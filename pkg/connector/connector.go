@@ -88,7 +88,7 @@ func (oc *OpenAIConnector) GetName() bridgev2.BridgeName {
 		NetworkURL:           "https://chat.openai.com",
 		NetworkIcon:          "mxc://maunium.net/HPiAFz2uVH54camzatoorkWY",
 		NetworkID:            "openai",
-		BeeperBridgeType:     "github.com/beepai/matrix-openai-bridge",
+		BeeperBridgeType:     "github.com/beeper/ai-bridge",
 		DefaultPort:          29345,
 		DefaultCommandPrefix: oc.Config.Bridge.CommandPrefix,
 	}

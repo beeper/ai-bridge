@@ -1,2 +1,0 @@
-# github.com/beepai/matrix-openai-bridge/cmd/openai-bridge
-ld: warning: ignoring duplicate libraries: '-lc++', '-lolm'

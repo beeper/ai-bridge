@@ -1,5 +1,0 @@
-./cors.go
-./handleerrors.go
-./json.go
-./middleware.go
-./networkerror.go

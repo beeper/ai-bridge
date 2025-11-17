@@ -1,7 +1,0 @@
-./client.go
-./config.go
-./connector.go
-./identifiers.go
-./login.go
-./metadata.go
-./remote_message.go

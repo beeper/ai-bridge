@@ -48,7 +48,7 @@ func (ol *OpenAILogin) SubmitUserInput(ctx context.Context, input map[string]str
 func (ol *OpenAILogin) apiKeyStep() *bridgev2.LoginStep {
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeUserInput,
-		StepID:       "io.beep.openai.enter_api_key",
+		StepID:       "io.ai-bridge.openai.enter_api_key",
 		Instructions: "Enter the OpenAI API key you want this bridge login to use.",
 		UserInputParams: &bridgev2.LoginUserInputParams{
 			Fields: []bridgev2.LoginInputDataField{{
@@ -76,7 +76,7 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, apiKey string) (*bridgev
 	}
 	return &bridgev2.LoginStep{
 		Type:   bridgev2.LoginStepTypeComplete,
-		StepID: "io.beep.openai.complete",
+		StepID: "io.ai-bridge.openai.complete",
 		CompleteParams: &bridgev2.LoginCompleteParams{
 			UserLoginID: login.ID,
 			UserLogin:   login,

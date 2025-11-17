@@ -1,6 +1,4 @@
-# vim: set ts=2 sts=2 sw=2:
-#
-# Example configuration for the BeepAI OpenAI Matrix bridge.
+# Example configuration for the ai-bridge OpenAI Matrix bridge.
 
 homeserver:
   address: https://matrix-client.example.com
@@ -44,7 +42,6 @@ encryption:
 # Connector-specific options (identical to pkg/connector/example-config.yaml)
 network:
   openai:
-    # Optional: leave blank to force each user to enter their own API key during login.
     api_key: ""
     organization_id: ""
     project_id: ""
@@ -54,8 +51,8 @@ network:
     max_context_messages: 12
     max_completion_tokens: 512
     system_prompt: |
-      You are a helpful assistant talking to Matrix users via the BeepAI bridge.
-      Answer clearly and concisely. Use Markdown when it helps.
+      You are a helpful assistant talking to Matrix users via the ai-bridge.
+      Answer clearly and concisely.
     request_timeout: 45s
   bridge:
     command_prefix: "!gpt"

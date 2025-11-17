@@ -1,5 +1,0 @@
-./encoder.go
-./qrcode.go
-./regular_symbol.go
-./symbol.go
-./version.go

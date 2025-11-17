@@ -1,5 +1,0 @@
-./event.go
-./returnonce.go
-./ringbuffer.go
-./syncmap.go
-./syncset.go

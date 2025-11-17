@@ -1,9 +1,0 @@
-./cache.go
-./client.go
-./context.go
-./httpclient.go
-./keyserver.go
-./resolution.go
-./serverauth.go
-./servername.go
-./signingkey.go

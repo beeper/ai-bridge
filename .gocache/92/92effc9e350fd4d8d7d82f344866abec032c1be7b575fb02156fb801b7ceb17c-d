@@ -1,7 +1,0 @@
-./account.go
-./errors.go
-./inboundgroupsession.go
-./olm.go
-./outboundgroupsession.go
-./pk.go
-./session.go

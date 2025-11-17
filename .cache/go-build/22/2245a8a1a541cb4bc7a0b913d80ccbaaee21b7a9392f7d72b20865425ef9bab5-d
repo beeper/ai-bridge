@@ -1,5 +1,0 @@
-./doc.go
-./megolm_inbound_session.go
-./megolm_outbound_session.go
-./olm_session.go
-./register.go

@@ -1,7 +1,0 @@
-./decoder.go
-./encoder.go
-./group_message.go
-./message.go
-./prekey_message.go
-./session_export.go
-./session_sharing.go
