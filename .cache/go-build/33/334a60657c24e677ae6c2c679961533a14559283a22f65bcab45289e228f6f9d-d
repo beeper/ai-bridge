@@ -1,0 +1,4 @@
+./config.go
+./dberror.go
+./legacymigrate.go
+./main.go

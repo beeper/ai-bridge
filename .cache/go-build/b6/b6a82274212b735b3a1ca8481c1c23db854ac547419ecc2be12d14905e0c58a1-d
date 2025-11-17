@@ -1,0 +1,17 @@
+./accept.go
+./close.go
+./compress.go
+./conn.go
+./dial.go
+./doc.go
+./errors.go
+./frame.go
+./hijack.go
+./mask.go
+./mask_asm.go
+./netconn.go
+./netconn_notjs.go
+./read.go
+./stringer.go
+./write.go
+./mask_arm64.s

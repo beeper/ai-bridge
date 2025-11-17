@@ -1,0 +1,12 @@
+./connlog.go
+./database.go
+./iter.go
+./json.go
+./log.go
+./massinsert.go
+./module.go
+./queryhelper.go
+./reflectscan.go
+./transaction.go
+./upgrades.go
+./upgradetable.go

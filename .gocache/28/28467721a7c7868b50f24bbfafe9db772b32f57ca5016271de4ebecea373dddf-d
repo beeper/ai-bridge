@@ -1,0 +1,10 @@
+./cjk.go
+./definition_list.go
+./footnote.go
+./gfm.go
+./linkify.go
+./package.go
+./strikethrough.go
+./table.go
+./tasklist.go
+./typographer.go

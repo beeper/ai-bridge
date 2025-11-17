@@ -1,0 +1,4 @@
+./cast.go
+./chunk.go
+./deduplicate.go
+./diff.go

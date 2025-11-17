@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="ALL" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="b9e26a2e-285d-4e14-b4d9-efcccf7bfa86" name="Changes" comment="" />
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 1
+}]]></component>
+  <component name="ProjectId" id="35cIutmr6aNTSm1MuviQsvHIR3X" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.GoLinterPluginOnboarding": "true",
+    "RunOnceActivity.GoLinterPluginStorageMigration": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.go.formatter.settings.were.checked": "true",
+    "RunOnceActivity.go.migrated.go.modules.settings": "true",
+    "RunOnceActivity.go.modules.go.list.on.any.changes.was.set": "true",
+    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
+    "go.import.settings.migrated": "true",
+    "junie.onboarding.icon.badge.shown": "true",
+    "last_opened_file_path": "/Users/joshpa8c",
+    "nodejs_package_manager_path": "npm",
+    "to.speed.mode.migration.done": "true"
+  }
+}]]></component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-gosdk-f466f9b0953e-146d08934cbf-org.jetbrains.plugins.go.sharedIndexes.bundled-GO-252.26830.102" />
+        <option value="bundled-js-predefined-d6986cc7102b-3aa1da707db6-JavaScript-GO-252.26830.102" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="b9e26a2e-285d-4e14-b4d9-efcccf7bfa86" name="Changes" comment="" />
+      <created>1763403159457</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1763403159457</updated>
+    </task>
+    <servers />
+  </component>
+  <component name="VgoProject">
+    <settings-migrated>true</settings-migrated>
+  </component>
+</project>

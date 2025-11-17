@@ -1,0 +1,8 @@
+./contenturi.go
+./crypto.go
+./matrixuri.go
+./opaque.go
+./roomversion.go
+./servername.go
+./trust.go
+./userid.go

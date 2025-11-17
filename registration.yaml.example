@@ -1,0 +1,12 @@
+id: openai-gpt
+url: http://bridge:29345
+as_token: "USE-SAME-AS-CONFIG"
+hs_token: "USE-SAME-AS-CONFIG"
+sender_localpart: gptbridge
+rate_limited: false
+namespaces:
+  users:
+    - regex: "@gptbridge.*:example\.com"
+      exclusive: true
+  aliases: []
+  rooms: []

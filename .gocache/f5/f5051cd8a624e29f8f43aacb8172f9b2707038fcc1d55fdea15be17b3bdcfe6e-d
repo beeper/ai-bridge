@@ -1,0 +1,10 @@
+./cleanup.go
+./debug.go
+./event.go
+./handler.go
+./help.go
+./login.go
+./processor.go
+./relay.go
+./startchat.go
+./sudo.go

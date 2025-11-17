@@ -1,0 +1,10 @@
+./customemoji.go
+./discordunderline.go
+./filteredparser.go
+./indentableparagraph.go
+./math.go
+./nohtml.go
+./shortemphasis.go
+./shortstrike.go
+./simplespoiler.go
+./spoiler.go

@@ -1,0 +1,14 @@
+./analytics.go
+./cmdadmin.go
+./cmddoublepuppet.go
+./connector.go
+./crypto.go
+./cryptoerror.go
+./cryptostore.go
+./directmedia.go
+./doublepuppet.go
+./intent.go
+./matrix.go
+./provisioning.go
+./publicmedia.go
+./websocket.go

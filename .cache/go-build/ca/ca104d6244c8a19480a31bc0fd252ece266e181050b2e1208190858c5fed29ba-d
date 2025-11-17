@@ -1,0 +1,9 @@
+./appservice.go
+./backfill.go
+./config.go
+./encryption.go
+./homeserver.go
+./legacymigrate.go
+./permissions.go
+./relay.go
+./upgrade.go
