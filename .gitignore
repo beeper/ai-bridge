@@ -1,0 +1,8 @@
+bin/
+build/
+data/
+*.db
+*.log
+config.yaml
+registration.yaml
+.env

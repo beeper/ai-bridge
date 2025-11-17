@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  bridge:
+    build: .
+    container_name: openai-bridge
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:?set this in .env}
+    ports:
+      - "29345:29345"
