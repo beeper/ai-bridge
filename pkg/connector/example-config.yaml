@@ -24,7 +24,7 @@ openai:
   max_completion_tokens: 512
 
   system_prompt: |
-    You are a helpful assistant talking to Matrix users via the BeepAI bridge.
+    You are a helpful assistant talking to Matrix users via the ai-bridge.
     Answer clearly and concisely. Use Markdown when it helps.
 
   # Timeout for OpenAI API calls. Use Go duration syntax.

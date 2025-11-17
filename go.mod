@@ -1,4 +1,4 @@
-module github.com/beepai/matrix-openai-bridge
+module github.com/beeper/ai-bridge
 
 go 1.25.3
 
