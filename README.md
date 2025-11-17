@@ -5,6 +5,9 @@ This repository contains a reference Matrix ↔ ChatGPT bridge that closely foll
 
 Heavily AI assisted.
 
+I imagine this being a multi network bridge able to be setup for all the different model providers, though, only one at a time due to
+bridge limitations. This is why it is a generic ai bridge instead of chatgpt specifically
+
 ## Features
 
 - gomatrix/mautrix `bridgev2` implementation with proper connector/login separation.
