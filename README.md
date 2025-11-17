@@ -35,6 +35,9 @@ Add the network section containing the bridge-specific configuration if necessar
 
 `./ai-bridge --config config.yaml --registration registration.yaml`
 
+### Build notes
+
+Its setup to use libolm.
 
 ### Login flows
 
