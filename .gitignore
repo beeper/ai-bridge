@@ -9,4 +9,4 @@ registration.yaml
 .cache
 .gocache
 .conductor
-/.DS_Store
+.DS_Store
