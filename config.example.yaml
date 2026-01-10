@@ -46,7 +46,7 @@ network:
     organization_id: ""
     project_id: ""
     base_url: ""
-    default_model: "gpt-4.1-mini"
+    default_model: "gpt-4o-mini"
     default_temperature: 0.3
     max_context_messages: 12
     max_completion_tokens: 512
@@ -54,6 +54,9 @@ network:
       You are a helpful assistant talking to Matrix users via the ai-bridge.
       Answer clearly and concisely.
     request_timeout: 45s
+    enable_streaming: true
+    edit_debounce_ms: 200
+    transient_debounce_ms: 50
   bridge:
     command_prefix: "!gpt"
     typing_notifications: true

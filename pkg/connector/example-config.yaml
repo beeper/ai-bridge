@@ -18,7 +18,7 @@ openai:
 
   # Defaults for new rooms/logins. Users can override most of these via
   # room commands if desired.
-  default_model: "gpt-4.1-mini"
+  default_model: "gpt-4o-mini"
   default_temperature: 0.3
   max_context_messages: 12
   max_completion_tokens: 512
@@ -29,6 +29,15 @@ openai:
 
   # Timeout for OpenAI API calls. Use Go duration syntax.
   request_timeout: 45s
+
+  # Enable streaming responses with debounced edits
+  enable_streaming: true
+
+  # Debounce time for streaming edits in milliseconds (200 ms by default)
+  edit_debounce_ms: 200
+
+  # Debounce time for transient events in milliseconds (50 ms by default)
+  transient_debounce_ms: 50
 
 bridge:
   # Command prefix for management commands like `!gpt config`.

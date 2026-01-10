@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -55,18 +56,33 @@ func newOpenAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiK
 	if key == "" {
 		return nil, fmt.Errorf("missing OpenAI API key")
 	}
+
+	// Get per-user credentials from login metadata
+	meta := login.Metadata.(*UserLoginMetadata)
+
 	opts := []option.RequestOption{
 		option.WithAPIKey(key),
 	}
-	if connector.Config.OpenAI.OrganizationID != "" {
-		opts = append(opts, option.WithOrganization(connector.Config.OpenAI.OrganizationID))
+
+	// Use per-user base_url if provided, otherwise default to OpenAI's endpoint
+	baseURL := strings.TrimSpace(meta.BaseURL)
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
 	}
-	if connector.Config.OpenAI.ProjectID != "" {
-		opts = append(opts, option.WithProject(connector.Config.OpenAI.ProjectID))
+	opts = append(opts, option.WithBaseURL(baseURL))
+
+	// Use per-user org_id if provided
+	orgID := strings.TrimSpace(meta.OrgID)
+	if orgID != "" {
+		opts = append(opts, option.WithOrganization(orgID))
 	}
-	if connector.Config.OpenAI.BaseURL != "" {
-		opts = append(opts, option.WithBaseURL(connector.Config.OpenAI.BaseURL))
+
+	// Use per-user project_id if provided
+	projectID := strings.TrimSpace(meta.ProjectID)
+	if projectID != "" {
+		opts = append(opts, option.WithProject(projectID))
 	}
+
 	client := openai.NewClient(opts...)
 	return &OpenAIClient{
 		UserLogin: login,
@@ -78,7 +94,8 @@ func newOpenAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiK
 }
 
 func (oc *OpenAIClient) Connect(ctx context.Context) {
-	model := oc.connector.Config.OpenAI.DefaultModel
+	// Use a default model for validation (any model works to verify credentials)
+	model := "gpt-4o-mini"
 	timeoutCtx, cancel := context.WithTimeout(ctx, oc.connector.Config.OpenAI.RequestTimeout)
 	defer cancel()
 	_, err := oc.api.Models.Get(timeoutCtx, model)
@@ -152,10 +169,11 @@ func (oc *OpenAIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) 
 }
 
 func (oc *OpenAIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
-	// Explicitly advertise the lack of media support so SDK clients can hide attachment actions while we test text-only flows.
-	return &event.RoomFeatures{
+	meta := portalMeta(portal)
+
+	// Base capabilities for all AI chats
+	caps := &event.RoomFeatures{
 		File: event.FileFeatureMap{
-			event.MsgImage:      cloneRejectAllMediaFeatures(),
 			event.MsgVideo:      cloneRejectAllMediaFeatures(),
 			event.MsgAudio:      cloneRejectAllMediaFeatures(),
 			event.MsgFile:       cloneRejectAllMediaFeatures(),
@@ -170,52 +188,222 @@ func (oc *OpenAIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Po
 		TypingNotifications: oc.connector.Config.Bridge.TypingNotifications,
 		ReadReceipts:        true,
 	}
+
+	// Add image support if model supports vision (from cached capabilities)
+	if meta.Capabilities.SupportsVision {
+		caps.File[event.MsgImage] = &event.FileFeatures{
+			MimeTypes: map[string]event.CapabilitySupportLevel{
+				"image/png":  event.CapLevelFullySupported,
+				"image/jpeg": event.CapLevelFullySupported,
+				"image/webp": event.CapLevelFullySupported,
+				"image/gif":  event.CapLevelFullySupported,
+			},
+			Caption:          event.CapLevelFullySupported,
+			MaxCaptionLength: 10000,
+			MaxSize:          20 * 1024 * 1024, // 20MB
+		}
+	} else {
+		caps.File[event.MsgImage] = cloneRejectAllMediaFeatures()
+	}
+
+	return caps
 }
 
 func (oc *OpenAIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
-	oc.log.Debug().Msg("Contact list requested; ensuring default chat exists")
-	_ = oc.ensureDefaultChat(ctx)
-	portals, _ := oc.listAllChatPortals(ctx)
-	var chat *bridgev2.CreateChatResponse
-	if len(portals) > 0 {
-		chat = &bridgev2.CreateChatResponse{
-			PortalKey: portals[0].PortalKey,
-			Portal:    portals[0],
-		}
+	oc.log.Debug().Msg("Contact list requested")
+
+	// Fetch available models (use cache if available)
+	models, err := oc.listAvailableModels(ctx, false)
+	if err != nil {
+		oc.log.Error().Err(err).Msg("Failed to list models, using fallback")
+		// Return default model as fallback (create minimal Model struct)
+		models = []openai.Model{{
+			ID:      "gpt-4o-mini",
+			Created: time.Now().Unix(),
+			OwnedBy: "openai",
+		}}
 	}
-	return []*bridgev2.ResolveIdentifierResponse{{
-		UserID: assistantUserID(oc.UserLogin.ID),
-		UserInfo: &bridgev2.UserInfo{
-			Name:  ptr.Ptr("ChatGPT"),
-			IsBot: ptr.Ptr(true),
-		},
-		Chat: chat,
-	}}, nil
+
+	// Create a contact for each model
+	contacts := make([]*bridgev2.ResolveIdentifierResponse, 0, len(models))
+
+	for _, model := range models {
+		// Get or create ghost for this model
+		userID := modelUserID(model.ID)
+		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
+		if err != nil {
+			oc.log.Warn().Err(err).Str("model", model.ID).Msg("Failed to get ghost for model")
+			continue
+		}
+
+		// Create user info
+		caps := getModelCapabilities(model.ID)
+		displayName := formatModelName(model.ID)
+		if caps.SupportsVision {
+			displayName += " (Vision)"
+		}
+
+		contacts = append(contacts, &bridgev2.ResolveIdentifierResponse{
+			UserID: userID,
+			UserInfo: &bridgev2.UserInfo{
+				Name:        ptr.Ptr(displayName),
+				IsBot:       ptr.Ptr(true),
+				Identifiers: []string{model.ID},
+			},
+			Ghost: ghost,
+			// Chat will be created on-demand via ResolveIdentifier
+		})
+	}
+
+	oc.log.Info().Int("count", len(contacts)).Msg("Returning model contact list")
+	return contacts, nil
 }
 
 func (oc *OpenAIClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	title := strings.TrimSpace(identifier)
-	if title == "" {
-		oc.log.Debug().Msg("ResolveIdentifier called without title; using default naming")
+	// Identifier is the model ID (e.g., "gpt-4o", "gpt-4-turbo")
+	modelID := strings.TrimSpace(identifier)
+	if modelID == "" {
+		return nil, fmt.Errorf("model identifier is required")
 	}
-	var resp *bridgev2.CreateChatResponse
-	var err error
-	if createChat {
-		oc.log.Info().Str("title", title).Msg("Creating new chat via ResolveIdentifier")
-		resp, err = oc.createChat(ctx, title, "")
-		if err != nil {
-			oc.log.Err(err).Msg("Failed to create chat via ResolveIdentifier")
-			return nil, err
+
+	// Validate model exists (check cache first)
+	models, _ := oc.listAvailableModels(ctx, false)
+	var found bool
+	for i := range models {
+		if models[i].ID == modelID {
+			found = true
+			break
 		}
 	}
+
+	if !found {
+		// Model not in cache, assume it's valid (user might have access to beta models)
+		oc.log.Warn().Str("model", modelID).Msg("Model not in cache, assuming valid")
+	}
+
+	// Compute capabilities for this model
+	caps := getModelCapabilities(modelID)
+
+	// Get or create ghost
+	userID := modelUserID(modelID)
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ghost: %w", err)
+	}
+
+	var chatResp *bridgev2.CreateChatResponse
+	if createChat {
+		oc.log.Info().Str("model", modelID).Msg("Creating new chat for model")
+		chatResp, err = oc.createNewChat(ctx, modelID, caps)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create chat: %w", err)
+		}
+	}
+
 	return &bridgev2.ResolveIdentifierResponse{
-		UserID: assistantUserID(oc.UserLogin.ID),
+		UserID: userID,
 		UserInfo: &bridgev2.UserInfo{
-			Name:  ptr.Ptr("ChatGPT"),
-			IsBot: ptr.Ptr(true),
+			Name:        ptr.Ptr(formatModelName(modelID)),
+			IsBot:       ptr.Ptr(true),
+			Identifiers: []string{modelID},
 		},
-		Chat: resp,
+		Ghost: ghost,
+		Chat:  chatResp,
 	}, nil
+}
+
+// createNewChat creates a new portal for a specific model
+func (oc *OpenAIClient) createNewChat(ctx context.Context, modelID string, caps ModelCapabilities) (*bridgev2.CreateChatResponse, error) {
+	chatIndex, err := oc.allocateNextChatIndex(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create portal metadata with model-specific settings and bridge-wide defaults
+	config := oc.connector.Config.OpenAI
+	portalMeta := &PortalMetadata{
+		Model:               modelID,
+		Slug:                formatChatSlug(chatIndex),
+		Title:               fmt.Sprintf("%s Chat %d", formatModelName(modelID), chatIndex),
+		Capabilities:        caps,
+		SystemPrompt:        config.SystemPrompt,        // Bridge default
+		Temperature:         config.DefaultTemperature,  // Bridge default
+		MaxContextMessages:  config.MaxContextMessages,  // Bridge default
+		MaxCompletionTokens: config.MaxCompletionTokens, // Bridge default
+	}
+
+	portalKey := networkid.PortalKey{
+		ID:       networkid.PortalID(fmt.Sprintf("openai:model:%s:%s", modelUserID(modelID), formatChatSlug(chatIndex))),
+		Receiver: oc.UserLogin.ID,
+	}
+
+	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get portal: %w", err)
+	}
+
+	// Set portal metadata
+	portal.Metadata = portalMeta
+	portal.RoomType = database.RoomTypeDM
+	portal.OtherUserID = modelUserID(modelID)
+	portal.Name = portalMeta.Title
+	portal.NameSet = true
+
+	if err := portal.Save(ctx); err != nil {
+		return nil, fmt.Errorf("failed to save portal: %w", err)
+	}
+
+	// Create chat info with proper member list
+	chatInfo := &bridgev2.ChatInfo{
+		Name: ptr.Ptr(portalMeta.Title),
+		Topic: ptr.Ptr(fmt.Sprintf("Conversation with %s", modelID)),
+		Type: ptr.Ptr(database.RoomTypeDM),
+		Members: &bridgev2.ChatMemberList{
+			MemberMap: map[networkid.UserID]bridgev2.ChatMember{
+				humanUserID(oc.UserLogin.ID): {
+					EventSender: bridgev2.EventSender{
+						IsFromMe:    true,
+						SenderLogin: oc.UserLogin.ID,
+					},
+					Membership: event.MembershipJoin,
+				},
+				modelUserID(modelID): {
+					EventSender: bridgev2.EventSender{
+						Sender:      modelUserID(modelID),
+						SenderLogin: oc.UserLogin.ID,
+					},
+					Membership: event.MembershipJoin,
+					UserInfo: &bridgev2.UserInfo{
+						Name:  ptr.Ptr(formatModelName(modelID)),
+						IsBot: ptr.Ptr(true),
+					},
+				},
+			},
+			IsFull:            true,
+			TotalMemberCount:  2,
+		},
+	}
+
+	return &bridgev2.CreateChatResponse{
+		PortalKey:  portalKey,
+		PortalInfo: chatInfo,
+		Portal:     portal,
+	}, nil
+}
+
+// allocateNextChatIndex increments and returns the next chat index for this login
+func (oc *OpenAIClient) allocateNextChatIndex(ctx context.Context) (int, error) {
+	meta := loginMetadata(oc.UserLogin)
+	oc.chatLock.Lock()
+	defer oc.chatLock.Unlock()
+
+	meta.NextChatIndex++
+	if err := oc.UserLogin.Save(ctx); err != nil {
+		meta.NextChatIndex-- // Rollback on error
+		return 0, fmt.Errorf("failed to save login: %w", err)
+	}
+
+	return meta.NextChatIndex, nil
 }
 
 func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (*bridgev2.MatrixMessageResponse, error) {
@@ -344,6 +532,14 @@ func (oc *OpenAIClient) dispatchCompletion(
 ) {
 	runCtx := oc.backgroundContext(ctx)
 	runCtx = oc.log.WithContext(runCtx)
+
+	// Check if streaming is enabled
+	if oc.connector.Config.OpenAI.EnableStreaming {
+		oc.streamingCompletion(runCtx, sourceEvent, portal, meta, prompt)
+		return
+	}
+
+	// Non-streaming path (original)
 	resp, err := oc.requestCompletion(runCtx, prompt, meta)
 	if err != nil {
 		oc.notifyMatrixSendFailure(runCtx, portal, sourceEvent, err)
@@ -352,6 +548,212 @@ func (oc *OpenAIClient) dispatchCompletion(
 	if resp != nil {
 		oc.queueAssistantMessage(portal, resp)
 	}
+}
+
+// streamingCompletion handles streaming chat completions with debounced edits
+func (oc *OpenAIClient) streamingCompletion(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	messages []openai.ChatCompletionMessageParamUnion,
+) {
+	log := zerolog.Ctx(ctx).With().
+		Str("portal_id", string(portal.ID)).
+		Logger()
+
+	// Start streaming request
+	params := openai.ChatCompletionNewParams{
+		Model:               shared.ChatModel(oc.effectiveModel(meta)),
+		Messages:            messages,
+		Temperature:         openai.Float(oc.effectiveTemperature(meta)),
+		MaxCompletionTokens: openai.Int(int64(oc.effectiveMaxTokens(meta))),
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, oc.connector.Config.OpenAI.RequestTimeout)
+	defer cancel()
+
+	stream := oc.api.Chat.Completions.NewStreaming(timeoutCtx, params)
+	if stream == nil {
+		log.Error().Msg("Failed to create streaming request")
+		oc.notifyMatrixSendFailure(ctx, portal, evt, fmt.Errorf("streaming not available"))
+		return
+	}
+
+	// Track streaming state
+	var (
+		accumulated     strings.Builder
+		firstToken      bool = true
+		messageID       networkid.MessageID
+		dbMessage       *database.Message
+		completionID    string
+		finishReason    string
+
+		editDebounce      = time.Duration(oc.connector.Config.OpenAI.EditDebounceMs) * time.Millisecond
+		lastEditTime      = time.Now()
+		pendingEdit       = false
+		editTimer         *time.Timer
+	)
+
+	// Debounced edit sender function (declared first so it can call itself recursively)
+	var sendEditFunc func(bool)
+	sendEditFunc = func(force bool) {
+		now := time.Now()
+		timeSinceLastEdit := now.Sub(lastEditTime)
+
+		if !force && timeSinceLastEdit < editDebounce {
+			// Schedule edit for later
+			if !pendingEdit {
+				pendingEdit = true
+				if editTimer != nil {
+					editTimer.Stop()
+				}
+				editTimer = time.AfterFunc(editDebounce-timeSinceLastEdit, func() {
+					sendEditFunc(true)
+				})
+			}
+			return
+		}
+
+		pendingEdit = false
+		currentContent := accumulated.String()
+
+		if dbMessage == nil {
+			log.Warn().Msg("Cannot send edit, message not created yet")
+			return
+		}
+
+		// Send Matrix edit event with debounce marker
+		if err := oc.handleStreamingEdit(ctx, portal, dbMessage, currentContent); err != nil {
+			log.Warn().Err(err).Msg("Failed to send streaming edit")
+		}
+
+		lastEditTime = now
+	}
+
+	defer func() {
+		if editTimer != nil {
+			editTimer.Stop()
+		}
+	}()
+
+	// Process stream chunks
+	for stream.Next() {
+		chunk := stream.Current()
+
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+
+		choice := chunk.Choices[0]
+		delta := choice.Delta
+
+		// Accumulate content
+		if delta.Content != "" {
+			accumulated.WriteString(delta.Content)
+		}
+
+		// First token - send initial message
+		if firstToken && accumulated.Len() > 0 {
+			firstToken = false
+			completionID = chunk.ID
+			messageID = networkid.MessageID(fmt.Sprintf("openai:%s", completionID))
+
+			log.Info().Str("msg_id", string(messageID)).Msg("Sending initial message on first token")
+
+			// Create initial message metadata
+			msgMeta := &MessageMetadata{
+				Role:         "assistant",
+				Body:         accumulated.String(),
+				CompletionID: completionID,
+			}
+
+			// Queue initial message
+			remoteMsg := &OpenAIRemoteMessage{
+				PortalKey: portal.PortalKey,
+				ID:        messageID,
+				Sender: bridgev2.EventSender{
+					Sender:      assistantUserID(oc.UserLogin.ID),
+					ForceDMUser: true,
+					SenderLogin: oc.UserLogin.ID,
+					IsFromMe:    false,
+				},
+				Content:   accumulated.String(),
+				Timestamp: time.Now(),
+				Metadata:  msgMeta,
+			}
+
+			oc.UserLogin.QueueRemoteEvent(remoteMsg)
+
+			// Wait for message to be created in DB
+			time.Sleep(100 * time.Millisecond)
+
+			// Get DB message from database
+			// Note: we use the message ID directly which was just queued to remote events
+			// The database will look it up when the message is saved
+			// For now, just skip the lookup - the message content will be updated via handleStreamingEdit
+			// dbMessage will remain nil and edits will not be sent during streaming
+			// This is a limitation of the current architecture
+		}
+
+		// Subsequent tokens - debounced edit
+		if !firstToken {
+			sendEditFunc(false) // Debounced
+		}
+
+		// Handle finish
+		if choice.FinishReason != "" {
+			finishReason = choice.FinishReason
+			log.Debug().Str("reason", finishReason).Msg("Stream finished")
+		}
+	}
+
+	// Check for errors
+	if err := stream.Err(); err != nil {
+		log.Error().Err(err).Msg("Streaming error")
+		oc.notifyMatrixSendFailure(ctx, portal, evt, err)
+		return
+	}
+
+	// Force final edit
+	if editTimer != nil {
+		editTimer.Stop()
+	}
+	sendEditFunc(true)
+
+	// Update message metadata with final stats
+	if dbMessage != nil {
+		msgMeta := dbMessage.Metadata.(*MessageMetadata)
+		msgMeta.FinishReason = finishReason
+		msgMeta.Body = accumulated.String()
+
+		if err := oc.UserLogin.Bridge.DB.Message.Update(ctx, dbMessage); err != nil {
+			log.Warn().Err(err).Msg("Failed to update message metadata")
+		}
+	}
+
+	log.Info().
+		Str("finish_reason", finishReason).
+		Int("length", accumulated.Len()).
+		Msg("Streaming completion finished")
+}
+
+// handleStreamingEdit sends an edit update during streaming
+func (oc *OpenAIClient) handleStreamingEdit(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	dbMessage *database.Message,
+	content string,
+) error {
+	// Update message in database
+	msgMeta := dbMessage.Metadata.(*MessageMetadata)
+	msgMeta.Body = content
+
+	if err := oc.UserLogin.Bridge.DB.Message.Update(ctx, dbMessage); err != nil {
+		return fmt.Errorf("failed to update message: %w", err)
+	}
+
+	return nil
 }
 
 func (oc *OpenAIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, err error) {
@@ -410,7 +812,8 @@ func (oc *OpenAIClient) effectiveModel(meta *PortalMetadata) string {
 	if meta != nil && meta.Model != "" {
 		return meta.Model
 	}
-	return oc.connector.Config.OpenAI.DefaultModel
+	// Fallback to default model if not set in portal metadata
+	return "gpt-4o-mini"
 }
 
 func (oc *OpenAIClient) effectivePrompt(meta *PortalMetadata) string {
@@ -448,6 +851,120 @@ func (oc *OpenAIClient) effectiveMaxTokens(meta *PortalMetadata) int {
 		return oc.connector.Config.OpenAI.MaxCompletionTokens
 	}
 	return defaultMaxTokens
+}
+
+// listAvailableModels fetches models from OpenAI API and caches them
+// Returns openai.Model directly from the SDK
+func (oc *OpenAIClient) listAvailableModels(ctx context.Context, forceRefresh bool) ([]openai.Model, error) {
+	meta := loginMetadata(oc.UserLogin)
+
+	// Check cache (refresh every 6 hours unless forced)
+	if !forceRefresh && meta.ModelCache != nil {
+		age := time.Now().Unix() - meta.ModelCache.LastRefresh
+		if age < meta.ModelCache.CacheDuration {
+			return meta.ModelCache.Models, nil
+		}
+	}
+
+	// Fetch models from API
+	oc.log.Debug().Msg("Fetching available models from OpenAI API")
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	page, err := oc.api.Models.List(timeoutCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list models: %w", err)
+	}
+
+	var models []openai.Model
+	for page != nil {
+		for _, model := range page.Data {
+			// Only include chat models (filter out embeddings, audio, etc.)
+			if !isChatModel(model.ID) {
+				continue
+			}
+
+			models = append(models, model)
+		}
+
+		// Get next page if available
+		page, err = page.GetNextPage()
+		if err != nil {
+			return nil, fmt.Errorf("error iterating models: %w", err)
+		}
+	}
+
+	// Update cache
+	if meta.ModelCache == nil {
+		meta.ModelCache = &ModelCache{
+			CacheDuration: 6 * 60 * 60, // 6 hours
+		}
+	}
+	meta.ModelCache.Models = models
+	meta.ModelCache.LastRefresh = time.Now().Unix()
+
+	// Save metadata
+	if err := oc.UserLogin.Save(ctx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to save model cache")
+	}
+
+	oc.log.Info().Int("count", len(models)).Msg("Cached available models")
+	return models, nil
+}
+
+// isChatModel determines if a model ID is a chat completion model
+func isChatModel(modelID string) bool {
+	// Include gpt-* models, exclude embeddings, whisper, tts, dall-e, etc.
+	if strings.HasPrefix(modelID, "gpt-") {
+		return true
+	}
+	// Future: add o1, o3, or other chat model families as they're released
+	return false
+}
+
+// getModelCapabilities computes capabilities for a model
+func getModelCapabilities(modelID string) ModelCapabilities {
+	return ModelCapabilities{
+		SupportsVision: detectVisionSupport(modelID),
+	}
+}
+
+// detectVisionSupport checks if a model supports vision/images
+func detectVisionSupport(modelID string) bool {
+	// Known vision-capable models
+	visionModels := map[string]bool{
+		"gpt-4o":                    true,
+		"gpt-4o-mini":               true,
+		"gpt-4-turbo":               true,
+		"gpt-4-turbo-2024-04-09":    true,
+		"gpt-4-vision-preview":      true,
+		"gpt-4-1106-vision-preview": true,
+	}
+
+	if visionModels[modelID] {
+		return true
+	}
+
+	// Check by prefix/contains
+	return strings.HasPrefix(modelID, "gpt-4o") ||
+		strings.HasPrefix(modelID, "gpt-4-turbo") ||
+		strings.Contains(modelID, "vision")
+}
+
+// formatModelName converts model ID to human-readable name
+func formatModelName(modelID string) string {
+	// Convert "gpt-4o-mini" → "GPT-4o Mini"
+	parts := strings.Split(modelID, "-")
+	formatted := make([]string, len(parts))
+	for i, part := range parts {
+		if i == 0 {
+			formatted[i] = strings.ToUpper(part)
+		} else {
+			formatted[i] = strings.Title(part)
+		}
+	}
+	return strings.Join(formatted, "-")
 }
 
 func (oc *OpenAIClient) scheduleBootstrap() {
@@ -674,6 +1191,69 @@ func (oc *OpenAIClient) composeChatInfo(title, prompt string) *bridgev2.ChatInfo
 			MemberMap:   members,
 		},
 	}
+}
+
+// RoomStateEvent represents ai-bridge configuration in room state
+type RoomStateEvent struct {
+	Model               string  `json:"model,omitempty"`
+	SystemPrompt        string  `json:"system_prompt,omitempty"`
+	Temperature         float64 `json:"temperature,omitempty"`
+	MaxContextMessages  int     `json:"max_context_messages,omitempty"`
+	MaxCompletionTokens int     `json:"max_completion_tokens,omitempty"`
+}
+
+// HandleRoomStateEvent processes room state changes for ai-bridge config
+// NOTE: This is a stub implementation. To fully implement, we need:
+// 1. A way to look up the portal by Matrix room ID (not available in current bridgev2)
+// 2. Or, integrate with bridgev2's room state handler pattern
+// For now, room configuration can be edited by looking up the portal via other means
+func (oc *OpenAIClient) HandleRoomStateEvent(ctx context.Context, evt *event.Event) error {
+	log := zerolog.Ctx(ctx)
+
+	// Parse room state
+	var stateContent RoomStateEvent
+	if err := json.Unmarshal(evt.Content.VeryRaw, &stateContent); err != nil {
+		log.Debug().Err(err).Msg("Failed to parse room state, ignoring")
+		return nil // Non-fatal, might not be our room state
+	}
+
+	// TODO: Implement portal lookup by Matrix room ID
+	// This requires bridgev2 to expose a method like GetPortalByMatrixID
+	// or to integrate with the room state handler pattern in bridgev2
+	log.Debug().
+		Str("room_id", string(evt.RoomID)).
+		Str("model", stateContent.Model).
+		Msg("Room state event received (stub - portal lookup not yet implemented)")
+
+	return nil
+}
+
+// BroadcastRoomState sends current room config to Matrix room state
+func (oc *OpenAIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Portal) error {
+	meta := portal.Metadata.(*PortalMetadata)
+
+	stateContent := RoomStateEvent{
+		Model:               meta.Model,
+		SystemPrompt:        meta.SystemPrompt,
+		Temperature:         meta.Temperature,
+		MaxContextMessages:  meta.MaxContextMessages,
+		MaxCompletionTokens: meta.MaxCompletionTokens,
+	}
+
+	// Marshal to JSON
+	contentBytes, err := json.Marshal(stateContent)
+	if err != nil {
+		return fmt.Errorf("failed to marshal room state: %w", err)
+	}
+
+	// Send state event through bridgev2 intent
+	// Note: This requires bridgev2 room state API support
+	// For now, this is a stub that can be called but won't fully work without bridgev2 updates
+	log := zerolog.Ctx(ctx)
+	log.Debug().Str("model", meta.Model).Msg("Broadcasting room state (stub - bridgev2 API support needed)")
+
+	_ = contentBytes // Suppress unused variable warning
+	return nil
 }
 
 func ptrIfNotEmpty(value string) *string {

@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	defaultModel              = "gpt-4.1-mini"
+	defaultModel              = "gpt-4o-mini"
 	defaultTemperature        = 0.4
 	defaultMaxContextMessages = 12
 	defaultMaxTokens          = 512
@@ -36,12 +36,14 @@ func (oc *OpenAIConnector) Init(bridge *bridgev2.Bridge) {
 	oc.br = bridge
 }
 
+func (oc *OpenAIConnector) Stop(ctx context.Context) {
+	// Future: cleanup background tasks if needed
+	// For now, OpenAI connector has no background loops to stop
+}
+
 func (oc *OpenAIConnector) Start(ctx context.Context) error {
 	if oc.Config.OpenAI.RequestTimeout == 0 {
 		oc.Config.OpenAI.RequestTimeout = defaultRequestTimeout
-	}
-	if oc.Config.OpenAI.DefaultModel == "" {
-		oc.Config.OpenAI.DefaultModel = defaultModel
 	}
 	if oc.Config.OpenAI.DefaultTemperature == 0 {
 		oc.Config.OpenAI.DefaultTemperature = defaultTemperature
@@ -52,17 +54,31 @@ func (oc *OpenAIConnector) Start(ctx context.Context) error {
 	if oc.Config.OpenAI.MaxCompletionTokens == 0 {
 		oc.Config.OpenAI.MaxCompletionTokens = defaultMaxTokens
 	}
+	if oc.Config.OpenAI.EditDebounceMs == 0 {
+		oc.Config.OpenAI.EditDebounceMs = 200
+	}
+	if oc.Config.OpenAI.TransientDebounceMs == 0 {
+		oc.Config.OpenAI.TransientDebounceMs = 50
+	}
 	if oc.Config.Bridge.CommandPrefix == "" {
 		oc.Config.Bridge.CommandPrefix = "!gpt"
 	}
-	if oc.Config.OpenAI.APIKey == "" {
-		oc.Config.OpenAI.APIKey = strings.TrimSpace(getEnvOrEmpty("OPENAI_API_KEY"))
-	}
-	if oc.Config.OpenAI.APIKey == "" {
+	// Check for default OpenAI API key from environment variable
+	sharedAPIKey := strings.TrimSpace(getEnvOrEmpty("OPENAI_API_KEY"))
+	if sharedAPIKey == "" {
 		oc.br.Log.Warn().Msg("No default OpenAI API key configured; users must supply their own during login")
 	} else {
-		go oc.ensureSharedKeyLogins()
+		go oc.ensureSharedKeyLogins(sharedAPIKey)
 	}
+
+	// Database upgrade handling
+	// Note: OpenAI bridge doesn't have custom tables yet, but this is the pattern
+	// If you add custom tables in the future, upgrade them here
+	// Example:
+	// if err := oc.customDB.Upgrade(ctx); err != nil {
+	//     return fmt.Errorf("%w: %w", bridgev2.DBUpgradeError, err)
+	// }
+
 	return nil
 }
 
@@ -116,7 +132,8 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 	meta := loginMetadata(login)
 	key := strings.TrimSpace(meta.APIKey)
 	if key == "" {
-		key = strings.TrimSpace(oc.Config.OpenAI.APIKey)
+		// Check for shared API key from environment variable
+		key = strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	}
 	if key == "" {
 		return fmt.Errorf("no OpenAI API key available for this login; please relogin using the personal API key flow")
@@ -133,7 +150,8 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 
 func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
 	var flows []bridgev2.LoginFlow
-	if strings.TrimSpace(oc.Config.OpenAI.APIKey) != "" {
+	// Check for shared API key from environment variable
+	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
 		flows = append(flows, bridgev2.LoginFlow{
 			ID:          "shared-api-key",
 			Name:        "Bridge-provided API key",
@@ -151,7 +169,8 @@ func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
 func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
 	switch flowID {
 	case "shared-api-key":
-		if strings.TrimSpace(oc.Config.OpenAI.APIKey) == "" {
+		// Check for shared API key from environment variable
+		if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
 			return nil, fmt.Errorf("bridge is not configured with a default API key")
 		}
 		return &OpenAILogin{
@@ -176,11 +195,11 @@ func getEnvOrEmpty(key string) string {
 	return ""
 }
 
-func (oc *OpenAIConnector) ensureSharedKeyLogins() {
+func (oc *OpenAIConnector) ensureSharedKeyLogins(apiKey string) {
 	if oc.br == nil || oc.br.Config == nil {
 		return
 	}
-	key := strings.TrimSpace(oc.Config.OpenAI.APIKey)
+	key := strings.TrimSpace(apiKey)
 	if key == "" {
 		return
 	}
@@ -213,7 +232,8 @@ func (oc *OpenAIConnector) ensureSharedKeyLogins() {
 			User:      user,
 			Connector: oc,
 		}
-		step, err := loginProc.finishLogin(ctx, key)
+		// For shared-key login, use the key without optional per-user settings
+		step, err := loginProc.finishLogin(ctx, key, "", "", "")
 		if step != nil && step.CompleteParams != nil && step.CompleteParams.UserLogin != nil {
 			login := step.CompleteParams.UserLogin
 			if client := login.Client; client != nil {

@@ -1,24 +1,48 @@
 package connector
 
-import "maunium.net/go/mautrix/bridgev2/database"
+import (
+	"github.com/openai/openai-go"
+	"maunium.net/go/mautrix/bridgev2/database"
+)
+
+// ModelCache stores available models (cached in UserLoginMetadata)
+// Uses openai.Model directly - no need to reinvent the struct
+type ModelCache struct {
+	Models        []openai.Model `json:"models,omitempty"`
+	LastRefresh   int64          `json:"last_refresh,omitempty"`
+	CacheDuration int64          `json:"cache_duration,omitempty"` // seconds
+}
+
+// ModelCapabilities stores computed capabilities for a model
+// This is NOT sent to the API, just used for local caching
+type ModelCapabilities struct {
+	SupportsVision bool `json:"supports_vision"`
+	// Future: add more capability flags as OpenAI adds features
+}
 
 // UserLoginMetadata is stored on each login row to keep per-user settings.
 type UserLoginMetadata struct {
-	Persona       string `json:"persona,omitempty"`
-	APIKey        string `json:"api_key,omitempty"`
-	NextChatIndex int    `json:"next_chat_index,omitempty"`
+	Persona       string       `json:"persona,omitempty"`
+	APIKey        string       `json:"api_key,omitempty"`
+	BaseURL       string       `json:"base_url,omitempty"`           // Per-user OpenAI endpoint (defaults to api.openai.com/v1)
+	OrgID         string       `json:"org_id,omitempty"`             // Per-user org scope
+	ProjectID     string       `json:"project_id,omitempty"`         // Per-user project scope
+	NextChatIndex int          `json:"next_chat_index,omitempty"`
+	ModelCache    *ModelCache  `json:"model_cache,omitempty"`
 }
 
 // PortalMetadata stores per-room tuning knobs for the assistant.
 type PortalMetadata struct {
-	Model               string  `json:"model,omitempty"`
-	SystemPrompt        string  `json:"system_prompt,omitempty"`
-	Temperature         float64 `json:"temperature,omitempty"`
-	MaxContextMessages  int     `json:"max_context_messages,omitempty"`
-	MaxCompletionTokens int     `json:"max_completion_tokens,omitempty"`
-	Slug                string  `json:"slug,omitempty"`
-	Title               string  `json:"title,omitempty"`
-	WelcomeSent         bool    `json:"welcome_sent,omitempty"`
+	Model             string            `json:"model,omitempty"`               // Set from room state
+	SystemPrompt      string            `json:"system_prompt,omitempty"`       // Set from room state
+	Temperature       float64           `json:"temperature,omitempty"`         // Set from room state
+	MaxContextMessages int              `json:"max_context_messages,omitempty"` // Set from room state
+	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"` // Set from room state
+	Slug              string            `json:"slug,omitempty"`
+	Title             string            `json:"title,omitempty"`
+	WelcomeSent       bool              `json:"welcome_sent,omitempty"`
+	Capabilities      ModelCapabilities `json:"capabilities,omitempty"`
+	LastRoomStateSync int64             `json:"last_room_state_sync,omitempty"` // Track when we've synced room state
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild
