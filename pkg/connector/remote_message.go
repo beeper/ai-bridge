@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	_ bridgev2.RemoteMessage             = (*OpenAIRemoteMessage)(nil)
-	_ bridgev2.RemoteEventWithTimestamp  = (*OpenAIRemoteMessage)(nil)
+	_ bridgev2.RemoteMessage                    = (*OpenAIRemoteMessage)(nil)
+	_ bridgev2.RemoteEventWithTimestamp         = (*OpenAIRemoteMessage)(nil)
+	_ bridgev2.RemoteMessageWithTransactionID   = (*OpenAIRemoteMessage)(nil)
 )
 
 // OpenAIRemoteMessage represents a GPT answer that should be bridged to Matrix.
@@ -51,6 +52,15 @@ func (m *OpenAIRemoteMessage) GetTimestamp() time.Time {
 		return time.Now()
 	}
 	return m.Timestamp
+}
+
+// GetTransactionID implements RemoteMessageWithTransactionID
+func (m *OpenAIRemoteMessage) GetTransactionID() networkid.TransactionID {
+	// Use completion ID as transaction ID for deduplication
+	if m.Metadata != nil && m.Metadata.CompletionID != "" {
+		return networkid.TransactionID("completion-" + m.Metadata.CompletionID)
+	}
+	return ""
 }
 
 func (m *OpenAIRemoteMessage) ConvertMessage(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI) (*bridgev2.ConvertedMessage, error) {
