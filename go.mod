@@ -4,6 +4,8 @@ go 1.24.0
 
 toolchain go1.24.5
 
+tool go.mau.fi/util/cmd/maubuild
+
 require (
 	github.com/google/uuid v1.6.0
 	github.com/openai/openai-go v1.12.0
@@ -32,6 +34,7 @@ require (
 	go.mau.fi/zeroconfig v0.2.0 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/exp v0.0.0-20251209150349-8475f28825e9 // indirect
+	golang.org/x/mod v0.31.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
