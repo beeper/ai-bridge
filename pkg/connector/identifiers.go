@@ -35,6 +35,11 @@ func assistantUserID(loginID networkid.UserLoginID) networkid.UserID {
 	return networkid.UserID(fmt.Sprintf("openai-assistant:%s", loginID))
 }
 
+func modelUserID(modelID string) networkid.UserID {
+	// Convert "gpt-4o" to "model-gpt-4o"
+	return networkid.UserID(fmt.Sprintf("model-%s", url.PathEscape(modelID)))
+}
+
 func humanUserID(loginID networkid.UserLoginID) networkid.UserID {
 	return networkid.UserID(fmt.Sprintf("openai-user:%s", loginID))
 }

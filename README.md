@@ -1,24 +1,20 @@
-# WIP ai-bridge
+# ai-bridge
 
-This repository contains a reference Matrix ↔ ChatGPT bridge that closely follows the
+This repository contains a reference Matrix ↔ OpenAI bridge that closely follows the
 [`bridgev2` megabridge template](https://mau.fi/blog/megabridge-twilio/)
 
-Heavily AI assisted.
-
-I imagine this being a multi network bridge able to be setup for all the different model providers, though, only one at a time due to
-bridge limitations. This is why it is a generic ai bridge instead of chatgpt specifically
+This is a generic AI bridge able to be setup for different model providers. Currently it supports OpenAI's chat completion API.
 
 ## Features
 
 - gomatrix/mautrix `bridgev2` implementation with proper connector/login separation.
+- **Model selection** – Each OpenAI model appears as a separate contact; create separate chats with different models.
+- **Dynamic capabilities** – Rooms automatically adjust based on model (vision support, etc.).
+- **Streaming responses** – Progressive rendering with debounced edits.
 - Chat history persistence via `bridgev2`'s shared database + prompt reconstruction.
 - Configurable OpenAI API key (config file or `OPENAI_API_KEY` environment variable).
-- Deployment artifacts mirroring mautrix bridges (example config, registration skeleton,
-  multi-stage Dockerfile, docker-compose service).
-
-### WIP
-
-- There is unused/not working logic to be able to start new chats with the bridge 
+- Support for user-provided API keys (per-user billing).
+- Deployment artifacts mirroring mautrix bridges (example config, registration skeleton, multi-stage Dockerfile).
 
 
 ## Getting Started
@@ -41,18 +37,16 @@ Its setup to use libolm.
 
 ### Login flows
 
-- **config-provided API key** – there is a spot in config.yaml to provide an api key if self hosting
-- **WIP - setup provided API key** – this should present a login prompt in beeper to enter your api key on setup if the config api key is empty
+- **config-provided API key** – Shared API key in config.yaml for all users.
+- **user-provided API key** – Login prompt in Beeper to enter your own API key.
 
-### Multiple chats
+### Multiple chats & model selection
 
-- Immediately after login, the bridge bootstraps the first GPT DM (emitting
-  `openai-chat-bootstrap` log entries) so the user can start chatting without extra
-  steps.
-- **WIP** Beeper’s “Start New Chat → ChatGPT” entry is backed by the bridge’s
-  `ResolveIdentifier` implementation, which always creates a brand-new portal. Each room
-  keeps its own title, prompt, and history, so users can juggle multiple threads in
-  parallel without context collisions.
+- Use "Start New Chat" in Beeper to view all available OpenAI models as contacts.
+- Each model appears as a separate contact (e.g., "GPT-4o (Vision)", "GPT-4o Mini", "GPT-4 Turbo").
+- Create multiple conversations with different models.
+- Each room automatically adjusts capabilities based on model (vision models support image uploads).
+- Room-specific settings (model, temperature, system prompt, etc.).
 
 ## Configuration Overview
 
