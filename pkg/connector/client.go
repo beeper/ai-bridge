@@ -21,6 +21,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 )
 
 var (
@@ -70,18 +71,6 @@ func newOpenAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiK
 		baseURL = "https://api.openai.com/v1"
 	}
 	opts = append(opts, option.WithBaseURL(baseURL))
-
-	// Use per-user org_id if provided
-	orgID := strings.TrimSpace(meta.OrgID)
-	if orgID != "" {
-		opts = append(opts, option.WithOrganization(orgID))
-	}
-
-	// Use per-user project_id if provided
-	projectID := strings.TrimSpace(meta.ProjectID)
-	if projectID != "" {
-		opts = append(opts, option.WithProject(projectID))
-	}
 
 	client := openai.NewClient(opts...)
 	return &OpenAIClient{
@@ -550,7 +539,7 @@ func (oc *OpenAIClient) dispatchCompletion(
 	}
 }
 
-// streamingCompletion handles streaming chat completions with debounced edits
+// streamingCompletion handles streaming chat completions with transient token updates
 func (oc *OpenAIClient) streamingCompletion(
 	ctx context.Context,
 	evt *event.Event,
@@ -561,6 +550,10 @@ func (oc *OpenAIClient) streamingCompletion(
 	log := zerolog.Ctx(ctx).With().
 		Str("portal_id", string(portal.ID)).
 		Logger()
+
+	// Set typing indicator when streaming starts
+	oc.setAssistantTyping(ctx, portal, true)
+	defer oc.setAssistantTyping(ctx, portal, false)
 
 	// Start streaming request
 	params := openai.ChatCompletionNewParams{
@@ -584,58 +577,13 @@ func (oc *OpenAIClient) streamingCompletion(
 	var (
 		accumulated     strings.Builder
 		firstToken      bool = true
-		messageID       networkid.MessageID
-		dbMessage       *database.Message
-		completionID    string
+		initialEventID  id.EventID
 		finishReason    string
 
-		editDebounce      = time.Duration(oc.connector.Config.OpenAI.EditDebounceMs) * time.Millisecond
-		lastEditTime      = time.Now()
-		pendingEdit       = false
-		editTimer         *time.Timer
+		// Transient token debouncing
+		transientDebounce = time.Duration(oc.connector.Config.OpenAI.TransientDebounceMs) * time.Millisecond
+		lastTransientTime = time.Now()
 	)
-
-	// Debounced edit sender function (declared first so it can call itself recursively)
-	var sendEditFunc func(bool)
-	sendEditFunc = func(force bool) {
-		now := time.Now()
-		timeSinceLastEdit := now.Sub(lastEditTime)
-
-		if !force && timeSinceLastEdit < editDebounce {
-			// Schedule edit for later
-			if !pendingEdit {
-				pendingEdit = true
-				if editTimer != nil {
-					editTimer.Stop()
-				}
-				editTimer = time.AfterFunc(editDebounce-timeSinceLastEdit, func() {
-					sendEditFunc(true)
-				})
-			}
-			return
-		}
-
-		pendingEdit = false
-		currentContent := accumulated.String()
-
-		if dbMessage == nil {
-			log.Warn().Msg("Cannot send edit, message not created yet")
-			return
-		}
-
-		// Send Matrix edit event with debounce marker
-		if err := oc.handleStreamingEdit(ctx, portal, dbMessage, currentContent); err != nil {
-			log.Warn().Err(err).Msg("Failed to send streaming edit")
-		}
-
-		lastEditTime = now
-	}
-
-	defer func() {
-		if editTimer != nil {
-			editTimer.Stop()
-		}
-	}()
 
 	// Process stream chunks
 	for stream.Next() {
@@ -653,52 +601,49 @@ func (oc *OpenAIClient) streamingCompletion(
 			accumulated.WriteString(delta.Content)
 		}
 
-		// First token - send initial message
+		// First token - send initial message synchronously to capture event_id
 		if firstToken && accumulated.Len() > 0 {
 			firstToken = false
-			completionID = chunk.ID
-			messageID = networkid.MessageID(fmt.Sprintf("openai:%s", completionID))
 
-			log.Info().Str("msg_id", string(messageID)).Msg("Sending initial message on first token")
+			log.Info().Msg("Sending initial streaming message")
 
-			// Create initial message metadata
-			msgMeta := &MessageMetadata{
-				Role:         "assistant",
-				Body:         accumulated.String(),
-				CompletionID: completionID,
+			// Get ghost intent for sending
+			ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
+			if err != nil {
+				log.Error().Err(err).Msg("Failed to get ghost for initial message")
+				continue
+			}
+			intent := ghost.Intent
+			if intent == nil {
+				log.Error().Msg("Ghost intent is nil")
+				continue
 			}
 
-			// Queue initial message
-			remoteMsg := &OpenAIRemoteMessage{
-				PortalKey: portal.PortalKey,
-				ID:        messageID,
-				Sender: bridgev2.EventSender{
-					Sender:      assistantUserID(oc.UserLogin.ID),
-					ForceDMUser: true,
-					SenderLogin: oc.UserLogin.ID,
-					IsFromMe:    false,
+			// Send initial message synchronously to get event_id
+			eventContent := &event.Content{
+				Raw: map[string]interface{}{
+					"msgtype": "m.text",
+					"body":    accumulated.String(),
 				},
-				Content:   accumulated.String(),
-				Timestamp: time.Now(),
-				Metadata:  msgMeta,
 			}
-
-			oc.UserLogin.QueueRemoteEvent(remoteMsg)
-
-			// Wait for message to be created in DB
-			time.Sleep(100 * time.Millisecond)
-
-			// Get DB message from database
-			// Note: we use the message ID directly which was just queued to remote events
-			// The database will look it up when the message is saved
-			// For now, just skip the lookup - the message content will be updated via handleStreamingEdit
-			// dbMessage will remain nil and edits will not be sent during streaming
-			// This is a limitation of the current architecture
+			resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
+			if err != nil {
+				log.Error().Err(err).Msg("Failed to send initial streaming message")
+				oc.notifyMatrixSendFailure(ctx, portal, evt, err)
+				return
+			}
+			initialEventID = resp.EventID
+			log.Info().Str("event_id", initialEventID.String()).Msg("Initial streaming message sent")
+			lastTransientTime = time.Now()
 		}
 
-		// Subsequent tokens - debounced edit
-		if !firstToken {
-			sendEditFunc(false) // Debounced
+		// Subsequent tokens - emit transient updates with debouncing
+		if !firstToken && initialEventID != "" {
+			now := time.Now()
+			if now.Sub(lastTransientTime) >= transientDebounce {
+				oc.emitTransientToken(ctx, portal, initialEventID, accumulated.String())
+				lastTransientTime = now
+			}
 		}
 
 		// Handle finish
@@ -715,45 +660,15 @@ func (oc *OpenAIClient) streamingCompletion(
 		return
 	}
 
-	// Force final edit
-	if editTimer != nil {
-		editTimer.Stop()
-	}
-	sendEditFunc(true)
-
-	// Update message metadata with final stats
-	if dbMessage != nil {
-		msgMeta := dbMessage.Metadata.(*MessageMetadata)
-		msgMeta.FinishReason = finishReason
-		msgMeta.Body = accumulated.String()
-
-		if err := oc.UserLogin.Bridge.DB.Message.Update(ctx, dbMessage); err != nil {
-			log.Warn().Err(err).Msg("Failed to update message metadata")
-		}
+	// Emit final transient update with complete content
+	if initialEventID != "" {
+		oc.emitTransientToken(ctx, portal, initialEventID, accumulated.String())
 	}
 
 	log.Info().
 		Str("finish_reason", finishReason).
 		Int("length", accumulated.Len()).
 		Msg("Streaming completion finished")
-}
-
-// handleStreamingEdit sends an edit update during streaming
-func (oc *OpenAIClient) handleStreamingEdit(
-	ctx context.Context,
-	portal *bridgev2.Portal,
-	dbMessage *database.Message,
-	content string,
-) error {
-	// Update message in database
-	msgMeta := dbMessage.Metadata.(*MessageMetadata)
-	msgMeta.Body = content
-
-	if err := oc.UserLogin.Bridge.DB.Message.Update(ctx, dbMessage); err != nil {
-		return fmt.Errorf("failed to update message: %w", err)
-	}
-
-	return nil
 }
 
 func (oc *OpenAIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, err error) {
@@ -767,6 +682,66 @@ func (oc *OpenAIClient) notifyMatrixSendFailure(ctx context.Context, portal *bri
 		WithIsCertain(true).
 		WithSendNotice(true)
 	portal.Bridge.Matrix.SendMessageStatus(ctx, &status, bridgev2.StatusEventInfoFromEvent(evt))
+}
+
+// setAssistantTyping sets the typing indicator for the assistant ghost user
+func (oc *OpenAIClient) setAssistantTyping(ctx context.Context, portal *bridgev2.Portal, typing bool) {
+	if portal == nil || portal.MXID == "" {
+		return
+	}
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
+	if err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to get ghost for typing indicator")
+		return
+	}
+	intent := ghost.Intent
+	if intent == nil {
+		oc.log.Warn().Msg("Ghost intent is nil, cannot set typing")
+		return
+	}
+	var timeout time.Duration
+	if typing {
+		timeout = 30 * time.Second
+	} else {
+		timeout = 0 // Zero timeout stops typing
+	}
+	if err := intent.MarkTyping(ctx, portal.MXID, bridgev2.TypingTypeText, timeout); err != nil {
+		oc.log.Warn().Err(err).Bool("typing", typing).Msg("Failed to set typing indicator")
+	}
+}
+
+// emitTransientToken sends a transient streaming token update to the room
+// Uses Matrix-spec compliant m.relates_to to correlate with the initial message
+func (oc *OpenAIClient) emitTransientToken(ctx context.Context, portal *bridgev2.Portal, relatedEventID id.EventID, content string) {
+	if portal == nil || portal.MXID == "" {
+		return
+	}
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
+	if err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to get ghost for transient token")
+		return
+	}
+	intent := ghost.Intent
+	if intent == nil {
+		oc.log.Warn().Msg("Ghost intent is nil, cannot emit transient token")
+		return
+	}
+	eventContent := &event.Content{
+		Raw: map[string]interface{}{
+			"body": content,
+			"m.relates_to": map[string]interface{}{
+				"rel_type": "m.reference",
+				"event_id": relatedEventID.String(),
+			},
+		},
+	}
+	_, err = intent.SendMessage(ctx, portal.MXID, event.Type{
+		Type:  "com.beeper.ai.stream_token",
+		Class: event.MessageEventType,
+	}, eventContent, nil)
+	if err != nil {
+		oc.log.Warn().Err(err).Str("related_event_id", relatedEventID.String()).Msg("Failed to emit transient token")
+	}
 }
 
 func (oc *OpenAIClient) backgroundContext(ctx context.Context) context.Context {
