@@ -10,9 +10,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
-	"github.com/openai/openai-go/shared"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/responses"
+	"github.com/openai/openai-go/v3/shared"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 	"golang.org/x/text/cases"
@@ -53,6 +54,22 @@ type OpenAIClient struct {
 
 	loggedIn atomic.Bool
 	chatLock sync.Mutex
+
+	// Turn-based message queuing: only one response per room at a time
+	activeRooms   map[id.RoomID]bool
+	activeRoomsMu sync.Mutex
+
+	// Pending message queue per room (for turn-based behavior)
+	pendingMessages   map[id.RoomID][]pendingMessage
+	pendingMessagesMu sync.Mutex
+}
+
+// pendingMessage represents a queued message waiting for AI processing
+type pendingMessage struct {
+	Event          *event.Event
+	Portal         *bridgev2.Portal
+	Meta           *PortalMetadata
+	PromptMessages []openai.ChatCompletionMessageParamUnion
 }
 
 func newOpenAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey string) (*OpenAIClient, error) {
@@ -77,12 +94,95 @@ func newOpenAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiK
 
 	client := openai.NewClient(opts...)
 	return &OpenAIClient{
-		UserLogin: login,
-		connector: connector,
-		api:       client,
-		apiKey:    key,
-		log:       login.Log.With().Str("component", "openai-network").Logger(),
+		UserLogin:       login,
+		connector:       connector,
+		api:             client,
+		apiKey:          key,
+		log:             login.Log.With().Str("component", "openai-network").Logger(),
+		activeRooms:     make(map[id.RoomID]bool),
+		pendingMessages: make(map[id.RoomID][]pendingMessage),
 	}, nil
+}
+
+// acquireRoom tries to acquire a room for processing. Returns false if the room is already busy.
+func (oc *OpenAIClient) acquireRoom(roomID id.RoomID) bool {
+	oc.activeRoomsMu.Lock()
+	defer oc.activeRoomsMu.Unlock()
+	if oc.activeRooms[roomID] {
+		return false // already processing
+	}
+	oc.activeRooms[roomID] = true
+	return true
+}
+
+// releaseRoom releases a room after processing is complete.
+func (oc *OpenAIClient) releaseRoom(roomID id.RoomID) {
+	oc.activeRoomsMu.Lock()
+	defer oc.activeRoomsMu.Unlock()
+	delete(oc.activeRooms, roomID)
+}
+
+// isRoomBusy checks if a room is currently processing a message (without acquiring lock)
+func (oc *OpenAIClient) isRoomBusy(roomID id.RoomID) bool {
+	oc.activeRoomsMu.Lock()
+	defer oc.activeRoomsMu.Unlock()
+	return oc.activeRooms[roomID]
+}
+
+// queuePendingMessage adds a message to the pending queue for later processing
+func (oc *OpenAIClient) queuePendingMessage(roomID id.RoomID, msg pendingMessage) {
+	oc.pendingMessagesMu.Lock()
+	defer oc.pendingMessagesMu.Unlock()
+	oc.pendingMessages[roomID] = append(oc.pendingMessages[roomID], msg)
+	oc.log.Debug().
+		Str("room_id", roomID.String()).
+		Int("queue_length", len(oc.pendingMessages[roomID])).
+		Msg("Message queued for later processing")
+}
+
+// popNextPending removes and returns the next pending message for a room, or nil if none
+func (oc *OpenAIClient) popNextPending(roomID id.RoomID) *pendingMessage {
+	oc.pendingMessagesMu.Lock()
+	defer oc.pendingMessagesMu.Unlock()
+	queue := oc.pendingMessages[roomID]
+	if len(queue) == 0 {
+		return nil
+	}
+	msg := queue[0]
+	oc.pendingMessages[roomID] = queue[1:]
+	if len(oc.pendingMessages[roomID]) == 0 {
+		delete(oc.pendingMessages, roomID)
+	}
+	return &msg
+}
+
+// processNextPending processes the next pending message for a room if one exists
+func (oc *OpenAIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
+	pending := oc.popNextPending(roomID)
+	if pending == nil {
+		return
+	}
+
+	oc.log.Debug().
+		Str("room_id", roomID.String()).
+		Msg("Processing next pending message")
+
+	// Re-acquire the room lock and process
+	if !oc.acquireRoom(roomID) {
+		// Room somehow got busy again, re-queue the message
+		oc.queuePendingMessage(roomID, *pending)
+		return
+	}
+
+	// Process in background, will release room when done
+	go func() {
+		defer func() {
+			oc.releaseRoom(roomID)
+			// Check for more pending messages
+			oc.processNextPending(oc.backgroundContext(ctx), roomID)
+		}()
+		oc.dispatchCompletionInternal(ctx, pending.Event, pending.Portal, pending.Meta, pending.PromptMessages)
+	}()
 }
 
 func (oc *OpenAIClient) Connect(ctx context.Context) {
@@ -440,8 +540,22 @@ func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 		},
 		Timestamp: time.Now(),
 	}
+
+	// Check if room is busy (message will be queued)
+	roomBusy := oc.isRoomBusy(portal.MXID)
+
 	// Dispatch completion handling in the background so the Matrix send pipeline can ack immediately.
 	go oc.dispatchCompletion(ctx, msg.Event, portal, meta, promptMessages)
+
+	// If room is busy, message will be queued - don't return SUCCESS status yet
+	// The message will be processed when the room becomes available
+	if roomBusy {
+		oc.log.Debug().
+			Str("room_id", portal.MXID.String()).
+			Msg("Room is busy, message will be queued - returning pending status")
+		return nil, nil
+	}
+
 	return &bridgev2.MatrixMessageResponse{
 		DB: userMessage,
 	}, nil
@@ -889,18 +1003,24 @@ func (oc *OpenAIClient) handleSlashCommand(
 		return true
 
 	case "/config":
+		mode := meta.ConversationMode
+		if mode == "" {
+			mode = "messages"
+		}
 		config := fmt.Sprintf(
 			"Current configuration:\n"+
 				"• Model: %s\n"+
 				"• Temperature: %.2f\n"+
 				"• Context: %d messages\n"+
 				"• Max tokens: %d\n"+
-				"• Vision: %v",
+				"• Vision: %v\n"+
+				"• Mode: %s",
 			oc.effectiveModel(meta),
 			oc.effectiveTemperature(meta),
 			oc.historyLimit(meta),
 			oc.effectiveMaxTokens(meta),
 			meta.Capabilities.SupportsVision,
+			mode,
 		)
 		oc.sendSystemNotice(ctx, portal, config)
 		return true
@@ -942,6 +1062,37 @@ func (oc *OpenAIClient) handleSlashCommand(
 		}
 		return true
 
+	case "/mode":
+		mode := meta.ConversationMode
+		if mode == "" {
+			mode = "messages"
+		}
+		if arg == "" {
+			modeHelp := "Conversation modes:\n" +
+				"• messages - Build full message history for each request (default)\n" +
+				"• responses - Use OpenAI's previous_response_id for context chaining\n\n" +
+				"Current mode: " + mode
+			oc.sendSystemNotice(ctx, portal, modeHelp)
+			return true
+		}
+		newMode := strings.ToLower(arg)
+		if newMode != "messages" && newMode != "responses" {
+			oc.sendSystemNotice(ctx, portal, "Invalid mode. Use 'messages' or 'responses'.")
+			return true
+		}
+		meta.ConversationMode = newMode
+		if newMode == "messages" {
+			meta.LastResponseID = "" // Clear when switching to messages mode
+		}
+		if err := portal.Save(ctx); err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to save portal after mode change")
+		}
+		if err := oc.BroadcastRoomState(ctx, portal); err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to broadcast room state after mode change")
+		}
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Conversation mode set to: %s", newMode))
+		return true
+
 	case "/cost":
 		// Calculate cost from conversation history
 		messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, 1000)
@@ -981,6 +1132,7 @@ func (oc *OpenAIClient) handleSlashCommand(
 			"• /context [1-100] - Get or set context message limit\n" +
 			"• /tokens [1-16384] - Get or set max completion tokens\n" +
 			"• /tools [on|off] - Enable/disable function calling tools\n" +
+			"• /mode [messages|responses] - Set conversation context mode\n" +
 			"• /config - Show current configuration\n" +
 			"• /cost - Show conversation token usage and cost\n" +
 			"• /regenerate - Regenerate the last response\n" +
@@ -1015,10 +1167,10 @@ func (oc *OpenAIClient) handleRegenerate(
 
 	// Find the last user message
 	var lastUserMessage *database.Message
-	for i := 0; i < len(history); i++ {
-		msgMeta := messageMeta(history[i])
+	for _, msg := range history {
+		msgMeta := messageMeta(msg)
 		if msgMeta != nil && msgMeta.Role == "user" {
-			lastUserMessage = history[i]
+			lastUserMessage = msg
 			break
 		}
 	}
@@ -1070,8 +1222,8 @@ func (oc *OpenAIClient) buildPromptForRegenerate(
 		// Skip the most recent messages (last user and assistant) and build from older history
 		skippedUser := false
 		skippedAssistant := false
-		for i := 0; i < len(history); i++ {
-			msgMeta := messageMeta(history[i])
+		for _, msg := range history {
+			msgMeta := messageMeta(msg)
 			if msgMeta == nil || msgMeta.Body == "" {
 				continue
 			}
@@ -1104,118 +1256,6 @@ func (oc *OpenAIClient) buildPromptForRegenerate(
 	return prompt, nil
 }
 
-func (oc *OpenAIClient) requestCompletion(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion, meta *PortalMetadata) (*openai.ChatCompletion, error) {
-	if len(messages) == 0 {
-		return nil, fmt.Errorf("prompt had no messages")
-	}
-	model := oc.effectiveModel(meta)
-	params := openai.ChatCompletionNewParams{
-		Model:               shared.ChatModel(model),
-		Messages:            messages,
-		Temperature:         openai.Float(oc.effectiveTemperature(meta)),
-		MaxCompletionTokens: openai.Int(int64(oc.effectiveMaxTokens(meta))),
-	}
-
-	// Add tools if enabled
-	if meta.ToolsEnabled && !isReasoningModel(model) {
-		params.Tools = ToOpenAITools(BuiltinTools())
-	}
-
-	// Use extended timeout for reasoning models (O1/O3)
-	timeout := oc.connector.Config.OpenAI.RequestTimeout
-	if isReasoningModel(model) {
-		timeout = reasoningModelRequestTimeout
-	}
-
-	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	resp, err := oc.api.Chat.Completions.New(timeoutCtx, params)
-	if err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-// requestCompletionWithToolLoop handles tool calls in a loop until the model gives a final response
-// It returns the final response and a list of tool call messages that were sent
-func (oc *OpenAIClient) requestCompletionWithToolLoop(
-	ctx context.Context,
-	messages []openai.ChatCompletionMessageParamUnion,
-	meta *PortalMetadata,
-	onToolCall func(toolName, args, result string),
-) (*openai.ChatCompletion, error) {
-	currentMessages := messages
-	maxToolIterations := 10 // Prevent infinite loops
-
-	for i := 0; i < maxToolIterations; i++ {
-		resp, err := oc.requestCompletion(ctx, currentMessages, meta)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(resp.Choices) == 0 {
-			return nil, fmt.Errorf("no choices in response")
-		}
-
-		choice := resp.Choices[0]
-
-		// Check if there are tool calls
-		if len(choice.Message.ToolCalls) == 0 {
-			// No tool calls, this is the final response
-			return resp, nil
-		}
-
-		// Execute tool calls
-		// First, add the assistant's message with tool_calls to the conversation
-		// Convert tool calls to params
-		toolCallParams := make([]openai.ChatCompletionMessageToolCallParam, len(choice.Message.ToolCalls))
-		for j, tc := range choice.Message.ToolCalls {
-			toolCallParams[j] = tc.ToParam()
-		}
-		currentMessages = append(currentMessages, openai.ChatCompletionMessageParamUnion{
-			OfAssistant: &openai.ChatCompletionAssistantMessageParam{
-				ToolCalls: toolCallParams,
-			},
-		})
-
-		// Execute each tool call and add results
-		for _, toolCall := range choice.Message.ToolCalls {
-			toolName := toolCall.Function.Name
-			toolArgs := toolCall.Function.Arguments
-
-			// Parse arguments
-			var args map[string]any
-			if err := json.Unmarshal([]byte(toolArgs), &args); err != nil {
-				args = map[string]any{"raw": toolArgs}
-			}
-
-			// Execute tool
-			tool := GetToolByName(toolName)
-			var result string
-			if tool != nil {
-				toolResult, err := tool.Execute(ctx, args)
-				if err != nil {
-					result = fmt.Sprintf("Error: %v", err)
-				} else {
-					result = toolResult
-				}
-			} else {
-				result = fmt.Sprintf("Error: Unknown tool '%s'", toolName)
-			}
-
-			// Notify callback if provided
-			if onToolCall != nil {
-				onToolCall(toolName, toolArgs, result)
-			}
-
-			// Add tool result to messages
-			currentMessages = append(currentMessages, openai.ToolMessage(result, toolCall.ID))
-		}
-	}
-
-	return nil, fmt.Errorf("exceeded maximum tool iterations (%d)", maxToolIterations)
-}
-
 func (oc *OpenAIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, latest string) ([]openai.ChatCompletionMessageParamUnion, error) {
 	var prompt []openai.ChatCompletionMessageParamUnion
 	systemPrompt := oc.effectivePrompt(meta)
@@ -1245,40 +1285,42 @@ func (oc *OpenAIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal
 	return prompt, nil
 }
 
-func (oc *OpenAIClient) queueAssistantMessage(portal *bridgev2.Portal, completion *openai.ChatCompletion) {
-	if completion == nil || len(completion.Choices) == 0 {
+func (oc *OpenAIClient) dispatchCompletion(
+	ctx context.Context,
+	sourceEvent *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	prompt []openai.ChatCompletionMessageParamUnion,
+) {
+	roomID := portal.MXID
+
+	// Try to acquire room lock for turn-based processing
+	if !oc.acquireRoom(roomID) {
+		// Room is busy, queue the message for later
+		oc.queuePendingMessage(roomID, pendingMessage{
+			Event:          sourceEvent,
+			Portal:         portal,
+			Meta:           meta,
+			PromptMessages: prompt,
+		})
+		oc.log.Debug().
+			Str("room_id", roomID.String()).
+			Msg("Room is busy, message queued")
 		return
 	}
-	choice := completion.Choices[0]
-	body := strings.TrimSpace(choice.Message.Content)
-	if body == "" {
-		return
-	}
-	meta := &MessageMetadata{
-		Role:             "assistant",
-		Body:             body,
-		CompletionID:     completion.ID,
-		FinishReason:     choice.FinishReason,
-		PromptTokens:     completion.Usage.PromptTokens,
-		CompletionTokens: completion.Usage.CompletionTokens,
-	}
-	event := &OpenAIRemoteMessage{
-		PortalKey: portal.PortalKey,
-		ID:        networkid.MessageID(fmt.Sprintf("openai:%s", uuid.NewString())),
-		Sender: bridgev2.EventSender{
-			Sender:      assistantUserID(oc.UserLogin.ID),
-			ForceDMUser: true,
-			SenderLogin: oc.UserLogin.ID,
-			IsFromMe:    false,
-		},
-		Content:   body,
-		Timestamp: time.Unix(completion.Created, 0),
-		Metadata:  meta,
-	}
-	oc.UserLogin.QueueRemoteEvent(event)
+
+	// Process and release room when done, then check for pending
+	defer func() {
+		oc.releaseRoom(roomID)
+		// Process any pending messages
+		oc.processNextPending(ctx, roomID)
+	}()
+
+	oc.dispatchCompletionInternal(ctx, sourceEvent, portal, meta, prompt)
 }
 
-func (oc *OpenAIClient) dispatchCompletion(
+// dispatchCompletionInternal contains the actual completion logic
+func (oc *OpenAIClient) dispatchCompletionInternal(
 	ctx context.Context,
 	sourceEvent *event.Event,
 	portal *bridgev2.Portal,
@@ -1288,90 +1330,18 @@ func (oc *OpenAIClient) dispatchCompletion(
 	runCtx := oc.backgroundContext(ctx)
 	runCtx = oc.log.WithContext(runCtx)
 
-	// Check if streaming is enabled and model supports it
-	// O1/O3 reasoning models don't support streaming
-	model := oc.effectiveModel(meta)
-	if oc.connector.Config.OpenAI.EnableStreaming && !isReasoningModel(model) {
-		oc.streamingCompletionWithRetry(runCtx, sourceEvent, portal, meta, prompt)
+	// Use Responses API for streaming (supports all models including reasoning)
+	if oc.connector.Config.OpenAI.EnableStreaming {
+		oc.streamingResponseWithRetry(runCtx, sourceEvent, portal, meta, prompt)
 		return
 	}
 
-	// Non-streaming path with retry (also used for reasoning models)
-	oc.nonStreamingCompletionWithRetry(runCtx, sourceEvent, portal, meta, prompt)
+	// Non-streaming fallback path using Responses API
+	oc.nonStreamingResponseWithRetry(runCtx, sourceEvent, portal, meta, prompt)
 }
 
-// nonStreamingCompletionWithRetry handles non-streaming completions with automatic retry on context overflow
-func (oc *OpenAIClient) nonStreamingCompletionWithRetry(
-	ctx context.Context,
-	sourceEvent *event.Event,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-	prompt []openai.ChatCompletionMessageParamUnion,
-) {
-	currentPrompt := prompt
-
-	for attempt := 0; attempt < maxRetryAttempts; attempt++ {
-		var resp *openai.ChatCompletion
-		var err error
-
-		// Use tool loop if tools are enabled
-		if meta.ToolsEnabled {
-			resp, err = oc.requestCompletionWithToolLoop(ctx, currentPrompt, meta, func(toolName, args, result string) {
-				// Send a notice for each tool call
-				notice := fmt.Sprintf("Using %s...\n%s", toolName, result)
-				if len(notice) > 500 {
-					notice = notice[:497] + "..."
-				}
-				oc.sendSystemNotice(ctx, portal, notice)
-			})
-		} else {
-			resp, err = oc.requestCompletion(ctx, currentPrompt, meta)
-		}
-
-		if err == nil {
-			if resp != nil {
-				oc.queueAssistantMessage(portal, resp)
-				// Generate room title after first response
-				if len(resp.Choices) > 0 {
-					oc.maybeGenerateTitle(ctx, portal, resp.Choices[0].Message.Content)
-				}
-			}
-			return
-		}
-
-		// Check for context length error
-		cle := ParseContextLengthError(err)
-		if cle == nil {
-			// Not a context error, report and exit
-			oc.notifyMatrixSendFailure(ctx, portal, sourceEvent, err)
-			return
-		}
-
-		// Can we truncate further?
-		truncated := oc.truncatePrompt(currentPrompt)
-		if truncated == nil || len(truncated) <= 2 {
-			// Can't truncate more (only system + latest user message left)
-			oc.notifyContextLengthExceeded(ctx, portal, cle, false)
-			return
-		}
-
-		// Notify user and retry
-		oc.notifyContextLengthExceeded(ctx, portal, cle, true)
-		currentPrompt = truncated
-
-		oc.log.Debug().
-			Int("attempt", attempt+1).
-			Int("new_prompt_len", len(currentPrompt)).
-			Msg("Retrying with truncated context")
-	}
-
-	// Exhausted retries
-	oc.notifyMatrixSendFailure(ctx, portal, sourceEvent,
-		fmt.Errorf("exceeded retry attempts for context length"))
-}
-
-// streamingCompletionWithRetry handles streaming completions with automatic retry on context overflow
-func (oc *OpenAIClient) streamingCompletionWithRetry(
+// streamingResponseWithRetry handles Responses API streaming with automatic retry on context overflow
+func (oc *OpenAIClient) streamingResponseWithRetry(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -1380,8 +1350,8 @@ func (oc *OpenAIClient) streamingCompletionWithRetry(
 ) {
 	currentPrompt := prompt
 
-	for attempt := 0; attempt < maxRetryAttempts; attempt++ {
-		success, cle := oc.streamingCompletion(ctx, evt, portal, meta, currentPrompt)
+	for attempt := range maxRetryAttempts {
+		success, cle := oc.streamingResponse(ctx, evt, portal, meta, currentPrompt)
 		if success {
 			return
 		}
@@ -1389,8 +1359,8 @@ func (oc *OpenAIClient) streamingCompletionWithRetry(
 		// If we got a context length error, try to truncate and retry
 		if cle != nil {
 			truncated := oc.truncatePrompt(currentPrompt)
-			if truncated == nil || len(truncated) <= 2 {
-				// Can't truncate more
+			if len(truncated) <= 2 {
+				// Can't truncate more (len of nil slice is 0)
 				oc.notifyContextLengthExceeded(ctx, portal, cle, false)
 				return
 			}
@@ -1402,160 +1372,19 @@ func (oc *OpenAIClient) streamingCompletionWithRetry(
 			oc.log.Debug().
 				Int("attempt", attempt+1).
 				Int("new_prompt_len", len(currentPrompt)).
-				Msg("Retrying streaming with truncated context")
+				Msg("Retrying Responses API streaming with truncated context")
 			continue
 		}
 
-		// Non-context error, already handled in streamingCompletion
+		// Non-context error, already handled in streamingResponse
 		return
 	}
+
+	// Exhausted retries
+	oc.notifyMatrixSendFailure(ctx, portal, evt,
+		fmt.Errorf("exceeded retry attempts for context length"))
 }
 
-// streamingCompletion handles streaming chat completions with transient token updates
-// Returns (success, contextLengthError) - contextLengthError is non-nil only when the error is a context length issue
-func (oc *OpenAIClient) streamingCompletion(
-	ctx context.Context,
-	evt *event.Event,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-	messages []openai.ChatCompletionMessageParamUnion,
-) (bool, *ContextLengthError) {
-	log := zerolog.Ctx(ctx).With().
-		Str("portal_id", string(portal.ID)).
-		Logger()
-
-	// Set typing indicator when streaming starts
-	oc.setAssistantTyping(ctx, portal, true)
-	defer oc.setAssistantTyping(ctx, portal, false)
-
-	// Start streaming request
-	params := openai.ChatCompletionNewParams{
-		Model:               shared.ChatModel(oc.effectiveModel(meta)),
-		Messages:            messages,
-		Temperature:         openai.Float(oc.effectiveTemperature(meta)),
-		MaxCompletionTokens: openai.Int(int64(oc.effectiveMaxTokens(meta))),
-	}
-
-	timeoutCtx, cancel := context.WithTimeout(ctx, oc.connector.Config.OpenAI.RequestTimeout)
-	defer cancel()
-
-	stream := oc.api.Chat.Completions.NewStreaming(timeoutCtx, params)
-	if stream == nil {
-		log.Error().Msg("Failed to create streaming request")
-		oc.notifyMatrixSendFailure(ctx, portal, evt, fmt.Errorf("streaming not available"))
-		return false, nil
-	}
-
-	// Track streaming state
-	var (
-		accumulated     strings.Builder
-		firstToken      bool = true
-		initialEventID  id.EventID
-		finishReason    string
-
-		// Transient token debouncing
-		transientDebounce = time.Duration(oc.connector.Config.OpenAI.TransientDebounceMs) * time.Millisecond
-		lastTransientTime = time.Now()
-	)
-
-	// Process stream chunks
-	for stream.Next() {
-		chunk := stream.Current()
-
-		if len(chunk.Choices) == 0 {
-			continue
-		}
-
-		choice := chunk.Choices[0]
-		delta := choice.Delta
-
-		// Accumulate content
-		if delta.Content != "" {
-			accumulated.WriteString(delta.Content)
-		}
-
-		// First token - send initial message synchronously to capture event_id
-		if firstToken && accumulated.Len() > 0 {
-			firstToken = false
-
-			log.Info().Msg("Sending initial streaming message")
-
-			// Get ghost intent for sending
-			ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
-			if err != nil {
-				log.Error().Err(err).Msg("Failed to get ghost for initial message")
-				continue
-			}
-			intent := ghost.Intent
-			if intent == nil {
-				log.Error().Msg("Ghost intent is nil")
-				continue
-			}
-
-			// Send initial message synchronously to get event_id
-			eventContent := &event.Content{
-				Raw: map[string]interface{}{
-					"msgtype": "m.text",
-					"body":    accumulated.String(),
-				},
-			}
-			resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
-			if err != nil {
-				log.Error().Err(err).Msg("Failed to send initial streaming message")
-				cle := ParseContextLengthError(err)
-				if cle != nil {
-					return false, cle
-				}
-				oc.notifyMatrixSendFailure(ctx, portal, evt, err)
-				return false, nil
-			}
-			initialEventID = resp.EventID
-			log.Info().Str("event_id", initialEventID.String()).Msg("Initial streaming message sent")
-			lastTransientTime = time.Now()
-		}
-
-		// Subsequent tokens - emit transient updates with debouncing
-		if !firstToken && initialEventID != "" {
-			now := time.Now()
-			if now.Sub(lastTransientTime) >= transientDebounce {
-				oc.emitTransientToken(ctx, portal, initialEventID, accumulated.String())
-				lastTransientTime = now
-			}
-		}
-
-		// Handle finish
-		if choice.FinishReason != "" {
-			finishReason = choice.FinishReason
-			log.Debug().Str("reason", finishReason).Msg("Stream finished")
-		}
-	}
-
-	// Check for errors
-	if err := stream.Err(); err != nil {
-		log.Error().Err(err).Msg("Streaming error")
-		cle := ParseContextLengthError(err)
-		if cle != nil {
-			return false, cle
-		}
-		oc.notifyMatrixSendFailure(ctx, portal, evt, err)
-		return false, nil
-	}
-
-	// Emit final transient update with complete content
-	if initialEventID != "" {
-		oc.emitTransientToken(ctx, portal, initialEventID, accumulated.String())
-	}
-
-	log.Info().
-		Str("finish_reason", finishReason).
-		Int("length", accumulated.Len()).
-		Msg("Streaming completion finished")
-
-	// Generate room title after first response
-	oc.maybeGenerateTitle(ctx, portal, accumulated.String())
-
-	return true, nil
-}
 
 func (oc *OpenAIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, err error) {
 	if portal == nil || portal.Bridge == nil || evt == nil {
@@ -1627,6 +1456,482 @@ func (oc *OpenAIClient) emitTransientToken(ctx context.Context, portal *bridgev2
 	}, eventContent, nil)
 	if err != nil {
 		oc.log.Warn().Err(err).Str("related_event_id", relatedEventID.String()).Msg("Failed to emit transient token")
+	}
+}
+
+// streamingResponse handles streaming using the Responses API
+// This is the preferred streaming method as it supports reasoning tokens
+// Returns (success, contextLengthError)
+func (oc *OpenAIClient) streamingResponse(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	messages []openai.ChatCompletionMessageParamUnion,
+) (bool, *ContextLengthError) {
+	log := zerolog.Ctx(ctx).With().
+		Str("portal_id", string(portal.ID)).
+		Logger()
+
+	// Set typing indicator when streaming starts
+	oc.setAssistantTyping(ctx, portal, true)
+	defer oc.setAssistantTyping(ctx, portal, false)
+
+	// Build Responses API params
+	params := responses.ResponseNewParams{
+		Model:           shared.ResponsesModel(oc.effectiveModel(meta)),
+		Temperature:     openai.Float(oc.effectiveTemperature(meta)),
+		MaxOutputTokens: openai.Int(int64(oc.effectiveMaxTokens(meta))),
+	}
+
+	// Use previous_response_id if in "responses" mode and ID exists
+	if meta.ConversationMode == "responses" && meta.LastResponseID != "" {
+		params.PreviousResponseID = openai.String(meta.LastResponseID)
+		// Still need to pass the latest user message as input
+		// Extract just the last user message from messages
+		if len(messages) > 0 {
+			latestMsg := messages[len(messages)-1]
+			input := oc.convertToResponsesInput([]openai.ChatCompletionMessageParamUnion{latestMsg}, meta)
+			params.Input = responses.ResponseNewParamsInputUnion{
+				OfInputItemList: input,
+			}
+		}
+		log.Debug().Str("previous_response_id", meta.LastResponseID).Msg("Using previous_response_id for context")
+	} else {
+		// Build full message history
+		input := oc.convertToResponsesInput(messages, meta)
+		params.Input = responses.ResponseNewParamsInputUnion{
+			OfInputItemList: input,
+		}
+	}
+
+	// Add reasoning effort if configured
+	if meta.ReasoningEffort != "" {
+		params.Reasoning = shared.ReasoningParam{
+			Effort: shared.ReasoningEffort(meta.ReasoningEffort),
+		}
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, oc.connector.Config.OpenAI.RequestTimeout)
+	defer cancel()
+
+	stream := oc.api.Responses.NewStreaming(timeoutCtx, params)
+	if stream == nil {
+		log.Error().Msg("Failed to create Responses API streaming request")
+		oc.notifyMatrixSendFailure(ctx, portal, evt, fmt.Errorf("responses streaming not available"))
+		return false, nil
+	}
+
+	// Track streaming state
+	var (
+		accumulated     strings.Builder
+		reasoning       strings.Builder
+		firstToken      = true
+		initialEventID  id.EventID
+		finishReason    string
+
+		// Transient token debouncing
+		transientDebounce = time.Duration(oc.connector.Config.OpenAI.TransientDebounceMs) * time.Millisecond
+		lastTransientTime = time.Now()
+	)
+
+	// Process stream events
+	for stream.Next() {
+		event := stream.Current()
+
+		switch event.Type {
+		case "response.output_text.delta":
+			accumulated.WriteString(event.Delta)
+
+			// First token - send initial message synchronously to capture event_id
+			if firstToken && accumulated.Len() > 0 {
+				firstToken = false
+				initialEventID = oc.sendInitialStreamMessage(ctx, portal, accumulated.String())
+				if initialEventID == "" {
+					log.Error().Msg("Failed to send initial streaming message")
+					return false, nil
+				}
+				lastTransientTime = time.Now()
+			}
+
+			// Subsequent tokens - emit transient updates with debouncing
+			if !firstToken && initialEventID != "" {
+				now := time.Now()
+				if now.Sub(lastTransientTime) >= transientDebounce {
+					oc.emitTransientToken(ctx, portal, initialEventID, accumulated.String())
+					lastTransientTime = now
+				}
+			}
+
+		case "response.reasoning_text.delta":
+			reasoning.WriteString(event.Delta)
+			// Reasoning tokens stream separately - we'll include them in final edit
+
+		case "response.completed":
+			if event.Response.Status == "completed" {
+				finishReason = "stop"
+			} else {
+				finishReason = string(event.Response.Status)
+			}
+			// Store response ID for "responses" mode context chaining
+			if event.Response.ID != "" && meta.ConversationMode == "responses" {
+				meta.LastResponseID = event.Response.ID
+				if err := portal.Save(ctx); err != nil {
+					log.Warn().Err(err).Msg("Failed to save portal after storing response ID")
+				}
+			}
+			log.Debug().Str("reason", finishReason).Str("response_id", event.Response.ID).Msg("Response stream completed")
+
+		case "error":
+			log.Error().Str("error", event.Message).Msg("Responses API stream error")
+			// Check for context length error
+			if strings.Contains(event.Message, "context_length") || strings.Contains(event.Message, "token") {
+				return false, &ContextLengthError{
+					OriginalError: fmt.Errorf("%s", event.Message),
+				}
+			}
+			oc.notifyMatrixSendFailure(ctx, portal, evt, fmt.Errorf("API error: %s", event.Message))
+			return false, nil
+		}
+	}
+
+	// Check for stream errors
+	if err := stream.Err(); err != nil {
+		log.Error().Err(err).Msg("Responses API streaming error")
+		cle := ParseContextLengthError(err)
+		if cle != nil {
+			return false, cle
+		}
+		oc.notifyMatrixSendFailure(ctx, portal, evt, err)
+		return false, nil
+	}
+
+	// Emit final transient update with complete content
+	if initialEventID != "" {
+		oc.emitTransientToken(ctx, portal, initialEventID, accumulated.String())
+	}
+
+	// Send final edit to persist complete content with metadata (including reasoning)
+	if initialEventID != "" {
+		oc.sendFinalEditWithReasoning(ctx, portal, initialEventID, accumulated.String(), reasoning.String(), meta, finishReason)
+	}
+
+	log.Info().
+		Str("finish_reason", finishReason).
+		Int("content_length", accumulated.Len()).
+		Int("reasoning_length", reasoning.Len()).
+		Msg("Responses API streaming finished")
+
+	// Generate room title after first response
+	oc.maybeGenerateTitle(ctx, portal, accumulated.String())
+
+	return true, nil
+}
+
+// convertToResponsesInput converts Chat Completion messages to Responses API input items
+func (oc *OpenAIClient) convertToResponsesInput(messages []openai.ChatCompletionMessageParamUnion, _ *PortalMetadata) responses.ResponseInputParam {
+	var input responses.ResponseInputParam
+
+	for _, msg := range messages {
+		// Extract role and content from the message
+		// The SDK uses union types, so we need to check which variant is set
+		msgJSON, _ := json.Marshal(msg)
+		var msgMap map[string]any
+		json.Unmarshal(msgJSON, &msgMap)
+
+		role, _ := msgMap["role"].(string)
+		content, _ := msgMap["content"].(string)
+
+		if role == "" || content == "" {
+			continue
+		}
+
+		// Map Chat Completions role to Responses API role
+		var responsesRole responses.EasyInputMessageRole
+		switch role {
+		case "system":
+			responsesRole = responses.EasyInputMessageRoleSystem
+		case "user":
+			responsesRole = responses.EasyInputMessageRoleUser
+		case "assistant":
+			responsesRole = responses.EasyInputMessageRoleAssistant
+		default:
+			responsesRole = responses.EasyInputMessageRoleUser
+		}
+
+		input = append(input, responses.ResponseInputItemUnionParam{
+			OfMessage: &responses.EasyInputMessageParam{
+				Role: responsesRole,
+				Content: responses.EasyInputMessageContentUnionParam{
+					OfString: openai.String(content),
+				},
+			},
+		})
+	}
+
+	return input
+}
+
+// nonStreamingResponse handles non-streaming using the Responses API
+// Returns (success, contextLengthError)
+func (oc *OpenAIClient) nonStreamingResponse(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	messages []openai.ChatCompletionMessageParamUnion,
+) (bool, *ContextLengthError) {
+	log := zerolog.Ctx(ctx).With().
+		Str("portal_id", string(portal.ID)).
+		Logger()
+
+	// Set typing indicator
+	oc.setAssistantTyping(ctx, portal, true)
+	defer oc.setAssistantTyping(ctx, portal, false)
+
+	// Build Responses API params
+	params := responses.ResponseNewParams{
+		Model:           shared.ResponsesModel(oc.effectiveModel(meta)),
+		Temperature:     openai.Float(oc.effectiveTemperature(meta)),
+		MaxOutputTokens: openai.Int(int64(oc.effectiveMaxTokens(meta))),
+	}
+
+	// Use previous_response_id if in "responses" mode and ID exists
+	if meta.ConversationMode == "responses" && meta.LastResponseID != "" {
+		params.PreviousResponseID = openai.String(meta.LastResponseID)
+		// Still need to pass the latest user message as input
+		if len(messages) > 0 {
+			latestMsg := messages[len(messages)-1]
+			input := oc.convertToResponsesInput([]openai.ChatCompletionMessageParamUnion{latestMsg}, meta)
+			params.Input = responses.ResponseNewParamsInputUnion{
+				OfInputItemList: input,
+			}
+		}
+		log.Debug().Str("previous_response_id", meta.LastResponseID).Msg("Using previous_response_id for context")
+	} else {
+		// Build full message history
+		input := oc.convertToResponsesInput(messages, meta)
+		params.Input = responses.ResponseNewParamsInputUnion{
+			OfInputItemList: input,
+		}
+	}
+
+	// Add reasoning effort if configured
+	if meta.ReasoningEffort != "" {
+		params.Reasoning = shared.ReasoningParam{
+			Effort: shared.ReasoningEffort(meta.ReasoningEffort),
+		}
+	}
+
+	// Use extended timeout for reasoning models
+	timeout := oc.connector.Config.OpenAI.RequestTimeout
+	if isReasoningModel(oc.effectiveModel(meta)) {
+		timeout = reasoningModelRequestTimeout
+	}
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	resp, err := oc.api.Responses.New(timeoutCtx, params)
+	if err != nil {
+		log.Error().Err(err).Msg("Responses API non-streaming error")
+		cle := ParseContextLengthError(err)
+		if cle != nil {
+			return false, cle
+		}
+		oc.notifyMatrixSendFailure(ctx, portal, evt, err)
+		return false, nil
+	}
+
+	// Extract content from response
+	content := resp.OutputText()
+	if content == "" {
+		log.Warn().Msg("Empty response from Responses API")
+		return true, nil
+	}
+
+	// Extract reasoning if present
+	var reasoning string
+	for _, item := range resp.Output {
+		if item.Type == "reasoning" {
+			for _, summary := range item.Summary {
+				reasoning += summary.Text
+			}
+		}
+	}
+
+	// Store response ID for "responses" mode context chaining
+	if resp.ID != "" && meta.ConversationMode == "responses" {
+		meta.LastResponseID = resp.ID
+		if err := portal.Save(ctx); err != nil {
+			log.Warn().Err(err).Msg("Failed to save portal after storing response ID")
+		}
+	}
+
+	// Queue assistant message via remote event
+	oc.queueAssistantResponseMessage(portal, resp.ID, content, reasoning, meta)
+
+	log.Info().
+		Str("response_id", resp.ID).
+		Int("content_length", len(content)).
+		Int("reasoning_length", len(reasoning)).
+		Msg("Non-streaming response completed")
+
+	// Generate room title after first response
+	oc.maybeGenerateTitle(ctx, portal, content)
+
+	return true, nil
+}
+
+// nonStreamingResponseWithRetry handles Responses API non-streaming with automatic retry on context overflow
+func (oc *OpenAIClient) nonStreamingResponseWithRetry(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	prompt []openai.ChatCompletionMessageParamUnion,
+) {
+	currentPrompt := prompt
+
+	for attempt := range maxRetryAttempts {
+		success, cle := oc.nonStreamingResponse(ctx, evt, portal, meta, currentPrompt)
+		if success {
+			return
+		}
+
+		// If we got a context length error, try to truncate and retry
+		if cle != nil {
+			truncated := oc.truncatePrompt(currentPrompt)
+			if len(truncated) <= 2 {
+				// Can't truncate more
+				oc.notifyContextLengthExceeded(ctx, portal, cle, false)
+				return
+			}
+
+			// Notify user and retry
+			oc.notifyContextLengthExceeded(ctx, portal, cle, true)
+			currentPrompt = truncated
+
+			oc.log.Debug().
+				Int("attempt", attempt+1).
+				Int("new_prompt_len", len(currentPrompt)).
+				Msg("Retrying Responses API non-streaming with truncated context")
+			continue
+		}
+
+		// Non-context error, already handled in nonStreamingResponse
+		return
+	}
+
+	// Exhausted retries
+	oc.notifyMatrixSendFailure(ctx, portal, evt,
+		fmt.Errorf("exceeded retry attempts for context length"))
+}
+
+// queueAssistantResponseMessage queues an assistant message from a Responses API response
+func (oc *OpenAIClient) queueAssistantResponseMessage(portal *bridgev2.Portal, responseID string, content string, _ string, _ *PortalMetadata) {
+	msgMeta := &MessageMetadata{
+		Role:         "assistant",
+		Body:         content,
+		CompletionID: responseID,
+		FinishReason: "stop",
+	}
+
+	evt := &OpenAIRemoteMessage{
+		PortalKey: portal.PortalKey,
+		ID:        networkid.MessageID(fmt.Sprintf("openai:%s", uuid.NewString())),
+		Sender: bridgev2.EventSender{
+			Sender:      assistantUserID(oc.UserLogin.ID),
+			ForceDMUser: true,
+			SenderLogin: oc.UserLogin.ID,
+			IsFromMe:    false,
+		},
+		Content:   content,
+		Timestamp: time.Now(),
+		Metadata:  msgMeta,
+	}
+	oc.UserLogin.QueueRemoteEvent(evt)
+}
+
+// sendInitialStreamMessage sends the first message in a streaming session and returns its event ID
+func (oc *OpenAIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string) id.EventID {
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
+	if err != nil {
+		oc.log.Error().Err(err).Msg("Failed to get ghost for initial message")
+		return ""
+	}
+	intent := ghost.Intent
+	if intent == nil {
+		oc.log.Error().Msg("Ghost intent is nil")
+		return ""
+	}
+
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"msgtype": "m.text",
+			"body":    content,
+		},
+	}
+	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
+	if err != nil {
+		oc.log.Error().Err(err).Msg("Failed to send initial streaming message")
+		return ""
+	}
+	oc.log.Info().Str("event_id", resp.EventID.String()).Msg("Initial streaming message sent")
+	return resp.EventID
+}
+
+// sendFinalEditWithReasoning sends an edit event including reasoning/thinking content
+func (oc *OpenAIClient) sendFinalEditWithReasoning(ctx context.Context, portal *bridgev2.Portal, initialEventID id.EventID, content string, reasoning string, meta *PortalMetadata, finishReason string) {
+	if portal == nil || portal.MXID == "" {
+		return
+	}
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
+	if err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to get ghost for final edit")
+		return
+	}
+	intent := ghost.Intent
+	if intent == nil {
+		oc.log.Warn().Msg("Ghost intent is nil, cannot send final edit")
+		return
+	}
+
+	// Build AI metadata for rich UI rendering
+	aiMetadata := map[string]any{
+		"model":         oc.effectiveModel(meta),
+		"finish_reason": finishReason,
+	}
+
+	// Include reasoning/thinking if present
+	if reasoning != "" {
+		aiMetadata["thinking"] = reasoning
+	}
+
+	// Send edit event with m.replace relation and m.new_content
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"msgtype": "m.text",
+			"body":    "* " + content, // Fallback with edit marker
+			"m.new_content": map[string]any{
+				"msgtype": "m.text",
+				"body":    content,
+			},
+			"m.relates_to": map[string]any{
+				"rel_type": "m.replace",
+				"event_id": initialEventID.String(),
+			},
+			"com.beeper.ai": aiMetadata,
+		},
+	}
+
+	_, err = intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
+	if err != nil {
+		oc.log.Warn().Err(err).Str("initial_event_id", initialEventID.String()).Msg("Failed to send final edit")
+	} else {
+		oc.log.Debug().
+			Str("initial_event_id", initialEventID.String()).
+			Bool("has_reasoning", reasoning != "").
+			Msg("Sent final edit with metadata")
 	}
 }
 
@@ -1958,10 +2263,18 @@ func isChatModel(modelID string) bool {
 	return false
 }
 
-// isReasoningModel checks if the model is an O1/O3 reasoning model
-// These models don't support streaming and have longer response times
+// isReasoningModel checks if a model supports reasoning/thinking capabilities
+// These models can use reasoning_effort parameter and stream reasoning tokens via Responses API
 func isReasoningModel(modelID string) bool {
-	return strings.HasPrefix(modelID, "o1") || strings.HasPrefix(modelID, "o3")
+	// O-series reasoning models
+	if strings.HasPrefix(modelID, "o1") || strings.HasPrefix(modelID, "o3") || strings.HasPrefix(modelID, "o4") {
+		return true
+	}
+	// GPT-5.x models with reasoning support
+	if strings.HasPrefix(modelID, "gpt-5") {
+		return true
+	}
+	return false
 }
 
 // getModelCapabilities computes capabilities for a model
@@ -2255,7 +2568,9 @@ func (oc *OpenAIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2
 		Temperature:         meta.Temperature,
 		MaxContextMessages:  meta.MaxContextMessages,
 		MaxCompletionTokens: meta.MaxCompletionTokens,
+		ReasoningEffort:     meta.ReasoningEffort,
 		ToolsEnabled:        meta.ToolsEnabled,
+		ConversationMode:    meta.ConversationMode,
 	}
 
 	// Use bot intent to send state event
