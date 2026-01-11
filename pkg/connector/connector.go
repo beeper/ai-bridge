@@ -18,11 +18,11 @@ import (
 )
 
 const (
-	defaultModel              = "gpt-4o-mini"
-	defaultTemperature        = 0.4
-	defaultMaxContextMessages = 12
-	defaultMaxTokens          = 512
-	defaultRequestTimeout     = 45 * time.Second
+	defaultTemperature            = 0.4
+	defaultMaxContextMessages     = 12
+	defaultMaxTokens              = 512
+	defaultRequestTimeout         = 45 * time.Second
+	reasoningModelRequestTimeout  = 5 * time.Minute // Extended timeout for O1/O3 models
 )
 
 var (
@@ -170,6 +170,9 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 	}
 	if content.SystemPrompt != "" {
 		changes = append(changes, "system_prompt updated")
+	}
+	if content.ToolsEnabled {
+		changes = append(changes, "tools=on")
 	}
 
 	if len(changes) > 0 {
