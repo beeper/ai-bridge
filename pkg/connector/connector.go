@@ -147,7 +147,7 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 			log.Warn().Err(err).Str("model", content.Model).Msg("Failed to validate model")
 		} else if !valid {
 			log.Warn().Str("model", content.Model).Msg("Invalid model specified, ignoring")
-			client.sendConfigNotice(ctx, portal, fmt.Sprintf("Invalid model: %s. Configuration not applied.", content.Model))
+			client.sendSystemNotice(ctx, portal, fmt.Sprintf("Invalid model: %s. Configuration not applied.", content.Model))
 			return
 		}
 	}
@@ -189,7 +189,7 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 	}
 
 	if len(changes) > 0 {
-		client.sendConfigNotice(ctx, portal, fmt.Sprintf("Configuration updated: %s", strings.Join(changes, ", ")))
+		client.sendSystemNotice(ctx, portal, fmt.Sprintf("Configuration updated: %s", strings.Join(changes, ", ")))
 	}
 
 	log.Info().
