@@ -26,4 +26,36 @@ type RoomConfigEventContent struct {
 	ReasoningEffort     string  `json:"reasoning_effort,omitempty"`
 	ToolsEnabled        bool    `json:"tools_enabled,omitempty"`
 	ConversationMode    string  `json:"conversation_mode,omitempty"` // "messages" or "responses"
+
+	// Responses API built-in tools
+	WebSearchEnabled       bool `json:"web_search_enabled,omitempty"`
+	FileSearchEnabled      bool `json:"file_search_enabled,omitempty"`
+	CodeInterpreterEnabled bool `json:"code_interpreter_enabled,omitempty"`
+}
+
+// ModelCapabilitiesEventType is the Matrix state event type for broadcasting available models
+var ModelCapabilitiesEventType = event.Type{
+	Type:  "com.beeper.ai.model_capabilities",
+	Class: event.StateEventType,
+}
+
+// ModelCapabilitiesEventContent represents available models and their capabilities
+type ModelCapabilitiesEventContent struct {
+	AvailableModels []ModelInfo `json:"available_models"`
+}
+
+// ModelInfo describes a single AI model's capabilities
+type ModelInfo struct {
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	Provider            string `json:"provider"`
+	Description         string `json:"description"`
+	SupportsVision      bool   `json:"supports_vision"`
+	SupportsToolCalling bool   `json:"supports_tool_calling"`
+	SupportsPDF         bool   `json:"supports_pdf"`
+	IsReasoningModel    bool   `json:"is_reasoning_model"`
+	SupportsWebSearch   bool   `json:"supports_web_search"`
+	SupportsImageGen    bool   `json:"supports_image_gen"`
+	ContextWindow       int    `json:"context_window"`
+	MaxOutputTokens     int    `json:"max_output_tokens"`
 }

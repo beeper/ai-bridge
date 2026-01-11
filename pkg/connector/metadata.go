@@ -49,6 +49,11 @@ type PortalMetadata struct {
 	// Conversation context mode: "messages" (build full history) or "responses" (use previous_response_id)
 	ConversationMode string `json:"conversation_mode,omitempty"` // Default: "messages"
 	LastResponseID   string `json:"last_response_id,omitempty"`  // For "responses" mode - chain responses
+
+	// Responses API built-in tools
+	WebSearchEnabled       bool `json:"web_search_enabled,omitempty"`
+	FileSearchEnabled      bool `json:"file_search_enabled,omitempty"`
+	CodeInterpreterEnabled bool `json:"code_interpreter_enabled,omitempty"`
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild
