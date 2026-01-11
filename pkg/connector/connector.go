@@ -26,7 +26,8 @@ const (
 )
 
 var (
-	_ bridgev2.NetworkConnector = (*OpenAIConnector)(nil)
+	_ bridgev2.NetworkConnector                = (*OpenAIConnector)(nil)
+	_ bridgev2.PortalBridgeInfoFillingNetwork = (*OpenAIConnector)(nil)
 )
 
 // OpenAIConnector wires mautrix bridgev2 to the OpenAI chat APIs.
@@ -171,8 +172,20 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 	if content.SystemPrompt != "" {
 		changes = append(changes, "system_prompt updated")
 	}
+	if content.ReasoningEffort != "" {
+		changes = append(changes, fmt.Sprintf("reasoning_effort=%s", content.ReasoningEffort))
+	}
+	if content.ConversationMode != "" {
+		changes = append(changes, fmt.Sprintf("conversation_mode=%s", content.ConversationMode))
+	}
 	if content.ToolsEnabled {
 		changes = append(changes, "tools=on")
+	}
+	if content.WebSearchEnabled {
+		changes = append(changes, "web_search=on")
+	}
+	if content.CodeInterpreterEnabled {
+		changes = append(changes, "code_interpreter=on")
 	}
 
 	if len(changes) > 0 {
@@ -199,6 +212,11 @@ func (oc *OpenAIConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilitie
 
 func (oc *OpenAIConnector) GetBridgeInfoVersion() (info, capabilities int) {
 	return 1, 1
+}
+
+// FillPortalBridgeInfo sets custom room type for AI rooms
+func (oc *OpenAIConnector) FillPortalBridgeInfo(portal *bridgev2.Portal, content *event.BridgeEventContent) {
+	content.BeeperRoomTypeV2 = "ai"
 }
 
 func (oc *OpenAIConnector) GetName() bridgev2.BridgeName {

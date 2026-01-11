@@ -1133,11 +1133,16 @@ func (oc *OpenAIClient) handleSlashCommand(
 			"• /tokens [1-16384] - Get or set max completion tokens\n" +
 			"• /tools [on|off] - Enable/disable function calling tools\n" +
 			"• /mode [messages|responses] - Set conversation context mode\n" +
+			"• /fork [event_id] - Fork conversation to a new chat\n" +
 			"• /config - Show current configuration\n" +
 			"• /cost - Show conversation token usage and cost\n" +
 			"• /regenerate - Regenerate the last response\n" +
 			"• /help - Show this help message"
 		oc.sendSystemNotice(ctx, portal, help)
+		return true
+
+	case "/fork":
+		go oc.handleFork(ctx, evt, portal, meta, arg)
 		return true
 
 	case "/regenerate":
@@ -1146,6 +1151,231 @@ func (oc *OpenAIClient) handleSlashCommand(
 	}
 
 	return false
+}
+
+// handleFork creates a new chat and copies messages from the current conversation
+func (oc *OpenAIClient) handleFork(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	arg string,
+) {
+	runCtx := oc.backgroundContext(ctx)
+
+	// 1. Retrieve all messages from current chat
+	messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(runCtx, portal.PortalKey, 10000)
+	if err != nil {
+		oc.sendSystemNotice(runCtx, portal, "Failed to retrieve messages: "+err.Error())
+		return
+	}
+
+	if len(messages) == 0 {
+		oc.sendSystemNotice(runCtx, portal, "No messages to fork.")
+		return
+	}
+
+	// 2. If event ID specified, filter messages up to that point
+	var messagesToCopy []*database.Message
+	if arg != "" {
+		// Validate Matrix event ID format
+		if !strings.HasPrefix(arg, "$") {
+			oc.sendSystemNotice(runCtx, portal, "Invalid event ID. Must start with '$'.")
+			return
+		}
+
+		// Messages are newest-first, reverse iterate to find target
+		found := false
+		for i := len(messages) - 1; i >= 0; i-- {
+			msg := messages[i]
+			messagesToCopy = append(messagesToCopy, msg)
+
+			// Check MXID field (Matrix event ID)
+			if msg.MXID != "" && string(msg.MXID) == arg {
+				found = true
+				break
+			}
+			// Check message ID format "mx:$eventid"
+			if strings.HasSuffix(string(msg.ID), arg) {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Could not find event: %s", arg))
+			return
+		}
+	} else {
+		// Copy all messages (reverse to get chronological order)
+		for i := len(messages) - 1; i >= 0; i-- {
+			messagesToCopy = append(messagesToCopy, messages[i])
+		}
+	}
+
+	// 3. Create new chat with same configuration
+	newPortal, chatInfo, err := oc.createForkedChat(runCtx, portal, meta)
+	if err != nil {
+		oc.sendSystemNotice(runCtx, portal, "Failed to create forked chat: "+err.Error())
+		return
+	}
+
+	// 4. Create Matrix room
+	if err := newPortal.CreateMatrixRoom(runCtx, oc.UserLogin, chatInfo); err != nil {
+		oc.sendSystemNotice(runCtx, portal, "Failed to create room: "+err.Error())
+		return
+	}
+
+	// 5. Copy messages to new chat
+	copiedCount := oc.copyMessagesToChat(runCtx, newPortal, messagesToCopy)
+
+	// 6. Broadcast room state
+	go oc.BroadcastRoomState(runCtx, newPortal)
+
+	// 7. Send notice with link
+	roomLink := fmt.Sprintf("https://matrix.to/#/%s", newPortal.MXID)
+	oc.sendSystemNotice(runCtx, portal, fmt.Sprintf(
+		"Forked %d messages to new chat.\nOpen: %s",
+		copiedCount, roomLink,
+	))
+}
+
+// createForkedChat creates a new portal inheriting config from source
+func (oc *OpenAIClient) createForkedChat(
+	ctx context.Context,
+	sourcePortal *bridgev2.Portal,
+	sourceMeta *PortalMetadata,
+) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
+	// Allocate new chat index
+	chatIndex, err := oc.allocateNextChatIndex(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	slug := formatChatSlug(chatIndex)
+
+	// Generate title
+	sourceTitle := sourceMeta.Title
+	if sourceTitle == "" {
+		sourceTitle = sourcePortal.Name
+	}
+	title := fmt.Sprintf("%s (Fork)", sourceTitle)
+
+	// Create portal key
+	portalKey := portalKeyForChat(oc.UserLogin.ID, slug)
+
+	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Copy configuration from source
+	portal.Metadata = &PortalMetadata{
+		Model:               sourceMeta.Model,
+		Slug:                slug,
+		Title:               title,
+		SystemPrompt:        sourceMeta.SystemPrompt,
+		Temperature:         sourceMeta.Temperature,
+		MaxContextMessages:  sourceMeta.MaxContextMessages,
+		MaxCompletionTokens: sourceMeta.MaxCompletionTokens,
+		ReasoningEffort:     sourceMeta.ReasoningEffort,
+		Capabilities:        sourceMeta.Capabilities,
+		ToolsEnabled:        sourceMeta.ToolsEnabled,
+	}
+
+	portal.RoomType = database.RoomTypeDM
+	portal.OtherUserID = modelUserID(sourceMeta.Model)
+	portal.Name = title
+	portal.NameSet = true
+	portal.Topic = sourceMeta.SystemPrompt
+	portal.TopicSet = sourceMeta.SystemPrompt != ""
+
+	if err := portal.Save(ctx); err != nil {
+		return nil, nil, err
+	}
+
+	// Create chat info
+	chatInfo := &bridgev2.ChatInfo{
+		Name:  ptr.Ptr(title),
+		Topic: ptr.Ptr(sourceMeta.SystemPrompt),
+		Type:  ptr.Ptr(database.RoomTypeDM),
+		Members: &bridgev2.ChatMemberList{
+			MemberMap: map[networkid.UserID]bridgev2.ChatMember{
+				humanUserID(oc.UserLogin.ID): {
+					EventSender: bridgev2.EventSender{
+						IsFromMe:    true,
+						SenderLogin: oc.UserLogin.ID,
+					},
+					Membership: event.MembershipJoin,
+				},
+				modelUserID(sourceMeta.Model): {
+					EventSender: bridgev2.EventSender{
+						Sender:      modelUserID(sourceMeta.Model),
+						SenderLogin: oc.UserLogin.ID,
+					},
+					Membership: event.MembershipJoin,
+					UserInfo: &bridgev2.UserInfo{
+						Name:  ptr.Ptr(formatModelName(sourceMeta.Model)),
+						IsBot: ptr.Ptr(true),
+					},
+				},
+			},
+			IsFull:           true,
+			TotalMemberCount: 2,
+		},
+	}
+
+	return portal, chatInfo, nil
+}
+
+// copyMessagesToChat queues messages to be bridged to the new chat
+func (oc *OpenAIClient) copyMessagesToChat(
+	ctx context.Context,
+	destPortal *bridgev2.Portal,
+	messages []*database.Message,
+) int {
+	copiedCount := 0
+
+	for _, srcMsg := range messages {
+		srcMeta := messageMeta(srcMsg)
+		if srcMeta == nil || srcMeta.Body == "" {
+			continue
+		}
+
+		// Determine sender
+		var sender bridgev2.EventSender
+		if srcMeta.Role == "user" {
+			sender = bridgev2.EventSender{
+				Sender:      humanUserID(oc.UserLogin.ID),
+				SenderLogin: oc.UserLogin.ID,
+				IsFromMe:    true,
+			}
+		} else {
+			sender = bridgev2.EventSender{
+				Sender:      srcMsg.SenderID,
+				SenderLogin: oc.UserLogin.ID,
+				IsFromMe:    false,
+			}
+		}
+
+		// Create remote message for bridging
+		remoteMsg := &OpenAIRemoteMessage{
+			PortalKey: destPortal.PortalKey,
+			ID:        networkid.MessageID(fmt.Sprintf("fork:%s", uuid.NewString())),
+			Sender:    sender,
+			Content:   srcMeta.Body,
+			Timestamp: srcMsg.Timestamp,
+			Metadata: &MessageMetadata{
+				Role: srcMeta.Role,
+				Body: srcMeta.Body,
+			},
+		}
+
+		oc.UserLogin.QueueRemoteEvent(remoteMsg)
+		copiedCount++
+	}
+
+	return copiedCount
 }
 
 // handleRegenerate regenerates the last AI response
@@ -1512,6 +1742,17 @@ func (oc *OpenAIClient) streamingResponse(
 		}
 	}
 
+	// Add built-in tools if enabled
+	if meta.WebSearchEnabled {
+		params.Tools = append(params.Tools, responses.ToolParamOfWebSearchPreview(responses.WebSearchPreviewToolTypeWebSearchPreview))
+		log.Debug().Msg("Web search tool enabled")
+	}
+	if meta.CodeInterpreterEnabled {
+		params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
+		log.Debug().Msg("Code interpreter tool enabled")
+	}
+	// Note: FileSearch requires a vector store ID - not implemented yet
+
 	timeoutCtx, cancel := context.WithTimeout(ctx, oc.connector.Config.OpenAI.RequestTimeout)
 	defer cancel()
 
@@ -1722,6 +1963,17 @@ func (oc *OpenAIClient) nonStreamingResponse(
 			Effort: shared.ReasoningEffort(meta.ReasoningEffort),
 		}
 	}
+
+	// Add built-in tools if enabled
+	if meta.WebSearchEnabled {
+		params.Tools = append(params.Tools, responses.ToolParamOfWebSearchPreview(responses.WebSearchPreviewToolTypeWebSearchPreview))
+		log.Debug().Msg("Web search tool enabled")
+	}
+	if meta.CodeInterpreterEnabled {
+		params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
+		log.Debug().Msg("Code interpreter tool enabled")
+	}
+	// Note: FileSearch requires a vector store ID - not implemented yet
 
 	// Use extended timeout for reasoning models
 	timeout := oc.connector.Config.OpenAI.RequestTimeout
@@ -2077,8 +2329,17 @@ func (oc *OpenAIClient) updatePortalConfig(ctx context.Context, portal *bridgev2
 	if config.MaxCompletionTokens > 0 {
 		meta.MaxCompletionTokens = config.MaxCompletionTokens
 	}
-	// ToolsEnabled is a boolean - always apply it
+	if config.ReasoningEffort != "" {
+		meta.ReasoningEffort = config.ReasoningEffort
+	}
+	if config.ConversationMode != "" {
+		meta.ConversationMode = config.ConversationMode
+	}
+	// Boolean fields - always apply
 	meta.ToolsEnabled = config.ToolsEnabled
+	meta.WebSearchEnabled = config.WebSearchEnabled
+	meta.FileSearchEnabled = config.FileSearchEnabled
+	meta.CodeInterpreterEnabled = config.CodeInterpreterEnabled
 
 	meta.LastRoomStateSync = time.Now().Unix()
 
