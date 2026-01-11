@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -11,6 +12,8 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/bridgev2/matrix"
+	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
 
@@ -71,15 +74,112 @@ func (oc *OpenAIConnector) Start(ctx context.Context) error {
 		go oc.ensureSharedKeyLogins(sharedAPIKey)
 	}
 
-	// Database upgrade handling
-	// Note: OpenAI bridge doesn't have custom tables yet, but this is the pattern
-	// If you add custom tables in the future, upgrade them here
-	// Example:
-	// if err := oc.customDB.Upgrade(ctx); err != nil {
-	//     return fmt.Errorf("%w: %w", bridgev2.DBUpgradeError, err)
-	// }
+	// Register custom Matrix event handlers
+	oc.registerCustomEventHandlers()
 
 	return nil
+}
+
+// registerCustomEventHandlers registers handlers for custom Matrix state events
+func (oc *OpenAIConnector) registerCustomEventHandlers() {
+	// Type assert the Matrix connector to get the concrete type with EventProcessor
+	matrixConnector, ok := oc.br.Matrix.(*matrix.Connector)
+	if !ok {
+		oc.br.Log.Warn().Msg("Cannot register custom event handlers: Matrix connector type assertion failed")
+		return
+	}
+
+	// Register handler for our custom room config event
+	matrixConnector.EventProcessor.On(RoomConfigEventType, oc.handleRoomConfigEvent)
+	oc.br.Log.Info().Msg("Registered custom room config event handler")
+}
+
+// handleRoomConfigEvent processes Matrix room config state events
+func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event.Event) {
+	log := oc.br.Log.With().
+		Str("component", "room_config_handler").
+		Str("room_id", evt.RoomID.String()).
+		Str("sender", evt.Sender.String()).
+		Logger()
+
+	// Look up portal by Matrix room ID
+	portal, err := oc.br.GetPortalByMXID(ctx, evt.RoomID)
+	if err != nil {
+		log.Err(err).Msg("Failed to get portal for room config event")
+		return
+	}
+	if portal == nil {
+		log.Debug().Msg("No portal found for room, ignoring config event")
+		return
+	}
+
+	// Parse event content
+	var content RoomConfigEventContent
+	if err := json.Unmarshal(evt.Content.VeryRaw, &content); err != nil {
+		log.Warn().Err(err).Msg("Failed to parse room config event content")
+		return
+	}
+
+	// Get the user who sent the event and their login
+	user, err := oc.br.GetUserByMXID(ctx, evt.Sender)
+	if err != nil || user == nil {
+		log.Warn().Err(err).Msg("Failed to get user for room config event")
+		return
+	}
+
+	login := user.GetDefaultLogin()
+	if login == nil {
+		log.Warn().Msg("User has no active login, cannot process config")
+		return
+	}
+
+	client, ok := login.Client.(*OpenAIClient)
+	if !ok || client == nil {
+		log.Warn().Msg("Invalid client type for user login")
+		return
+	}
+
+	// Validate model if specified
+	if content.Model != "" {
+		valid, err := client.validateModel(ctx, content.Model)
+		if err != nil {
+			log.Warn().Err(err).Str("model", content.Model).Msg("Failed to validate model")
+		} else if !valid {
+			log.Warn().Str("model", content.Model).Msg("Invalid model specified, ignoring")
+			client.sendConfigNotice(ctx, portal, fmt.Sprintf("Invalid model: %s. Configuration not applied.", content.Model))
+			return
+		}
+	}
+
+	// Update portal metadata
+	client.updatePortalConfig(ctx, portal, &content)
+
+	// Send confirmation notice
+	var changes []string
+	if content.Model != "" {
+		changes = append(changes, fmt.Sprintf("model=%s", content.Model))
+	}
+	if content.Temperature > 0 {
+		changes = append(changes, fmt.Sprintf("temperature=%.2f", content.Temperature))
+	}
+	if content.MaxContextMessages > 0 {
+		changes = append(changes, fmt.Sprintf("context=%d messages", content.MaxContextMessages))
+	}
+	if content.MaxCompletionTokens > 0 {
+		changes = append(changes, fmt.Sprintf("max_tokens=%d", content.MaxCompletionTokens))
+	}
+	if content.SystemPrompt != "" {
+		changes = append(changes, "system_prompt updated")
+	}
+
+	if len(changes) > 0 {
+		client.sendConfigNotice(ctx, portal, fmt.Sprintf("Configuration updated: %s", strings.Join(changes, ", ")))
+	}
+
+	log.Info().
+		Str("model", content.Model).
+		Float64("temperature", content.Temperature).
+		Msg("Updated room configuration from state event")
 }
 
 func (oc *OpenAIConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
