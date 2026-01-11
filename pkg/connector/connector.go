@@ -233,7 +233,7 @@ func (oc *OpenAIConnector) ensureSharedKeyLogins(apiKey string) {
 			Connector: oc,
 		}
 		// For shared-key login, use the key without optional per-user settings
-		step, err := loginProc.finishLogin(ctx, key, "", "", "")
+		step, err := loginProc.finishLogin(ctx, key, "")
 		if step != nil && step.CompleteParams != nil && step.CompleteParams.UserLogin != nil {
 			login := step.CompleteParams.UserLogin
 			if client := login.Client; client != nil {
