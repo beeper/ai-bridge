@@ -17,13 +17,6 @@ func makeUserLoginID(mxid id.UserID) networkid.UserLoginID {
 	return networkid.UserLoginID(fmt.Sprintf("openai:%s", escaped))
 }
 
-func portalKeyForLogin(loginID networkid.UserLoginID) networkid.PortalKey {
-	return networkid.PortalKey{
-		ID:       networkid.PortalID(fmt.Sprintf("openai:%s", loginID)),
-		Receiver: loginID,
-	}
-}
-
 func portalKeyForChat(loginID networkid.UserLoginID, slug string) networkid.PortalKey {
 	return networkid.PortalKey{
 		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:%s", loginID, slug)),

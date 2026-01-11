@@ -16,8 +16,8 @@ type ModelCache struct {
 // ModelCapabilities stores computed capabilities for a model
 // This is NOT sent to the API, just used for local caching
 type ModelCapabilities struct {
-	SupportsVision bool `json:"supports_vision"`
-	// Future: add more capability flags as OpenAI adds features
+	SupportsVision   bool `json:"supports_vision"`
+	IsReasoningModel bool `json:"is_reasoning_model"` // O1/O3 models - no streaming, longer timeouts
 }
 
 // UserLoginMetadata is stored on each login row to keep per-user settings.
@@ -39,9 +39,11 @@ type PortalMetadata struct {
 	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"` // Set from room state
 	Slug              string            `json:"slug,omitempty"`
 	Title             string            `json:"title,omitempty"`
+	TitleGenerated    bool              `json:"title_generated,omitempty"`  // True if title was auto-generated
 	WelcomeSent       bool              `json:"welcome_sent,omitempty"`
 	Capabilities      ModelCapabilities `json:"capabilities,omitempty"`
 	LastRoomStateSync int64             `json:"last_room_state_sync,omitempty"` // Track when we've synced room state
+	ToolsEnabled      bool              `json:"tools_enabled,omitempty"`       // Enable function calling tools
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild
