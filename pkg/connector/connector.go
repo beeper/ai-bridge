@@ -68,7 +68,7 @@ func (oc *OpenAIConnector) Start(ctx context.Context) error {
 		oc.Config.Bridge.CommandPrefix = "!gpt"
 	}
 	// Check for default OpenAI API key from environment variable
-	sharedAPIKey := strings.TrimSpace(getEnvOrEmpty("OPENAI_API_KEY"))
+	sharedAPIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if sharedAPIKey == "" {
 		oc.br.Log.Warn().Msg("No default OpenAI API key configured; users must supply their own during login")
 	} else {
@@ -307,13 +307,6 @@ func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User,
 	default:
 		return nil, fmt.Errorf("unknown login flow: %s", flowID)
 	}
-}
-
-func getEnvOrEmpty(key string) string {
-	if val, ok := os.LookupEnv(key); ok {
-		return val
-	}
-	return ""
 }
 
 func (oc *OpenAIConnector) ensureSharedKeyLogins(apiKey string) {
