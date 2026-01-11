@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -1634,14 +1633,8 @@ func (oc *OpenAIClient) setAssistantTyping(ctx context.Context, portal *bridgev2
 	if portal == nil || portal.MXID == "" {
 		return
 	}
-	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
-	if err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to get ghost for typing indicator")
-		return
-	}
-	intent := ghost.Intent
+	intent := oc.getAssistantIntent(ctx)
 	if intent == nil {
-		oc.log.Warn().Msg("Ghost intent is nil, cannot set typing")
 		return
 	}
 	var timeout time.Duration
@@ -1661,14 +1654,8 @@ func (oc *OpenAIClient) emitTransientToken(ctx context.Context, portal *bridgev2
 	if portal == nil || portal.MXID == "" {
 		return
 	}
-	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
-	if err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to get ghost for transient token")
-		return
-	}
-	intent := ghost.Intent
+	intent := oc.getAssistantIntent(ctx)
 	if intent == nil {
-		oc.log.Warn().Msg("Ghost intent is nil, cannot emit transient token")
 		return
 	}
 	eventContent := &event.Content{
@@ -1680,34 +1667,18 @@ func (oc *OpenAIClient) emitTransientToken(ctx context.Context, portal *bridgev2
 			},
 		},
 	}
-	_, err = intent.SendMessage(ctx, portal.MXID, event.Type{
+	if _, err := intent.SendMessage(ctx, portal.MXID, event.Type{
 		Type:  "com.beeper.ai.stream_token",
 		Class: event.MessageEventType,
-	}, eventContent, nil)
-	if err != nil {
+	}, eventContent, nil); err != nil {
 		oc.log.Warn().Err(err).Str("related_event_id", relatedEventID.String()).Msg("Failed to emit transient token")
 	}
 }
 
-// streamingResponse handles streaming using the Responses API
-// This is the preferred streaming method as it supports reasoning tokens
-// Returns (success, contextLengthError)
-func (oc *OpenAIClient) streamingResponse(
-	ctx context.Context,
-	evt *event.Event,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-	messages []openai.ChatCompletionMessageParamUnion,
-) (bool, *ContextLengthError) {
-	log := zerolog.Ctx(ctx).With().
-		Str("portal_id", string(portal.ID)).
-		Logger()
+// buildResponsesAPIParams creates common Responses API parameters for both streaming and non-streaming paths
+func (oc *OpenAIClient) buildResponsesAPIParams(ctx context.Context, meta *PortalMetadata, messages []openai.ChatCompletionMessageParamUnion) responses.ResponseNewParams {
+	log := zerolog.Ctx(ctx)
 
-	// Set typing indicator when streaming starts
-	oc.setAssistantTyping(ctx, portal, true)
-	defer oc.setAssistantTyping(ctx, portal, false)
-
-	// Build Responses API params
 	params := responses.ResponseNewParams{
 		Model:           shared.ResponsesModel(oc.effectiveModel(meta)),
 		Temperature:     openai.Float(oc.effectiveTemperature(meta)),
@@ -1718,7 +1689,6 @@ func (oc *OpenAIClient) streamingResponse(
 	if meta.ConversationMode == "responses" && meta.LastResponseID != "" {
 		params.PreviousResponseID = openai.String(meta.LastResponseID)
 		// Still need to pass the latest user message as input
-		// Extract just the last user message from messages
 		if len(messages) > 0 {
 			latestMsg := messages[len(messages)-1]
 			input := oc.convertToResponsesInput([]openai.ChatCompletionMessageParamUnion{latestMsg}, meta)
@@ -1751,7 +1721,30 @@ func (oc *OpenAIClient) streamingResponse(
 		params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
 		log.Debug().Msg("Code interpreter tool enabled")
 	}
-	// Note: FileSearch requires a vector store ID - not implemented yet
+
+	return params
+}
+
+// streamingResponse handles streaming using the Responses API
+// This is the preferred streaming method as it supports reasoning tokens
+// Returns (success, contextLengthError)
+func (oc *OpenAIClient) streamingResponse(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	messages []openai.ChatCompletionMessageParamUnion,
+) (bool, *ContextLengthError) {
+	log := zerolog.Ctx(ctx).With().
+		Str("portal_id", string(portal.ID)).
+		Logger()
+
+	// Set typing indicator when streaming starts
+	oc.setAssistantTyping(ctx, portal, true)
+	defer oc.setAssistantTyping(ctx, portal, false)
+
+	// Build Responses API params using shared helper
+	params := oc.buildResponsesAPIParams(ctx, meta, messages)
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, oc.connector.Config.OpenAI.RequestTimeout)
 	defer cancel()
@@ -1874,15 +1867,8 @@ func (oc *OpenAIClient) convertToResponsesInput(messages []openai.ChatCompletion
 	var input responses.ResponseInputParam
 
 	for _, msg := range messages {
-		// Extract role and content from the message
-		// The SDK uses union types, so we need to check which variant is set
-		msgJSON, _ := json.Marshal(msg)
-		var msgMap map[string]any
-		json.Unmarshal(msgJSON, &msgMap)
-
-		role, _ := msgMap["role"].(string)
-		content, _ := msgMap["content"].(string)
-
+		// Use shared helper to extract content and role (avoids JSON roundtrip)
+		content, role := extractMessageContent(msg)
 		if role == "" || content == "" {
 			continue
 		}
@@ -1930,50 +1916,8 @@ func (oc *OpenAIClient) nonStreamingResponse(
 	oc.setAssistantTyping(ctx, portal, true)
 	defer oc.setAssistantTyping(ctx, portal, false)
 
-	// Build Responses API params
-	params := responses.ResponseNewParams{
-		Model:           shared.ResponsesModel(oc.effectiveModel(meta)),
-		Temperature:     openai.Float(oc.effectiveTemperature(meta)),
-		MaxOutputTokens: openai.Int(int64(oc.effectiveMaxTokens(meta))),
-	}
-
-	// Use previous_response_id if in "responses" mode and ID exists
-	if meta.ConversationMode == "responses" && meta.LastResponseID != "" {
-		params.PreviousResponseID = openai.String(meta.LastResponseID)
-		// Still need to pass the latest user message as input
-		if len(messages) > 0 {
-			latestMsg := messages[len(messages)-1]
-			input := oc.convertToResponsesInput([]openai.ChatCompletionMessageParamUnion{latestMsg}, meta)
-			params.Input = responses.ResponseNewParamsInputUnion{
-				OfInputItemList: input,
-			}
-		}
-		log.Debug().Str("previous_response_id", meta.LastResponseID).Msg("Using previous_response_id for context")
-	} else {
-		// Build full message history
-		input := oc.convertToResponsesInput(messages, meta)
-		params.Input = responses.ResponseNewParamsInputUnion{
-			OfInputItemList: input,
-		}
-	}
-
-	// Add reasoning effort if configured
-	if meta.ReasoningEffort != "" {
-		params.Reasoning = shared.ReasoningParam{
-			Effort: shared.ReasoningEffort(meta.ReasoningEffort),
-		}
-	}
-
-	// Add built-in tools if enabled
-	if meta.WebSearchEnabled {
-		params.Tools = append(params.Tools, responses.ToolParamOfWebSearchPreview(responses.WebSearchPreviewToolTypeWebSearchPreview))
-		log.Debug().Msg("Web search tool enabled")
-	}
-	if meta.CodeInterpreterEnabled {
-		params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
-		log.Debug().Msg("Code interpreter tool enabled")
-	}
-	// Note: FileSearch requires a vector store ID - not implemented yet
+	// Build Responses API params using shared helper
+	params := oc.buildResponsesAPIParams(ctx, meta, messages)
 
 	// Use extended timeout for reasoning models
 	timeout := oc.connector.Config.OpenAI.RequestTimeout
@@ -2106,14 +2050,8 @@ func (oc *OpenAIClient) queueAssistantResponseMessage(portal *bridgev2.Portal, r
 
 // sendInitialStreamMessage sends the first message in a streaming session and returns its event ID
 func (oc *OpenAIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string) id.EventID {
-	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
-	if err != nil {
-		oc.log.Error().Err(err).Msg("Failed to get ghost for initial message")
-		return ""
-	}
-	intent := ghost.Intent
+	intent := oc.getAssistantIntent(ctx)
 	if intent == nil {
-		oc.log.Error().Msg("Ghost intent is nil")
 		return ""
 	}
 
@@ -2137,14 +2075,8 @@ func (oc *OpenAIClient) sendFinalEditWithReasoning(ctx context.Context, portal *
 	if portal == nil || portal.MXID == "" {
 		return
 	}
-	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
-	if err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to get ghost for final edit")
-		return
-	}
-	intent := ghost.Intent
+	intent := oc.getAssistantIntent(ctx)
 	if intent == nil {
-		oc.log.Warn().Msg("Ghost intent is nil, cannot send final edit")
 		return
 	}
 
@@ -2176,8 +2108,7 @@ func (oc *OpenAIClient) sendFinalEditWithReasoning(ctx context.Context, portal *
 		},
 	}
 
-	_, err = intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
-	if err != nil {
+	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {
 		oc.log.Warn().Err(err).Str("initial_event_id", initialEventID.String()).Msg("Failed to send final edit")
 	} else {
 		oc.log.Debug().
@@ -2349,24 +2280,12 @@ func (oc *OpenAIClient) updatePortalConfig(ctx context.Context, portal *bridgev2
 	}
 }
 
-// sendConfigNotice sends a notice to the room about configuration changes
-func (oc *OpenAIClient) sendConfigNotice(ctx context.Context, portal *bridgev2.Portal, message string) {
-	oc.sendSystemNotice(ctx, portal, message)
-}
-
 // sendSystemNotice sends an informational notice to the room as the assistant
 func (oc *OpenAIClient) sendSystemNotice(ctx context.Context, portal *bridgev2.Portal, message string) {
 	if portal == nil || portal.MXID == "" {
 		return
 	}
-
-	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
-	if err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to get ghost for system notice")
-		return
-	}
-
-	intent := ghost.Intent
+	intent := oc.getAssistantIntent(ctx)
 	if intent == nil {
 		return
 	}
@@ -2376,12 +2295,22 @@ func (oc *OpenAIClient) sendSystemNotice(ctx context.Context, portal *bridgev2.P
 		Body:    message,
 	}
 
-	_, err = intent.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{
+	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{
 		Parsed: content,
-	}, nil)
-	if err != nil {
+	}, nil); err != nil {
 		oc.log.Warn().Err(err).Msg("Failed to send system notice")
 	}
+}
+
+// getAssistantIntent returns the Matrix intent for the assistant ghost, or nil if unavailable.
+// Centralizes the repeated ghost lookup and nil-checking pattern.
+func (oc *OpenAIClient) getAssistantIntent(ctx context.Context) bridgev2.MatrixAPI {
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
+	if err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to get assistant ghost")
+		return nil
+	}
+	return ghost.Intent
 }
 
 const (

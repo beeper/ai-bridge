@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/openai/openai-go/v3"
 )
 
 // ToolDefinition defines a tool that can be used by the AI
@@ -55,29 +53,6 @@ func BuiltinTools() []ToolDefinition {
 			Execute: executeWebSearch,
 		},
 	}
-}
-
-// ToOpenAITools converts our tool definitions to OpenAI tool parameters
-func ToOpenAITools(tools []ToolDefinition) []openai.ChatCompletionToolUnionParam {
-	result := make([]openai.ChatCompletionToolUnionParam, len(tools))
-	for i, tool := range tools {
-		result[i] = openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
-			Name:        tool.Name,
-			Description: openai.String(tool.Description),
-			Parameters:  openai.FunctionParameters(tool.Parameters),
-		})
-	}
-	return result
-}
-
-// GetToolByName finds a tool by name
-func GetToolByName(name string) *ToolDefinition {
-	for _, tool := range BuiltinTools() {
-		if tool.Name == name {
-			return &tool
-		}
-	}
-	return nil
 }
 
 // executeCalculator evaluates a simple arithmetic expression
