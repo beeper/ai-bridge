@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -28,6 +27,7 @@ var (
 	_ bridgev2.NetworkAPI                    = (*OpenAIClient)(nil)
 	_ bridgev2.IdentifierResolvingNetworkAPI = (*OpenAIClient)(nil)
 	_ bridgev2.ContactListingNetworkAPI      = (*OpenAIClient)(nil)
+	_ bridgev2.EditHandlingNetworkAPI        = (*OpenAIClient)(nil)
 )
 
 var rejectAllMediaFileFeatures = &event.FileFeatures{
@@ -399,6 +399,15 @@ func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 	if msg.Content == nil {
 		return nil, fmt.Errorf("missing message content")
 	}
+
+	portal := msg.Portal
+	meta := portalMeta(portal)
+
+	// Handle image messages for vision-capable models
+	if msg.Content.MsgType == event.MsgImage {
+		return oc.handleImageMessage(ctx, msg, portal, meta)
+	}
+
 	switch msg.Content.MsgType {
 	case event.MsgText, event.MsgNotice, event.MsgEmote:
 	default:
@@ -408,8 +417,12 @@ func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 	if body == "" {
 		return nil, fmt.Errorf("empty messages are not supported")
 	}
-	portal := msg.Portal
-	meta := portalMeta(portal)
+
+	// Check for commands
+	if handled := oc.handleCommand(ctx, msg.Event, portal, meta, body); handled {
+		return nil, nil // Command was handled, no message to save
+	}
+
 	promptMessages, err := oc.buildPrompt(ctx, portal, meta, body)
 	if err != nil {
 		return nil, err
@@ -429,6 +442,589 @@ func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 	return &bridgev2.MatrixMessageResponse{
 		DB: userMessage,
 	}, nil
+}
+
+// HandleMatrixEdit handles edits to previously sent messages
+func (oc *OpenAIClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixEdit) error {
+	if edit.Content == nil || edit.EditTarget == nil {
+		return fmt.Errorf("invalid edit: missing content or target")
+	}
+
+	portal := edit.Portal
+	meta := portalMeta(portal)
+
+	// Get the new message body
+	newBody := strings.TrimSpace(edit.Content.Body)
+	if newBody == "" {
+		return fmt.Errorf("empty edit body")
+	}
+
+	// Update the message metadata with the new content
+	msgMeta := messageMeta(edit.EditTarget)
+	if msgMeta == nil {
+		msgMeta = &MessageMetadata{}
+		edit.EditTarget.Metadata = msgMeta
+	}
+	msgMeta.Body = newBody
+
+	// Only regenerate if this was a user message
+	if msgMeta.Role != "user" {
+		// Just update the content, don't regenerate
+		return nil
+	}
+
+	oc.log.Info().
+		Str("message_id", string(edit.EditTarget.ID)).
+		Str("new_body", newBody).
+		Msg("User edited message, regenerating response")
+
+	// Find the assistant response that came after this message
+	// We'll delete it and regenerate
+	err := oc.regenerateFromEdit(ctx, edit.Event, portal, meta, edit.EditTarget, newBody)
+	if err != nil {
+		oc.log.Err(err).Msg("Failed to regenerate response after edit")
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Failed to regenerate response: %v", err))
+	}
+
+	return nil
+}
+
+// regenerateFromEdit regenerates the AI response based on an edited user message
+func (oc *OpenAIClient) regenerateFromEdit(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	editedMessage *database.Message,
+	newBody string,
+) error {
+	// Get messages in the portal to find the assistant response after the edited message
+	messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, 50)
+	if err != nil {
+		return fmt.Errorf("failed to get messages: %w", err)
+	}
+
+	// Find the assistant response that came after the edited message
+	var assistantResponse *database.Message
+	foundEditedMessage := false
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.ID == editedMessage.ID {
+			foundEditedMessage = true
+			continue
+		}
+		if foundEditedMessage {
+			msgMeta := messageMeta(msg)
+			if msgMeta != nil && msgMeta.Role == "assistant" {
+				assistantResponse = msg
+				break
+			}
+		}
+	}
+
+	// Build the prompt with the edited message included
+	// We need to rebuild from scratch up to the edited message
+	promptMessages, err := oc.buildPromptUpToMessage(ctx, portal, meta, editedMessage.ID, newBody)
+	if err != nil {
+		return fmt.Errorf("failed to build prompt: %w", err)
+	}
+
+	// If we found an assistant response, we'll redact/edit it
+	if assistantResponse != nil {
+		// Try to redact the old response
+		if assistantResponse.MXID != "" {
+			intent := portal.GetIntentFor(ctx, oc.UserLogin, id.UserID(""), false)
+			if intent != nil {
+				_, _ = intent.RedactEvent(ctx, portal.MXID, assistantResponse.MXID, &event.Event{})
+			}
+		}
+	}
+
+	// Dispatch a new completion
+	go oc.dispatchCompletion(ctx, evt, portal, meta, promptMessages)
+
+	return nil
+}
+
+// buildPromptUpToMessage builds a prompt including messages up to and including the specified message
+func (oc *OpenAIClient) buildPromptUpToMessage(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	targetMessageID networkid.MessageID,
+	newBody string,
+) ([]openai.ChatCompletionMessageParamUnion, error) {
+	var prompt []openai.ChatCompletionMessageParamUnion
+
+	// Add system prompt
+	systemPrompt := oc.effectivePrompt(meta)
+	if systemPrompt != "" {
+		prompt = append(prompt, openai.SystemMessage(systemPrompt))
+	}
+
+	// Get history
+	historyLimit := oc.historyLimit(meta)
+	if historyLimit > 0 {
+		history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, historyLimit)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load prompt history: %w", err)
+		}
+
+		// Add messages up to the target message, replacing the target with newBody
+		for i := len(history) - 1; i >= 0; i-- {
+			msg := history[i]
+			msgMeta := messageMeta(msg)
+			if msgMeta == nil || msgMeta.Body == "" {
+				continue
+			}
+
+			// Stop after adding the target message
+			if msg.ID == targetMessageID {
+				// Use the new body for the edited message
+				prompt = append(prompt, openai.UserMessage(newBody))
+				break
+			}
+
+			// Skip assistant messages that came after the target (we're going backwards)
+			switch msgMeta.Role {
+			case "assistant":
+				prompt = append(prompt, openai.AssistantMessage(msgMeta.Body))
+			default:
+				prompt = append(prompt, openai.UserMessage(msgMeta.Body))
+			}
+		}
+	} else {
+		// No history, just add the new message
+		prompt = append(prompt, openai.UserMessage(newBody))
+	}
+
+	return prompt, nil
+}
+
+// handleImageMessage processes an image message for vision-capable models
+func (oc *OpenAIClient) handleImageMessage(
+	ctx context.Context,
+	msg *bridgev2.MatrixMessage,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+) (*bridgev2.MatrixMessageResponse, error) {
+	// Check if model supports vision
+	if !meta.Capabilities.SupportsVision {
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
+			"The current model (%s) does not support image analysis. "+
+				"Please switch to a vision-capable model like gpt-4o or gpt-4-turbo using /model.",
+			oc.effectiveModel(meta),
+		))
+		return nil, nil
+	}
+
+	// Get the image URL from the message
+	imageURL := msg.Content.URL
+	if imageURL == "" && msg.Content.File != nil {
+		imageURL = msg.Content.File.URL
+	}
+	if imageURL == "" {
+		return nil, fmt.Errorf("image message has no URL")
+	}
+
+	// Get caption (body is usually the filename or caption)
+	caption := strings.TrimSpace(msg.Content.Body)
+	if caption == "" || (msg.Content.Info != nil && caption == msg.Content.Info.MimeType) {
+		caption = "What's in this image?"
+	}
+
+	// Build prompt with image
+	promptMessages, err := oc.buildPromptWithImage(ctx, portal, meta, caption, string(imageURL))
+	if err != nil {
+		return nil, err
+	}
+
+	userMessage := &database.Message{
+		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+		Room:     portal.PortalKey,
+		SenderID: humanUserID(oc.UserLogin.ID),
+		Metadata: &MessageMetadata{
+			Role: "user",
+			Body: caption + " [image]",
+		},
+		Timestamp: time.Now(),
+	}
+
+	// Dispatch completion handling in the background
+	go oc.dispatchCompletion(ctx, msg.Event, portal, meta, promptMessages)
+	return &bridgev2.MatrixMessageResponse{
+		DB: userMessage,
+	}, nil
+}
+
+// buildPromptWithImage builds a prompt that includes an image URL
+func (oc *OpenAIClient) buildPromptWithImage(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	caption string,
+	imageURL string,
+) ([]openai.ChatCompletionMessageParamUnion, error) {
+	var prompt []openai.ChatCompletionMessageParamUnion
+
+	// Add system prompt
+	systemPrompt := oc.effectivePrompt(meta)
+	if systemPrompt != "" {
+		prompt = append(prompt, openai.SystemMessage(systemPrompt))
+	}
+
+	// Add history (text-only for now)
+	historyLimit := oc.historyLimit(meta)
+	if historyLimit > 0 {
+		history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, historyLimit)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load prompt history: %w", err)
+		}
+		for i := len(history) - 1; i >= 0; i-- {
+			msgMeta := messageMeta(history[i])
+			if msgMeta == nil || msgMeta.Body == "" {
+				continue
+			}
+			switch msgMeta.Role {
+			case "assistant":
+				prompt = append(prompt, openai.AssistantMessage(msgMeta.Body))
+			default:
+				prompt = append(prompt, openai.UserMessage(msgMeta.Body))
+			}
+		}
+	}
+
+	// Build the user message with image
+	// Convert Matrix mxc:// URL to HTTP URL for download
+	httpURL := oc.convertMxcToHttp(imageURL)
+
+	imageContent := openai.ChatCompletionContentPartUnionParam{
+		OfImageURL: &openai.ChatCompletionContentPartImageParam{
+			ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
+				URL:    httpURL,
+				Detail: "auto",
+			},
+		},
+	}
+
+	textContent := openai.ChatCompletionContentPartUnionParam{
+		OfText: &openai.ChatCompletionContentPartTextParam{
+			Text: caption,
+		},
+	}
+
+	// Create user message with both image and text
+	userMsg := openai.ChatCompletionMessageParamUnion{
+		OfUser: &openai.ChatCompletionUserMessageParam{
+			Content: openai.ChatCompletionUserMessageParamContentUnion{
+				OfArrayOfContentParts: []openai.ChatCompletionContentPartUnionParam{
+					textContent,
+					imageContent,
+				},
+			},
+		},
+	}
+
+	prompt = append(prompt, userMsg)
+	return prompt, nil
+}
+
+// convertMxcToHttp converts an mxc:// URL to an HTTP URL via the homeserver
+func (oc *OpenAIClient) convertMxcToHttp(mxcURL string) string {
+	// mxc://server/mediaID -> https://homeserver/_matrix/media/v3/download/server/mediaID
+	if !strings.HasPrefix(mxcURL, "mxc://") {
+		return mxcURL // Already HTTP
+	}
+
+	// Get homeserver URL from bridge config
+	homeserver := oc.UserLogin.Bridge.Matrix.ServerName()
+
+	// Parse mxc URL
+	parts := strings.SplitN(strings.TrimPrefix(mxcURL, "mxc://"), "/", 2)
+	if len(parts) != 2 {
+		return mxcURL
+	}
+
+	server := parts[0]
+	mediaID := parts[1]
+
+	return fmt.Sprintf("https://%s/_matrix/media/v3/download/%s/%s", homeserver, server, mediaID)
+}
+
+// handleCommand checks if the message is a command and handles it
+// Returns true if the message was a command and was handled
+func (oc *OpenAIClient) handleCommand(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	body string,
+) bool {
+	// Check for slash commands
+	if strings.HasPrefix(body, "/") {
+		return oc.handleSlashCommand(ctx, evt, portal, meta, body)
+	}
+
+	// Check for regenerate command
+	prefix := oc.connector.Config.Bridge.CommandPrefix
+	if strings.HasPrefix(body, prefix+" regenerate") || body == prefix+" regenerate" ||
+		body == "!regenerate" || body == "/regenerate" {
+		go oc.handleRegenerate(ctx, evt, portal, meta)
+		return true
+	}
+
+	return false
+}
+
+// handleSlashCommand handles slash commands like /model, /temp, /prompt
+func (oc *OpenAIClient) handleSlashCommand(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	body string,
+) bool {
+	parts := strings.SplitN(body, " ", 2)
+	cmd := strings.ToLower(parts[0])
+	var arg string
+	if len(parts) > 1 {
+		arg = strings.TrimSpace(parts[1])
+	}
+
+	switch cmd {
+	case "/model":
+		if arg == "" {
+			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current model: %s", oc.effectiveModel(meta)))
+			return true
+		}
+		// Validate model
+		valid, err := oc.validateModel(ctx, arg)
+		if err != nil || !valid {
+			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Invalid model: %s", arg))
+			return true
+		}
+		// Update model
+		meta.Model = arg
+		meta.Capabilities = getModelCapabilities(arg)
+		if err := portal.Save(ctx); err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to save portal after model change")
+		}
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Model changed to: %s", arg))
+		return true
+
+	case "/temp", "/temperature":
+		if arg == "" {
+			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current temperature: %.2f", oc.effectiveTemperature(meta)))
+			return true
+		}
+		var temp float64
+		if _, err := fmt.Sscanf(arg, "%f", &temp); err != nil || temp < 0 || temp > 2 {
+			oc.sendSystemNotice(ctx, portal, "Invalid temperature. Must be between 0 and 2.")
+			return true
+		}
+		meta.Temperature = temp
+		if err := portal.Save(ctx); err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to save portal after temperature change")
+		}
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Temperature set to: %.2f", temp))
+		return true
+
+	case "/prompt", "/system":
+		if arg == "" {
+			current := oc.effectivePrompt(meta)
+			if current == "" {
+				current = "(none)"
+			} else if len(current) > 100 {
+				current = current[:100] + "..."
+			}
+			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current system prompt: %s", current))
+			return true
+		}
+		meta.SystemPrompt = arg
+		if err := portal.Save(ctx); err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to save portal after prompt change")
+		}
+		oc.sendSystemNotice(ctx, portal, "System prompt updated.")
+		return true
+
+	case "/context":
+		if arg == "" {
+			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current context limit: %d messages", oc.historyLimit(meta)))
+			return true
+		}
+		var limit int
+		if _, err := fmt.Sscanf(arg, "%d", &limit); err != nil || limit < 1 || limit > 100 {
+			oc.sendSystemNotice(ctx, portal, "Invalid context limit. Must be between 1 and 100.")
+			return true
+		}
+		meta.MaxContextMessages = limit
+		if err := portal.Save(ctx); err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to save portal after context change")
+		}
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Context limit set to: %d messages", limit))
+		return true
+
+	case "/tokens", "/maxtokens":
+		if arg == "" {
+			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current max tokens: %d", oc.effectiveMaxTokens(meta)))
+			return true
+		}
+		var tokens int
+		if _, err := fmt.Sscanf(arg, "%d", &tokens); err != nil || tokens < 1 || tokens > 16384 {
+			oc.sendSystemNotice(ctx, portal, "Invalid max tokens. Must be between 1 and 16384.")
+			return true
+		}
+		meta.MaxCompletionTokens = tokens
+		if err := portal.Save(ctx); err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to save portal after tokens change")
+		}
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Max tokens set to: %d", tokens))
+		return true
+
+	case "/config":
+		config := fmt.Sprintf(
+			"Current configuration:\n"+
+				"• Model: %s\n"+
+				"• Temperature: %.2f\n"+
+				"• Context: %d messages\n"+
+				"• Max tokens: %d\n"+
+				"• Vision: %v",
+			oc.effectiveModel(meta),
+			oc.effectiveTemperature(meta),
+			oc.historyLimit(meta),
+			oc.effectiveMaxTokens(meta),
+			meta.Capabilities.SupportsVision,
+		)
+		oc.sendSystemNotice(ctx, portal, config)
+		return true
+
+	case "/help":
+		help := "Available commands:\n" +
+			"• /model [name] - Get or set the AI model\n" +
+			"• /temp [0-2] - Get or set temperature\n" +
+			"• /prompt [text] - Get or set system prompt\n" +
+			"• /context [1-100] - Get or set context message limit\n" +
+			"• /tokens [1-16384] - Get or set max completion tokens\n" +
+			"• /config - Show current configuration\n" +
+			"• /regenerate - Regenerate the last response\n" +
+			"• /help - Show this help message"
+		oc.sendSystemNotice(ctx, portal, help)
+		return true
+
+	case "/regenerate":
+		go oc.handleRegenerate(ctx, evt, portal, meta)
+		return true
+	}
+
+	return false
+}
+
+// handleRegenerate regenerates the last AI response
+func (oc *OpenAIClient) handleRegenerate(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+) {
+	runCtx := oc.backgroundContext(ctx)
+	runCtx = oc.log.WithContext(runCtx)
+
+	// Get message history
+	history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(runCtx, portal.PortalKey, 10)
+	if err != nil || len(history) == 0 {
+		oc.sendSystemNotice(runCtx, portal, "No messages to regenerate from.")
+		return
+	}
+
+	// Find the last user message
+	var lastUserMessage *database.Message
+	for i := 0; i < len(history); i++ {
+		msgMeta := messageMeta(history[i])
+		if msgMeta != nil && msgMeta.Role == "user" {
+			lastUserMessage = history[i]
+			break
+		}
+	}
+
+	if lastUserMessage == nil {
+		oc.sendSystemNotice(runCtx, portal, "No user message found to regenerate from.")
+		return
+	}
+
+	userMeta := messageMeta(lastUserMessage)
+	if userMeta == nil || userMeta.Body == "" {
+		oc.sendSystemNotice(runCtx, portal, "Cannot regenerate: message content not available.")
+		return
+	}
+
+	oc.sendSystemNotice(runCtx, portal, "Regenerating response...")
+
+	// Build prompt excluding the old assistant response
+	prompt, err := oc.buildPromptForRegenerate(runCtx, portal, meta, userMeta.Body)
+	if err != nil {
+		oc.sendSystemNotice(runCtx, portal, "Failed to regenerate: "+err.Error())
+		return
+	}
+
+	// Dispatch new completion
+	oc.dispatchCompletion(runCtx, evt, portal, meta, prompt)
+}
+
+// buildPromptForRegenerate builds a prompt for regeneration, excluding the last assistant message
+func (oc *OpenAIClient) buildPromptForRegenerate(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	latestUserBody string,
+) ([]openai.ChatCompletionMessageParamUnion, error) {
+	var prompt []openai.ChatCompletionMessageParamUnion
+	systemPrompt := oc.effectivePrompt(meta)
+	if systemPrompt != "" {
+		prompt = append(prompt, openai.SystemMessage(systemPrompt))
+	}
+
+	historyLimit := oc.historyLimit(meta)
+	if historyLimit > 0 {
+		history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, historyLimit+2)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load prompt history: %w", err)
+		}
+
+		// Skip the most recent messages (last user and assistant) and build from older history
+		skippedUser := false
+		skippedAssistant := false
+		for i := 0; i < len(history); i++ {
+			msgMeta := messageMeta(history[i])
+			if msgMeta == nil || msgMeta.Body == "" {
+				continue
+			}
+
+			// Skip the last user message and last assistant message
+			if !skippedUser && msgMeta.Role == "user" {
+				skippedUser = true
+				continue
+			}
+			if !skippedAssistant && msgMeta.Role == "assistant" {
+				skippedAssistant = true
+				continue
+			}
+
+			switch msgMeta.Role {
+			case "assistant":
+				prompt = append(prompt, openai.AssistantMessage(msgMeta.Body))
+			default:
+				prompt = append(prompt, openai.UserMessage(msgMeta.Body))
+			}
+		}
+
+		// Reverse to get chronological order
+		for i, j := len(prompt)-1, 0; i > j; i, j = i-1, j+1 {
+			prompt[i], prompt[j] = prompt[j], prompt[i]
+		}
+	}
+
+	prompt = append(prompt, openai.UserMessage(latestUserBody))
+	return prompt, nil
 }
 
 func (oc *OpenAIClient) requestCompletion(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion, meta *PortalMetadata) (*openai.ChatCompletion, error) {
@@ -524,29 +1120,114 @@ func (oc *OpenAIClient) dispatchCompletion(
 
 	// Check if streaming is enabled
 	if oc.connector.Config.OpenAI.EnableStreaming {
-		oc.streamingCompletion(runCtx, sourceEvent, portal, meta, prompt)
+		oc.streamingCompletionWithRetry(runCtx, sourceEvent, portal, meta, prompt)
 		return
 	}
 
-	// Non-streaming path (original)
-	resp, err := oc.requestCompletion(runCtx, prompt, meta)
-	if err != nil {
-		oc.notifyMatrixSendFailure(runCtx, portal, sourceEvent, err)
-		return
+	// Non-streaming path with retry
+	oc.nonStreamingCompletionWithRetry(runCtx, sourceEvent, portal, meta, prompt)
+}
+
+// nonStreamingCompletionWithRetry handles non-streaming completions with automatic retry on context overflow
+func (oc *OpenAIClient) nonStreamingCompletionWithRetry(
+	ctx context.Context,
+	sourceEvent *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	prompt []openai.ChatCompletionMessageParamUnion,
+) {
+	currentPrompt := prompt
+
+	for attempt := 0; attempt < maxRetryAttempts; attempt++ {
+		resp, err := oc.requestCompletion(ctx, currentPrompt, meta)
+		if err == nil {
+			if resp != nil {
+				oc.queueAssistantMessage(portal, resp)
+			}
+			return
+		}
+
+		// Check for context length error
+		cle := ParseContextLengthError(err)
+		if cle == nil {
+			// Not a context error, report and exit
+			oc.notifyMatrixSendFailure(ctx, portal, sourceEvent, err)
+			return
+		}
+
+		// Can we truncate further?
+		truncated := oc.truncatePrompt(currentPrompt)
+		if truncated == nil || len(truncated) <= 2 {
+			// Can't truncate more (only system + latest user message left)
+			oc.notifyContextLengthExceeded(ctx, portal, cle, false)
+			return
+		}
+
+		// Notify user and retry
+		oc.notifyContextLengthExceeded(ctx, portal, cle, true)
+		currentPrompt = truncated
+
+		oc.log.Debug().
+			Int("attempt", attempt+1).
+			Int("new_prompt_len", len(currentPrompt)).
+			Msg("Retrying with truncated context")
 	}
-	if resp != nil {
-		oc.queueAssistantMessage(portal, resp)
+
+	// Exhausted retries
+	oc.notifyMatrixSendFailure(ctx, portal, sourceEvent,
+		fmt.Errorf("exceeded retry attempts for context length"))
+}
+
+// streamingCompletionWithRetry handles streaming completions with automatic retry on context overflow
+func (oc *OpenAIClient) streamingCompletionWithRetry(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	prompt []openai.ChatCompletionMessageParamUnion,
+) {
+	currentPrompt := prompt
+
+	for attempt := 0; attempt < maxRetryAttempts; attempt++ {
+		success, cle := oc.streamingCompletion(ctx, evt, portal, meta, currentPrompt)
+		if success {
+			return
+		}
+
+		// If we got a context length error, try to truncate and retry
+		if cle != nil {
+			truncated := oc.truncatePrompt(currentPrompt)
+			if truncated == nil || len(truncated) <= 2 {
+				// Can't truncate more
+				oc.notifyContextLengthExceeded(ctx, portal, cle, false)
+				return
+			}
+
+			// Notify user and retry
+			oc.notifyContextLengthExceeded(ctx, portal, cle, true)
+			currentPrompt = truncated
+
+			oc.log.Debug().
+				Int("attempt", attempt+1).
+				Int("new_prompt_len", len(currentPrompt)).
+				Msg("Retrying streaming with truncated context")
+			continue
+		}
+
+		// Non-context error, already handled in streamingCompletion
+		return
 	}
 }
 
 // streamingCompletion handles streaming chat completions with transient token updates
+// Returns (success, contextLengthError) - contextLengthError is non-nil only when the error is a context length issue
 func (oc *OpenAIClient) streamingCompletion(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	messages []openai.ChatCompletionMessageParamUnion,
-) {
+) (bool, *ContextLengthError) {
 	log := zerolog.Ctx(ctx).With().
 		Str("portal_id", string(portal.ID)).
 		Logger()
@@ -570,7 +1251,7 @@ func (oc *OpenAIClient) streamingCompletion(
 	if stream == nil {
 		log.Error().Msg("Failed to create streaming request")
 		oc.notifyMatrixSendFailure(ctx, portal, evt, fmt.Errorf("streaming not available"))
-		return
+		return false, nil
 	}
 
 	// Track streaming state
@@ -629,8 +1310,12 @@ func (oc *OpenAIClient) streamingCompletion(
 			resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to send initial streaming message")
+				cle := ParseContextLengthError(err)
+				if cle != nil {
+					return false, cle
+				}
 				oc.notifyMatrixSendFailure(ctx, portal, evt, err)
-				return
+				return false, nil
 			}
 			initialEventID = resp.EventID
 			log.Info().Str("event_id", initialEventID.String()).Msg("Initial streaming message sent")
@@ -656,8 +1341,12 @@ func (oc *OpenAIClient) streamingCompletion(
 	// Check for errors
 	if err := stream.Err(); err != nil {
 		log.Error().Err(err).Msg("Streaming error")
+		cle := ParseContextLengthError(err)
+		if cle != nil {
+			return false, cle
+		}
 		oc.notifyMatrixSendFailure(ctx, portal, evt, err)
-		return
+		return false, nil
 	}
 
 	// Emit final transient update with complete content
@@ -669,6 +1358,8 @@ func (oc *OpenAIClient) streamingCompletion(
 		Str("finish_reason", finishReason).
 		Int("length", accumulated.Len()).
 		Msg("Streaming completion finished")
+
+	return true, nil
 }
 
 func (oc *OpenAIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, err error) {
@@ -826,6 +1517,181 @@ func (oc *OpenAIClient) effectiveMaxTokens(meta *PortalMetadata) int {
 		return oc.connector.Config.OpenAI.MaxCompletionTokens
 	}
 	return defaultMaxTokens
+}
+
+// knownModelPrefixes is a list of known valid model ID prefixes
+var knownModelPrefixes = []string{
+	"gpt-4", "gpt-3.5", "o1", "o3", "chatgpt",
+}
+
+// validateModel checks if a model is available for this user
+func (oc *OpenAIClient) validateModel(ctx context.Context, modelID string) (bool, error) {
+	if modelID == "" {
+		return true, nil
+	}
+
+	// First check cache
+	models, err := oc.listAvailableModels(ctx, false)
+	if err == nil {
+		for _, model := range models {
+			if model.ID == modelID {
+				return true, nil
+			}
+		}
+	}
+
+	// Check against known patterns
+	for _, prefix := range knownModelPrefixes {
+		if strings.HasPrefix(modelID, prefix) {
+			return true, nil
+		}
+	}
+
+	// Try to validate by making a minimal API call
+	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	_, err = oc.api.Models.Get(timeoutCtx, modelID)
+	return err == nil, nil
+}
+
+// updatePortalConfig applies room config to portal metadata
+func (oc *OpenAIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Portal, config *RoomConfigEventContent) {
+	meta := portalMeta(portal)
+
+	// Update only non-empty/non-zero values
+	if config.Model != "" {
+		meta.Model = config.Model
+		// Update capabilities when model changes
+		meta.Capabilities = getModelCapabilities(config.Model)
+	}
+	if config.SystemPrompt != "" {
+		meta.SystemPrompt = config.SystemPrompt
+	}
+	if config.Temperature > 0 {
+		meta.Temperature = config.Temperature
+	}
+	if config.MaxContextMessages > 0 {
+		meta.MaxContextMessages = config.MaxContextMessages
+	}
+	if config.MaxCompletionTokens > 0 {
+		meta.MaxCompletionTokens = config.MaxCompletionTokens
+	}
+
+	meta.LastRoomStateSync = time.Now().Unix()
+
+	// Persist changes
+	if err := portal.Save(ctx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to save portal after config update")
+	}
+}
+
+// sendConfigNotice sends a notice to the room about configuration changes
+func (oc *OpenAIClient) sendConfigNotice(ctx context.Context, portal *bridgev2.Portal, message string) {
+	oc.sendSystemNotice(ctx, portal, message)
+}
+
+// sendSystemNotice sends an informational notice to the room as the assistant
+func (oc *OpenAIClient) sendSystemNotice(ctx context.Context, portal *bridgev2.Portal, message string) {
+	if portal == nil || portal.MXID == "" {
+		return
+	}
+
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
+	if err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to get ghost for system notice")
+		return
+	}
+
+	intent := ghost.Intent
+	if intent == nil {
+		return
+	}
+
+	content := &event.MessageEventContent{
+		MsgType: event.MsgNotice,
+		Body:    message,
+	}
+
+	_, err = intent.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{
+		Parsed: content,
+	}, nil)
+	if err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to send system notice")
+	}
+}
+
+const (
+	maxRetryAttempts = 3 // Maximum retry attempts for context length errors
+)
+
+// notifyContextLengthExceeded sends a user-friendly notice about context overflow
+func (oc *OpenAIClient) notifyContextLengthExceeded(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	cle *ContextLengthError,
+	willRetry bool,
+) {
+	var message string
+	if willRetry {
+		message = fmt.Sprintf(
+			"Your conversation exceeded the model's context limit (%d tokens requested, %d max). "+
+				"Automatically trimming older messages and retrying...",
+			cle.RequestedTokens, cle.ModelMaxTokens,
+		)
+	} else {
+		message = fmt.Sprintf(
+			"Your message is too long for this model's context window (%d tokens max). "+
+				"Please try a shorter message or start a new conversation.",
+			cle.ModelMaxTokens,
+		)
+	}
+
+	oc.sendSystemNotice(ctx, portal, message)
+}
+
+// truncatePrompt removes older messages from the prompt while preserving
+// the system message (if any) and the latest user message
+func (oc *OpenAIClient) truncatePrompt(
+	prompt []openai.ChatCompletionMessageParamUnion,
+) []openai.ChatCompletionMessageParamUnion {
+	if len(prompt) <= 2 {
+		return nil // Can't truncate further
+	}
+
+	// Determine if first message is system prompt
+	hasSystem := prompt[0].OfSystem != nil
+
+	// Calculate how many history messages to keep
+	historyCount := len(prompt)
+	startIdx := 0
+	if hasSystem {
+		historyCount-- // Don't count system
+		startIdx = 1
+	}
+	historyCount-- // Don't count latest user message
+
+	// Remove approximately half of history
+	keepCount := historyCount / 2
+	if keepCount < 1 {
+		keepCount = 1
+	}
+
+	// Build new prompt: [system] + [last N history] + [latest user]
+	var result []openai.ChatCompletionMessageParamUnion
+
+	if hasSystem {
+		result = append(result, prompt[0])
+	}
+
+	// Keep only the most recent history messages
+	historyStart := len(prompt) - 1 - keepCount
+	if historyStart < startIdx {
+		historyStart = startIdx
+	}
+
+	result = append(result, prompt[historyStart:]...)
+	return result
 }
 
 // listAvailableModels fetches models from OpenAI API and caches them
@@ -1016,6 +1882,8 @@ func (oc *OpenAIClient) ensureDefaultChat(ctx context.Context) error {
 			oc.log.Err(err).Msg("Failed to create Matrix room for existing portal")
 		}
 		oc.sendWelcomeMessage(ctx, portals[0])
+		// Broadcast initial room state
+		go oc.BroadcastRoomState(ctx, portals[0])
 		return err
 	}
 	resp, err := oc.createChat(ctx, "", oc.connector.Config.OpenAI.SystemPrompt)
@@ -1029,6 +1897,8 @@ func (oc *OpenAIClient) ensureDefaultChat(ctx context.Context) error {
 		return err
 	}
 	oc.sendWelcomeMessage(ctx, resp.Portal)
+	// Broadcast initial room state
+	go oc.BroadcastRoomState(ctx, resp.Portal)
 	oc.log.Info().Stringer("portal", resp.PortalKey).Msg("Default ChatGPT room created")
 	return nil
 }
@@ -1168,46 +2038,16 @@ func (oc *OpenAIClient) composeChatInfo(title, prompt string) *bridgev2.ChatInfo
 	}
 }
 
-// RoomStateEvent represents ai-bridge configuration in room state
-type RoomStateEvent struct {
-	Model               string  `json:"model,omitempty"`
-	SystemPrompt        string  `json:"system_prompt,omitempty"`
-	Temperature         float64 `json:"temperature,omitempty"`
-	MaxContextMessages  int     `json:"max_context_messages,omitempty"`
-	MaxCompletionTokens int     `json:"max_completion_tokens,omitempty"`
-}
-
-// HandleRoomStateEvent processes room state changes for ai-bridge config
-// NOTE: This is a stub implementation. To fully implement, we need:
-// 1. A way to look up the portal by Matrix room ID (not available in current bridgev2)
-// 2. Or, integrate with bridgev2's room state handler pattern
-// For now, room configuration can be edited by looking up the portal via other means
-func (oc *OpenAIClient) HandleRoomStateEvent(ctx context.Context, evt *event.Event) error {
-	log := zerolog.Ctx(ctx)
-
-	// Parse room state
-	var stateContent RoomStateEvent
-	if err := json.Unmarshal(evt.Content.VeryRaw, &stateContent); err != nil {
-		log.Debug().Err(err).Msg("Failed to parse room state, ignoring")
-		return nil // Non-fatal, might not be our room state
-	}
-
-	// TODO: Implement portal lookup by Matrix room ID
-	// This requires bridgev2 to expose a method like GetPortalByMatrixID
-	// or to integrate with the room state handler pattern in bridgev2
-	log.Debug().
-		Str("room_id", string(evt.RoomID)).
-		Str("model", stateContent.Model).
-		Msg("Room state event received (stub - portal lookup not yet implemented)")
-
-	return nil
-}
 
 // BroadcastRoomState sends current room config to Matrix room state
 func (oc *OpenAIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Portal) error {
-	meta := portal.Metadata.(*PortalMetadata)
+	if portal.MXID == "" {
+		return fmt.Errorf("portal has no Matrix room ID")
+	}
 
-	stateContent := RoomStateEvent{
+	meta := portalMeta(portal)
+
+	stateContent := &RoomConfigEventContent{
 		Model:               meta.Model,
 		SystemPrompt:        meta.SystemPrompt,
 		Temperature:         meta.Temperature,
@@ -1215,19 +2055,23 @@ func (oc *OpenAIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2
 		MaxCompletionTokens: meta.MaxCompletionTokens,
 	}
 
-	// Marshal to JSON
-	contentBytes, err := json.Marshal(stateContent)
+	// Use bot intent to send state event
+	bot := oc.UserLogin.Bridge.Bot
+	_, err := bot.SendState(ctx, portal.MXID, RoomConfigEventType, "", &event.Content{
+		Parsed: stateContent,
+	}, time.Time{})
+
 	if err != nil {
-		return fmt.Errorf("failed to marshal room state: %w", err)
+		oc.log.Warn().Err(err).Msg("Failed to broadcast room state")
+		return err
 	}
 
-	// Send state event through bridgev2 intent
-	// Note: This requires bridgev2 room state API support
-	// For now, this is a stub that can be called but won't fully work without bridgev2 updates
-	log := zerolog.Ctx(ctx)
-	log.Debug().Str("model", meta.Model).Msg("Broadcasting room state (stub - bridgev2 API support needed)")
+	meta.LastRoomStateSync = time.Now().Unix()
+	if err := portal.Save(ctx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to save portal after state broadcast")
+	}
 
-	_ = contentBytes // Suppress unused variable warning
+	oc.log.Debug().Str("model", meta.Model).Msg("Broadcasted room state")
 	return nil
 }
 
