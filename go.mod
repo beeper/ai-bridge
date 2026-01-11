@@ -19,11 +19,13 @@ require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/coreos/go-systemd/v22 v22.6.0 // indirect
+	github.com/dlclark/regexp2 v1.10.0 // indirect
 	github.com/lib/pq v1.10.9 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-sqlite3 v1.14.32 // indirect
 	github.com/petermattis/goid v0.0.0-20251121121749-a11dd1a45f9a // indirect
+	github.com/pkoukk/tiktoken-go v0.1.8 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
