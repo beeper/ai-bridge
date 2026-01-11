@@ -446,33 +446,10 @@ func (oc *OpenAIClient) createNewChat(ctx context.Context, modelID string, caps 
 
 	// Create chat info with proper member list
 	chatInfo := &bridgev2.ChatInfo{
-		Name: ptr.Ptr(portalMeta.Title),
-		Topic: ptr.Ptr(fmt.Sprintf("Conversation with %s", modelID)),
-		Type: ptr.Ptr(database.RoomTypeDM),
-		Members: &bridgev2.ChatMemberList{
-			MemberMap: map[networkid.UserID]bridgev2.ChatMember{
-				humanUserID(oc.UserLogin.ID): {
-					EventSender: bridgev2.EventSender{
-						IsFromMe:    true,
-						SenderLogin: oc.UserLogin.ID,
-					},
-					Membership: event.MembershipJoin,
-				},
-				modelUserID(modelID): {
-					EventSender: bridgev2.EventSender{
-						Sender:      modelUserID(modelID),
-						SenderLogin: oc.UserLogin.ID,
-					},
-					Membership: event.MembershipJoin,
-					UserInfo: &bridgev2.UserInfo{
-						Name:  ptr.Ptr(formatModelName(modelID)),
-						IsBot: ptr.Ptr(true),
-					},
-				},
-			},
-			IsFull:            true,
-			TotalMemberCount:  2,
-		},
+		Name:    ptr.Ptr(portalMeta.Title),
+		Topic:   ptr.Ptr(fmt.Sprintf("Conversation with %s", modelID)),
+		Type:    ptr.Ptr(database.RoomTypeDM),
+		Members: oc.buildChatMembers(modelID),
 	}
 
 	return &bridgev2.CreateChatResponse{
@@ -495,6 +472,34 @@ func (oc *OpenAIClient) allocateNextChatIndex(ctx context.Context) (int, error) 
 	}
 
 	return meta.NextChatIndex, nil
+}
+
+// buildChatMembers creates the standard member list for a chat portal
+func (oc *OpenAIClient) buildChatMembers(modelID string) *bridgev2.ChatMemberList {
+	return &bridgev2.ChatMemberList{
+		MemberMap: map[networkid.UserID]bridgev2.ChatMember{
+			humanUserID(oc.UserLogin.ID): {
+				EventSender: bridgev2.EventSender{
+					IsFromMe:    true,
+					SenderLogin: oc.UserLogin.ID,
+				},
+				Membership: event.MembershipJoin,
+			},
+			modelUserID(modelID): {
+				EventSender: bridgev2.EventSender{
+					Sender:      modelUserID(modelID),
+					SenderLogin: oc.UserLogin.ID,
+				},
+				Membership: event.MembershipJoin,
+				UserInfo: &bridgev2.UserInfo{
+					Name:  ptr.Ptr(formatModelName(modelID)),
+					IsBot: ptr.Ptr(true),
+				},
+			},
+		},
+		IsFull:           true,
+		TotalMemberCount: 2,
+	}
 }
 
 func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (*bridgev2.MatrixMessageResponse, error) {
@@ -1295,33 +1300,10 @@ func (oc *OpenAIClient) createForkedChat(
 
 	// Create chat info
 	chatInfo := &bridgev2.ChatInfo{
-		Name:  ptr.Ptr(title),
-		Topic: ptr.Ptr(sourceMeta.SystemPrompt),
-		Type:  ptr.Ptr(database.RoomTypeDM),
-		Members: &bridgev2.ChatMemberList{
-			MemberMap: map[networkid.UserID]bridgev2.ChatMember{
-				humanUserID(oc.UserLogin.ID): {
-					EventSender: bridgev2.EventSender{
-						IsFromMe:    true,
-						SenderLogin: oc.UserLogin.ID,
-					},
-					Membership: event.MembershipJoin,
-				},
-				modelUserID(sourceMeta.Model): {
-					EventSender: bridgev2.EventSender{
-						Sender:      modelUserID(sourceMeta.Model),
-						SenderLogin: oc.UserLogin.ID,
-					},
-					Membership: event.MembershipJoin,
-					UserInfo: &bridgev2.UserInfo{
-						Name:  ptr.Ptr(formatModelName(sourceMeta.Model)),
-						IsBot: ptr.Ptr(true),
-					},
-				},
-			},
-			IsFull:           true,
-			TotalMemberCount: 2,
-		},
+		Name:    ptr.Ptr(title),
+		Topic:   ptr.Ptr(sourceMeta.SystemPrompt),
+		Type:    ptr.Ptr(database.RoomTypeDM),
+		Members: oc.buildChatMembers(sourceMeta.Model),
 	}
 
 	return portal, chatInfo, nil
@@ -1570,17 +1552,23 @@ func (oc *OpenAIClient) dispatchCompletionInternal(
 }
 
 // streamingResponseWithRetry handles Responses API streaming with automatic retry on context overflow
-func (oc *OpenAIClient) streamingResponseWithRetry(
+// responseFunc is the signature for response handlers that can be retried on context length errors
+type responseFunc func(ctx context.Context, evt *event.Event, portal *bridgev2.Portal, meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (bool, *ContextLengthError)
+
+// responseWithRetry wraps a response function with context length retry logic
+func (oc *OpenAIClient) responseWithRetry(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	prompt []openai.ChatCompletionMessageParamUnion,
+	responseFn responseFunc,
+	logLabel string,
 ) {
 	currentPrompt := prompt
 
 	for attempt := range maxRetryAttempts {
-		success, cle := oc.streamingResponse(ctx, evt, portal, meta, currentPrompt)
+		success, cle := responseFn(ctx, evt, portal, meta, currentPrompt)
 		if success {
 			return
 		}
@@ -1589,29 +1577,36 @@ func (oc *OpenAIClient) streamingResponseWithRetry(
 		if cle != nil {
 			truncated := oc.truncatePrompt(currentPrompt)
 			if len(truncated) <= 2 {
-				// Can't truncate more (len of nil slice is 0)
 				oc.notifyContextLengthExceeded(ctx, portal, cle, false)
 				return
 			}
 
-			// Notify user and retry
 			oc.notifyContextLengthExceeded(ctx, portal, cle, true)
 			currentPrompt = truncated
 
 			oc.log.Debug().
 				Int("attempt", attempt+1).
 				Int("new_prompt_len", len(currentPrompt)).
-				Msg("Retrying Responses API streaming with truncated context")
+				Msgf("Retrying Responses API %s with truncated context", logLabel)
 			continue
 		}
 
-		// Non-context error, already handled in streamingResponse
+		// Non-context error, already handled in responseFn
 		return
 	}
 
-	// Exhausted retries
 	oc.notifyMatrixSendFailure(ctx, portal, evt,
 		fmt.Errorf("exceeded retry attempts for context length"))
+}
+
+func (oc *OpenAIClient) streamingResponseWithRetry(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	prompt []openai.ChatCompletionMessageParamUnion,
+) {
+	oc.responseWithRetry(ctx, evt, portal, meta, prompt, oc.streamingResponse, "streaming")
 }
 
 
@@ -1986,41 +1981,7 @@ func (oc *OpenAIClient) nonStreamingResponseWithRetry(
 	meta *PortalMetadata,
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) {
-	currentPrompt := prompt
-
-	for attempt := range maxRetryAttempts {
-		success, cle := oc.nonStreamingResponse(ctx, evt, portal, meta, currentPrompt)
-		if success {
-			return
-		}
-
-		// If we got a context length error, try to truncate and retry
-		if cle != nil {
-			truncated := oc.truncatePrompt(currentPrompt)
-			if len(truncated) <= 2 {
-				// Can't truncate more
-				oc.notifyContextLengthExceeded(ctx, portal, cle, false)
-				return
-			}
-
-			// Notify user and retry
-			oc.notifyContextLengthExceeded(ctx, portal, cle, true)
-			currentPrompt = truncated
-
-			oc.log.Debug().
-				Int("attempt", attempt+1).
-				Int("new_prompt_len", len(currentPrompt)).
-				Msg("Retrying Responses API non-streaming with truncated context")
-			continue
-		}
-
-		// Non-context error, already handled in nonStreamingResponse
-		return
-	}
-
-	// Exhausted retries
-	oc.notifyMatrixSendFailure(ctx, portal, evt,
-		fmt.Errorf("exceeded retry attempts for context length"))
+	oc.responseWithRetry(ctx, evt, portal, meta, prompt, oc.nonStreamingResponse, "non-streaming")
 }
 
 // queueAssistantResponseMessage queues an assistant message from a Responses API response

@@ -51,17 +51,8 @@ func EstimateTokens(messages []openai.ChatCompletionMessageParamUnion, model str
 		return 0, err
 	}
 
-	var tokensPerMessage int
-	switch {
-	case strings.Contains(model, "gpt-4o"), strings.Contains(model, "gpt-4-turbo"):
-		tokensPerMessage = 3
-	case strings.Contains(model, "gpt-4"):
-		tokensPerMessage = 3
-	case strings.Contains(model, "gpt-3.5-turbo"):
-		tokensPerMessage = 3
-	default:
-		tokensPerMessage = 3
-	}
+	// Token overhead per message (consistent across GPT models)
+	const tokensPerMessage = 3
 
 	numTokens := 0
 	for _, msg := range messages {
