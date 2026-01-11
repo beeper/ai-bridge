@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -14,6 +15,8 @@ import (
 	"github.com/openai/openai-go/shared"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -533,9 +536,13 @@ func (oc *OpenAIClient) regenerateFromEdit(
 	if assistantResponse != nil {
 		// Try to redact the old response
 		if assistantResponse.MXID != "" {
-			intent := portal.GetIntentFor(ctx, oc.UserLogin, id.UserID(""), false)
+			intent, _ := portal.GetIntentFor(ctx, bridgev2.EventSender{IsFromMe: true}, oc.UserLogin, bridgev2.RemoteEventMessageRemove)
 			if intent != nil {
-				_, _ = intent.RedactEvent(ctx, portal.MXID, assistantResponse.MXID, &event.Event{})
+				_, _ = intent.SendMessage(ctx, portal.MXID, event.EventRedaction, &event.Content{
+					Parsed: &event.RedactionEventContent{
+						Redacts: assistantResponse.MXID,
+					},
+				}, nil)
 			}
 		}
 	}
@@ -898,6 +905,74 @@ func (oc *OpenAIClient) handleSlashCommand(
 		oc.sendSystemNotice(ctx, portal, config)
 		return true
 
+	case "/tools":
+		if arg == "" {
+			status := "disabled"
+			if meta.ToolsEnabled {
+				status = "enabled"
+			}
+			toolList := ""
+			for _, tool := range BuiltinTools() {
+				toolList += fmt.Sprintf("  - %s: %s\n", tool.Name, tool.Description)
+			}
+			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Tools are currently %s.\n\nAvailable tools:\n%s\nUse /tools on or /tools off to toggle.", status, toolList))
+			return true
+		}
+		switch strings.ToLower(arg) {
+		case "on", "enable", "true", "1":
+			meta.ToolsEnabled = true
+			if err := portal.Save(ctx); err != nil {
+				oc.log.Warn().Err(err).Msg("Failed to save portal after enabling tools")
+			}
+			if err := oc.BroadcastRoomState(ctx, portal); err != nil {
+				oc.log.Warn().Err(err).Msg("Failed to broadcast room state after enabling tools")
+			}
+			oc.sendSystemNotice(ctx, portal, "Tools enabled. The AI can now use calculator and web search.")
+		case "off", "disable", "false", "0":
+			meta.ToolsEnabled = false
+			if err := portal.Save(ctx); err != nil {
+				oc.log.Warn().Err(err).Msg("Failed to save portal after disabling tools")
+			}
+			if err := oc.BroadcastRoomState(ctx, portal); err != nil {
+				oc.log.Warn().Err(err).Msg("Failed to broadcast room state after disabling tools")
+			}
+			oc.sendSystemNotice(ctx, portal, "Tools disabled.")
+		default:
+			oc.sendSystemNotice(ctx, portal, "Invalid option. Use /tools on or /tools off.")
+		}
+		return true
+
+	case "/cost":
+		// Calculate cost from conversation history
+		messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, 1000)
+		if err != nil {
+			oc.sendSystemNotice(ctx, portal, "Failed to retrieve message history for cost calculation.")
+			return true
+		}
+		var totalPromptTokens, totalCompletionTokens int64
+		var totalCost float64
+		model := oc.effectiveModel(meta)
+		for _, msg := range messages {
+			msgMeta := messageMeta(msg)
+			if msgMeta != nil && msgMeta.Role == "assistant" {
+				totalPromptTokens += msgMeta.PromptTokens
+				totalCompletionTokens += msgMeta.CompletionTokens
+				totalCost += CalculateCost(model, msgMeta.PromptTokens, msgMeta.CompletionTokens)
+			}
+		}
+		costMsg := fmt.Sprintf(
+			"Conversation cost (%s):\n"+
+				"• Input tokens: %d\n"+
+				"• Output tokens: %d\n"+
+				"• Estimated cost: %s",
+			model,
+			totalPromptTokens,
+			totalCompletionTokens,
+			FormatCost(totalCost),
+		)
+		oc.sendSystemNotice(ctx, portal, costMsg)
+		return true
+
 	case "/help":
 		help := "Available commands:\n" +
 			"• /model [name] - Get or set the AI model\n" +
@@ -905,7 +980,9 @@ func (oc *OpenAIClient) handleSlashCommand(
 			"• /prompt [text] - Get or set system prompt\n" +
 			"• /context [1-100] - Get or set context message limit\n" +
 			"• /tokens [1-16384] - Get or set max completion tokens\n" +
+			"• /tools [on|off] - Enable/disable function calling tools\n" +
 			"• /config - Show current configuration\n" +
+			"• /cost - Show conversation token usage and cost\n" +
 			"• /regenerate - Regenerate the last response\n" +
 			"• /help - Show this help message"
 		oc.sendSystemNotice(ctx, portal, help)
@@ -1031,19 +1108,112 @@ func (oc *OpenAIClient) requestCompletion(ctx context.Context, messages []openai
 	if len(messages) == 0 {
 		return nil, fmt.Errorf("prompt had no messages")
 	}
+	model := oc.effectiveModel(meta)
 	params := openai.ChatCompletionNewParams{
-		Model:               shared.ChatModel(oc.effectiveModel(meta)),
+		Model:               shared.ChatModel(model),
 		Messages:            messages,
 		Temperature:         openai.Float(oc.effectiveTemperature(meta)),
 		MaxCompletionTokens: openai.Int(int64(oc.effectiveMaxTokens(meta))),
 	}
-	timeoutCtx, cancel := context.WithTimeout(ctx, oc.connector.Config.OpenAI.RequestTimeout)
+
+	// Add tools if enabled
+	if meta.ToolsEnabled && !isReasoningModel(model) {
+		params.Tools = ToOpenAITools(BuiltinTools())
+	}
+
+	// Use extended timeout for reasoning models (O1/O3)
+	timeout := oc.connector.Config.OpenAI.RequestTimeout
+	if isReasoningModel(model) {
+		timeout = reasoningModelRequestTimeout
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	resp, err := oc.api.Chat.Completions.New(timeoutCtx, params)
 	if err != nil {
 		return nil, err
 	}
 	return resp, nil
+}
+
+// requestCompletionWithToolLoop handles tool calls in a loop until the model gives a final response
+// It returns the final response and a list of tool call messages that were sent
+func (oc *OpenAIClient) requestCompletionWithToolLoop(
+	ctx context.Context,
+	messages []openai.ChatCompletionMessageParamUnion,
+	meta *PortalMetadata,
+	onToolCall func(toolName, args, result string),
+) (*openai.ChatCompletion, error) {
+	currentMessages := messages
+	maxToolIterations := 10 // Prevent infinite loops
+
+	for i := 0; i < maxToolIterations; i++ {
+		resp, err := oc.requestCompletion(ctx, currentMessages, meta)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(resp.Choices) == 0 {
+			return nil, fmt.Errorf("no choices in response")
+		}
+
+		choice := resp.Choices[0]
+
+		// Check if there are tool calls
+		if len(choice.Message.ToolCalls) == 0 {
+			// No tool calls, this is the final response
+			return resp, nil
+		}
+
+		// Execute tool calls
+		// First, add the assistant's message with tool_calls to the conversation
+		// Convert tool calls to params
+		toolCallParams := make([]openai.ChatCompletionMessageToolCallParam, len(choice.Message.ToolCalls))
+		for j, tc := range choice.Message.ToolCalls {
+			toolCallParams[j] = tc.ToParam()
+		}
+		currentMessages = append(currentMessages, openai.ChatCompletionMessageParamUnion{
+			OfAssistant: &openai.ChatCompletionAssistantMessageParam{
+				ToolCalls: toolCallParams,
+			},
+		})
+
+		// Execute each tool call and add results
+		for _, toolCall := range choice.Message.ToolCalls {
+			toolName := toolCall.Function.Name
+			toolArgs := toolCall.Function.Arguments
+
+			// Parse arguments
+			var args map[string]any
+			if err := json.Unmarshal([]byte(toolArgs), &args); err != nil {
+				args = map[string]any{"raw": toolArgs}
+			}
+
+			// Execute tool
+			tool := GetToolByName(toolName)
+			var result string
+			if tool != nil {
+				toolResult, err := tool.Execute(ctx, args)
+				if err != nil {
+					result = fmt.Sprintf("Error: %v", err)
+				} else {
+					result = toolResult
+				}
+			} else {
+				result = fmt.Sprintf("Error: Unknown tool '%s'", toolName)
+			}
+
+			// Notify callback if provided
+			if onToolCall != nil {
+				onToolCall(toolName, toolArgs, result)
+			}
+
+			// Add tool result to messages
+			currentMessages = append(currentMessages, openai.ToolMessage(result, toolCall.ID))
+		}
+	}
+
+	return nil, fmt.Errorf("exceeded maximum tool iterations (%d)", maxToolIterations)
 }
 
 func (oc *OpenAIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, latest string) ([]openai.ChatCompletionMessageParamUnion, error) {
@@ -1118,13 +1288,15 @@ func (oc *OpenAIClient) dispatchCompletion(
 	runCtx := oc.backgroundContext(ctx)
 	runCtx = oc.log.WithContext(runCtx)
 
-	// Check if streaming is enabled
-	if oc.connector.Config.OpenAI.EnableStreaming {
+	// Check if streaming is enabled and model supports it
+	// O1/O3 reasoning models don't support streaming
+	model := oc.effectiveModel(meta)
+	if oc.connector.Config.OpenAI.EnableStreaming && !isReasoningModel(model) {
 		oc.streamingCompletionWithRetry(runCtx, sourceEvent, portal, meta, prompt)
 		return
 	}
 
-	// Non-streaming path with retry
+	// Non-streaming path with retry (also used for reasoning models)
 	oc.nonStreamingCompletionWithRetry(runCtx, sourceEvent, portal, meta, prompt)
 }
 
@@ -1139,10 +1311,30 @@ func (oc *OpenAIClient) nonStreamingCompletionWithRetry(
 	currentPrompt := prompt
 
 	for attempt := 0; attempt < maxRetryAttempts; attempt++ {
-		resp, err := oc.requestCompletion(ctx, currentPrompt, meta)
+		var resp *openai.ChatCompletion
+		var err error
+
+		// Use tool loop if tools are enabled
+		if meta.ToolsEnabled {
+			resp, err = oc.requestCompletionWithToolLoop(ctx, currentPrompt, meta, func(toolName, args, result string) {
+				// Send a notice for each tool call
+				notice := fmt.Sprintf("Using %s...\n%s", toolName, result)
+				if len(notice) > 500 {
+					notice = notice[:497] + "..."
+				}
+				oc.sendSystemNotice(ctx, portal, notice)
+			})
+		} else {
+			resp, err = oc.requestCompletion(ctx, currentPrompt, meta)
+		}
+
 		if err == nil {
 			if resp != nil {
 				oc.queueAssistantMessage(portal, resp)
+				// Generate room title after first response
+				if len(resp.Choices) > 0 {
+					oc.maybeGenerateTitle(ctx, portal, resp.Choices[0].Message.Content)
+				}
 			}
 			return
 		}
@@ -1359,6 +1551,9 @@ func (oc *OpenAIClient) streamingCompletion(
 		Int("length", accumulated.Len()).
 		Msg("Streaming completion finished")
 
+	// Generate room title after first response
+	oc.maybeGenerateTitle(ctx, portal, accumulated.String())
+
 	return true, nil
 }
 
@@ -1418,9 +1613,9 @@ func (oc *OpenAIClient) emitTransientToken(ctx context.Context, portal *bridgev2
 		return
 	}
 	eventContent := &event.Content{
-		Raw: map[string]interface{}{
+		Raw: map[string]any{
 			"body": content,
-			"m.relates_to": map[string]interface{}{
+			"m.relates_to": map[string]any{
 				"rel_type": "m.reference",
 				"event_id": relatedEventID.String(),
 			},
@@ -1577,6 +1772,8 @@ func (oc *OpenAIClient) updatePortalConfig(ctx context.Context, portal *bridgev2
 	if config.MaxCompletionTokens > 0 {
 		meta.MaxCompletionTokens = config.MaxCompletionTokens
 	}
+	// ToolsEnabled is a boolean - always apply it
+	meta.ToolsEnabled = config.ToolsEnabled
 
 	meta.LastRoomStateSync = time.Now().Unix()
 
@@ -1672,10 +1869,7 @@ func (oc *OpenAIClient) truncatePrompt(
 	historyCount-- // Don't count latest user message
 
 	// Remove approximately half of history
-	keepCount := historyCount / 2
-	if keepCount < 1 {
-		keepCount = 1
-	}
+	keepCount := max(historyCount/2, 1)
 
 	// Build new prompt: [system] + [last N history] + [latest user]
 	var result []openai.ChatCompletionMessageParamUnion
@@ -1685,10 +1879,7 @@ func (oc *OpenAIClient) truncatePrompt(
 	}
 
 	// Keep only the most recent history messages
-	historyStart := len(prompt) - 1 - keepCount
-	if historyStart < startIdx {
-		historyStart = startIdx
-	}
+	historyStart := max(len(prompt)-1-keepCount, startIdx)
 
 	result = append(result, prompt[historyStart:]...)
 	return result
@@ -1760,14 +1951,24 @@ func isChatModel(modelID string) bool {
 	if strings.HasPrefix(modelID, "gpt-") {
 		return true
 	}
-	// Future: add o1, o3, or other chat model families as they're released
+	// O1/O3 reasoning models
+	if strings.HasPrefix(modelID, "o1") || strings.HasPrefix(modelID, "o3") {
+		return true
+	}
 	return false
+}
+
+// isReasoningModel checks if the model is an O1/O3 reasoning model
+// These models don't support streaming and have longer response times
+func isReasoningModel(modelID string) bool {
+	return strings.HasPrefix(modelID, "o1") || strings.HasPrefix(modelID, "o3")
 }
 
 // getModelCapabilities computes capabilities for a model
 func getModelCapabilities(modelID string) ModelCapabilities {
 	return ModelCapabilities{
-		SupportsVision: detectVisionSupport(modelID),
+		SupportsVision:   detectVisionSupport(modelID),
+		IsReasoningModel: isReasoningModel(modelID),
 	}
 }
 
@@ -1798,11 +1999,12 @@ func formatModelName(modelID string) string {
 	// Convert "gpt-4o-mini" → "GPT-4o Mini"
 	parts := strings.Split(modelID, "-")
 	formatted := make([]string, len(parts))
+	titleCaser := cases.Title(language.English)
 	for i, part := range parts {
 		if i == 0 {
 			formatted[i] = strings.ToUpper(part)
 		} else {
-			formatted[i] = strings.Title(part)
+			formatted[i] = titleCaser.String(part)
 		}
 	}
 	return strings.Join(formatted, "-")
@@ -2053,6 +2255,7 @@ func (oc *OpenAIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2
 		Temperature:         meta.Temperature,
 		MaxContextMessages:  meta.MaxContextMessages,
 		MaxCompletionTokens: meta.MaxCompletionTokens,
+		ToolsEnabled:        meta.ToolsEnabled,
 	}
 
 	// Use bot intent to send state event
@@ -2080,4 +2283,117 @@ func ptrIfNotEmpty(value string) *string {
 		return nil
 	}
 	return ptr.Ptr(value)
+}
+
+// generateRoomTitle asks the model to generate a short descriptive title for the conversation
+func (oc *OpenAIClient) generateRoomTitle(ctx context.Context, userMessage, assistantResponse string) (string, error) {
+	prompt := []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage("Generate a very short title (3-5 words max) that summarizes this conversation. Reply with ONLY the title, no quotes, no punctuation at the end."),
+		openai.UserMessage(fmt.Sprintf("User: %s\n\nAssistant: %s", userMessage, assistantResponse)),
+	}
+
+	model := oc.effectiveModel(nil)
+	// Use a faster/cheaper model for title generation if available
+	if strings.HasPrefix(model, "gpt-4") {
+		model = "gpt-4o-mini"
+	}
+
+	resp, err := oc.api.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		Model:     model,
+		Messages:  prompt,
+		MaxTokens: openai.Int(20),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("no response from model")
+	}
+
+	title := strings.TrimSpace(resp.Choices[0].Message.Content)
+	// Remove quotes if the model added them
+	title = strings.Trim(title, "\"'")
+	// Limit length
+	if len(title) > 50 {
+		title = title[:50]
+	}
+	return title, nil
+}
+
+// setRoomName sets the Matrix room name via m.room.name state event
+func (oc *OpenAIClient) setRoomName(ctx context.Context, portal *bridgev2.Portal, name string) error {
+	if portal.MXID == "" {
+		return fmt.Errorf("portal has no Matrix room ID")
+	}
+
+	bot := oc.UserLogin.Bridge.Bot
+	_, err := bot.SendState(ctx, portal.MXID, event.StateRoomName, "", &event.Content{
+		Parsed: &event.RoomNameEventContent{Name: name},
+	}, time.Time{})
+
+	if err != nil {
+		return fmt.Errorf("failed to set room name: %w", err)
+	}
+
+	// Update portal metadata
+	meta := portalMeta(portal)
+	meta.Title = name
+	meta.TitleGenerated = true
+	if err := portal.Save(ctx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to save portal after setting room name")
+	}
+
+	oc.log.Debug().Str("name", name).Msg("Set Matrix room name")
+	return nil
+}
+
+// maybeGenerateTitle generates a title for the room after the first exchange
+func (oc *OpenAIClient) maybeGenerateTitle(ctx context.Context, portal *bridgev2.Portal, assistantResponse string) {
+	meta := portalMeta(portal)
+
+	// Skip if title was already generated
+	if meta.TitleGenerated {
+		return
+	}
+
+	// Generate title in background to not block the message flow
+	go func() {
+		bgCtx := oc.backgroundContext(ctx)
+
+		// Fetch the last user message from database
+		messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(bgCtx, portal.PortalKey, 10)
+		if err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to get messages for title generation")
+			return
+		}
+
+		var userMessage string
+		for _, msg := range messages {
+			msgMeta, ok := msg.Metadata.(*MessageMetadata)
+			if ok && msgMeta != nil && msgMeta.Role == "user" && msgMeta.Body != "" {
+				userMessage = msgMeta.Body
+				break
+			}
+		}
+
+		if userMessage == "" {
+			oc.log.Debug().Msg("No user message found for title generation")
+			return
+		}
+
+		title, err := oc.generateRoomTitle(bgCtx, userMessage, assistantResponse)
+		if err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to generate room title")
+			return
+		}
+
+		if title == "" {
+			return
+		}
+
+		if err := oc.setRoomName(bgCtx, portal, title); err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to set room name")
+		}
+	}()
 }
