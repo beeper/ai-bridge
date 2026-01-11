@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/v3"
 )
 
 // ToolDefinition defines a tool that can be used by the AI
@@ -58,16 +58,14 @@ func BuiltinTools() []ToolDefinition {
 }
 
 // ToOpenAITools converts our tool definitions to OpenAI tool parameters
-func ToOpenAITools(tools []ToolDefinition) []openai.ChatCompletionToolParam {
-	result := make([]openai.ChatCompletionToolParam, len(tools))
+func ToOpenAITools(tools []ToolDefinition) []openai.ChatCompletionToolUnionParam {
+	result := make([]openai.ChatCompletionToolUnionParam, len(tools))
 	for i, tool := range tools {
-		result[i] = openai.ChatCompletionToolParam{
-			Function: openai.FunctionDefinitionParam{
-				Name:        tool.Name,
-				Description: openai.String(tool.Description),
-				Parameters:  openai.FunctionParameters(tool.Parameters),
-			},
-		}
+		result[i] = openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
+			Name:        tool.Name,
+			Description: openai.String(tool.Description),
+			Parameters:  openai.FunctionParameters(tool.Parameters),
+		})
 	}
 	return result
 }

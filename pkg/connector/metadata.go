@@ -1,7 +1,7 @@
 package connector
 
 import (
-	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2/database"
 )
 
@@ -32,18 +32,23 @@ type UserLoginMetadata struct {
 
 // PortalMetadata stores per-room tuning knobs for the assistant.
 type PortalMetadata struct {
-	Model             string            `json:"model,omitempty"`               // Set from room state
-	SystemPrompt      string            `json:"system_prompt,omitempty"`       // Set from room state
-	Temperature       float64           `json:"temperature,omitempty"`         // Set from room state
-	MaxContextMessages int              `json:"max_context_messages,omitempty"` // Set from room state
-	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"` // Set from room state
-	Slug              string            `json:"slug,omitempty"`
-	Title             string            `json:"title,omitempty"`
-	TitleGenerated    bool              `json:"title_generated,omitempty"`  // True if title was auto-generated
-	WelcomeSent       bool              `json:"welcome_sent,omitempty"`
-	Capabilities      ModelCapabilities `json:"capabilities,omitempty"`
-	LastRoomStateSync int64             `json:"last_room_state_sync,omitempty"` // Track when we've synced room state
-	ToolsEnabled      bool              `json:"tools_enabled,omitempty"`       // Enable function calling tools
+	Model               string            `json:"model,omitempty"`                 // Set from room state
+	SystemPrompt        string            `json:"system_prompt,omitempty"`         // Set from room state
+	Temperature         float64           `json:"temperature,omitempty"`           // Set from room state
+	MaxContextMessages  int               `json:"max_context_messages,omitempty"`  // Set from room state
+	MaxCompletionTokens int               `json:"max_completion_tokens,omitempty"` // Set from room state
+	ReasoningEffort     string            `json:"reasoning_effort,omitempty"`      // none, low, medium, high, xhigh
+	Slug                string            `json:"slug,omitempty"`
+	Title               string            `json:"title,omitempty"`
+	TitleGenerated      bool              `json:"title_generated,omitempty"` // True if title was auto-generated
+	WelcomeSent         bool              `json:"welcome_sent,omitempty"`
+	Capabilities        ModelCapabilities `json:"capabilities,omitempty"`
+	LastRoomStateSync   int64             `json:"last_room_state_sync,omitempty"` // Track when we've synced room state
+	ToolsEnabled        bool              `json:"tools_enabled,omitempty"`        // Enable function calling tools
+
+	// Conversation context mode: "messages" (build full history) or "responses" (use previous_response_id)
+	ConversationMode string `json:"conversation_mode,omitempty"` // Default: "messages"
+	LastResponseID   string `json:"last_response_id,omitempty"`  // For "responses" mode - chain responses
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild

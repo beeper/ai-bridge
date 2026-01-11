@@ -8,7 +8,7 @@ tool go.mau.fi/util/cmd/maubuild
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/openai/openai-go v1.12.0
+	github.com/openai/openai-go/v3 v3.16.0
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/rs/zerolog v1.34.0
 	go.mau.fi/util v0.9.4

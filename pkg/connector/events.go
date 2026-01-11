@@ -23,5 +23,7 @@ type RoomConfigEventContent struct {
 	Temperature         float64 `json:"temperature,omitempty"`
 	MaxContextMessages  int     `json:"max_context_messages,omitempty"`
 	MaxCompletionTokens int     `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string  `json:"reasoning_effort,omitempty"`
 	ToolsEnabled        bool    `json:"tools_enabled,omitempty"`
+	ConversationMode    string  `json:"conversation_mode,omitempty"` // "messages" or "responses"
 }
