@@ -221,11 +221,11 @@ func (oc *OpenAIConnector) FillPortalBridgeInfo(portal *bridgev2.Portal, content
 
 func (oc *OpenAIConnector) GetName() bridgev2.BridgeName {
 	return bridgev2.BridgeName{
-		DisplayName:          "ChatGPT",
-		NetworkURL:           "https://chat.openai.com",
+		DisplayName:          "Beeper AI",
+		NetworkURL:           "https://www.beeper.com/ai",
 		NetworkIcon:          "mxc://maunium.net/HPiAFz2uVH54camzatoorkWY",
-		NetworkID:            "openai",
-		BeeperBridgeType:     "github.com/beeper/ai-bridge",
+		NetworkID:            "beeper-ai",
+		BeeperBridgeType:     "beeper-ai",
 		DefaultPort:          29345,
 		DefaultCommandPrefix: oc.Config.Bridge.CommandPrefix,
 	}
