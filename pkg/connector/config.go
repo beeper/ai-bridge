@@ -61,4 +61,3 @@ func upgradeConfig(helper configupgrade.Helper) {
 	// Note: api_key, organization_id, project_id, base_url, and default_model
 	// are now per-user (via login flow) and per-room (via room state), not in config
 }
-

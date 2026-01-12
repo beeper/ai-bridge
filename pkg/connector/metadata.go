@@ -22,9 +22,9 @@ type ModelCapabilities struct {
 // UserLoginMetadata is stored on each login row to keep per-user settings.
 type UserLoginMetadata struct {
 	Persona       string      `json:"persona,omitempty"`
-	Provider      string      `json:"provider,omitempty"`            // Selected provider (beeper, openai, openrouter, custom)
+	Provider      string      `json:"provider,omitempty"` // Selected provider (beeper, openai, openrouter, custom)
 	APIKey        string      `json:"api_key,omitempty"`
-	BaseURL       string      `json:"base_url,omitempty"`            // Per-user API endpoint
+	BaseURL       string      `json:"base_url,omitempty"` // Per-user API endpoint
 	NextChatIndex int         `json:"next_chat_index,omitempty"`
 	ModelCache    *ModelCache `json:"model_cache,omitempty"`
 }

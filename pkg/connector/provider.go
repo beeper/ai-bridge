@@ -62,23 +62,23 @@ type GenerateResponse struct {
 type StreamEventType string
 
 const (
-	StreamEventDelta     StreamEventType = "delta"      // Text content delta
-	StreamEventReasoning StreamEventType = "reasoning"  // Reasoning/thinking delta
-	StreamEventToolCall  StreamEventType = "tool_call"  // Tool call request
-	StreamEventComplete  StreamEventType = "complete"   // Generation complete
-	StreamEventError     StreamEventType = "error"      // Error occurred
+	StreamEventDelta     StreamEventType = "delta"     // Text content delta
+	StreamEventReasoning StreamEventType = "reasoning" // Reasoning/thinking delta
+	StreamEventToolCall  StreamEventType = "tool_call" // Tool call request
+	StreamEventComplete  StreamEventType = "complete"  // Generation complete
+	StreamEventError     StreamEventType = "error"     // Error occurred
 )
 
 // StreamEvent represents a single event from a streaming response
 type StreamEvent struct {
 	Type           StreamEventType
-	Delta          string           // Text chunk for delta events
-	ReasoningDelta string           // Thinking/reasoning chunk
-	ToolCall       *ToolCallResult  // For tool_call events
-	FinishReason   string           // For complete events
-	ResponseID     string           // Response ID (for Responses API)
-	Usage          *UsageInfo       // Token usage (usually on complete)
-	Error          error            // For error events
+	Delta          string          // Text chunk for delta events
+	ReasoningDelta string          // Thinking/reasoning chunk
+	ToolCall       *ToolCallResult // For tool_call events
+	FinishReason   string          // For complete events
+	ResponseID     string          // Response ID (for Responses API)
+	Usage          *UsageInfo      // Token usage (usually on complete)
+	Error          error           // For error events
 }
 
 // ToolCallResult represents a tool/function call from the model

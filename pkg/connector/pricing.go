@@ -17,8 +17,8 @@ type ModelPricing struct {
 // Uses prefix matching to handle versioned models.
 var modelPricing = map[string]ModelPricing{
 	// GPT-4o family
-	"gpt-4o-mini":  {InputPerMillion: 0.15, OutputPerMillion: 0.60},
-	"gpt-4o":       {InputPerMillion: 2.50, OutputPerMillion: 10.00},
+	"gpt-4o-mini": {InputPerMillion: 0.15, OutputPerMillion: 0.60},
+	"gpt-4o":      {InputPerMillion: 2.50, OutputPerMillion: 10.00},
 
 	// GPT-4 Turbo
 	"gpt-4-turbo": {InputPerMillion: 10.00, OutputPerMillion: 30.00},
