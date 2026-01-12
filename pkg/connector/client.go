@@ -180,6 +180,10 @@ func (oc *OpenAIClient) processNextPending(ctx context.Context, roomID id.RoomID
 			// Check for more pending messages
 			oc.processNextPending(oc.backgroundContext(ctx), roomID)
 		}()
+
+		// Send SUCCESS status - message is now being processed (no longer waiting)
+		oc.sendSuccessStatus(ctx, pending.Portal, pending.Event)
+
 		oc.dispatchCompletionInternal(ctx, pending.Event, pending.Portal, pending.Meta, pending.PromptMessages)
 	}()
 }
@@ -551,13 +555,20 @@ func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 	// Dispatch completion handling in the background so the Matrix send pipeline can ack immediately.
 	go oc.dispatchCompletion(ctx, msg.Event, portal, meta, promptMessages)
 
-	// If room is busy, message will be queued - don't return SUCCESS status yet
+	// If room is busy, message will be queued - send PENDING status to keep in "Sending..." state
 	// The message will be processed when the room becomes available
 	if roomBusy {
 		oc.log.Debug().
 			Str("room_id", portal.MXID.String()).
-			Msg("Room is busy, message will be queued - returning pending status")
-		return nil, nil
+			Msg("Room is busy, message will be queued - sending pending status")
+
+		// Send PENDING status so the message stays in "Sending..." state in clients
+		oc.sendPendingStatus(ctx, portal, msg.Event, "Waiting for previous response to complete")
+
+		// Return the DB record (saves the message) but PENDING status keeps it in loading state
+		return &bridgev2.MatrixMessageResponse{
+			DB: userMessage,
+		}, nil
 	}
 
 	return &bridgev2.MatrixMessageResponse{
@@ -1620,6 +1631,31 @@ func (oc *OpenAIClient) notifyMatrixSendFailure(ctx context.Context, portal *bri
 		WithMessage("Failed to reach OpenAI").
 		WithIsCertain(true).
 		WithSendNotice(true)
+	portal.Bridge.Matrix.SendMessageStatus(ctx, &status, bridgev2.StatusEventInfoFromEvent(evt))
+}
+
+// sendPendingStatus sends a PENDING status for a message that is queued
+func (oc *OpenAIClient) sendPendingStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, message string) {
+	if portal == nil || portal.Bridge == nil || evt == nil {
+		return
+	}
+	status := bridgev2.MessageStatus{
+		Status:    event.MessageStatusPending,
+		Message:   message,
+		IsCertain: true,
+	}
+	portal.Bridge.Matrix.SendMessageStatus(ctx, &status, bridgev2.StatusEventInfoFromEvent(evt))
+}
+
+// sendSuccessStatus sends a SUCCESS status for a message that was previously pending
+func (oc *OpenAIClient) sendSuccessStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event) {
+	if portal == nil || portal.Bridge == nil || evt == nil {
+		return
+	}
+	status := bridgev2.MessageStatus{
+		Status:    event.MessageStatusSuccess,
+		IsCertain: true,
+	}
 	portal.Bridge.Matrix.SendMessageStatus(ctx, &status, bridgev2.StatusEventInfoFromEvent(evt))
 }
 
