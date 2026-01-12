@@ -2441,7 +2441,21 @@ func (oc *OpenAIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.
 	oldModelName := formatModelName(oldModel)
 	newModelName := formatModelName(newModel)
 
+	// Pre-update the new model ghost's profile before queueing the event
+	// This ensures the ghost has a display name set in its Matrix profile
+	newGhost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, modelUserID(newModel))
+	if err != nil {
+		oc.log.Warn().Err(err).Str("model", newModel).Msg("Failed to get ghost for model switch")
+	} else {
+		newGhost.UpdateInfo(ctx, &bridgev2.UserInfo{
+			Name:  ptr.Ptr(newModelName),
+			IsBot: ptr.Ptr(true),
+		})
+	}
+
 	// Create member changes: old model leaves, new model joins
+	// Use MemberEventExtra to set displayname directly in the membership event
+	// This works because MemberEventContent.Displayname has omitempty, so our Raw value is preserved
 	memberChanges := &bridgev2.ChatMemberList{
 		MemberMap: bridgev2.ChatMemberMap{
 			modelUserID(oldModel): {
@@ -2461,6 +2475,9 @@ func (oc *OpenAIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.
 				UserInfo: &bridgev2.UserInfo{
 					Name:  ptr.Ptr(newModelName),
 					IsBot: ptr.Ptr(true),
+				},
+				MemberEventExtra: map[string]any{
+					"displayname": newModelName,
 				},
 			},
 		},
@@ -2960,6 +2977,11 @@ func (oc *OpenAIClient) composeChatInfo(title, prompt, modelID string) *bridgev2
 			UserInfo: &bridgev2.UserInfo{
 				Name:  ptr.Ptr(modelName),
 				IsBot: ptr.Ptr(true),
+			},
+			// Set displayname directly in membership event content
+			// This works because MemberEventContent.Displayname has omitempty
+			MemberEventExtra: map[string]any{
+				"displayname": modelName,
 			},
 		},
 	}
