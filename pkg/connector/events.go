@@ -16,6 +16,16 @@ var StreamTokenEventType = event.Type{
 	Class: event.MessageEventType,
 }
 
+// StreamContentType identifies the type of content in a stream delta
+type StreamContentType string
+
+const (
+	StreamContentText       StreamContentType = "text"
+	StreamContentReasoning  StreamContentType = "reasoning"
+	StreamContentToolCall   StreamContentType = "tool_call"
+	StreamContentToolResult StreamContentType = "tool_result"
+)
+
 // RoomConfigEventContent represents the content of the room config state event
 type RoomConfigEventContent struct {
 	Model               string  `json:"model,omitempty"`

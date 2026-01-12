@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -173,6 +175,9 @@ func (oc *OpenAIClient) processNextPending(ctx context.Context, roomID id.RoomID
 		return
 	}
 
+	// Send SUCCESS status synchronously - message is now being processed
+	oc.sendSuccessStatus(ctx, pending.Portal, pending.Event)
+
 	// Process in background, will release room when done
 	go func() {
 		defer func() {
@@ -180,10 +185,6 @@ func (oc *OpenAIClient) processNextPending(ctx context.Context, roomID id.RoomID
 			// Check for more pending messages
 			oc.processNextPending(oc.backgroundContext(ctx), roomID)
 		}()
-
-		// Send SUCCESS status - message is now being processed (no longer waiting)
-		oc.sendSuccessStatus(ctx, pending.Portal, pending.Event)
-
 		oc.dispatchCompletionInternal(ctx, pending.Event, pending.Portal, pending.Meta, pending.PromptMessages)
 	}()
 }
@@ -255,11 +256,25 @@ func (oc *OpenAIClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal
 }
 
 func (oc *OpenAIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
-	name := ptr.Ptr("ChatGPT")
-	isBot := ptr.Ptr(true)
+	ghostID := string(ghost.ID)
+
+	// Parse model from ghost ID (format: "model-{escaped-model-id}")
+	if modelID := parseModelFromGhostID(ghostID); modelID != "" {
+		caps := getModelCapabilities(modelID)
+		displayName := formatModelName(modelID)
+		if caps.SupportsVision {
+			displayName += " (Vision)"
+		}
+		return &bridgev2.UserInfo{
+			Name:  ptr.Ptr(displayName),
+			IsBot: ptr.Ptr(true),
+		}, nil
+	}
+
+	// Fallback for unknown ghost types
 	return &bridgev2.UserInfo{
-		Name:  name,
-		IsBot: isBot,
+		Name:  ptr.Ptr("AI Assistant"),
+		IsBot: ptr.Ptr(true),
 	}, nil
 }
 
@@ -512,6 +527,9 @@ func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 	}
 
 	portal := msg.Portal
+	if portal == nil {
+		return nil, fmt.Errorf("portal is nil")
+	}
 	meta := portalMeta(portal)
 
 	// Handle image messages for vision-capable models
@@ -549,26 +567,28 @@ func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 		Timestamp: time.Now(),
 	}
 
-	// Check if room is busy (message will be queued)
-	roomBusy := oc.isRoomBusy(portal.MXID)
+	// Try to acquire room SYNCHRONOUSLY - no race condition
+	if oc.acquireRoom(portal.MXID) {
+		// Room acquired - send SUCCESS, we're processing now
+		oc.sendSuccessStatus(ctx, portal, msg.Event)
 
-	// Dispatch completion handling in the background so the Matrix send pipeline can ack immediately.
-	go oc.dispatchCompletion(ctx, msg.Event, portal, meta, promptMessages)
-
-	// If room is busy, message will be queued - send PENDING status to keep in "Sending..." state
-	// The message will be processed when the room becomes available
-	if roomBusy {
-		oc.log.Debug().
-			Str("room_id", portal.MXID.String()).
-			Msg("Room is busy, message will be queued - sending pending status")
-
-		// Send PENDING status so the message stays in "Sending..." state in clients
-		oc.sendPendingStatus(ctx, portal, msg.Event, "Waiting for previous response to complete")
-
-		// Return the DB record (saves the message) but PENDING status keeps it in loading state
-		return &bridgev2.MatrixMessageResponse{
-			DB: userMessage,
-		}, nil
+		// Process in background
+		go func() {
+			defer func() {
+				oc.releaseRoom(portal.MXID)
+				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
+			}()
+			oc.dispatchCompletionInternal(ctx, msg.Event, portal, meta, promptMessages)
+		}()
+	} else {
+		// Room busy - queue and send PENDING
+		oc.queuePendingMessage(portal.MXID, pendingMessage{
+			Event:          msg.Event,
+			Portal:         portal,
+			Meta:           meta,
+			PromptMessages: promptMessages,
+		})
+		oc.sendPendingStatus(ctx, portal, msg.Event, "Waiting for previous response")
 	}
 
 	return &bridgev2.MatrixMessageResponse{
@@ -583,6 +603,9 @@ func (oc *OpenAIClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Mat
 	}
 
 	portal := edit.Portal
+	if portal == nil {
+		return fmt.Errorf("portal is nil")
+	}
 	meta := portalMeta(portal)
 
 	// Get the new message body
@@ -676,8 +699,25 @@ func (oc *OpenAIClient) regenerateFromEdit(
 		}
 	}
 
-	// Dispatch a new completion
-	go oc.dispatchCompletion(ctx, evt, portal, meta, promptMessages)
+	// Dispatch a new completion with synchronous room acquisition
+	if oc.acquireRoom(portal.MXID) {
+		oc.sendSuccessStatus(ctx, portal, evt)
+		go func() {
+			defer func() {
+				oc.releaseRoom(portal.MXID)
+				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
+			}()
+			oc.dispatchCompletionInternal(ctx, evt, portal, meta, promptMessages)
+		}()
+	} else {
+		oc.queuePendingMessage(portal.MXID, pendingMessage{
+			Event:          evt,
+			Portal:         portal,
+			Meta:           meta,
+			PromptMessages: promptMessages,
+		})
+		oc.sendPendingStatus(ctx, portal, evt, "Waiting for previous response")
+	}
 
 	return nil
 }
@@ -786,8 +826,30 @@ func (oc *OpenAIClient) handleImageMessage(
 		Timestamp: time.Now(),
 	}
 
-	// Dispatch completion handling in the background
-	go oc.dispatchCompletion(ctx, msg.Event, portal, meta, promptMessages)
+	// Try to acquire room SYNCHRONOUSLY - no race condition
+	if oc.acquireRoom(portal.MXID) {
+		// Room acquired - send SUCCESS, we're processing now
+		oc.sendSuccessStatus(ctx, portal, msg.Event)
+
+		// Process in background
+		go func() {
+			defer func() {
+				oc.releaseRoom(portal.MXID)
+				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
+			}()
+			oc.dispatchCompletionInternal(ctx, msg.Event, portal, meta, promptMessages)
+		}()
+	} else {
+		// Room busy - queue and send PENDING
+		oc.queuePendingMessage(portal.MXID, pendingMessage{
+			Event:          msg.Event,
+			Portal:         portal,
+			Meta:           meta,
+			PromptMessages: promptMessages,
+		})
+		oc.sendPendingStatus(ctx, portal, msg.Event, "Waiting for previous response")
+	}
+
 	return &bridgev2.MatrixMessageResponse{
 		DB: userMessage,
 	}, nil
@@ -1417,8 +1479,25 @@ func (oc *OpenAIClient) handleRegenerate(
 		return
 	}
 
-	// Dispatch new completion
-	oc.dispatchCompletion(runCtx, evt, portal, meta, prompt)
+	// Dispatch new completion with synchronous room acquisition
+	if oc.acquireRoom(portal.MXID) {
+		oc.sendSuccessStatus(runCtx, portal, evt)
+		go func() {
+			defer func() {
+				oc.releaseRoom(portal.MXID)
+				oc.processNextPending(oc.backgroundContext(runCtx), portal.MXID)
+			}()
+			oc.dispatchCompletionInternal(runCtx, evt, portal, meta, prompt)
+		}()
+	} else {
+		oc.queuePendingMessage(portal.MXID, pendingMessage{
+			Event:          evt,
+			Portal:         portal,
+			Meta:           meta,
+			PromptMessages: prompt,
+		})
+		oc.sendPendingStatus(runCtx, portal, evt, "Waiting for previous response")
+	}
 }
 
 // buildPromptForRegenerate builds a prompt for regeneration, excluding the last assistant message
@@ -1505,40 +1584,6 @@ func (oc *OpenAIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal
 	}
 	prompt = append(prompt, openai.UserMessage(latest))
 	return prompt, nil
-}
-
-func (oc *OpenAIClient) dispatchCompletion(
-	ctx context.Context,
-	sourceEvent *event.Event,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-	prompt []openai.ChatCompletionMessageParamUnion,
-) {
-	roomID := portal.MXID
-
-	// Try to acquire room lock for turn-based processing
-	if !oc.acquireRoom(roomID) {
-		// Room is busy, queue the message for later
-		oc.queuePendingMessage(roomID, pendingMessage{
-			Event:          sourceEvent,
-			Portal:         portal,
-			Meta:           meta,
-			PromptMessages: prompt,
-		})
-		oc.log.Debug().
-			Str("room_id", roomID.String()).
-			Msg("Room is busy, message queued")
-		return
-	}
-
-	// Process and release room when done, then check for pending
-	defer func() {
-		oc.releaseRoom(roomID)
-		// Process any pending messages
-		oc.processNextPending(ctx, roomID)
-	}()
-
-	oc.dispatchCompletionInternal(ctx, sourceEvent, portal, meta, prompt)
 }
 
 // dispatchCompletionInternal contains the actual completion logic
@@ -1659,12 +1704,12 @@ func (oc *OpenAIClient) sendSuccessStatus(ctx context.Context, portal *bridgev2.
 	portal.Bridge.Matrix.SendMessageStatus(ctx, &status, bridgev2.StatusEventInfoFromEvent(evt))
 }
 
-// setAssistantTyping sets the typing indicator for the assistant ghost user
-func (oc *OpenAIClient) setAssistantTyping(ctx context.Context, portal *bridgev2.Portal, typing bool) {
+// setModelTyping sets the typing indicator for the current model's ghost user
+func (oc *OpenAIClient) setModelTyping(ctx context.Context, portal *bridgev2.Portal, typing bool) {
 	if portal == nil || portal.MXID == "" {
 		return
 	}
-	intent := oc.getAssistantIntent(ctx)
+	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return
 	}
@@ -1679,31 +1724,52 @@ func (oc *OpenAIClient) setAssistantTyping(ctx context.Context, portal *bridgev2
 	}
 }
 
-// emitTransientToken sends a transient streaming token update to the room
+// emitStreamEvent sends a streaming delta event to the room
 // Uses Matrix-spec compliant m.relates_to to correlate with the initial message
-func (oc *OpenAIClient) emitTransientToken(ctx context.Context, portal *bridgev2.Portal, relatedEventID id.EventID, content string) {
+// contentType identifies what kind of content this is (text, reasoning, tool_call, tool_result)
+// seq is a sequence number for ordering events
+// metadata contains optional fields like tool_name, item_id, status
+func (oc *OpenAIClient) emitStreamEvent(ctx context.Context, portal *bridgev2.Portal, relatedEventID id.EventID, contentType StreamContentType, delta string, seq int, metadata map[string]any) {
 	if portal == nil || portal.MXID == "" {
 		return
 	}
-	intent := oc.getAssistantIntent(ctx)
+	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return
 	}
 	eventContent := &event.Content{
 		Raw: map[string]any{
-			"body": content,
+			"body":         delta,
+			"content_type": string(contentType),
+			"seq":          seq,
 			"m.relates_to": map[string]any{
 				"rel_type": "m.reference",
 				"event_id": relatedEventID.String(),
 			},
 		},
 	}
-	if _, err := intent.SendMessage(ctx, portal.MXID, event.Type{
-		Type:  "com.beeper.ai.stream_token",
-		Class: event.MessageEventType,
-	}, eventContent, nil); err != nil {
-		oc.log.Warn().Err(err).Str("related_event_id", relatedEventID.String()).Msg("Failed to emit transient token")
+	// Merge optional metadata (tool_name, item_id, status, etc.)
+	for k, v := range metadata {
+		eventContent.Raw[k] = v
 	}
+	if _, err := intent.SendMessage(ctx, portal.MXID, StreamTokenEventType, eventContent, nil); err != nil {
+		oc.log.Warn().Err(err).Str("related_event_id", relatedEventID.String()).Str("content_type", string(contentType)).Int("seq", seq).Msg("Failed to emit stream event")
+	}
+}
+
+// executeBuiltinTool finds and executes a builtin tool by name
+func (oc *OpenAIClient) executeBuiltinTool(ctx context.Context, toolName string, argsJSON string) (string, error) {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return "", fmt.Errorf("invalid tool arguments: %w", err)
+	}
+
+	for _, tool := range BuiltinTools() {
+		if tool.Name == toolName {
+			return tool.Execute(ctx, args)
+		}
+	}
+	return "", fmt.Errorf("unknown tool: %s", toolName)
 }
 
 // buildResponsesAPIParams creates common Responses API parameters for both streaming and non-streaming paths
@@ -1771,8 +1837,8 @@ func (oc *OpenAIClient) streamingResponse(
 		Logger()
 
 	// Set typing indicator when streaming starts
-	oc.setAssistantTyping(ctx, portal, true)
-	defer oc.setAssistantTyping(ctx, portal, false)
+	oc.setModelTyping(ctx, portal, true)
+	defer oc.setModelTyping(ctx, portal, false)
 
 	// Build Responses API params using shared helper
 	params := oc.buildResponsesAPIParams(ctx, meta, messages)
@@ -1789,24 +1855,21 @@ func (oc *OpenAIClient) streamingResponse(
 
 	// Track streaming state
 	var (
-		accumulated     strings.Builder
-		reasoning       strings.Builder
-		firstToken      = true
-		initialEventID  id.EventID
-		finishReason    string
-
-		// Transient token debouncing
-		transientDebounce = time.Duration(oc.connector.Config.OpenAI.TransientDebounceMs) * time.Millisecond
-		lastTransientTime = time.Now()
+		accumulated    strings.Builder
+		reasoning      strings.Builder
+		firstToken     = true
+		initialEventID id.EventID
+		finishReason   string
+		sequenceNum    int // Global sequence number for ordering all stream events
 	)
 
-	// Process stream events
+	// Process stream events - no debouncing, stream every delta immediately
 	for stream.Next() {
-		event := stream.Current()
+		streamEvent := stream.Current()
 
-		switch event.Type {
+		switch streamEvent.Type {
 		case "response.output_text.delta":
-			accumulated.WriteString(event.Delta)
+			accumulated.WriteString(streamEvent.Delta)
 
 			// First token - send initial message synchronously to capture event_id
 			if firstToken && accumulated.Len() > 0 {
@@ -1816,46 +1879,95 @@ func (oc *OpenAIClient) streamingResponse(
 					log.Error().Msg("Failed to send initial streaming message")
 					return false, nil
 				}
-				lastTransientTime = time.Now()
 			}
 
-			// Subsequent tokens - emit transient updates with debouncing
+			// Stream every text delta immediately (no debouncing for snappy UX)
 			if !firstToken && initialEventID != "" {
-				now := time.Now()
-				if now.Sub(lastTransientTime) >= transientDebounce {
-					oc.emitTransientToken(ctx, portal, initialEventID, accumulated.String())
-					lastTransientTime = now
-				}
+				sequenceNum++
+				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentText, streamEvent.Delta, sequenceNum, nil)
 			}
 
 		case "response.reasoning_text.delta":
-			reasoning.WriteString(event.Delta)
-			// Reasoning tokens stream separately - we'll include them in final edit
+			reasoning.WriteString(streamEvent.Delta)
+			// Stream reasoning tokens in real-time too
+			if !firstToken && initialEventID != "" {
+				sequenceNum++
+				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentReasoning, streamEvent.Delta, sequenceNum, nil)
+			}
+
+		case "response.function_call_arguments.delta":
+			// Stream function call arguments as they arrive
+			if initialEventID != "" {
+				sequenceNum++
+				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentToolCall, streamEvent.Delta, sequenceNum, map[string]any{
+					"tool_name": streamEvent.Name,
+					"item_id":   streamEvent.ItemID,
+					"status":    "streaming",
+				})
+			}
+
+		case "response.function_call_arguments.done":
+			// Function call complete - execute the tool and stream result
+			if initialEventID != "" && meta.ToolsEnabled {
+				result, err := oc.executeBuiltinTool(ctx, streamEvent.Name, streamEvent.Arguments)
+				if err != nil {
+					log.Warn().Err(err).Str("tool", streamEvent.Name).Msg("Tool execution failed")
+					result = fmt.Sprintf("Error: %s", err.Error())
+				}
+				sequenceNum++
+				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentToolResult, result, sequenceNum, map[string]any{
+					"tool_name": streamEvent.Name,
+					"item_id":   streamEvent.ItemID,
+					"status":    "completed",
+				})
+			}
+
+		case "response.web_search_call.searching":
+			// Web search starting
+			if initialEventID != "" {
+				sequenceNum++
+				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentToolCall, "", sequenceNum, map[string]any{
+					"tool_name": "web_search",
+					"item_id":   streamEvent.ItemID,
+					"status":    "searching",
+				})
+			}
+
+		case "response.web_search_call.completed":
+			// Web search completed
+			if initialEventID != "" {
+				sequenceNum++
+				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentToolResult, "", sequenceNum, map[string]any{
+					"tool_name": "web_search",
+					"item_id":   streamEvent.ItemID,
+					"status":    "completed",
+				})
+			}
 
 		case "response.completed":
-			if event.Response.Status == "completed" {
+			if streamEvent.Response.Status == "completed" {
 				finishReason = "stop"
 			} else {
-				finishReason = string(event.Response.Status)
+				finishReason = string(streamEvent.Response.Status)
 			}
 			// Store response ID for "responses" mode context chaining
-			if event.Response.ID != "" && meta.ConversationMode == "responses" {
-				meta.LastResponseID = event.Response.ID
+			if streamEvent.Response.ID != "" && meta.ConversationMode == "responses" {
+				meta.LastResponseID = streamEvent.Response.ID
 				if err := portal.Save(ctx); err != nil {
 					log.Warn().Err(err).Msg("Failed to save portal after storing response ID")
 				}
 			}
-			log.Debug().Str("reason", finishReason).Str("response_id", event.Response.ID).Msg("Response stream completed")
+			log.Debug().Str("reason", finishReason).Str("response_id", streamEvent.Response.ID).Msg("Response stream completed")
 
 		case "error":
-			log.Error().Str("error", event.Message).Msg("Responses API stream error")
+			log.Error().Str("error", streamEvent.Message).Msg("Responses API stream error")
 			// Check for context length error
-			if strings.Contains(event.Message, "context_length") || strings.Contains(event.Message, "token") {
+			if strings.Contains(streamEvent.Message, "context_length") || strings.Contains(streamEvent.Message, "token") {
 				return false, &ContextLengthError{
-					OriginalError: fmt.Errorf("%s", event.Message),
+					OriginalError: fmt.Errorf("%s", streamEvent.Message),
 				}
 			}
-			oc.notifyMatrixSendFailure(ctx, portal, evt, fmt.Errorf("API error: %s", event.Message))
+			oc.notifyMatrixSendFailure(ctx, portal, evt, fmt.Errorf("API error: %s", streamEvent.Message))
 			return false, nil
 		}
 	}
@@ -1869,11 +1981,6 @@ func (oc *OpenAIClient) streamingResponse(
 		}
 		oc.notifyMatrixSendFailure(ctx, portal, evt, err)
 		return false, nil
-	}
-
-	// Emit final transient update with complete content
-	if initialEventID != "" {
-		oc.emitTransientToken(ctx, portal, initialEventID, accumulated.String())
 	}
 
 	// Send final edit to persist complete content with metadata (including reasoning)
@@ -1944,8 +2051,8 @@ func (oc *OpenAIClient) nonStreamingResponse(
 		Logger()
 
 	// Set typing indicator
-	oc.setAssistantTyping(ctx, portal, true)
-	defer oc.setAssistantTyping(ctx, portal, false)
+	oc.setModelTyping(ctx, portal, true)
+	defer oc.setModelTyping(ctx, portal, false)
 
 	// Build Responses API params using shared helper
 	params := oc.buildResponsesAPIParams(ctx, meta, messages)
@@ -1994,8 +2101,8 @@ func (oc *OpenAIClient) nonStreamingResponse(
 		}
 	}
 
-	// Queue assistant message via remote event
-	oc.queueAssistantResponseMessage(portal, resp.ID, content, reasoning, meta)
+	// Queue model response message via remote event
+	oc.queueModelResponseMessage(portal, resp.ID, content, reasoning, meta)
 
 	log.Info().
 		Str("response_id", resp.ID).
@@ -2020,8 +2127,9 @@ func (oc *OpenAIClient) nonStreamingResponseWithRetry(
 	oc.responseWithRetry(ctx, evt, portal, meta, prompt, oc.nonStreamingResponse, "non-streaming")
 }
 
-// queueAssistantResponseMessage queues an assistant message from a Responses API response
-func (oc *OpenAIClient) queueAssistantResponseMessage(portal *bridgev2.Portal, responseID string, content string, _ string, _ *PortalMetadata) {
+// queueModelResponseMessage queues an assistant message from a Responses API response
+func (oc *OpenAIClient) queueModelResponseMessage(portal *bridgev2.Portal, responseID string, content string, _ string, meta *PortalMetadata) {
+	modelID := oc.effectiveModel(meta)
 	msgMeta := &MessageMetadata{
 		Role:         "assistant",
 		Body:         content,
@@ -2033,7 +2141,7 @@ func (oc *OpenAIClient) queueAssistantResponseMessage(portal *bridgev2.Portal, r
 		PortalKey: portal.PortalKey,
 		ID:        networkid.MessageID(fmt.Sprintf("openai:%s", uuid.NewString())),
 		Sender: bridgev2.EventSender{
-			Sender:      assistantUserID(oc.UserLogin.ID),
+			Sender:      modelUserID(modelID),
 			ForceDMUser: true,
 			SenderLogin: oc.UserLogin.ID,
 			IsFromMe:    false,
@@ -2047,7 +2155,7 @@ func (oc *OpenAIClient) queueAssistantResponseMessage(portal *bridgev2.Portal, r
 
 // sendInitialStreamMessage sends the first message in a streaming session and returns its event ID
 func (oc *OpenAIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string) id.EventID {
-	intent := oc.getAssistantIntent(ctx)
+	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return ""
 	}
@@ -2072,7 +2180,7 @@ func (oc *OpenAIClient) sendFinalEditWithReasoning(ctx context.Context, portal *
 	if portal == nil || portal.MXID == "" {
 		return
 	}
-	intent := oc.getAssistantIntent(ctx)
+	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return
 	}
@@ -2101,7 +2209,8 @@ func (oc *OpenAIClient) sendFinalEditWithReasoning(ctx context.Context, portal *
 				"rel_type": "m.replace",
 				"event_id": initialEventID.String(),
 			},
-			"com.beeper.ai": aiMetadata,
+			"com.beeper.ai":                 aiMetadata,
+			"com.beeper.dont_render_edited": true, // Don't show "edited" indicator for streaming updates
 		},
 	}
 
@@ -2130,12 +2239,14 @@ func (oc *OpenAIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2
 	if meta.WelcomeSent {
 		return
 	}
-	body := "This chat was created automatically. Send a message to start talking to ChatGPT."
+	modelID := oc.effectiveModel(meta)
+	modelName := formatModelName(modelID)
+	body := fmt.Sprintf("This chat was created automatically. Send a message to start talking to %s.", modelName)
 	event := &OpenAIRemoteMessage{
 		PortalKey: portal.PortalKey,
 		ID:        networkid.MessageID(fmt.Sprintf("openai:welcome:%s", uuid.NewString())),
 		Sender: bridgev2.EventSender{
-			Sender:      assistantUserID(oc.UserLogin.ID),
+			Sender:      modelUserID(modelID),
 			ForceDMUser: true,
 			SenderLogin: oc.UserLogin.ID,
 			IsFromMe:    false,
@@ -2239,6 +2350,9 @@ func (oc *OpenAIClient) validateModel(ctx context.Context, modelID string) (bool
 func (oc *OpenAIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Portal, config *RoomConfigEventContent) {
 	meta := portalMeta(portal)
 
+	// Track old model for membership change
+	oldModel := meta.Model
+
 	// Update only non-empty/non-zero values
 	if config.Model != "" {
 		meta.Model = config.Model
@@ -2271,19 +2385,92 @@ func (oc *OpenAIClient) updatePortalConfig(ctx context.Context, portal *bridgev2
 
 	meta.LastRoomStateSync = time.Now().Unix()
 
+	// Handle model switch - generate membership events if model changed
+	if config.Model != "" && oldModel != "" && config.Model != oldModel {
+		oc.handleModelSwitch(ctx, portal, oldModel, config.Model)
+	}
+
 	// Persist changes
 	if err := portal.Save(ctx); err != nil {
 		oc.log.Warn().Err(err).Msg("Failed to save portal after config update")
 	}
 }
 
-// sendSystemNotice sends an informational notice to the room as the assistant
+// handleModelSwitch generates membership change events when switching models
+// This creates leave/join events to show the model transition in the room timeline
+func (oc *OpenAIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Portal, oldModel, newModel string) {
+	if oldModel == newModel || oldModel == "" || newModel == "" {
+		return
+	}
+
+	oc.log.Info().
+		Str("old_model", oldModel).
+		Str("new_model", newModel).
+		Stringer("portal", portal.PortalKey).
+		Msg("Handling model switch")
+
+	oldModelName := formatModelName(oldModel)
+	newModelName := formatModelName(newModel)
+
+	// Create member changes: old model leaves, new model joins
+	memberChanges := &bridgev2.ChatMemberList{
+		MemberMap: bridgev2.ChatMemberMap{
+			modelUserID(oldModel): {
+				EventSender: bridgev2.EventSender{
+					Sender:      modelUserID(oldModel),
+					SenderLogin: oc.UserLogin.ID,
+				},
+				Membership:     event.MembershipLeave,
+				PrevMembership: event.MembershipJoin,
+			},
+			modelUserID(newModel): {
+				EventSender: bridgev2.EventSender{
+					Sender:      modelUserID(newModel),
+					SenderLogin: oc.UserLogin.ID,
+				},
+				Membership: event.MembershipJoin,
+				UserInfo: &bridgev2.UserInfo{
+					Name:  ptr.Ptr(newModelName),
+					IsBot: ptr.Ptr(true),
+				},
+			},
+		},
+	}
+
+	// Update portal's OtherUserID to new model
+	portal.OtherUserID = modelUserID(newModel)
+
+	// Queue the ChatInfoChange event
+	evt := &simplevent.ChatInfoChange{
+		EventMeta: simplevent.EventMeta{
+			Type:      bridgev2.RemoteEventChatInfoChange,
+			PortalKey: portal.PortalKey,
+			Timestamp: time.Now(),
+			LogContext: func(c zerolog.Context) zerolog.Context {
+				return c.Str("action", "model_switch").
+					Str("old_model", oldModel).
+					Str("new_model", newModel)
+			},
+		},
+		ChatInfoChange: &bridgev2.ChatInfoChange{
+			MemberChanges: memberChanges,
+		},
+	}
+
+	oc.UserLogin.QueueRemoteEvent(evt)
+
+	// Send a notice about the model change from the bridge bot
+	notice := fmt.Sprintf("Switched from %s to %s", oldModelName, newModelName)
+	oc.sendSystemNotice(ctx, portal, notice)
+}
+
+// sendSystemNotice sends an informational notice to the room from the bridge bot
 func (oc *OpenAIClient) sendSystemNotice(ctx context.Context, portal *bridgev2.Portal, message string) {
 	if portal == nil || portal.MXID == "" {
 		return
 	}
-	intent := oc.getAssistantIntent(ctx)
-	if intent == nil {
+	bot := oc.UserLogin.Bridge.Bot
+	if bot == nil {
 		return
 	}
 
@@ -2292,19 +2479,21 @@ func (oc *OpenAIClient) sendSystemNotice(ctx context.Context, portal *bridgev2.P
 		Body:    message,
 	}
 
-	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{
+	if _, err := bot.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{
 		Parsed: content,
 	}, nil); err != nil {
 		oc.log.Warn().Err(err).Msg("Failed to send system notice")
 	}
 }
 
-// getAssistantIntent returns the Matrix intent for the assistant ghost, or nil if unavailable.
-// Centralizes the repeated ghost lookup and nil-checking pattern.
-func (oc *OpenAIClient) getAssistantIntent(ctx context.Context) bridgev2.MatrixAPI {
-	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, assistantUserID(oc.UserLogin.ID))
+// getModelIntent returns the Matrix intent for the current model's ghost in the portal, or nil if unavailable.
+// Uses the portal's model configuration to determine which model ghost to use.
+func (oc *OpenAIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal) bridgev2.MatrixAPI {
+	meta := portalMeta(portal)
+	modelID := oc.effectiveModel(meta)
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, modelUserID(modelID))
 	if err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to get assistant ghost")
+		oc.log.Warn().Err(err).Str("model", modelID).Msg("Failed to get model ghost")
 		return nil
 	}
 	return ghost.Intent
@@ -2606,12 +2795,18 @@ func (oc *OpenAIClient) ensureDefaultChat(ctx context.Context) error {
 }
 
 func (oc *OpenAIClient) listAllChatPortals(ctx context.Context) ([]*bridgev2.Portal, error) {
-	dbPortals, err := oc.UserLogin.Bridge.DB.Portal.GetAllDMsWith(ctx, assistantUserID(oc.UserLogin.ID))
+	// Query all portals and filter by receiver (our login ID)
+	// This works because all our portals have Receiver set to our UserLogin.ID
+	allDBPortals, err := oc.UserLogin.Bridge.DB.Portal.GetAll(ctx)
 	if err != nil {
 		return nil, err
 	}
-	portals := make([]*bridgev2.Portal, 0, len(dbPortals))
-	for _, dbPortal := range dbPortals {
+	portals := make([]*bridgev2.Portal, 0)
+	for _, dbPortal := range allDBPortals {
+		// Filter to only portals owned by this user login
+		if dbPortal.Receiver != oc.UserLogin.ID {
+			continue
+		}
 		portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, dbPortal.PortalKey)
 		if err != nil {
 			return nil, err
@@ -2645,12 +2840,16 @@ func (oc *OpenAIClient) spawnPortal(ctx context.Context, title, systemPrompt str
 	defer oc.chatLock.Unlock()
 	oc.log.Debug().Str("title", title).Msg("Allocating portal for new chat")
 
+	// Get default model for new chats
+	defaultModelID := oc.effectiveModel(nil)
+
 	meta := loginMetadata(oc.UserLogin)
 	meta.NextChatIndex++
 	index := meta.NextChatIndex
 	slug := formatChatSlug(index)
 	if title == "" {
-		title = fmt.Sprintf("ChatGPT %d", index)
+		modelName := formatModelName(defaultModelID)
+		title = fmt.Sprintf("%s %d", modelName, index)
 	}
 	if systemPrompt == "" {
 		systemPrompt = oc.connector.Config.OpenAI.SystemPrompt
@@ -2664,11 +2863,13 @@ func (oc *OpenAIClient) spawnPortal(ctx context.Context, title, systemPrompt str
 	pmeta := portalMeta(portal)
 	pmeta.Slug = slug
 	pmeta.Title = title
+	pmeta.Model = defaultModelID
+	pmeta.Capabilities = getModelCapabilities(defaultModelID)
 	if systemPrompt != "" {
 		pmeta.SystemPrompt = systemPrompt
 	}
 	portal.RoomType = database.RoomTypeDM
-	portal.OtherUserID = assistantUserID(oc.UserLogin.ID)
+	portal.OtherUserID = modelUserID(defaultModelID)
 	portal.Name = title
 	portal.NameSet = true
 	portal.Topic = systemPrompt
@@ -2680,30 +2881,35 @@ func (oc *OpenAIClient) spawnPortal(ctx context.Context, title, systemPrompt str
 	if err := oc.UserLogin.Save(ctx); err != nil {
 		return nil, nil, err
 	}
-	info := oc.composeChatInfo(title, systemPrompt)
+	info := oc.composeChatInfo(title, systemPrompt, defaultModelID)
 	return portal, info, nil
 }
 
 func (oc *OpenAIClient) chatInfoFromPortal(portal *bridgev2.Portal) *bridgev2.ChatInfo {
 	meta := portalMeta(portal)
+	modelID := oc.effectiveModel(meta)
 	title := meta.Title
 	if title == "" {
 		if portal.Name != "" {
 			title = portal.Name
 		} else {
-			title = "ChatGPT"
+			title = formatModelName(modelID)
 		}
 	}
 	prompt := meta.SystemPrompt
 	if prompt == "" {
 		prompt = oc.connector.Config.OpenAI.SystemPrompt
 	}
-	return oc.composeChatInfo(title, prompt)
+	return oc.composeChatInfo(title, prompt, modelID)
 }
 
-func (oc *OpenAIClient) composeChatInfo(title, prompt string) *bridgev2.ChatInfo {
+func (oc *OpenAIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.ChatInfo {
+	if modelID == "" {
+		modelID = oc.effectiveModel(nil)
+	}
+	modelName := formatModelName(modelID)
 	if title == "" {
-		title = "ChatGPT"
+		title = modelName
 	}
 	if prompt == "" {
 		prompt = oc.connector.Config.OpenAI.SystemPrompt
@@ -2716,14 +2922,14 @@ func (oc *OpenAIClient) composeChatInfo(title, prompt string) *bridgev2.ChatInfo
 			},
 			Membership: event.MembershipJoin,
 		},
-		assistantUserID(oc.UserLogin.ID): {
+		modelUserID(modelID): {
 			EventSender: bridgev2.EventSender{
-				Sender:      assistantUserID(oc.UserLogin.ID),
+				Sender:      modelUserID(modelID),
 				SenderLogin: oc.UserLogin.ID,
 			},
 			Membership: event.MembershipJoin,
 			UserInfo: &bridgev2.UserInfo{
-				Name:  ptr.Ptr("ChatGPT"),
+				Name:  ptr.Ptr(modelName),
 				IsBot: ptr.Ptr(true),
 			},
 		},
@@ -2734,7 +2940,7 @@ func (oc *OpenAIClient) composeChatInfo(title, prompt string) *bridgev2.ChatInfo
 		Type:  ptr.Ptr(database.RoomTypeDM),
 		Members: &bridgev2.ChatMemberList{
 			IsFull:      true,
-			OtherUserID: assistantUserID(oc.UserLogin.ID),
+			OtherUserID: modelUserID(modelID),
 			MemberMap:   members,
 		},
 	}
