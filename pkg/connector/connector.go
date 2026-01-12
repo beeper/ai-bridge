@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -14,7 +13,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/matrix"
 	"maunium.net/go/mautrix/event"
-	"maunium.net/go/mautrix/id"
 )
 
 const (
@@ -66,13 +64,6 @@ func (oc *OpenAIConnector) Start(ctx context.Context) error {
 	}
 	if oc.Config.Bridge.CommandPrefix == "" {
 		oc.Config.Bridge.CommandPrefix = "!gpt"
-	}
-	// Check for default OpenAI API key from environment variable
-	sharedAPIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
-	if sharedAPIKey == "" {
-		oc.br.Log.Warn().Msg("No default OpenAI API key configured; users must supply their own during login")
-	} else {
-		go oc.ensureSharedKeyLogins(sharedAPIKey)
 	}
 
 	// Register custom Matrix event handlers
@@ -253,11 +244,7 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 	meta := loginMetadata(login)
 	key := strings.TrimSpace(meta.APIKey)
 	if key == "" {
-		// Check for shared API key from environment variable
-		key = strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
-	}
-	if key == "" {
-		return fmt.Errorf("no OpenAI API key available for this login; please relogin using the personal API key flow")
+		return fmt.Errorf("no API key available for this login; please login again")
 	}
 	client, err := newAIClient(login, oc, key)
 	if err != nil {
@@ -270,112 +257,58 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 }
 
 func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
-	var flows []bridgev2.LoginFlow
-
-	// Local Beeper flow (for SDK integration) - always first for easy discovery
-	flows = append(flows, bridgev2.LoginFlow{
-		ID:          LoginFlowIDLocalBeeper,
-		Name:        "Local Beeper",
-		Description: "Use Beeper's AI proxy (automatic setup for SDK).",
-	})
-
-	// Check for shared API key from environment variable
-	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
-		flows = append(flows, bridgev2.LoginFlow{
-			ID:          LoginFlowIDSharedKey,
-			Name:        "Bridge-provided API key",
-			Description: "Use the shared OpenAI API key configured by the bridge admin.",
-		})
+	return []bridgev2.LoginFlow{
+		{
+			ID:          LoginFlowIDLocalBeeper,
+			Name:        "Local Beeper",
+			Description: "Use Beeper's AI proxy (automatic setup for SDK).",
+		},
+		{
+			ID:          LoginFlowIDOpenAI,
+			Name:        "OpenAI",
+			Description: "Use your own OpenAI API key.",
+		},
+		{
+			ID:          LoginFlowIDAnthropic,
+			Name:        "Anthropic",
+			Description: "Use your own Anthropic API key.",
+		},
+		{
+			ID:          LoginFlowIDGemini,
+			Name:        "Gemini",
+			Description: "Use your own Google Gemini API key.",
+		},
+		{
+			ID:          LoginFlowIDOpenRouter,
+			Name:        "OpenRouter",
+			Description: "Use your own OpenRouter API key.",
+		},
+		{
+			ID:          LoginFlowIDCustom,
+			Name:        "Custom OpenAI-compatible",
+			Description: "Use a custom OpenAI-compatible API endpoint.",
+		},
 	}
-
-	flows = append(flows, bridgev2.LoginFlow{
-		ID:          LoginFlowIDPersonalKey,
-		Name:        "Personal API key",
-		Description: "Provide your own API key for OpenAI, Anthropic, Gemini, or other providers.",
-	})
-
-	return flows
 }
 
 func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
+	login := &OpenAILogin{User: user, Connector: oc, FlowID: flowID}
+
 	switch flowID {
 	case LoginFlowIDLocalBeeper:
-		// Local Beeper flow - SDK will provide credentials
-		return &OpenAILogin{
-			User:             user,
-			Connector:        oc,
-			FlowID:           LoginFlowIDLocalBeeper,
-			RequireUserInput: true,
-		}, nil
-	case LoginFlowIDSharedKey, "shared-api-key": // support legacy ID
-		// Check for shared API key from environment variable
-		if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
-			return nil, fmt.Errorf("bridge is not configured with a default API key")
-		}
-		return &OpenAILogin{
-			User:      user,
-			Connector: oc,
-			FlowID:    LoginFlowIDSharedKey,
-		}, nil
-	case LoginFlowIDPersonalKey, "user-api-key": // support legacy ID
-		return &OpenAILogin{
-			User:             user,
-			Connector:        oc,
-			FlowID:           LoginFlowIDPersonalKey,
-			RequireUserInput: true,
-		}, nil
+		login.Provider = ProviderBeeper
+	case LoginFlowIDOpenAI:
+		login.Provider = ProviderOpenAI
+	case LoginFlowIDAnthropic:
+		login.Provider = ProviderAnthropic
+	case LoginFlowIDGemini:
+		login.Provider = ProviderGemini
+	case LoginFlowIDOpenRouter:
+		login.Provider = ProviderOpenRouter
+	case LoginFlowIDCustom:
+		login.Provider = ProviderCustom
 	default:
 		return nil, fmt.Errorf("unknown login flow: %s", flowID)
 	}
-}
-
-func (oc *OpenAIConnector) ensureSharedKeyLogins(apiKey string) {
-	if oc.br == nil || oc.br.Config == nil {
-		return
-	}
-	key := strings.TrimSpace(apiKey)
-	if key == "" {
-		return
-	}
-	ctx := oc.br.BackgroundCtx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	log := oc.br.Log.With().Str("component", "openai-auto-login").Logger()
-	for rawUser, perms := range oc.br.Config.Permissions {
-		if !strings.HasPrefix(rawUser, "@") {
-			continue
-		}
-		if perms != nil && !perms.Login {
-			continue
-		}
-		userID := id.UserID(rawUser)
-		user, err := oc.br.GetUserByMXID(ctx, userID)
-		if err != nil {
-			log.Warn().Err(err).Str("user_mxid", rawUser).Msg("Failed to load user for shared-key auto login")
-			continue
-		}
-		if user == nil {
-			continue
-		}
-		if user.GetDefaultLogin() != nil {
-			continue
-		}
-		log.Info().Str("user_mxid", rawUser).Msg("Provisioning shared-key OpenAI login automatically")
-		loginProc := &OpenAILogin{
-			User:      user,
-			Connector: oc,
-		}
-		// For shared-key login, use the key without optional per-user settings
-		step, err := loginProc.finishLogin(ctx, key, "")
-		if step != nil && step.CompleteParams != nil && step.CompleteParams.UserLogin != nil {
-			login := step.CompleteParams.UserLogin
-			if client := login.Client; client != nil {
-				go client.Connect(ctx)
-			}
-		}
-		if err != nil {
-			log.Warn().Err(err).Str("user_mxid", rawUser).Msg("Failed to auto-provision OpenAI login")
-		}
-	}
+	return login, nil
 }

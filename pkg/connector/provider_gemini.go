@@ -104,6 +104,7 @@ func (g *GeminiProvider) GenerateStream(ctx context.Context, params GeneratePara
 		// Make streaming request using iter.Seq2 pattern
 		var totalText strings.Builder
 		var finishReason string
+		var completionSent bool
 
 		for resp, err := range g.client.Models.GenerateContentStream(ctx, params.Model, contents, config) {
 			if err != nil {
@@ -156,7 +157,7 @@ func (g *GeminiProvider) GenerateStream(ctx context.Context, params GeneratePara
 			}
 
 			// Extract usage info if available
-			if resp.UsageMetadata != nil {
+			if resp.UsageMetadata != nil && !completionSent {
 				events <- StreamEvent{
 					Type: StreamEventComplete,
 					Usage: &UsageInfo{
@@ -166,11 +167,12 @@ func (g *GeminiProvider) GenerateStream(ctx context.Context, params GeneratePara
 					},
 					FinishReason: finishReason,
 				}
+				completionSent = true
 			}
 		}
 
 		// Send completion event if not already sent
-		if finishReason == "" {
+		if !completionSent {
 			events <- StreamEvent{
 				Type:         StreamEventComplete,
 				FinishReason: "stop",
