@@ -271,25 +271,43 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 
 func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
 	var flows []bridgev2.LoginFlow
+
+	// Local Beeper flow (for SDK integration) - always first for easy discovery
+	flows = append(flows, bridgev2.LoginFlow{
+		ID:          LoginFlowIDLocalBeeper,
+		Name:        "Local Beeper",
+		Description: "Use Beeper's AI proxy (automatic setup for SDK).",
+	})
+
 	// Check for shared API key from environment variable
 	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
 		flows = append(flows, bridgev2.LoginFlow{
-			ID:          "shared-api-key",
+			ID:          LoginFlowIDSharedKey,
 			Name:        "Bridge-provided API key",
 			Description: "Use the shared OpenAI API key configured by the bridge admin.",
 		})
 	}
+
 	flows = append(flows, bridgev2.LoginFlow{
-		ID:          "user-api-key",
-		Name:        "Personal OpenAI API key",
-		Description: "Provide your own OpenAI API key (displayed as a text box in supporting clients).",
+		ID:          LoginFlowIDPersonalKey,
+		Name:        "Personal API key",
+		Description: "Provide your own API key for OpenAI, Anthropic, Gemini, or other providers.",
 	})
+
 	return flows
 }
 
 func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
 	switch flowID {
-	case "shared-api-key":
+	case LoginFlowIDLocalBeeper:
+		// Local Beeper flow - SDK will provide credentials
+		return &OpenAILogin{
+			User:             user,
+			Connector:        oc,
+			FlowID:           LoginFlowIDLocalBeeper,
+			RequireUserInput: true,
+		}, nil
+	case LoginFlowIDSharedKey, "shared-api-key": // support legacy ID
 		// Check for shared API key from environment variable
 		if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
 			return nil, fmt.Errorf("bridge is not configured with a default API key")
@@ -297,11 +315,13 @@ func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User,
 		return &OpenAILogin{
 			User:      user,
 			Connector: oc,
+			FlowID:    LoginFlowIDSharedKey,
 		}, nil
-	case "user-api-key":
+	case LoginFlowIDPersonalKey, "user-api-key": // support legacy ID
 		return &OpenAILogin{
 			User:             user,
 			Connector:        oc,
+			FlowID:           LoginFlowIDPersonalKey,
 			RequireUserInput: true,
 		}, nil
 	default:
