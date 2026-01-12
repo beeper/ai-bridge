@@ -134,7 +134,7 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 		return
 	}
 
-	client, ok := login.Client.(*OpenAIClient)
+	client, ok := login.Client.(*AIClient)
 	if !ok || client == nil {
 		log.Warn().Msg("Invalid client type for user login")
 		return
@@ -259,7 +259,7 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 	if key == "" {
 		return fmt.Errorf("no OpenAI API key available for this login; please relogin using the personal API key flow")
 	}
-	client, err := newOpenAIClient(login, oc, key)
+	client, err := newAIClient(login, oc, key)
 	if err != nil {
 		return err
 	}
