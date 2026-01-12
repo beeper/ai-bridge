@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 	"github.com/rs/zerolog"
@@ -29,10 +28,10 @@ import (
 )
 
 var (
-	_ bridgev2.NetworkAPI                    = (*OpenAIClient)(nil)
-	_ bridgev2.IdentifierResolvingNetworkAPI = (*OpenAIClient)(nil)
-	_ bridgev2.ContactListingNetworkAPI      = (*OpenAIClient)(nil)
-	_ bridgev2.EditHandlingNetworkAPI        = (*OpenAIClient)(nil)
+	_ bridgev2.NetworkAPI                    = (*AIClient)(nil)
+	_ bridgev2.IdentifierResolvingNetworkAPI = (*AIClient)(nil)
+	_ bridgev2.ContactListingNetworkAPI      = (*AIClient)(nil)
+	_ bridgev2.EditHandlingNetworkAPI        = (*AIClient)(nil)
 )
 
 var rejectAllMediaFileFeatures = &event.FileFeatures{
@@ -46,12 +45,24 @@ func cloneRejectAllMediaFeatures() *event.FileFeatures {
 	return rejectAllMediaFileFeatures.Clone()
 }
 
-type OpenAIClient struct {
+type AIClient struct {
 	UserLogin *bridgev2.UserLogin
 	connector *OpenAIConnector
 	api       openai.Client
 	apiKey    string
 	log       zerolog.Logger
+
+	// Provider abstraction layer
+	// For individual providers (OpenAI, Gemini, Anthropic), this is their single provider
+	// For Beeper provider, providers are selected based on model prefix
+	provider AIProvider
+
+	// Multiple providers for Beeper (smart proxy routing)
+	// Only initialized when Provider == ProviderBeeper
+	openaiProvider     AIProvider
+	geminiProvider     AIProvider
+	anthropicProvider  AIProvider
+	openrouterProvider AIProvider
 
 	loggedIn atomic.Bool
 	chatLock sync.Mutex
@@ -73,40 +84,171 @@ type pendingMessage struct {
 	PromptMessages []openai.ChatCompletionMessageParamUnion
 }
 
-func newOpenAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey string) (*OpenAIClient, error) {
+func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey string) (*AIClient, error) {
 	key := strings.TrimSpace(apiKey)
 	if key == "" {
-		return nil, fmt.Errorf("missing OpenAI API key")
+		return nil, fmt.Errorf("missing API key")
 	}
 
 	// Get per-user credentials from login metadata
 	meta := login.Metadata.(*UserLoginMetadata)
+	log := login.Log.With().Str("component", "ai-network").Str("provider", meta.Provider).Logger()
 
-	opts := []option.RequestOption{
-		option.WithAPIKey(key),
-	}
-
-	// Use per-user base_url if provided, otherwise default to OpenAI's endpoint
-	baseURL := strings.TrimSpace(meta.BaseURL)
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
-	}
-	opts = append(opts, option.WithBaseURL(baseURL))
-
-	client := openai.NewClient(opts...)
-	return &OpenAIClient{
+	// Create base client struct
+	oc := &AIClient{
 		UserLogin:       login,
 		connector:       connector,
-		api:             client,
 		apiKey:          key,
-		log:             login.Log.With().Str("component", "openai-network").Logger(),
+		log:             log,
 		activeRooms:     make(map[id.RoomID]bool),
 		pendingMessages: make(map[id.RoomID][]pendingMessage),
-	}, nil
+	}
+
+	// Use per-user base_url if provided
+	baseURL := strings.TrimSpace(meta.BaseURL)
+
+	// Initialize provider(s) based on login metadata
+	switch meta.Provider {
+	case ProviderGemini:
+		// Gemini provider - initialize genai client
+		ctx := context.Background()
+		provider, err := NewGeminiProviderWithBaseURL(ctx, key, baseURL, log)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Gemini provider: %w", err)
+		}
+		oc.provider = provider
+		oc.geminiProvider = provider
+
+	case ProviderAnthropic:
+		// Anthropic provider - initialize anthropic client
+		provider, err := NewAnthropicProviderWithBaseURL(key, baseURL, log)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Anthropic provider: %w", err)
+		}
+		oc.provider = provider
+		oc.anthropicProvider = provider
+
+	case ProviderBeeper:
+		// Beeper is a smart proxy - initialize all providers with Beeper routing URLs
+		beeperBaseURL := baseURL
+		if beeperBaseURL == "" {
+			beeperBaseURL = "https://ai-proxy.beeper.com"
+		}
+
+		// OpenAI via Beeper
+		openaiURL := beeperBaseURL + "/openai/v1"
+		openaiProvider, err := NewOpenAIProviderWithBaseURL(key, openaiURL, log)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OpenAI provider for Beeper: %w", err)
+		}
+		oc.openaiProvider = openaiProvider
+		oc.provider = openaiProvider // Default to OpenAI
+		oc.api = openaiProvider.Client() // Keep api field for backward compatibility
+
+		// Gemini via Beeper
+		ctx := context.Background()
+		geminiURL := beeperBaseURL + "/gemini"
+		geminiProvider, err := NewGeminiProviderWithBaseURL(ctx, key, geminiURL, log)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to create Gemini provider for Beeper")
+		} else {
+			oc.geminiProvider = geminiProvider
+		}
+
+		// Anthropic via Beeper
+		anthropicURL := beeperBaseURL + "/anthropic"
+		anthropicProvider, err := NewAnthropicProviderWithBaseURL(key, anthropicURL, log)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to create Anthropic provider for Beeper")
+		} else {
+			oc.anthropicProvider = anthropicProvider
+		}
+
+		// OpenRouter via Beeper
+		openrouterURL := beeperBaseURL + "/openrouter/v1"
+		openrouterProvider, err := NewOpenAIProviderWithBaseURL(key, openrouterURL, log)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to create OpenRouter provider for Beeper")
+		} else {
+			oc.openrouterProvider = openrouterProvider
+		}
+
+	case ProviderOpenRouter:
+		// OpenRouter uses OpenAI-compatible API
+		openrouterURL := baseURL
+		if openrouterURL == "" {
+			openrouterURL = "https://openrouter.ai/api/v1"
+		}
+		provider, err := NewOpenAIProviderWithBaseURL(key, openrouterURL, log)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OpenRouter provider: %w", err)
+		}
+		oc.provider = provider
+		oc.openrouterProvider = provider
+		oc.api = provider.Client()
+
+	default:
+		// OpenAI (default) or Custom provider
+		openaiURL := baseURL
+		if openaiURL == "" {
+			openaiURL = "https://api.openai.com/v1"
+		}
+		provider, err := NewOpenAIProviderWithBaseURL(key, openaiURL, log)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OpenAI provider: %w", err)
+		}
+		oc.provider = provider
+		oc.openaiProvider = provider
+		oc.api = provider.Client()
+	}
+
+	return oc, nil
+}
+
+// getProviderForModel returns the appropriate AIProvider for the given model
+// For Beeper, this routes to different backends based on prefix
+func (oc *AIClient) getProviderForModel(modelID string) (AIProvider, string, error) {
+	meta := loginMetadata(oc.UserLogin)
+	backend, actualModel := ParseModelPrefix(modelID)
+
+	// For individual providers (non-Beeper), use their single provider
+	if meta.Provider != ProviderBeeper {
+		return oc.provider, actualModel, nil
+	}
+
+	// For Beeper, route to appropriate backend based on prefix
+	switch backend {
+	case BackendOpenAI:
+		if oc.openaiProvider == nil {
+			return nil, "", fmt.Errorf("OpenAI provider not available")
+		}
+		return oc.openaiProvider, actualModel, nil
+	case BackendGemini:
+		if oc.geminiProvider == nil {
+			return nil, "", fmt.Errorf("Gemini provider not available")
+		}
+		return oc.geminiProvider, actualModel, nil
+	case BackendAnthropic:
+		if oc.anthropicProvider == nil {
+			return nil, "", fmt.Errorf("Anthropic provider not available")
+		}
+		return oc.anthropicProvider, actualModel, nil
+	case BackendOpenRouter:
+		if oc.openrouterProvider == nil {
+			return nil, "", fmt.Errorf("OpenRouter provider not available")
+		}
+		return oc.openrouterProvider, actualModel, nil
+	default:
+		// No prefix or unknown prefix - default to OpenAI
+		if oc.openaiProvider != nil {
+			return oc.openaiProvider, modelID, nil
+		}
+		return oc.provider, modelID, nil
+	}
 }
 
 // acquireRoom tries to acquire a room for processing. Returns false if the room is already busy.
-func (oc *OpenAIClient) acquireRoom(roomID id.RoomID) bool {
+func (oc *AIClient) acquireRoom(roomID id.RoomID) bool {
 	oc.activeRoomsMu.Lock()
 	defer oc.activeRoomsMu.Unlock()
 	if oc.activeRooms[roomID] {
@@ -117,21 +259,21 @@ func (oc *OpenAIClient) acquireRoom(roomID id.RoomID) bool {
 }
 
 // releaseRoom releases a room after processing is complete.
-func (oc *OpenAIClient) releaseRoom(roomID id.RoomID) {
+func (oc *AIClient) releaseRoom(roomID id.RoomID) {
 	oc.activeRoomsMu.Lock()
 	defer oc.activeRoomsMu.Unlock()
 	delete(oc.activeRooms, roomID)
 }
 
 // isRoomBusy checks if a room is currently processing a message (without acquiring lock)
-func (oc *OpenAIClient) isRoomBusy(roomID id.RoomID) bool {
+func (oc *AIClient) isRoomBusy(roomID id.RoomID) bool {
 	oc.activeRoomsMu.Lock()
 	defer oc.activeRoomsMu.Unlock()
 	return oc.activeRooms[roomID]
 }
 
 // queuePendingMessage adds a message to the pending queue for later processing
-func (oc *OpenAIClient) queuePendingMessage(roomID id.RoomID, msg pendingMessage) {
+func (oc *AIClient) queuePendingMessage(roomID id.RoomID, msg pendingMessage) {
 	oc.pendingMessagesMu.Lock()
 	defer oc.pendingMessagesMu.Unlock()
 	oc.pendingMessages[roomID] = append(oc.pendingMessages[roomID], msg)
@@ -142,7 +284,7 @@ func (oc *OpenAIClient) queuePendingMessage(roomID id.RoomID, msg pendingMessage
 }
 
 // popNextPending removes and returns the next pending message for a room, or nil if none
-func (oc *OpenAIClient) popNextPending(roomID id.RoomID) *pendingMessage {
+func (oc *AIClient) popNextPending(roomID id.RoomID) *pendingMessage {
 	oc.pendingMessagesMu.Lock()
 	defer oc.pendingMessagesMu.Unlock()
 	queue := oc.pendingMessages[roomID]
@@ -158,7 +300,7 @@ func (oc *OpenAIClient) popNextPending(roomID id.RoomID) *pendingMessage {
 }
 
 // processNextPending processes the next pending message for a room if one exists
-func (oc *OpenAIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
+func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 	pending := oc.popNextPending(roomID)
 	if pending == nil {
 		return
@@ -189,7 +331,7 @@ func (oc *OpenAIClient) processNextPending(ctx context.Context, roomID id.RoomID
 	}()
 }
 
-func (oc *OpenAIClient) Connect(ctx context.Context) {
+func (oc *AIClient) Connect(ctx context.Context) {
 	// Use a default model for validation (any model works to verify credentials)
 	model := "gpt-4o-mini"
 	timeoutCtx, cancel := context.WithTimeout(ctx, oc.connector.Config.OpenAI.RequestTimeout)
@@ -215,15 +357,15 @@ func (oc *OpenAIClient) Connect(ctx context.Context) {
 	})
 }
 
-func (oc *OpenAIClient) Disconnect() {
+func (oc *AIClient) Disconnect() {
 	oc.loggedIn.Store(false)
 }
 
-func (oc *OpenAIClient) IsLoggedIn() bool {
+func (oc *AIClient) IsLoggedIn() bool {
 	return oc.loggedIn.Load()
 }
 
-func (oc *OpenAIClient) LogoutRemote(ctx context.Context) {
+func (oc *AIClient) LogoutRemote(ctx context.Context) {
 	oc.Disconnect()
 	oc.UserLogin.BridgeState.Send(status.BridgeState{
 		StateEvent: status.StateLoggedOut,
@@ -231,11 +373,11 @@ func (oc *OpenAIClient) LogoutRemote(ctx context.Context) {
 	})
 }
 
-func (oc *OpenAIClient) IsThisUser(ctx context.Context, userID networkid.UserID) bool {
+func (oc *AIClient) IsThisUser(ctx context.Context, userID networkid.UserID) bool {
 	return userID == humanUserID(oc.UserLogin.ID)
 }
 
-func (oc *OpenAIClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+func (oc *AIClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 	meta := portalMeta(portal)
 	title := meta.Title
 	if title == "" {
@@ -255,7 +397,7 @@ func (oc *OpenAIClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal
 	}, nil
 }
 
-func (oc *OpenAIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
+func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	ghostID := string(ghost.ID)
 
 	// Parse model from ghost ID (format: "model-{escaped-model-id}")
@@ -278,7 +420,7 @@ func (oc *OpenAIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) 
 	}, nil
 }
 
-func (oc *OpenAIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
+func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
 	meta := portalMeta(portal)
 
 	// Base capabilities for all AI chats
@@ -319,18 +461,19 @@ func (oc *OpenAIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Po
 	return caps
 }
 
-func (oc *OpenAIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
+func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
 	oc.log.Debug().Msg("Contact list requested")
 
 	// Fetch available models (use cache if available)
 	models, err := oc.listAvailableModels(ctx, false)
 	if err != nil {
 		oc.log.Error().Err(err).Msg("Failed to list models, using fallback")
-		// Return default model as fallback (create minimal Model struct)
-		models = []openai.Model{{
-			ID:      "gpt-4o-mini",
-			Created: time.Now().Unix(),
-			OwnedBy: "openai",
+		// Return default model as fallback based on provider
+		meta := loginMetadata(oc.UserLogin)
+		models = []ModelInfo{{
+			ID:       DefaultModelForProvider(meta.Provider),
+			Name:     "GPT 4o Mini",
+			Provider: meta.Provider,
 		}}
 	}
 
@@ -369,7 +512,7 @@ func (oc *OpenAIClient) GetContactList(ctx context.Context) ([]*bridgev2.Resolve
 	return contacts, nil
 }
 
-func (oc *OpenAIClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
+func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
 	// Identifier is the model ID (e.g., "gpt-4o", "gpt-4-turbo")
 	modelID := strings.TrimSpace(identifier)
 	if modelID == "" {
@@ -423,7 +566,7 @@ func (oc *OpenAIClient) ResolveIdentifier(ctx context.Context, identifier string
 }
 
 // createNewChat creates a new portal for a specific model
-func (oc *OpenAIClient) createNewChat(ctx context.Context, modelID string, caps ModelCapabilities) (*bridgev2.CreateChatResponse, error) {
+func (oc *AIClient) createNewChat(ctx context.Context, modelID string, caps ModelCapabilities) (*bridgev2.CreateChatResponse, error) {
 	chatIndex, err := oc.allocateNextChatIndex(ctx)
 	if err != nil {
 		return nil, err
@@ -479,7 +622,7 @@ func (oc *OpenAIClient) createNewChat(ctx context.Context, modelID string, caps 
 }
 
 // allocateNextChatIndex increments and returns the next chat index for this login
-func (oc *OpenAIClient) allocateNextChatIndex(ctx context.Context) (int, error) {
+func (oc *AIClient) allocateNextChatIndex(ctx context.Context) (int, error) {
 	meta := loginMetadata(oc.UserLogin)
 	oc.chatLock.Lock()
 	defer oc.chatLock.Unlock()
@@ -494,7 +637,7 @@ func (oc *OpenAIClient) allocateNextChatIndex(ctx context.Context) (int, error) 
 }
 
 // buildChatMembers creates the standard member list for a chat portal
-func (oc *OpenAIClient) buildChatMembers(modelID string) *bridgev2.ChatMemberList {
+func (oc *AIClient) buildChatMembers(modelID string) *bridgev2.ChatMemberList {
 	return &bridgev2.ChatMemberList{
 		MemberMap: map[networkid.UserID]bridgev2.ChatMember{
 			humanUserID(oc.UserLogin.ID): {
@@ -521,7 +664,7 @@ func (oc *OpenAIClient) buildChatMembers(modelID string) *bridgev2.ChatMemberLis
 	}
 }
 
-func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (*bridgev2.MatrixMessageResponse, error) {
+func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (*bridgev2.MatrixMessageResponse, error) {
 	if msg.Content == nil {
 		return nil, fmt.Errorf("missing message content")
 	}
@@ -611,7 +754,7 @@ func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 }
 
 // HandleMatrixEdit handles edits to previously sent messages
-func (oc *OpenAIClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixEdit) error {
+func (oc *AIClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixEdit) error {
 	if edit.Content == nil || edit.EditTarget == nil {
 		return fmt.Errorf("invalid edit: missing content or target")
 	}
@@ -659,7 +802,7 @@ func (oc *OpenAIClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Mat
 }
 
 // regenerateFromEdit regenerates the AI response based on an edited user message
-func (oc *OpenAIClient) regenerateFromEdit(
+func (oc *AIClient) regenerateFromEdit(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -737,7 +880,7 @@ func (oc *OpenAIClient) regenerateFromEdit(
 }
 
 // buildPromptUpToMessage builds a prompt including messages up to and including the specified message
-func (oc *OpenAIClient) buildPromptUpToMessage(
+func (oc *AIClient) buildPromptUpToMessage(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
@@ -794,7 +937,7 @@ func (oc *OpenAIClient) buildPromptUpToMessage(
 }
 
 // handleImageMessage processes an image message for vision-capable models
-func (oc *OpenAIClient) handleImageMessage(
+func (oc *AIClient) handleImageMessage(
 	ctx context.Context,
 	msg *bridgev2.MatrixMessage,
 	portal *bridgev2.Portal,
@@ -883,7 +1026,7 @@ func (oc *OpenAIClient) handleImageMessage(
 }
 
 // buildPromptWithImage builds a prompt that includes an image URL
-func (oc *OpenAIClient) buildPromptWithImage(
+func (oc *AIClient) buildPromptWithImage(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
@@ -956,7 +1099,7 @@ func (oc *OpenAIClient) buildPromptWithImage(
 }
 
 // convertMxcToHttp converts an mxc:// URL to an HTTP URL via the homeserver
-func (oc *OpenAIClient) convertMxcToHttp(mxcURL string) string {
+func (oc *AIClient) convertMxcToHttp(mxcURL string) string {
 	// mxc://server/mediaID -> https://homeserver/_matrix/media/v3/download/server/mediaID
 	if !strings.HasPrefix(mxcURL, "mxc://") {
 		return mxcURL // Already HTTP
@@ -979,7 +1122,7 @@ func (oc *OpenAIClient) convertMxcToHttp(mxcURL string) string {
 
 // handleCommand checks if the message is a command and handles it
 // Returns true if the message was a command and was handled
-func (oc *OpenAIClient) handleCommand(
+func (oc *AIClient) handleCommand(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -1003,7 +1146,7 @@ func (oc *OpenAIClient) handleCommand(
 }
 
 // handleSlashCommand handles slash commands like /model, /temp, /prompt
-func (oc *OpenAIClient) handleSlashCommand(
+func (oc *AIClient) handleSlashCommand(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -1264,7 +1407,7 @@ func (oc *OpenAIClient) handleSlashCommand(
 }
 
 // handleFork creates a new chat and copies messages from the current conversation
-func (oc *OpenAIClient) handleFork(
+func (oc *AIClient) handleFork(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -1351,7 +1494,7 @@ func (oc *OpenAIClient) handleFork(
 }
 
 // handleNewChat creates a new empty chat with a specified model
-func (oc *OpenAIClient) handleNewChat(
+func (oc *AIClient) handleNewChat(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -1398,7 +1541,7 @@ func (oc *OpenAIClient) handleNewChat(
 }
 
 // createForkedChat creates a new portal inheriting config from source
-func (oc *OpenAIClient) createForkedChat(
+func (oc *AIClient) createForkedChat(
 	ctx context.Context,
 	sourcePortal *bridgev2.Portal,
 	sourceMeta *PortalMetadata,
@@ -1463,7 +1606,7 @@ func (oc *OpenAIClient) createForkedChat(
 }
 
 // copyMessagesToChat queues messages to be bridged to the new chat
-func (oc *OpenAIClient) copyMessagesToChat(
+func (oc *AIClient) copyMessagesToChat(
 	ctx context.Context,
 	destPortal *bridgev2.Portal,
 	messages []*database.Message,
@@ -1513,7 +1656,7 @@ func (oc *OpenAIClient) copyMessagesToChat(
 }
 
 // handleRegenerate regenerates the last AI response
-func (oc *OpenAIClient) handleRegenerate(
+func (oc *AIClient) handleRegenerate(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -1581,7 +1724,7 @@ func (oc *OpenAIClient) handleRegenerate(
 }
 
 // buildPromptForRegenerate builds a prompt for regeneration, excluding the last assistant message
-func (oc *OpenAIClient) buildPromptForRegenerate(
+func (oc *AIClient) buildPromptForRegenerate(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
@@ -1638,7 +1781,7 @@ func (oc *OpenAIClient) buildPromptForRegenerate(
 	return prompt, nil
 }
 
-func (oc *OpenAIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, latest string) ([]openai.ChatCompletionMessageParamUnion, error) {
+func (oc *AIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, latest string) ([]openai.ChatCompletionMessageParamUnion, error) {
 	var prompt []openai.ChatCompletionMessageParamUnion
 	systemPrompt := oc.effectivePrompt(meta)
 	if systemPrompt != "" {
@@ -1668,7 +1811,7 @@ func (oc *OpenAIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal
 }
 
 // dispatchCompletionInternal contains the actual completion logic
-func (oc *OpenAIClient) dispatchCompletionInternal(
+func (oc *AIClient) dispatchCompletionInternal(
 	ctx context.Context,
 	sourceEvent *event.Event,
 	portal *bridgev2.Portal,
@@ -1693,7 +1836,7 @@ func (oc *OpenAIClient) dispatchCompletionInternal(
 type responseFunc func(ctx context.Context, evt *event.Event, portal *bridgev2.Portal, meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (bool, *ContextLengthError)
 
 // responseWithRetry wraps a response function with context length retry logic
-func (oc *OpenAIClient) responseWithRetry(
+func (oc *AIClient) responseWithRetry(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -1736,7 +1879,7 @@ func (oc *OpenAIClient) responseWithRetry(
 		fmt.Errorf("exceeded retry attempts for context length"))
 }
 
-func (oc *OpenAIClient) streamingResponseWithRetry(
+func (oc *AIClient) streamingResponseWithRetry(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -1747,7 +1890,7 @@ func (oc *OpenAIClient) streamingResponseWithRetry(
 }
 
 
-func (oc *OpenAIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, err error) {
+func (oc *AIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, err error) {
 	if portal == nil || portal.Bridge == nil || evt == nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to send message via OpenAI")
 		return
@@ -1761,7 +1904,7 @@ func (oc *OpenAIClient) notifyMatrixSendFailure(ctx context.Context, portal *bri
 }
 
 // sendPendingStatus sends a PENDING status for a message that is queued
-func (oc *OpenAIClient) sendPendingStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, message string) {
+func (oc *AIClient) sendPendingStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, message string) {
 	if portal == nil || portal.Bridge == nil || evt == nil {
 		return
 	}
@@ -1774,7 +1917,7 @@ func (oc *OpenAIClient) sendPendingStatus(ctx context.Context, portal *bridgev2.
 }
 
 // sendSuccessStatus sends a SUCCESS status for a message that was previously pending
-func (oc *OpenAIClient) sendSuccessStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event) {
+func (oc *AIClient) sendSuccessStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event) {
 	if portal == nil || portal.Bridge == nil || evt == nil {
 		return
 	}
@@ -1786,7 +1929,7 @@ func (oc *OpenAIClient) sendSuccessStatus(ctx context.Context, portal *bridgev2.
 }
 
 // setModelTyping sets the typing indicator for the current model's ghost user
-func (oc *OpenAIClient) setModelTyping(ctx context.Context, portal *bridgev2.Portal, typing bool) {
+func (oc *AIClient) setModelTyping(ctx context.Context, portal *bridgev2.Portal, typing bool) {
 	if portal == nil || portal.MXID == "" {
 		return
 	}
@@ -1810,7 +1953,7 @@ func (oc *OpenAIClient) setModelTyping(ctx context.Context, portal *bridgev2.Por
 // contentType identifies what kind of content this is (text, reasoning, tool_call, tool_result)
 // seq is a sequence number for ordering events
 // metadata contains optional fields like tool_name, item_id, status
-func (oc *OpenAIClient) emitStreamEvent(ctx context.Context, portal *bridgev2.Portal, relatedEventID id.EventID, contentType StreamContentType, delta string, seq int, metadata map[string]any) {
+func (oc *AIClient) emitStreamEvent(ctx context.Context, portal *bridgev2.Portal, relatedEventID id.EventID, contentType StreamContentType, delta string, seq int, metadata map[string]any) {
 	if portal == nil || portal.MXID == "" {
 		return
 	}
@@ -1839,7 +1982,7 @@ func (oc *OpenAIClient) emitStreamEvent(ctx context.Context, portal *bridgev2.Po
 }
 
 // executeBuiltinTool finds and executes a builtin tool by name
-func (oc *OpenAIClient) executeBuiltinTool(ctx context.Context, toolName string, argsJSON string) (string, error) {
+func (oc *AIClient) executeBuiltinTool(ctx context.Context, toolName string, argsJSON string) (string, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("invalid tool arguments: %w", err)
@@ -1854,7 +1997,7 @@ func (oc *OpenAIClient) executeBuiltinTool(ctx context.Context, toolName string,
 }
 
 // buildResponsesAPIParams creates common Responses API parameters for both streaming and non-streaming paths
-func (oc *OpenAIClient) buildResponsesAPIParams(ctx context.Context, meta *PortalMetadata, messages []openai.ChatCompletionMessageParamUnion) responses.ResponseNewParams {
+func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, meta *PortalMetadata, messages []openai.ChatCompletionMessageParamUnion) responses.ResponseNewParams {
 	log := zerolog.Ctx(ctx)
 
 	params := responses.ResponseNewParams{
@@ -1906,7 +2049,7 @@ func (oc *OpenAIClient) buildResponsesAPIParams(ctx context.Context, meta *Porta
 // streamingResponse handles streaming using the Responses API
 // This is the preferred streaming method as it supports reasoning tokens
 // Returns (success, contextLengthError)
-func (oc *OpenAIClient) streamingResponse(
+func (oc *AIClient) streamingResponse(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -2082,7 +2225,7 @@ func (oc *OpenAIClient) streamingResponse(
 }
 
 // convertToResponsesInput converts Chat Completion messages to Responses API input items
-func (oc *OpenAIClient) convertToResponsesInput(messages []openai.ChatCompletionMessageParamUnion, _ *PortalMetadata) responses.ResponseInputParam {
+func (oc *AIClient) convertToResponsesInput(messages []openai.ChatCompletionMessageParamUnion, _ *PortalMetadata) responses.ResponseInputParam {
 	var input responses.ResponseInputParam
 
 	for _, msg := range messages {
@@ -2120,7 +2263,7 @@ func (oc *OpenAIClient) convertToResponsesInput(messages []openai.ChatCompletion
 
 // nonStreamingResponse handles non-streaming using the Responses API
 // Returns (success, contextLengthError)
-func (oc *OpenAIClient) nonStreamingResponse(
+func (oc *AIClient) nonStreamingResponse(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -2198,7 +2341,7 @@ func (oc *OpenAIClient) nonStreamingResponse(
 }
 
 // nonStreamingResponseWithRetry handles Responses API non-streaming with automatic retry on context overflow
-func (oc *OpenAIClient) nonStreamingResponseWithRetry(
+func (oc *AIClient) nonStreamingResponseWithRetry(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -2209,7 +2352,7 @@ func (oc *OpenAIClient) nonStreamingResponseWithRetry(
 }
 
 // queueModelResponseMessage queues an assistant message from a Responses API response
-func (oc *OpenAIClient) queueModelResponseMessage(portal *bridgev2.Portal, responseID string, content string, _ string, meta *PortalMetadata) {
+func (oc *AIClient) queueModelResponseMessage(portal *bridgev2.Portal, responseID string, content string, _ string, meta *PortalMetadata) {
 	modelID := oc.effectiveModel(meta)
 	msgMeta := &MessageMetadata{
 		Role:         "assistant",
@@ -2235,7 +2378,7 @@ func (oc *OpenAIClient) queueModelResponseMessage(portal *bridgev2.Portal, respo
 }
 
 // sendInitialStreamMessage sends the first message in a streaming session and returns its event ID
-func (oc *OpenAIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string) id.EventID {
+func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string) id.EventID {
 	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return ""
@@ -2257,7 +2400,7 @@ func (oc *OpenAIClient) sendInitialStreamMessage(ctx context.Context, portal *br
 }
 
 // sendFinalEditWithReasoning sends an edit event including reasoning/thinking content
-func (oc *OpenAIClient) sendFinalEditWithReasoning(ctx context.Context, portal *bridgev2.Portal, initialEventID id.EventID, content string, reasoning string, meta *PortalMetadata, finishReason string) {
+func (oc *AIClient) sendFinalEditWithReasoning(ctx context.Context, portal *bridgev2.Portal, initialEventID id.EventID, content string, reasoning string, meta *PortalMetadata, finishReason string) {
 	if portal == nil || portal.MXID == "" {
 		return
 	}
@@ -2305,7 +2448,7 @@ func (oc *OpenAIClient) sendFinalEditWithReasoning(ctx context.Context, portal *
 	}
 }
 
-func (oc *OpenAIClient) backgroundContext(ctx context.Context) context.Context {
+func (oc *AIClient) backgroundContext(ctx context.Context) context.Context {
 	if oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.BackgroundCtx != nil {
 		return oc.UserLogin.Bridge.BackgroundCtx
 	}
@@ -2315,7 +2458,7 @@ func (oc *OpenAIClient) backgroundContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-func (oc *OpenAIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Portal) {
+func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Portal) {
 	meta := portalMeta(portal)
 	if meta.WelcomeSent {
 		return
@@ -2346,7 +2489,7 @@ func (oc *OpenAIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2
 	}
 }
 
-func (oc *OpenAIClient) effectiveModel(meta *PortalMetadata) string {
+func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 	if meta != nil && meta.Model != "" {
 		return meta.Model
 	}
@@ -2354,14 +2497,14 @@ func (oc *OpenAIClient) effectiveModel(meta *PortalMetadata) string {
 	return "gpt-4o-mini"
 }
 
-func (oc *OpenAIClient) effectivePrompt(meta *PortalMetadata) string {
+func (oc *AIClient) effectivePrompt(meta *PortalMetadata) string {
 	if meta != nil && meta.SystemPrompt != "" {
 		return meta.SystemPrompt
 	}
 	return oc.connector.Config.OpenAI.SystemPrompt
 }
 
-func (oc *OpenAIClient) effectiveTemperature(meta *PortalMetadata) float64 {
+func (oc *AIClient) effectiveTemperature(meta *PortalMetadata) float64 {
 	if meta != nil && meta.Temperature > 0 {
 		return meta.Temperature
 	}
@@ -2371,7 +2514,7 @@ func (oc *OpenAIClient) effectiveTemperature(meta *PortalMetadata) float64 {
 	return defaultTemperature
 }
 
-func (oc *OpenAIClient) historyLimit(meta *PortalMetadata) int {
+func (oc *AIClient) historyLimit(meta *PortalMetadata) int {
 	if meta != nil && meta.MaxContextMessages > 0 {
 		return meta.MaxContextMessages
 	}
@@ -2381,7 +2524,7 @@ func (oc *OpenAIClient) historyLimit(meta *PortalMetadata) int {
 	return defaultMaxContextMessages
 }
 
-func (oc *OpenAIClient) effectiveMaxTokens(meta *PortalMetadata) int {
+func (oc *AIClient) effectiveMaxTokens(meta *PortalMetadata) int {
 	if meta != nil && meta.MaxCompletionTokens > 0 {
 		return meta.MaxCompletionTokens
 	}
@@ -2397,7 +2540,7 @@ var knownModelPrefixes = []string{
 }
 
 // validateModel checks if a model is available for this user
-func (oc *OpenAIClient) validateModel(ctx context.Context, modelID string) (bool, error) {
+func (oc *AIClient) validateModel(ctx context.Context, modelID string) (bool, error) {
 	if modelID == "" {
 		return true, nil
 	}
@@ -2428,7 +2571,7 @@ func (oc *OpenAIClient) validateModel(ctx context.Context, modelID string) (bool
 }
 
 // updatePortalConfig applies room config to portal metadata
-func (oc *OpenAIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Portal, config *RoomConfigEventContent) {
+func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Portal, config *RoomConfigEventContent) {
 	meta := portalMeta(portal)
 
 	// Track old model for membership change
@@ -2479,7 +2622,7 @@ func (oc *OpenAIClient) updatePortalConfig(ctx context.Context, portal *bridgev2
 
 // handleModelSwitch generates membership change events when switching models
 // This creates leave/join events to show the model transition in the room timeline
-func (oc *OpenAIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Portal, oldModel, newModel string) {
+func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Portal, oldModel, newModel string) {
 	if oldModel == newModel || oldModel == "" || newModel == "" {
 		return
 	}
@@ -2563,7 +2706,7 @@ func (oc *OpenAIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.
 }
 
 // sendSystemNotice sends an informational notice to the room from the bridge bot
-func (oc *OpenAIClient) sendSystemNotice(ctx context.Context, portal *bridgev2.Portal, message string) {
+func (oc *AIClient) sendSystemNotice(ctx context.Context, portal *bridgev2.Portal, message string) {
 	if portal == nil || portal.MXID == "" {
 		return
 	}
@@ -2586,7 +2729,7 @@ func (oc *OpenAIClient) sendSystemNotice(ctx context.Context, portal *bridgev2.P
 
 // getModelIntent returns the Matrix intent for the current model's ghost in the portal, or nil if unavailable.
 // Uses the portal's model configuration to determine which model ghost to use.
-func (oc *OpenAIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal) bridgev2.MatrixAPI {
+func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal) bridgev2.MatrixAPI {
 	meta := portalMeta(portal)
 	modelID := oc.effectiveModel(meta)
 	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, modelUserID(modelID))
@@ -2602,7 +2745,7 @@ const (
 )
 
 // notifyContextLengthExceeded sends a user-friendly notice about context overflow
-func (oc *OpenAIClient) notifyContextLengthExceeded(
+func (oc *AIClient) notifyContextLengthExceeded(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	cle *ContextLengthError,
@@ -2628,7 +2771,7 @@ func (oc *OpenAIClient) notifyContextLengthExceeded(
 
 // truncatePrompt removes older messages from the prompt while preserving
 // the system message (if any) and the latest user message
-func (oc *OpenAIClient) truncatePrompt(
+func (oc *AIClient) truncatePrompt(
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) []openai.ChatCompletionMessageParamUnion {
 	if len(prompt) <= 2 {
@@ -2665,8 +2808,8 @@ func (oc *OpenAIClient) truncatePrompt(
 }
 
 // listAvailableModels fetches models from OpenAI API and caches them
-// Returns openai.Model directly from the SDK
-func (oc *OpenAIClient) listAvailableModels(ctx context.Context, forceRefresh bool) ([]openai.Model, error) {
+// Returns ModelInfo list from the provider
+func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) ([]ModelInfo, error) {
 	meta := loginMetadata(oc.UserLogin)
 
 	// Check cache (refresh every 6 hours unless forced)
@@ -2677,33 +2820,50 @@ func (oc *OpenAIClient) listAvailableModels(ctx context.Context, forceRefresh bo
 		}
 	}
 
-	// Fetch models from API
-	oc.log.Debug().Msg("Fetching available models from OpenAI API")
+	// Fetch models from provider
+	oc.log.Debug().Msg("Fetching available models from provider")
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	page, err := oc.api.Models.List(timeoutCtx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list models: %w", err)
-	}
+	var allModels []ModelInfo
 
-	var models []openai.Model
-	for page != nil {
-		for _, model := range page.Data {
-			// Only include chat models (filter out embeddings, audio, etc.)
-			if !isChatModel(model.ID) {
-				continue
+	// For Beeper provider, list models from all backends
+	if meta.Provider == ProviderBeeper {
+		// OpenAI models
+		if oc.openaiProvider != nil {
+			models, err := oc.openaiProvider.ListModels(timeoutCtx)
+			if err != nil {
+				oc.log.Warn().Err(err).Msg("Failed to list OpenAI models")
+			} else {
+				allModels = append(allModels, models...)
 			}
-
-			models = append(models, model)
 		}
-
-		// Get next page if available
-		page, err = page.GetNextPage()
+		// Gemini models
+		if oc.geminiProvider != nil {
+			models, err := oc.geminiProvider.ListModels(timeoutCtx)
+			if err != nil {
+				oc.log.Warn().Err(err).Msg("Failed to list Gemini models")
+			} else {
+				allModels = append(allModels, models...)
+			}
+		}
+		// Anthropic models
+		if oc.anthropicProvider != nil {
+			models, err := oc.anthropicProvider.ListModels(timeoutCtx)
+			if err != nil {
+				oc.log.Warn().Err(err).Msg("Failed to list Anthropic models")
+			} else {
+				allModels = append(allModels, models...)
+			}
+		}
+	} else if oc.provider != nil {
+		// Single provider - just list its models
+		models, err := oc.provider.ListModels(timeoutCtx)
 		if err != nil {
-			return nil, fmt.Errorf("error iterating models: %w", err)
+			return nil, fmt.Errorf("failed to list models: %w", err)
 		}
+		allModels = models
 	}
 
 	// Update cache
@@ -2712,7 +2872,7 @@ func (oc *OpenAIClient) listAvailableModels(ctx context.Context, forceRefresh bo
 			CacheDuration: 6 * 60 * 60, // 6 hours
 		}
 	}
-	meta.ModelCache.Models = models
+	meta.ModelCache.Models = allModels
 	meta.ModelCache.LastRefresh = time.Now().Unix()
 
 	// Save metadata
@@ -2720,8 +2880,8 @@ func (oc *OpenAIClient) listAvailableModels(ctx context.Context, forceRefresh bo
 		oc.log.Warn().Err(err).Msg("Failed to save model cache")
 	}
 
-	oc.log.Info().Int("count", len(models)).Msg("Cached available models")
-	return models, nil
+	oc.log.Info().Int("count", len(allModels)).Msg("Cached available models")
+	return allModels, nil
 }
 
 // isChatModel determines if a model ID is a chat completion model
@@ -2797,12 +2957,12 @@ func formatModelName(modelID string) string {
 	return strings.Join(formatted, "-")
 }
 
-func (oc *OpenAIClient) scheduleBootstrap() {
+func (oc *AIClient) scheduleBootstrap() {
 	backgroundCtx := oc.UserLogin.Bridge.BackgroundCtx
 	go oc.bootstrap(backgroundCtx)
 }
 
-func (oc *OpenAIClient) bootstrap(ctx context.Context) {
+func (oc *AIClient) bootstrap(ctx context.Context) {
 	logCtx := oc.log.With().Str("component", "openai-chat-bootstrap").Logger().WithContext(ctx)
 	oc.waitForLoginPersisted(logCtx)
 	if err := oc.syncChatCounter(logCtx); err != nil {
@@ -2814,7 +2974,7 @@ func (oc *OpenAIClient) bootstrap(ctx context.Context) {
 	}
 }
 
-func (oc *OpenAIClient) waitForLoginPersisted(ctx context.Context) {
+func (oc *AIClient) waitForLoginPersisted(ctx context.Context) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -2830,7 +2990,7 @@ func (oc *OpenAIClient) waitForLoginPersisted(ctx context.Context) {
 	}
 }
 
-func (oc *OpenAIClient) syncChatCounter(ctx context.Context) error {
+func (oc *AIClient) syncChatCounter(ctx context.Context) error {
 	meta := loginMetadata(oc.UserLogin)
 	portals, err := oc.listAllChatPortals(ctx)
 	if err != nil {
@@ -2850,7 +3010,7 @@ func (oc *OpenAIClient) syncChatCounter(ctx context.Context) error {
 	return nil
 }
 
-func (oc *OpenAIClient) ensureDefaultChat(ctx context.Context) error {
+func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 	oc.log.Debug().Msg("Ensuring default ChatGPT room exists")
 	portals, err := oc.listAllChatPortals(ctx)
 	if err != nil {
@@ -2892,7 +3052,7 @@ func (oc *OpenAIClient) ensureDefaultChat(ctx context.Context) error {
 	return nil
 }
 
-func (oc *OpenAIClient) listAllChatPortals(ctx context.Context) ([]*bridgev2.Portal, error) {
+func (oc *AIClient) listAllChatPortals(ctx context.Context) ([]*bridgev2.Portal, error) {
 	// Query all portals and filter by receiver (our login ID)
 	// This works because all our portals have Receiver set to our UserLogin.ID
 	allDBPortals, err := oc.UserLogin.Bridge.DB.Portal.GetAll(ctx)
@@ -2916,7 +3076,7 @@ func (oc *OpenAIClient) listAllChatPortals(ctx context.Context) ([]*bridgev2.Por
 	return portals, nil
 }
 
-func (oc *OpenAIClient) createChat(ctx context.Context, title, systemPrompt string) (*bridgev2.CreateChatResponse, error) {
+func (oc *AIClient) createChat(ctx context.Context, title, systemPrompt string) (*bridgev2.CreateChatResponse, error) {
 	if strings.TrimSpace(title) == "" {
 		meta := loginMetadata(oc.UserLogin)
 		next := meta.NextChatIndex + 1
@@ -2933,7 +3093,7 @@ func (oc *OpenAIClient) createChat(ctx context.Context, title, systemPrompt stri
 	}, nil
 }
 
-func (oc *OpenAIClient) spawnPortal(ctx context.Context, title, systemPrompt string) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
+func (oc *AIClient) spawnPortal(ctx context.Context, title, systemPrompt string) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
 	oc.chatLock.Lock()
 	defer oc.chatLock.Unlock()
 	oc.log.Debug().Str("title", title).Msg("Allocating portal for new chat")
@@ -2984,7 +3144,7 @@ func (oc *OpenAIClient) spawnPortal(ctx context.Context, title, systemPrompt str
 }
 
 // createNewChatWithModel creates a new chat portal with the specified model and default settings
-func (oc *OpenAIClient) createNewChatWithModel(ctx context.Context, modelID string) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
+func (oc *AIClient) createNewChatWithModel(ctx context.Context, modelID string) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
 	chatIndex, err := oc.allocateNextChatIndex(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -3025,7 +3185,7 @@ func (oc *OpenAIClient) createNewChatWithModel(ctx context.Context, modelID stri
 	return portal, info, nil
 }
 
-func (oc *OpenAIClient) chatInfoFromPortal(portal *bridgev2.Portal) *bridgev2.ChatInfo {
+func (oc *AIClient) chatInfoFromPortal(portal *bridgev2.Portal) *bridgev2.ChatInfo {
 	meta := portalMeta(portal)
 	modelID := oc.effectiveModel(meta)
 	title := meta.Title
@@ -3043,7 +3203,7 @@ func (oc *OpenAIClient) chatInfoFromPortal(portal *bridgev2.Portal) *bridgev2.Ch
 	return oc.composeChatInfo(title, prompt, modelID)
 }
 
-func (oc *OpenAIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.ChatInfo {
+func (oc *AIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.ChatInfo {
 	if modelID == "" {
 		modelID = oc.effectiveModel(nil)
 	}
@@ -3093,7 +3253,7 @@ func (oc *OpenAIClient) composeChatInfo(title, prompt, modelID string) *bridgev2
 
 
 // BroadcastRoomState sends current room config to Matrix room state
-func (oc *OpenAIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Portal) error {
+func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Portal) error {
 	if portal.MXID == "" {
 		return fmt.Errorf("portal has no Matrix room ID")
 	}
@@ -3139,7 +3299,7 @@ func ptrIfNotEmpty(value string) *string {
 }
 
 // generateRoomTitle asks the model to generate a short descriptive title for the conversation
-func (oc *OpenAIClient) generateRoomTitle(ctx context.Context, userMessage, assistantResponse string) (string, error) {
+func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistantResponse string) (string, error) {
 	prompt := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage("Generate a very short title (3-5 words max) that summarizes this conversation. Reply with ONLY the title, no quotes, no punctuation at the end."),
 		openai.UserMessage(fmt.Sprintf("User: %s\n\nAssistant: %s", userMessage, assistantResponse)),
@@ -3175,7 +3335,7 @@ func (oc *OpenAIClient) generateRoomTitle(ctx context.Context, userMessage, assi
 }
 
 // setRoomName sets the Matrix room name via m.room.name state event
-func (oc *OpenAIClient) setRoomName(ctx context.Context, portal *bridgev2.Portal, name string) error {
+func (oc *AIClient) setRoomName(ctx context.Context, portal *bridgev2.Portal, name string) error {
 	if portal.MXID == "" {
 		return fmt.Errorf("portal has no Matrix room ID")
 	}
@@ -3202,7 +3362,7 @@ func (oc *OpenAIClient) setRoomName(ctx context.Context, portal *bridgev2.Portal
 }
 
 // maybeGenerateTitle generates a title for the room after the first exchange
-func (oc *OpenAIClient) maybeGenerateTitle(ctx context.Context, portal *bridgev2.Portal, assistantResponse string) {
+func (oc *AIClient) maybeGenerateTitle(ctx context.Context, portal *bridgev2.Portal, assistantResponse string) {
 	meta := portalMeta(portal)
 
 	// Skip if title was already generated

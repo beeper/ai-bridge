@@ -1,16 +1,15 @@
 package connector
 
 import (
-	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2/database"
 )
 
 // ModelCache stores available models (cached in UserLoginMetadata)
-// Uses openai.Model directly - no need to reinvent the struct
+// Uses provider-agnostic ModelInfo instead of openai.Model
 type ModelCache struct {
-	Models        []openai.Model `json:"models,omitempty"`
-	LastRefresh   int64          `json:"last_refresh,omitempty"`
-	CacheDuration int64          `json:"cache_duration,omitempty"` // seconds
+	Models        []ModelInfo `json:"models,omitempty"`
+	LastRefresh   int64       `json:"last_refresh,omitempty"`
+	CacheDuration int64       `json:"cache_duration,omitempty"` // seconds
 }
 
 // ModelCapabilities stores computed capabilities for a model
