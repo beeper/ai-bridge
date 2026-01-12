@@ -1997,7 +1997,6 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, meta *PortalMet
 
 	params := responses.ResponseNewParams{
 		Model:           shared.ResponsesModel(oc.effectiveModel(meta)),
-		Temperature:     openai.Float(oc.effectiveTemperature(meta)),
 		MaxOutputTokens: openai.Int(int64(oc.effectiveMaxTokens(meta))),
 	}
 
