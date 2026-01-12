@@ -218,12 +218,12 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 	defer resp.Body.Close()
 
 	var result struct {
-		Abstract     string `json:"Abstract"`
-		AbstractText string `json:"AbstractText"`
-		Answer       string `json:"Answer"`
-		AnswerType   string `json:"AnswerType"`
-		Definition   string `json:"Definition"`
-		Heading      string `json:"Heading"`
+		Abstract      string `json:"Abstract"`
+		AbstractText  string `json:"AbstractText"`
+		Answer        string `json:"Answer"`
+		AnswerType    string `json:"AnswerType"`
+		Definition    string `json:"Definition"`
+		Heading       string `json:"Heading"`
 		RelatedTopics []struct {
 			Text string `json:"Text"`
 		} `json:"RelatedTopics"`

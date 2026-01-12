@@ -157,7 +157,7 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 			return nil, fmt.Errorf("failed to create OpenAI provider for Beeper: %w", err)
 		}
 		oc.openaiProvider = openaiProvider
-		oc.provider = openaiProvider // Default to OpenAI
+		oc.provider = openaiProvider     // Default to OpenAI
 		oc.api = openaiProvider.Client() // Keep api field for backward compatibility
 
 		// Gemini via Beeper
@@ -1886,7 +1886,6 @@ func (oc *AIClient) streamingResponseWithRetry(
 	oc.responseWithRetry(ctx, evt, portal, meta, prompt, oc.streamingResponse, "streaming")
 }
 
-
 func (oc *AIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, err error) {
 	if portal == nil || portal.Bridge == nil || evt == nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to send message via OpenAI")
@@ -3231,7 +3230,6 @@ func (oc *AIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.Cha
 		},
 	}
 }
-
 
 // BroadcastRoomState sends current room config to Matrix room state
 func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Portal) error {

@@ -16,15 +16,15 @@ import (
 )
 
 const (
-	defaultTemperature            = 0.4
-	defaultMaxContextMessages     = 12
-	defaultMaxTokens              = 512
-	defaultRequestTimeout         = 45 * time.Second
-	reasoningModelRequestTimeout  = 5 * time.Minute // Extended timeout for O1/O3 models
+	defaultTemperature           = 0.4
+	defaultMaxContextMessages    = 12
+	defaultMaxTokens             = 512
+	defaultRequestTimeout        = 45 * time.Second
+	reasoningModelRequestTimeout = 5 * time.Minute // Extended timeout for O1/O3 models
 )
 
 var (
-	_ bridgev2.NetworkConnector                = (*OpenAIConnector)(nil)
+	_ bridgev2.NetworkConnector               = (*OpenAIConnector)(nil)
 	_ bridgev2.PortalBridgeInfoFillingNetwork = (*OpenAIConnector)(nil)
 )
 
