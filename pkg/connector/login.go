@@ -14,6 +14,8 @@ import (
 const (
 	ProviderBeeper     = "beeper"
 	ProviderOpenAI     = "openai"
+	ProviderGemini     = "gemini"
+	ProviderAnthropic  = "anthropic"
 	ProviderOpenRouter = "openrouter"
 	ProviderCustom     = "custom"
 )
@@ -66,7 +68,7 @@ func (ol *OpenAILogin) SubmitUserInput(ctx context.Context, input map[string]str
 		}
 		// Validate provider
 		switch provider {
-		case ProviderBeeper, ProviderOpenAI, ProviderOpenRouter, ProviderCustom:
+		case ProviderBeeper, ProviderOpenAI, ProviderGemini, ProviderAnthropic, ProviderOpenRouter, ProviderCustom:
 			// Valid
 		default:
 			return nil, fmt.Errorf("invalid provider: %s", provider)
@@ -107,7 +109,7 @@ func (ol *OpenAILogin) providerStep() *bridgev2.LoginStep {
 					Type:    bridgev2.LoginInputFieldTypeSelect,
 					ID:      "provider",
 					Name:    "Provider",
-					Options: []string{ProviderBeeper, ProviderOpenAI, ProviderOpenRouter, ProviderCustom},
+					Options: []string{ProviderBeeper, ProviderOpenAI, ProviderGemini, ProviderAnthropic, ProviderOpenRouter, ProviderCustom},
 				},
 			},
 		},
@@ -134,6 +136,24 @@ func (ol *OpenAILogin) credentialsStep() *bridgev2.LoginStep {
 				ID:          "api_key",
 				Name:        "OpenAI API Key",
 				Description: "Generate one at https://platform.openai.com/account/api-keys",
+			},
+		}
+	case ProviderGemini:
+		fields = []bridgev2.LoginInputDataField{
+			{
+				Type:        bridgev2.LoginInputFieldTypeToken,
+				ID:          "api_key",
+				Name:        "Gemini API Key",
+				Description: "Generate one at https://aistudio.google.com/apikey",
+			},
+		}
+	case ProviderAnthropic:
+		fields = []bridgev2.LoginInputDataField{
+			{
+				Type:        bridgev2.LoginInputFieldTypeToken,
+				ID:          "api_key",
+				Name:        "Anthropic API Key",
+				Description: "Generate one at https://console.anthropic.com/settings/keys",
 			},
 		}
 	case ProviderOpenRouter:
