@@ -77,12 +77,26 @@ type AIClient struct {
 	pendingMessagesMu sync.Mutex
 }
 
+// pendingMessageType indicates what kind of pending message this is
+type pendingMessageType string
+
+const (
+	pendingTypeText           pendingMessageType = "text"
+	pendingTypeImage          pendingMessageType = "image"
+	pendingTypeRegenerate     pendingMessageType = "regenerate"
+	pendingTypeEditRegenerate pendingMessageType = "edit_regenerate"
+)
+
 // pendingMessage represents a queued message waiting for AI processing
+// Prompt is built fresh when processing starts to ensure up-to-date history
 type pendingMessage struct {
-	Event          *event.Event
-	Portal         *bridgev2.Portal
-	Meta           *PortalMetadata
-	PromptMessages []openai.ChatCompletionMessageParamUnion
+	Event       *event.Event
+	Portal      *bridgev2.Portal
+	Meta        *PortalMetadata
+	Type        pendingMessageType
+	MessageBody string              // For text, regenerate, edit_regenerate
+	ImageURL    string              // For image messages
+	TargetMsgID networkid.MessageID // For edit_regenerate
 }
 
 func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey string) (*AIClient, error) {
@@ -260,12 +274,37 @@ func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 
 	oc.log.Debug().
 		Str("room_id", roomID.String()).
+		Str("type", string(pending.Type)).
 		Msg("Processing next pending message")
 
 	// Re-acquire the room lock and process
 	if !oc.acquireRoom(roomID) {
 		// Room somehow got busy again, re-queue the message
 		oc.queuePendingMessage(roomID, *pending)
+		return
+	}
+
+	// Build prompt NOW with fresh history (includes previous AI responses)
+	var promptMessages []openai.ChatCompletionMessageParamUnion
+	var err error
+
+	switch pending.Type {
+	case pendingTypeText:
+		promptMessages, err = oc.buildPrompt(ctx, pending.Portal, pending.Meta, pending.MessageBody)
+	case pendingTypeImage:
+		promptMessages, err = oc.buildPromptWithImage(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.ImageURL)
+	case pendingTypeRegenerate:
+		promptMessages, err = oc.buildPromptForRegenerate(ctx, pending.Portal, pending.Meta, pending.MessageBody)
+	case pendingTypeEditRegenerate:
+		promptMessages, err = oc.buildPromptUpToMessage(ctx, pending.Portal, pending.Meta, pending.TargetMsgID, pending.MessageBody)
+	default:
+		err = fmt.Errorf("unknown pending message type: %s", pending.Type)
+	}
+
+	if err != nil {
+		oc.log.Err(err).Str("type", string(pending.Type)).Msg("Failed to build prompt for pending message")
+		oc.releaseRoom(roomID)
+		oc.processNextPending(oc.backgroundContext(ctx), roomID)
 		return
 	}
 
@@ -279,7 +318,7 @@ func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 			// Check for more pending messages
 			oc.processNextPending(oc.backgroundContext(ctx), roomID)
 		}()
-		oc.dispatchCompletionInternal(ctx, pending.Event, pending.Portal, pending.Meta, pending.PromptMessages)
+		oc.dispatchCompletionInternal(ctx, pending.Event, pending.Portal, pending.Meta, promptMessages)
 	}()
 }
 
@@ -688,12 +727,13 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		// Continue anyway - the message will still be processed
 	}
 
-	// Queue the message for later processing
+	// Queue the message for later processing (prompt built fresh when processed)
 	oc.queuePendingMessage(portal.MXID, pendingMessage{
-		Event:          msg.Event,
-		Portal:         portal,
-		Meta:           meta,
-		PromptMessages: promptMessages,
+		Event:       msg.Event,
+		Portal:      portal,
+		Meta:        meta,
+		Type:        pendingTypeText,
+		MessageBody: body,
 	})
 
 	// Send PENDING status - message shows "Sending..." in client
@@ -820,10 +860,12 @@ func (oc *AIClient) regenerateFromEdit(
 		}()
 	} else {
 		oc.queuePendingMessage(portal.MXID, pendingMessage{
-			Event:          evt,
-			Portal:         portal,
-			Meta:           meta,
-			PromptMessages: promptMessages,
+			Event:       evt,
+			Portal:      portal,
+			Meta:        meta,
+			Type:        pendingTypeEditRegenerate,
+			MessageBody: newBody,
+			TargetMsgID: editedMessage.ID,
 		})
 		oc.sendPendingStatus(ctx, portal, evt, "Waiting for previous response")
 	}
@@ -960,12 +1002,14 @@ func (oc *AIClient) handleImageMessage(
 		oc.log.Err(err).Msg("Failed to save queued image message to database")
 	}
 
-	// Queue the message for later processing
+	// Queue the message for later processing (prompt built fresh when processed)
 	oc.queuePendingMessage(portal.MXID, pendingMessage{
-		Event:          msg.Event,
-		Portal:         portal,
-		Meta:           meta,
-		PromptMessages: promptMessages,
+		Event:       msg.Event,
+		Portal:      portal,
+		Meta:        meta,
+		Type:        pendingTypeImage,
+		MessageBody: caption,
+		ImageURL:    string(imageURL),
 	})
 
 	// Send PENDING status - message shows "Sending..." in client
@@ -1666,10 +1710,11 @@ func (oc *AIClient) handleRegenerate(
 		}()
 	} else {
 		oc.queuePendingMessage(portal.MXID, pendingMessage{
-			Event:          evt,
-			Portal:         portal,
-			Meta:           meta,
-			PromptMessages: prompt,
+			Event:       evt,
+			Portal:      portal,
+			Meta:        meta,
+			Type:        pendingTypeRegenerate,
+			MessageBody: userMeta.Body,
 		})
 		oc.sendPendingStatus(runCtx, portal, evt, "Waiting for previous response")
 	}
