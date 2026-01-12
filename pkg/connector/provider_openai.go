@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -397,74 +396,7 @@ func (o *OpenAIProvider) CountTokens(ctx context.Context, messages []UnifiedMess
 
 // defaultOpenAIModels returns known OpenAI models
 func defaultOpenAIModels() []ModelInfo {
-	return []ModelInfo{
-		{
-			ID:                  "openai/gpt-4o",
-			Name:                "GPT 4o",
-			Provider:            "openai",
-			Description:         "Most capable multimodal model",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    false,
-			ContextWindow:       128000,
-			MaxOutputTokens:     16384,
-		},
-		{
-			ID:                  "openai/gpt-4o-mini",
-			Name:                "GPT 4o Mini",
-			Provider:            "openai",
-			Description:         "Fast and efficient GPT model",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    false,
-			ContextWindow:       128000,
-			MaxOutputTokens:     16384,
-		},
-		{
-			ID:                  "openai/o1",
-			Name:                "O1",
-			Provider:            "openai",
-			Description:         "Advanced reasoning model",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    true,
-			ContextWindow:       200000,
-			MaxOutputTokens:     100000,
-		},
-		{
-			ID:                  "openai/o1-mini",
-			Name:                "O1 Mini",
-			Provider:            "openai",
-			Description:         "Fast reasoning model",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    true,
-			ContextWindow:       128000,
-			MaxOutputTokens:     65536,
-		},
-		{
-			ID:                  "openai/o3-mini",
-			Name:                "O3 Mini",
-			Provider:            "openai",
-			Description:         "Latest reasoning model",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    true,
-			ContextWindow:       200000,
-			MaxOutputTokens:     100000,
-		},
-		{
-			ID:                  "openai/gpt-4-turbo",
-			Name:                "GPT 4 Turbo",
-			Provider:            "openai",
-			Description:         "Previous generation GPT-4 with vision",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    false,
-			ContextWindow:       128000,
-			MaxOutputTokens:     4096,
-		},
-	}
+	return GetDefaultModels("openai")
 }
 
 // ToOpenAITools converts tool definitions to OpenAI Responses API format
@@ -573,51 +505,3 @@ func ToOpenAIChatTools(tools []ToolDefinition) []openai.ChatCompletionToolUnionP
 	return result
 }
 
-// extractResponseTextContent extracts text content from Responses API output
-func extractResponseTextContent(output []responses.ResponseOutputItemUnion) string {
-	var content strings.Builder
-	for _, item := range output {
-		switch item := item.AsAny().(type) {
-		case responses.ResponseOutputMessage:
-			for _, contentPart := range item.Content {
-				switch part := contentPart.AsAny().(type) {
-				case responses.ResponseOutputText:
-					content.WriteString(part.Text)
-				}
-			}
-		}
-	}
-	return content.String()
-}
-
-// extractResponseToolCalls extracts tool calls from Responses API output
-func extractResponseToolCalls(output []responses.ResponseOutputItemUnion) []ToolCallResult {
-	var toolCalls []ToolCallResult
-	for _, item := range output {
-		switch item := item.AsAny().(type) {
-		case responses.ResponseFunctionToolCall:
-			argsJSON := "{}"
-			if item.Arguments != "" {
-				argsJSON = item.Arguments
-			}
-			toolCalls = append(toolCalls, ToolCallResult{
-				ID:        item.ID,
-				Name:      item.Name,
-				Arguments: argsJSON,
-			})
-		}
-	}
-	return toolCalls
-}
-
-// helper to marshal to JSON string
-func toJSONString(v any) string {
-	if v == nil {
-		return "{}"
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return "{}"
-	}
-	return string(b)
-}

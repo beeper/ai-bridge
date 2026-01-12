@@ -366,52 +366,7 @@ func (g *GeminiProvider) CountTokens(ctx context.Context, messages []UnifiedMess
 
 // defaultGeminiModels returns known Gemini models
 func defaultGeminiModels() []ModelInfo {
-	return []ModelInfo{
-		{
-			ID:                  "gemini/gemini-2.5-flash",
-			Name:                "Gemini 2.5 Flash",
-			Provider:            "gemini",
-			Description:         "Fast and efficient model for most tasks",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    false,
-			ContextWindow:       1000000,
-			MaxOutputTokens:     8192,
-		},
-		{
-			ID:                  "gemini/gemini-2.5-pro",
-			Name:                "Gemini 2.5 Pro",
-			Provider:            "gemini",
-			Description:         "Advanced model for complex tasks",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    false,
-			ContextWindow:       2000000,
-			MaxOutputTokens:     8192,
-		},
-		{
-			ID:                  "gemini/gemini-2.0-flash",
-			Name:                "Gemini 2.0 Flash",
-			Provider:            "gemini",
-			Description:         "Previous generation fast model",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    false,
-			ContextWindow:       1000000,
-			MaxOutputTokens:     8192,
-		},
-		{
-			ID:                  "gemini/gemini-2.0-flash-thinking",
-			Name:                "Gemini 2.0 Flash Thinking",
-			Provider:            "gemini",
-			Description:         "Reasoning model with chain-of-thought",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    true,
-			ContextWindow:       1000000,
-			MaxOutputTokens:     8192,
-		},
-	}
+	return GetDefaultModels("gemini")
 }
 
 // containsAny checks if slice contains any of the given values

@@ -205,48 +205,6 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 	return oc, nil
 }
 
-// getProviderForModel returns the appropriate AIProvider for the given model
-// For Beeper, this routes to different backends based on prefix
-func (oc *AIClient) getProviderForModel(modelID string) (AIProvider, string, error) {
-	meta := loginMetadata(oc.UserLogin)
-	backend, actualModel := ParseModelPrefix(modelID)
-
-	// For individual providers (non-Beeper), use their single provider
-	if meta.Provider != ProviderBeeper {
-		return oc.provider, actualModel, nil
-	}
-
-	// For Beeper, route to appropriate backend based on prefix
-	switch backend {
-	case BackendOpenAI:
-		if oc.openaiProvider == nil {
-			return nil, "", fmt.Errorf("OpenAI provider not available")
-		}
-		return oc.openaiProvider, actualModel, nil
-	case BackendGemini:
-		if oc.geminiProvider == nil {
-			return nil, "", fmt.Errorf("Gemini provider not available")
-		}
-		return oc.geminiProvider, actualModel, nil
-	case BackendAnthropic:
-		if oc.anthropicProvider == nil {
-			return nil, "", fmt.Errorf("Anthropic provider not available")
-		}
-		return oc.anthropicProvider, actualModel, nil
-	case BackendOpenRouter:
-		if oc.openrouterProvider == nil {
-			return nil, "", fmt.Errorf("OpenRouter provider not available")
-		}
-		return oc.openrouterProvider, actualModel, nil
-	default:
-		// No prefix or unknown prefix - default to OpenAI
-		if oc.openaiProvider != nil {
-			return oc.openaiProvider, modelID, nil
-		}
-		return oc.provider, modelID, nil
-	}
-}
-
 // acquireRoom tries to acquire a room for processing. Returns false if the room is already busy.
 func (oc *AIClient) acquireRoom(roomID id.RoomID) bool {
 	oc.activeRoomsMu.Lock()
@@ -263,13 +221,6 @@ func (oc *AIClient) releaseRoom(roomID id.RoomID) {
 	oc.activeRoomsMu.Lock()
 	defer oc.activeRoomsMu.Unlock()
 	delete(oc.activeRooms, roomID)
-}
-
-// isRoomBusy checks if a room is currently processing a message (without acquiring lock)
-func (oc *AIClient) isRoomBusy(roomID id.RoomID) bool {
-	oc.activeRoomsMu.Lock()
-	defer oc.activeRoomsMu.Unlock()
-	return oc.activeRooms[roomID]
 }
 
 // queuePendingMessage adds a message to the pending queue for later processing
@@ -2882,19 +2833,6 @@ func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) 
 
 	oc.log.Info().Int("count", len(allModels)).Msg("Cached available models")
 	return allModels, nil
-}
-
-// isChatModel determines if a model ID is a chat completion model
-func isChatModel(modelID string) bool {
-	// Include gpt-* models, exclude embeddings, whisper, tts, dall-e, etc.
-	if strings.HasPrefix(modelID, "gpt-") {
-		return true
-	}
-	// O1/O3 reasoning models
-	if strings.HasPrefix(modelID, "o1") || strings.HasPrefix(modelID, "o3") {
-		return true
-	}
-	return false
 }
 
 // isReasoningModel checks if a model supports reasoning/thinking capabilities

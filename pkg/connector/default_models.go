@@ -1,0 +1,190 @@
+package connector
+
+// DefaultModels contains all default model definitions for each provider.
+// This consolidates model definitions that were previously duplicated across provider files.
+var DefaultModels = map[string][]ModelInfo{
+	"openai": {
+		{
+			ID:                  "openai/gpt-4o",
+			Name:                "GPT 4o",
+			Provider:            "openai",
+			Description:         "Most capable multimodal model",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    false,
+			ContextWindow:       128000,
+			MaxOutputTokens:     16384,
+		},
+		{
+			ID:                  "openai/gpt-4o-mini",
+			Name:                "GPT 4o Mini",
+			Provider:            "openai",
+			Description:         "Fast and efficient GPT model",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    false,
+			ContextWindow:       128000,
+			MaxOutputTokens:     16384,
+		},
+		{
+			ID:                  "openai/o1",
+			Name:                "O1",
+			Provider:            "openai",
+			Description:         "Advanced reasoning model",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    true,
+			ContextWindow:       200000,
+			MaxOutputTokens:     100000,
+		},
+		{
+			ID:                  "openai/o1-mini",
+			Name:                "O1 Mini",
+			Provider:            "openai",
+			Description:         "Fast reasoning model",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    true,
+			ContextWindow:       128000,
+			MaxOutputTokens:     65536,
+		},
+		{
+			ID:                  "openai/o3-mini",
+			Name:                "O3 Mini",
+			Provider:            "openai",
+			Description:         "Latest reasoning model",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    true,
+			ContextWindow:       200000,
+			MaxOutputTokens:     100000,
+		},
+		{
+			ID:                  "openai/gpt-4-turbo",
+			Name:                "GPT 4 Turbo",
+			Provider:            "openai",
+			Description:         "Previous generation GPT-4 with vision",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    false,
+			ContextWindow:       128000,
+			MaxOutputTokens:     4096,
+		},
+	},
+	"anthropic": {
+		{
+			ID:                  "anthropic/claude-sonnet-4-5-20250929",
+			Name:                "Claude Sonnet 4.5",
+			Provider:            "anthropic",
+			Description:         "Latest Claude model with excellent performance",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    false,
+			ContextWindow:       200000,
+			MaxOutputTokens:     8192,
+		},
+		{
+			ID:                  "anthropic/claude-opus-4-5-20250929",
+			Name:                "Claude Opus 4.5",
+			Provider:            "anthropic",
+			Description:         "Most capable Claude model",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    false,
+			ContextWindow:       200000,
+			MaxOutputTokens:     8192,
+		},
+		{
+			ID:                  "anthropic/claude-3-5-sonnet-20241022",
+			Name:                "Claude 3.5 Sonnet",
+			Provider:            "anthropic",
+			Description:         "Balanced performance and speed",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    false,
+			ContextWindow:       200000,
+			MaxOutputTokens:     8192,
+		},
+		{
+			ID:                  "anthropic/claude-3-5-haiku-20241022",
+			Name:                "Claude 3.5 Haiku",
+			Provider:            "anthropic",
+			Description:         "Fast and efficient Claude model",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    false,
+			ContextWindow:       200000,
+			MaxOutputTokens:     8192,
+		},
+		{
+			ID:                  "anthropic/claude-3-opus-20240229",
+			Name:                "Claude 3 Opus",
+			Provider:            "anthropic",
+			Description:         "Previous generation most capable model",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    false,
+			ContextWindow:       200000,
+			MaxOutputTokens:     4096,
+		},
+	},
+	"gemini": {
+		{
+			ID:                  "gemini/gemini-2.5-flash",
+			Name:                "Gemini 2.5 Flash",
+			Provider:            "gemini",
+			Description:         "Fast and efficient model for most tasks",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    false,
+			ContextWindow:       1000000,
+			MaxOutputTokens:     8192,
+		},
+		{
+			ID:                  "gemini/gemini-2.5-pro",
+			Name:                "Gemini 2.5 Pro",
+			Provider:            "gemini",
+			Description:         "Advanced model for complex tasks",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    false,
+			ContextWindow:       2000000,
+			MaxOutputTokens:     8192,
+		},
+		{
+			ID:                  "gemini/gemini-2.0-flash",
+			Name:                "Gemini 2.0 Flash",
+			Provider:            "gemini",
+			Description:         "Previous generation fast model",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    false,
+			ContextWindow:       1000000,
+			MaxOutputTokens:     8192,
+		},
+		{
+			ID:                  "gemini/gemini-2.0-flash-thinking",
+			Name:                "Gemini 2.0 Flash Thinking",
+			Provider:            "gemini",
+			Description:         "Reasoning model with chain-of-thought",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			IsReasoningModel:    true,
+			ContextWindow:       1000000,
+			MaxOutputTokens:     8192,
+		},
+	},
+}
+
+// GetDefaultModels returns default models for a provider.
+// Returns a copy to prevent modification of the original slice.
+func GetDefaultModels(provider string) []ModelInfo {
+	models, ok := DefaultModels[provider]
+	if !ok {
+		return nil
+	}
+	// Return a copy
+	result := make([]ModelInfo, len(models))
+	copy(result, models)
+	return result
+}

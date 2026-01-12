@@ -20,9 +20,16 @@ const (
 	ProviderCustom     = "custom"
 )
 
+// Login flow IDs
+const (
+	LoginFlowIDSharedKey   = "shared-key"
+	LoginFlowIDPersonalKey = "personal-key"
+	LoginFlowIDLocalBeeper = "local-beeper"
+)
+
 // providerBaseURLs maps provider names to their API base URLs
+// For Beeper provider, the base URL is provided by the SDK (hungryserv endpoint)
 var providerBaseURLs = map[string]string{
-	ProviderBeeper:     "https://ai-proxy.beeper.com/v1",
 	ProviderOpenAI:     "https://api.openai.com/v1",
 	ProviderOpenRouter: "https://openrouter.ai/api/v1",
 }
@@ -36,13 +43,31 @@ var (
 type OpenAILogin struct {
 	User             *bridgev2.User
 	Connector        *OpenAIConnector
+	FlowID           string // Login flow ID
 	RequireUserInput bool
 	Provider         string // Selected provider (set after step 1)
 	Step             int    // Current step: 0 = provider selection, 1 = credentials
 }
 
 func (ol *OpenAILogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
-	if !ol.RequireUserInput {
+	// Handle local-beeper flow (for SDK integration)
+	if ol.FlowID == LoginFlowIDLocalBeeper {
+		// Return a step that expects pre-filled credentials from the SDK
+		return &bridgev2.LoginStep{
+			Type:         bridgev2.LoginStepTypeUserInput,
+			StepID:       "io.ai-bridge.local-beeper.credentials",
+			Instructions: "Connecting to Beeper AI...",
+			UserInputParams: &bridgev2.LoginUserInputParams{
+				Fields: []bridgev2.LoginInputDataField{
+					{Type: bridgev2.LoginInputFieldTypeToken, ID: "api_key", Name: "Access Token"},
+					{Type: bridgev2.LoginInputFieldTypeURL, ID: "base_url", Name: "Base URL"},
+				},
+			},
+		}, nil
+	}
+
+	// Handle shared-key flow
+	if ol.FlowID == LoginFlowIDSharedKey || !ol.RequireUserInput {
 		// Check for shared API key from environment variable
 		key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 		if key == "" {
@@ -50,13 +75,33 @@ func (ol *OpenAILogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
 		}
 		return ol.finishLogin(ctx, key, "")
 	}
+
+	// Handle personal-key flow - start with provider selection
 	return ol.providerStep(), nil
 }
 
 func (ol *OpenAILogin) Cancel() {}
 
 func (ol *OpenAILogin) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
-	if !ol.RequireUserInput {
+	// Handle local-beeper flow
+	if ol.FlowID == LoginFlowIDLocalBeeper {
+		// Auto-set provider to beeper
+		ol.Provider = ProviderBeeper
+
+		apiKey := strings.TrimSpace(input["api_key"])
+		if apiKey == "" {
+			return nil, fmt.Errorf("access token is required")
+		}
+
+		baseURL := strings.TrimSpace(input["base_url"])
+		if baseURL == "" {
+			return nil, fmt.Errorf("base URL is required")
+		}
+
+		return ol.finishLogin(ctx, apiKey, baseURL)
+	}
+
+	if ol.FlowID == LoginFlowIDSharedKey || !ol.RequireUserInput {
 		return nil, fmt.Errorf("user input not expected for this login flow")
 	}
 
@@ -86,12 +131,19 @@ func (ol *OpenAILogin) SubmitUserInput(ctx context.Context, input map[string]str
 
 	// Determine base URL based on provider
 	var baseURL string
-	if ol.Provider == ProviderCustom {
+	switch ol.Provider {
+	case ProviderCustom:
 		baseURL = strings.TrimSpace(input["base_url"])
 		if baseURL == "" {
 			return nil, fmt.Errorf("please enter a base URL")
 		}
-	} else {
+	case ProviderBeeper:
+		// For standalone Beeper mode, require base URL
+		baseURL = strings.TrimSpace(input["base_url"])
+		if baseURL == "" {
+			return nil, fmt.Errorf("please enter a base URL")
+		}
+	default:
 		baseURL = providerBaseURLs[ol.Provider]
 	}
 
@@ -123,10 +175,16 @@ func (ol *OpenAILogin) credentialsStep() *bridgev2.LoginStep {
 	case ProviderBeeper:
 		fields = []bridgev2.LoginInputDataField{
 			{
+				Type:        bridgev2.LoginInputFieldTypeURL,
+				ID:          "base_url",
+				Name:        "Beeper AI Proxy URL",
+				Description: "Your Beeper homeserver AI proxy endpoint",
+			},
+			{
 				Type:        bridgev2.LoginInputFieldTypeToken,
 				ID:          "api_key",
 				Name:        "Beeper Access Token",
-				Description: "Your Beeper access token",
+				Description: "Your Beeper Matrix access token",
 			},
 		}
 	case ProviderOpenAI:
@@ -201,7 +259,7 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, apiKey, baseURL string) 
 	}
 	login, err := ol.User.NewLogin(ctx, &database.UserLogin{
 		ID:         loginID,
-		RemoteName: "ChatGPT",
+		RemoteName: "Beeper AI",
 		Metadata:   meta,
 	}, nil)
 	if err != nil {
