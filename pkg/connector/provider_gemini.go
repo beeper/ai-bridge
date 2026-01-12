@@ -336,7 +336,8 @@ func (g *GeminiProvider) ValidateModel(ctx context.Context, modelID string) (boo
 	if err != nil {
 		// Check if it's a known model
 		for _, m := range defaultGeminiModels() {
-			if strings.Contains(m.ID, actualModel) {
+			_, knownModel := ParseModelPrefix(m.ID)
+			if actualModel == knownModel {
 				return true, nil
 			}
 		}

@@ -323,23 +323,31 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	}
 
 	var models []ModelInfo
-	for _, model := range page.Data {
-		// Filter to only relevant models
-		if !strings.HasPrefix(model.ID, "gpt-") &&
-			!strings.HasPrefix(model.ID, "o1") &&
-			!strings.HasPrefix(model.ID, "o3") &&
-			!strings.HasPrefix(model.ID, "chatgpt") {
-			continue
+	for page != nil {
+		for _, model := range page.Data {
+			// Filter to only relevant models
+			if !strings.HasPrefix(model.ID, "gpt-") &&
+				!strings.HasPrefix(model.ID, "o1") &&
+				!strings.HasPrefix(model.ID, "o3") &&
+				!strings.HasPrefix(model.ID, "chatgpt") {
+				continue
+			}
+
+			models = append(models, ModelInfo{
+				ID:                  AddModelPrefix(BackendOpenAI, model.ID),
+				Name:                formatModelDisplayName(model.ID),
+				Provider:            "openai",
+				SupportsVision:      strings.Contains(model.ID, "vision") || strings.Contains(model.ID, "4o") || strings.Contains(model.ID, "4-turbo"),
+				SupportsToolCalling: true,
+				IsReasoningModel:    strings.HasPrefix(model.ID, "o1") || strings.HasPrefix(model.ID, "o3"),
+			})
 		}
 
-		models = append(models, ModelInfo{
-			ID:                  AddModelPrefix(BackendOpenAI, model.ID),
-			Name:                formatModelDisplayName(model.ID),
-			Provider:            "openai",
-			SupportsVision:      strings.Contains(model.ID, "vision") || strings.Contains(model.ID, "4o") || strings.Contains(model.ID, "4-turbo"),
-			SupportsToolCalling: true,
-			IsReasoningModel:    strings.HasPrefix(model.ID, "o1") || strings.HasPrefix(model.ID, "o3"),
-		})
+		// Get next page
+		page, err = page.GetNextPage()
+		if err != nil {
+			break
+		}
 	}
 
 	if len(models) == 0 {
