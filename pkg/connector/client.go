@@ -267,14 +267,14 @@ func (oc *OpenAIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) 
 		}
 		return &bridgev2.UserInfo{
 			Name:  ptr.Ptr(displayName),
-			IsBot: ptr.Ptr(true),
+			IsBot: ptr.Ptr(false),
 		}, nil
 	}
 
 	// Fallback for unknown ghost types
 	return &bridgev2.UserInfo{
 		Name:  ptr.Ptr("AI Assistant"),
-		IsBot: ptr.Ptr(true),
+		IsBot: ptr.Ptr(false),
 	}, nil
 }
 
@@ -357,7 +357,7 @@ func (oc *OpenAIClient) GetContactList(ctx context.Context) ([]*bridgev2.Resolve
 			UserID: userID,
 			UserInfo: &bridgev2.UserInfo{
 				Name:        ptr.Ptr(displayName),
-				IsBot:       ptr.Ptr(true),
+				IsBot:       ptr.Ptr(false),
 				Identifiers: []string{model.ID},
 			},
 			Ghost: ghost,
@@ -414,7 +414,7 @@ func (oc *OpenAIClient) ResolveIdentifier(ctx context.Context, identifier string
 		UserID: userID,
 		UserInfo: &bridgev2.UserInfo{
 			Name:        ptr.Ptr(formatModelName(modelID)),
-			IsBot:       ptr.Ptr(true),
+			IsBot:       ptr.Ptr(false),
 			Identifiers: []string{modelID},
 		},
 		Ghost: ghost,
@@ -512,7 +512,7 @@ func (oc *OpenAIClient) buildChatMembers(modelID string) *bridgev2.ChatMemberLis
 				Membership: event.MembershipJoin,
 				UserInfo: &bridgev2.UserInfo{
 					Name:  ptr.Ptr(formatModelName(modelID)),
-					IsBot: ptr.Ptr(true),
+					IsBot: ptr.Ptr(false),
 				},
 			},
 		},
@@ -1238,6 +1238,7 @@ func (oc *OpenAIClient) handleSlashCommand(
 			"• /tokens [1-16384] - Get or set max completion tokens\n" +
 			"• /tools [on|off] - Enable/disable function calling tools\n" +
 			"• /mode [messages|responses] - Set conversation context mode\n" +
+			"• /new [model] - Create a new chat (uses current model if none specified)\n" +
 			"• /fork [event_id] - Fork conversation to a new chat\n" +
 			"• /config - Show current configuration\n" +
 			"• /cost - Show conversation token usage and cost\n" +
@@ -1248,6 +1249,10 @@ func (oc *OpenAIClient) handleSlashCommand(
 
 	case "/fork":
 		go oc.handleFork(ctx, evt, portal, meta, arg)
+		return true
+
+	case "/new":
+		go oc.handleNewChat(ctx, evt, portal, meta, arg)
 		return true
 
 	case "/regenerate":
@@ -1342,6 +1347,53 @@ func (oc *OpenAIClient) handleFork(
 	oc.sendSystemNotice(runCtx, portal, fmt.Sprintf(
 		"Forked %d messages to new chat.\nOpen: %s",
 		copiedCount, roomLink,
+	))
+}
+
+// handleNewChat creates a new empty chat with a specified model
+func (oc *OpenAIClient) handleNewChat(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	arg string,
+) {
+	runCtx := oc.backgroundContext(ctx)
+
+	// Determine model: use argument or current chat's model
+	modelID := arg
+	if modelID == "" {
+		modelID = oc.effectiveModel(meta)
+	}
+
+	// Validate model
+	valid, err := oc.validateModel(runCtx, modelID)
+	if err != nil || !valid {
+		oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Invalid model: %s", modelID))
+		return
+	}
+
+	// Create new chat with default settings
+	newPortal, chatInfo, err := oc.createNewChatWithModel(runCtx, modelID)
+	if err != nil {
+		oc.sendSystemNotice(runCtx, portal, "Failed to create chat: "+err.Error())
+		return
+	}
+
+	// Create Matrix room
+	if err := newPortal.CreateMatrixRoom(runCtx, oc.UserLogin, chatInfo); err != nil {
+		oc.sendSystemNotice(runCtx, portal, "Failed to create room: "+err.Error())
+		return
+	}
+
+	// Broadcast room state
+	go oc.BroadcastRoomState(runCtx, newPortal)
+
+	// Send confirmation with link
+	roomLink := fmt.Sprintf("https://matrix.to/#/%s", newPortal.MXID)
+	oc.sendSystemNotice(runCtx, portal, fmt.Sprintf(
+		"Created new %s chat.\nOpen: %s",
+		formatModelName(modelID), roomLink,
 	))
 }
 
@@ -2449,7 +2501,7 @@ func (oc *OpenAIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.
 	} else {
 		newGhost.UpdateInfo(ctx, &bridgev2.UserInfo{
 			Name:  ptr.Ptr(newModelName),
-			IsBot: ptr.Ptr(true),
+			IsBot: ptr.Ptr(false),
 		})
 	}
 
@@ -2474,7 +2526,7 @@ func (oc *OpenAIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.
 				Membership: event.MembershipJoin,
 				UserInfo: &bridgev2.UserInfo{
 					Name:  ptr.Ptr(newModelName),
-					IsBot: ptr.Ptr(true),
+					IsBot: ptr.Ptr(false),
 				},
 				MemberEventExtra: map[string]any{
 					"displayname": newModelName,
@@ -2931,6 +2983,48 @@ func (oc *OpenAIClient) spawnPortal(ctx context.Context, title, systemPrompt str
 	return portal, info, nil
 }
 
+// createNewChatWithModel creates a new chat portal with the specified model and default settings
+func (oc *OpenAIClient) createNewChatWithModel(ctx context.Context, modelID string) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
+	chatIndex, err := oc.allocateNextChatIndex(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	slug := formatChatSlug(chatIndex)
+	modelName := formatModelName(modelID)
+	title := fmt.Sprintf("%s %d", modelName, chatIndex)
+	systemPrompt := oc.connector.Config.OpenAI.SystemPrompt
+
+	key := portalKeyForChat(oc.UserLogin.ID, slug)
+	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, key)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	pmeta := portalMeta(portal)
+	pmeta.Slug = slug
+	pmeta.Title = title
+	pmeta.Model = modelID
+	pmeta.Capabilities = getModelCapabilities(modelID)
+	if systemPrompt != "" {
+		pmeta.SystemPrompt = systemPrompt
+	}
+
+	portal.RoomType = database.RoomTypeDM
+	portal.OtherUserID = modelUserID(modelID)
+	portal.Name = title
+	portal.NameSet = true
+	portal.Topic = systemPrompt
+	portal.TopicSet = systemPrompt != ""
+
+	if err := portal.Save(ctx); err != nil {
+		return nil, nil, err
+	}
+
+	info := oc.composeChatInfo(title, systemPrompt, modelID)
+	return portal, info, nil
+}
+
 func (oc *OpenAIClient) chatInfoFromPortal(portal *bridgev2.Portal) *bridgev2.ChatInfo {
 	meta := portalMeta(portal)
 	modelID := oc.effectiveModel(meta)
@@ -2976,7 +3070,7 @@ func (oc *OpenAIClient) composeChatInfo(title, prompt, modelID string) *bridgev2
 			Membership: event.MembershipJoin,
 			UserInfo: &bridgev2.UserInfo{
 				Name:  ptr.Ptr(modelName),
-				IsBot: ptr.Ptr(true),
+				IsBot: ptr.Ptr(false),
 			},
 			// Set displayname directly in membership event content
 			// This works because MemberEventContent.Displayname has omitempty
