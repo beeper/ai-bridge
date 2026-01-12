@@ -85,11 +85,6 @@ func (o *OpenAIProvider) GenerateStream(ctx context.Context, params GeneratePara
 			responsesParams.MaxOutputTokens = openai.Int(int64(params.MaxCompletionTokens))
 		}
 
-		// Set temperature
-		if params.Temperature > 0 {
-			responsesParams.Temperature = openai.Float(params.Temperature)
-		}
-
 		// Set system prompt via instructions
 		if params.SystemPrompt != "" {
 			responsesParams.Instructions = openai.String(params.SystemPrompt)
@@ -229,11 +224,6 @@ func (o *OpenAIProvider) Generate(ctx context.Context, params GenerateParams) (*
 	// Set max tokens
 	if params.MaxCompletionTokens > 0 {
 		responsesParams.MaxOutputTokens = openai.Int(int64(params.MaxCompletionTokens))
-	}
-
-	// Set temperature
-	if params.Temperature > 0 {
-		responsesParams.Temperature = openai.Float(params.Temperature)
 	}
 
 	// Set system prompt via instructions
