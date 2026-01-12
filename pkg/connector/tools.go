@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -217,6 +218,11 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("web search failed: status %d: %s", resp.StatusCode, string(body))
+	}
+
 	var result struct {
 		Abstract      string `json:"Abstract"`
 		AbstractText  string `json:"AbstractText"`
@@ -250,11 +256,16 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 	// Add related topics if no direct answer
 	if result.Answer == "" && result.AbstractText == "" && len(result.RelatedTopics) > 0 {
 		response.WriteString("Related information:\n")
-		for i, topic := range result.RelatedTopics {
-			if i >= 3 || topic.Text == "" {
-				break
+		count := 0
+		for _, topic := range result.RelatedTopics {
+			if topic.Text == "" {
+				continue
 			}
 			response.WriteString(fmt.Sprintf("- %s\n", topic.Text))
+			count++
+			if count >= 3 {
+				break
+			}
 		}
 	}
 
