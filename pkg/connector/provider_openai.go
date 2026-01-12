@@ -494,4 +494,3 @@ func ToOpenAIChatTools(tools []ToolDefinition) []openai.ChatCompletionToolUnionP
 
 	return result
 }
-

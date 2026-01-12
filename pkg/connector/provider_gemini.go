@@ -215,7 +215,7 @@ func (g *GeminiProvider) Generate(ctx context.Context, params GenerateParams) (*
 	// Make request
 	resp, err := g.client.Models.GenerateContent(ctx, params.Model, contents, config)
 	if err != nil {
-		return nil, fmt.Errorf("Gemini generation failed: %w", err)
+		return nil, fmt.Errorf("gemini generation failed: %w", err)
 	}
 
 	// Extract response content
