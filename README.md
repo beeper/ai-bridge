@@ -1,69 +1,83 @@
 # ai-bridge
 
-This repository contains a reference Matrix ↔ OpenAI bridge that closely follows the
-[`bridgev2` megabridge template](https://mau.fi/blog/megabridge-twilio/)
-
-This is a generic AI bridge able to be setup for different model providers. Currently it supports OpenAI's chat completion API.
+Multi-provider AI bridge for Beeper. Supports OpenAI, Anthropic, Google Gemini, and OpenRouter via the mautrix-go bridgev2 framework.
 
 ## Features
 
-- gomatrix/mautrix `bridgev2` implementation with proper connector/login separation.
-- **Model selection** – Each OpenAI model appears as a separate contact; create separate chats with different models.
-- **Dynamic capabilities** – Rooms automatically adjust based on model (vision support, etc.).
-- **Streaming responses** – Progressive rendering with debounced edits.
-- Chat history persistence via `bridgev2`'s shared database + prompt reconstruction.
-- Configurable OpenAI API key (config file or `OPENAI_API_KEY` environment variable).
-- Support for user-provided API keys (per-user billing).
-- Deployment artifacts mirroring mautrix bridges (example config, registration skeleton, multi-stage Dockerfile).
+- **Multi-provider support** with intelligent model routing (prefix-based: `openai/gpt-4o`, `anthropic/claude-3-5-sonnet`, etc.)
+- **Per-model contacts** - each model appears as a separate chat contact
+- **Streaming responses** with debounced progressive rendering
+- **Vision support** - automatic capability detection for image uploads
+- **Per-room configuration** - model, temperature, system prompt, context length
+- **User-provided API keys** - per-user billing via login flow
+- **Chat history persistence** with prompt reconstruction
 
+## Supported Providers
 
-## Getting Started
+| Provider | Example Models |
+|----------|----------------|
+| OpenAI | gpt-4o, gpt-4o-mini, o1, o3-mini |
+| Anthropic | claude-3-5-sonnet, claude-3-opus, claude-3-haiku |
+| Google | gemini-2.0-flash, gemini-1.5-pro |
+| OpenRouter | Various (pass-through) |
 
-Use bridge manager to generate your config:
+## Setup
 
+Generate config with bbctl:
+
+```bash
+bbctl config --type bridgev2 sh-ai
 ```
-If you have a 3rd party bridge that's built on top of mautrix-go's bridgev2 framework, you can have bbctl generate a mostly-complete config file:
 
-Run bbctl config --type bridgev2 <name> to generate a bridgev2 config with everything except the network section.
-<name> is a short name for the bridge (a-z, 0-9, -). The name should start with sh-. The bridge user ID namespace will be @<name>_.+:beeper.local and the bridge bot will be @<name>bot:beeper.local.
-Add the network section containing the bridge-specific configuration if necessary, then run the bridge normally.
+Add the `network` section from `config.example.yaml`, then run:
+
+```bash
+./ai-bridge --config config.yaml
 ```
 
-`./ai-bridge --config config.yaml --registration registration.yaml`
+## Login Flows
 
-### Build notes
+- **Shared key** - Set `network.openai.api_key` in config or `OPENAI_API_KEY` env var
+- **Personal key** - User selects provider and enters API key in Beeper
+- **Beeper SDK** - Pre-configured credentials from Beeper infrastructure
 
-Its setup to use libolm.
+## Configuration
 
-### Login flows
+Key settings under `network`:
 
-- **config-provided API key** – Shared API key in config.yaml for all users.
-- **user-provided API key** – Login prompt in Beeper to enter your own API key.
+```yaml
+network:
+  openai:
+    api_key: ""                    # Shared API key (or use OPENAI_API_KEY env)
+    default_model: gpt-4o-mini
+    default_temperature: 0.3
+    max_context_messages: 12
+    max_completion_tokens: 512
+    system_prompt: ""
+    request_timeout: 45s
+    enable_streaming: true
+  bridge:
+    command_prefix: "!ai"
+    typing_notifications: true
+```
 
-### Multiple chats & model selection
+See `config.example.yaml` for full options.
 
-- Use "Start New Chat" in Beeper to view all available OpenAI models as contacts.
-- Each model appears as a separate contact (e.g., "GPT-4o (Vision)", "GPT-4o Mini", "GPT-4 Turbo").
-- Create multiple conversations with different models.
-- Each room automatically adjusts capabilities based on model (vision models support image uploads).
-- Room-specific settings (model, temperature, system prompt, etc.).
+## Build
 
-## Configuration Overview
+Requires libolm for encryption support.
 
-`config.example.yaml` mirrors mautrix defaults. Key sections:
+```bash
+./build.sh
+```
 
-- `homeserver` / `appservice`: standard mautrix fields.
-- `network.openai`: API access + defaults for model, temperature, context length,
-  timeout, and system prompt.
-- `network.bridge`: bridge-specific UX toggles (command prefix, typing mirroring).
+Or use Docker:
 
-For connector-only deployments (e.g. mx-puppet), see `pkg/connector/example-config.yaml`.
+```bash
+docker build -t ai-bridge .
+```
 
-## Architecture Notes
+## Architecture
 
-- `pkg/connector`: OpenAI connector implementation (config, login flows, metadata,
-  NetworkAPI, remote message conversions).
-- `cmd/openai-bridge`: thin mxmain bootstrap identical to other mautrix bridges.
-- Prompt reconstruction uses stored message metadata (role/body) from the shared DB.
-- GPT responses are queued as `RemoteMessage` events so they flow through the same
-  portal machinery as external networks.
+- `cmd/ai-bridge/` - mxmain bootstrap
+- `pkg/connector/` - Provider implementations, message handling, login flows
