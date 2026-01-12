@@ -12,9 +12,9 @@ import (
 )
 
 var (
-	_ bridgev2.RemoteMessage                    = (*OpenAIRemoteMessage)(nil)
-	_ bridgev2.RemoteEventWithTimestamp         = (*OpenAIRemoteMessage)(nil)
-	_ bridgev2.RemoteMessageWithTransactionID   = (*OpenAIRemoteMessage)(nil)
+	_ bridgev2.RemoteMessage                  = (*OpenAIRemoteMessage)(nil)
+	_ bridgev2.RemoteEventWithTimestamp       = (*OpenAIRemoteMessage)(nil)
+	_ bridgev2.RemoteMessageWithTransactionID = (*OpenAIRemoteMessage)(nil)
 )
 
 // OpenAIRemoteMessage represents a GPT answer that should be bridged to Matrix.
