@@ -549,7 +549,9 @@ func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 
 	// Check for commands
 	if handled := oc.handleCommand(ctx, msg.Event, portal, meta, body); handled {
-		return nil, nil // Command was handled, no message to save
+		// Return empty response - framework will send SUCCESS immediately
+		// No DB message needed since commands aren't chat messages
+		return &bridgev2.MatrixMessageResponse{}, nil
 	}
 
 	promptMessages, err := oc.buildPrompt(ctx, portal, meta, body)
@@ -569,10 +571,7 @@ func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 
 	// Try to acquire room SYNCHRONOUSLY - no race condition
 	if oc.acquireRoom(portal.MXID) {
-		// Room acquired - send SUCCESS, we're processing now
-		oc.sendSuccessStatus(ctx, portal, msg.Event)
-
-		// Process in background
+		// Room acquired - framework will save message and send SUCCESS
 		go func() {
 			defer func() {
 				oc.releaseRoom(portal.MXID)
@@ -580,19 +579,34 @@ func (oc *OpenAIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 			}()
 			oc.dispatchCompletionInternal(ctx, msg.Event, portal, meta, promptMessages)
 		}()
-	} else {
-		// Room busy - queue and send PENDING
-		oc.queuePendingMessage(portal.MXID, pendingMessage{
-			Event:          msg.Event,
-			Portal:         portal,
-			Meta:           meta,
-			PromptMessages: promptMessages,
-		})
-		oc.sendPendingStatus(ctx, portal, msg.Event, "Waiting for previous response")
+
+		return &bridgev2.MatrixMessageResponse{
+			DB: userMessage,
+		}, nil
 	}
 
+	// Room busy - handle message saving ourselves to control status
+	userMessage.MXID = msg.Event.ID
+	err = oc.UserLogin.Bridge.DB.Message.Insert(ctx, userMessage)
+	if err != nil {
+		oc.log.Err(err).Msg("Failed to save queued message to database")
+		// Continue anyway - the message will still be processed
+	}
+
+	// Queue the message for later processing
+	oc.queuePendingMessage(portal.MXID, pendingMessage{
+		Event:          msg.Event,
+		Portal:         portal,
+		Meta:           meta,
+		PromptMessages: promptMessages,
+	})
+
+	// Send PENDING status - message shows "Sending..." in client
+	oc.sendPendingStatus(ctx, portal, msg.Event, "Waiting for previous response")
+
+	// Return Pending: true so framework doesn't override our PENDING status with SUCCESS
 	return &bridgev2.MatrixMessageResponse{
-		DB: userMessage,
+		Pending: true,
 	}, nil
 }
 
@@ -750,15 +764,17 @@ func (oc *OpenAIClient) buildPromptUpToMessage(
 		for i := len(history) - 1; i >= 0; i-- {
 			msg := history[i]
 			msgMeta := messageMeta(msg)
-			if msgMeta == nil || msgMeta.Body == "" {
-				continue
-			}
 
 			// Stop after adding the target message
 			if msg.ID == targetMessageID {
 				// Use the new body for the edited message
 				prompt = append(prompt, openai.UserMessage(newBody))
 				break
+			}
+
+			// Skip commands and non-conversation messages
+			if !shouldIncludeInHistory(msgMeta) {
+				continue
 			}
 
 			// Skip assistant messages that came after the target (we're going backwards)
@@ -828,10 +844,7 @@ func (oc *OpenAIClient) handleImageMessage(
 
 	// Try to acquire room SYNCHRONOUSLY - no race condition
 	if oc.acquireRoom(portal.MXID) {
-		// Room acquired - send SUCCESS, we're processing now
-		oc.sendSuccessStatus(ctx, portal, msg.Event)
-
-		// Process in background
+		// Room acquired - framework will save message and send SUCCESS
 		go func() {
 			defer func() {
 				oc.releaseRoom(portal.MXID)
@@ -839,19 +852,33 @@ func (oc *OpenAIClient) handleImageMessage(
 			}()
 			oc.dispatchCompletionInternal(ctx, msg.Event, portal, meta, promptMessages)
 		}()
-	} else {
-		// Room busy - queue and send PENDING
-		oc.queuePendingMessage(portal.MXID, pendingMessage{
-			Event:          msg.Event,
-			Portal:         portal,
-			Meta:           meta,
-			PromptMessages: promptMessages,
-		})
-		oc.sendPendingStatus(ctx, portal, msg.Event, "Waiting for previous response")
+
+		return &bridgev2.MatrixMessageResponse{
+			DB: userMessage,
+		}, nil
 	}
 
+	// Room busy - handle message saving ourselves to control status
+	userMessage.MXID = msg.Event.ID
+	err = oc.UserLogin.Bridge.DB.Message.Insert(ctx, userMessage)
+	if err != nil {
+		oc.log.Err(err).Msg("Failed to save queued image message to database")
+	}
+
+	// Queue the message for later processing
+	oc.queuePendingMessage(portal.MXID, pendingMessage{
+		Event:          msg.Event,
+		Portal:         portal,
+		Meta:           meta,
+		PromptMessages: promptMessages,
+	})
+
+	// Send PENDING status - message shows "Sending..." in client
+	oc.sendPendingStatus(ctx, portal, msg.Event, "Waiting for previous response")
+
+	// Return Pending: true so framework doesn't override our PENDING status with SUCCESS
 	return &bridgev2.MatrixMessageResponse{
-		DB: userMessage,
+		Pending: true,
 	}, nil
 }
 
@@ -880,7 +907,8 @@ func (oc *OpenAIClient) buildPromptWithImage(
 		}
 		for i := len(history) - 1; i >= 0; i-- {
 			msgMeta := messageMeta(history[i])
-			if msgMeta == nil || msgMeta.Body == "" {
+			// Skip commands and non-conversation messages
+			if !shouldIncludeInHistory(msgMeta) {
 				continue
 			}
 			switch msgMeta.Role {
@@ -1525,7 +1553,8 @@ func (oc *OpenAIClient) buildPromptForRegenerate(
 		skippedAssistant := false
 		for _, msg := range history {
 			msgMeta := messageMeta(msg)
-			if msgMeta == nil || msgMeta.Body == "" {
+			// Skip commands and non-conversation messages
+			if !shouldIncludeInHistory(msgMeta) {
 				continue
 			}
 
@@ -1571,7 +1600,7 @@ func (oc *OpenAIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal
 		}
 		for i := len(history) - 1; i >= 0; i-- {
 			meta := messageMeta(history[i])
-			if meta == nil || meta.Body == "" {
+			if !shouldIncludeInHistory(meta) {
 				continue
 			}
 			switch meta.Role {
