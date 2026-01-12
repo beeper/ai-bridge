@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -136,7 +137,7 @@ func parseTerm(expr string, pos *int) (float64, error) {
 			if right == 0 {
 				return 0, fmt.Errorf("modulo by zero")
 			}
-			result = float64(int64(result) % int64(right))
+			result = math.Mod(result, right)
 		}
 	}
 	return result, nil
