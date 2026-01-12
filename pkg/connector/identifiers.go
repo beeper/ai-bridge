@@ -73,6 +73,23 @@ func messageMeta(msg *database.Message) *MessageMetadata {
 	return nil
 }
 
+// shouldIncludeInHistory checks if a message should be included in LLM history.
+// Filters out commands (messages starting with /) and non-conversation messages.
+func shouldIncludeInHistory(meta *MessageMetadata) bool {
+	if meta == nil || meta.Body == "" {
+		return false
+	}
+	// Skip command messages
+	if strings.HasPrefix(meta.Body, "/") {
+		return false
+	}
+	// Only include user and assistant messages
+	if meta.Role != "user" && meta.Role != "assistant" {
+		return false
+	}
+	return true
+}
+
 func loginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
 	meta, ok := login.Metadata.(*UserLoginMetadata)
 	if !ok || meta == nil {
