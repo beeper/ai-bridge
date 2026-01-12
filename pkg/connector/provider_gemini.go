@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -282,10 +283,7 @@ func (g *GeminiProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 			}
 
 			// Extract model name (remove "models/" prefix)
-			modelID := model.Name
-			if strings.HasPrefix(modelID, "models/") {
-				modelID = strings.TrimPrefix(modelID, "models/")
-			}
+			modelID := strings.TrimPrefix(model.Name, "models/")
 
 			// Skip non-generative models
 			if !strings.Contains(modelID, "gemini") {
@@ -371,11 +369,9 @@ func defaultGeminiModels() []ModelInfo {
 
 // containsAny checks if slice contains any of the given values
 func containsAny(slice []string, values ...string) bool {
-	for _, s := range slice {
-		for _, v := range values {
-			if s == v {
-				return true
-			}
+	for _, v := range values {
+		if slices.Contains(slice, v) {
+			return true
 		}
 	}
 	return false

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1924,9 +1925,7 @@ func (oc *AIClient) emitStreamEvent(ctx context.Context, portal *bridgev2.Portal
 		},
 	}
 	// Merge optional metadata (tool_name, item_id, status, etc.)
-	for k, v := range metadata {
-		eventContent.Raw[k] = v
-	}
+	maps.Copy(eventContent.Raw, metadata)
 	if _, err := intent.SendMessage(ctx, portal.MXID, StreamTokenEventType, eventContent, nil); err != nil {
 		oc.log.Warn().Err(err).Str("related_event_id", relatedEventID.String()).Str("content_type", string(contentType)).Int("seq", seq).Msg("Failed to emit stream event")
 	}
