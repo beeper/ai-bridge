@@ -32,8 +32,8 @@ func modelUserID(modelID string) networkid.UserID {
 // parseModelFromGhostID extracts the model ID from a ghost ID (format: "model-{escaped-model-id}")
 // Returns empty string if the ghost ID doesn't match the expected format.
 func parseModelFromGhostID(ghostID string) string {
-	if strings.HasPrefix(ghostID, "model-") {
-		modelID, err := url.PathUnescape(strings.TrimPrefix(ghostID, "model-"))
+	if suffix, ok := strings.CutPrefix(ghostID, "model-"); ok {
+		modelID, err := url.PathUnescape(suffix)
 		if err == nil {
 			return modelID
 		}
@@ -100,8 +100,8 @@ func formatChatSlug(index int) string {
 }
 
 func parseChatSlug(slug string) int {
-	if strings.HasPrefix(slug, "chat-") {
-		if idx, err := strconv.Atoi(strings.TrimPrefix(slug, "chat-")); err == nil {
+	if suffix, ok := strings.CutPrefix(slug, "chat-"); ok {
+		if idx, err := strconv.Atoi(suffix); err == nil {
 			return idx
 		}
 	}
