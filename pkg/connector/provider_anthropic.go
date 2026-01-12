@@ -278,63 +278,7 @@ func (a *AnthropicProvider) CountTokens(ctx context.Context, messages []UnifiedM
 
 // defaultAnthropicModels returns known Anthropic/Claude models
 func defaultAnthropicModels() []ModelInfo {
-	return []ModelInfo{
-		{
-			ID:                  "anthropic/claude-sonnet-4-5-20250929",
-			Name:                "Claude Sonnet 4.5",
-			Provider:            "anthropic",
-			Description:         "Latest Claude model with excellent performance",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    false,
-			ContextWindow:       200000,
-			MaxOutputTokens:     8192,
-		},
-		{
-			ID:                  "anthropic/claude-opus-4-5-20250929",
-			Name:                "Claude Opus 4.5",
-			Provider:            "anthropic",
-			Description:         "Most capable Claude model",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    false,
-			ContextWindow:       200000,
-			MaxOutputTokens:     8192,
-		},
-		{
-			ID:                  "anthropic/claude-3-5-sonnet-20241022",
-			Name:                "Claude 3.5 Sonnet",
-			Provider:            "anthropic",
-			Description:         "Balanced performance and speed",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    false,
-			ContextWindow:       200000,
-			MaxOutputTokens:     8192,
-		},
-		{
-			ID:                  "anthropic/claude-3-5-haiku-20241022",
-			Name:                "Claude 3.5 Haiku",
-			Provider:            "anthropic",
-			Description:         "Fast and efficient Claude model",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    false,
-			ContextWindow:       200000,
-			MaxOutputTokens:     8192,
-		},
-		{
-			ID:                  "anthropic/claude-3-opus-20240229",
-			Name:                "Claude 3 Opus",
-			Provider:            "anthropic",
-			Description:         "Previous generation most capable model",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			IsReasoningModel:    false,
-			ContextWindow:       200000,
-			MaxOutputTokens:     4096,
-		},
-	}
+	return GetDefaultModels("anthropic")
 }
 
 // ToAnthropicTools converts tool definitions to Anthropic format
