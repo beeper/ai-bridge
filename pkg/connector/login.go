@@ -185,8 +185,9 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, apiKey, baseURL string) 
 		return nil, fmt.Errorf("failed to load client: client is nil")
 	}
 
-	// Trigger connection in background
-	go client.Connect(ctx)
+	// Trigger connection in background with a long-lived context
+	// (the request context gets cancelled after login returns)
+	go client.Connect(login.Log.WithContext(context.Background()))
 
 	return &bridgev2.LoginStep{
 		Type:   bridgev2.LoginStepTypeComplete,
