@@ -207,7 +207,7 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 		url.QueryEscape(query))
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}

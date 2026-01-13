@@ -115,11 +115,11 @@ func ValidateModelForProvider(modelID, provider string) error {
 		}
 	case ProviderGemini:
 		if backend != BackendGemini {
-			return fmt.Errorf("Gemini provider only supports gemini/* models, got %q", modelID)
+			return fmt.Errorf("gemini provider only supports gemini/* models, got %q", modelID)
 		}
 	case ProviderAnthropic:
 		if backend != BackendAnthropic {
-			return fmt.Errorf("Anthropic provider only supports anthropic/* models, got %q", modelID)
+			return fmt.Errorf("anthropic provider only supports anthropic/* models, got %q", modelID)
 		}
 	case ProviderOpenRouter:
 		if backend != BackendOpenRouter {

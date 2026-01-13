@@ -197,7 +197,7 @@ func (a *AnthropicProvider) Generate(ctx context.Context, params GenerateParams)
 	// Make request
 	resp, err := a.client.Messages.New(ctx, messageParams)
 	if err != nil {
-		return nil, fmt.Errorf("Anthropic generation failed: %w", err)
+		return nil, fmt.Errorf("anthropic generation failed: %w", err)
 	}
 
 	// Extract response content

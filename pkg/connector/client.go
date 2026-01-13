@@ -1864,7 +1864,8 @@ func (oc *AIClient) responseWithRetry(
 			oc.log.Debug().
 				Int("attempt", attempt+1).
 				Int("new_prompt_len", len(currentPrompt)).
-				Msgf("Retrying Responses API %s with truncated context", logLabel)
+				Str("log_label", logLabel).
+				Msg("Retrying Responses API with truncated context")
 			continue
 		}
 
