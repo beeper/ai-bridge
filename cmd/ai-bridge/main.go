@@ -8,8 +8,8 @@ import (
 
 func main() {
 	br := &mxmain.BridgeMain{
-		Name:        "ai-bridge-openai-bridge",
-		Description: "A Matrix↔OpenAI ChatGPT bridge built on mautrix-go bridgev2.",
+		Name:        "beeper-ai-bridge",
+		Description: "A Matrix↔AI bridge for Beeper built on mautrix-go bridgev2.",
 		URL:         "https://github.com/beeper/ai-bridge",
 		Version:     "0.1.0",
 		Connector:   &connector.OpenAIConnector{},
