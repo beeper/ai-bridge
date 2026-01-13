@@ -16,11 +16,9 @@ import (
 )
 
 const (
-	defaultTemperature           = 0.4
-	defaultMaxContextMessages    = 12
-	defaultMaxTokens             = 512
-	defaultRequestTimeout        = 45 * time.Second
-	reasoningModelRequestTimeout = 5 * time.Minute // Extended timeout for O1/O3 models
+	defaultTemperature        = 0.4
+	defaultMaxContextMessages = 12
+	defaultMaxTokens          = 512
 )
 
 var (
@@ -44,26 +42,11 @@ func (oc *OpenAIConnector) Stop(ctx context.Context) {
 }
 
 func (oc *OpenAIConnector) Start(ctx context.Context) error {
-	if oc.Config.OpenAI.RequestTimeout == 0 {
-		oc.Config.OpenAI.RequestTimeout = defaultRequestTimeout
-	}
-	if oc.Config.OpenAI.DefaultTemperature == 0 {
-		oc.Config.OpenAI.DefaultTemperature = defaultTemperature
-	}
-	if oc.Config.OpenAI.MaxContextMessages == 0 {
-		oc.Config.OpenAI.MaxContextMessages = defaultMaxContextMessages
-	}
-	if oc.Config.OpenAI.MaxCompletionTokens == 0 {
-		oc.Config.OpenAI.MaxCompletionTokens = defaultMaxTokens
-	}
-	if oc.Config.OpenAI.EditDebounceMs == 0 {
-		oc.Config.OpenAI.EditDebounceMs = 200
-	}
-	if oc.Config.OpenAI.TransientDebounceMs == 0 {
-		oc.Config.OpenAI.TransientDebounceMs = 50
+	if oc.Config.ModelCacheDuration == 0 {
+		oc.Config.ModelCacheDuration = 6 * time.Hour
 	}
 	if oc.Config.Bridge.CommandPrefix == "" {
-		oc.Config.Bridge.CommandPrefix = "!gpt"
+		oc.Config.Bridge.CommandPrefix = "!ai"
 	}
 
 	// Register custom Matrix event handlers
@@ -256,39 +239,98 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 	return nil
 }
 
+// AutoCreateBeeperLogin creates a Beeper login for a user using config credentials.
+// Returns nil if Beeper config is not set or user already has a login.
+func (oc *OpenAIConnector) AutoCreateBeeperLogin(ctx context.Context, user *bridgev2.User) (*bridgev2.UserLogin, error) {
+	if !oc.hasBeeperConfig() {
+		return nil, nil
+	}
+
+	// Check if user already has a login
+	logins := user.GetUserLogins()
+	if len(logins) > 0 {
+		return logins[0], nil
+	}
+
+	// Create login with Beeper credentials from config
+	loginID := makeUserLoginID(user.MXID)
+	meta := &UserLoginMetadata{
+		Provider: ProviderBeeper,
+		APIKey:   oc.Config.Beeper.Token,
+		BaseURL:  oc.Config.Beeper.BaseURL,
+	}
+	login, err := user.NewLogin(ctx, &database.UserLogin{
+		ID:         loginID,
+		RemoteName: "Beeper AI",
+		Metadata:   meta,
+	}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create beeper login: %w", err)
+	}
+
+	// Load the login
+	err = oc.LoadUserLogin(ctx, login)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load beeper login: %w", err)
+	}
+
+	// Connect in background
+	if login.Client != nil {
+		go login.Client.Connect(oc.br.Log.WithContext(context.Background()))
+	}
+
+	oc.br.Log.Info().Str("user", user.MXID.String()).Msg("Auto-created Beeper login from config")
+	return login, nil
+}
+
+// hasBeeperConfig returns true if Beeper credentials are configured in the bridge config.
+func (oc *OpenAIConnector) hasBeeperConfig() bool {
+	return oc.Config.Beeper.BaseURL != "" && oc.Config.Beeper.Token != ""
+}
+
 func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
-	return []bridgev2.LoginFlow{
-		{
+	flows := []bridgev2.LoginFlow{}
+
+	// Only show Beeper provider if NOT configured in config
+	// (if configured, users get auto-login and don't need to manually login)
+	if !oc.hasBeeperConfig() {
+		flows = append(flows, bridgev2.LoginFlow{
 			ID:          LoginFlowIDLocalBeeper,
 			Name:        "Local Beeper",
 			Description: "Use Beeper's AI proxy (automatic setup for SDK).",
-		},
-		{
+		})
+	}
+
+	// Always show other providers
+	flows = append(flows,
+		bridgev2.LoginFlow{
 			ID:          LoginFlowIDOpenAI,
 			Name:        "OpenAI",
 			Description: "Use your own OpenAI API key.",
 		},
-		{
+		bridgev2.LoginFlow{
 			ID:          LoginFlowIDAnthropic,
 			Name:        "Anthropic",
 			Description: "Use your own Anthropic API key.",
 		},
-		{
+		bridgev2.LoginFlow{
 			ID:          LoginFlowIDGemini,
 			Name:        "Gemini",
 			Description: "Use your own Google Gemini API key.",
 		},
-		{
+		bridgev2.LoginFlow{
 			ID:          LoginFlowIDOpenRouter,
 			Name:        "OpenRouter",
 			Description: "Use your own OpenRouter API key.",
 		},
-		{
+		bridgev2.LoginFlow{
 			ID:          LoginFlowIDCustom,
 			Name:        "Custom OpenAI-compatible",
 			Description: "Use a custom OpenAI-compatible API endpoint.",
 		},
-	}
+	)
+
+	return flows
 }
 
 func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {

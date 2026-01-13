@@ -1,51 +1,32 @@
 # Connector-specific configuration lives under the `network:` section of the
 # main config file.
 
-openai:
-  # Optional. Set this to share a single API key across all users. Leave blank to
-  # require each user to provide their own key during the login flow. You can
-  # still set it via the OPENAI_API_KEY environment variable.
-  api_key: ""
+# Beeper AI credentials for automatic login (optional).
+# If both base_url and token are set, users don't need to manually log in,
+# and the Beeper provider won't appear in login flow options.
+beeper:
+  base_url: ""  # Required if using Beeper provider
+  token: ""
 
-  # Optional account scoping knobs. Leave empty unless your key is scoped to
-  # a specific org or project.
-  organization_id: ""
-  project_id: ""
+# Per-provider default models.
+# These are used when a room doesn't have a specific model configured.
+providers:
+  beeper:
+    default_model: "openai/gpt5.2"
+  openai:
+    default_model: "openai/gpt-4o-mini"
+  gemini:
+    default_model: "gemini/gemini-2.5-flash"
+  anthropic:
+    default_model: "anthropic/claude-sonnet-4-5-20250929"
+  openrouter:
+    default_model: "openrouter/openai/gpt-4o-mini"
 
-  # Use this if you need to talk to a custom base URL (for example Azure hosts
-  # or a proxy). Leave empty to use api.openai.com.
-  base_url: ""
-
-  # Defaults for new rooms/logins. Users can override most of these via
-  # room commands if desired.
-  default_model: "gpt-4o-mini"
-  default_temperature: 0.3
-  max_context_messages: 12
-  max_completion_tokens: 512
-
-  system_prompt: |
-    You are a helpful assistant talking to Matrix users via the ai-bridge.
-    Answer clearly and concisely. Use Markdown when it helps.
-
-  # Timeout for OpenAI API calls. Use Go duration syntax.
-  request_timeout: 45s
-
-  # Enable streaming responses with debounced edits
-  enable_streaming: true
-
-  # Debounce time for streaming edits in milliseconds (200 ms by default)
-  edit_debounce_ms: 200
-
-  # Debounce time for transient events in milliseconds (50 ms by default)
-  transient_debounce_ms: 50
+# Global settings
+default_system_prompt: |
+  You are a helpful assistant.
+model_cache_duration: 6h
 
 bridge:
-  # Command prefix for management commands like `!gpt config`.
-  command_prefix: "!gpt"
-
-  # Whether to mirror Matrix typing notifications to the OpenAI connector.
-  typing_notifications: true
-
-  # Mention the assistant's MXID when echoing replies into rooms. Useful when
-  # the room has additional participants.
-  mention_assistant: false
+  # Command prefix for management commands like `!ai config`.
+  command_prefix: "!ai"

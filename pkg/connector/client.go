@@ -147,7 +147,7 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		// Beeper is a smart proxy - initialize all providers with Beeper routing URLs
 		beeperBaseURL := baseURL
 		if beeperBaseURL == "" {
-			beeperBaseURL = "https://ai-proxy.beeper.com"
+			return nil, fmt.Errorf("beeper base_url is required for Beeper provider")
 		}
 
 		// OpenAI via Beeper
@@ -325,7 +325,7 @@ func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 func (oc *AIClient) Connect(ctx context.Context) {
 	// Use a default model for validation (any model works to verify credentials)
 	model := "gpt-4o-mini"
-	timeoutCtx, cancel := context.WithTimeout(ctx, oc.connector.Config.OpenAI.RequestTimeout)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	_, err := oc.api.Models.Get(timeoutCtx, model)
 	if err != nil {
@@ -378,13 +378,9 @@ func (oc *AIClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*
 			title = "ChatGPT"
 		}
 	}
-	prompt := meta.SystemPrompt
-	if prompt == "" {
-		prompt = oc.connector.Config.OpenAI.SystemPrompt
-	}
 	return &bridgev2.ChatInfo{
 		Name:  ptr.Ptr(title),
-		Topic: ptrIfNotEmpty(prompt),
+		Topic: ptrIfNotEmpty(meta.SystemPrompt),
 	}, nil
 }
 
@@ -428,7 +424,7 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 		Thread:              event.CapLevelFullySupported,
 		Edit:                event.CapLevelFullySupported,
 		Delete:              event.CapLevelPartialSupport,
-		TypingNotifications: oc.connector.Config.Bridge.TypingNotifications,
+		TypingNotifications: true, // Always enabled
 		ReadReceipts:        true,
 	}
 
@@ -563,17 +559,14 @@ func (oc *AIClient) createNewChat(ctx context.Context, modelID string, caps Mode
 		return nil, err
 	}
 
-	// Create portal metadata with model-specific settings and bridge-wide defaults
-	config := oc.connector.Config.OpenAI
+	// Create portal metadata with model-specific settings
+	// Per-room settings (SystemPrompt, Temperature, etc.) start at zero values
+	// and use hardcoded defaults until user overrides via /commands
 	portalMeta := &PortalMetadata{
-		Model:               modelID,
-		Slug:                formatChatSlug(chatIndex),
-		Title:               fmt.Sprintf("%s Chat %d", formatModelName(modelID), chatIndex),
-		Capabilities:        caps,
-		SystemPrompt:        config.SystemPrompt,        // Bridge default
-		Temperature:         config.DefaultTemperature,  // Bridge default
-		MaxContextMessages:  config.MaxContextMessages,  // Bridge default
-		MaxCompletionTokens: config.MaxCompletionTokens, // Bridge default
+		Model:        modelID,
+		Slug:         formatChatSlug(chatIndex),
+		Title:        fmt.Sprintf("%s Chat %d", formatModelName(modelID), chatIndex),
+		Capabilities: caps,
 	}
 
 	portalKey := networkid.PortalKey{
@@ -1818,14 +1811,8 @@ func (oc *AIClient) dispatchCompletionInternal(
 	runCtx := oc.backgroundContext(ctx)
 	runCtx = oc.log.WithContext(runCtx)
 
-	// Use Responses API for streaming (supports all models including reasoning)
-	if oc.connector.Config.OpenAI.EnableStreaming {
-		oc.streamingResponseWithRetry(runCtx, sourceEvent, portal, meta, prompt)
-		return
-	}
-
-	// Non-streaming fallback path using Responses API
-	oc.nonStreamingResponseWithRetry(runCtx, sourceEvent, portal, meta, prompt)
+	// Always use streaming responses
+	oc.streamingResponseWithRetry(runCtx, sourceEvent, portal, meta, prompt)
 }
 
 // streamingResponseWithRetry handles Responses API streaming with automatic retry on context overflow
@@ -1996,7 +1983,7 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, meta *PortalMet
 	log := zerolog.Ctx(ctx)
 
 	params := responses.ResponseNewParams{
-		Model:           shared.ResponsesModel(oc.effectiveModel(meta)),
+		Model:           shared.ResponsesModel(oc.effectiveModelForAPI(meta)),
 		MaxOutputTokens: openai.Int(int64(oc.effectiveMaxTokens(meta))),
 	}
 
@@ -2061,10 +2048,7 @@ func (oc *AIClient) streamingResponse(
 	// Build Responses API params using shared helper
 	params := oc.buildResponsesAPIParams(ctx, meta, messages)
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, oc.connector.Config.OpenAI.RequestTimeout)
-	defer cancel()
-
-	stream := oc.api.Responses.NewStreaming(timeoutCtx, params)
+	stream := oc.api.Responses.NewStreaming(ctx, params)
 	if stream == nil {
 		log.Error().Msg("Failed to create Responses API streaming request")
 		oc.notifyMatrixSendFailure(ctx, portal, evt, fmt.Errorf("responses streaming not available"))
@@ -2255,122 +2239,6 @@ func (oc *AIClient) convertToResponsesInput(messages []openai.ChatCompletionMess
 	return input
 }
 
-// nonStreamingResponse handles non-streaming using the Responses API
-// Returns (success, contextLengthError)
-func (oc *AIClient) nonStreamingResponse(
-	ctx context.Context,
-	evt *event.Event,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-	messages []openai.ChatCompletionMessageParamUnion,
-) (bool, *ContextLengthError) {
-	log := zerolog.Ctx(ctx).With().
-		Str("portal_id", string(portal.ID)).
-		Logger()
-
-	// Set typing indicator
-	oc.setModelTyping(ctx, portal, true)
-	defer oc.setModelTyping(ctx, portal, false)
-
-	// Build Responses API params using shared helper
-	params := oc.buildResponsesAPIParams(ctx, meta, messages)
-
-	// Use extended timeout for reasoning models
-	timeout := oc.connector.Config.OpenAI.RequestTimeout
-	if isReasoningModel(oc.effectiveModel(meta)) {
-		timeout = reasoningModelRequestTimeout
-	}
-	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	resp, err := oc.api.Responses.New(timeoutCtx, params)
-	if err != nil {
-		log.Error().Err(err).Msg("Responses API non-streaming error")
-		cle := ParseContextLengthError(err)
-		if cle != nil {
-			return false, cle
-		}
-		oc.notifyMatrixSendFailure(ctx, portal, evt, err)
-		return false, nil
-	}
-
-	// Extract content from response
-	content := resp.OutputText()
-	if content == "" {
-		log.Warn().Msg("Empty response from Responses API")
-		return true, nil
-	}
-
-	// Extract reasoning if present
-	var reasoning string
-	for _, item := range resp.Output {
-		if item.Type == "reasoning" {
-			for _, summary := range item.Summary {
-				reasoning += summary.Text
-			}
-		}
-	}
-
-	// Store response ID for "responses" mode context chaining
-	if resp.ID != "" && meta.ConversationMode == "responses" {
-		meta.LastResponseID = resp.ID
-		if err := portal.Save(ctx); err != nil {
-			log.Warn().Err(err).Msg("Failed to save portal after storing response ID")
-		}
-	}
-
-	// Queue model response message via remote event
-	oc.queueModelResponseMessage(portal, resp.ID, content, reasoning, meta)
-
-	log.Info().
-		Str("response_id", resp.ID).
-		Int("content_length", len(content)).
-		Int("reasoning_length", len(reasoning)).
-		Msg("Non-streaming response completed")
-
-	// Generate room title after first response
-	oc.maybeGenerateTitle(ctx, portal, content)
-
-	return true, nil
-}
-
-// nonStreamingResponseWithRetry handles Responses API non-streaming with automatic retry on context overflow
-func (oc *AIClient) nonStreamingResponseWithRetry(
-	ctx context.Context,
-	evt *event.Event,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-	prompt []openai.ChatCompletionMessageParamUnion,
-) {
-	oc.responseWithRetry(ctx, evt, portal, meta, prompt, oc.nonStreamingResponse, "non-streaming")
-}
-
-// queueModelResponseMessage queues an assistant message from a Responses API response
-func (oc *AIClient) queueModelResponseMessage(portal *bridgev2.Portal, responseID string, content string, _ string, meta *PortalMetadata) {
-	modelID := oc.effectiveModel(meta)
-	msgMeta := &MessageMetadata{
-		Role:         "assistant",
-		Body:         content,
-		CompletionID: responseID,
-		FinishReason: "stop",
-	}
-
-	evt := &OpenAIRemoteMessage{
-		PortalKey: portal.PortalKey,
-		ID:        networkid.MessageID(fmt.Sprintf("openai:%s", uuid.NewString())),
-		Sender: bridgev2.EventSender{
-			Sender:      modelUserID(modelID),
-			ForceDMUser: true,
-			SenderLogin: oc.UserLogin.ID,
-			IsFromMe:    false,
-		},
-		Content:   content,
-		Timestamp: time.Now(),
-		Metadata:  msgMeta,
-	}
-	oc.UserLogin.QueueRemoteEvent(evt)
-}
-
 // sendInitialStreamMessage sends the first message in a streaming session and returns its event ID
 func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string) id.EventID {
 	intent := oc.getModelIntent(ctx, portal)
@@ -2483,27 +2351,69 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 	}
 }
 
+// effectiveModel returns the full prefixed model ID (e.g., "openai/gpt-5.2")
+// Used for routing and display purposes
 func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 	if meta != nil && meta.Model != "" {
 		return meta.Model
 	}
-	// Fallback to default model if not set in portal metadata
-	return "gpt-4o-mini"
+	return oc.defaultModelForProvider()
+}
+
+// effectiveModelForAPI returns the actual model name to send to the API
+// Strips the provider prefix (e.g., "openai/gpt-5.2" → "gpt-5.2")
+func (oc *AIClient) effectiveModelForAPI(meta *PortalMetadata) string {
+	modelID := oc.effectiveModel(meta)
+	_, actualModel := ParseModelPrefix(modelID)
+	return actualModel
+}
+
+// defaultModelForProvider returns the configured default model for this login's provider
+func (oc *AIClient) defaultModelForProvider() string {
+	loginMeta := loginMetadata(oc.UserLogin)
+	providers := oc.connector.Config.Providers
+
+	switch loginMeta.Provider {
+	case ProviderOpenAI:
+		if providers.OpenAI.DefaultModel != "" {
+			return providers.OpenAI.DefaultModel
+		}
+		return DefaultModelOpenAI
+	case ProviderGemini:
+		if providers.Gemini.DefaultModel != "" {
+			return providers.Gemini.DefaultModel
+		}
+		return DefaultModelGemini
+	case ProviderAnthropic:
+		if providers.Anthropic.DefaultModel != "" {
+			return providers.Anthropic.DefaultModel
+		}
+		return DefaultModelAnthropic
+	case ProviderOpenRouter:
+		if providers.OpenRouter.DefaultModel != "" {
+			return providers.OpenRouter.DefaultModel
+		}
+		return DefaultModelOpenRouter
+	case ProviderBeeper:
+		if providers.Beeper.DefaultModel != "" {
+			return providers.Beeper.DefaultModel
+		}
+		return DefaultModelBeeper
+	default:
+		return DefaultModelOpenAI
+	}
 }
 
 func (oc *AIClient) effectivePrompt(meta *PortalMetadata) string {
 	if meta != nil && meta.SystemPrompt != "" {
 		return meta.SystemPrompt
 	}
-	return oc.connector.Config.OpenAI.SystemPrompt
+	return oc.connector.Config.DefaultSystemPrompt
 }
 
 func (oc *AIClient) effectiveTemperature(meta *PortalMetadata) float64 {
 	if meta != nil && meta.Temperature > 0 {
 		return meta.Temperature
-	}
-	if oc.connector.Config.OpenAI.DefaultTemperature > 0 {
-		return oc.connector.Config.OpenAI.DefaultTemperature
 	}
 	return defaultTemperature
 }
@@ -2512,18 +2422,12 @@ func (oc *AIClient) historyLimit(meta *PortalMetadata) int {
 	if meta != nil && meta.MaxContextMessages > 0 {
 		return meta.MaxContextMessages
 	}
-	if oc.connector.Config.OpenAI.MaxContextMessages > 0 {
-		return oc.connector.Config.OpenAI.MaxContextMessages
-	}
 	return defaultMaxContextMessages
 }
 
 func (oc *AIClient) effectiveMaxTokens(meta *PortalMetadata) int {
 	if meta != nil && meta.MaxCompletionTokens > 0 {
 		return meta.MaxCompletionTokens
-	}
-	if oc.connector.Config.OpenAI.MaxCompletionTokens > 0 {
-		return oc.connector.Config.OpenAI.MaxCompletionTokens
 	}
 	return defaultMaxTokens
 }
@@ -2863,7 +2767,7 @@ func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) 
 	// Update cache
 	if meta.ModelCache == nil {
 		meta.ModelCache = &ModelCache{
-			CacheDuration: 6 * 60 * 60, // 6 hours
+			CacheDuration: int64(oc.connector.Config.ModelCacheDuration.Seconds()),
 		}
 	}
 	meta.ModelCache.Models = allModels
@@ -3016,7 +2920,7 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		go oc.BroadcastRoomState(ctx, portals[0])
 		return err
 	}
-	resp, err := oc.createChat(ctx, "", oc.connector.Config.OpenAI.SystemPrompt)
+	resp, err := oc.createChat(ctx, "", "") // No default system prompt
 	if err != nil {
 		oc.log.Err(err).Msg("Failed to create default portal")
 		return err
@@ -3090,9 +2994,6 @@ func (oc *AIClient) spawnPortal(ctx context.Context, title, systemPrompt string)
 		modelName := formatModelName(defaultModelID)
 		title = fmt.Sprintf("%s %d", modelName, index)
 	}
-	if systemPrompt == "" {
-		systemPrompt = oc.connector.Config.OpenAI.SystemPrompt
-	}
 	key := portalKeyForChat(oc.UserLogin.ID, slug)
 	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, key)
 	if err != nil {
@@ -3134,7 +3035,6 @@ func (oc *AIClient) createNewChatWithModel(ctx context.Context, modelID string) 
 	slug := formatChatSlug(chatIndex)
 	modelName := formatModelName(modelID)
 	title := fmt.Sprintf("%s %d", modelName, chatIndex)
-	systemPrompt := oc.connector.Config.OpenAI.SystemPrompt
 
 	key := portalKeyForChat(oc.UserLogin.ID, slug)
 	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, key)
@@ -3147,22 +3047,17 @@ func (oc *AIClient) createNewChatWithModel(ctx context.Context, modelID string) 
 	pmeta.Title = title
 	pmeta.Model = modelID
 	pmeta.Capabilities = getModelCapabilities(modelID)
-	if systemPrompt != "" {
-		pmeta.SystemPrompt = systemPrompt
-	}
 
 	portal.RoomType = database.RoomTypeDM
 	portal.OtherUserID = modelUserID(modelID)
 	portal.Name = title
 	portal.NameSet = true
-	portal.Topic = systemPrompt
-	portal.TopicSet = systemPrompt != ""
 
 	if err := portal.Save(ctx); err != nil {
 		return nil, nil, err
 	}
 
-	info := oc.composeChatInfo(title, systemPrompt, modelID)
+	info := oc.composeChatInfo(title, "", modelID) // No default system prompt
 	return portal, info, nil
 }
 
@@ -3177,11 +3072,7 @@ func (oc *AIClient) chatInfoFromPortal(portal *bridgev2.Portal) *bridgev2.ChatIn
 			title = formatModelName(modelID)
 		}
 	}
-	prompt := meta.SystemPrompt
-	if prompt == "" {
-		prompt = oc.connector.Config.OpenAI.SystemPrompt
-	}
-	return oc.composeChatInfo(title, prompt, modelID)
+	return oc.composeChatInfo(title, meta.SystemPrompt, modelID)
 }
 
 func (oc *AIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.ChatInfo {
@@ -3191,9 +3082,6 @@ func (oc *AIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.Cha
 	modelName := formatModelName(modelID)
 	if title == "" {
 		title = modelName
-	}
-	if prompt == "" {
-		prompt = oc.connector.Config.OpenAI.SystemPrompt
 	}
 	members := bridgev2.ChatMemberMap{
 		humanUserID(oc.UserLogin.ID): {

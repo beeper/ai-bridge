@@ -32,7 +32,7 @@ metrics:
   listen: 0.0.0.0:9000
 
 bridge:
-  command_prefix: "!gpt"
+  command_prefix: "!ai"
   sync_with_custom_puppets: false
 
 encryption:
@@ -41,23 +41,28 @@ encryption:
 
 # Connector-specific options (identical to pkg/connector/example-config.yaml)
 network:
-  openai:
-    api_key: ""
-    organization_id: ""
-    project_id: ""
-    base_url: ""
-    default_model: "gpt-4o-mini"
-    default_temperature: 0.3
-    max_context_messages: 12
-    max_completion_tokens: 512
-    system_prompt: |
-      You are a helpful assistant talking to Matrix users via the ai-bridge.
-      Answer clearly and concisely.
-    request_timeout: 45s
-    enable_streaming: true
-    edit_debounce_ms: 200
-    transient_debounce_ms: 50
+  # Beeper AI credentials for automatic login (optional)
+  beeper:
+    base_url: ""  # Required if using Beeper provider
+    token: ""
+
+  # Per-provider default models
+  providers:
+    beeper:
+      default_model: "openai/gpt5.2"
+    openai:
+      default_model: "openai/gpt-4o-mini"
+    gemini:
+      default_model: "gemini/gemini-2.5-flash"
+    anthropic:
+      default_model: "anthropic/claude-sonnet-4-5-20250929"
+    openrouter:
+      default_model: "openrouter/openai/gpt-4o-mini"
+
+  # Global settings
+  default_system_prompt: |
+    You are a helpful assistant.
+  model_cache_duration: 6h
+
   bridge:
-    command_prefix: "!gpt"
-    typing_notifications: true
-    mention_assistant: false
+    command_prefix: "!ai"
