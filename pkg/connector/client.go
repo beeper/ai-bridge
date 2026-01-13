@@ -1972,7 +1972,7 @@ func (oc *AIClient) emitStreamEvent(ctx context.Context, portal *bridgev2.Portal
 	// Merge optional metadata (tool_name, item_id, status, etc.)
 	maps.Copy(eventContent.Raw, metadata)
 	if _, err := intent.SendMessage(ctx, portal.MXID, StreamTokenEventType, eventContent, nil); err != nil {
-		oc.log.Warn().Err(err).Str("related_event_id", relatedEventID.String()).Str("content_type", string(contentType)).Int("seq", seq).Msg("Failed to emit stream event")
+		oc.log.Warn().Err(err).Stringer("related_event_id", relatedEventID).Str("content_type", string(contentType)).Int("seq", seq).Msg("Failed to emit stream event")
 	}
 }
 
@@ -2389,7 +2389,7 @@ func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridge
 		oc.log.Error().Err(err).Msg("Failed to send initial streaming message")
 		return ""
 	}
-	oc.log.Info().Str("event_id", resp.EventID.String()).Msg("Initial streaming message sent")
+	oc.log.Info().Stringer("event_id", resp.EventID).Msg("Initial streaming message sent")
 	return resp.EventID
 }
 
@@ -2433,7 +2433,7 @@ func (oc *AIClient) sendFinalEditWithReasoning(ctx context.Context, portal *brid
 	}
 
 	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {
-		oc.log.Warn().Err(err).Str("initial_event_id", initialEventID.String()).Msg("Failed to send final edit")
+		oc.log.Warn().Err(err).Stringer("initial_event_id", initialEventID).Msg("Failed to send final edit")
 	} else {
 		oc.log.Debug().
 			Str("initial_event_id", initialEventID.String()).
