@@ -286,24 +286,19 @@ func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
 	}
 }
 
-func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
-	login := &OpenAILogin{User: user, Connector: oc, FlowID: flowID}
+// validFlowIDs is the set of valid login flow IDs
+var validFlowIDs = map[string]bool{
+	LoginFlowIDBeeper:     true,
+	LoginFlowIDOpenAI:     true,
+	LoginFlowIDAnthropic:  true,
+	LoginFlowIDGemini:     true,
+	LoginFlowIDOpenRouter: true,
+	LoginFlowIDCustom:     true,
+}
 
-	switch flowID {
-	case LoginFlowIDBeeper:
-		login.Provider = ProviderBeeper
-	case LoginFlowIDOpenAI:
-		login.Provider = ProviderOpenAI
-	case LoginFlowIDAnthropic:
-		login.Provider = ProviderAnthropic
-	case LoginFlowIDGemini:
-		login.Provider = ProviderGemini
-	case LoginFlowIDOpenRouter:
-		login.Provider = ProviderOpenRouter
-	case LoginFlowIDCustom:
-		login.Provider = ProviderCustom
-	default:
+func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
+	if !validFlowIDs[flowID] {
 		return nil, fmt.Errorf("unknown login flow: %s", flowID)
 	}
-	return login, nil
+	return &OpenAILogin{User: user, Connector: oc, FlowID: flowID, Provider: flowID}, nil
 }

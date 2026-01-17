@@ -36,6 +36,23 @@ var providerBaseURLs = map[string]string{
 	ProviderOpenRouter: "https://openrouter.ai/api/v1",
 }
 
+// providerFieldConfig defines the login form fields for a provider
+type providerFieldConfig struct {
+	keyName, keyDesc string
+	needsURL         bool
+	urlName, urlDesc string
+}
+
+// providerFieldConfigs maps providers to their login field configuration
+var providerFieldConfigs = map[string]providerFieldConfig{
+	ProviderBeeper:     {"Beeper Access Token", "Your Beeper Matrix access token", true, "Beeper AI Proxy URL", "Your Beeper homeserver AI proxy endpoint"},
+	ProviderOpenAI:     {"OpenAI API Key", "Generate one at https://platform.openai.com/account/api-keys", false, "", ""},
+	ProviderGemini:     {"Gemini API Key", "Generate one at https://aistudio.google.com/apikey", false, "", ""},
+	ProviderAnthropic:  {"Anthropic API Key", "Generate one at https://console.anthropic.com/settings/keys", false, "", ""},
+	ProviderOpenRouter: {"OpenRouter API Key", "Generate one at https://openrouter.ai/keys", false, "", ""},
+	ProviderCustom:     {"API Key", "API key for authentication", true, "Base URL", "OpenAI-compatible API endpoint (e.g., https://api.example.com/v1)"},
+}
+
 var (
 	_ bridgev2.LoginProcess          = (*OpenAILogin)(nil)
 	_ bridgev2.LoginProcessUserInput = (*OpenAILogin)(nil)
@@ -76,80 +93,34 @@ func (ol *OpenAILogin) SubmitUserInput(ctx context.Context, input map[string]str
 		baseURL = providerBaseURLs[ol.Provider]
 	}
 
+	if baseURL == "" && (ol.Provider == ProviderOpenAI || ol.Provider == ProviderOpenRouter) {
+		return nil, fmt.Errorf("no base URL configured for provider %s", ol.Provider)
+	}
+
 	return ol.finishLogin(ctx, key, baseURL)
 }
 
 func (ol *OpenAILogin) credentialsStep() *bridgev2.LoginStep {
-	var fields []bridgev2.LoginInputDataField
-
-	switch ol.Provider {
-	case ProviderBeeper:
-		fields = []bridgev2.LoginInputDataField{
-			{
-				Type:        bridgev2.LoginInputFieldTypeURL,
-				ID:          "base_url",
-				Name:        "Beeper AI Proxy URL",
-				Description: "Your Beeper homeserver AI proxy endpoint",
-			},
-			{
-				Type:        bridgev2.LoginInputFieldTypeToken,
-				ID:          "api_key",
-				Name:        "Beeper Access Token",
-				Description: "Your Beeper Matrix access token",
-			},
-		}
-	case ProviderOpenAI:
-		fields = []bridgev2.LoginInputDataField{
-			{
-				Type:        bridgev2.LoginInputFieldTypeToken,
-				ID:          "api_key",
-				Name:        "OpenAI API Key",
-				Description: "Generate one at https://platform.openai.com/account/api-keys",
-			},
-		}
-	case ProviderGemini:
-		fields = []bridgev2.LoginInputDataField{
-			{
-				Type:        bridgev2.LoginInputFieldTypeToken,
-				ID:          "api_key",
-				Name:        "Gemini API Key",
-				Description: "Generate one at https://aistudio.google.com/apikey",
-			},
-		}
-	case ProviderAnthropic:
-		fields = []bridgev2.LoginInputDataField{
-			{
-				Type:        bridgev2.LoginInputFieldTypeToken,
-				ID:          "api_key",
-				Name:        "Anthropic API Key",
-				Description: "Generate one at https://console.anthropic.com/settings/keys",
-			},
-		}
-	case ProviderOpenRouter:
-		fields = []bridgev2.LoginInputDataField{
-			{
-				Type:        bridgev2.LoginInputFieldTypeToken,
-				ID:          "api_key",
-				Name:        "OpenRouter API Key",
-				Description: "Generate one at https://openrouter.ai/keys",
-			},
-		}
-	case ProviderCustom:
-		fields = []bridgev2.LoginInputDataField{
-			{
-				Type:        bridgev2.LoginInputFieldTypeURL,
-				ID:          "base_url",
-				Name:        "Base URL",
-				Description: "OpenAI-compatible API endpoint (e.g., https://api.example.com/v1)",
-			},
-			{
-				Type:        bridgev2.LoginInputFieldTypeToken,
-				ID:          "api_key",
-				Name:        "API Key",
-				Description: "API key for authentication",
-			},
-		}
+	cfg, ok := providerFieldConfigs[ol.Provider]
+	if !ok {
+		cfg = providerFieldConfigs[ProviderCustom]
 	}
+
+	var fields []bridgev2.LoginInputDataField
+	if cfg.needsURL {
+		fields = append(fields, bridgev2.LoginInputDataField{
+			Type:        bridgev2.LoginInputFieldTypeURL,
+			ID:          "base_url",
+			Name:        cfg.urlName,
+			Description: cfg.urlDesc,
+		})
+	}
+	fields = append(fields, bridgev2.LoginInputDataField{
+		Type:        bridgev2.LoginInputFieldTypeToken,
+		ID:          "api_key",
+		Name:        cfg.keyName,
+		Description: cfg.keyDesc,
+	})
 
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeUserInput,
@@ -174,7 +145,7 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, apiKey, baseURL string) 
 		Metadata:   meta,
 	}, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create login: %w", err)
 	}
 
 	// Load login (which validates and caches the client internally)
