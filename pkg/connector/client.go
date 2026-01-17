@@ -150,9 +150,12 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 			return nil, fmt.Errorf("beeper base_url is required for Beeper provider")
 		}
 
+		// Get user ID for rate limiting (hungryserv uses beeper.local domain internally)
+		userID := login.User.MXID.String()
+
 		// OpenAI via Beeper
 		openaiURL := beeperBaseURL + "/openai/v1"
-		openaiProvider, err := NewOpenAIProviderWithBaseURL(key, openaiURL, log)
+		openaiProvider, err := NewOpenAIProviderWithUserID(key, openaiURL, userID, log)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OpenAI provider for Beeper: %w", err)
 		}
@@ -163,7 +166,7 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		// Gemini via Beeper
 		ctx := context.Background()
 		geminiURL := beeperBaseURL + "/gemini"
-		geminiProvider, err := NewGeminiProviderWithBaseURL(ctx, key, geminiURL, log)
+		geminiProvider, err := NewGeminiProviderWithUserID(ctx, key, geminiURL, userID, log)
 		if err != nil {
 			log.Warn().Err(err).Msg("Failed to create Gemini provider for Beeper")
 		} else {
@@ -172,7 +175,7 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 
 		// Anthropic via Beeper
 		anthropicURL := beeperBaseURL + "/anthropic"
-		anthropicProvider, err := NewAnthropicProviderWithBaseURL(key, anthropicURL, log)
+		anthropicProvider, err := NewAnthropicProviderWithUserID(key, anthropicURL, userID, log)
 		if err != nil {
 			log.Warn().Err(err).Msg("Failed to create Anthropic provider for Beeper")
 		} else {
@@ -181,7 +184,7 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 
 		// OpenRouter via Beeper
 		openrouterURL := beeperBaseURL + "/openrouter/v1"
-		openrouterProvider, err := NewOpenAIProviderWithBaseURL(key, openrouterURL, log)
+		openrouterProvider, err := NewOpenAIProviderWithUserID(key, openrouterURL, userID, log)
 		if err != nil {
 			log.Warn().Err(err).Msg("Failed to create OpenRouter provider for Beeper")
 		} else {

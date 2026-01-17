@@ -21,12 +21,12 @@ const (
 
 // Login flow IDs
 const (
-	LoginFlowIDLocalBeeper = "local-beeper"
-	LoginFlowIDOpenAI      = "openai"
-	LoginFlowIDAnthropic   = "anthropic"
-	LoginFlowIDGemini      = "gemini"
-	LoginFlowIDOpenRouter  = "openrouter"
-	LoginFlowIDCustom      = "custom"
+	LoginFlowIDBeeper     = "beeper"     // Cloud mode (auto-completes using config credentials)
+	LoginFlowIDOpenAI     = "openai"     // Self-hosted
+	LoginFlowIDAnthropic  = "anthropic"  // Self-hosted
+	LoginFlowIDGemini     = "gemini"     // Self-hosted
+	LoginFlowIDOpenRouter = "openrouter" // Self-hosted
+	LoginFlowIDCustom     = "custom"     // Self-hosted
 )
 
 // providerBaseURLs maps provider names to their API base URLs
@@ -50,6 +50,10 @@ type OpenAILogin struct {
 }
 
 func (ol *OpenAILogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
+	// If Beeper provider and config has credentials, complete immediately (zero-step login)
+	if ol.Provider == ProviderBeeper && ol.Connector.hasBeeperConfig() {
+		return ol.finishLogin(ctx, ol.Connector.Config.Beeper.Token, ol.Connector.Config.Beeper.BaseURL)
+	}
 	return ol.credentialsStep(), nil
 }
 

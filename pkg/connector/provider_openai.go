@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
@@ -26,12 +27,27 @@ func NewOpenAIProvider(apiKey string, log zerolog.Logger) (*OpenAIProvider, erro
 // NewOpenAIProviderWithBaseURL creates an OpenAI provider with custom base URL
 // Used for OpenRouter, Beeper proxy, or custom endpoints
 func NewOpenAIProviderWithBaseURL(apiKey, baseURL string, log zerolog.Logger) (*OpenAIProvider, error) {
+	return NewOpenAIProviderWithUserID(apiKey, baseURL, "", log)
+}
+
+// NewOpenAIProviderWithUserID creates an OpenAI provider that passes user_id with each request.
+// Used for Beeper proxy to ensure correct rate limiting and feature flags per user.
+func NewOpenAIProviderWithUserID(apiKey, baseURL, userID string, log zerolog.Logger) (*OpenAIProvider, error) {
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
 	}
 
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
+	}
+
+	if userID != "" {
+		opts = append(opts, option.WithMiddleware(func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+			q := req.URL.Query()
+			q.Set("user_id", userID)
+			req.URL.RawQuery = q.Encode()
+			return next(req)
+		}))
 	}
 
 	client := openai.NewClient(opts...)

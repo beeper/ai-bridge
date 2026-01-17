@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -25,6 +26,12 @@ func NewGeminiProvider(ctx context.Context, apiKey string, log zerolog.Logger) (
 
 // NewGeminiProviderWithBaseURL creates a Gemini provider with custom base URL (for Beeper proxy)
 func NewGeminiProviderWithBaseURL(ctx context.Context, apiKey, baseURL string, log zerolog.Logger) (*GeminiProvider, error) {
+	return NewGeminiProviderWithUserID(ctx, apiKey, baseURL, "", log)
+}
+
+// NewGeminiProviderWithUserID creates a Gemini provider that passes user_id with each request.
+// Used for Beeper proxy to ensure correct rate limiting and feature flags per user.
+func NewGeminiProviderWithUserID(ctx context.Context, apiKey, baseURL, userID string, log zerolog.Logger) (*GeminiProvider, error) {
 	config := &genai.ClientConfig{
 		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
@@ -34,6 +41,16 @@ func NewGeminiProviderWithBaseURL(ctx context.Context, apiKey, baseURL string, l
 	if baseURL != "" {
 		config.HTTPOptions = genai.HTTPOptions{
 			BaseURL: baseURL,
+		}
+	}
+
+	// Use custom HTTP client to inject user_id query parameter
+	if userID != "" {
+		config.HTTPClient = &http.Client{
+			Transport: &userIDTransport{
+				base:   http.DefaultTransport,
+				userID: userID,
+			},
 		}
 	}
 
@@ -47,6 +64,21 @@ func NewGeminiProviderWithBaseURL(ctx context.Context, apiKey, baseURL string, l
 		log:     log.With().Str("provider", "gemini").Logger(),
 		baseURL: baseURL,
 	}, nil
+}
+
+// userIDTransport is an http.RoundTripper that adds user_id query parameter to all requests
+type userIDTransport struct {
+	base   http.RoundTripper
+	userID string
+}
+
+func (t *userIDTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Clone the request to avoid modifying the original
+	reqCopy := req.Clone(req.Context())
+	q := reqCopy.URL.Query()
+	q.Set("user_id", t.userID)
+	reqCopy.URL.RawQuery = q.Encode()
+	return t.base.RoundTrip(reqCopy)
 }
 
 func (g *GeminiProvider) Name() string {
