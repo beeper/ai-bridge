@@ -355,7 +355,7 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 				Provider:            "openai",
 				SupportsVision:      strings.Contains(model.ID, "vision") || strings.Contains(model.ID, "4o") || strings.Contains(model.ID, "4-turbo"),
 				SupportsToolCalling: true,
-				IsReasoningModel:    strings.HasPrefix(model.ID, "o1") || strings.HasPrefix(model.ID, "o3"),
+				SupportsReasoning:   strings.HasPrefix(model.ID, "o1") || strings.HasPrefix(model.ID, "o3"),
 			})
 		}
 

@@ -144,7 +144,8 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		oc.anthropicProvider = provider
 
 	case ProviderBeeper:
-		// Beeper is a smart proxy - initialize all providers with Beeper routing URLs
+		// Beeper mode: ALL models route through OpenRouter Responses API
+		// This simplifies routing and ensures consistent behavior across all models
 		beeperBaseURL := baseURL
 		if beeperBaseURL == "" {
 			return nil, fmt.Errorf("beeper base_url is required for Beeper provider")
@@ -153,43 +154,21 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		// Get user ID for rate limiting (hungryserv uses beeper.local domain internally)
 		userID := login.User.MXID.String()
 
-		// OpenAI via Beeper
-		openaiURL := beeperBaseURL + "/openai/v1"
-		openaiProvider, err := NewOpenAIProviderWithUserID(key, openaiURL, userID, log)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create OpenAI provider for Beeper: %w", err)
-		}
-		oc.openaiProvider = openaiProvider
-		oc.provider = openaiProvider     // Default to OpenAI
-		oc.api = openaiProvider.Client() // Keep api field for backward compatibility
-
-		// Gemini via Beeper
-		ctx := context.Background()
-		geminiURL := beeperBaseURL + "/gemini"
-		geminiProvider, err := NewGeminiProviderWithUserID(ctx, key, geminiURL, userID, log)
-		if err != nil {
-			log.Warn().Err(err).Msg("Failed to create Gemini provider for Beeper")
-		} else {
-			oc.geminiProvider = geminiProvider
-		}
-
-		// Anthropic via Beeper
-		anthropicURL := beeperBaseURL + "/anthropic"
-		anthropicProvider, err := NewAnthropicProviderWithUserID(key, anthropicURL, userID, log)
-		if err != nil {
-			log.Warn().Err(err).Msg("Failed to create Anthropic provider for Beeper")
-		} else {
-			oc.anthropicProvider = anthropicProvider
-		}
-
-		// OpenRouter via Beeper
+		// ALL Beeper models go through OpenRouter Responses API
 		openrouterURL := beeperBaseURL + "/openrouter/v1"
 		openrouterProvider, err := NewOpenAIProviderWithUserID(key, openrouterURL, userID, log)
 		if err != nil {
-			log.Warn().Err(err).Msg("Failed to create OpenRouter provider for Beeper")
-		} else {
-			oc.openrouterProvider = openrouterProvider
+			return nil, fmt.Errorf("failed to create OpenRouter provider for Beeper: %w", err)
 		}
+
+		// Set OpenRouter as the single provider for all operations
+		oc.provider = openrouterProvider
+		oc.openrouterProvider = openrouterProvider
+		oc.api = openrouterProvider.Client()
+
+		// Note: Individual provider instances (openaiProvider, geminiProvider, anthropicProvider)
+		// are NOT initialized in Beeper mode. All routing happens via OpenRouter
+		// with model format "provider/model" (e.g., "openai/gpt-5.2", "anthropic/claude-sonnet-4.5")
 
 	case ProviderOpenRouter:
 		// OpenRouter uses OpenAI-compatible API
@@ -2785,9 +2764,9 @@ func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) 
 	return allModels, nil
 }
 
-// isReasoningModel checks if a model supports reasoning/thinking capabilities
+// supportsReasoning checks if a model supports reasoning/thinking capabilities
 // These models can use reasoning_effort parameter and stream reasoning tokens via Responses API
-func isReasoningModel(modelID string) bool {
+func supportsReasoning(modelID string) bool {
 	// O-series reasoning models
 	if strings.HasPrefix(modelID, "o1") || strings.HasPrefix(modelID, "o3") || strings.HasPrefix(modelID, "o4") {
 		return true
@@ -2802,8 +2781,8 @@ func isReasoningModel(modelID string) bool {
 // getModelCapabilities computes capabilities for a model
 func getModelCapabilities(modelID string) ModelCapabilities {
 	return ModelCapabilities{
-		SupportsVision:   detectVisionSupport(modelID),
-		IsReasoningModel: isReasoningModel(modelID),
+		SupportsVision:    detectVisionSupport(modelID),
+		SupportsReasoning: supportsReasoning(modelID),
 	}
 }
 

@@ -331,7 +331,7 @@ func (g *GeminiProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 				Description:         model.Description,
 				SupportsVision:      containsAny(model.SupportedActions, "generateContent"),
 				SupportsToolCalling: true, // Most Gemini models support tools
-				IsReasoningModel:    strings.Contains(modelID, "thinking"),
+				SupportsReasoning:   strings.Contains(modelID, "thinking"),
 				ContextWindow:       int(model.InputTokenLimit),
 				MaxOutputTokens:     int(model.OutputTokenLimit),
 			})
