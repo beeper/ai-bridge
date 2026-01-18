@@ -2343,9 +2343,18 @@ func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 }
 
 // effectiveModelForAPI returns the actual model name to send to the API
-// Strips the provider prefix (e.g., "openai/gpt-5.2" → "gpt-5.2")
+// For OpenRouter/Beeper, returns the full model ID (e.g., "openai/gpt-5.2")
+// For direct providers, strips the prefix (e.g., "openai/gpt-5.2" → "gpt-5.2")
 func (oc *AIClient) effectiveModelForAPI(meta *PortalMetadata) string {
 	modelID := oc.effectiveModel(meta)
+
+	// OpenRouter and Beeper route through a gateway that expects the full model ID
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper {
+		return modelID
+	}
+
+	// Direct providers (openai, gemini, anthropic) need the prefix stripped
 	_, actualModel := ParseModelPrefix(modelID)
 	return actualModel
 }
@@ -2446,7 +2455,8 @@ func (oc *AIClient) validateModel(ctx context.Context, modelID string) (bool, er
 	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	_, err = oc.api.Models.Get(timeoutCtx, modelID)
+	_, actualModel := ParseModelPrefix(modelID)
+	_, err = oc.api.Models.Get(timeoutCtx, actualModel)
 	return err == nil, nil
 }
 
@@ -3155,7 +3165,7 @@ func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistan
 		openai.UserMessage(fmt.Sprintf("User: %s\n\nAssistant: %s", userMessage, assistantResponse)),
 	}
 
-	model := oc.effectiveModel(nil)
+	model := oc.effectiveModelForAPI(nil)
 	// Use a faster/cheaper model for title generation if available
 	if strings.HasPrefix(model, "gpt-4") {
 		model = "gpt-4o-mini"

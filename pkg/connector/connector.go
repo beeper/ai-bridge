@@ -300,5 +300,19 @@ func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User,
 	if !validFlowIDs[flowID] {
 		return nil, fmt.Errorf("unknown login flow: %s", flowID)
 	}
+
+	// Enforce availability rules matching GetLoginFlows
+	if oc.hasBeeperConfig() {
+		// Cloud mode: only Beeper flow is allowed
+		if flowID != LoginFlowIDBeeper {
+			return nil, fmt.Errorf("login flow %s is not available", flowID)
+		}
+	} else {
+		// Self-hosted mode: Beeper flow is not allowed
+		if flowID == LoginFlowIDBeeper {
+			return nil, fmt.Errorf("login flow %s is not available", flowID)
+		}
+	}
+
 	return &OpenAILogin{User: user, Connector: oc, FlowID: flowID, Provider: flowID}, nil
 }

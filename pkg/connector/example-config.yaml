@@ -12,7 +12,7 @@ beeper:
 # These are used when a room doesn't have a specific model configured.
 providers:
   beeper:
-    default_model: "openai/gpt5.2"
+    default_model: "openai/gpt-5.2"
   openai:
     default_model: "openai/gpt-4o-mini"
   gemini:
