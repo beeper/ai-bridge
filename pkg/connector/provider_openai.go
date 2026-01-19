@@ -391,4 +391,3 @@ func ToOpenAITools(tools []ToolDefinition) []responses.ToolUnionParam {
 
 	return result
 }
-
