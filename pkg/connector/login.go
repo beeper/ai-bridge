@@ -9,22 +9,18 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 )
 
-// Provider constants
+// Provider constants - all use OpenAI SDK with different base URLs
 const (
-	ProviderBeeper     = "beeper"
-	ProviderOpenAI     = "openai"
-	ProviderGemini     = "gemini"
-	ProviderAnthropic  = "anthropic"
-	ProviderOpenRouter = "openrouter"
-	ProviderCustom     = "custom"
+	ProviderBeeper     = "beeper"     // Beeper's OpenRouter proxy
+	ProviderOpenAI     = "openai"     // Direct OpenAI API
+	ProviderOpenRouter = "openrouter" // Direct OpenRouter API
+	ProviderCustom     = "custom"     // Custom OpenAI-compatible endpoint
 )
 
 // Login flow IDs
 const (
 	LoginFlowIDBeeper     = "beeper"     // Cloud mode (auto-completes using config credentials)
 	LoginFlowIDOpenAI     = "openai"     // Self-hosted
-	LoginFlowIDAnthropic  = "anthropic"  // Self-hosted
-	LoginFlowIDGemini     = "gemini"     // Self-hosted
 	LoginFlowIDOpenRouter = "openrouter" // Self-hosted
 	LoginFlowIDCustom     = "custom"     // Self-hosted
 )
@@ -47,8 +43,6 @@ type providerFieldConfig struct {
 var providerFieldConfigs = map[string]providerFieldConfig{
 	ProviderBeeper:     {"Beeper Access Token", "Your Beeper Matrix access token", true, "Beeper AI Proxy URL", "Your Beeper homeserver AI proxy endpoint"},
 	ProviderOpenAI:     {"OpenAI API Key", "Generate one at https://platform.openai.com/account/api-keys", false, "", ""},
-	ProviderGemini:     {"Gemini API Key", "Generate one at https://aistudio.google.com/apikey", false, "", ""},
-	ProviderAnthropic:  {"Anthropic API Key", "Generate one at https://console.anthropic.com/settings/keys", false, "", ""},
 	ProviderOpenRouter: {"OpenRouter API Key", "Generate one at https://openrouter.ai/keys", false, "", ""},
 	ProviderCustom:     {"API Key", "API key for authentication", true, "Base URL", "OpenAI-compatible API endpoint (e.g., https://api.example.com/v1)"},
 }

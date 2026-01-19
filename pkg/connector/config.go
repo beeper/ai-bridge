@@ -38,8 +38,6 @@ type ProviderConfig struct {
 type ProvidersConfig struct {
 	Beeper     ProviderConfig `yaml:"beeper"`
 	OpenAI     ProviderConfig `yaml:"openai"`
-	Gemini     ProviderConfig `yaml:"gemini"`
-	Anthropic  ProviderConfig `yaml:"anthropic"`
 	OpenRouter ProviderConfig `yaml:"openrouter"`
 }
 
@@ -56,8 +54,6 @@ func upgradeConfig(helper configupgrade.Helper) {
 	// Per-provider default models
 	helper.Copy(configupgrade.Str, "providers", "beeper", "default_model")
 	helper.Copy(configupgrade.Str, "providers", "openai", "default_model")
-	helper.Copy(configupgrade.Str, "providers", "gemini", "default_model")
-	helper.Copy(configupgrade.Str, "providers", "anthropic", "default_model")
 	helper.Copy(configupgrade.Str, "providers", "openrouter", "default_model")
 
 	// Global settings
