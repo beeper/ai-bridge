@@ -15,8 +15,8 @@ type ModelCache struct {
 // ModelCapabilities stores computed capabilities for a model
 // This is NOT sent to the API, just used for local caching
 type ModelCapabilities struct {
-	SupportsVision   bool `json:"supports_vision"`
-	IsReasoningModel bool `json:"is_reasoning_model"` // O1/O3 models - no streaming, longer timeouts
+	SupportsVision    bool `json:"supports_vision"`
+	SupportsReasoning bool `json:"supports_reasoning"` // Models that support reasoning_effort parameter
 }
 
 // UserLoginMetadata is stored on each login row to keep per-user settings.
