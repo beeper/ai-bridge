@@ -16,11 +16,9 @@ import (
 )
 
 const (
-	defaultTemperature           = 0.4
-	defaultMaxContextMessages    = 12
-	defaultMaxTokens             = 512
-	defaultRequestTimeout        = 45 * time.Second
-	reasoningModelRequestTimeout = 5 * time.Minute // Extended timeout for O1/O3 models
+	defaultTemperature        = 0.4
+	defaultMaxContextMessages = 12
+	defaultMaxTokens          = 512
 )
 
 var (
@@ -44,26 +42,11 @@ func (oc *OpenAIConnector) Stop(ctx context.Context) {
 }
 
 func (oc *OpenAIConnector) Start(ctx context.Context) error {
-	if oc.Config.OpenAI.RequestTimeout == 0 {
-		oc.Config.OpenAI.RequestTimeout = defaultRequestTimeout
-	}
-	if oc.Config.OpenAI.DefaultTemperature == 0 {
-		oc.Config.OpenAI.DefaultTemperature = defaultTemperature
-	}
-	if oc.Config.OpenAI.MaxContextMessages == 0 {
-		oc.Config.OpenAI.MaxContextMessages = defaultMaxContextMessages
-	}
-	if oc.Config.OpenAI.MaxCompletionTokens == 0 {
-		oc.Config.OpenAI.MaxCompletionTokens = defaultMaxTokens
-	}
-	if oc.Config.OpenAI.EditDebounceMs == 0 {
-		oc.Config.OpenAI.EditDebounceMs = 200
-	}
-	if oc.Config.OpenAI.TransientDebounceMs == 0 {
-		oc.Config.OpenAI.TransientDebounceMs = 50
+	if oc.Config.ModelCacheDuration == 0 {
+		oc.Config.ModelCacheDuration = 6 * time.Hour
 	}
 	if oc.Config.Bridge.CommandPrefix == "" {
-		oc.Config.Bridge.CommandPrefix = "!gpt"
+		oc.Config.Bridge.CommandPrefix = "!ai"
 	}
 
 	// Register custom Matrix event handlers
@@ -256,13 +239,25 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 	return nil
 }
 
+// hasBeeperConfig returns true if Beeper credentials are configured in the bridge config.
+func (oc *OpenAIConnector) hasBeeperConfig() bool {
+	return oc.Config.Beeper.BaseURL != "" && oc.Config.Beeper.Token != ""
+}
+
 func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
+	// Cloud mode: show ONLY the Beeper flow (auto-completes using config)
+	if oc.hasBeeperConfig() {
+		return []bridgev2.LoginFlow{
+			{
+				ID:          LoginFlowIDBeeper,
+				Name:        "Beeper AI",
+				Description: "Connect to Beeper AI (automatic)",
+			},
+		}
+	}
+
+	// Self-hosted mode: show provider options (user provides own API keys)
 	return []bridgev2.LoginFlow{
-		{
-			ID:          LoginFlowIDLocalBeeper,
-			Name:        "Local Beeper",
-			Description: "Use Beeper's AI proxy (automatic setup for SDK).",
-		},
 		{
 			ID:          LoginFlowIDOpenAI,
 			Name:        "OpenAI",
@@ -291,24 +286,33 @@ func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
 	}
 }
 
-func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
-	login := &OpenAILogin{User: user, Connector: oc, FlowID: flowID}
+// validFlowIDs is the set of valid login flow IDs
+var validFlowIDs = map[string]bool{
+	LoginFlowIDBeeper:     true,
+	LoginFlowIDOpenAI:     true,
+	LoginFlowIDAnthropic:  true,
+	LoginFlowIDGemini:     true,
+	LoginFlowIDOpenRouter: true,
+	LoginFlowIDCustom:     true,
+}
 
-	switch flowID {
-	case LoginFlowIDLocalBeeper:
-		login.Provider = ProviderBeeper
-	case LoginFlowIDOpenAI:
-		login.Provider = ProviderOpenAI
-	case LoginFlowIDAnthropic:
-		login.Provider = ProviderAnthropic
-	case LoginFlowIDGemini:
-		login.Provider = ProviderGemini
-	case LoginFlowIDOpenRouter:
-		login.Provider = ProviderOpenRouter
-	case LoginFlowIDCustom:
-		login.Provider = ProviderCustom
-	default:
+func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
+	if !validFlowIDs[flowID] {
 		return nil, fmt.Errorf("unknown login flow: %s", flowID)
 	}
-	return login, nil
+
+	// Enforce availability rules matching GetLoginFlows
+	if oc.hasBeeperConfig() {
+		// Cloud mode: only Beeper flow is allowed
+		if flowID != LoginFlowIDBeeper {
+			return nil, fmt.Errorf("login flow %s is not available", flowID)
+		}
+	} else {
+		// Self-hosted mode: Beeper flow is not allowed
+		if flowID == LoginFlowIDBeeper {
+			return nil, fmt.Errorf("login flow %s is not available", flowID)
+		}
+	}
+
+	return &OpenAILogin{User: user, Connector: oc, FlowID: flowID, Provider: flowID}, nil
 }

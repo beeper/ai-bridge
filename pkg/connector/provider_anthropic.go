@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -25,12 +26,27 @@ func NewAnthropicProvider(apiKey string, log zerolog.Logger) (*AnthropicProvider
 
 // NewAnthropicProviderWithBaseURL creates an Anthropic provider with custom base URL (for Beeper proxy)
 func NewAnthropicProviderWithBaseURL(apiKey, baseURL string, log zerolog.Logger) (*AnthropicProvider, error) {
+	return NewAnthropicProviderWithUserID(apiKey, baseURL, "", log)
+}
+
+// NewAnthropicProviderWithUserID creates an Anthropic provider that passes user_id with each request.
+// Used for Beeper proxy to ensure correct rate limiting and feature flags per user.
+func NewAnthropicProviderWithUserID(apiKey, baseURL, userID string, log zerolog.Logger) (*AnthropicProvider, error) {
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
 	}
 
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
+	}
+
+	if userID != "" {
+		opts = append(opts, option.WithMiddleware(func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+			q := req.URL.Query()
+			q.Set("user_id", userID)
+			req.URL.RawQuery = q.Encode()
+			return next(req)
+		}))
 	}
 
 	client := anthropic.NewClient(opts...)

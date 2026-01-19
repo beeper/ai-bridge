@@ -24,7 +24,7 @@ const (
 	DefaultModelGemini     = "gemini/gemini-2.5-flash"
 	DefaultModelAnthropic  = "anthropic/claude-sonnet-4-5-20250929"
 	DefaultModelOpenRouter = "openrouter/openai/gpt-4o-mini"
-	DefaultModelBeeper     = "openai/gpt-4o-mini"
+	DefaultModelBeeper     = "openai/gpt-5.2"
 )
 
 // ParseModelPrefix extracts the backend and actual model ID from a prefixed model
