@@ -63,18 +63,6 @@ func (o *OpenAIProvider) Name() string {
 	return "openai"
 }
 
-func (o *OpenAIProvider) SupportsTools() bool {
-	return true
-}
-
-func (o *OpenAIProvider) SupportsVision() bool {
-	return true
-}
-
-func (o *OpenAIProvider) SupportsStreaming() bool {
-	return true
-}
-
 // Client returns the underlying OpenAI client for direct access
 // Used by the bridge for advanced features like Responses API
 func (o *OpenAIProvider) Client() openai.Client {
@@ -373,41 +361,6 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	return models, nil
 }
 
-// ValidateModel checks if a model is valid for OpenAI
-func (o *OpenAIProvider) ValidateModel(ctx context.Context, modelID string) (bool, error) {
-	// Parse prefix
-	backend, actualModel := ParseModelPrefix(modelID)
-	if backend != BackendOpenAI && backend != "" {
-		return false, nil
-	}
-
-	// Try to get model info
-	_, err := o.client.Models.Get(ctx, actualModel)
-	if err != nil {
-		// Check if it's a known model
-		for _, m := range defaultOpenAIModels() {
-			_, knownModel := ParseModelPrefix(m.ID)
-			if actualModel == knownModel {
-				return true, nil
-			}
-		}
-		return false, nil
-	}
-
-	return true, nil
-}
-
-// CountTokens estimates token count for messages
-func (o *OpenAIProvider) CountTokens(ctx context.Context, messages []UnifiedMessage, model string) (int, error) {
-	// Use tiktoken for accurate counting when available
-	// Fallback to estimation (~4 chars per token)
-	total := 0
-	for _, msg := range messages {
-		total += len(msg.Text()) / 4
-	}
-	return total, nil
-}
-
 // defaultOpenAIModels returns known OpenAI models
 func defaultOpenAIModels() []ModelInfo {
 	return GetDefaultModels("openai")
@@ -439,82 +392,3 @@ func ToOpenAITools(tools []ToolDefinition) []responses.ToolUnionParam {
 	return result
 }
 
-// ChatCompletionsGenerate performs generation using Chat Completions API (fallback)
-func (o *OpenAIProvider) ChatCompletionsGenerate(ctx context.Context, params GenerateParams) (*GenerateResponse, error) {
-	chatParams := openai.ChatCompletionNewParams{
-		Model:    params.Model,
-		Messages: ToOpenAIChatMessages(params.Messages),
-	}
-
-	if params.MaxCompletionTokens > 0 {
-		chatParams.MaxCompletionTokens = openai.Int(int64(params.MaxCompletionTokens))
-	}
-
-	if params.Temperature > 0 {
-		chatParams.Temperature = openai.Float(params.Temperature)
-	}
-
-	if len(params.Tools) > 0 {
-		chatParams.Tools = ToOpenAIChatTools(params.Tools)
-	}
-
-	resp, err := o.client.Chat.Completions.New(ctx, chatParams)
-	if err != nil {
-		return nil, fmt.Errorf("OpenAI Chat Completions failed: %w", err)
-	}
-
-	var content strings.Builder
-	var toolCalls []ToolCallResult
-
-	if len(resp.Choices) > 0 {
-		choice := resp.Choices[0]
-		content.WriteString(choice.Message.Content)
-
-		for _, tc := range choice.Message.ToolCalls {
-			toolCalls = append(toolCalls, ToolCallResult{
-				ID:        tc.ID,
-				Name:      tc.Function.Name,
-				Arguments: tc.Function.Arguments,
-			})
-		}
-	}
-
-	finishReason := "stop"
-	if len(resp.Choices) > 0 {
-		finishReason = string(resp.Choices[0].FinishReason)
-	}
-
-	return &GenerateResponse{
-		Content:      content.String(),
-		FinishReason: finishReason,
-		ToolCalls:    toolCalls,
-		Usage: UsageInfo{
-			PromptTokens:     int(resp.Usage.PromptTokens),
-			CompletionTokens: int(resp.Usage.CompletionTokens),
-			TotalTokens:      int(resp.Usage.TotalTokens),
-		},
-	}, nil
-}
-
-// ToOpenAIChatTools converts tool definitions to Chat Completions format
-func ToOpenAIChatTools(tools []ToolDefinition) []openai.ChatCompletionToolUnionParam {
-	if len(tools) == 0 {
-		return nil
-	}
-
-	var result []openai.ChatCompletionToolUnionParam
-	for _, tool := range tools {
-		funcDef := openai.FunctionDefinitionParam{
-			Name:        tool.Name,
-			Description: openai.String(tool.Description),
-		}
-
-		if tool.Parameters != nil {
-			funcDef.Parameters = openai.FunctionParameters(tool.Parameters)
-		}
-
-		result = append(result, openai.ChatCompletionFunctionTool(funcDef))
-	}
-
-	return result
-}
