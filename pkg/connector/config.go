@@ -13,51 +13,57 @@ var exampleNetworkConfig string
 // Config represents the connector-specific configuration that is nested under
 // the `network:` block in the main bridge config.
 type Config struct {
-	OpenAI OpenAIConfig `yaml:"openai"`
-	Bridge BridgeConfig `yaml:"bridge"`
+	Beeper    BeeperConfig    `yaml:"beeper"`
+	Providers ProvidersConfig `yaml:"providers"`
+	Bridge    BridgeConfig    `yaml:"bridge"`
+
+	// Global settings
+	DefaultSystemPrompt string        `yaml:"default_system_prompt"`
+	ModelCacheDuration  time.Duration `yaml:"model_cache_duration"`
 }
 
-// OpenAIConfig controls how the connector talks to the OpenAI API.
-// Per-user credentials (API key, base_url, org_id, project_id) are provided during login, not in config.
-type OpenAIConfig struct {
-	// Bridge-wide defaults for new rooms (can be overridden per-room via room state)
-	DefaultTemperature  float64       `yaml:"default_temperature"`
-	MaxContextMessages  int           `yaml:"max_context_messages"`
-	MaxCompletionTokens int           `yaml:"max_completion_tokens"`
-	SystemPrompt        string        `yaml:"system_prompt"`
-	RequestTimeout      time.Duration `yaml:"request_timeout"`
-
-	// Streaming configuration
-	EnableStreaming     bool `yaml:"enable_streaming"`
-	EditDebounceMs      int  `yaml:"edit_debounce_ms"`      // Debounce time for edits (default: 200ms)
-	TransientDebounceMs int  `yaml:"transient_debounce_ms"` // Debounce for transient events (default: 50ms)
+// BeeperConfig contains Beeper AI proxy credentials for automatic login.
+// If both BaseURL and Token are set, users don't need to manually log in.
+type BeeperConfig struct {
+	BaseURL string `yaml:"base_url"` // Beeper AI proxy endpoint
+	Token   string `yaml:"token"`    // Beeper Matrix access token
 }
 
-// BridgeConfig tweaks Matrix-side behaviour for the GPT bridge.
+// ProviderConfig holds settings for a specific AI provider.
+type ProviderConfig struct {
+	DefaultModel string `yaml:"default_model"`
+}
+
+// ProvidersConfig contains per-provider configuration.
+type ProvidersConfig struct {
+	Beeper     ProviderConfig `yaml:"beeper"`
+	OpenAI     ProviderConfig `yaml:"openai"`
+	Gemini     ProviderConfig `yaml:"gemini"`
+	Anthropic  ProviderConfig `yaml:"anthropic"`
+	OpenRouter ProviderConfig `yaml:"openrouter"`
+}
+
+// BridgeConfig tweaks Matrix-side behaviour for the AI bridge.
 type BridgeConfig struct {
-	CommandPrefix       string `yaml:"command_prefix"`
-	TypingNotifications bool   `yaml:"typing_notifications"`
-	MentionAssistant    bool   `yaml:"mention_assistant"`
+	CommandPrefix string `yaml:"command_prefix"`
 }
 
 func upgradeConfig(helper configupgrade.Helper) {
-	// Bridge-wide defaults (kept from config)
-	helper.Copy(configupgrade.Float, "openai", "default_temperature")
-	helper.Copy(configupgrade.Int, "openai", "max_context_messages")
-	helper.Copy(configupgrade.Int, "openai", "max_completion_tokens")
-	helper.Copy(configupgrade.Str, "openai", "system_prompt")
-	helper.Copy(configupgrade.Str, "openai", "request_timeout")
+	// Beeper credentials for auto-login
+	helper.Copy(configupgrade.Str, "beeper", "base_url")
+	helper.Copy(configupgrade.Str, "beeper", "token")
 
-	// Streaming configuration
-	helper.Copy(configupgrade.Bool, "openai", "enable_streaming")
-	helper.Copy(configupgrade.Int, "openai", "edit_debounce_ms")
-	helper.Copy(configupgrade.Int, "openai", "transient_debounce_ms")
+	// Per-provider default models
+	helper.Copy(configupgrade.Str, "providers", "beeper", "default_model")
+	helper.Copy(configupgrade.Str, "providers", "openai", "default_model")
+	helper.Copy(configupgrade.Str, "providers", "gemini", "default_model")
+	helper.Copy(configupgrade.Str, "providers", "anthropic", "default_model")
+	helper.Copy(configupgrade.Str, "providers", "openrouter", "default_model")
+
+	// Global settings
+	helper.Copy(configupgrade.Str, "default_system_prompt")
+	helper.Copy(configupgrade.Str, "model_cache_duration")
 
 	// Bridge-specific configuration
 	helper.Copy(configupgrade.Str, "bridge", "command_prefix")
-	helper.Copy(configupgrade.Bool, "bridge", "typing_notifications")
-	helper.Copy(configupgrade.Bool, "bridge", "mention_assistant")
-
-	// Note: api_key, organization_id, project_id, base_url, and default_model
-	// are now per-user (via login flow) and per-room (via room state), not in config
 }
