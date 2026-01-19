@@ -116,7 +116,7 @@ func main() {
 }
 
 func fetchOpenRouterModels(token string) (map[string]OpenRouterModel, error) {
-	req, err := http.NewRequest("GET", "https://openrouter.ai/api/v1/models", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://openrouter.ai/api/v1/models", nil)
 	if err != nil {
 		return nil, err
 	}
