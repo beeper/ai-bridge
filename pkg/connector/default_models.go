@@ -5,32 +5,6 @@ package connector
 var DefaultModels = map[string][]ModelInfo{
 	"openai": {
 		{
-			ID:                  "openai/gpt-4o",
-			Name:                "GPT 4o",
-			Provider:            "openai",
-			Description:         "Most capable multimodal model",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			SupportsReasoning:   false,
-			SupportsWebSearch:   true,
-			ContextWindow:       128000,
-			MaxOutputTokens:     16384,
-			AvailableTools:      []string{ToolWebSearch, ToolFunctionCalling},
-		},
-		{
-			ID:                  "openai/gpt-4o-mini",
-			Name:                "GPT 4o Mini",
-			Provider:            "openai",
-			Description:         "Fast and efficient GPT model",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			SupportsReasoning:   false,
-			SupportsWebSearch:   true,
-			ContextWindow:       128000,
-			MaxOutputTokens:     16384,
-			AvailableTools:      []string{ToolWebSearch, ToolFunctionCalling},
-		},
-		{
 			ID:                  "openai/o1",
 			Name:                "O1",
 			Provider:            "openai",
