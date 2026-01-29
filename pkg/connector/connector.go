@@ -264,16 +264,6 @@ func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
 			Description: "Use your own OpenAI API key.",
 		},
 		{
-			ID:          LoginFlowIDAnthropic,
-			Name:        "Anthropic",
-			Description: "Use your own Anthropic API key.",
-		},
-		{
-			ID:          LoginFlowIDGemini,
-			Name:        "Gemini",
-			Description: "Use your own Google Gemini API key.",
-		},
-		{
 			ID:          LoginFlowIDOpenRouter,
 			Name:        "OpenRouter",
 			Description: "Use your own OpenRouter API key.",
@@ -290,8 +280,6 @@ func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
 var validFlowIDs = map[string]bool{
 	LoginFlowIDBeeper:     true,
 	LoginFlowIDOpenAI:     true,
-	LoginFlowIDAnthropic:  true,
-	LoginFlowIDGemini:     true,
 	LoginFlowIDOpenRouter: true,
 	LoginFlowIDCustom:     true,
 }

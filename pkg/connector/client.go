@@ -53,17 +53,8 @@ type AIClient struct {
 	apiKey    string
 	log       zerolog.Logger
 
-	// Provider abstraction layer
-	// For individual providers (OpenAI, Gemini, Anthropic), this is their single provider
-	// For Beeper provider, providers are selected based on model prefix
+	// Provider abstraction layer - all providers use OpenAI SDK
 	provider AIProvider
-
-	// Multiple providers for Beeper (smart proxy routing)
-	// Only initialized when Provider == ProviderBeeper
-	openaiProvider     AIProvider
-	geminiProvider     AIProvider
-	anthropicProvider  AIProvider
-	openrouterProvider AIProvider
 
 	loggedIn atomic.Bool
 	chatLock sync.Mutex
@@ -122,56 +113,29 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 	// Use per-user base_url if provided
 	baseURL := strings.TrimSpace(meta.BaseURL)
 
-	// Initialize provider(s) based on login metadata
+	// Initialize provider based on login metadata
+	// All providers use the OpenAI SDK with different base URLs
 	switch meta.Provider {
-	case ProviderGemini:
-		// Gemini provider - initialize genai client
-		ctx := context.Background()
-		provider, err := NewGeminiProviderWithBaseURL(ctx, key, baseURL, log)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create Gemini provider: %w", err)
-		}
-		oc.provider = provider
-		oc.geminiProvider = provider
-
-	case ProviderAnthropic:
-		// Anthropic provider - initialize anthropic client
-		provider, err := NewAnthropicProviderWithBaseURL(key, baseURL, log)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create Anthropic provider: %w", err)
-		}
-		oc.provider = provider
-		oc.anthropicProvider = provider
-
 	case ProviderBeeper:
-		// Beeper mode: ALL models route through OpenRouter Responses API
-		// This simplifies routing and ensures consistent behavior across all models
+		// Beeper mode: routes through Beeper's OpenRouter proxy
 		beeperBaseURL := baseURL
 		if beeperBaseURL == "" {
 			return nil, fmt.Errorf("beeper base_url is required for Beeper provider")
 		}
 
-		// Get user ID for rate limiting (hungryserv uses beeper.local domain internally)
+		// Get user ID for rate limiting
 		userID := login.User.MXID.String()
 
-		// ALL Beeper models go through OpenRouter Responses API
 		openrouterURL := beeperBaseURL + "/openrouter/v1"
-		openrouterProvider, err := NewOpenAIProviderWithUserID(key, openrouterURL, userID, log)
+		provider, err := NewOpenAIProviderWithUserID(key, openrouterURL, userID, log)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create OpenRouter provider for Beeper: %w", err)
+			return nil, fmt.Errorf("failed to create Beeper provider: %w", err)
 		}
-
-		// Set OpenRouter as the single provider for all operations
-		oc.provider = openrouterProvider
-		oc.openrouterProvider = openrouterProvider
-		oc.api = openrouterProvider.Client()
-
-		// Note: Individual provider instances (openaiProvider, geminiProvider, anthropicProvider)
-		// are NOT initialized in Beeper mode. All routing happens via OpenRouter
-		// with model format "provider/model" (e.g., "openai/gpt-5.2", "anthropic/claude-sonnet-4.5")
+		oc.provider = provider
+		oc.api = provider.Client()
 
 	case ProviderOpenRouter:
-		// OpenRouter uses OpenAI-compatible API
+		// OpenRouter direct access
 		openrouterURL := baseURL
 		if openrouterURL == "" {
 			openrouterURL = "https://openrouter.ai/api/v1"
@@ -181,11 +145,10 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 			return nil, fmt.Errorf("failed to create OpenRouter provider: %w", err)
 		}
 		oc.provider = provider
-		oc.openrouterProvider = provider
 		oc.api = provider.Client()
 
 	default:
-		// OpenAI (default) or Custom provider
+		// OpenAI (default) or Custom OpenAI-compatible provider
 		openaiURL := baseURL
 		if openaiURL == "" {
 			openaiURL = "https://api.openai.com/v1"
@@ -195,7 +158,6 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 			return nil, fmt.Errorf("failed to create OpenAI provider: %w", err)
 		}
 		oc.provider = provider
-		oc.openaiProvider = provider
 		oc.api = provider.Client()
 	}
 
@@ -2354,7 +2316,7 @@ func (oc *AIClient) effectiveModelForAPI(meta *PortalMetadata) string {
 		return modelID
 	}
 
-	// Direct providers (openai, gemini, anthropic) need the prefix stripped
+	// Direct OpenAI provider needs the prefix stripped
 	_, actualModel := ParseModelPrefix(modelID)
 	return actualModel
 }
@@ -2370,16 +2332,6 @@ func (oc *AIClient) defaultModelForProvider() string {
 			return providers.OpenAI.DefaultModel
 		}
 		return DefaultModelOpenAI
-	case ProviderGemini:
-		if providers.Gemini.DefaultModel != "" {
-			return providers.Gemini.DefaultModel
-		}
-		return DefaultModelGemini
-	case ProviderAnthropic:
-		if providers.Anthropic.DefaultModel != "" {
-			return providers.Anthropic.DefaultModel
-		}
-		return DefaultModelAnthropic
 	case ProviderOpenRouter:
 		if providers.OpenRouter.DefaultModel != "" {
 			return providers.OpenRouter.DefaultModel
@@ -2718,19 +2670,8 @@ func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) 
 
 	var allModels []ModelInfo
 
-	// For Beeper provider, list models from all backends
-	if meta.Provider == ProviderBeeper {
-		// Use OpenRouter provider (Beeper proxy) for model discovery
-		if oc.openrouterProvider != nil {
-			models, err := oc.openrouterProvider.ListModels(timeoutCtx)
-			if err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to list OpenRouter models")
-			} else {
-				allModels = append(allModels, models...)
-			}
-		}
-	} else if oc.provider != nil {
-		// Single provider - just list its models
+	// List models from the provider
+	if oc.provider != nil {
 		models, err := oc.provider.ListModels(timeoutCtx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list models: %w", err)
@@ -3142,31 +3083,52 @@ func ptrIfNotEmpty(value string) *string {
 
 // generateRoomTitle asks the model to generate a short descriptive title for the conversation
 func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistantResponse string) (string, error) {
-	prompt := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage("Generate a very short title (3-5 words max) that summarizes this conversation. Reply with ONLY the title, no quotes, no punctuation at the end."),
-		openai.UserMessage(fmt.Sprintf("User: %s\n\nAssistant: %s", userMessage, assistantResponse)),
-	}
-
 	model := oc.effectiveModelForAPI(nil)
 	// Use a faster/cheaper model for title generation if available
 	if strings.HasPrefix(model, "gpt-4") {
 		model = "gpt-4o-mini"
 	}
 
-	resp, err := oc.api.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model:     model,
-		Messages:  prompt,
-		MaxTokens: openai.Int(20),
+	// Build Responses API input
+	input := responses.ResponseInputParam{
+		{
+			OfMessage: &responses.EasyInputMessageParam{
+				Role: responses.EasyInputMessageRoleUser,
+				Content: responses.EasyInputMessageContentUnionParam{
+					OfString: openai.String(fmt.Sprintf("User: %s\n\nAssistant: %s", userMessage, assistantResponse)),
+				},
+			},
+		},
+	}
+
+	resp, err := oc.api.Responses.New(ctx, responses.ResponseNewParams{
+		Model:           model,
+		Input:           responses.ResponseNewParamsInputUnion{OfInputItemList: input},
+		Instructions:    openai.String("Generate a very short title (3-5 words max) that summarizes this conversation. Reply with ONLY the title, no quotes, no punctuation at the end."),
+		MaxOutputTokens: openai.Int(20),
 	})
 	if err != nil {
 		return "", err
 	}
 
-	if len(resp.Choices) == 0 {
+	// Extract text from response
+	var title string
+	for _, item := range resp.Output {
+		if msg, ok := item.AsAny().(responses.ResponseOutputMessage); ok {
+			for _, contentPart := range msg.Content {
+				if text, ok := contentPart.AsAny().(responses.ResponseOutputText); ok {
+					title = text.Text
+					break
+				}
+			}
+		}
+	}
+
+	if title == "" {
 		return "", fmt.Errorf("no response from model")
 	}
 
-	title := strings.TrimSpace(resp.Choices[0].Message.Content)
+	title = strings.TrimSpace(title)
 	// Remove quotes if the model added them
 	title = strings.Trim(title, "\"'")
 	// Limit length
