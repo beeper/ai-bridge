@@ -89,7 +89,7 @@ func ValidateModelForProvider(modelID, provider string) error {
 
 	// No prefix - legacy model, needs to be updated
 	if backend == "" {
-		return fmt.Errorf("model %q is missing backend prefix (use %s/%s)", modelID, inferBackendFromModel(modelID), modelID)
+		return fmt.Errorf("model %q is missing backend prefix (use openai/%s or openrouter/%s)", modelID, modelID, modelID)
 	}
 
 	switch provider {
@@ -110,12 +110,6 @@ func ValidateModelForProvider(modelID, provider string) error {
 	}
 
 	return nil
-}
-
-// inferBackendFromModel tries to guess the backend from a legacy (unprefixed) model name
-func inferBackendFromModel(_ string) string {
-	// Default to openai - all providers use OpenAI SDK
-	return "openai"
 }
 
 // BackendForProvider returns the expected backend for a provider
