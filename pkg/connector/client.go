@@ -2720,29 +2720,11 @@ func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) 
 
 	// For Beeper provider, list models from all backends
 	if meta.Provider == ProviderBeeper {
-		// OpenAI models
-		if oc.openaiProvider != nil {
-			models, err := oc.openaiProvider.ListModels(timeoutCtx)
+		// Use OpenRouter provider (Beeper proxy) for model discovery
+		if oc.openrouterProvider != nil {
+			models, err := oc.openrouterProvider.ListModels(timeoutCtx)
 			if err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to list OpenAI models")
-			} else {
-				allModels = append(allModels, models...)
-			}
-		}
-		// Gemini models
-		if oc.geminiProvider != nil {
-			models, err := oc.geminiProvider.ListModels(timeoutCtx)
-			if err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to list Gemini models")
-			} else {
-				allModels = append(allModels, models...)
-			}
-		}
-		// Anthropic models
-		if oc.anthropicProvider != nil {
-			models, err := oc.anthropicProvider.ListModels(timeoutCtx)
-			if err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to list Anthropic models")
+				oc.log.Warn().Err(err).Msg("Failed to list OpenRouter models")
 			} else {
 				allModels = append(allModels, models...)
 			}
