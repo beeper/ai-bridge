@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/beeper/ai-bridge/pkg/connector"
 )
 
 // OpenRouterArchitecture contains model architecture information
@@ -63,46 +65,6 @@ type ModelCapabilities struct {
 	MaxOutputTokens int
 }
 
-// BeeperModelConfig defines which models to include for Beeper
-// Simple map: model ID -> display name
-// All capabilities are auto-detected from OpenRouter API
-var BeeperModelConfig = map[string]string{
-	// MiniMax
-	"minimax/minimax-m2.1": "MiniMax M2.1",
-	"minimax/minimax-m2":   "MiniMax M2",
-	// GLM (Z.AI)
-	"z-ai/glm-4.7":  "GLM 4.7",
-	"z-ai/glm-4.6v": "GLM 4.6V",
-	// Kimi (Moonshot)
-	"moonshotai/kimi-k2-0905":     "Kimi K2 (0905)",
-	"moonshotai/kimi-k2-thinking": "Kimi K2 (Thinking)",
-	// Qwen
-	"qwen/qwen3-235b-a22b-thinking-2507": "Qwen 3 235B (Thinking)",
-	"qwen/qwen3-235b-a22b":               "Qwen 3 235B",
-	// Grok (xAI)
-	"x-ai/grok-4.1-fast": "Grok 4.1 Fast",
-	// DeepSeek
-	"deepseek/deepseek-v3.2": "DeepSeek v3.2",
-	// Llama (Meta)
-	"meta-llama/llama-4-scout":    "Llama 4 Scout",
-	"meta-llama/llama-4-maverick": "Llama 4 Maverick",
-	// Gemini (Google) via OpenRouter
-	"google/gemini-2.5-flash-image":     "Nano Banana",
-	"google/gemini-3-flash-preview":     "Gemini 3 Flash",
-	"google/gemini-3-pro-image-preview": "Nano Banana Pro",
-	"google/gemini-3-pro-preview":       "Gemini 3 Pro",
-	// Claude (Anthropic) via OpenRouter
-	"anthropic/claude-sonnet-4.5": "Claude Sonnet 4.5",
-	"anthropic/claude-opus-4.5":   "Claude Opus 4.5",
-	"anthropic/claude-haiku-4.5":  "Claude Haiku 4.5",
-	// GPT (OpenAI) via OpenRouter
-	"openai/gpt-5-image":  "GPT ImageGen 1.5",
-	"openai/gpt-5.2":      "GPT-5.2",
-	"openai/gpt-5-mini":   "GPT-5 mini",
-	"openai/gpt-oss-20b":  "GPT OSS 20B",
-	"openai/gpt-oss-120b": "GPT OSS 120B",
-}
-
 func main() {
 	token := flag.String("openrouter-token", "", "OpenRouter API token")
 	outputFile := flag.String("output", "pkg/connector/beeper_models_generated.go", "Output Go file")
@@ -126,7 +88,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error generating file: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Generated %s with %d models\n", *outputFile, len(BeeperModelConfig))
+	fmt.Printf("Generated %s with %d models\n", *outputFile, len(connector.BeeperModelList))
 
 	// Generate JSON file for clients
 	if err := generateJSONFile(models, *jsonFile); err != nil {
@@ -245,10 +207,10 @@ var BeeperModelsGenerated = []ModelInfo{
 `)
 
 	// Get sorted model IDs for deterministic output
-	modelIDs := sortedKeys(BeeperModelConfig)
+	modelIDs := sortedKeys(connector.BeeperModelList)
 
 	for _, modelID := range modelIDs {
-		displayName := BeeperModelConfig[modelID]
+		displayName := connector.BeeperModelList[modelID]
 		apiModel, hasAPIData := apiModels[modelID]
 		caps := detectCapabilities(modelID, apiModel, hasAPIData)
 
@@ -310,10 +272,10 @@ type JSONModelInfo struct {
 func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) error {
 	var models []JSONModelInfo
 
-	modelIDs := sortedKeys(BeeperModelConfig)
+	modelIDs := sortedKeys(connector.BeeperModelList)
 
 	for _, modelID := range modelIDs {
-		displayName := BeeperModelConfig[modelID]
+		displayName := connector.BeeperModelList[modelID]
 		apiModel, hasAPIData := apiModels[modelID]
 		caps := detectCapabilities(modelID, apiModel, hasAPIData)
 
