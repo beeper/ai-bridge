@@ -69,6 +69,63 @@ func (o *OpenAIProvider) Client() openai.Client {
 	return o.client
 }
 
+// buildResponsesParams constructs Responses API parameters from GenerateParams
+func (o *OpenAIProvider) buildResponsesParams(params GenerateParams) responses.ResponseNewParams {
+	responsesParams := responses.ResponseNewParams{
+		Model: params.Model,
+		Input: responses.ResponseNewParamsInputUnion{
+			OfInputItemList: ToOpenAIResponsesInput(params.Messages),
+		},
+	}
+
+	// Set max tokens
+	if params.MaxCompletionTokens > 0 {
+		responsesParams.MaxOutputTokens = openai.Int(int64(params.MaxCompletionTokens))
+	}
+
+	// Set system prompt via instructions
+	if params.SystemPrompt != "" {
+		responsesParams.Instructions = openai.String(params.SystemPrompt)
+	}
+
+	// Set tools
+	if len(params.Tools) > 0 {
+		responsesParams.Tools = ToOpenAITools(params.Tools)
+	}
+
+	// Handle reasoning effort for o1/o3 models
+	if params.ReasoningEffort != "" && params.ReasoningEffort != "none" {
+		switch params.ReasoningEffort {
+		case "low":
+			responsesParams.Reasoning = responses.ReasoningParam{
+				Effort: responses.ReasoningEffortLow,
+			}
+		case "medium":
+			responsesParams.Reasoning = responses.ReasoningParam{
+				Effort: responses.ReasoningEffortMedium,
+			}
+		case "high":
+			responsesParams.Reasoning = responses.ReasoningParam{
+				Effort: responses.ReasoningEffortHigh,
+			}
+		}
+	}
+
+	// Previous response for conversation continuation
+	if params.PreviousResponseID != "" {
+		responsesParams.PreviousResponseID = openai.String(params.PreviousResponseID)
+	}
+
+	// Web search
+	if params.WebSearchEnabled {
+		responsesParams.Tools = append(responsesParams.Tools, responses.ToolUnionParam{
+			OfWebSearch: &responses.WebSearchToolParam{},
+		})
+	}
+
+	return responsesParams
+}
+
 // GenerateStream generates a streaming response from OpenAI using Responses API
 func (o *OpenAIProvider) GenerateStream(ctx context.Context, params GenerateParams) (<-chan StreamEvent, error) {
 	events := make(chan StreamEvent, 100)
@@ -76,58 +133,7 @@ func (o *OpenAIProvider) GenerateStream(ctx context.Context, params GeneratePara
 	go func() {
 		defer close(events)
 
-		// Build Responses API params
-		responsesParams := responses.ResponseNewParams{
-			Model: params.Model,
-			Input: responses.ResponseNewParamsInputUnion{
-				OfInputItemList: ToOpenAIResponsesInput(params.Messages),
-			},
-		}
-
-		// Set max tokens
-		if params.MaxCompletionTokens > 0 {
-			responsesParams.MaxOutputTokens = openai.Int(int64(params.MaxCompletionTokens))
-		}
-
-		// Set system prompt via instructions
-		if params.SystemPrompt != "" {
-			responsesParams.Instructions = openai.String(params.SystemPrompt)
-		}
-
-		// Set tools
-		if len(params.Tools) > 0 {
-			responsesParams.Tools = ToOpenAITools(params.Tools)
-		}
-
-		// Handle reasoning effort for o1/o3 models
-		if params.ReasoningEffort != "" && params.ReasoningEffort != "none" {
-			switch params.ReasoningEffort {
-			case "low":
-				responsesParams.Reasoning = responses.ReasoningParam{
-					Effort: responses.ReasoningEffortLow,
-				}
-			case "medium":
-				responsesParams.Reasoning = responses.ReasoningParam{
-					Effort: responses.ReasoningEffortMedium,
-				}
-			case "high":
-				responsesParams.Reasoning = responses.ReasoningParam{
-					Effort: responses.ReasoningEffortHigh,
-				}
-			}
-		}
-
-		// Previous response for conversation continuation
-		if params.PreviousResponseID != "" {
-			responsesParams.PreviousResponseID = openai.String(params.PreviousResponseID)
-		}
-
-		// Web search
-		if params.WebSearchEnabled {
-			responsesParams.Tools = append(responsesParams.Tools, responses.ToolUnionParam{
-				OfWebSearch: &responses.WebSearchToolParam{},
-			})
-		}
+		responsesParams := o.buildResponsesParams(params)
 
 		// Create streaming request
 		stream := o.client.Responses.NewStreaming(ctx, responsesParams)
@@ -217,58 +223,7 @@ func (o *OpenAIProvider) GenerateStream(ctx context.Context, params GeneratePara
 
 // Generate performs a non-streaming generation using Responses API
 func (o *OpenAIProvider) Generate(ctx context.Context, params GenerateParams) (*GenerateResponse, error) {
-	// Build Responses API params
-	responsesParams := responses.ResponseNewParams{
-		Model: params.Model,
-		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: ToOpenAIResponsesInput(params.Messages),
-		},
-	}
-
-	// Set max tokens
-	if params.MaxCompletionTokens > 0 {
-		responsesParams.MaxOutputTokens = openai.Int(int64(params.MaxCompletionTokens))
-	}
-
-	// Set system prompt via instructions
-	if params.SystemPrompt != "" {
-		responsesParams.Instructions = openai.String(params.SystemPrompt)
-	}
-
-	// Set tools
-	if len(params.Tools) > 0 {
-		responsesParams.Tools = ToOpenAITools(params.Tools)
-	}
-
-	// Handle reasoning effort
-	if params.ReasoningEffort != "" && params.ReasoningEffort != "none" {
-		switch params.ReasoningEffort {
-		case "low":
-			responsesParams.Reasoning = responses.ReasoningParam{
-				Effort: responses.ReasoningEffortLow,
-			}
-		case "medium":
-			responsesParams.Reasoning = responses.ReasoningParam{
-				Effort: responses.ReasoningEffortMedium,
-			}
-		case "high":
-			responsesParams.Reasoning = responses.ReasoningParam{
-				Effort: responses.ReasoningEffortHigh,
-			}
-		}
-	}
-
-	// Previous response for conversation continuation
-	if params.PreviousResponseID != "" {
-		responsesParams.PreviousResponseID = openai.String(params.PreviousResponseID)
-	}
-
-	// Web search
-	if params.WebSearchEnabled {
-		responsesParams.Tools = append(responsesParams.Tools, responses.ToolUnionParam{
-			OfWebSearch: &responses.WebSearchToolParam{},
-		})
-	}
+	responsesParams := o.buildResponsesParams(params)
 
 	// Make request
 	resp, err := o.client.Responses.New(ctx, responsesParams)

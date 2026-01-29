@@ -89,44 +89,42 @@ func IsAuthError(err error) bool {
 	return false
 }
 
-// modelContextWindows stores known context window sizes for various models
-var modelContextWindows = map[string]int{
-	"gpt-4o":              128000,
-	"gpt-4o-mini":         128000,
-	"gpt-4-turbo":         128000,
-	"gpt-4-turbo-preview": 128000,
-	"gpt-4":               8192,
-	"gpt-4-32k":           32768,
-	"gpt-3.5-turbo":       16385,
-	"gpt-3.5-turbo-16k":   16385,
-	"o1":                  128000,
-	"o1-mini":             128000,
-	"o1-preview":          128000,
+// fallbackContextWindows stores fallback context window sizes for known models
+// Used when runtime cache is unavailable
+var fallbackContextWindows = map[string]int{
+	"gpt-4o":        128000,
+	"gpt-4o-mini":   128000,
+	"gpt-4-turbo":   128000,
+	"gpt-4":         8192,
+	"gpt-4-32k":     32768,
+	"gpt-3.5-turbo": 16385,
+	"o1":            128000,
+	"o1-mini":       128000,
+	"o3-mini":       200000,
 }
+
+const defaultContextWindow = 8192
 
 // GetModelContextWindow returns the context window size for a model
 func GetModelContextWindow(modelID string) int {
+	// First, try runtime cache from OpenRouter
+	if size := GetOpenRouterContextWindow(modelID); size > 0 {
+		return size
+	}
+
+	// Fall back to hardcoded values
 	// Check exact match first
-	if size, ok := modelContextWindows[modelID]; ok {
+	if size, ok := fallbackContextWindows[modelID]; ok {
 		return size
 	}
 
 	// Check prefix matches (for versioned models like gpt-4o-2024-05-13)
-	prefixSizes := map[string]int{
-		"gpt-4o":        128000,
-		"gpt-4-turbo":   128000,
-		"gpt-4-32k":     32768,
-		"gpt-4":         8192,
-		"gpt-3.5-turbo": 16385,
-		"o1":            128000,
-	}
-
-	for prefix, size := range prefixSizes {
+	for prefix, size := range fallbackContextWindows {
 		if strings.HasPrefix(modelID, prefix) {
 			return size
 		}
 	}
 
 	// Default fallback for unknown models
-	return 8192
+	return defaultContextWindow
 }

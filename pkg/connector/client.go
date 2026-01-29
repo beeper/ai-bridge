@@ -16,8 +16,6 @@ import (
 	"github.com/openai/openai-go/v3/shared"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -334,7 +332,7 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 	// Parse model from ghost ID (format: "model-{escaped-model-id}")
 	if modelID := parseModelFromGhostID(ghostID); modelID != "" {
 		caps := getModelCapabilities(modelID)
-		displayName := formatModelName(modelID)
+		displayName := FormatModelDisplay(modelID)
 		if caps.SupportsVision {
 			displayName += " (Vision)"
 		}
@@ -422,7 +420,7 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 
 		// Create user info
 		caps := getModelCapabilities(model.ID)
-		displayName := formatModelName(model.ID)
+		displayName := FormatModelDisplay(model.ID)
 		if caps.SupportsVision {
 			displayName += " (Vision)"
 		}
@@ -487,7 +485,7 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 	return &bridgev2.ResolveIdentifierResponse{
 		UserID: userID,
 		UserInfo: &bridgev2.UserInfo{
-			Name:        ptr.Ptr(formatModelName(modelID)),
+			Name:        ptr.Ptr(FormatModelDisplay(modelID)),
 			IsBot:       ptr.Ptr(false),
 			Identifiers: []string{modelID},
 		},
@@ -509,7 +507,7 @@ func (oc *AIClient) createNewChat(ctx context.Context, modelID string, caps Mode
 	portalMeta := &PortalMetadata{
 		Model:        modelID,
 		Slug:         formatChatSlug(chatIndex),
-		Title:        fmt.Sprintf("%s Chat %d", formatModelName(modelID), chatIndex),
+		Title:        fmt.Sprintf("%s Chat %d", FormatModelDisplay(modelID), chatIndex),
 		Capabilities: caps,
 	}
 
@@ -582,7 +580,7 @@ func (oc *AIClient) buildChatMembers(modelID string) *bridgev2.ChatMemberList {
 				},
 				Membership: event.MembershipJoin,
 				UserInfo: &bridgev2.UserInfo{
-					Name:  ptr.Ptr(formatModelName(modelID)),
+					Name:  ptr.Ptr(FormatModelDisplay(modelID)),
 					IsBot: ptr.Ptr(false),
 				},
 			},
@@ -958,13 +956,12 @@ func (oc *AIClient) handleImageMessage(
 	}, nil
 }
 
-// buildPromptWithImage builds a prompt that includes an image URL
-func (oc *AIClient) buildPromptWithImage(
+// buildBasePrompt builds the system prompt and history portion of a prompt.
+// This is the common pattern used by buildPrompt and buildPromptWithImage.
+func (oc *AIClient) buildBasePrompt(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
-	caption string,
-	imageURL string,
 ) ([]openai.ChatCompletionMessageParamUnion, error) {
 	var prompt []openai.ChatCompletionMessageParamUnion
 
@@ -974,7 +971,7 @@ func (oc *AIClient) buildPromptWithImage(
 		prompt = append(prompt, openai.SystemMessage(systemPrompt))
 	}
 
-	// Add history (text-only for now)
+	// Add history
 	historyLimit := oc.historyLimit(meta)
 	if historyLimit > 0 {
 		history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, historyLimit)
@@ -983,7 +980,6 @@ func (oc *AIClient) buildPromptWithImage(
 		}
 		for i := len(history) - 1; i >= 0; i-- {
 			msgMeta := messageMeta(history[i])
-			// Skip commands and non-conversation messages
 			if !shouldIncludeInHistory(msgMeta) {
 				continue
 			}
@@ -994,6 +990,22 @@ func (oc *AIClient) buildPromptWithImage(
 				prompt = append(prompt, openai.UserMessage(msgMeta.Body))
 			}
 		}
+	}
+
+	return prompt, nil
+}
+
+// buildPromptWithImage builds a prompt that includes an image URL
+func (oc *AIClient) buildPromptWithImage(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	caption string,
+	imageURL string,
+) ([]openai.ChatCompletionMessageParamUnion, error) {
+	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build the user message with image
@@ -1469,7 +1481,7 @@ func (oc *AIClient) handleNewChat(
 	roomLink := fmt.Sprintf("https://matrix.to/#/%s", newPortal.MXID)
 	oc.sendSystemNotice(runCtx, portal, fmt.Sprintf(
 		"Created new %s chat.\nOpen: %s",
-		formatModelName(modelID), roomLink,
+		FormatModelDisplay(modelID), roomLink,
 	))
 }
 
@@ -1716,29 +1728,9 @@ func (oc *AIClient) buildPromptForRegenerate(
 }
 
 func (oc *AIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, latest string) ([]openai.ChatCompletionMessageParamUnion, error) {
-	var prompt []openai.ChatCompletionMessageParamUnion
-	systemPrompt := oc.effectivePrompt(meta)
-	if systemPrompt != "" {
-		prompt = append(prompt, openai.SystemMessage(systemPrompt))
-	}
-	historyLimit := oc.historyLimit(meta)
-	if historyLimit > 0 {
-		history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, historyLimit)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load prompt history: %w", err)
-		}
-		for i := len(history) - 1; i >= 0; i-- {
-			meta := messageMeta(history[i])
-			if !shouldIncludeInHistory(meta) {
-				continue
-			}
-			switch meta.Role {
-			case "assistant":
-				prompt = append(prompt, openai.AssistantMessage(meta.Body))
-			default:
-				prompt = append(prompt, openai.UserMessage(meta.Body))
-			}
-		}
+	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
+	if err != nil {
+		return nil, err
 	}
 	prompt = append(prompt, openai.UserMessage(latest))
 	return prompt, nil
@@ -2270,7 +2262,7 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 		return
 	}
 	modelID := oc.effectiveModel(meta)
-	modelName := formatModelName(modelID)
+	modelName := FormatModelDisplay(modelID)
 	body := fmt.Sprintf("This chat was created automatically. Send a message to start talking to %s.", modelName)
 	event := &OpenAIRemoteMessage{
 		PortalKey: portal.PortalKey,
@@ -2375,18 +2367,13 @@ func (oc *AIClient) effectiveMaxTokens(meta *PortalMetadata) int {
 	return defaultMaxTokens
 }
 
-// knownModelPrefixes is a list of known valid model ID prefixes
-var knownModelPrefixes = []string{
-	"gpt-4", "gpt-3.5", "o1", "o3", "chatgpt",
-}
-
 // validateModel checks if a model is available for this user
 func (oc *AIClient) validateModel(ctx context.Context, modelID string) (bool, error) {
 	if modelID == "" {
 		return true, nil
 	}
 
-	// First check cache
+	// First check local model cache
 	models, err := oc.listAvailableModels(ctx, false)
 	if err == nil {
 		for _, model := range models {
@@ -2396,18 +2383,16 @@ func (oc *AIClient) validateModel(ctx context.Context, modelID string) (bool, er
 		}
 	}
 
-	// Check against known patterns
-	for _, prefix := range knownModelPrefixes {
-		if strings.HasPrefix(modelID, prefix) {
-			return true, nil
-		}
+	// Check against OpenRouter's model list (cached)
+	_, actualModel := ParseModelPrefix(modelID)
+	if IsValidOpenRouterModel(actualModel) {
+		return true, nil
 	}
 
-	// Try to validate by making a minimal API call
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// Try to validate by making a minimal API call as last resort
+	timeoutCtx, cancel := context.WithTimeout(ctx, modelValidationTimeout)
 	defer cancel()
 
-	_, actualModel := ParseModelPrefix(modelID)
 	_, err = oc.api.Models.Get(timeoutCtx, actualModel)
 	return err == nil, nil
 }
@@ -2475,8 +2460,8 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 		Stringer("portal", portal.PortalKey).
 		Msg("Handling model switch")
 
-	oldModelName := formatModelName(oldModel)
-	newModelName := formatModelName(newModel)
+	oldModelName := FormatModelDisplay(oldModel)
+	newModelName := FormatModelDisplay(newModel)
 
 	// Pre-update the new model ghost's profile before queueing the event
 	// This ensures the ghost has a display name set in its Matrix profile
@@ -2583,7 +2568,11 @@ func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal)
 }
 
 const (
-	maxRetryAttempts = 3 // Maximum retry attempts for context length errors
+	maxRetryAttempts        = 3                 // Maximum retry attempts for context length errors
+	defaultHistoryLookup    = 50                // Default number of messages to include in history
+	forkMessageLimit        = 10000             // Maximum messages to consider when forking
+	modelValidationTimeout  = 5 * time.Second   // Timeout for model validation API calls
+	maxImageSize            = 20 * 1024 * 1024  // Maximum image size (20MB)
 )
 
 // notifyContextLengthExceeded sends a user-friendly notice about context overflow
@@ -2741,22 +2730,6 @@ func detectVisionSupport(modelID string) bool {
 		strings.Contains(modelID, "vision")
 }
 
-// formatModelName converts model ID to human-readable name
-func formatModelName(modelID string) string {
-	// Convert "gpt-4o-mini" → "GPT-4o Mini"
-	parts := strings.Split(modelID, "-")
-	formatted := make([]string, len(parts))
-	titleCaser := cases.Title(language.English)
-	for i, part := range parts {
-		if i == 0 {
-			formatted[i] = strings.ToUpper(part)
-		} else {
-			formatted[i] = titleCaser.String(part)
-		}
-	}
-	return strings.Join(formatted, "-")
-}
-
 func (oc *AIClient) scheduleBootstrap() {
 	backgroundCtx := oc.UserLogin.Bridge.BackgroundCtx
 	go oc.bootstrap(backgroundCtx)
@@ -2906,7 +2879,7 @@ func (oc *AIClient) spawnPortal(ctx context.Context, title, systemPrompt string)
 	index := meta.NextChatIndex
 	slug := formatChatSlug(index)
 	if title == "" {
-		modelName := formatModelName(defaultModelID)
+		modelName := FormatModelDisplay(defaultModelID)
 		title = fmt.Sprintf("%s %d", modelName, index)
 	}
 	key := portalKeyForChat(oc.UserLogin.ID, slug)
@@ -2948,7 +2921,7 @@ func (oc *AIClient) createNewChatWithModel(ctx context.Context, modelID string) 
 	}
 
 	slug := formatChatSlug(chatIndex)
-	modelName := formatModelName(modelID)
+	modelName := FormatModelDisplay(modelID)
 	title := fmt.Sprintf("%s %d", modelName, chatIndex)
 
 	key := portalKeyForChat(oc.UserLogin.ID, slug)
@@ -2984,7 +2957,7 @@ func (oc *AIClient) chatInfoFromPortal(portal *bridgev2.Portal) *bridgev2.ChatIn
 		if portal.Name != "" {
 			title = portal.Name
 		} else {
-			title = formatModelName(modelID)
+			title = FormatModelDisplay(modelID)
 		}
 	}
 	return oc.composeChatInfo(title, meta.SystemPrompt, modelID)
@@ -2994,7 +2967,7 @@ func (oc *AIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.Cha
 	if modelID == "" {
 		modelID = oc.effectiveModel(nil)
 	}
-	modelName := formatModelName(modelID)
+	modelName := FormatModelDisplay(modelID)
 	if title == "" {
 		title = modelName
 	}
