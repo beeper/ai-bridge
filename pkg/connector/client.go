@@ -16,8 +16,6 @@ import (
 	"github.com/openai/openai-go/v3/shared"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -53,17 +51,8 @@ type AIClient struct {
 	apiKey    string
 	log       zerolog.Logger
 
-	// Provider abstraction layer
-	// For individual providers (OpenAI, Gemini, Anthropic), this is their single provider
-	// For Beeper provider, providers are selected based on model prefix
+	// Provider abstraction layer - all providers use OpenAI SDK
 	provider AIProvider
-
-	// Multiple providers for Beeper (smart proxy routing)
-	// Only initialized when Provider == ProviderBeeper
-	openaiProvider     AIProvider
-	geminiProvider     AIProvider
-	anthropicProvider  AIProvider
-	openrouterProvider AIProvider
 
 	loggedIn atomic.Bool
 	chatLock sync.Mutex
@@ -122,56 +111,29 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 	// Use per-user base_url if provided
 	baseURL := strings.TrimSpace(meta.BaseURL)
 
-	// Initialize provider(s) based on login metadata
+	// Initialize provider based on login metadata
+	// All providers use the OpenAI SDK with different base URLs
 	switch meta.Provider {
-	case ProviderGemini:
-		// Gemini provider - initialize genai client
-		ctx := context.Background()
-		provider, err := NewGeminiProviderWithBaseURL(ctx, key, baseURL, log)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create Gemini provider: %w", err)
-		}
-		oc.provider = provider
-		oc.geminiProvider = provider
-
-	case ProviderAnthropic:
-		// Anthropic provider - initialize anthropic client
-		provider, err := NewAnthropicProviderWithBaseURL(key, baseURL, log)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create Anthropic provider: %w", err)
-		}
-		oc.provider = provider
-		oc.anthropicProvider = provider
-
 	case ProviderBeeper:
-		// Beeper mode: ALL models route through OpenRouter Responses API
-		// This simplifies routing and ensures consistent behavior across all models
+		// Beeper mode: routes through Beeper's OpenRouter proxy
 		beeperBaseURL := baseURL
 		if beeperBaseURL == "" {
 			return nil, fmt.Errorf("beeper base_url is required for Beeper provider")
 		}
 
-		// Get user ID for rate limiting (hungryserv uses beeper.local domain internally)
+		// Get user ID for rate limiting
 		userID := login.User.MXID.String()
 
-		// ALL Beeper models go through OpenRouter Responses API
 		openrouterURL := beeperBaseURL + "/openrouter/v1"
-		openrouterProvider, err := NewOpenAIProviderWithUserID(key, openrouterURL, userID, log)
+		provider, err := NewOpenAIProviderWithUserID(key, openrouterURL, userID, log)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create OpenRouter provider for Beeper: %w", err)
+			return nil, fmt.Errorf("failed to create Beeper provider: %w", err)
 		}
-
-		// Set OpenRouter as the single provider for all operations
-		oc.provider = openrouterProvider
-		oc.openrouterProvider = openrouterProvider
-		oc.api = openrouterProvider.Client()
-
-		// Note: Individual provider instances (openaiProvider, geminiProvider, anthropicProvider)
-		// are NOT initialized in Beeper mode. All routing happens via OpenRouter
-		// with model format "provider/model" (e.g., "openai/gpt-5.2", "anthropic/claude-sonnet-4.5")
+		oc.provider = provider
+		oc.api = provider.Client()
 
 	case ProviderOpenRouter:
-		// OpenRouter uses OpenAI-compatible API
+		// OpenRouter direct access
 		openrouterURL := baseURL
 		if openrouterURL == "" {
 			openrouterURL = "https://openrouter.ai/api/v1"
@@ -181,11 +143,10 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 			return nil, fmt.Errorf("failed to create OpenRouter provider: %w", err)
 		}
 		oc.provider = provider
-		oc.openrouterProvider = provider
 		oc.api = provider.Client()
 
 	default:
-		// OpenAI (default) or Custom provider
+		// OpenAI (default) or Custom OpenAI-compatible provider
 		openaiURL := baseURL
 		if openaiURL == "" {
 			openaiURL = "https://api.openai.com/v1"
@@ -195,7 +156,6 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 			return nil, fmt.Errorf("failed to create OpenAI provider: %w", err)
 		}
 		oc.provider = provider
-		oc.openaiProvider = provider
 		oc.api = provider.Client()
 	}
 
@@ -372,7 +332,7 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 	// Parse model from ghost ID (format: "model-{escaped-model-id}")
 	if modelID := parseModelFromGhostID(ghostID); modelID != "" {
 		caps := getModelCapabilities(modelID)
-		displayName := formatModelName(modelID)
+		displayName := FormatModelDisplay(modelID)
 		if caps.SupportsVision {
 			displayName += " (Vision)"
 		}
@@ -460,7 +420,7 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 
 		// Create user info
 		caps := getModelCapabilities(model.ID)
-		displayName := formatModelName(model.ID)
+		displayName := FormatModelDisplay(model.ID)
 		if caps.SupportsVision {
 			displayName += " (Vision)"
 		}
@@ -525,7 +485,7 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 	return &bridgev2.ResolveIdentifierResponse{
 		UserID: userID,
 		UserInfo: &bridgev2.UserInfo{
-			Name:        ptr.Ptr(formatModelName(modelID)),
+			Name:        ptr.Ptr(FormatModelDisplay(modelID)),
 			IsBot:       ptr.Ptr(false),
 			Identifiers: []string{modelID},
 		},
@@ -547,7 +507,7 @@ func (oc *AIClient) createNewChat(ctx context.Context, modelID string, caps Mode
 	portalMeta := &PortalMetadata{
 		Model:        modelID,
 		Slug:         formatChatSlug(chatIndex),
-		Title:        fmt.Sprintf("%s Chat %d", formatModelName(modelID), chatIndex),
+		Title:        fmt.Sprintf("%s Chat %d", FormatModelDisplay(modelID), chatIndex),
 		Capabilities: caps,
 	}
 
@@ -620,7 +580,7 @@ func (oc *AIClient) buildChatMembers(modelID string) *bridgev2.ChatMemberList {
 				},
 				Membership: event.MembershipJoin,
 				UserInfo: &bridgev2.UserInfo{
-					Name:  ptr.Ptr(formatModelName(modelID)),
+					Name:  ptr.Ptr(FormatModelDisplay(modelID)),
 					IsBot: ptr.Ptr(false),
 				},
 			},
@@ -996,13 +956,12 @@ func (oc *AIClient) handleImageMessage(
 	}, nil
 }
 
-// buildPromptWithImage builds a prompt that includes an image URL
-func (oc *AIClient) buildPromptWithImage(
+// buildBasePrompt builds the system prompt and history portion of a prompt.
+// This is the common pattern used by buildPrompt and buildPromptWithImage.
+func (oc *AIClient) buildBasePrompt(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
-	caption string,
-	imageURL string,
 ) ([]openai.ChatCompletionMessageParamUnion, error) {
 	var prompt []openai.ChatCompletionMessageParamUnion
 
@@ -1012,7 +971,7 @@ func (oc *AIClient) buildPromptWithImage(
 		prompt = append(prompt, openai.SystemMessage(systemPrompt))
 	}
 
-	// Add history (text-only for now)
+	// Add history
 	historyLimit := oc.historyLimit(meta)
 	if historyLimit > 0 {
 		history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, historyLimit)
@@ -1021,7 +980,6 @@ func (oc *AIClient) buildPromptWithImage(
 		}
 		for i := len(history) - 1; i >= 0; i-- {
 			msgMeta := messageMeta(history[i])
-			// Skip commands and non-conversation messages
 			if !shouldIncludeInHistory(msgMeta) {
 				continue
 			}
@@ -1032,6 +990,22 @@ func (oc *AIClient) buildPromptWithImage(
 				prompt = append(prompt, openai.UserMessage(msgMeta.Body))
 			}
 		}
+	}
+
+	return prompt, nil
+}
+
+// buildPromptWithImage builds a prompt that includes an image URL
+func (oc *AIClient) buildPromptWithImage(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	caption string,
+	imageURL string,
+) ([]openai.ChatCompletionMessageParamUnion, error) {
+	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build the user message with image
@@ -1507,7 +1481,7 @@ func (oc *AIClient) handleNewChat(
 	roomLink := fmt.Sprintf("https://matrix.to/#/%s", newPortal.MXID)
 	oc.sendSystemNotice(runCtx, portal, fmt.Sprintf(
 		"Created new %s chat.\nOpen: %s",
-		formatModelName(modelID), roomLink,
+		FormatModelDisplay(modelID), roomLink,
 	))
 }
 
@@ -1754,29 +1728,9 @@ func (oc *AIClient) buildPromptForRegenerate(
 }
 
 func (oc *AIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, latest string) ([]openai.ChatCompletionMessageParamUnion, error) {
-	var prompt []openai.ChatCompletionMessageParamUnion
-	systemPrompt := oc.effectivePrompt(meta)
-	if systemPrompt != "" {
-		prompt = append(prompt, openai.SystemMessage(systemPrompt))
-	}
-	historyLimit := oc.historyLimit(meta)
-	if historyLimit > 0 {
-		history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, historyLimit)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load prompt history: %w", err)
-		}
-		for i := len(history) - 1; i >= 0; i-- {
-			meta := messageMeta(history[i])
-			if !shouldIncludeInHistory(meta) {
-				continue
-			}
-			switch meta.Role {
-			case "assistant":
-				prompt = append(prompt, openai.AssistantMessage(meta.Body))
-			default:
-				prompt = append(prompt, openai.UserMessage(meta.Body))
-			}
-		}
+	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
+	if err != nil {
+		return nil, err
 	}
 	prompt = append(prompt, openai.UserMessage(latest))
 	return prompt, nil
@@ -2308,7 +2262,7 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 		return
 	}
 	modelID := oc.effectiveModel(meta)
-	modelName := formatModelName(modelID)
+	modelName := FormatModelDisplay(modelID)
 	body := fmt.Sprintf("This chat was created automatically. Send a message to start talking to %s.", modelName)
 	event := &OpenAIRemoteMessage{
 		PortalKey: portal.PortalKey,
@@ -2354,7 +2308,7 @@ func (oc *AIClient) effectiveModelForAPI(meta *PortalMetadata) string {
 		return modelID
 	}
 
-	// Direct providers (openai, gemini, anthropic) need the prefix stripped
+	// Direct OpenAI provider needs the prefix stripped
 	_, actualModel := ParseModelPrefix(modelID)
 	return actualModel
 }
@@ -2370,16 +2324,6 @@ func (oc *AIClient) defaultModelForProvider() string {
 			return providers.OpenAI.DefaultModel
 		}
 		return DefaultModelOpenAI
-	case ProviderGemini:
-		if providers.Gemini.DefaultModel != "" {
-			return providers.Gemini.DefaultModel
-		}
-		return DefaultModelGemini
-	case ProviderAnthropic:
-		if providers.Anthropic.DefaultModel != "" {
-			return providers.Anthropic.DefaultModel
-		}
-		return DefaultModelAnthropic
 	case ProviderOpenRouter:
 		if providers.OpenRouter.DefaultModel != "" {
 			return providers.OpenRouter.DefaultModel
@@ -2423,18 +2367,13 @@ func (oc *AIClient) effectiveMaxTokens(meta *PortalMetadata) int {
 	return defaultMaxTokens
 }
 
-// knownModelPrefixes is a list of known valid model ID prefixes
-var knownModelPrefixes = []string{
-	"gpt-4", "gpt-3.5", "o1", "o3", "chatgpt",
-}
-
 // validateModel checks if a model is available for this user
 func (oc *AIClient) validateModel(ctx context.Context, modelID string) (bool, error) {
 	if modelID == "" {
 		return true, nil
 	}
 
-	// First check cache
+	// First check local model cache
 	models, err := oc.listAvailableModels(ctx, false)
 	if err == nil {
 		for _, model := range models {
@@ -2444,18 +2383,16 @@ func (oc *AIClient) validateModel(ctx context.Context, modelID string) (bool, er
 		}
 	}
 
-	// Check against known patterns
-	for _, prefix := range knownModelPrefixes {
-		if strings.HasPrefix(modelID, prefix) {
-			return true, nil
-		}
+	// Check against OpenRouter's model list (cached)
+	_, actualModel := ParseModelPrefix(modelID)
+	if IsValidOpenRouterModel(actualModel) {
+		return true, nil
 	}
 
-	// Try to validate by making a minimal API call
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// Try to validate by making a minimal API call as last resort
+	timeoutCtx, cancel := context.WithTimeout(ctx, modelValidationTimeout)
 	defer cancel()
 
-	_, actualModel := ParseModelPrefix(modelID)
 	_, err = oc.api.Models.Get(timeoutCtx, actualModel)
 	return err == nil, nil
 }
@@ -2523,8 +2460,8 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 		Stringer("portal", portal.PortalKey).
 		Msg("Handling model switch")
 
-	oldModelName := formatModelName(oldModel)
-	newModelName := formatModelName(newModel)
+	oldModelName := FormatModelDisplay(oldModel)
+	newModelName := FormatModelDisplay(newModel)
 
 	// Pre-update the new model ghost's profile before queueing the event
 	// This ensures the ghost has a display name set in its Matrix profile
@@ -2631,7 +2568,11 @@ func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal)
 }
 
 const (
-	maxRetryAttempts = 3 // Maximum retry attempts for context length errors
+	maxRetryAttempts       = 3                // Maximum retry attempts for context length errors
+	defaultHistoryLookup   = 50               // Default number of messages to include in history
+	forkMessageLimit       = 10000            // Maximum messages to consider when forking
+	modelValidationTimeout = 5 * time.Second  // Timeout for model validation API calls
+	maxImageSize           = 20 * 1024 * 1024 // Maximum image size (20MB)
 )
 
 // notifyContextLengthExceeded sends a user-friendly notice about context overflow
@@ -2718,37 +2659,8 @@ func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) 
 
 	var allModels []ModelInfo
 
-	// For Beeper provider, list models from all backends
-	if meta.Provider == ProviderBeeper {
-		// OpenAI models
-		if oc.openaiProvider != nil {
-			models, err := oc.openaiProvider.ListModels(timeoutCtx)
-			if err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to list OpenAI models")
-			} else {
-				allModels = append(allModels, models...)
-			}
-		}
-		// Gemini models
-		if oc.geminiProvider != nil {
-			models, err := oc.geminiProvider.ListModels(timeoutCtx)
-			if err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to list Gemini models")
-			} else {
-				allModels = append(allModels, models...)
-			}
-		}
-		// Anthropic models
-		if oc.anthropicProvider != nil {
-			models, err := oc.anthropicProvider.ListModels(timeoutCtx)
-			if err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to list Anthropic models")
-			} else {
-				allModels = append(allModels, models...)
-			}
-		}
-	} else if oc.provider != nil {
-		// Single provider - just list its models
+	// List models from the provider
+	if oc.provider != nil {
 		models, err := oc.provider.ListModels(timeoutCtx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list models: %w", err)
@@ -2816,22 +2728,6 @@ func detectVisionSupport(modelID string) bool {
 	return strings.HasPrefix(modelID, "gpt-4o") ||
 		strings.HasPrefix(modelID, "gpt-4-turbo") ||
 		strings.Contains(modelID, "vision")
-}
-
-// formatModelName converts model ID to human-readable name
-func formatModelName(modelID string) string {
-	// Convert "gpt-4o-mini" → "GPT-4o Mini"
-	parts := strings.Split(modelID, "-")
-	formatted := make([]string, len(parts))
-	titleCaser := cases.Title(language.English)
-	for i, part := range parts {
-		if i == 0 {
-			formatted[i] = strings.ToUpper(part)
-		} else {
-			formatted[i] = titleCaser.String(part)
-		}
-	}
-	return strings.Join(formatted, "-")
 }
 
 func (oc *AIClient) scheduleBootstrap() {
@@ -2983,7 +2879,7 @@ func (oc *AIClient) spawnPortal(ctx context.Context, title, systemPrompt string)
 	index := meta.NextChatIndex
 	slug := formatChatSlug(index)
 	if title == "" {
-		modelName := formatModelName(defaultModelID)
+		modelName := FormatModelDisplay(defaultModelID)
 		title = fmt.Sprintf("%s %d", modelName, index)
 	}
 	key := portalKeyForChat(oc.UserLogin.ID, slug)
@@ -3025,7 +2921,7 @@ func (oc *AIClient) createNewChatWithModel(ctx context.Context, modelID string) 
 	}
 
 	slug := formatChatSlug(chatIndex)
-	modelName := formatModelName(modelID)
+	modelName := FormatModelDisplay(modelID)
 	title := fmt.Sprintf("%s %d", modelName, chatIndex)
 
 	key := portalKeyForChat(oc.UserLogin.ID, slug)
@@ -3061,7 +2957,7 @@ func (oc *AIClient) chatInfoFromPortal(portal *bridgev2.Portal) *bridgev2.ChatIn
 		if portal.Name != "" {
 			title = portal.Name
 		} else {
-			title = formatModelName(modelID)
+			title = FormatModelDisplay(modelID)
 		}
 	}
 	return oc.composeChatInfo(title, meta.SystemPrompt, modelID)
@@ -3071,7 +2967,7 @@ func (oc *AIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.Cha
 	if modelID == "" {
 		modelID = oc.effectiveModel(nil)
 	}
-	modelName := formatModelName(modelID)
+	modelName := FormatModelDisplay(modelID)
 	if title == "" {
 		title = modelName
 	}
@@ -3160,31 +3056,52 @@ func ptrIfNotEmpty(value string) *string {
 
 // generateRoomTitle asks the model to generate a short descriptive title for the conversation
 func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistantResponse string) (string, error) {
-	prompt := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage("Generate a very short title (3-5 words max) that summarizes this conversation. Reply with ONLY the title, no quotes, no punctuation at the end."),
-		openai.UserMessage(fmt.Sprintf("User: %s\n\nAssistant: %s", userMessage, assistantResponse)),
-	}
-
 	model := oc.effectiveModelForAPI(nil)
 	// Use a faster/cheaper model for title generation if available
 	if strings.HasPrefix(model, "gpt-4") {
 		model = "gpt-4o-mini"
 	}
 
-	resp, err := oc.api.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model:     model,
-		Messages:  prompt,
-		MaxTokens: openai.Int(20),
+	// Build Responses API input
+	input := responses.ResponseInputParam{
+		{
+			OfMessage: &responses.EasyInputMessageParam{
+				Role: responses.EasyInputMessageRoleUser,
+				Content: responses.EasyInputMessageContentUnionParam{
+					OfString: openai.String(fmt.Sprintf("User: %s\n\nAssistant: %s", userMessage, assistantResponse)),
+				},
+			},
+		},
+	}
+
+	resp, err := oc.api.Responses.New(ctx, responses.ResponseNewParams{
+		Model:           model,
+		Input:           responses.ResponseNewParamsInputUnion{OfInputItemList: input},
+		Instructions:    openai.String("Generate a very short title (3-5 words max) that summarizes this conversation. Reply with ONLY the title, no quotes, no punctuation at the end."),
+		MaxOutputTokens: openai.Int(20),
 	})
 	if err != nil {
 		return "", err
 	}
 
-	if len(resp.Choices) == 0 {
+	// Extract text from response
+	var title string
+	for _, item := range resp.Output {
+		if msg, ok := item.AsAny().(responses.ResponseOutputMessage); ok {
+			for _, contentPart := range msg.Content {
+				if text, ok := contentPart.AsAny().(responses.ResponseOutputText); ok {
+					title = text.Text
+					break
+				}
+			}
+		}
+	}
+
+	if title == "" {
 		return "", fmt.Errorf("no response from model")
 	}
 
-	title := strings.TrimSpace(resp.Choices[0].Message.Content)
+	title = strings.TrimSpace(title)
 	// Remove quotes if the model added them
 	title = strings.Trim(title, "\"'")
 	// Limit length
