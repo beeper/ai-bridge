@@ -8,30 +8,25 @@ import (
 	"golang.org/x/text/language"
 )
 
-// ModelBackend identifies which backend/SDK to use for a model
+// ModelBackend identifies which backend to use for a model
+// All backends use the OpenAI SDK with different base URLs
 type ModelBackend string
 
 const (
 	BackendOpenAI     ModelBackend = "openai"
-	BackendGemini     ModelBackend = "gemini"
-	BackendAnthropic  ModelBackend = "anthropic"
 	BackendOpenRouter ModelBackend = "openrouter"
 )
 
 // Default models for each provider (with prefixes)
 const (
-	DefaultModelOpenAI     = "openai/gpt-4o-mini"
-	DefaultModelGemini     = "gemini/gemini-2.5-flash"
-	DefaultModelAnthropic  = "anthropic/claude-sonnet-4-5-20250929"
-	DefaultModelOpenRouter = "openrouter/openai/gpt-4o-mini"
-	DefaultModelBeeper     = "openai/gpt-5.2"
+	DefaultModelOpenAI     = "openai/gpt-5.2"
+	DefaultModelOpenRouter = "openrouter/anthropic/claude-sonnet-4.5"
+	DefaultModelBeeper     = "anthropic/claude-sonnet-4.5"
 )
 
 // ParseModelPrefix extracts the backend and actual model ID from a prefixed model
 // Examples:
 //   - "openai/gpt-5.2" → (BackendOpenAI, "gpt-5.2")
-//   - "gemini/gemini-3-flash" → (BackendGemini, "gemini-3-flash")
-//   - "anthropic/claude-5-opus" → (BackendAnthropic, "claude-5-opus")
 //   - "openrouter/openai/gpt-5" → (BackendOpenRouter, "openai/gpt-5")
 //   - "gpt-4o" (no prefix) → ("", "gpt-4o")
 func ParseModelPrefix(modelID string) (backend ModelBackend, actualModel string) {
@@ -43,10 +38,6 @@ func ParseModelPrefix(modelID string) (backend ModelBackend, actualModel string)
 	switch parts[0] {
 	case "openai":
 		return BackendOpenAI, parts[1]
-	case "gemini":
-		return BackendGemini, parts[1]
-	case "anthropic":
-		return BackendAnthropic, parts[1]
 	case "openrouter":
 		return BackendOpenRouter, parts[1] // parts[1] = "openai/gpt-5" (nested)
 	default:
@@ -82,10 +73,6 @@ func DefaultModelForProvider(provider string) string {
 	switch provider {
 	case ProviderOpenAI:
 		return DefaultModelOpenAI
-	case ProviderGemini:
-		return DefaultModelGemini
-	case ProviderAnthropic:
-		return DefaultModelAnthropic
 	case ProviderOpenRouter:
 		return DefaultModelOpenRouter
 	case ProviderBeeper:
@@ -102,24 +89,16 @@ func ValidateModelForProvider(modelID, provider string) error {
 
 	// No prefix - legacy model, needs to be updated
 	if backend == "" {
-		return fmt.Errorf("model %q is missing backend prefix (use %s/%s)", modelID, inferBackendFromModel(modelID), modelID)
+		return fmt.Errorf("model %q is missing backend prefix (use openai/%s or openrouter/%s)", modelID, modelID, modelID)
 	}
 
 	switch provider {
 	case ProviderBeeper:
-		// Beeper supports all backends
+		// Beeper supports all backends via OpenRouter
 		return nil
 	case ProviderOpenAI:
 		if backend != BackendOpenAI {
 			return fmt.Errorf("OpenAI provider only supports openai/* models, got %q", modelID)
-		}
-	case ProviderGemini:
-		if backend != BackendGemini {
-			return fmt.Errorf("gemini provider only supports gemini/* models, got %q", modelID)
-		}
-	case ProviderAnthropic:
-		if backend != BackendAnthropic {
-			return fmt.Errorf("anthropic provider only supports anthropic/* models, got %q", modelID)
 		}
 	case ProviderOpenRouter:
 		if backend != BackendOpenRouter {
@@ -133,44 +112,11 @@ func ValidateModelForProvider(modelID, provider string) error {
 	return nil
 }
 
-// inferBackendFromModel tries to guess the backend from a legacy (unprefixed) model name
-func inferBackendFromModel(modelID string) string {
-	modelLower := strings.ToLower(modelID)
-
-	// OpenAI models
-	if strings.HasPrefix(modelLower, "gpt-") ||
-		strings.HasPrefix(modelLower, "o1") ||
-		strings.HasPrefix(modelLower, "o3") ||
-		strings.HasPrefix(modelLower, "chatgpt") ||
-		strings.Contains(modelLower, "davinci") ||
-		strings.Contains(modelLower, "turbo") {
-		return "openai"
-	}
-
-	// Gemini models
-	if strings.HasPrefix(modelLower, "gemini") ||
-		strings.HasPrefix(modelLower, "models/gemini") {
-		return "gemini"
-	}
-
-	// Anthropic models
-	if strings.HasPrefix(modelLower, "claude") {
-		return "anthropic"
-	}
-
-	// Default to openai
-	return "openai"
-}
-
 // BackendForProvider returns the expected backend for a provider
 func BackendForProvider(provider string) ModelBackend {
 	switch provider {
 	case ProviderOpenAI:
 		return BackendOpenAI
-	case ProviderGemini:
-		return BackendGemini
-	case ProviderAnthropic:
-		return BackendAnthropic
 	case ProviderOpenRouter:
 		return BackendOpenRouter
 	default:

@@ -8,7 +8,7 @@ import (
 
 func main() {
 	br := &mxmain.BridgeMain{
-		Name:        "beeper-ai-bridge",
+		Name:        "ai",
 		Description: "A Matrix↔AI bridge for Beeper built on mautrix-go bridgev2.",
 		URL:         "https://github.com/beeper/ai-bridge",
 		Version:     "0.1.0",
