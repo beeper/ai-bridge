@@ -77,7 +77,7 @@ jobs:
         image: ${{ env.GHCR_REGISTRY_IMAGE }}
 
     - name: Run bridge CD tool
-      uses: beeper/bridge-cd-tool@22a0517ba44250dabc00c8b554a4978e26cfa989 # main
+      uses: beeper/bridge-cd-tool@208d6029cf9d3d1d343036fc2d8cac5d11f42eed # main
       env:
         CI_REGISTRY: "${{ secrets.CI_REGISTRY }}"
         BEEPER_DEV_ADMIN_API_URL: "${{ secrets.BEEPER_DEV_ADMIN_API_URL }}"
