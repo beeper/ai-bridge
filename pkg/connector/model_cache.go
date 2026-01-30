@@ -3,6 +3,8 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -172,6 +174,11 @@ func (mc *OpenRouterCache) fetchModels(ctx context.Context) (map[string]OpenRout
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("OpenRouter API returned status %d: %s", resp.StatusCode, string(body))
+	}
 
 	var response openRouterModelsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {

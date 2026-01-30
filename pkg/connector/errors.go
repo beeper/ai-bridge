@@ -3,6 +3,7 @@ package connector
 import (
 	"errors"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -119,9 +120,17 @@ func GetModelContextWindow(modelID string) int {
 	}
 
 	// Check prefix matches (for versioned models like gpt-4o-2024-05-13)
-	for prefix, size := range fallbackContextWindows {
+	// Sort by descending length so longer prefixes match first
+	prefixes := make([]string, 0, len(fallbackContextWindows))
+	for prefix := range fallbackContextWindows {
+		prefixes = append(prefixes, prefix)
+	}
+	sort.Slice(prefixes, func(i, j int) bool {
+		return len(prefixes[i]) > len(prefixes[j])
+	})
+	for _, prefix := range prefixes {
 		if strings.HasPrefix(modelID, prefix) {
-			return size
+			return fallbackContextWindows[prefix]
 		}
 	}
 
