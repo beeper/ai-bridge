@@ -7,31 +7,46 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/beeper/ai-bridge/pkg/connector"
 )
 
-// OpenRouterModel represents a model from OpenRouter API
+// OpenRouterArchitecture contains model architecture information
+type OpenRouterArchitecture struct {
+	InputModalities  []string `json:"input_modalities"`
+	OutputModalities []string `json:"output_modalities"`
+	Modality         string   `json:"modality"` // Legacy field
+	Tokenizer        string   `json:"tokenizer"`
+	InstructType     string   `json:"instruct_type"`
+}
+
+// OpenRouterPricing contains model pricing information
+type OpenRouterPricing struct {
+	Prompt     string `json:"prompt"`
+	Completion string `json:"completion"`
+	WebSearch  string `json:"web_search"`
+}
+
+// OpenRouterTopProvider contains top provider information
+type OpenRouterTopProvider struct {
+	MaxCompletionTokens int  `json:"max_completion_tokens"`
+	IsModerated         bool `json:"is_moderated"`
+}
+
+// OpenRouterModel represents a model from OpenRouter API with full capability fields
 type OpenRouterModel struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Pricing     struct {
-		Prompt     string `json:"prompt"`
-		Completion string `json:"completion"`
-	} `json:"pricing"`
-	ContextLength int `json:"context_length"`
-	Architecture  struct {
-		Modality     string `json:"modality"`
-		Tokenizer    string `json:"tokenizer"`
-		InstructType string `json:"instruct_type"`
-	} `json:"architecture"`
-	TopProvider struct {
-		MaxCompletionTokens int  `json:"max_completion_tokens"`
-		IsModerated         bool `json:"is_moderated"`
-	} `json:"top_provider"`
-	PerRequestLimits interface{} `json:"per_request_limits"`
+	ID                  string                 `json:"id"`
+	Name                string                 `json:"name"`
+	Description         string                 `json:"description"`
+	ContextLength       int                    `json:"context_length"`
+	Architecture        OpenRouterArchitecture `json:"architecture"`
+	Pricing             OpenRouterPricing      `json:"pricing"`
+	TopProvider         OpenRouterTopProvider  `json:"top_provider"`
+	SupportedParameters []string               `json:"supported_parameters"`
 }
 
 // OpenRouterResponse represents the API response
@@ -39,47 +54,15 @@ type OpenRouterResponse struct {
 	Data []OpenRouterModel `json:"data"`
 }
 
-// BeeperModelConfig defines which models to include for Beeper
-// This is the manually curated list - only these models will be included
-var BeeperModelConfig = map[string]struct {
-	DisplayName       string
-	SupportsReasoning bool
-	SupportsWebSearch bool
-}{
-	// MiniMax
-	"minimax/minimax-m2.1": {"MiniMax M2.1", false, true},
-	"minimax/minimax-m2":   {"MiniMax M2", false, true},
-	// GLM (Z.AI)
-	"z-ai/glm-4.7":  {"GLM 4.7", true, true},
-	"z-ai/glm-4.6v": {"GLM 4.6V", false, true},
-	// Kimi (Moonshot)
-	"moonshotai/kimi-k2-0905":     {"Kimi K2 (0905)", false, true},
-	"moonshotai/kimi-k2-thinking": {"Kimi K2 (Thinking)", true, true},
-	// Qwen
-	"qwen/qwen3-235b-a22b-thinking-2507": {"Qwen 3 235B (Thinking)", true, true},
-	"qwen/qwen3-235b-a22b":               {"Qwen 3 235B", false, true},
-	// Grok (xAI)
-	"x-ai/grok-4.1-fast": {"Grok 4.1 Fast", true, true},
-	// DeepSeek
-	"deepseek/deepseek-v3.2": {"DeepSeek v3.2", true, true},
-	// Llama (Meta)
-	"meta-llama/llama-4-scout":    {"Llama 4 Scout", false, true},
-	"meta-llama/llama-4-maverick": {"Llama 4 Maverick", false, true},
-	// Gemini (Google) via OpenRouter
-	"google/gemini-2.5-flash-image":     {"Nano Banana", false, true},
-	"google/gemini-3-flash-preview":     {"Gemini 3 Flash", true, true},
-	"google/gemini-3-pro-image-preview": {"Nano Banana Pro", false, true},
-	"google/gemini-3-pro-preview":       {"Gemini 3 Pro", false, true},
-	// Claude (Anthropic) via OpenRouter
-	"anthropic/claude-sonnet-4.5": {"Claude Sonnet 4.5", true, true},
-	"anthropic/claude-opus-4.5":   {"Claude Opus 4.5", false, true},
-	"anthropic/claude-haiku-4.5":  {"Claude Haiku 4.5", true, true},
-	// GPT (OpenAI) via OpenRouter
-	"openai/gpt-5-image":  {"GPT ImageGen 1.5", false, false},
-	"openai/gpt-5.2":      {"GPT-5.2", true, true},
-	"openai/gpt-5-mini":   {"GPT-5 mini", false, true},
-	"openai/gpt-oss-20b":  {"GPT OSS 20B", false, true},
-	"openai/gpt-oss-120b": {"GPT OSS 120B", false, true},
+// ModelCapabilities holds auto-detected capabilities for a model
+type ModelCapabilities struct {
+	Vision          bool
+	ToolCalling     bool
+	Reasoning       bool
+	WebSearch       bool
+	ImageGen        bool
+	ContextWindow   int
+	MaxOutputTokens int
 }
 
 func main() {
@@ -105,7 +88,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error generating file: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Generated %s with %d models\n", *outputFile, len(BeeperModelConfig))
+	fmt.Printf("Generated %s with %d models\n", *outputFile, len(connector.BeeperModelList))
 
 	// Generate JSON file for clients
 	if err := generateJSONFile(models, *jsonFile); err != nil {
@@ -148,6 +131,67 @@ func fetchOpenRouterModels(token string) (map[string]OpenRouterModel, error) {
 	return result, nil
 }
 
+// detectCapabilities auto-detects all model capabilities from OpenRouter API response
+func detectCapabilities(modelID string, apiModel OpenRouterModel, hasAPIData bool) ModelCapabilities {
+	if !hasAPIData {
+		// Fallback: can't detect capabilities without API data
+		fmt.Fprintf(os.Stderr, "Warning: No API data for model %s, using defaults\n", modelID)
+		return ModelCapabilities{ToolCalling: true}
+	}
+
+	caps := ModelCapabilities{}
+
+	// Vision: "image" in architecture.input_modalities
+	caps.Vision = slices.Contains(apiModel.Architecture.InputModalities, "image")
+	// Legacy fallback: check modality field
+	if !caps.Vision && strings.Contains(apiModel.Architecture.Modality, "image") {
+		caps.Vision = true
+	}
+
+	// Image Generation: "image" in architecture.output_modalities
+	caps.ImageGen = slices.Contains(apiModel.Architecture.OutputModalities, "image")
+
+	// Tool Calling: "tools" in supported_parameters
+	caps.ToolCalling = slices.Contains(apiModel.SupportedParameters, "tools")
+
+	// Reasoning: "reasoning" in supported_parameters
+	caps.Reasoning = slices.Contains(apiModel.SupportedParameters, "reasoning")
+
+	// Web Search: pricing.web_search != "" OR "web_search_options" in supported_parameters
+	caps.WebSearch = apiModel.Pricing.WebSearch != "" ||
+		slices.Contains(apiModel.SupportedParameters, "web_search_options")
+
+	// Context window and max output tokens from API
+	caps.ContextWindow = apiModel.ContextLength
+	caps.MaxOutputTokens = apiModel.TopProvider.MaxCompletionTokens
+
+	return caps
+}
+
+// availableToolsGo returns the Go code representation of available tools
+func availableToolsGo(caps ModelCapabilities) string {
+	if caps.WebSearch && caps.ToolCalling {
+		return "[]string{ToolWebSearch, ToolFunctionCalling}"
+	} else if caps.ToolCalling {
+		return "[]string{ToolFunctionCalling}"
+	} else if caps.WebSearch {
+		return "[]string{ToolWebSearch}"
+	}
+	return "[]string{}"
+}
+
+// availableToolsJSON returns the JSON representation of available tools
+func availableToolsJSON(caps ModelCapabilities) []string {
+	var tools []string
+	if caps.WebSearch {
+		tools = append(tools, "web_search")
+	}
+	if caps.ToolCalling {
+		tools = append(tools, "function_calling")
+	}
+	return tools
+}
+
 func generateGoFile(apiModels map[string]OpenRouterModel, outputPath string) error {
 	var buf strings.Builder
 
@@ -158,62 +202,17 @@ package connector
 
 // BeeperModelsGenerated contains model definitions fetched from OpenRouter API.
 // The model list is manually curated in cmd/generate-models/main.go.
-// This file is auto-generated but checked into version control.
+// All capabilities are auto-detected from the OpenRouter API.
 var BeeperModelsGenerated = []ModelInfo{
 `)
 
 	// Get sorted model IDs for deterministic output
-	var modelIDs []string
-	for id := range BeeperModelConfig {
-		modelIDs = append(modelIDs, id)
-	}
-	sort.Strings(modelIDs)
+	modelIDs := sortedKeys(connector.BeeperModelList)
 
 	for _, modelID := range modelIDs {
-		config := BeeperModelConfig[modelID]
+		displayName := connector.BeeperModelList[modelID]
 		apiModel, hasAPIData := apiModels[modelID]
-
-		// Determine capabilities
-		supportsVision := false
-		contextWindow := 0
-		maxOutputTokens := 0
-
-		if hasAPIData {
-			// Check if model supports vision (multimodal)
-			supportsVision = strings.Contains(apiModel.Architecture.Modality, "image") ||
-				strings.Contains(strings.ToLower(apiModel.Name), "vision") ||
-				strings.Contains(modelID, "image")
-			contextWindow = apiModel.ContextLength
-			maxOutputTokens = apiModel.TopProvider.MaxCompletionTokens
-		}
-
-		// Default vision for known models
-		if strings.Contains(modelID, "gpt-5") ||
-			strings.Contains(modelID, "claude") ||
-			strings.Contains(modelID, "gemini") ||
-			strings.Contains(modelID, "llama-4") ||
-			strings.Contains(modelID, "glm") ||
-			strings.Contains(modelID, "kimi") ||
-			strings.Contains(modelID, "qwen") ||
-			strings.Contains(modelID, "grok") ||
-			strings.Contains(modelID, "deepseek") ||
-			strings.Contains(modelID, "minimax") {
-			supportsVision = true
-		}
-
-		// Image gen models
-		isImageGen := strings.Contains(modelID, "image")
-		supportsToolCalling := !isImageGen
-
-		// Available tools
-		tools := "[]string{}"
-		if config.SupportsWebSearch && supportsToolCalling {
-			tools = "[]string{ToolWebSearch, ToolFunctionCalling}"
-		} else if supportsToolCalling {
-			tools = "[]string{ToolFunctionCalling}"
-		} else if config.SupportsWebSearch {
-			tools = "[]string{ToolWebSearch}"
-		}
+		caps := detectCapabilities(modelID, apiModel, hasAPIData)
 
 		buf.WriteString(fmt.Sprintf(`	{
 		ID:                  %q,
@@ -230,15 +229,15 @@ var BeeperModelsGenerated = []ModelInfo{
 	},
 `,
 			modelID,
-			config.DisplayName,
-			supportsVision,
-			supportsToolCalling,
-			config.SupportsReasoning,
-			config.SupportsWebSearch,
-			isImageGen,
-			contextWindow,
-			maxOutputTokens,
-			tools,
+			displayName,
+			caps.Vision,
+			caps.ToolCalling,
+			caps.Reasoning,
+			caps.WebSearch,
+			caps.ImageGen,
+			caps.ContextWindow,
+			caps.MaxOutputTokens,
+			availableToolsGo(caps),
 		))
 	}
 
@@ -273,69 +272,25 @@ type JSONModelInfo struct {
 func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) error {
 	var models []JSONModelInfo
 
-	// Get sorted model IDs for deterministic output
-	var modelIDs []string
-	for id := range BeeperModelConfig {
-		modelIDs = append(modelIDs, id)
-	}
-	sort.Strings(modelIDs)
+	modelIDs := sortedKeys(connector.BeeperModelList)
 
 	for _, modelID := range modelIDs {
-		config := BeeperModelConfig[modelID]
+		displayName := connector.BeeperModelList[modelID]
 		apiModel, hasAPIData := apiModels[modelID]
-
-		// Determine capabilities
-		supportsVision := false
-		contextWindow := 0
-		maxOutputTokens := 0
-
-		if hasAPIData {
-			supportsVision = strings.Contains(apiModel.Architecture.Modality, "image") ||
-				strings.Contains(strings.ToLower(apiModel.Name), "vision") ||
-				strings.Contains(modelID, "image")
-			contextWindow = apiModel.ContextLength
-			maxOutputTokens = apiModel.TopProvider.MaxCompletionTokens
-		}
-
-		// Default vision for known models
-		if strings.Contains(modelID, "gpt-5") ||
-			strings.Contains(modelID, "claude") ||
-			strings.Contains(modelID, "gemini") ||
-			strings.Contains(modelID, "llama-4") ||
-			strings.Contains(modelID, "glm") ||
-			strings.Contains(modelID, "kimi") ||
-			strings.Contains(modelID, "qwen") ||
-			strings.Contains(modelID, "grok") ||
-			strings.Contains(modelID, "deepseek") ||
-			strings.Contains(modelID, "minimax") {
-			supportsVision = true
-		}
-
-		// Image gen models
-		isImageGen := strings.Contains(modelID, "image")
-		supportsToolCalling := !isImageGen
-
-		// Available tools
-		var tools []string
-		if config.SupportsWebSearch {
-			tools = append(tools, "web_search")
-		}
-		if supportsToolCalling {
-			tools = append(tools, "function_calling")
-		}
+		caps := detectCapabilities(modelID, apiModel, hasAPIData)
 
 		models = append(models, JSONModelInfo{
 			ID:                  modelID,
-			Name:                config.DisplayName,
+			Name:                displayName,
 			Provider:            "openrouter",
-			SupportsVision:      supportsVision,
-			SupportsToolCalling: supportsToolCalling,
-			SupportsReasoning:   config.SupportsReasoning,
-			SupportsWebSearch:   config.SupportsWebSearch,
-			SupportsImageGen:    isImageGen,
-			ContextWindow:       contextWindow,
-			MaxOutputTokens:     maxOutputTokens,
-			AvailableTools:      tools,
+			SupportsVision:      caps.Vision,
+			SupportsToolCalling: caps.ToolCalling,
+			SupportsReasoning:   caps.Reasoning,
+			SupportsWebSearch:   caps.WebSearch,
+			SupportsImageGen:    caps.ImageGen,
+			ContextWindow:       caps.ContextWindow,
+			MaxOutputTokens:     caps.MaxOutputTokens,
+			AvailableTools:      availableToolsJSON(caps),
 		})
 	}
 
@@ -345,4 +300,14 @@ func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) e
 	}
 
 	return os.WriteFile(outputPath, data, 0644)
+}
+
+// sortedKeys returns the keys of a map sorted alphabetically
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

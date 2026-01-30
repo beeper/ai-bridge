@@ -39,7 +39,7 @@ func LookupModelInfo(modelID string) *ModelInfo {
 	resolvedID := ResolveModelAlias(modelID)
 
 	// Look up in Beeper models
-	for _, model := range GetDefaultModels("beeper") {
+	for _, model := range GetBeeperModelsGenerated() {
 		if model.ID == resolvedID {
 			return &model
 		}

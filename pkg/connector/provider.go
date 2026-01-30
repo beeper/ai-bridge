@@ -4,9 +4,9 @@ import (
 	"context"
 )
 
-// AIProvider defines a common interface for AI providers (OpenAI, Gemini, Anthropic)
+// AIProvider defines a common interface for OpenAI-compatible AI providers
 type AIProvider interface {
-	// Name returns the provider name (e.g., "openai", "gemini", "anthropic")
+	// Name returns the provider name (e.g., "openai", "openrouter")
 	Name() string
 
 	// GenerateStream generates a streaming response
@@ -17,21 +17,6 @@ type AIProvider interface {
 
 	// ListModels returns available models for this provider
 	ListModels(ctx context.Context) ([]ModelInfo, error)
-
-	// ValidateModel checks if a model ID is valid for this provider
-	ValidateModel(ctx context.Context, modelID string) (bool, error)
-
-	// CountTokens estimates token count for the given messages
-	CountTokens(ctx context.Context, messages []UnifiedMessage, model string) (int, error)
-
-	// SupportsTools returns whether this provider supports function calling
-	SupportsTools() bool
-
-	// SupportsVision returns whether this provider supports image inputs
-	SupportsVision() bool
-
-	// SupportsStreaming returns whether this provider supports streaming
-	SupportsStreaming() bool
 }
 
 // GenerateParams contains parameters for generation requests
