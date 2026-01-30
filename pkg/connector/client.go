@@ -2568,11 +2568,11 @@ func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal)
 }
 
 const (
-	maxRetryAttempts        = 3                 // Maximum retry attempts for context length errors
-	defaultHistoryLookup    = 50                // Default number of messages to include in history
-	forkMessageLimit        = 10000             // Maximum messages to consider when forking
-	modelValidationTimeout  = 5 * time.Second   // Timeout for model validation API calls
-	maxImageSize            = 20 * 1024 * 1024  // Maximum image size (20MB)
+	maxRetryAttempts       = 3                // Maximum retry attempts for context length errors
+	defaultHistoryLookup   = 50               // Default number of messages to include in history
+	forkMessageLimit       = 10000            // Maximum messages to consider when forking
+	modelValidationTimeout = 5 * time.Second  // Timeout for model validation API calls
+	maxImageSize           = 20 * 1024 * 1024 // Maximum image size (20MB)
 )
 
 // notifyContextLengthExceeded sends a user-friendly notice about context overflow
