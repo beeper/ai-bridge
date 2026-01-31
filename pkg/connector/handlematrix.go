@@ -341,7 +341,7 @@ func (oc *AIClient) handlePDFMessage(
 				"Please switch to a PDF-capable model using /model.",
 			oc.effectiveModel(meta),
 		))
-		return nil, nil
+		return &bridgev2.MatrixMessageResponse{}, nil
 	}
 
 	// Get the file URL from the message
