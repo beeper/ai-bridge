@@ -518,14 +518,14 @@ type ApprovalAction struct {
 
 // RoomConfigEventContent represents the content of the room config state event
 type RoomConfigEventContent struct {
-	Model               string  `json:"model,omitempty"`
-	SystemPrompt        string  `json:"system_prompt,omitempty"`
+	Model               string   `json:"model,omitempty"`
+	SystemPrompt        string   `json:"system_prompt,omitempty"`
 	Temperature         *float64 `json:"temperature,omitempty"`
-	MaxContextMessages  int     `json:"max_context_messages,omitempty"`
-	MaxCompletionTokens int     `json:"max_completion_tokens,omitempty"`
-	ReasoningEffort     string  `json:"reasoning_effort,omitempty"`
-	ToolsEnabled        *bool   `json:"tools_enabled,omitempty"`
-	ConversationMode    string  `json:"conversation_mode,omitempty"` // "messages" or "responses"
+	MaxContextMessages  int      `json:"max_context_messages,omitempty"`
+	MaxCompletionTokens int      `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string   `json:"reasoning_effort,omitempty"`
+	ToolsEnabled        *bool    `json:"tools_enabled,omitempty"`
+	ConversationMode    string   `json:"conversation_mode,omitempty"` // "messages" or "responses"
 
 	// Responses API built-in tools
 	WebSearchEnabled       *bool `json:"web_search_enabled,omitempty"`
