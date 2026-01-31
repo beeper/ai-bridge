@@ -23,15 +23,30 @@ type ContentPartType string
 const (
 	ContentTypeText  ContentPartType = "text"
 	ContentTypeImage ContentPartType = "image"
+	ContentTypePDF   ContentPartType = "pdf"
+	ContentTypeAudio ContentPartType = "audio"
+	ContentTypeVideo ContentPartType = "video"
 )
 
-// ContentPart represents a single piece of content (text or image)
+// ContentPart represents a single piece of content (text, image, PDF, audio, or video)
 type ContentPart struct {
 	Type     ContentPartType
 	Text     string
 	ImageURL string // For URL-based images
 	ImageB64 string // For base64-encoded images
-	MimeType string // e.g., "image/png", "image/jpeg"
+	MimeType string // e.g., "image/png", "image/jpeg", "application/pdf"
+
+	// PDF content
+	PDFURL string // URL to PDF file
+	PDFB64 string // Base64-encoded PDF data
+
+	// Audio content
+	AudioB64    string // Base64-encoded audio data
+	AudioFormat string // Format: wav, mp3, webm, ogg, flac
+
+	// Video content
+	VideoURL string // URL to video file
+	VideoB64 string // Base64-encoded video data
 }
 
 // UnifiedMessage is a provider-agnostic message format
@@ -58,6 +73,17 @@ func (m *UnifiedMessage) Text() string {
 func (m *UnifiedMessage) HasImages() bool {
 	for _, part := range m.Content {
 		if part.Type == ContentTypeImage {
+			return true
+		}
+	}
+	return false
+}
+
+// HasMultimodalContent returns true if the message contains any non-text content
+func (m *UnifiedMessage) HasMultimodalContent() bool {
+	for _, part := range m.Content {
+		switch part.Type {
+		case ContentTypeImage, ContentTypePDF, ContentTypeAudio, ContentTypeVideo:
 			return true
 		}
 	}

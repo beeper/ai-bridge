@@ -25,13 +25,26 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 	}
 	meta := portalMeta(portal)
 
-	// Handle image messages for vision-capable models
-	if msg.Content.MsgType == event.MsgImage {
-		return oc.handleImageMessage(ctx, msg, portal, meta)
-	}
-
+	// Handle media messages based on type
 	switch msg.Content.MsgType {
+	case event.MsgImage:
+		return oc.handleImageMessage(ctx, msg, portal, meta)
+	case event.MsgVideo:
+		return oc.handleVideoMessage(ctx, msg, portal, meta)
+	case event.MsgAudio:
+		return oc.handleAudioMessage(ctx, msg, portal, meta)
+	case event.MsgFile:
+		// Check if it's a PDF
+		mimeType := ""
+		if msg.Content.Info != nil {
+			mimeType = msg.Content.Info.MimeType
+		}
+		if mimeType == "application/pdf" {
+			return oc.handlePDFMessage(ctx, msg, portal, meta)
+		}
+		return nil, fmt.Errorf("unsupported file type: %s", mimeType)
 	case event.MsgText, event.MsgNotice, event.MsgEmote:
+		// Continue to text handling below
 	default:
 		return nil, fmt.Errorf("%s messages are not supported", msg.Content.MsgType)
 	}
@@ -251,6 +264,212 @@ func (oc *AIClient) handleImageMessage(
 		Type:        pendingTypeImage,
 		MessageBody: caption,
 		ImageURL:    string(imageURL),
+	}, promptMessages)
+
+	return &bridgev2.MatrixMessageResponse{
+		DB:      dbMsg,
+		Pending: isPending,
+	}, nil
+}
+
+// handlePDFMessage processes a PDF file message for PDF-capable models
+func (oc *AIClient) handlePDFMessage(
+	ctx context.Context,
+	msg *bridgev2.MatrixMessage,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+) (*bridgev2.MatrixMessageResponse, error) {
+	// Check if model supports PDF
+	if !meta.Capabilities.SupportsPDF {
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
+			"The current model (%s) does not support PDF analysis. "+
+				"Please switch to a PDF-capable model using /model.",
+			oc.effectiveModel(meta),
+		))
+		return nil, nil
+	}
+
+	// Get the file URL from the message
+	fileURL := msg.Content.URL
+	if fileURL == "" && msg.Content.File != nil {
+		fileURL = msg.Content.File.URL
+	}
+	if fileURL == "" {
+		return nil, fmt.Errorf("PDF message has no URL")
+	}
+
+	// Get MIME type
+	mimeType := "application/pdf"
+	if msg.Content.Info != nil && msg.Content.Info.MimeType != "" {
+		mimeType = msg.Content.Info.MimeType
+	}
+
+	// Get caption (body is usually the filename or caption)
+	caption := strings.TrimSpace(msg.Content.Body)
+	if caption == "" || (msg.Content.Info != nil && caption == msg.Content.Info.MimeType) {
+		caption = "Please analyze this PDF document."
+	}
+
+	// Build prompt with PDF
+	promptMessages, err := oc.buildPromptWithPDF(ctx, portal, meta, caption, string(fileURL), mimeType)
+	if err != nil {
+		return nil, err
+	}
+
+	userMessage := &database.Message{
+		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+		Room:     portal.PortalKey,
+		SenderID: humanUserID(oc.UserLogin.ID),
+		Metadata: &MessageMetadata{
+			Role: "user",
+			Body: caption + " [PDF]",
+		},
+		Timestamp: time.Now(),
+	}
+
+	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
+		Event:       msg.Event,
+		Portal:      portal,
+		Meta:        meta,
+		Type:        pendingTypePDF,
+		MessageBody: caption,
+		PDFURL:      string(fileURL),
+		MimeType:    mimeType,
+	}, promptMessages)
+
+	return &bridgev2.MatrixMessageResponse{
+		DB:      dbMsg,
+		Pending: isPending,
+	}, nil
+}
+
+// handleAudioMessage processes an audio file message for audio-capable models
+func (oc *AIClient) handleAudioMessage(
+	ctx context.Context,
+	msg *bridgev2.MatrixMessage,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+) (*bridgev2.MatrixMessageResponse, error) {
+	// Check if model supports audio
+	if !meta.Capabilities.SupportsAudio {
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
+			"The current model (%s) does not support audio input. "+
+				"Please switch to an audio-capable model using /model.",
+			oc.effectiveModel(meta),
+		))
+		return nil, nil
+	}
+
+	// Get the audio URL from the message
+	audioURL := msg.Content.URL
+	if audioURL == "" && msg.Content.File != nil {
+		audioURL = msg.Content.File.URL
+	}
+	if audioURL == "" {
+		return nil, fmt.Errorf("audio message has no URL")
+	}
+
+	// Get MIME type
+	mimeType := "audio/mpeg"
+	if msg.Content.Info != nil && msg.Content.Info.MimeType != "" {
+		mimeType = msg.Content.Info.MimeType
+	}
+
+	// Get caption (body is usually the filename or caption)
+	caption := strings.TrimSpace(msg.Content.Body)
+	if caption == "" || (msg.Content.Info != nil && caption == msg.Content.Info.MimeType) {
+		caption = "Please transcribe or analyze this audio."
+	}
+
+	// Build prompt with audio
+	promptMessages, err := oc.buildPromptWithAudio(ctx, portal, meta, caption, string(audioURL), mimeType)
+	if err != nil {
+		return nil, err
+	}
+
+	userMessage := &database.Message{
+		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+		Room:     portal.PortalKey,
+		SenderID: humanUserID(oc.UserLogin.ID),
+		Metadata: &MessageMetadata{
+			Role: "user",
+			Body: caption + " [audio]",
+		},
+		Timestamp: time.Now(),
+	}
+
+	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
+		Event:       msg.Event,
+		Portal:      portal,
+		Meta:        meta,
+		Type:        pendingTypeAudio,
+		MessageBody: caption,
+		AudioURL:    string(audioURL),
+		MimeType:    mimeType,
+	}, promptMessages)
+
+	return &bridgev2.MatrixMessageResponse{
+		DB:      dbMsg,
+		Pending: isPending,
+	}, nil
+}
+
+// handleVideoMessage processes a video file message for video-capable models
+func (oc *AIClient) handleVideoMessage(
+	ctx context.Context,
+	msg *bridgev2.MatrixMessage,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+) (*bridgev2.MatrixMessageResponse, error) {
+	// Check if model supports video
+	if !meta.Capabilities.SupportsVideo {
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
+			"The current model (%s) does not support video input. "+
+				"Please switch to a video-capable model using /model.",
+			oc.effectiveModel(meta),
+		))
+		return nil, nil
+	}
+
+	// Get the video URL from the message
+	videoURL := msg.Content.URL
+	if videoURL == "" && msg.Content.File != nil {
+		videoURL = msg.Content.File.URL
+	}
+	if videoURL == "" {
+		return nil, fmt.Errorf("video message has no URL")
+	}
+
+	// Get caption (body is usually the filename or caption)
+	caption := strings.TrimSpace(msg.Content.Body)
+	if caption == "" || (msg.Content.Info != nil && caption == msg.Content.Info.MimeType) {
+		caption = "Please analyze this video."
+	}
+
+	// Build prompt with video
+	promptMessages, err := oc.buildPromptWithVideo(ctx, portal, meta, caption, string(videoURL))
+	if err != nil {
+		return nil, err
+	}
+
+	userMessage := &database.Message{
+		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+		Room:     portal.PortalKey,
+		SenderID: humanUserID(oc.UserLogin.ID),
+		Metadata: &MessageMetadata{
+			Role: "user",
+			Body: caption + " [video]",
+		},
+		Timestamp: time.Now(),
+	}
+
+	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
+		Event:       msg.Event,
+		Portal:      portal,
+		Meta:        meta,
+		Type:        pendingTypeVideo,
+		MessageBody: caption,
+		VideoURL:    string(videoURL),
 	}, promptMessages)
 
 	return &bridgev2.MatrixMessageResponse{

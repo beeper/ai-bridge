@@ -2,7 +2,10 @@ package connector
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -92,11 +95,17 @@ func buildCapabilityID(caps ModelCapabilities) string {
 	var suffixes []string
 
 	// Add suffixes in alphabetical order for determinism
+	if caps.SupportsAudio {
+		suffixes = append(suffixes, "audio")
+	}
 	if caps.SupportsImageGen {
 		suffixes = append(suffixes, "imagegen")
 	}
 	if caps.SupportsPDF {
 		suffixes = append(suffixes, "pdf")
+	}
+	if caps.SupportsVideo {
+		suffixes = append(suffixes, "video")
 	}
 	if caps.SupportsVision {
 		suffixes = append(suffixes, "vision")
@@ -135,6 +144,41 @@ func pdfFileFeatures() *event.FileFeatures {
 	}
 }
 
+// audioFileFeatures returns FileFeatures for audio-capable models
+func audioFileFeatures() *event.FileFeatures {
+	return &event.FileFeatures{
+		MimeTypes: map[string]event.CapabilitySupportLevel{
+			"audio/wav":   event.CapLevelFullySupported,
+			"audio/mpeg":  event.CapLevelFullySupported, // mp3
+			"audio/mp3":   event.CapLevelFullySupported,
+			"audio/webm":  event.CapLevelFullySupported,
+			"audio/ogg":   event.CapLevelFullySupported,
+			"audio/flac":  event.CapLevelFullySupported,
+			"audio/mp4":   event.CapLevelFullySupported, // m4a
+			"audio/x-m4a": event.CapLevelFullySupported,
+		},
+		Caption:          event.CapLevelFullySupported,
+		MaxCaptionLength: AIMaxTextLength,
+		MaxSize:          25 * 1024 * 1024, // 25MB for audio
+	}
+}
+
+// videoFileFeatures returns FileFeatures for video-capable models
+func videoFileFeatures() *event.FileFeatures {
+	return &event.FileFeatures{
+		MimeTypes: map[string]event.CapabilitySupportLevel{
+			"video/mp4":       event.CapLevelFullySupported,
+			"video/webm":      event.CapLevelFullySupported,
+			"video/mpeg":      event.CapLevelFullySupported,
+			"video/quicktime": event.CapLevelFullySupported, // mov
+			"video/x-msvideo": event.CapLevelFullySupported, // avi
+		},
+		Caption:          event.CapLevelFullySupported,
+		MaxCaptionLength: AIMaxTextLength,
+		MaxSize:          100 * 1024 * 1024, // 100MB for video
+	}
+}
+
 // AIClient handles communication with AI providers
 type AIClient struct {
 	UserLogin *bridgev2.UserLogin
@@ -164,6 +208,9 @@ type pendingMessageType string
 const (
 	pendingTypeText           pendingMessageType = "text"
 	pendingTypeImage          pendingMessageType = "image"
+	pendingTypePDF            pendingMessageType = "pdf"
+	pendingTypeAudio          pendingMessageType = "audio"
+	pendingTypeVideo          pendingMessageType = "video"
 	pendingTypeRegenerate     pendingMessageType = "regenerate"
 	pendingTypeEditRegenerate pendingMessageType = "edit_regenerate"
 )
@@ -175,8 +222,12 @@ type pendingMessage struct {
 	Portal      *bridgev2.Portal
 	Meta        *PortalMetadata
 	Type        pendingMessageType
-	MessageBody string              // For text, regenerate, edit_regenerate
+	MessageBody string              // For text, regenerate, edit_regenerate (caption for media)
 	ImageURL    string              // For image messages
+	PDFURL      string              // For PDF messages
+	AudioURL    string              // For audio messages
+	VideoURL    string              // For video messages
+	MimeType    string              // MIME type of the media
 	TargetMsgID networkid.MessageID // For edit_regenerate
 }
 
@@ -389,6 +440,12 @@ func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 		promptMessages, err = oc.buildPrompt(ctx, pending.Portal, pending.Meta, pending.MessageBody)
 	case pendingTypeImage:
 		promptMessages, err = oc.buildPromptWithImage(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.ImageURL)
+	case pendingTypePDF:
+		promptMessages, err = oc.buildPromptWithPDF(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.PDFURL, pending.MimeType)
+	case pendingTypeAudio:
+		promptMessages, err = oc.buildPromptWithAudio(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.AudioURL, pending.MimeType)
+	case pendingTypeVideo:
+		promptMessages, err = oc.buildPromptWithVideo(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.VideoURL)
 	case pendingTypeRegenerate:
 		promptMessages, err = oc.buildPromptForRegenerate(ctx, pending.Portal, pending.Meta, pending.MessageBody)
 	case pendingTypeEditRegenerate:
@@ -513,6 +570,12 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 	}
 	if meta.Capabilities.SupportsPDF {
 		caps.File[event.MsgFile] = pdfFileFeatures()
+	}
+	if meta.Capabilities.SupportsAudio {
+		caps.File[event.MsgAudio] = audioFileFeatures()
+	}
+	if meta.Capabilities.SupportsVideo {
+		caps.File[event.MsgVideo] = videoFileFeatures()
 	}
 	// Note: ImageGen is output capability - doesn't affect file upload features
 	// Note: Reasoning is processing mode - doesn't affect room features
@@ -789,6 +852,163 @@ func (oc *AIClient) buildPromptWithImage(
 	return prompt, nil
 }
 
+// buildPromptWithPDF builds a prompt with a PDF file for document analysis
+func (oc *AIClient) buildPromptWithPDF(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	caption string,
+	pdfURL string,
+	mimeType string,
+) ([]openai.ChatCompletionMessageParamUnion, error) {
+	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
+	if err != nil {
+		return nil, err
+	}
+
+	// Download and base64 encode the PDF
+	b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, pdfURL, 50) // 50MB limit
+	if err != nil {
+		return nil, fmt.Errorf("failed to download PDF: %w", err)
+	}
+	if actualMimeType == "" || actualMimeType == "application/octet-stream" {
+		actualMimeType = mimeType
+	}
+	if actualMimeType == "" {
+		actualMimeType = "application/pdf"
+	}
+
+	// Build data URL for the PDF
+	dataURL := fmt.Sprintf("data:%s;base64,%s", actualMimeType, b64Data)
+
+	// OpenRouter uses file content type for PDFs
+	// Format: {"type": "file", "file": {"filename": "doc.pdf", "file_data": "data:application/pdf;base64,..."}}
+	fileContent := openai.ChatCompletionContentPartUnionParam{
+		OfFile: &openai.ChatCompletionContentPartFileParam{
+			File: openai.ChatCompletionContentPartFileFileParam{
+				FileData: openai.String(dataURL),
+			},
+		},
+	}
+
+	textContent := openai.ChatCompletionContentPartUnionParam{
+		OfText: &openai.ChatCompletionContentPartTextParam{
+			Text: caption,
+		},
+	}
+
+	userMsg := openai.ChatCompletionMessageParamUnion{
+		OfUser: &openai.ChatCompletionUserMessageParam{
+			Content: openai.ChatCompletionUserMessageParamContentUnion{
+				OfArrayOfContentParts: []openai.ChatCompletionContentPartUnionParam{
+					textContent,
+					fileContent,
+				},
+			},
+		},
+	}
+
+	prompt = append(prompt, userMsg)
+	return prompt, nil
+}
+
+// buildPromptWithAudio builds a prompt with audio content for audio-capable models
+func (oc *AIClient) buildPromptWithAudio(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	caption string,
+	audioURL string,
+	mimeType string,
+) ([]openai.ChatCompletionMessageParamUnion, error) {
+	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
+	if err != nil {
+		return nil, err
+	}
+
+	// Download and base64 encode the audio
+	b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, audioURL, 25) // 25MB limit
+	if err != nil {
+		return nil, fmt.Errorf("failed to download audio: %w", err)
+	}
+	if actualMimeType == "" || actualMimeType == "application/octet-stream" {
+		actualMimeType = mimeType
+	}
+
+	// Get audio format for OpenRouter API
+	audioFormat := getAudioFormat(actualMimeType)
+
+	// OpenRouter uses input_audio content type
+	// Format: {"type": "input_audio", "input_audio": {"data": "base64...", "format": "wav"}}
+	audioContent := openai.ChatCompletionContentPartUnionParam{
+		OfInputAudio: &openai.ChatCompletionContentPartInputAudioParam{
+			InputAudio: openai.ChatCompletionContentPartInputAudioInputAudioParam{
+				Data:   b64Data,
+				Format: audioFormat,
+			},
+		},
+	}
+
+	textContent := openai.ChatCompletionContentPartUnionParam{
+		OfText: &openai.ChatCompletionContentPartTextParam{
+			Text: caption,
+		},
+	}
+
+	userMsg := openai.ChatCompletionMessageParamUnion{
+		OfUser: &openai.ChatCompletionUserMessageParam{
+			Content: openai.ChatCompletionUserMessageParamContentUnion{
+				OfArrayOfContentParts: []openai.ChatCompletionContentPartUnionParam{
+					textContent,
+					audioContent,
+				},
+			},
+		},
+	}
+
+	prompt = append(prompt, userMsg)
+	return prompt, nil
+}
+
+// buildPromptWithVideo builds a prompt with video content for video-capable models
+func (oc *AIClient) buildPromptWithVideo(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	caption string,
+	videoURL string,
+) ([]openai.ChatCompletionMessageParamUnion, error) {
+	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert mxc:// URL to HTTP URL for video passthrough
+	httpURL := oc.convertMxcToHttp(videoURL)
+
+	// OpenRouter expects video_url content type for video
+	// We pass the URL directly rather than base64 encoding due to video sizes
+	// Note: The OpenAI SDK may not have direct video support, so we use a generic approach
+	// Format: {"type": "video_url", "video_url": {"url": "https://..."}}
+	// Since the OpenAI Go SDK may not have native video support, we'll construct the message manually
+	// For now, we'll use the image URL approach which some models accept for video
+
+	// TODO: Once OpenRouter/OpenAI SDK adds proper video support, update this
+	// For now, we use a text-based approach with the video URL
+	videoPrompt := fmt.Sprintf("%s\n\nVideo URL: %s", caption, httpURL)
+
+	userMsg := openai.ChatCompletionMessageParamUnion{
+		OfUser: &openai.ChatCompletionUserMessageParam{
+			Content: openai.ChatCompletionUserMessageParamContentUnion{
+				OfString: openai.String(videoPrompt),
+			},
+		},
+	}
+
+	prompt = append(prompt, userMsg)
+	return prompt, nil
+}
+
 // buildPromptUpToMessage builds a prompt including messages up to and including the specified message
 func (oc *AIClient) buildPromptUpToMessage(
 	ctx context.Context,
@@ -866,6 +1086,95 @@ func (oc *AIClient) convertMxcToHttp(mxcURL string) string {
 	mediaID := parts[1]
 
 	return fmt.Sprintf("https://%s/_matrix/media/v3/download/%s/%s", homeserver, server, mediaID)
+}
+
+// downloadAndEncodeMedia downloads media from Matrix and returns base64-encoded data
+// maxSizeMB limits the download size (0 = no limit)
+// Returns (base64Data, mimeType, error)
+func (oc *AIClient) downloadAndEncodeMedia(ctx context.Context, mxcURL string, maxSizeMB int) (string, string, error) {
+	// Convert mxc:// to HTTP URL
+	httpURL := oc.convertMxcToHttp(mxcURL)
+
+	// Create HTTP request with context
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, httpURL, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Use a client with timeout
+	client := &http.Client{
+		Timeout: 60 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to download media: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("download failed with status %d", resp.StatusCode)
+	}
+
+	// Check content length if available
+	if maxSizeMB > 0 && resp.ContentLength > 0 {
+		maxBytes := int64(maxSizeMB * 1024 * 1024)
+		if resp.ContentLength > maxBytes {
+			return "", "", fmt.Errorf("media too large: %d bytes (max %d MB)", resp.ContentLength, maxSizeMB)
+		}
+	}
+
+	// Read with size limit
+	var reader io.Reader = resp.Body
+	if maxSizeMB > 0 {
+		maxBytes := int64(maxSizeMB * 1024 * 1024)
+		reader = io.LimitReader(resp.Body, maxBytes+1) // +1 to detect overflow
+	}
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read media: %w", err)
+	}
+
+	// Check if we hit the size limit
+	if maxSizeMB > 0 {
+		maxBytes := int64(maxSizeMB * 1024 * 1024)
+		if int64(len(data)) > maxBytes {
+			return "", "", fmt.Errorf("media too large (max %d MB)", maxSizeMB)
+		}
+	}
+
+	// Get MIME type from response header
+	mimeType := resp.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	// Base64 encode
+	b64Data := base64.StdEncoding.EncodeToString(data)
+
+	return b64Data, mimeType, nil
+}
+
+// getAudioFormat extracts the audio format from a MIME type for OpenRouter API
+func getAudioFormat(mimeType string) string {
+	switch mimeType {
+	case "audio/wav", "audio/x-wav":
+		return "wav"
+	case "audio/mpeg", "audio/mp3":
+		return "mp3"
+	case "audio/webm":
+		return "webm"
+	case "audio/ogg":
+		return "ogg"
+	case "audio/flac":
+		return "flac"
+	case "audio/mp4", "audio/x-m4a":
+		return "mp4"
+	default:
+		// Default to mp3 for unknown formats
+		return "mp3"
+	}
 }
 
 // ensureGhostDisplayName ensures the ghost has its display name set before sending messages.

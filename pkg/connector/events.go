@@ -74,6 +74,8 @@ type ModelInfo struct {
 	SupportsReasoning   bool     `json:"supports_reasoning"`  // Model can use reasoning when enabled
 	SupportsWebSearch   bool     `json:"supports_web_search"` // Model supports web search plugin
 	SupportsImageGen    bool     `json:"supports_image_gen,omitempty"`
+	SupportsAudio       bool     `json:"supports_audio,omitempty"` // Model accepts audio input
+	SupportsVideo       bool     `json:"supports_video,omitempty"` // Model accepts video input
 	ContextWindow       int      `json:"context_window,omitempty"`
 	MaxOutputTokens     int      `json:"max_output_tokens,omitempty"`
 	AvailableTools      []string `json:"available_tools,omitempty"` // List of supported tools
