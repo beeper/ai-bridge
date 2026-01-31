@@ -64,7 +64,7 @@ type PortalMetadata struct {
 	CodeInterpreterEnabled bool `json:"code_interpreter_enabled,omitempty"`
 
 	// Streaming configuration
-	EmitThinking bool `json:"emit_thinking,omitempty"` // Stream thinking/reasoning tokens
+	EmitThinking bool `json:"emit_thinking,omitempty"`  // Stream thinking/reasoning tokens
 	EmitToolArgs bool `json:"emit_tool_args,omitempty"` // Stream tool argument tokens
 
 	// Agent configuration (for multi-agent rooms)
@@ -92,7 +92,7 @@ type MessageMetadata struct {
 	ToolCalls []ToolCallMetadata `json:"tool_calls,omitempty"` // List of tool calls in this turn
 
 	// Timing information
-	StartedAtMs    int64 `json:"started_at_ms,omitempty"`    // Unix ms when generation started
+	StartedAtMs    int64 `json:"started_at_ms,omitempty"`     // Unix ms when generation started
 	FirstTokenAtMs int64 `json:"first_token_at_ms,omitempty"` // Unix ms of first token
 	CompletedAtMs  int64 `json:"completed_at_ms,omitempty"`   // Unix ms when completed
 
@@ -103,16 +103,16 @@ type MessageMetadata struct {
 
 // ToolCallMetadata tracks a tool call within a message
 type ToolCallMetadata struct {
-	CallID       string         `json:"call_id"`
-	ToolName     string         `json:"tool_name"`
-	ToolType     string         `json:"tool_type"` // builtin, provider, function, mcp
-	Input        map[string]any `json:"input,omitempty"`
-	Output       map[string]any `json:"output,omitempty"`
-	Status       string         `json:"status"`                  // pending, running, completed, failed, timeout, cancelled
-	ResultStatus string         `json:"result_status,omitempty"` // success, error, partial
-	ErrorMessage string         `json:"error_message,omitempty"`
-	StartedAtMs  int64          `json:"started_at_ms,omitempty"`
-	CompletedAtMs int64         `json:"completed_at_ms,omitempty"`
+	CallID        string         `json:"call_id"`
+	ToolName      string         `json:"tool_name"`
+	ToolType      string         `json:"tool_type"` // builtin, provider, function, mcp
+	Input         map[string]any `json:"input,omitempty"`
+	Output        map[string]any `json:"output,omitempty"`
+	Status        string         `json:"status"`                  // pending, running, completed, failed, timeout, cancelled
+	ResultStatus  string         `json:"result_status,omitempty"` // success, error, partial
+	ErrorMessage  string         `json:"error_message,omitempty"`
+	StartedAtMs   int64          `json:"started_at_ms,omitempty"`
+	CompletedAtMs int64          `json:"completed_at_ms,omitempty"`
 
 	// Event IDs for timeline events (if emitted as separate events)
 	CallEventID   string `json:"call_event_id,omitempty"`
