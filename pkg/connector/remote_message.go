@@ -27,11 +27,10 @@ type OpenAIRemoteMessage struct {
 	Timestamp time.Time
 	Metadata  *MessageMetadata
 
-	// New schema fields
-	FormattedContent string     // HTML formatted content
-	ReplyToEventID   id.EventID // For m.relates_to threading
-	ToolCallEventIDs []string   // References to tool call events
-	ImageEventIDs    []string   // References to generated image events
+	FormattedContent string
+	ReplyToEventID   id.EventID
+	ToolCallEventIDs []string
+	ImageEventIDs    []string
 }
 
 func (m *OpenAIRemoteMessage) GetType() bridgev2.RemoteEventType {

@@ -47,7 +47,6 @@ var StepBoundaryEventType = event.Type{
 }
 
 // StreamDeltaEventType is the custom event type for streaming token updates
-// This replaces the old StreamTokenEventType with true ephemeral semantics
 var StreamDeltaEventType = event.Type{
 	Type:  "com.beeper.ai.stream_delta",
 	Class: event.MessageEventType,
@@ -94,7 +93,7 @@ type StreamContentType string
 
 const (
 	StreamContentText       StreamContentType = "text"
-	StreamContentThinking   StreamContentType = "thinking" // Renamed from reasoning for consistency
+	StreamContentThinking   StreamContentType = "thinking"
 	StreamContentToolInput  StreamContentType = "tool_input"
 	StreamContentToolResult StreamContentType = "tool_result"
 	StreamContentCode       StreamContentType = "code"
@@ -184,8 +183,8 @@ type AssistantTurnAI struct {
 	Usage *EventUsageInfo `json:"usage,omitempty"`
 
 	// Related events
-	ToolCalls []string `json:"tool_calls,omitempty"` // Event IDs of tool calls
-	Images    []string `json:"images,omitempty"`     // Event IDs of generated images
+	ToolCalls []string `json:"tool_calls,omitempty"`
+	Images    []string `json:"images,omitempty"`
 
 	// Timing information
 	Timing *TimingInfo `json:"timing,omitempty"`
@@ -287,7 +286,7 @@ type ToolDisplay struct {
 // ApprovalInfo contains approval request details
 type ApprovalInfo struct {
 	Reason  string   `json:"reason,omitempty"`
-	Actions []string `json:"actions,omitempty"` // e.g., ["approve", "deny", "modify"]
+	Actions []string `json:"actions,omitempty"`
 }
 
 // ToolResultContent represents a tool result timeline event

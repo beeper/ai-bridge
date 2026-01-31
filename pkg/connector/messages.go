@@ -31,22 +31,16 @@ const (
 // ContentPart represents a single piece of content (text, image, PDF, audio, or video)
 type ContentPart struct {
 	Type     ContentPartType
-	Text     string
-	ImageURL string // For URL-based images
-	ImageB64 string // For base64-encoded images
-	MimeType string // e.g., "image/png", "image/jpeg", "application/pdf"
-
-	// PDF content
-	PDFURL string // URL to PDF file
-	PDFB64 string // Base64-encoded PDF data
-
-	// Audio content
-	AudioB64    string // Base64-encoded audio data
-	AudioFormat string // Format: wav, mp3, webm, ogg, flac
-
-	// Video content
-	VideoURL string // URL to video file
-	VideoB64 string // Base64-encoded video data
+	Text        string
+	ImageURL    string
+	ImageB64    string
+	MimeType    string
+	PDFURL      string
+	PDFB64      string
+	AudioB64    string
+	AudioFormat string // wav, mp3, webm, ogg, flac
+	VideoURL    string
+	VideoB64    string
 }
 
 // UnifiedMessage is a provider-agnostic message format

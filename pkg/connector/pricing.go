@@ -6,8 +6,6 @@ import (
 )
 
 // ModelPricing stores the cost per million tokens for input and output.
-// Prices are in USD and should be updated periodically.
-// Last updated: January 2025
 type ModelPricing struct {
 	InputPerMillion  float64 // Cost per 1M input tokens
 	OutputPerMillion float64 // Cost per 1M output tokens
