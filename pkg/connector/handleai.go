@@ -133,7 +133,14 @@ func (oc *AIClient) streamingResponseWithRetry(
 	meta *PortalMetadata,
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) {
-	oc.responseWithRetry(ctx, evt, portal, meta, prompt, oc.streamingResponse, "streaming")
+	// Use Chat Completions API for audio (native support)
+	// SDK v3.16.0 has ResponseInputAudioParam but it's not wired into the union
+	if hasAudioContent(prompt) {
+		oc.responseWithRetry(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
+		return
+	}
+	// Use Responses API for other content (images, files, text)
+	oc.responseWithRetry(ctx, evt, portal, meta, prompt, oc.streamingResponse, "responses")
 }
 
 // buildResponsesAPIParams creates common Responses API parameters for both streaming and non-streaming paths
@@ -612,47 +619,222 @@ func (oc *AIClient) streamingResponse(
 	return true, nil
 }
 
+// streamChatCompletions handles streaming using Chat Completions API (for audio support)
+// This is used as a fallback when the prompt contains audio content, since
+// SDK v3.16.0 has ResponseInputAudioParam defined but NOT wired into ResponseInputContentUnionParam.
+func (oc *AIClient) streamChatCompletions(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	messages []openai.ChatCompletionMessageParamUnion,
+) (bool, *ContextLengthError) {
+	log := zerolog.Ctx(ctx).With().
+		Str("action", "stream_chat_completions").
+		Str("portal", string(portal.ID)).
+		Logger()
+
+	oc.setModelTyping(ctx, portal, true)
+	defer oc.setModelTyping(ctx, portal, false)
+
+	params := openai.ChatCompletionNewParams{
+		Model:    oc.effectiveModelForAPI(meta),
+		Messages: messages,
+	}
+	if maxTokens := oc.effectiveMaxTokens(meta); maxTokens > 0 {
+		params.MaxCompletionTokens = openai.Int(int64(maxTokens))
+	}
+	if temp := oc.effectiveTemperature(meta); temp > 0 {
+		params.Temperature = openai.Float(temp)
+	}
+
+	stream := oc.api.Chat.Completions.NewStreaming(ctx, params)
+	if stream == nil {
+		log.Error().Msg("Failed to create Chat Completions streaming request")
+		oc.notifyMatrixSendFailure(ctx, portal, evt, fmt.Errorf("chat completions streaming not available"))
+		return false, nil
+	}
+
+	state := &streamingState{
+		turnID:      NewTurnID(),
+		agentID:     meta.DefaultAgentID,
+		startedAtMs: time.Now().UnixMilli(),
+		firstToken:  true,
+	}
+
+	oc.emitGenerationStatus(ctx, portal, state, "starting", "Starting generation...", nil)
+
+	for stream.Next() {
+		chunk := stream.Current()
+
+		for _, choice := range chunk.Choices {
+			if choice.Delta.Content != "" {
+				state.accumulated.WriteString(choice.Delta.Content)
+
+				if state.firstToken && state.accumulated.Len() > 0 {
+					state.firstToken = false
+					state.firstTokenAtMs = time.Now().UnixMilli()
+					oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
+					state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID)
+					if state.initialEventID == "" {
+						log.Error().Msg("Failed to send initial streaming message")
+						return false, nil
+					}
+					oc.emitGenerationStatus(ctx, portal, state, "generating", "Generating response...", nil)
+				}
+
+				if !state.firstToken && state.initialEventID != "" {
+					state.sequenceNum++
+					oc.emitStreamDelta(ctx, portal, state, StreamContentText, choice.Delta.Content, nil)
+				}
+			}
+
+			if choice.FinishReason != "" {
+				state.finishReason = string(choice.FinishReason)
+			}
+		}
+	}
+
+	if err := stream.Err(); err != nil {
+		if cle := ParseContextLengthError(err); cle != nil {
+			return false, cle
+		}
+		log.Error().Err(err).Msg("Chat Completions stream error")
+		oc.notifyMatrixSendFailure(ctx, portal, evt, err)
+		return false, nil
+	}
+
+	state.completedAtMs = time.Now().UnixMilli()
+	oc.emitGenerationStatus(ctx, portal, state, "completed", "Generation complete", nil)
+
+	// Send final edit and save to database
+	if state.initialEventID != "" {
+		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
+
+		// Save assistant message to database for history reconstruction
+		modelID := oc.effectiveModel(meta)
+		assistantMsg := &database.Message{
+			ID:        MakeMessageID(state.initialEventID),
+			Room:      portal.PortalKey,
+			SenderID:  modelUserID(modelID),
+			MXID:      state.initialEventID,
+			Timestamp: time.Now(),
+			Metadata: &MessageMetadata{
+				Role:           "assistant",
+				Body:           state.accumulated.String(),
+				FinishReason:   state.finishReason,
+				Model:          modelID,
+				TurnID:         state.turnID,
+				AgentID:        state.agentID,
+				StartedAtMs:    state.startedAtMs,
+				FirstTokenAtMs: state.firstTokenAtMs,
+				CompletedAtMs:  state.completedAtMs,
+			},
+		}
+		if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, assistantMsg); err != nil {
+			log.Warn().Err(err).Msg("Failed to save assistant message to database")
+		}
+	}
+
+	log.Info().
+		Str("turn_id", state.turnID).
+		Str("finish_reason", state.finishReason).
+		Int("content_length", state.accumulated.Len()).
+		Msg("Chat Completions streaming finished")
+
+	oc.maybeGenerateTitle(ctx, portal, state.accumulated.String())
+	return true, nil
+}
+
 // convertToResponsesInput converts Chat Completion messages to Responses API input items
-// NOTE: This currently extracts text content only. For multimodal messages (images, PDFs, audio, video),
-// the media URL/description is appended to the text content. Full multimodal support for Responses API
-// would require using the native array content format which may not be fully supported.
+// Supports native multimodal content: images (ResponseInputImageParam), files/PDFs (ResponseInputFileParam)
+// Note: Audio is handled via Chat Completions API fallback (SDK v3.16.0 lacks Responses API audio union support)
 func (oc *AIClient) convertToResponsesInput(messages []openai.ChatCompletionMessageParamUnion, _ *PortalMetadata) responses.ResponseInputParam {
 	var input responses.ResponseInputParam
 
 	for _, msg := range messages {
-		// Use shared helper to extract content and role (avoids JSON roundtrip)
-		content, role := extractMessageContent(msg)
+		if msg.OfUser != nil {
+			var contentParts responses.ResponseInputMessageContentListParam
+			hasMultimodal := false
+			textContent := ""
 
-		// Also extract any multimodal content descriptions for user messages
-		if msg.OfUser != nil && msg.OfUser.Content.OfArrayOfContentParts != nil {
-			var extraContent []string
-			for _, part := range msg.OfUser.Content.OfArrayOfContentParts {
-				if part.OfImageURL != nil && part.OfImageURL.ImageURL.URL != "" {
-					extraContent = append(extraContent, "[Image: "+part.OfImageURL.ImageURL.URL+"]")
-				}
-				if part.OfInputAudio != nil {
-					extraContent = append(extraContent, "[Audio content attached]")
-				}
-				if part.OfFile != nil {
-					extraContent = append(extraContent, "[File content attached]")
+			if msg.OfUser.Content.OfString.Value != "" {
+				textContent = msg.OfUser.Content.OfString.Value
+			}
+
+			if len(msg.OfUser.Content.OfArrayOfContentParts) > 0 {
+				for _, part := range msg.OfUser.Content.OfArrayOfContentParts {
+					if part.OfText != nil {
+						textContent = part.OfText.Text
+					}
+					if part.OfImageURL != nil && part.OfImageURL.ImageURL.URL != "" {
+						hasMultimodal = true
+						detail := responses.ResponseInputImageDetailAuto
+						switch part.OfImageURL.ImageURL.Detail {
+						case "low":
+							detail = responses.ResponseInputImageDetailLow
+						case "high":
+							detail = responses.ResponseInputImageDetailHigh
+						}
+						contentParts = append(contentParts, responses.ResponseInputContentUnionParam{
+							OfInputImage: &responses.ResponseInputImageParam{
+								ImageURL: openai.String(part.OfImageURL.ImageURL.URL),
+								Detail:   detail,
+							},
+						})
+					}
+					if part.OfFile != nil && part.OfFile.File.FileData.Value != "" {
+						hasMultimodal = true
+						contentParts = append(contentParts, responses.ResponseInputContentUnionParam{
+							OfInputFile: &responses.ResponseInputFileParam{
+								FileData: openai.String(part.OfFile.File.FileData.Value),
+							},
+						})
+					}
+					// Note: Audio handled by Chat Completions fallback, skip here
 				}
 			}
-			if len(extraContent) > 0 {
-				content = content + "\n" + strings.Join(extraContent, "\n")
+
+			if textContent != "" {
+				textPart := responses.ResponseInputContentUnionParam{
+					OfInputText: &responses.ResponseInputTextParam{
+						Text: textContent,
+					},
+				}
+				contentParts = append([]responses.ResponseInputContentUnionParam{textPart}, contentParts...)
 			}
+
+			if hasMultimodal && len(contentParts) > 0 {
+				input = append(input, responses.ResponseInputItemUnionParam{
+					OfMessage: &responses.EasyInputMessageParam{
+						Role: responses.EasyInputMessageRoleUser,
+						Content: responses.EasyInputMessageContentUnionParam{
+							OfInputItemContentList: contentParts,
+						},
+					},
+				})
+			} else if textContent != "" {
+				input = append(input, responses.ResponseInputItemUnionParam{
+					OfMessage: &responses.EasyInputMessageParam{
+						Role: responses.EasyInputMessageRoleUser,
+						Content: responses.EasyInputMessageContentUnionParam{
+							OfString: openai.String(textContent),
+						},
+					},
+				})
+			}
+			continue
 		}
 
+		content, role := extractMessageContent(msg)
 		if role == "" || content == "" {
 			continue
 		}
 
-		// Map Chat Completions role to Responses API role
 		var responsesRole responses.EasyInputMessageRole
 		switch role {
 		case "system":
 			responsesRole = responses.EasyInputMessageRoleSystem
-		case "user":
-			responsesRole = responses.EasyInputMessageRoleUser
 		case "assistant":
 			responsesRole = responses.EasyInputMessageRoleAssistant
 		default:
@@ -670,6 +852,20 @@ func (oc *AIClient) convertToResponsesInput(messages []openai.ChatCompletionMess
 	}
 
 	return input
+}
+
+// hasAudioContent checks if the prompt contains audio content
+func hasAudioContent(messages []openai.ChatCompletionMessageParamUnion) bool {
+	for _, msg := range messages {
+		if msg.OfUser != nil && len(msg.OfUser.Content.OfArrayOfContentParts) > 0 {
+			for _, part := range msg.OfUser.Content.OfArrayOfContentParts {
+				if part.OfInputAudio != nil {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // sendInitialStreamMessage sends the first message in a streaming session and returns its event ID

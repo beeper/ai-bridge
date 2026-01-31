@@ -621,37 +621,6 @@ func (oc *AIClient) handleSlashCommand(
 		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Conversation mode set to: %s", newMode))
 		return true
 
-	case "/cost":
-		// Calculate cost from conversation history
-		messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, 1000)
-		if err != nil {
-			oc.sendSystemNotice(ctx, portal, "Failed to retrieve message history for cost calculation.")
-			return true
-		}
-		var totalPromptTokens, totalCompletionTokens int64
-		var totalCost float64
-		model := oc.effectiveModel(meta)
-		for _, msg := range messages {
-			msgMeta := messageMeta(msg)
-			if msgMeta != nil && msgMeta.Role == "assistant" {
-				totalPromptTokens += msgMeta.PromptTokens
-				totalCompletionTokens += msgMeta.CompletionTokens
-				totalCost += CalculateCost(model, msgMeta.PromptTokens, msgMeta.CompletionTokens)
-			}
-		}
-		costMsg := fmt.Sprintf(
-			"Conversation cost (%s):\n"+
-				"• Input tokens: %d\n"+
-				"• Output tokens: %d\n"+
-				"• Estimated cost: %s",
-			model,
-			totalPromptTokens,
-			totalCompletionTokens,
-			FormatCost(totalCost),
-		)
-		oc.sendSystemNotice(ctx, portal, costMsg)
-		return true
-
 	case "/help":
 		help := "Available commands:\n" +
 			"• /model [name] - Get or set the AI model\n" +
@@ -664,7 +633,6 @@ func (oc *AIClient) handleSlashCommand(
 			"• /new [model] - Create a new chat (uses current model if none specified)\n" +
 			"• /fork [event_id] - Fork conversation to a new chat\n" +
 			"• /config - Show current configuration\n" +
-			"• /cost - Show conversation token usage and cost\n" +
 			"• /regenerate - Regenerate the last response\n" +
 			"• /help - Show this help message"
 		oc.sendSystemNotice(ctx, portal, help)
