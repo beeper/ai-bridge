@@ -39,5 +39,5 @@ Requires libolm for encryption support.
 Or use Docker:
 
 ```bash
-docker build -t ai-bridge .
+docker build -t ai .
 ```
