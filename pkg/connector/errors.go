@@ -44,6 +44,9 @@ func MapErrorToStateCode(err error) status.BridgeStateErrorCode {
 	if ParseContextLengthError(err) != nil {
 		return AIContextTooLong
 	}
+	if IsModelNotFound(err) {
+		return AIModelNotFound
+	}
 	if IsServerError(err) {
 		return AIProviderError
 	}
@@ -126,6 +129,15 @@ func IsAuthError(err error) bool {
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == 401 || apiErr.StatusCode == 403
+	}
+	return false
+}
+
+// IsModelNotFound checks if the error is a model not found (404) error
+func IsModelNotFound(err error) bool {
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == 404
 	}
 	return false
 }

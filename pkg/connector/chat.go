@@ -540,11 +540,19 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 	if config.ConversationMode != "" {
 		meta.ConversationMode = config.ConversationMode
 	}
-	// Boolean fields - always apply
-	meta.ToolsEnabled = config.ToolsEnabled
-	meta.WebSearchEnabled = config.WebSearchEnabled
-	meta.FileSearchEnabled = config.FileSearchEnabled
-	meta.CodeInterpreterEnabled = config.CodeInterpreterEnabled
+	// Boolean fields - only apply when explicitly set (non-nil)
+	if config.ToolsEnabled != nil {
+		meta.ToolsEnabled = *config.ToolsEnabled
+	}
+	if config.WebSearchEnabled != nil {
+		meta.WebSearchEnabled = *config.WebSearchEnabled
+	}
+	if config.FileSearchEnabled != nil {
+		meta.FileSearchEnabled = *config.FileSearchEnabled
+	}
+	if config.CodeInterpreterEnabled != nil {
+		meta.CodeInterpreterEnabled = *config.CodeInterpreterEnabled
+	}
 
 	meta.LastRoomStateSync = time.Now().Unix()
 
@@ -653,14 +661,17 @@ func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Por
 	meta := portalMeta(portal)
 
 	stateContent := &RoomConfigEventContent{
-		Model:               meta.Model,
-		SystemPrompt:        meta.SystemPrompt,
-		Temperature:         meta.Temperature,
-		MaxContextMessages:  meta.MaxContextMessages,
-		MaxCompletionTokens: meta.MaxCompletionTokens,
-		ReasoningEffort:     meta.ReasoningEffort,
-		ToolsEnabled:        meta.ToolsEnabled,
-		ConversationMode:    meta.ConversationMode,
+		Model:                  meta.Model,
+		SystemPrompt:           meta.SystemPrompt,
+		Temperature:            meta.Temperature,
+		MaxContextMessages:     meta.MaxContextMessages,
+		MaxCompletionTokens:    meta.MaxCompletionTokens,
+		ReasoningEffort:        meta.ReasoningEffort,
+		ToolsEnabled:           ptr.Ptr(meta.ToolsEnabled),
+		ConversationMode:       meta.ConversationMode,
+		WebSearchEnabled:       ptr.Ptr(meta.WebSearchEnabled),
+		FileSearchEnabled:      ptr.Ptr(meta.FileSearchEnabled),
+		CodeInterpreterEnabled: ptr.Ptr(meta.CodeInterpreterEnabled),
 	}
 
 	// Use bot intent to send state event

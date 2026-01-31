@@ -94,9 +94,7 @@ func (mm *MessageMetadata) CopyFrom(other any) {
 	if src.ReasoningTokens != 0 {
 		mm.ReasoningTokens = src.ReasoningTokens
 	}
-	if src.HasToolCalls {
-		mm.HasToolCalls = src.HasToolCalls
-	}
+	mm.HasToolCalls = src.HasToolCalls
 }
 
 var _ database.MetaMerger = (*MessageMetadata)(nil)

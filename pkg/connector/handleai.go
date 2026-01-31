@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -22,6 +21,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
+
+	"github.com/beeper/ai-bridge/pkg/aiid"
 )
 
 const (
@@ -362,7 +363,7 @@ func (oc *AIClient) streamingResponse(
 		// This is CRITICAL - without this, the AI only sees user messages and tries to answer all of them
 		modelID := oc.effectiveModel(meta)
 		assistantMsg := &database.Message{
-			ID:        networkid.MessageID(fmt.Sprintf("openai:%s", initialEventID.String())),
+			ID:        aiid.MakeMessageID(initialEventID),
 			Room:      portal.PortalKey,
 			SenderID:  modelUserID(modelID),
 			MXID:      initialEventID,
@@ -576,7 +577,15 @@ func (oc *AIClient) emitStreamEvent(ctx context.Context, portal *bridgev2.Portal
 		},
 	}
 	// Merge optional metadata (tool_name, item_id, status, etc.)
-	maps.Copy(eventContent.Raw, metadata)
+	// Skip reserved keys that metadata cannot overwrite
+	reservedKeys := map[string]bool{
+		"body": true, "content_type": true, "seq": true, "m.relates_to": true,
+	}
+	for k, v := range metadata {
+		if !reservedKeys[k] {
+			eventContent.Raw[k] = v
+		}
+	}
 	if _, err := intent.SendMessage(ctx, portal.MXID, StreamTokenEventType, eventContent, nil); err != nil {
 		oc.log.Warn().Err(err).Stringer("related_event_id", relatedEventID).Str("content_type", string(contentType)).Int("seq", seq).Msg("Failed to emit stream event")
 	}
