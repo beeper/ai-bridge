@@ -8,7 +8,47 @@ import (
 	"strings"
 
 	"github.com/openai/openai-go/v3"
+	"maunium.net/go/mautrix/bridgev2/status"
 )
+
+// Bridge state error codes for AI-specific errors
+const (
+	AIRateLimited    status.BridgeStateErrorCode = "ai-rate-limited"
+	AIAuthFailed     status.BridgeStateErrorCode = "ai-auth-failed"
+	AIContextTooLong status.BridgeStateErrorCode = "ai-context-too-long"
+	AIModelNotFound  status.BridgeStateErrorCode = "ai-model-not-found"
+	AIProviderError  status.BridgeStateErrorCode = "ai-provider-error"
+)
+
+// BridgeStateHumanErrors provides human-readable messages for AI bridge error codes
+var BridgeStateHumanErrors = map[status.BridgeStateErrorCode]string{
+	AIRateLimited:    "Rate limited by AI provider. Please wait before retrying.",
+	AIAuthFailed:     "API key is invalid or has expired.",
+	AIContextTooLong: "Conversation is too long for this model's context window.",
+	AIModelNotFound:  "The requested model is not available.",
+	AIProviderError:  "The AI provider returned an error.",
+}
+
+// MapErrorToStateCode maps an API error to a bridge state error code.
+// Returns empty string if the error doesn't map to a known state code.
+func MapErrorToStateCode(err error) status.BridgeStateErrorCode {
+	if err == nil {
+		return ""
+	}
+	if IsRateLimitError(err) {
+		return AIRateLimited
+	}
+	if IsAuthError(err) {
+		return AIAuthFailed
+	}
+	if ParseContextLengthError(err) != nil {
+		return AIContextTooLong
+	}
+	if IsServerError(err) {
+		return AIProviderError
+	}
+	return ""
+}
 
 // ContextLengthError contains parsed details from context_length_exceeded errors
 type ContextLengthError struct {
