@@ -1179,10 +1179,6 @@ func detectVisionSupport(modelID string) bool {
 		strings.Contains(modelID, "vision")
 }
 
-// =============================================================================
-// Agent Management
-// =============================================================================
-
 // DefaultAgentID is the default agent identifier used when no specific agent is configured
 const DefaultAgentID = "agent_main"
 

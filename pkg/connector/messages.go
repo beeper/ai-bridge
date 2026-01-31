@@ -110,10 +110,6 @@ func NewImageMessage(role MessageRole, imageURL, mimeType string) UnifiedMessage
 	}
 }
 
-// ====================
-// OpenAI Conversions
-// ====================
-
 // ToOpenAIResponsesInput converts unified messages to OpenAI Responses API format
 func ToOpenAIResponsesInput(messages []UnifiedMessage) responses.ResponseInputParam {
 	var result responses.ResponseInputParam
