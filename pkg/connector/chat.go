@@ -17,6 +17,56 @@ import (
 	"maunium.net/go/mautrix/event"
 )
 
+// SearchUsers searches available AI models by name/ID
+func (oc *AIClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.ResolveIdentifierResponse, error) {
+	oc.log.Debug().Str("query", query).Msg("User search requested")
+
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return nil, nil
+	}
+
+	// Fetch available models
+	models, err := oc.listAvailableModels(ctx, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list models: %w", err)
+	}
+
+	// Filter models by query (match ID or display name)
+	var results []*bridgev2.ResolveIdentifierResponse
+	for i := range models {
+		model := &models[i]
+		displayName := FormatModelDisplay(model.ID)
+
+		// Check if query matches model ID or display name (case-insensitive)
+		if !strings.Contains(strings.ToLower(model.ID), query) &&
+			!strings.Contains(strings.ToLower(displayName), query) &&
+			!strings.Contains(strings.ToLower(model.Name), query) {
+			continue
+		}
+
+		userID := modelUserID(model.ID)
+		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
+		if err != nil {
+			oc.log.Warn().Err(err).Str("model", model.ID).Msg("Failed to get ghost for search result")
+			continue
+		}
+
+		results = append(results, &bridgev2.ResolveIdentifierResponse{
+			UserID: userID,
+			UserInfo: &bridgev2.UserInfo{
+				Name:        ptr.Ptr(displayName),
+				IsBot:       ptr.Ptr(false),
+				Identifiers: []string{model.ID},
+			},
+			Ghost: ghost,
+		})
+	}
+
+	oc.log.Info().Str("query", query).Int("results", len(results)).Msg("Search completed")
+	return results, nil
+}
+
 // GetContactList returns a list of available AI models as contacts
 func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
 	oc.log.Debug().Msg("Contact list requested")
@@ -558,6 +608,15 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 	if config.CodeInterpreterEnabled != nil {
 		meta.CodeInterpreterEnabled = *config.CodeInterpreterEnabled
 	}
+	if config.EmitThinking != nil {
+		meta.EmitThinking = *config.EmitThinking
+	}
+	if config.EmitToolArgs != nil {
+		meta.EmitToolArgs = *config.EmitToolArgs
+	}
+	if config.DefaultAgentID != "" {
+		meta.DefaultAgentID = config.DefaultAgentID
+	}
 
 	meta.LastRoomStateSync = time.Now().Unix()
 
@@ -569,6 +628,11 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 	// Persist changes
 	if err := portal.Save(ctx); err != nil {
 		oc.log.Warn().Err(err).Msg("Failed to save portal after config update")
+	}
+
+	// Re-broadcast room state to confirm changes to all clients
+	if err := oc.BroadcastRoomState(ctx, portal); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to re-broadcast room state after config update")
 	}
 }
 
@@ -655,6 +719,10 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 	// Send a notice about the model change from the bridge bot
 	notice := fmt.Sprintf("Switched from %s to %s", oldModelName, newModelName)
 	oc.sendSystemNotice(ctx, portal, notice)
+
+	// Update bridge info to resend room features state event with new capabilities
+	// This ensures the client knows what features the new model supports (vision, audio, etc.)
+	portal.UpdateBridgeInfo(ctx)
 }
 
 // BroadcastRoomState sends current room config to Matrix room state
@@ -677,6 +745,10 @@ func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Por
 		WebSearchEnabled:       ptr.Ptr(meta.WebSearchEnabled),
 		FileSearchEnabled:      ptr.Ptr(meta.FileSearchEnabled),
 		CodeInterpreterEnabled: ptr.Ptr(meta.CodeInterpreterEnabled),
+		EmitThinking:           ptr.Ptr(meta.EmitThinking),
+		EmitToolArgs:           ptr.Ptr(meta.EmitToolArgs),
+		DefaultAgentID:         meta.DefaultAgentID,
+		Capabilities:           &meta.Capabilities,
 	}
 
 	// Use bot intent to send state event

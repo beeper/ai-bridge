@@ -17,12 +17,23 @@ type ModelCache struct {
 // ModelCapabilities stores computed capabilities for a model
 // This is NOT sent to the API, just used for local caching
 type ModelCapabilities struct {
-	SupportsVision    bool `json:"supports_vision"`
-	SupportsReasoning bool `json:"supports_reasoning"` // Models that support reasoning_effort parameter
-	SupportsPDF       bool `json:"supports_pdf"`
-	SupportsImageGen  bool `json:"supports_image_gen"`
-	SupportsAudio     bool `json:"supports_audio"` // Models that accept audio input
-	SupportsVideo     bool `json:"supports_video"` // Models that accept video input
+	SupportsVision      bool `json:"supports_vision"`
+	SupportsReasoning   bool `json:"supports_reasoning"` // Models that support reasoning_effort parameter
+	SupportsPDF         bool `json:"supports_pdf"`
+	SupportsImageGen    bool `json:"supports_image_gen"`
+	SupportsAudio       bool `json:"supports_audio"`       // Models that accept audio input
+	SupportsVideo       bool `json:"supports_video"`       // Models that accept video input
+	SupportsToolCalling bool `json:"supports_tool_calling"` // Models that support function calling
+}
+
+// ToolsConfig stores per-room tool configuration
+// nil values mean "auto" (use defaults based on model/provider capabilities)
+type ToolsConfig struct {
+	Calculator          *bool `json:"calculator,omitempty"`            // Builtin calculator tool
+	WebSearch           *bool `json:"web_search,omitempty"`            // Builtin DuckDuckGo search (fallback when :online is off)
+	WebSearchProvider   bool  `json:"web_search_provider,omitempty"`   // OpenAI web search tool
+	CodeInterpreter     bool  `json:"code_interpreter,omitempty"`      // OpenAI code interpreter
+	UseOpenRouterOnline *bool `json:"use_openrouter_online,omitempty"` // OpenRouter :online plugin (default for OpenRouter)
 }
 
 // UserLoginMetadata is stored on each login row to keep per-user settings.
@@ -50,7 +61,8 @@ type PortalMetadata struct {
 	WelcomeSent         bool              `json:"welcome_sent,omitempty"`
 	Capabilities        ModelCapabilities `json:"capabilities,omitempty"`
 	LastRoomStateSync   int64             `json:"last_room_state_sync,omitempty"` // Track when we've synced room state
-	ToolsEnabled        bool              `json:"tools_enabled,omitempty"`        // Enable function calling tools
+	ToolsEnabled        bool              `json:"tools_enabled,omitempty"`        // Legacy: Enable function calling tools (deprecated, use ToolsConfig)
+	ToolsConfig         ToolsConfig       `json:"tools_config,omitempty"`         // Per-tool configuration
 
 	ConversationMode       string `json:"conversation_mode,omitempty"`
 	LastResponseID         string `json:"last_response_id,omitempty"`

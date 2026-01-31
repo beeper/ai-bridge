@@ -532,6 +532,14 @@ type RoomConfigEventContent struct {
 	FileSearchEnabled      *bool `json:"file_search_enabled,omitempty"`
 	CodeInterpreterEnabled *bool `json:"code_interpreter_enabled,omitempty"`
 
+	// Advanced settings
+	EmitThinking   *bool  `json:"emit_thinking,omitempty"`
+	EmitToolArgs   *bool  `json:"emit_tool_args,omitempty"`
+	DefaultAgentID string `json:"default_agent_id,omitempty"`
+
+	// Model capabilities
+	Capabilities *ModelCapabilities `json:"capabilities,omitempty"`
+
 	// Streaming configuration
 	Streaming *StreamingConfig `json:"streaming,omitempty"`
 }

@@ -194,18 +194,23 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 
 func (oc *OpenAIConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
 	return &bridgev2.NetworkGeneralCapabilities{
+		// Enable disappearing messages - we just delete from Matrix and DB
+		DisappearingMessages: true,
 		Provisioning: bridgev2.ProvisioningCapabilities{
 			ResolveIdentifier: bridgev2.ResolveIdentifierCapabilities{
 				CreateDM:       true,
 				LookupUsername: true,
 				ContactList:    true,
+				Search:         true,
 			},
 		},
 	}
 }
 
 func (oc *OpenAIConnector) GetBridgeInfoVersion() (info, capabilities int) {
-	return 1, 1
+	// Bump capabilities version when room features change.
+	// v2: Added UpdateBridgeInfo call on model switch to properly broadcast capability changes
+	return 1, 2
 }
 
 // FillPortalBridgeInfo sets custom room type for AI rooms
