@@ -71,10 +71,45 @@ func (m *OpenAIRemoteMessage) ConvertMessage(ctx context.Context, portal *bridge
 	if m.Metadata != nil && m.Metadata.Body == "" {
 		m.Metadata.Body = m.Content
 	}
+
+	// Build Extra map with AI-specific metadata
+	extra := map[string]any{}
+	if m.Metadata != nil {
+		if m.Metadata.CompletionID != "" {
+			extra["com.beeper.ai.completion_id"] = m.Metadata.CompletionID
+		}
+		if m.Metadata.FinishReason != "" {
+			extra["com.beeper.ai.finish_reason"] = m.Metadata.FinishReason
+		}
+		if m.Metadata.PromptTokens > 0 {
+			extra["com.beeper.ai.prompt_tokens"] = m.Metadata.PromptTokens
+		}
+		if m.Metadata.CompletionTokens > 0 {
+			extra["com.beeper.ai.completion_tokens"] = m.Metadata.CompletionTokens
+		}
+		if m.Metadata.Model != "" {
+			extra["com.beeper.ai.model"] = m.Metadata.Model
+		}
+		if m.Metadata.ReasoningTokens > 0 {
+			extra["com.beeper.ai.reasoning_tokens"] = m.Metadata.ReasoningTokens
+		}
+		if m.Metadata.HasToolCalls {
+			extra["com.beeper.ai.has_tool_calls"] = m.Metadata.HasToolCalls
+		}
+	}
+
+	// Get model from portal metadata as fallback
+	if _, hasModel := extra["com.beeper.ai.model"]; !hasModel {
+		if portalMeta, ok := portal.Metadata.(*PortalMetadata); ok && portalMeta.Model != "" {
+			extra["com.beeper.ai.model"] = portalMeta.Model
+		}
+	}
+
 	part := &bridgev2.ConvertedMessagePart{
 		ID:         networkid.PartID("0"),
 		Type:       event.EventMessage,
 		Content:    content,
+		Extra:      extra,
 		DBMetadata: m.Metadata,
 	}
 	return &bridgev2.ConvertedMessage{

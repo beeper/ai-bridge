@@ -24,6 +24,7 @@ const (
 	StreamContentReasoning  StreamContentType = "reasoning"
 	StreamContentToolCall   StreamContentType = "tool_call"
 	StreamContentToolResult StreamContentType = "tool_result"
+	StreamContentImage      StreamContentType = "image"
 )
 
 // RoomConfigEventContent represents the content of the room config state event

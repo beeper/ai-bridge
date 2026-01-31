@@ -220,6 +220,9 @@ func (oc *OpenAIConnector) GetDBMetaTypes() database.MetaTypes {
 		UserLogin: func() any {
 			return &UserLoginMetadata{}
 		},
+		Ghost: func() any {
+			return &GhostMetadata{}
+		},
 	}
 }
 
