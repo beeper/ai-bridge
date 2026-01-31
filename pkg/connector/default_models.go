@@ -3,7 +3,6 @@ package connector
 import "slices"
 
 // DefaultModels contains all default model definitions for each provider.
-// This consolidates model definitions that were previously duplicated across provider files.
 var DefaultModels = map[string][]ModelInfo{
 	"openai": {
 		{

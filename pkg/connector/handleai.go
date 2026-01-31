@@ -1421,9 +1421,7 @@ func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistan
 	}
 
 	title = strings.TrimSpace(title)
-	// Remove quotes if the model added them
 	title = strings.Trim(title, "\"'")
-	// Limit length
 	if len(title) > 50 {
 		title = title[:50]
 	}

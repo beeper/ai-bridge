@@ -19,7 +19,7 @@ import (
 type OpenRouterArchitecture struct {
 	InputModalities  []string `json:"input_modalities"`
 	OutputModalities []string `json:"output_modalities"`
-	Modality         string   `json:"modality"` // Legacy field
+	Modality         string   `json:"modality"`
 	Tokenizer        string   `json:"tokenizer"`
 	InstructType     string   `json:"instruct_type"`
 }
@@ -79,21 +79,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Fetch models from OpenRouter
 	models, err := fetchOpenRouterModels(*token)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching models: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Generate Go file
 	if err := generateGoFile(models, *outputFile); err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating file: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Printf("Generated %s with %d models\n", *outputFile, len(connector.BeeperModelList))
 
-	// Generate JSON file for clients
 	if err := generateJSONFile(models, *jsonFile); err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating JSON file: %v\n", err)
 		os.Exit(1)
@@ -125,7 +122,6 @@ func fetchOpenRouterModels(token string) (map[string]OpenRouterModel, error) {
 		return nil, err
 	}
 
-	// Index by ID
 	result := make(map[string]OpenRouterModel)
 	for _, model := range apiResp.Data {
 		result[model.ID] = model

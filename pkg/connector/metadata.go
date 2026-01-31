@@ -54,21 +54,14 @@ type PortalMetadata struct {
 	LastRoomStateSync   int64             `json:"last_room_state_sync,omitempty"` // Track when we've synced room state
 	ToolsEnabled        bool              `json:"tools_enabled,omitempty"`        // Enable function calling tools
 
-	// Conversation context mode: "messages" (build full history) or "responses" (use previous_response_id)
-	ConversationMode string `json:"conversation_mode,omitempty"` // Default: "messages"
-	LastResponseID   string `json:"last_response_id,omitempty"`  // For "responses" mode - chain responses
-
-	// Responses API built-in tools
-	WebSearchEnabled       bool `json:"web_search_enabled,omitempty"`
-	FileSearchEnabled      bool `json:"file_search_enabled,omitempty"`
-	CodeInterpreterEnabled bool `json:"code_interpreter_enabled,omitempty"`
-
-	// Streaming configuration
-	EmitThinking bool `json:"emit_thinking,omitempty"`  // Stream thinking/reasoning tokens
-	EmitToolArgs bool `json:"emit_tool_args,omitempty"` // Stream tool argument tokens
-
-	// Agent configuration (for multi-agent rooms)
-	DefaultAgentID string `json:"default_agent_id,omitempty"` // Which agent responds by default
+	ConversationMode       string `json:"conversation_mode,omitempty"`
+	LastResponseID         string `json:"last_response_id,omitempty"`
+	WebSearchEnabled       bool   `json:"web_search_enabled,omitempty"`
+	FileSearchEnabled      bool   `json:"file_search_enabled,omitempty"`
+	CodeInterpreterEnabled bool   `json:"code_interpreter_enabled,omitempty"`
+	EmitThinking           bool   `json:"emit_thinking,omitempty"`
+	EmitToolArgs           bool   `json:"emit_tool_args,omitempty"`
+	DefaultAgentID         string `json:"default_agent_id,omitempty"`
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild
