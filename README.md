@@ -1,69 +1,22 @@
 # Bridge AI chats into Beeper
 
-AI bridge is a multi-provider Matrix bridge for chatting with any model from providers like OpenAI, Anthropic, Google Gemini, and OpenRouter. It's built on the bridgev2 framework.
+AI bridge is a Matrix <-> AI bridge for Beeper built on mautrix-go bridgev2. It routes chats to models via OpenAI and OpenRouter (which includes Anthropic, Google, Meta, and more). Designed for Beeper Desktop.
+Rich features only work with alpha versions of Beeper Desktop. This bridge is highly experimental.
 
-AI bridge works best with Beeper Desktop.
+## Highlights
 
-Beeper Plus users can use most popular models with their existing subscription.
+- **Multi-provider routing** with prefixed model IDs (for example `openai/o3-mini`, `openai/gpt-5.2`, `anthropic/claude-sonnet-4.5` via OpenRouter)
+- **Per-model contacts** so each model appears as its own chat contact
+- **Streaming responses** with status updates
+- **Multimodal input** (images, PDFs, audio, video) when the selected model supports it
+- **Per-room settings** for model, temperature, system prompt, context limits, and tools
+- **User-managed keys** via login flow, plus optional Beeper-managed credentials
 
-## Features
+## Providers and example models
 
-- **Multi-provider support** with intelligent model routing (prefix-based: `openai/gpt-4o`, `anthropic/claude-3-5-sonnet`, etc.)
-- **Per-model contacts** - each model appears as a separate chat contact
-- **Streaming responses** with debounced progressive rendering
-- **Vision support** - automatic capability detection for image uploads
-- **Per-room configuration** - model, temperature, system prompt, context length
-- **User-provided API keys** - per-user billing via login flow
-- **Chat history persistence** with prompt reconstruction
-
-## Supported Providers
-
-| Provider | Example Models |
-|----------|----------------|
-| OpenAI | gpt-4o, gpt-4o-mini, o1, o3-mini |
-| OpenRouter | Various (pass-through) |
-
-## Setup
-
-Generate config with bbctl:
-
-```bash
-bbctl config --type bridgev2 sh-ai
-```
-
-Add the `network` section from `config.example.yaml`, then run:
-
-```bash
-./ai-bridge --config config.yaml
-```
-
-## Login Flows
-
-- **Shared key** - Set `network.openai.api_key` in config or `OPENAI_API_KEY` env var
-- **Personal key** - User selects provider and enters API key in Beeper
-- **Beeper SDK** - Pre-configured credentials from Beeper infrastructure
-
-## Configuration
-
-Key settings under `network`:
-
-```yaml
-network:
-  openai:
-    api_key: ""                    # Shared API key (or use OPENAI_API_KEY env)
-    default_model: gpt-4o-mini
-    default_temperature: 0.3
-    max_context_messages: 12
-    max_completion_tokens: 512
-    system_prompt: ""
-    request_timeout: 45s
-    enable_streaming: true
-  bridge:
-    command_prefix: "!ai"
-    typing_notifications: true
-```
-
-See `config.example.yaml` for full options.
+- **OpenAI**: `openai/o1`, `openai/o1-mini`, `openai/o3-mini`, `openai/gpt-4-turbo`
+- **OpenRouter**: `openai/gpt-5.2`, `anthropic/claude-sonnet-4.5`, `google/gemini-3-pro-preview`, `meta-llama/llama-4-maverick`, `qwen/qwen3-235b-a22b`
+- **Beeper aliases**: `beeper/default`, `beeper/fast`, `beeper/smart`, `beeper/reasoning`
 
 ## Build
 
@@ -78,8 +31,3 @@ Or use Docker:
 ```bash
 docker build -t ai-bridge .
 ```
-
-## Architecture
-
-- `cmd/ai-bridge/` - mxmain bootstrap
-- `pkg/connector/` - Provider implementations, message handling, login flows
