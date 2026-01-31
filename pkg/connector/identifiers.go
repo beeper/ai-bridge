@@ -100,13 +100,13 @@ func formatChatSlug(index int) string {
 	return fmt.Sprintf("chat-%d", index)
 }
 
-func parseChatSlug(slug string) int {
+func parseChatSlug(slug string) (int, bool) {
 	if suffix, ok := strings.CutPrefix(slug, "chat-"); ok {
 		if idx, err := strconv.Atoi(suffix); err == nil {
-			return idx
+			return idx, true
 		}
 	}
-	return 0
+	return 0, false
 }
 
 // MakeMessageID creates a message ID from a Matrix event ID

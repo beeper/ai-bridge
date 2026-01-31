@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"go/format"
 	"io"
 	"net/http"
 	"os"
@@ -352,6 +353,10 @@ var ModelManifest = struct {
 	for _, modelID := range modelIDs {
 		displayName := modelConfig.Models[modelID]
 		apiModel, hasAPIData := apiModels[modelID]
+		// Fallback to API name if display name override is empty
+		if displayName == "" && hasAPIData {
+			displayName = apiModel.Name
+		}
 		caps := detectCapabilities(modelID, apiModel, hasAPIData)
 
 		buf.WriteString(fmt.Sprintf(`		%q: {
@@ -444,7 +449,11 @@ var ModelManifest = struct {
 }
 `)
 
-	return os.WriteFile(outputPath, []byte(buf.String()), 0644)
+	formatted, err := format.Source([]byte(buf.String()))
+	if err != nil {
+		return fmt.Errorf("failed to format generated code: %w", err)
+	}
+	return os.WriteFile(outputPath, formatted, 0644)
 }
 
 // JSONModelInfo mirrors the connector.ModelInfo struct for JSON output
@@ -480,6 +489,10 @@ func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) e
 	for _, modelID := range modelIDs {
 		displayName := modelConfig.Models[modelID]
 		apiModel, hasAPIData := apiModels[modelID]
+		// Fallback to API name if display name override is empty
+		if displayName == "" && hasAPIData {
+			displayName = apiModel.Name
+		}
 		caps := detectCapabilities(modelID, apiModel, hasAPIData)
 
 		models = append(models, JSONModelInfo{
@@ -532,6 +545,7 @@ func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) e
 	if err != nil {
 		return err
 	}
+	data = append(data, '\n') // Add trailing newline
 
 	return os.WriteFile(outputPath, data, 0644)
 }
