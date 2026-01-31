@@ -28,6 +28,7 @@ var (
 	_ bridgev2.NetworkAPI                    = (*AIClient)(nil)
 	_ bridgev2.IdentifierResolvingNetworkAPI = (*AIClient)(nil)
 	_ bridgev2.ContactListingNetworkAPI      = (*AIClient)(nil)
+	_ bridgev2.UserSearchingNetworkAPI       = (*AIClient)(nil)
 	_ bridgev2.EditHandlingNetworkAPI        = (*AIClient)(nil)
 )
 
@@ -87,6 +88,15 @@ var aiBaseCaps = &event.RoomFeatures{
 	Reaction:            event.CapLevelRejected,
 	ReadReceipts:        true,
 	TypingNotifications: true,
+	DisappearingTimer: &event.DisappearingTimerCapability{
+		Types: []event.DisappearingType{event.DisappearingTypeAfterSend},
+		Timers: []jsontime.Milliseconds{
+			jsontime.MS(1 * time.Hour),
+			jsontime.MS(24 * time.Hour),
+			jsontime.MS(7 * 24 * time.Hour),
+			jsontime.MS(90 * 24 * time.Hour),
+		},
+	},
 }
 
 // buildCapabilityID constructs a deterministic capability ID based on model modalities.
