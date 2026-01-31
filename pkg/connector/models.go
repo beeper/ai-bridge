@@ -3,9 +3,6 @@ package connector
 import (
 	"fmt"
 	"strings"
-
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 // ModelBackend identifies which backend to use for a model
@@ -124,41 +121,8 @@ func BackendForProvider(provider string) ModelBackend {
 	}
 }
 
-// FormatModelDisplay formats a prefixed model ID for display
-// "openai/gpt-4o" → "GPT 4o"
-// "gemini/gemini-2.5-flash" → "Gemini 2.5 Flash"
-// "anthropic/claude-sonnet-4-5" → "Claude Sonnet 4.5"
+// FormatModelDisplay formats a prefixed model ID for display.
+// Delegates to GetModelDisplayName which uses the model manifest.
 func FormatModelDisplay(modelID string) string {
-	_, actualModel := ParseModelPrefix(modelID)
-	return formatModelDisplayName(actualModel)
-}
-
-// formatModelDisplayName formats a model name for display
-func formatModelDisplayName(model string) string {
-	// Handle common model naming patterns
-	model = strings.ReplaceAll(model, "-", " ")
-	model = strings.ReplaceAll(model, "_", " ")
-
-	caser := cases.Title(language.English)
-
-	// Capitalize words
-	words := strings.Fields(model)
-	for i, word := range words {
-		lower := strings.ToLower(word)
-		switch lower {
-		case "gpt":
-			words[i] = "GPT"
-		case "o1", "o3":
-			words[i] = strings.ToUpper(word)
-		default:
-			// Keep version numbers and other short words as-is, title-case the rest
-			if len(word) <= 3 {
-				words[i] = word
-			} else {
-				words[i] = caser.String(word)
-			}
-		}
-	}
-
-	return strings.Join(words, " ")
+	return GetModelDisplayName(modelID)
 }
