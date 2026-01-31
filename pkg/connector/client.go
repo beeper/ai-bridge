@@ -2,9 +2,11 @@ package connector
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +17,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/ptr"
 
 	"maunium.net/go/mautrix/bridgev2"
@@ -42,6 +45,52 @@ var rejectAllMediaFileFeatures = &event.FileFeatures{
 
 func cloneRejectAllMediaFeatures() *event.FileFeatures {
 	return rejectAllMediaFileFeatures.Clone()
+}
+
+// AI bridge capability constants
+const (
+	AIMaxTextLength = 100000
+	AIEditMaxAge    = 24 * time.Hour
+)
+
+func aiCapID() string {
+	return "com.beeper.ai.capabilities.2025"
+}
+
+// aiBaseCaps defines the base capabilities for AI chat rooms
+var aiBaseCaps = &event.RoomFeatures{
+	ID: aiCapID(),
+	Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
+		event.FmtBold:          event.CapLevelFullySupported,
+		event.FmtItalic:        event.CapLevelFullySupported,
+		event.FmtStrikethrough: event.CapLevelFullySupported,
+		event.FmtInlineCode:    event.CapLevelFullySupported,
+		event.FmtCodeBlock:     event.CapLevelFullySupported,
+		event.FmtBlockquote:    event.CapLevelFullySupported,
+		event.FmtUnorderedList: event.CapLevelFullySupported,
+		event.FmtOrderedList:   event.CapLevelFullySupported,
+		event.FmtInlineLink:    event.CapLevelFullySupported,
+	},
+	File: event.FileFeatureMap{
+		event.MsgVideo:      cloneRejectAllMediaFeatures(),
+		event.MsgAudio:      cloneRejectAllMediaFeatures(),
+		event.MsgFile:       cloneRejectAllMediaFeatures(),
+		event.CapMsgVoice:   cloneRejectAllMediaFeatures(),
+		event.CapMsgGIF:     cloneRejectAllMediaFeatures(),
+		event.CapMsgSticker: cloneRejectAllMediaFeatures(),
+		event.MsgImage:      cloneRejectAllMediaFeatures(),
+	},
+	MaxTextLength:       AIMaxTextLength,
+	Reply:               event.CapLevelFullySupported,
+	Thread:              event.CapLevelFullySupported,
+	Edit:                event.CapLevelFullySupported,
+	EditMaxCount:        10,
+	EditMaxAge:          ptr.Ptr(jsontime.S(AIEditMaxAge)),
+	Delete:              event.CapLevelPartialSupport,
+	DeleteMaxAge:        ptr.Ptr(jsontime.S(24 * time.Hour)),
+	Reaction:            event.CapLevelRejected,
+	ReadReceipts:        true,
+	TypingNotifications: true,
 }
 
 type AIClient struct {
@@ -315,14 +364,16 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 
 	// Parse model from ghost ID (format: "model-{escaped-model-id}")
 	if modelID := parseModelFromGhostID(ghostID); modelID != "" {
-		caps := getModelCapabilities(modelID)
+		caps := getModelCapabilities(modelID, nil)
 		displayName := FormatModelDisplay(modelID)
 		if caps.SupportsVision {
 			displayName += " (Vision)"
 		}
 		return &bridgev2.UserInfo{
-			Name:  ptr.Ptr(displayName),
-			IsBot: ptr.Ptr(false),
+			Name:         ptr.Ptr(displayName),
+			IsBot:        ptr.Ptr(false),
+			Identifiers:  []string{modelID},
+			ExtraUpdates: updateGhostLastSync,
 		}, nil
 	}
 
@@ -333,29 +384,31 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 	}, nil
 }
 
+// updateGhostLastSync updates the ghost's LastSync timestamp
+func updateGhostLastSync(_ context.Context, ghost *bridgev2.Ghost) bool {
+	meta, ok := ghost.Metadata.(*GhostMetadata)
+	if !ok || meta == nil {
+		ghost.Metadata = &GhostMetadata{LastSync: jsontime.U(time.Now())}
+		return true
+	}
+	// Force save if last sync was more than 24 hours ago
+	forceSave := time.Since(meta.LastSync.Time) > 24*time.Hour
+	meta.LastSync = jsontime.U(time.Now())
+	return forceSave
+}
+
 func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
 	meta := portalMeta(portal)
 
-	// Base capabilities for all AI chats
-	caps := &event.RoomFeatures{
-		File: event.FileFeatureMap{
-			event.MsgVideo:      cloneRejectAllMediaFeatures(),
-			event.MsgAudio:      cloneRejectAllMediaFeatures(),
-			event.MsgFile:       cloneRejectAllMediaFeatures(),
-			event.CapMsgVoice:   cloneRejectAllMediaFeatures(),
-			event.CapMsgGIF:     cloneRejectAllMediaFeatures(),
-			event.CapMsgSticker: cloneRejectAllMediaFeatures(),
-		},
-		Reply:               event.CapLevelFullySupported,
-		Thread:              event.CapLevelFullySupported,
-		Edit:                event.CapLevelFullySupported,
-		Delete:              event.CapLevelPartialSupport,
-		TypingNotifications: true, // Always enabled
-		ReadReceipts:        true,
-	}
+	// Clone base capabilities
+	caps := ptr.Clone(aiBaseCaps)
 
-	// Add image support if model supports vision (from cached capabilities)
+	// Build dynamic capability ID based on supported features
+	capID := aiCapID()
+
+	// Add image input support if model supports vision
 	if meta.Capabilities.SupportsVision {
+		capID += "+vision"
 		caps.File[event.MsgImage] = &event.FileFeatures{
 			MimeTypes: map[string]event.CapabilitySupportLevel{
 				"image/png":  event.CapLevelFullySupported,
@@ -364,13 +417,30 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 				"image/gif":  event.CapLevelFullySupported,
 			},
 			Caption:          event.CapLevelFullySupported,
-			MaxCaptionLength: 10000,
+			MaxCaptionLength: AIMaxTextLength,
 			MaxSize:          20 * 1024 * 1024, // 20MB
 		}
-	} else {
-		caps.File[event.MsgImage] = cloneRejectAllMediaFeatures()
 	}
 
+	// Add PDF support if model supports it
+	if meta.Capabilities.SupportsPDF {
+		capID += "+pdf"
+		caps.File[event.MsgFile] = &event.FileFeatures{
+			MimeTypes: map[string]event.CapabilitySupportLevel{
+				"application/pdf": event.CapLevelFullySupported,
+			},
+			Caption:          event.CapLevelFullySupported,
+			MaxCaptionLength: AIMaxTextLength,
+			MaxSize:          50 * 1024 * 1024, // 50MB
+		}
+	}
+
+	// Add image generation marker if model supports it (for UI hints)
+	if meta.Capabilities.SupportsImageGen {
+		capID += "+imagegen"
+	}
+
+	caps.ID = capID
 	return caps
 }
 
@@ -393,7 +463,8 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 	// Create a contact for each model
 	contacts := make([]*bridgev2.ResolveIdentifierResponse, 0, len(models))
 
-	for _, model := range models {
+	for i := range models {
+		model := &models[i]
 		// Get or create ghost for this model
 		userID := modelUserID(model.ID)
 		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
@@ -402,8 +473,8 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 			continue
 		}
 
-		// Create user info
-		caps := getModelCapabilities(model.ID)
+		// Create user info - pass ModelInfo for accurate capability detection
+		caps := getModelCapabilities(model.ID, model)
 		displayName := FormatModelDisplay(model.ID)
 		if caps.SupportsVision {
 			displayName += " (Vision)"
@@ -434,21 +505,21 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 
 	// Validate model exists (check cache first)
 	models, _ := oc.listAvailableModels(ctx, false)
-	var found bool
+	var modelInfo *ModelInfo
 	for i := range models {
 		if models[i].ID == modelID {
-			found = true
+			modelInfo = &models[i]
 			break
 		}
 	}
 
-	if !found {
+	if modelInfo == nil {
 		// Model not in cache, assume it's valid (user might have access to beta models)
 		oc.log.Warn().Str("model", modelID).Msg("Model not in cache, assuming valid")
 	}
 
-	// Compute capabilities for this model
-	caps := getModelCapabilities(modelID)
+	// Compute capabilities for this model - pass ModelInfo for accurate detection if available
+	caps := getModelCapabilities(modelID, modelInfo)
 
 	// Get or create ghost
 	userID := modelUserID(modelID)
@@ -456,6 +527,9 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ghost: %w", err)
 	}
+
+	// Ensure ghost display name is set before returning
+	oc.ensureGhostDisplayName(ctx, modelID)
 
 	var chatResp *bridgev2.CreateChatResponse
 	if createChat {
@@ -491,14 +565,11 @@ func (oc *AIClient) createNewChat(ctx context.Context, modelID string, caps Mode
 	portalMeta := &PortalMetadata{
 		Model:        modelID,
 		Slug:         formatChatSlug(chatIndex),
-		Title:        fmt.Sprintf("%s Chat %d", FormatModelDisplay(modelID), chatIndex),
+		Title:        fmt.Sprintf("AI Chat with %s", FormatModelDisplay(modelID)),
 		Capabilities: caps,
 	}
 
-	portalKey := networkid.PortalKey{
-		ID:       networkid.PortalID(fmt.Sprintf("openai:model:%s:%s", modelUserID(modelID), formatChatSlug(chatIndex))),
-		Receiver: oc.UserLogin.ID,
-	}
+	portalKey := portalKeyForChat(oc.UserLogin.ID)
 
 	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
 	if err != nil {
@@ -548,6 +619,12 @@ func (oc *AIClient) allocateNextChatIndex(ctx context.Context) (int, error) {
 
 // buildChatMembers creates the standard member list for a chat portal
 func (oc *AIClient) buildChatMembers(modelID string) *bridgev2.ChatMemberList {
+	caps := getModelCapabilities(modelID, nil)
+	displayName := FormatModelDisplay(modelID)
+	if caps.SupportsVision {
+		displayName += " (Vision)"
+	}
+
 	return &bridgev2.ChatMemberList{
 		MemberMap: map[networkid.UserID]bridgev2.ChatMember{
 			humanUserID(oc.UserLogin.ID): {
@@ -556,6 +633,9 @@ func (oc *AIClient) buildChatMembers(modelID string) *bridgev2.ChatMemberList {
 					SenderLogin: oc.UserLogin.ID,
 				},
 				Membership: event.MembershipJoin,
+				MemberEventExtra: map[string]any{
+					"com.beeper.exclude_from_timeline": true,
+				},
 			},
 			modelUserID(modelID): {
 				EventSender: bridgev2.EventSender{
@@ -563,9 +643,13 @@ func (oc *AIClient) buildChatMembers(modelID string) *bridgev2.ChatMemberList {
 					SenderLogin: oc.UserLogin.ID,
 				},
 				Membership: event.MembershipJoin,
+				MemberEventExtra: map[string]any{
+					"com.beeper.exclude_from_timeline": true,
+				},
 				UserInfo: &bridgev2.UserInfo{
-					Name:  ptr.Ptr(FormatModelDisplay(modelID)),
-					IsBot: ptr.Ptr(false),
+					Name:        ptr.Ptr(displayName),
+					IsBot:       ptr.Ptr(false),
+					Identifiers: []string{modelID},
 				},
 			},
 		},
@@ -764,6 +848,10 @@ func (oc *AIClient) regenerateFromEdit(
 					},
 				}, nil)
 			}
+		}
+		// Clean up database record to prevent orphaned messages
+		if err := oc.UserLogin.Bridge.DB.Message.Delete(ctx, assistantResponse.RowID); err != nil {
+			oc.log.Warn().Err(err).Str("msg_id", string(assistantResponse.ID)).Msg("Failed to delete redacted message from database")
 		}
 	}
 
@@ -1103,10 +1191,12 @@ func (oc *AIClient) handleSlashCommand(
 		}
 		// Update model
 		meta.Model = arg
-		meta.Capabilities = getModelCapabilities(arg)
+		meta.Capabilities = getModelCapabilities(arg, oc.findModelInfo(arg))
 		if err := portal.Save(ctx); err != nil {
 			oc.log.Warn().Err(err).Msg("Failed to save portal after model change")
 		}
+		// Ensure the new model's ghost has its display name set
+		oc.ensureGhostDisplayName(ctx, arg)
 		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Model changed to: %s", arg))
 		return true
 
@@ -1491,7 +1581,7 @@ func (oc *AIClient) createForkedChat(
 	title := fmt.Sprintf("%s (Fork)", sourceTitle)
 
 	// Create portal key
-	portalKey := portalKeyForChat(oc.UserLogin.ID, slug)
+	portalKey := portalKeyForChat(oc.UserLogin.ID)
 
 	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
 	if err != nil {
@@ -1535,16 +1625,19 @@ func (oc *AIClient) createForkedChat(
 }
 
 // copyMessagesToChat queues messages to be bridged to the new chat
+// Returns the count of successfully queued messages
 func (oc *AIClient) copyMessagesToChat(
-	ctx context.Context,
+	_ context.Context,
 	destPortal *bridgev2.Portal,
 	messages []*database.Message,
 ) int {
 	copiedCount := 0
+	skippedCount := 0
 
 	for _, srcMsg := range messages {
 		srcMeta := messageMeta(srcMsg)
 		if srcMeta == nil || srcMeta.Body == "" {
+			skippedCount++
 			continue
 		}
 
@@ -1579,6 +1672,15 @@ func (oc *AIClient) copyMessagesToChat(
 
 		oc.UserLogin.QueueRemoteEvent(remoteMsg)
 		copiedCount++
+	}
+
+	// Log if partial copy occurred (some messages were skipped)
+	if skippedCount > 0 {
+		oc.log.Warn().
+			Int("copied", copiedCount).
+			Int("skipped", skippedCount).
+			Int("total", len(messages)).
+			Msg("Partial fork - some messages were skipped due to missing metadata")
 	}
 
 	return copiedCount
@@ -1988,14 +2090,22 @@ func (oc *AIClient) streamingResponse(
 		return false, nil
 	}
 
+	// generatedImage tracks a pending image from image generation
+	type generatedImage struct {
+		itemID   string
+		imageB64 string
+	}
+
 	// Track streaming state
 	var (
-		accumulated    strings.Builder
-		reasoning      strings.Builder
-		firstToken     = true
-		initialEventID id.EventID
-		finishReason   string
-		sequenceNum    int // Global sequence number for ordering all stream events
+		accumulated     strings.Builder
+		reasoning       strings.Builder
+		firstToken      = true
+		initialEventID  id.EventID
+		finishReason    string
+		sequenceNum     int               // Global sequence number for ordering all stream events
+		responseID      string            // Capture response ID for persistence and context chaining
+		pendingImages   []generatedImage  // Images generated during the response
 	)
 
 	// Process stream events - no debouncing, stream every delta immediately
@@ -2009,6 +2119,8 @@ func (oc *AIClient) streamingResponse(
 			// First token - send initial message synchronously to capture event_id
 			if firstToken && accumulated.Len() > 0 {
 				firstToken = false
+				// Ensure ghost display name is set before sending the first message
+				oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
 				initialEventID = oc.sendInitialStreamMessage(ctx, portal, accumulated.String())
 				if initialEventID == "" {
 					log.Error().Msg("Failed to send initial streaming message")
@@ -2079,20 +2191,56 @@ func (oc *AIClient) streamingResponse(
 				})
 			}
 
+		case "response.image_generation_call.in_progress", "response.image_generation_call.generating":
+			// Image generation in progress
+			if initialEventID != "" {
+				sequenceNum++
+				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentToolCall, "", sequenceNum, map[string]any{
+					"tool_name": "image_generation",
+					"item_id":   streamEvent.ItemID,
+					"status":    "generating",
+				})
+			}
+			log.Debug().Str("item_id", streamEvent.ItemID).Msg("Image generation in progress")
+
+		case "response.image_generation_call.completed":
+			// Image generation completed - the actual image data will be in response.completed
+			if initialEventID != "" {
+				sequenceNum++
+				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentToolResult, "", sequenceNum, map[string]any{
+					"tool_name": "image_generation",
+					"item_id":   streamEvent.ItemID,
+					"status":    "completed",
+				})
+			}
+			log.Info().Str("item_id", streamEvent.ItemID).Msg("Image generation completed")
+
 		case "response.completed":
 			if streamEvent.Response.Status == "completed" {
 				finishReason = "stop"
 			} else {
 				finishReason = string(streamEvent.Response.Status)
 			}
-			// Store response ID for "responses" mode context chaining
-			if streamEvent.Response.ID != "" && meta.ConversationMode == "responses" {
-				meta.LastResponseID = streamEvent.Response.ID
-				if err := portal.Save(ctx); err != nil {
-					log.Warn().Err(err).Msg("Failed to save portal after storing response ID")
+			// Capture response ID for persistence (will save to DB and portal after streaming completes)
+			if streamEvent.Response.ID != "" {
+				responseID = streamEvent.Response.ID
+			}
+
+			// Extract any generated images from response output
+			for _, output := range streamEvent.Response.Output {
+				if output.Type == "image_generation_call" {
+					imgOutput := output.AsImageGenerationCall()
+					if imgOutput.Status == "completed" && imgOutput.Result != "" {
+						pendingImages = append(pendingImages, generatedImage{
+							itemID:   imgOutput.ID,
+							imageB64: imgOutput.Result,
+						})
+						log.Debug().Str("item_id", imgOutput.ID).Msg("Captured generated image from response")
+					}
 				}
 			}
-			log.Debug().Str("reason", finishReason).Str("response_id", streamEvent.Response.ID).Msg("Response stream completed")
+
+			log.Debug().Str("reason", finishReason).Str("response_id", responseID).Int("images", len(pendingImages)).Msg("Response stream completed")
 
 		case "error":
 			log.Error().Str("error", streamEvent.Message).Msg("Responses API stream error")
@@ -2121,12 +2269,61 @@ func (oc *AIClient) streamingResponse(
 	// Send final edit to persist complete content with metadata (including reasoning)
 	if initialEventID != "" {
 		oc.sendFinalEditWithReasoning(ctx, portal, initialEventID, accumulated.String(), reasoning.String(), meta, finishReason)
+
+		// Save assistant message to database for history reconstruction
+		// This is CRITICAL - without this, the AI only sees user messages and tries to answer all of them
+		modelID := oc.effectiveModel(meta)
+		assistantMsg := &database.Message{
+			ID:        networkid.MessageID(fmt.Sprintf("openai:%s", initialEventID.String())),
+			Room:      portal.PortalKey,
+			SenderID:  modelUserID(modelID),
+			MXID:      initialEventID,
+			Timestamp: time.Now(),
+			Metadata: &MessageMetadata{
+				Role:         "assistant",
+				Body:         accumulated.String(),
+				CompletionID: responseID,
+				FinishReason: finishReason,
+				Model:        modelID,
+			},
+		}
+		if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, assistantMsg); err != nil {
+			log.Warn().Err(err).Msg("Failed to save assistant message to database")
+		} else {
+			log.Debug().Str("msg_id", string(assistantMsg.ID)).Msg("Saved assistant message to database")
+		}
+
+		// Save LastResponseID for "responses" mode context chaining AFTER message persistence
+		// This ensures we don't save an ID for a message that failed to persist
+		if meta.ConversationMode == "responses" && responseID != "" {
+			meta.LastResponseID = responseID
+			if err := portal.Save(ctx); err != nil {
+				log.Warn().Err(err).Msg("Failed to save portal after storing response ID")
+			}
+		}
+	}
+
+	// Send any generated images as separate messages
+	for _, img := range pendingImages {
+		imageData, mimeType, err := decodeBase64Image(img.imageB64)
+		if err != nil {
+			log.Warn().Err(err).Str("item_id", img.itemID).Msg("Failed to decode generated image")
+			continue
+		}
+		eventID, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType)
+		if err != nil {
+			log.Warn().Err(err).Str("item_id", img.itemID).Msg("Failed to send generated image to Matrix")
+			continue
+		}
+		log.Info().Stringer("event_id", eventID).Str("item_id", img.itemID).Msg("Sent generated image to Matrix")
 	}
 
 	log.Info().
 		Str("finish_reason", finishReason).
 		Int("content_length", accumulated.Len()).
 		Int("reasoning_length", reasoning.Len()).
+		Str("response_id", responseID).
+		Int("images_sent", len(pendingImages)).
 		Msg("Responses API streaming finished")
 
 	// Generate room title after first response
@@ -2258,9 +2455,21 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 	if meta.WelcomeSent {
 		return
 	}
+
+	// Mark as sent BEFORE queuing to prevent duplicate welcome messages on race
+	meta.WelcomeSent = true
+	if err := portal.Save(ctx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to persist welcome message state")
+		return // Don't send if we can't persist state
+	}
+
 	modelID := oc.effectiveModel(meta)
 	modelName := FormatModelDisplay(modelID)
 	body := fmt.Sprintf("This chat was created automatically. Send a message to start talking to %s.", modelName)
+
+	// Ensure ghost display name is set before sending welcome message
+	oc.ensureGhostDisplayName(ctx, modelID)
+
 	event := &OpenAIRemoteMessage{
 		PortalKey: portal.PortalKey,
 		ID:        networkid.MessageID(fmt.Sprintf("openai:welcome:%s", uuid.NewString())),
@@ -2278,10 +2487,6 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 		},
 	}
 	oc.UserLogin.QueueRemoteEvent(event)
-	meta.WelcomeSent = true
-	if err := portal.Save(ctx); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to persist welcome message state")
-	}
 }
 
 // effectiveModel returns the full prefixed model ID (e.g., "openai/gpt-5.2")
@@ -2405,7 +2610,7 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 	if config.Model != "" {
 		meta.Model = config.Model
 		// Update capabilities when model changes
-		meta.Capabilities = getModelCapabilities(config.Model)
+		meta.Capabilities = getModelCapabilities(config.Model, oc.findModelInfo(config.Model))
 	}
 	if config.SystemPrompt != "" {
 		meta.SystemPrompt = config.SystemPrompt
@@ -2548,6 +2753,28 @@ func (oc *AIClient) sendSystemNotice(ctx context.Context, portal *bridgev2.Porta
 		Parsed: content,
 	}, nil); err != nil {
 		oc.log.Warn().Err(err).Msg("Failed to send system notice")
+	}
+}
+
+// ensureGhostDisplayName ensures the ghost has its display name set before sending messages.
+// This fixes the issue where ghosts appear with raw user IDs instead of formatted names.
+func (oc *AIClient) ensureGhostDisplayName(ctx context.Context, modelID string) {
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, modelUserID(modelID))
+	if err != nil || ghost == nil {
+		return
+	}
+	// Only update if name is not already set
+	if ghost.Name == "" || !ghost.NameSet {
+		displayName := FormatModelDisplay(modelID)
+		caps := getModelCapabilities(modelID, oc.findModelInfo(modelID))
+		if caps.SupportsVision {
+			displayName += " (Vision)"
+		}
+		ghost.UpdateInfo(ctx, &bridgev2.UserInfo{
+			Name:  ptr.Ptr(displayName),
+			IsBot: ptr.Ptr(false),
+		})
+		oc.log.Debug().Str("model", modelID).Str("name", displayName).Msg("Updated ghost display name")
 	}
 }
 
@@ -2697,12 +2924,108 @@ func supportsReasoning(modelID string) bool {
 	return false
 }
 
-// getModelCapabilities computes capabilities for a model
-func getModelCapabilities(modelID string) ModelCapabilities {
-	return ModelCapabilities{
+// decodeBase64Image decodes a base64-encoded image and detects its MIME type
+func decodeBase64Image(b64Data string) ([]byte, string, error) {
+	data, err := base64.StdEncoding.DecodeString(b64Data)
+	if err != nil {
+		return nil, "", fmt.Errorf("base64 decode failed: %w", err)
+	}
+	mimeType := http.DetectContentType(data)
+	// Fallback to PNG if detection fails (common for AI-generated images)
+	if mimeType == "application/octet-stream" {
+		mimeType = "image/png"
+	}
+	return data, mimeType, nil
+}
+
+// sendGeneratedImage uploads an AI-generated image to Matrix and sends it as a message
+func (oc *AIClient) sendGeneratedImage(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	imageData []byte,
+	mimeType string,
+) (id.EventID, error) {
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return "", fmt.Errorf("failed to get model intent")
+	}
+
+	// Generate filename based on timestamp and mime type
+	ext := "png"
+	switch mimeType {
+	case "image/jpeg":
+		ext = "jpg"
+	case "image/webp":
+		ext = "webp"
+	case "image/gif":
+		ext = "gif"
+	}
+	fileName := fmt.Sprintf("generated-%d.%s", time.Now().UnixMilli(), ext)
+
+	// Upload to Matrix
+	uri, file, err := intent.UploadMedia(ctx, portal.MXID, imageData, fileName, mimeType)
+	if err != nil {
+		return "", fmt.Errorf("upload failed: %w", err)
+	}
+
+	// Build image message content
+	content := &event.MessageEventContent{
+		MsgType: event.MsgImage,
+		Body:    fileName,
+		Info: &event.FileInfo{
+			MimeType: mimeType,
+			Size:     len(imageData),
+		},
+	}
+	if file != nil {
+		content.File = file
+	} else {
+		content.URL = uri
+	}
+
+	// Send message
+	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{Parsed: content}, nil)
+	if err != nil {
+		return "", fmt.Errorf("send failed: %w", err)
+	}
+	return resp.EventID, nil
+}
+
+// findModelInfo looks up ModelInfo from the user's model cache by ID
+func (oc *AIClient) findModelInfo(modelID string) *ModelInfo {
+	meta := loginMetadata(oc.UserLogin)
+	if meta.ModelCache == nil {
+		return nil
+	}
+	for i := range meta.ModelCache.Models {
+		if meta.ModelCache.Models[i].ID == modelID {
+			return &meta.ModelCache.Models[i]
+		}
+	}
+	return nil
+}
+
+// getModelCapabilities computes capabilities for a model.
+// If info is provided, it uses the ModelInfo fields for accurate capability detection.
+// Otherwise, it falls back to heuristic detection based on modelID.
+func getModelCapabilities(modelID string, info *ModelInfo) ModelCapabilities {
+	caps := ModelCapabilities{
 		SupportsVision:    detectVisionSupport(modelID),
 		SupportsReasoning: supportsReasoning(modelID),
 	}
+
+	// Use ModelInfo if available (more accurate than heuristics)
+	if info != nil {
+		caps.SupportsVision = info.SupportsVision
+		caps.SupportsPDF = info.SupportsPDF
+		caps.SupportsImageGen = info.SupportsImageGen
+		// Also override reasoning if the info has it
+		if info.SupportsReasoning {
+			caps.SupportsReasoning = true
+		}
+	}
+
+	return caps
 }
 
 // detectVisionSupport checks if a model supports vision/images
@@ -2847,11 +3170,6 @@ func (oc *AIClient) listAllChatPortals(ctx context.Context) ([]*bridgev2.Portal,
 }
 
 func (oc *AIClient) createChat(ctx context.Context, title, systemPrompt string) (*bridgev2.CreateChatResponse, error) {
-	if strings.TrimSpace(title) == "" {
-		meta := loginMetadata(oc.UserLogin)
-		next := meta.NextChatIndex + 1
-		title = fmt.Sprintf("ChatGPT %d", next)
-	}
 	portal, info, err := oc.spawnPortal(ctx, title, systemPrompt)
 	if err != nil {
 		return nil, err
@@ -2877,9 +3195,9 @@ func (oc *AIClient) spawnPortal(ctx context.Context, title, systemPrompt string)
 	slug := formatChatSlug(index)
 	if title == "" {
 		modelName := FormatModelDisplay(defaultModelID)
-		title = fmt.Sprintf("%s %d", modelName, index)
+		title = fmt.Sprintf("AI Chat with %s", modelName)
 	}
-	key := portalKeyForChat(oc.UserLogin.ID, slug)
+	key := portalKeyForChat(oc.UserLogin.ID)
 	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, key)
 	if err != nil {
 		meta.NextChatIndex--
@@ -2889,7 +3207,7 @@ func (oc *AIClient) spawnPortal(ctx context.Context, title, systemPrompt string)
 	pmeta.Slug = slug
 	pmeta.Title = title
 	pmeta.Model = defaultModelID
-	pmeta.Capabilities = getModelCapabilities(defaultModelID)
+	pmeta.Capabilities = getModelCapabilities(defaultModelID, oc.findModelInfo(defaultModelID))
 	if systemPrompt != "" {
 		pmeta.SystemPrompt = systemPrompt
 	}
@@ -2919,9 +3237,9 @@ func (oc *AIClient) createNewChatWithModel(ctx context.Context, modelID string) 
 
 	slug := formatChatSlug(chatIndex)
 	modelName := FormatModelDisplay(modelID)
-	title := fmt.Sprintf("%s %d", modelName, chatIndex)
+	title := fmt.Sprintf("AI Chat with %s", modelName)
 
-	key := portalKeyForChat(oc.UserLogin.ID, slug)
+	key := portalKeyForChat(oc.UserLogin.ID)
 	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, key)
 	if err != nil {
 		return nil, nil, err
@@ -2931,7 +3249,7 @@ func (oc *AIClient) createNewChatWithModel(ctx context.Context, modelID string) 
 	pmeta.Slug = slug
 	pmeta.Title = title
 	pmeta.Model = modelID
-	pmeta.Capabilities = getModelCapabilities(modelID)
+	pmeta.Capabilities = getModelCapabilities(modelID, oc.findModelInfo(modelID))
 
 	portal.RoomType = database.RoomTypeDM
 	portal.OtherUserID = modelUserID(modelID)

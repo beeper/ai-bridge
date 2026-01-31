@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"go.mau.fi/util/jsontime"
 	"maunium.net/go/mautrix/bridgev2/database"
 )
 
@@ -17,6 +18,8 @@ type ModelCache struct {
 type ModelCapabilities struct {
 	SupportsVision    bool `json:"supports_vision"`
 	SupportsReasoning bool `json:"supports_reasoning"` // Models that support reasoning_effort parameter
+	SupportsPDF       bool `json:"supports_pdf"`
+	SupportsImageGen  bool `json:"supports_image_gen"`
 }
 
 // UserLoginMetadata is stored on each login row to keep per-user settings.
@@ -64,6 +67,14 @@ type MessageMetadata struct {
 	FinishReason     string `json:"finish_reason,omitempty"`
 	PromptTokens     int64  `json:"prompt_tokens,omitempty"`
 	CompletionTokens int64  `json:"completion_tokens,omitempty"`
+	Model            string `json:"model,omitempty"`
+	ReasoningTokens  int64  `json:"reasoning_tokens,omitempty"`
+	HasToolCalls     bool   `json:"has_tool_calls,omitempty"`
+}
+
+// GhostMetadata stores metadata for AI model ghosts
+type GhostMetadata struct {
+	LastSync jsontime.Unix `json:"last_sync,omitempty"`
 }
 
 // CopyFrom allows the metadata struct to participate in mautrix's meta merge.
@@ -89,6 +100,15 @@ func (mm *MessageMetadata) CopyFrom(other any) {
 	}
 	if src.CompletionTokens != 0 {
 		mm.CompletionTokens = src.CompletionTokens
+	}
+	if src.Model != "" {
+		mm.Model = src.Model
+	}
+	if src.ReasoningTokens != 0 {
+		mm.ReasoningTokens = src.ReasoningTokens
+	}
+	if src.HasToolCalls {
+		mm.HasToolCalls = src.HasToolCalls
 	}
 }
 

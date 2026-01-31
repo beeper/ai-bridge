@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rs/xid"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -17,9 +18,9 @@ func makeUserLoginID(mxid id.UserID) networkid.UserLoginID {
 	return networkid.UserLoginID(fmt.Sprintf("openai:%s", escaped))
 }
 
-func portalKeyForChat(loginID networkid.UserLoginID, slug string) networkid.PortalKey {
+func portalKeyForChat(loginID networkid.UserLoginID) networkid.PortalKey {
 	return networkid.PortalKey{
-		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:%s", loginID, slug)),
+		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:%s", loginID, xid.New().String())),
 		Receiver: loginID,
 	}
 }
