@@ -9,6 +9,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 )
 
 var (
@@ -25,6 +26,12 @@ type OpenAIRemoteMessage struct {
 	Content   string
 	Timestamp time.Time
 	Metadata  *MessageMetadata
+
+	// New schema fields
+	FormattedContent string            // HTML formatted content
+	ReplyToEventID   id.EventID        // For m.relates_to threading
+	ToolCallEventIDs []string          // References to tool call events
+	ImageEventIDs    []string          // References to generated image events
 }
 
 func (m *OpenAIRemoteMessage) GetType() bridgev2.RemoteEventType {
@@ -68,43 +75,131 @@ func (m *OpenAIRemoteMessage) ConvertMessage(ctx context.Context, portal *bridge
 		MsgType: event.MsgText,
 		Body:    m.Content,
 	}
+
+	// Add formatted content if available
+	if m.FormattedContent != "" {
+		content.Format = event.FormatHTML
+		content.FormattedBody = m.FormattedContent
+	}
+
 	if m.Metadata != nil && m.Metadata.Body == "" {
 		m.Metadata.Body = m.Content
 	}
 
-	// Build Extra map with AI-specific metadata
+	// Build the new com.beeper.ai nested structure
 	extra := map[string]any{}
-	addIfNotEmpty := func(key string, val any) {
-		switch v := val.(type) {
-		case string:
-			if v != "" {
-				extra[key] = v
+
+	// Get model from metadata or portal fallback
+	model := ""
+	if m.Metadata != nil && m.Metadata.Model != "" {
+		model = m.Metadata.Model
+	} else if portalMeta, ok := portal.Metadata.(*PortalMetadata); ok && portalMeta.Model != "" {
+		model = portalMeta.Model
+	}
+
+	// Build the com.beeper.ai content block
+	aiContent := map[string]any{}
+
+	if m.Metadata != nil {
+		// Core fields
+		if m.Metadata.TurnID != "" {
+			aiContent["turn_id"] = m.Metadata.TurnID
+		}
+		if m.Metadata.AgentID != "" {
+			aiContent["agent_id"] = m.Metadata.AgentID
+		}
+		if model != "" {
+			aiContent["model"] = model
+		}
+
+		// Status and completion info
+		aiContent["status"] = TurnStatusCompleted
+		if m.Metadata.FinishReason != "" {
+			aiContent["finish_reason"] = m.Metadata.FinishReason
+		}
+
+		// Embedded thinking
+		if m.Metadata.ThinkingContent != "" {
+			thinking := map[string]any{
+				"content": m.Metadata.ThinkingContent,
 			}
-		case int64:
-			if v > 0 {
-				extra[key] = v
+			if m.Metadata.ThinkingTokenCount > 0 {
+				thinking["token_count"] = m.Metadata.ThinkingTokenCount
 			}
-		case bool:
-			if v {
-				extra[key] = v
+			aiContent["thinking"] = thinking
+		}
+
+		// Usage info
+		usage := map[string]any{}
+		if m.Metadata.PromptTokens > 0 {
+			usage["prompt_tokens"] = m.Metadata.PromptTokens
+		}
+		if m.Metadata.CompletionTokens > 0 {
+			usage["completion_tokens"] = m.Metadata.CompletionTokens
+		}
+		if m.Metadata.ReasoningTokens > 0 {
+			usage["reasoning_tokens"] = m.Metadata.ReasoningTokens
+		}
+		if len(usage) > 0 {
+			aiContent["usage"] = usage
+		}
+
+		// Tool call references
+		if len(m.ToolCallEventIDs) > 0 {
+			aiContent["tool_calls"] = m.ToolCallEventIDs
+		} else if m.Metadata.HasToolCalls && len(m.Metadata.ToolCalls) > 0 {
+			// Build tool call IDs from metadata
+			toolCallIDs := make([]string, 0, len(m.Metadata.ToolCalls))
+			for _, tc := range m.Metadata.ToolCalls {
+				if tc.CallEventID != "" {
+					toolCallIDs = append(toolCallIDs, tc.CallEventID)
+				}
 			}
+			if len(toolCallIDs) > 0 {
+				aiContent["tool_calls"] = toolCallIDs
+			}
+		}
+
+		// Image references
+		if len(m.ImageEventIDs) > 0 {
+			aiContent["images"] = m.ImageEventIDs
+		}
+
+		// Timing info
+		timing := map[string]any{}
+		if m.Metadata.StartedAtMs > 0 {
+			timing["started_at"] = m.Metadata.StartedAtMs
+		}
+		if m.Metadata.FirstTokenAtMs > 0 {
+			timing["first_token_at"] = m.Metadata.FirstTokenAtMs
+		}
+		if m.Metadata.CompletedAtMs > 0 {
+			timing["completed_at"] = m.Metadata.CompletedAtMs
+		}
+		if len(timing) > 0 {
+			aiContent["timing"] = timing
+		}
+
+		// Legacy fields for backwards compatibility
+		if m.Metadata.CompletionID != "" {
+			aiContent["completion_id"] = m.Metadata.CompletionID
 		}
 	}
 
-	if m.Metadata != nil {
-		addIfNotEmpty("com.beeper.ai.completion_id", m.Metadata.CompletionID)
-		addIfNotEmpty("com.beeper.ai.finish_reason", m.Metadata.FinishReason)
-		addIfNotEmpty("com.beeper.ai.prompt_tokens", m.Metadata.PromptTokens)
-		addIfNotEmpty("com.beeper.ai.completion_tokens", m.Metadata.CompletionTokens)
-		addIfNotEmpty("com.beeper.ai.model", m.Metadata.Model)
-		addIfNotEmpty("com.beeper.ai.reasoning_tokens", m.Metadata.ReasoningTokens)
-		addIfNotEmpty("com.beeper.ai.has_tool_calls", m.Metadata.HasToolCalls)
+	// Only add the block if we have content
+	if len(aiContent) > 0 {
+		extra["com.beeper.ai"] = aiContent
 	}
 
-	// Get model from portal metadata as fallback
-	if _, hasModel := extra["com.beeper.ai.model"]; !hasModel {
-		if portalMeta, ok := portal.Metadata.(*PortalMetadata); ok && portalMeta.Model != "" {
-			extra["com.beeper.ai.model"] = portalMeta.Model
+	// Build m.relates_to for threading if we have a reply target
+	if m.ReplyToEventID != "" {
+		extra["m.relates_to"] = map[string]any{
+			"rel_type":       "m.thread",
+			"event_id":       m.ReplyToEventID.String(),
+			"is_falling_back": true,
+			"m.in_reply_to": map[string]any{
+				"event_id": m.ReplyToEventID.String(),
+			},
 		}
 	}
 

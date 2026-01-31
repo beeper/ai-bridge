@@ -1,6 +1,10 @@
 package connector
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"time"
+
 	"go.mau.fi/util/jsontime"
 	"maunium.net/go/mautrix/bridgev2/database"
 )
@@ -58,6 +62,13 @@ type PortalMetadata struct {
 	WebSearchEnabled       bool `json:"web_search_enabled,omitempty"`
 	FileSearchEnabled      bool `json:"file_search_enabled,omitempty"`
 	CodeInterpreterEnabled bool `json:"code_interpreter_enabled,omitempty"`
+
+	// Streaming configuration
+	EmitThinking bool `json:"emit_thinking,omitempty"` // Stream thinking/reasoning tokens
+	EmitToolArgs bool `json:"emit_tool_args,omitempty"` // Stream tool argument tokens
+
+	// Agent configuration (for multi-agent rooms)
+	DefaultAgentID string `json:"default_agent_id,omitempty"` // Which agent responds by default
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild
@@ -72,6 +83,40 @@ type MessageMetadata struct {
 	Model            string `json:"model,omitempty"`
 	ReasoningTokens  int64  `json:"reasoning_tokens,omitempty"`
 	HasToolCalls     bool   `json:"has_tool_calls,omitempty"`
+
+	// Turn tracking for the new schema
+	TurnID  string `json:"turn_id,omitempty"`  // Unique identifier for this assistant turn
+	AgentID string `json:"agent_id,omitempty"` // Which agent generated this (for multi-agent rooms)
+
+	// Tool call tracking
+	ToolCalls []ToolCallMetadata `json:"tool_calls,omitempty"` // List of tool calls in this turn
+
+	// Timing information
+	StartedAtMs    int64 `json:"started_at_ms,omitempty"`    // Unix ms when generation started
+	FirstTokenAtMs int64 `json:"first_token_at_ms,omitempty"` // Unix ms of first token
+	CompletedAtMs  int64 `json:"completed_at_ms,omitempty"`   // Unix ms when completed
+
+	// Thinking/reasoning content (embedded, not separate)
+	ThinkingContent    string `json:"thinking_content,omitempty"`     // Full thinking text
+	ThinkingTokenCount int    `json:"thinking_token_count,omitempty"` // Number of thinking tokens
+}
+
+// ToolCallMetadata tracks a tool call within a message
+type ToolCallMetadata struct {
+	CallID       string         `json:"call_id"`
+	ToolName     string         `json:"tool_name"`
+	ToolType     string         `json:"tool_type"` // builtin, provider, function, mcp
+	Input        map[string]any `json:"input,omitempty"`
+	Output       map[string]any `json:"output,omitempty"`
+	Status       string         `json:"status"`                  // pending, running, completed, failed, timeout, cancelled
+	ResultStatus string         `json:"result_status,omitempty"` // success, error, partial
+	ErrorMessage string         `json:"error_message,omitempty"`
+	StartedAtMs  int64          `json:"started_at_ms,omitempty"`
+	CompletedAtMs int64         `json:"completed_at_ms,omitempty"`
+
+	// Event IDs for timeline events (if emitted as separate events)
+	CallEventID   string `json:"call_event_id,omitempty"`
+	ResultEventID string `json:"result_event_id,omitempty"`
 }
 
 // GhostMetadata stores metadata for AI model ghosts
@@ -110,6 +155,54 @@ func (mm *MessageMetadata) CopyFrom(other any) {
 		mm.ReasoningTokens = src.ReasoningTokens
 	}
 	mm.HasToolCalls = src.HasToolCalls
+
+	// Copy new fields
+	if src.TurnID != "" {
+		mm.TurnID = src.TurnID
+	}
+	if src.AgentID != "" {
+		mm.AgentID = src.AgentID
+	}
+	if len(src.ToolCalls) > 0 {
+		mm.ToolCalls = src.ToolCalls
+	}
+	if src.StartedAtMs != 0 {
+		mm.StartedAtMs = src.StartedAtMs
+	}
+	if src.FirstTokenAtMs != 0 {
+		mm.FirstTokenAtMs = src.FirstTokenAtMs
+	}
+	if src.CompletedAtMs != 0 {
+		mm.CompletedAtMs = src.CompletedAtMs
+	}
+	if src.ThinkingContent != "" {
+		mm.ThinkingContent = src.ThinkingContent
+	}
+	if src.ThinkingTokenCount != 0 {
+		mm.ThinkingTokenCount = src.ThinkingTokenCount
+	}
 }
 
 var _ database.MetaMerger = (*MessageMetadata)(nil)
+
+// NewTurnID generates a new unique turn ID
+func NewTurnID() string {
+	// Use a simple timestamp-based ID for now
+	// Could be enhanced with UUID or other unique ID generation
+	return "turn_" + generateShortID()
+}
+
+// NewCallID generates a new unique call ID for tool calls
+func NewCallID() string {
+	return "call_" + generateShortID()
+}
+
+// generateShortID generates a short unique ID (12 chars) using crypto/rand
+func generateShortID() string {
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp if crypto/rand fails
+		return hex.EncodeToString([]byte(time.Now().Format("060102150405")))[:12]
+	}
+	return hex.EncodeToString(b)
+}
