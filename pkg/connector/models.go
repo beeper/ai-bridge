@@ -133,15 +133,6 @@ func FormatModelDisplay(modelID string) string {
 	return formatModelDisplayName(actualModel)
 }
 
-// FormatModelDisplayWithVision formats a model ID for display, appending " (Vision)" if supported
-func FormatModelDisplayWithVision(modelID string, caps ModelCapabilities) string {
-	name := FormatModelDisplay(modelID)
-	if caps.SupportsVision {
-		name += " (Vision)"
-	}
-	return name
-}
-
 // formatModelDisplayName formats a model name for display
 func formatModelDisplayName(model string) string {
 	// Handle common model naming patterns
