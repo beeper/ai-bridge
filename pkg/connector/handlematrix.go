@@ -115,6 +115,11 @@ func (oc *AIClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixE
 	}
 	msgMeta.Body = newBody
 
+	// Persist the updated metadata
+	if err := oc.UserLogin.Bridge.DB.Message.Update(ctx, edit.EditTarget); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to persist edited message metadata")
+	}
+
 	// Only regenerate if this was a user message
 	if msgMeta.Role != "user" {
 		// Just update the content, don't regenerate
@@ -153,18 +158,24 @@ func (oc *AIClient) regenerateFromEdit(
 	}
 
 	// Find the assistant response that came after the edited message
+	// Messages come newest-first from GetLastNInPortal, so lower indices are newer
 	var assistantResponse *database.Message
-	foundEditedMessage := false
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+
+	// First find the index of the edited message
+	editedIdx := -1
+	for i, msg := range messages {
 		if msg.ID == editedMessage.ID {
-			foundEditedMessage = true
-			continue
+			editedIdx = i
+			break
 		}
-		if foundEditedMessage {
-			msgMeta := messageMeta(msg)
+	}
+
+	if editedIdx > 0 {
+		// Search toward newer messages (lower indices) for assistant response
+		for i := editedIdx - 1; i >= 0; i-- {
+			msgMeta := messageMeta(messages[i])
 			if msgMeta != nil && msgMeta.Role == "assistant" {
-				assistantResponse = msg
+				assistantResponse = messages[i]
 				break
 			}
 		}
@@ -870,8 +881,12 @@ func (oc *AIClient) buildPromptForRegenerate(
 			}
 		}
 
-		// Reverse to get chronological order
-		for i, j := len(prompt)-1, 0; i > j; i, j = i-1, j+1 {
+		// Reverse to get chronological order (skip system message at index 0 if present)
+		startIdx := 0
+		if systemPrompt != "" && len(prompt) > 0 {
+			startIdx = 1
+		}
+		for i, j := len(prompt)-1, startIdx; i > j; i, j = i-1, j+1 {
 			prompt[i], prompt[j] = prompt[j], prompt[i]
 		}
 	}
