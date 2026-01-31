@@ -1,7 +1,8 @@
 # Bridge AI chats into Beeper
 
-AI bridge is a Matrix <-> AI bridge for Beeper built on mautrix-go bridgev2. It routes chats to models via OpenAI and OpenRouter (which includes Anthropic, Google, Meta, and more). Designed for Beeper Desktop.
-Rich features only work with alpha versions of Beeper Desktop. This bridge is highly experimental.
+Highly experimental Matrix ↔︎ AI bridge for Beeper, built on top of [mautrix/bridgev2](https://pkg.go.dev/maunium.net/go/mautrix/bridgev2). Supports any OpenAI-compatible provider, including OpenRouter.
+
+Currently best works with alpha versions of Beeper Desktop. Beeper Plus users can use it without providing their own keys by picking the Beeper AI provider when adding an account.
 
 ## Highlights
 
@@ -11,12 +12,6 @@ Rich features only work with alpha versions of Beeper Desktop. This bridge is hi
 - **Multimodal input** (images, PDFs, audio, video) when the selected model supports it
 - **Per-room settings** for model, temperature, system prompt, context limits, and tools
 - **User-managed keys** via login flow, plus optional Beeper-managed credentials
-
-## Providers and example models
-
-- **OpenAI**: `openai/o1`, `openai/o1-mini`, `openai/o3-mini`, `openai/gpt-4-turbo`
-- **OpenRouter**: `openai/gpt-5.2`, `anthropic/claude-sonnet-4.5`, `google/gemini-3-pro-preview`, `meta-llama/llama-4-maverick`, `qwen/qwen3-235b-a22b`
-- **Beeper aliases**: `beeper/default`, `beeper/fast`, `beeper/smart`, `beeper/reasoning`
 
 ## Build
 
