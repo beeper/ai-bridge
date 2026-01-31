@@ -1282,3 +1282,152 @@ func detectVisionSupport(modelID string) bool {
 		strings.HasPrefix(modelID, "gpt-4-turbo") ||
 		strings.Contains(modelID, "vision")
 }
+
+// =============================================================================
+// Agent Management
+// =============================================================================
+
+// DefaultAgentID is the default agent identifier used when no specific agent is configured
+const DefaultAgentID = "agent_main"
+
+// getEffectiveAgentID returns the agent ID to use for this portal
+// Returns the portal's configured default agent, or falls back to DefaultAgentID
+func (oc *AIClient) getEffectiveAgentID(meta *PortalMetadata) string {
+	if meta != nil && meta.DefaultAgentID != "" {
+		return meta.DefaultAgentID
+	}
+	return DefaultAgentID
+}
+
+// getAgentIntent returns the Matrix intent for a specific agent in the portal
+// For now, all agents use the same model ghost - in the future, different agents
+// could have different models/ghosts
+func (oc *AIClient) getAgentIntent(ctx context.Context, portal *bridgev2.Portal, agentID string) bridgev2.MatrixAPI {
+	// Currently agents share the model intent
+	// In the future, we could look up agent-specific models from AgentsEventContent
+	return oc.getModelIntent(ctx, portal)
+}
+
+// AgentState tracks the state of an active agent turn
+type AgentState struct {
+	AgentID     string
+	TurnID      string
+	Status      string // pending, thinking, generating, tool_use, completed, failed, cancelled
+	StartedAt   time.Time
+	Model       string
+	ToolCalls   []string // Event IDs of tool calls
+	ImageEvents []string // Event IDs of generated images
+}
+
+// createAgentState creates a new AgentState for starting a turn
+func (oc *AIClient) createAgentState(meta *PortalMetadata) *AgentState {
+	return &AgentState{
+		AgentID:   oc.getEffectiveAgentID(meta),
+		TurnID:    NewTurnID(),
+		Status:    string(TurnStatusPending),
+		StartedAt: time.Now(),
+		Model:     oc.effectiveModel(meta),
+	}
+}
+
+// sendAgentsStateEvent sends the agents configuration as a room state event
+func (oc *AIClient) sendAgentsStateEvent(ctx context.Context, portal *bridgev2.Portal, agents []AgentConfig, orchestration *OrchestrationConfig) error {
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return fmt.Errorf("no intent available for sending agents state")
+	}
+
+	stateContent := &AgentsEventContent{
+		Agents:        agents,
+		Orchestration: orchestration,
+	}
+
+	_, err := intent.SendState(ctx, portal.MXID, AgentsEventType, "", &event.Content{
+		Parsed: stateContent,
+	}, time.Time{})
+	if err != nil {
+		oc.log.Err(err).Msg("Failed to send agents state event")
+		return err
+	}
+
+	oc.log.Debug().
+		Int("agent_count", len(agents)).
+		Msg("Sent agents state event")
+
+	return nil
+}
+
+// getDefaultAgentConfig returns the default agent configuration for a portal
+// This is used when no explicit agents are configured in the room state
+func (oc *AIClient) getDefaultAgentConfig(meta *PortalMetadata) AgentConfig {
+	modelID := oc.effectiveModel(meta)
+	caps := getModelCapabilities(modelID, oc.findModelInfo(modelID))
+
+	return AgentConfig{
+		AgentID:     DefaultAgentID,
+		Name:        FormatModelDisplayWithVision(modelID, caps),
+		Model:       modelID,
+		UserID:      string(oc.UserLogin.UserMXID),
+		Role:        "primary",
+		Description: "Main AI assistant",
+	}
+}
+
+// emitAgentHandoff sends an agent handoff event when one agent delegates to another
+func (oc *AIClient) emitAgentHandoff(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	fromAgent, toAgent string,
+	fromTurnID string,
+	reason string,
+	handoffContext map[string]any,
+) error {
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return fmt.Errorf("no intent available for agent handoff")
+	}
+
+	content := &AgentHandoffContent{
+		Body:    fmt.Sprintf("Handing off from %s to %s", fromAgent, toAgent),
+		MsgType: "m.notice",
+		Handoff: &AgentHandoffData{
+			FromAgent: fromAgent,
+			ToAgent:   toAgent,
+			FromTurn:  fromTurnID,
+			Reason:    reason,
+			Context:   handoffContext,
+		},
+	}
+
+	// Add relates_to reference to the original turn
+	rawContent := map[string]any{
+		"body":                        content.Body,
+		"msgtype":                     content.MsgType,
+		"com.beeper.ai.agent_handoff": content.Handoff,
+	}
+
+	if fromTurnID != "" {
+		rawContent["m.relates_to"] = map[string]any{
+			"rel_type": "m.reference",
+			"event_id": fromTurnID,
+		}
+	}
+
+	eventContent := &event.Content{Raw: rawContent}
+	_, err := intent.SendMessage(ctx, portal.MXID, AgentHandoffEventType, eventContent, nil)
+	if err != nil {
+		oc.log.Err(err).
+			Str("from_agent", fromAgent).
+			Str("to_agent", toAgent).
+			Msg("Failed to send agent handoff event")
+		return err
+	}
+
+	oc.log.Debug().
+		Str("from_agent", fromAgent).
+		Str("to_agent", toAgent).
+		Str("reason", reason).
+		Msg("Sent agent handoff event")
+
+	return nil
+}

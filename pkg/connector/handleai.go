@@ -29,6 +29,42 @@ const (
 	maxRetryAttempts = 3 // Maximum retry attempts for context length errors
 )
 
+// streamingState tracks the state of a streaming response
+type streamingState struct {
+	turnID         string
+	agentID        string
+	startedAtMs    int64
+	firstTokenAtMs int64
+	completedAtMs  int64
+
+	accumulated    strings.Builder
+	reasoning      strings.Builder
+	toolCalls      []ToolCallMetadata
+	pendingImages  []generatedImage
+	initialEventID id.EventID
+	finishReason   string
+	responseID     string
+	sequenceNum    int
+	firstToken     bool
+}
+
+// generatedImage tracks a pending image from image generation
+type generatedImage struct {
+	itemID   string
+	imageB64 string
+	turnID   string
+}
+
+// activeToolCall tracks a tool call that's in progress
+type activeToolCall struct {
+	callID      string
+	toolName    string
+	toolType    ToolType
+	input       strings.Builder
+	startedAtMs int64
+	eventID     id.EventID // Event ID of the tool call timeline event
+}
+
 // dispatchCompletionInternal contains the actual completion logic
 func (oc *AIClient) dispatchCompletionInternal(
 	ctx context.Context,
@@ -179,23 +215,19 @@ func (oc *AIClient) streamingResponse(
 		return false, nil
 	}
 
-	// generatedImage tracks a pending image from image generation
-	type generatedImage struct {
-		itemID   string
-		imageB64 string
+	// Initialize streaming state with turn tracking
+	state := &streamingState{
+		turnID:      NewTurnID(),
+		agentID:     meta.DefaultAgentID, // Use default agent for now
+		startedAtMs: time.Now().UnixMilli(),
+		firstToken:  true,
 	}
 
-	// Track streaming state
-	var (
-		accumulated    strings.Builder
-		reasoning      strings.Builder
-		firstToken     = true
-		initialEventID id.EventID
-		finishReason   string
-		sequenceNum    int              // Global sequence number for ordering all stream events
-		responseID     string           // Capture response ID for persistence and context chaining
-		pendingImages  []generatedImage // Images generated during the response
-	)
+	// Track active tool calls
+	activeTools := make(map[string]*activeToolCall)
+
+	// Emit generation status: starting
+	oc.emitGenerationStatus(ctx, portal, state, "starting", "Starting generation...", nil)
 
 	// Process stream events - no debouncing, stream every delta immediately
 	for stream.Next() {
@@ -203,116 +235,262 @@ func (oc *AIClient) streamingResponse(
 
 		switch streamEvent.Type {
 		case "response.output_text.delta":
-			accumulated.WriteString(streamEvent.Delta)
+			state.accumulated.WriteString(streamEvent.Delta)
 
 			// First token - send initial message synchronously to capture event_id
-			if firstToken && accumulated.Len() > 0 {
-				firstToken = false
+			if state.firstToken && state.accumulated.Len() > 0 {
+				state.firstToken = false
+				state.firstTokenAtMs = time.Now().UnixMilli()
 				// Ensure ghost display name is set before sending the first message
 				oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
-				initialEventID = oc.sendInitialStreamMessage(ctx, portal, accumulated.String())
-				if initialEventID == "" {
+				state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID)
+				if state.initialEventID == "" {
 					log.Error().Msg("Failed to send initial streaming message")
 					return false, nil
 				}
+				// Update status to generating
+				oc.emitGenerationStatus(ctx, portal, state, "generating", "Generating response...", nil)
 			}
 
 			// Stream every text delta immediately (no debouncing for snappy UX)
-			if !firstToken && initialEventID != "" {
-				sequenceNum++
-				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentText, streamEvent.Delta, sequenceNum, nil)
+			if !state.firstToken && state.initialEventID != "" {
+				state.sequenceNum++
+				oc.emitStreamDelta(ctx, portal, state, StreamContentText, streamEvent.Delta, nil)
 			}
 
 		case "response.reasoning_text.delta":
-			reasoning.WriteString(streamEvent.Delta)
-			// Stream reasoning tokens in real-time too
-			if !firstToken && initialEventID != "" {
-				sequenceNum++
-				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentReasoning, streamEvent.Delta, sequenceNum, nil)
+			state.reasoning.WriteString(streamEvent.Delta)
+
+			// Check if this is first content (reasoning before text)
+			if state.firstToken && state.reasoning.Len() > 0 {
+				state.firstToken = false
+				state.firstTokenAtMs = time.Now().UnixMilli()
+				oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
+				// Send empty initial message - will be replaced with content later
+				state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID)
+				if state.initialEventID == "" {
+					log.Error().Msg("Failed to send initial streaming message")
+					return false, nil
+				}
+				// Update status to thinking
+				oc.emitGenerationStatus(ctx, portal, state, "thinking", "Thinking...", nil)
+			}
+
+			// Stream reasoning tokens in real-time
+			if !state.firstToken && state.initialEventID != "" {
+				state.sequenceNum++
+				oc.emitStreamDelta(ctx, portal, state, StreamContentThinking, streamEvent.Delta, nil)
 			}
 
 		case "response.function_call_arguments.delta":
+			// Get or create active tool call
+			tool, exists := activeTools[streamEvent.ItemID]
+			if !exists {
+				tool = &activeToolCall{
+					callID:      NewCallID(),
+					toolName:    streamEvent.Name,
+					toolType:    ToolTypeFunction,
+					startedAtMs: time.Now().UnixMilli(),
+				}
+				activeTools[streamEvent.ItemID] = tool
+
+				// Send tool call timeline event
+				tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
+
+				// Update status to tool_use
+				oc.emitGenerationStatus(ctx, portal, state, "tool_use", fmt.Sprintf("Calling %s...", streamEvent.Name), &GenerationDetails{
+					CurrentTool: streamEvent.Name,
+					CallID:      tool.callID,
+				})
+			}
+
+			// Accumulate arguments
+			tool.input.WriteString(streamEvent.Delta)
+
 			// Stream function call arguments as they arrive
-			if initialEventID != "" {
-				sequenceNum++
-				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentToolCall, streamEvent.Delta, sequenceNum, map[string]any{
+			if state.initialEventID != "" {
+				state.sequenceNum++
+				oc.emitStreamDelta(ctx, portal, state, StreamContentToolInput, streamEvent.Delta, map[string]any{
+					"call_id":   tool.callID,
 					"tool_name": streamEvent.Name,
-					"item_id":   streamEvent.ItemID,
-					"status":    "streaming",
 				})
 			}
 
 		case "response.function_call_arguments.done":
-			// Function call complete - execute the tool and stream result
-			if initialEventID != "" && meta.ToolsEnabled {
+			// Function call complete - execute the tool and send result
+			tool, exists := activeTools[streamEvent.ItemID]
+			if !exists {
+				// Create tool if we missed the delta events
+				tool = &activeToolCall{
+					callID:      NewCallID(),
+					toolName:    streamEvent.Name,
+					toolType:    ToolTypeFunction,
+					startedAtMs: time.Now().UnixMilli(),
+				}
+				tool.input.WriteString(streamEvent.Arguments)
+				activeTools[streamEvent.ItemID] = tool
+			}
+
+			if state.initialEventID != "" && meta.ToolsEnabled {
 				result, err := oc.executeBuiltinTool(ctx, streamEvent.Name, streamEvent.Arguments)
+				resultStatus := ResultStatusSuccess
 				if err != nil {
 					log.Warn().Err(err).Str("tool", streamEvent.Name).Msg("Tool execution failed")
 					result = fmt.Sprintf("Error: %s", err.Error())
+					resultStatus = ResultStatusError
 				}
-				sequenceNum++
-				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentToolResult, result, sequenceNum, map[string]any{
+
+				// Parse input for storage
+				var inputMap map[string]any
+				_ = json.Unmarshal([]byte(streamEvent.Arguments), &inputMap)
+
+				// Send tool result timeline event
+				resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, result, resultStatus)
+
+				// Track tool call in metadata
+				state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+					CallID:        tool.callID,
+					ToolName:      streamEvent.Name,
+					ToolType:      string(tool.toolType),
+					Input:         inputMap,
+					Output:        map[string]any{"result": result},
+					Status:        string(ToolStatusCompleted),
+					ResultStatus:  string(resultStatus),
+					StartedAtMs:   tool.startedAtMs,
+					CompletedAtMs: time.Now().UnixMilli(),
+					CallEventID:   tool.eventID.String(),
+					ResultEventID: resultEventID.String(),
+				})
+
+				// Stream result
+				state.sequenceNum++
+				oc.emitStreamDelta(ctx, portal, state, StreamContentToolResult, result, map[string]any{
+					"call_id":   tool.callID,
 					"tool_name": streamEvent.Name,
-					"item_id":   streamEvent.ItemID,
 					"status":    "completed",
 				})
+
+				// Update status back to generating
+				oc.emitGenerationStatus(ctx, portal, state, "generating", "Continuing generation...", nil)
 			}
 
 		case "response.web_search_call.searching":
 			// Web search starting
-			if initialEventID != "" {
-				sequenceNum++
-				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentToolCall, "", sequenceNum, map[string]any{
-					"tool_name": "web_search",
-					"item_id":   streamEvent.ItemID,
-					"status":    "searching",
-				})
+			tool := &activeToolCall{
+				callID:      NewCallID(),
+				toolName:    "web_search",
+				toolType:    ToolTypeProvider,
+				startedAtMs: time.Now().UnixMilli(),
 			}
+			activeTools[streamEvent.ItemID] = tool
+
+			// Send tool call timeline event
+			tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
+
+			// Update status
+			oc.emitGenerationStatus(ctx, portal, state, "tool_use", "Searching the web...", &GenerationDetails{
+				CurrentTool: "web_search",
+				CallID:      tool.callID,
+			})
+
+			// Emit tool progress
+			oc.emitToolProgress(ctx, portal, state, tool, ToolStatusRunning, "Searching...", 0)
 
 		case "response.web_search_call.completed":
 			// Web search completed
-			if initialEventID != "" {
-				sequenceNum++
-				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentToolResult, "", sequenceNum, map[string]any{
+			tool, exists := activeTools[streamEvent.ItemID]
+			if exists {
+				// Send tool result timeline event
+				resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, "", ResultStatusSuccess)
+
+				// Track tool call
+				state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+					CallID:        tool.callID,
+					ToolName:      "web_search",
+					ToolType:      string(tool.toolType),
+					Status:        string(ToolStatusCompleted),
+					ResultStatus:  string(ResultStatusSuccess),
+					StartedAtMs:   tool.startedAtMs,
+					CompletedAtMs: time.Now().UnixMilli(),
+					CallEventID:   tool.eventID.String(),
+					ResultEventID: resultEventID.String(),
+				})
+
+				// Emit completion
+				state.sequenceNum++
+				oc.emitStreamDelta(ctx, portal, state, StreamContentToolResult, "", map[string]any{
+					"call_id":   tool.callID,
 					"tool_name": "web_search",
-					"item_id":   streamEvent.ItemID,
 					"status":    "completed",
 				})
 			}
 
+			// Update status back to generating
+			oc.emitGenerationStatus(ctx, portal, state, "generating", "Continuing generation...", nil)
+
 		case "response.image_generation_call.in_progress", "response.image_generation_call.generating":
 			// Image generation in progress
-			if initialEventID != "" {
-				sequenceNum++
-				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentToolCall, "", sequenceNum, map[string]any{
-					"tool_name": "image_generation",
-					"item_id":   streamEvent.ItemID,
-					"status":    "generating",
-				})
+			tool, exists := activeTools[streamEvent.ItemID]
+			if !exists {
+				tool = &activeToolCall{
+					callID:      NewCallID(),
+					toolName:    "image_generation",
+					toolType:    ToolTypeProvider,
+					startedAtMs: time.Now().UnixMilli(),
+				}
+				activeTools[streamEvent.ItemID] = tool
+
+				// Send tool call timeline event
+				tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
 			}
+
+			// Update status
+			oc.emitGenerationStatus(ctx, portal, state, "image_generating", "Generating image...", &GenerationDetails{
+				CurrentTool: "image_generation",
+				CallID:      tool.callID,
+			})
+
+			// Emit tool progress
+			oc.emitToolProgress(ctx, portal, state, tool, ToolStatusRunning, "Generating image...", 50)
+
 			log.Debug().Str("item_id", streamEvent.ItemID).Msg("Image generation in progress")
 
 		case "response.image_generation_call.completed":
 			// Image generation completed - the actual image data will be in response.completed
-			if initialEventID != "" {
-				sequenceNum++
-				oc.emitStreamEvent(ctx, portal, initialEventID, StreamContentToolResult, "", sequenceNum, map[string]any{
+			tool, exists := activeTools[streamEvent.ItemID]
+			if exists {
+				// Track tool call
+				state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+					CallID:        tool.callID,
+					ToolName:      "image_generation",
+					ToolType:      string(tool.toolType),
+					Status:        string(ToolStatusCompleted),
+					ResultStatus:  string(ResultStatusSuccess),
+					StartedAtMs:   tool.startedAtMs,
+					CompletedAtMs: time.Now().UnixMilli(),
+					CallEventID:   tool.eventID.String(),
+				})
+
+				state.sequenceNum++
+				oc.emitStreamDelta(ctx, portal, state, StreamContentToolResult, "", map[string]any{
+					"call_id":   tool.callID,
 					"tool_name": "image_generation",
-					"item_id":   streamEvent.ItemID,
 					"status":    "completed",
 				})
 			}
 			log.Info().Str("item_id", streamEvent.ItemID).Msg("Image generation completed")
 
 		case "response.completed":
+			state.completedAtMs = time.Now().UnixMilli()
+
 			if streamEvent.Response.Status == "completed" {
-				finishReason = "stop"
+				state.finishReason = "stop"
 			} else {
-				finishReason = string(streamEvent.Response.Status)
+				state.finishReason = string(streamEvent.Response.Status)
 			}
 			// Capture response ID for persistence (will save to DB and portal after streaming completes)
 			if streamEvent.Response.ID != "" {
-				responseID = streamEvent.Response.ID
+				state.responseID = streamEvent.Response.ID
 			}
 
 			// Extract any generated images from response output
@@ -320,16 +498,20 @@ func (oc *AIClient) streamingResponse(
 				if output.Type == "image_generation_call" {
 					imgOutput := output.AsImageGenerationCall()
 					if imgOutput.Status == "completed" && imgOutput.Result != "" {
-						pendingImages = append(pendingImages, generatedImage{
+						state.pendingImages = append(state.pendingImages, generatedImage{
 							itemID:   imgOutput.ID,
 							imageB64: imgOutput.Result,
+							turnID:   state.turnID,
 						})
 						log.Debug().Str("item_id", imgOutput.ID).Msg("Captured generated image from response")
 					}
 				}
 			}
 
-			log.Debug().Str("reason", finishReason).Str("response_id", responseID).Int("images", len(pendingImages)).Msg("Response stream completed")
+			// Emit final status
+			oc.emitGenerationStatus(ctx, portal, state, "finalizing", "Completing response...", nil)
+
+			log.Debug().Str("reason", state.finishReason).Str("response_id", state.responseID).Int("images", len(state.pendingImages)).Msg("Response stream completed")
 
 		case "error":
 			log.Error().Str("error", streamEvent.Message).Msg("Responses API stream error")
@@ -356,24 +538,33 @@ func (oc *AIClient) streamingResponse(
 	}
 
 	// Send final edit to persist complete content with metadata (including reasoning)
-	if initialEventID != "" {
-		oc.sendFinalEditWithReasoning(ctx, portal, initialEventID, accumulated.String(), reasoning.String(), meta, finishReason)
+	if state.initialEventID != "" {
+		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
 
 		// Save assistant message to database for history reconstruction
 		// This is CRITICAL - without this, the AI only sees user messages and tries to answer all of them
 		modelID := oc.effectiveModel(meta)
 		assistantMsg := &database.Message{
-			ID:        aiid.MakeMessageID(initialEventID),
+			ID:        aiid.MakeMessageID(state.initialEventID),
 			Room:      portal.PortalKey,
 			SenderID:  modelUserID(modelID),
-			MXID:      initialEventID,
+			MXID:      state.initialEventID,
 			Timestamp: time.Now(),
 			Metadata: &MessageMetadata{
-				Role:         "assistant",
-				Body:         accumulated.String(),
-				CompletionID: responseID,
-				FinishReason: finishReason,
-				Model:        modelID,
+				Role:               "assistant",
+				Body:               state.accumulated.String(),
+				CompletionID:       state.responseID,
+				FinishReason:       state.finishReason,
+				Model:              modelID,
+				TurnID:             state.turnID,
+				AgentID:            state.agentID,
+				ToolCalls:          state.toolCalls,
+				StartedAtMs:        state.startedAtMs,
+				FirstTokenAtMs:     state.firstTokenAtMs,
+				CompletedAtMs:      state.completedAtMs,
+				ThinkingContent:    state.reasoning.String(),
+				ThinkingTokenCount: len(strings.Fields(state.reasoning.String())), // Approximate token count
+				HasToolCalls:       len(state.toolCalls) > 0,
 			},
 		}
 		if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, assistantMsg); err != nil {
@@ -384,8 +575,8 @@ func (oc *AIClient) streamingResponse(
 
 		// Save LastResponseID for "responses" mode context chaining AFTER message persistence
 		// This ensures we don't save an ID for a message that failed to persist
-		if meta.ConversationMode == "responses" && responseID != "" {
-			meta.LastResponseID = responseID
+		if meta.ConversationMode == "responses" && state.responseID != "" {
+			meta.LastResponseID = state.responseID
 			if err := portal.Save(ctx); err != nil {
 				log.Warn().Err(err).Msg("Failed to save portal after storing response ID")
 			}
@@ -393,13 +584,13 @@ func (oc *AIClient) streamingResponse(
 	}
 
 	// Send any generated images as separate messages
-	for _, img := range pendingImages {
+	for _, img := range state.pendingImages {
 		imageData, mimeType, err := decodeBase64Image(img.imageB64)
 		if err != nil {
 			log.Warn().Err(err).Str("item_id", img.itemID).Msg("Failed to decode generated image")
 			continue
 		}
-		eventID, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType)
+		eventID, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, img.turnID)
 		if err != nil {
 			log.Warn().Err(err).Str("item_id", img.itemID).Msg("Failed to send generated image to Matrix")
 			continue
@@ -408,15 +599,17 @@ func (oc *AIClient) streamingResponse(
 	}
 
 	log.Info().
-		Str("finish_reason", finishReason).
-		Int("content_length", accumulated.Len()).
-		Int("reasoning_length", reasoning.Len()).
-		Str("response_id", responseID).
-		Int("images_sent", len(pendingImages)).
+		Str("turn_id", state.turnID).
+		Str("finish_reason", state.finishReason).
+		Int("content_length", state.accumulated.Len()).
+		Int("reasoning_length", state.reasoning.Len()).
+		Int("tool_calls", len(state.toolCalls)).
+		Str("response_id", state.responseID).
+		Int("images_sent", len(state.pendingImages)).
 		Msg("Responses API streaming finished")
 
 	// Generate room title after first response
-	oc.maybeGenerateTitle(ctx, portal, accumulated.String())
+	oc.maybeGenerateTitle(ctx, portal, state.accumulated.String())
 
 	return true, nil
 }
@@ -482,7 +675,7 @@ func (oc *AIClient) convertToResponsesInput(messages []openai.ChatCompletionMess
 }
 
 // sendInitialStreamMessage sends the first message in a streaming session and returns its event ID
-func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string) id.EventID {
+func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string, turnID string) id.EventID {
 	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return ""
@@ -492,6 +685,10 @@ func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridge
 		Raw: map[string]any{
 			"msgtype": "m.text",
 			"body":    content,
+			"com.beeper.ai": map[string]any{
+				"turn_id": turnID,
+				"status":  string(TurnStatusGenerating),
+			},
 		},
 	}
 	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
@@ -499,12 +696,12 @@ func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridge
 		oc.log.Error().Err(err).Msg("Failed to send initial streaming message")
 		return ""
 	}
-	oc.log.Info().Stringer("event_id", resp.EventID).Msg("Initial streaming message sent")
+	oc.log.Info().Stringer("event_id", resp.EventID).Str("turn_id", turnID).Msg("Initial streaming message sent")
 	return resp.EventID
 }
 
-// sendFinalEditWithReasoning sends an edit event including reasoning/thinking content
-func (oc *AIClient) sendFinalEditWithReasoning(ctx context.Context, portal *bridgev2.Portal, initialEventID id.EventID, content string, reasoning string, meta *PortalMetadata, finishReason string) {
+// sendFinalAssistantTurn sends an edit event with the complete assistant turn data
+func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata) {
 	if portal == nil || portal.MXID == "" {
 		return
 	}
@@ -513,15 +710,45 @@ func (oc *AIClient) sendFinalEditWithReasoning(ctx context.Context, portal *brid
 		return
 	}
 
-	// Build AI metadata for rich UI rendering
+	content := state.accumulated.String()
+
+	// Build AI metadata following the new schema
 	aiMetadata := map[string]any{
+		"turn_id":       state.turnID,
 		"model":         oc.effectiveModel(meta),
-		"finish_reason": finishReason,
+		"status":        string(TurnStatusCompleted),
+		"finish_reason": state.finishReason,
+		"timing": map[string]any{
+			"started_at":     state.startedAtMs,
+			"first_token_at": state.firstTokenAtMs,
+			"completed_at":   state.completedAtMs,
+		},
 	}
 
-	// Include reasoning/thinking if present
-	if reasoning != "" {
-		aiMetadata["thinking"] = reasoning
+	// Add agent_id if set
+	if state.agentID != "" {
+		aiMetadata["agent_id"] = state.agentID
+	}
+
+	// Include embedded thinking if present
+	if state.reasoning.Len() > 0 {
+		aiMetadata["thinking"] = map[string]any{
+			"content":     state.reasoning.String(),
+			"token_count": len(strings.Fields(state.reasoning.String())), // Approximate
+		}
+	}
+
+	// Include tool call event IDs
+	if len(state.toolCalls) > 0 {
+		toolCallIDs := make([]string, 0, len(state.toolCalls))
+		for _, tc := range state.toolCalls {
+			if tc.CallEventID != "" {
+				toolCallIDs = append(toolCallIDs, tc.CallEventID)
+			}
+		}
+		if len(toolCallIDs) > 0 {
+			aiMetadata["tool_calls"] = toolCallIDs
+		}
 	}
 
 	// Send edit event with m.replace relation and m.new_content
@@ -535,7 +762,7 @@ func (oc *AIClient) sendFinalEditWithReasoning(ctx context.Context, portal *brid
 			},
 			"m.relates_to": map[string]any{
 				"rel_type": "m.replace",
-				"event_id": initialEventID.String(),
+				"event_id": state.initialEventID.String(),
 			},
 			"com.beeper.ai":                 aiMetadata,
 			"com.beeper.dont_render_edited": true, // Don't show "edited" indicator for streaming updates
@@ -543,20 +770,76 @@ func (oc *AIClient) sendFinalEditWithReasoning(ctx context.Context, portal *brid
 	}
 
 	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {
-		oc.log.Warn().Err(err).Stringer("initial_event_id", initialEventID).Msg("Failed to send final edit")
+		oc.log.Warn().Err(err).Stringer("initial_event_id", state.initialEventID).Msg("Failed to send final assistant turn")
 	} else {
 		oc.log.Debug().
-			Str("initial_event_id", initialEventID.String()).
-			Bool("has_reasoning", reasoning != "").
-			Msg("Sent final edit with metadata")
+			Str("initial_event_id", state.initialEventID.String()).
+			Str("turn_id", state.turnID).
+			Bool("has_thinking", state.reasoning.Len() > 0).
+			Int("tool_calls", len(state.toolCalls)).
+			Msg("Sent final assistant turn with metadata")
 	}
 }
 
-// emitStreamEvent sends a streaming delta event to the room
-// Uses Matrix-spec compliant m.relates_to to correlate with the initial message
-// contentType identifies what kind of content this is (text, reasoning, tool_call, tool_result)
-// seq is a sequence number for ordering events
-// metadata contains optional fields like tool_name, item_id, status
+// sendFinalEditWithReasoning sends an edit event including reasoning/thinking content
+// Deprecated: Use sendFinalAssistantTurn instead
+func (oc *AIClient) sendFinalEditWithReasoning(ctx context.Context, portal *bridgev2.Portal, initialEventID id.EventID, content string, reasoning string, meta *PortalMetadata, finishReason string) {
+	state := &streamingState{
+		turnID:         NewTurnID(),
+		initialEventID: initialEventID,
+		finishReason:   finishReason,
+	}
+	state.accumulated.WriteString(content)
+	state.reasoning.WriteString(reasoning)
+	oc.sendFinalAssistantTurn(ctx, portal, state, meta)
+}
+
+// emitStreamDelta sends a streaming delta event to the room
+func (oc *AIClient) emitStreamDelta(ctx context.Context, portal *bridgev2.Portal, state *streamingState, contentType StreamContentType, delta string, extra map[string]any) {
+	if portal == nil || portal.MXID == "" {
+		return
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return
+	}
+
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"turn_id":      state.turnID,
+			"target_event": state.initialEventID.String(),
+			"content_type": string(contentType),
+			"delta":        delta,
+			"seq":          state.sequenceNum,
+			"m.relates_to": map[string]any{
+				"rel_type": "m.reference",
+				"event_id": state.initialEventID.String(),
+			},
+		},
+	}
+
+	// Add agent_id if set
+	if state.agentID != "" {
+		eventContent.Raw["agent_id"] = state.agentID
+	}
+
+	// Merge extra fields
+	for k, v := range extra {
+		if _, exists := eventContent.Raw[k]; !exists {
+			eventContent.Raw[k] = v
+		}
+	}
+
+	if _, err := intent.SendMessage(ctx, portal.MXID, StreamDeltaEventType, eventContent, nil); err != nil {
+		oc.log.Warn().Err(err).
+			Stringer("target_event", state.initialEventID).
+			Str("content_type", string(contentType)).
+			Int("seq", state.sequenceNum).
+			Msg("Failed to emit stream delta")
+	}
+}
+
+// emitStreamEvent sends a streaming delta event to the room (legacy compatibility)
 func (oc *AIClient) emitStreamEvent(ctx context.Context, portal *bridgev2.Portal, relatedEventID id.EventID, contentType StreamContentType, delta string, seq int, metadata map[string]any) {
 	if portal == nil || portal.MXID == "" {
 		return
@@ -586,9 +869,224 @@ func (oc *AIClient) emitStreamEvent(ctx context.Context, portal *bridgev2.Portal
 			eventContent.Raw[k] = v
 		}
 	}
-	if _, err := intent.SendMessage(ctx, portal.MXID, StreamTokenEventType, eventContent, nil); err != nil {
+	if _, err := intent.SendMessage(ctx, portal.MXID, StreamDeltaEventType, eventContent, nil); err != nil {
 		oc.log.Warn().Err(err).Stringer("related_event_id", relatedEventID).Str("content_type", string(contentType)).Int("seq", seq).Msg("Failed to emit stream event")
 	}
+}
+
+// emitGenerationStatus sends a generation status update event
+func (oc *AIClient) emitGenerationStatus(ctx context.Context, portal *bridgev2.Portal, state *streamingState, statusType string, message string, details *GenerationDetails) {
+	if portal == nil || portal.MXID == "" {
+		return
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return
+	}
+
+	content := map[string]any{
+		"turn_id":        state.turnID,
+		"status":         statusType,
+		"status_message": message,
+	}
+
+	if state.initialEventID != "" {
+		content["target_event"] = state.initialEventID.String()
+	}
+
+	if state.agentID != "" {
+		content["agent_id"] = state.agentID
+	}
+
+	if details != nil {
+		detailsMap := map[string]any{}
+		if details.CurrentTool != "" {
+			detailsMap["current_tool"] = details.CurrentTool
+		}
+		if details.CallID != "" {
+			detailsMap["call_id"] = details.CallID
+		}
+		if details.ToolsCompleted > 0 || details.ToolsTotal > 0 {
+			detailsMap["tools_completed"] = details.ToolsCompleted
+			detailsMap["tools_total"] = details.ToolsTotal
+		}
+		if len(detailsMap) > 0 {
+			content["details"] = detailsMap
+		}
+	}
+
+	eventContent := &event.Content{Raw: content}
+
+	if _, err := intent.SendMessage(ctx, portal.MXID, GenerationStatusEventType, eventContent, nil); err != nil {
+		oc.log.Debug().Err(err).Str("status", statusType).Msg("Failed to emit generation status")
+	}
+}
+
+// emitToolProgress sends a tool progress update event
+func (oc *AIClient) emitToolProgress(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall, status ToolStatus, message string, percent int) {
+	if portal == nil || portal.MXID == "" {
+		return
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return
+	}
+
+	content := map[string]any{
+		"call_id":   tool.callID,
+		"turn_id":   state.turnID,
+		"tool_name": tool.toolName,
+		"status":    string(status),
+		"progress": map[string]any{
+			"message": message,
+			"percent": percent,
+		},
+	}
+
+	if state.agentID != "" {
+		content["agent_id"] = state.agentID
+	}
+
+	eventContent := &event.Content{Raw: content}
+
+	if _, err := intent.SendMessage(ctx, portal.MXID, ToolProgressEventType, eventContent, nil); err != nil {
+		oc.log.Debug().Err(err).Str("tool", tool.toolName).Msg("Failed to emit tool progress")
+	}
+}
+
+// sendToolCallEvent sends a tool call as a timeline event
+func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall) id.EventID {
+	if portal == nil || portal.MXID == "" {
+		return ""
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return ""
+	}
+
+	// Build display info
+	displayTitle := tool.toolName
+	switch tool.toolName {
+	case "web_search":
+		displayTitle = "Web Search"
+	case "code_interpreter":
+		displayTitle = "Code Interpreter"
+	case "image_generation":
+		displayTitle = "Image Generation"
+	}
+
+	toolCallData := map[string]any{
+		"call_id":   tool.callID,
+		"turn_id":   state.turnID,
+		"tool_name": tool.toolName,
+		"tool_type": string(tool.toolType),
+		"status":    string(ToolStatusRunning),
+		"display": map[string]any{
+			"title":     displayTitle,
+			"collapsed": false,
+		},
+		"timing": map[string]any{
+			"started_at": tool.startedAtMs,
+		},
+	}
+
+	if state.agentID != "" {
+		toolCallData["agent_id"] = state.agentID
+	}
+
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"body":                    fmt.Sprintf("Calling %s...", displayTitle),
+			"msgtype":                 "m.notice",
+			"com.beeper.ai.tool_call": toolCallData,
+			"m.relates_to": map[string]any{
+				"rel_type": "m.reference",
+				"event_id": state.initialEventID.String(),
+			},
+		},
+	}
+
+	resp, err := intent.SendMessage(ctx, portal.MXID, ToolCallEventType, eventContent, nil)
+	if err != nil {
+		oc.log.Warn().Err(err).Str("tool", tool.toolName).Msg("Failed to send tool call event")
+		return ""
+	}
+
+	oc.log.Debug().
+		Stringer("event_id", resp.EventID).
+		Str("call_id", tool.callID).
+		Str("tool", tool.toolName).
+		Msg("Sent tool call timeline event")
+
+	return resp.EventID
+}
+
+// sendToolResultEvent sends a tool result as a timeline event
+func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall, result string, resultStatus ResultStatus) id.EventID {
+	if portal == nil || portal.MXID == "" {
+		return ""
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return ""
+	}
+
+	// Truncate result for body if too long
+	bodyText := result
+	if len(bodyText) > 200 {
+		bodyText = bodyText[:200] + "..."
+	}
+	if bodyText == "" {
+		bodyText = fmt.Sprintf("%s completed", tool.toolName)
+	}
+
+	toolResultData := map[string]any{
+		"call_id":   tool.callID,
+		"turn_id":   state.turnID,
+		"tool_name": tool.toolName,
+		"status":    string(resultStatus),
+		"display": map[string]any{
+			"expandable":       len(result) > 200,
+			"default_expanded": len(result) <= 500,
+		},
+	}
+
+	if state.agentID != "" {
+		toolResultData["agent_id"] = state.agentID
+	}
+
+	if result != "" {
+		toolResultData["output"] = map[string]any{
+			"result": result,
+		}
+	}
+
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"body":                      bodyText,
+			"msgtype":                   "m.notice",
+			"com.beeper.ai.tool_result": toolResultData,
+			"m.relates_to": map[string]any{
+				"rel_type": "m.reference",
+				"event_id": tool.eventID.String(),
+			},
+		},
+	}
+
+	resp, err := intent.SendMessage(ctx, portal.MXID, ToolResultEventType, eventContent, nil)
+	if err != nil {
+		oc.log.Warn().Err(err).Str("tool", tool.toolName).Msg("Failed to send tool result event")
+		return ""
+	}
+
+	oc.log.Debug().
+		Stringer("event_id", resp.EventID).
+		Str("call_id", tool.callID).
+		Str("tool", tool.toolName).
+		Str("status", string(resultStatus)).
+		Msg("Sent tool result timeline event")
+
+	return resp.EventID
 }
 
 // executeBuiltinTool finds and executes a builtin tool by name
@@ -778,6 +1276,7 @@ func (oc *AIClient) sendGeneratedImage(
 	portal *bridgev2.Portal,
 	imageData []byte,
 	mimeType string,
+	turnID string,
 ) (id.EventID, error) {
 	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
@@ -802,23 +1301,32 @@ func (oc *AIClient) sendGeneratedImage(
 		return "", fmt.Errorf("upload failed: %w", err)
 	}
 
-	// Build image message content
-	content := &event.MessageEventContent{
-		MsgType: event.MsgImage,
-		Body:    fileName,
-		Info: &event.FileInfo{
-			MimeType: mimeType,
-			Size:     len(imageData),
+	// Build image message content with AI metadata
+	rawContent := map[string]any{
+		"msgtype": "m.image",
+		"body":    fileName,
+		"info": map[string]any{
+			"mimetype": mimeType,
+			"size":     len(imageData),
 		},
 	}
+
 	if file != nil {
-		content.File = file
+		rawContent["file"] = file
 	} else {
-		content.URL = uri
+		rawContent["url"] = string(uri)
+	}
+
+	// Add image generation metadata
+	if turnID != "" {
+		rawContent["com.beeper.ai.image_generation"] = map[string]any{
+			"turn_id": turnID,
+		}
 	}
 
 	// Send message
-	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{Parsed: content}, nil)
+	eventContent := &event.Content{Raw: rawContent}
+	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
 	if err != nil {
 		return "", fmt.Errorf("send failed: %w", err)
 	}
