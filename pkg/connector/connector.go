@@ -134,8 +134,8 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 	if content.Model != "" {
 		changes = append(changes, fmt.Sprintf("model=%s", content.Model))
 	}
-	if content.Temperature > 0 {
-		changes = append(changes, fmt.Sprintf("temperature=%.2f", content.Temperature))
+	if content.Temperature != nil {
+		changes = append(changes, fmt.Sprintf("temperature=%.2f", *content.Temperature))
 	}
 	if content.MaxContextMessages > 0 {
 		changes = append(changes, fmt.Sprintf("context=%d messages", content.MaxContextMessages))
@@ -152,24 +152,44 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 	if content.ConversationMode != "" {
 		changes = append(changes, fmt.Sprintf("conversation_mode=%s", content.ConversationMode))
 	}
-	if content.ToolsEnabled {
-		changes = append(changes, "tools=on")
+	if content.ToolsEnabled != nil {
+		if *content.ToolsEnabled {
+			changes = append(changes, "tools=on")
+		} else {
+			changes = append(changes, "tools=off")
+		}
 	}
-	if content.WebSearchEnabled {
-		changes = append(changes, "web_search=on")
+	if content.WebSearchEnabled != nil {
+		if *content.WebSearchEnabled {
+			changes = append(changes, "web_search=on")
+		} else {
+			changes = append(changes, "web_search=off")
+		}
 	}
-	if content.CodeInterpreterEnabled {
-		changes = append(changes, "code_interpreter=on")
+	if content.FileSearchEnabled != nil {
+		if *content.FileSearchEnabled {
+			changes = append(changes, "file_search=on")
+		} else {
+			changes = append(changes, "file_search=off")
+		}
+	}
+	if content.CodeInterpreterEnabled != nil {
+		if *content.CodeInterpreterEnabled {
+			changes = append(changes, "code_interpreter=on")
+		} else {
+			changes = append(changes, "code_interpreter=off")
+		}
 	}
 
 	if len(changes) > 0 {
 		client.sendSystemNotice(ctx, portal, fmt.Sprintf("Configuration updated: %s", strings.Join(changes, ", ")))
 	}
 
-	log.Info().
-		Str("model", content.Model).
-		Float64("temperature", content.Temperature).
-		Msg("Updated room configuration from state event")
+	logEvent := log.Info().Str("model", content.Model)
+	if content.Temperature != nil {
+		logEvent = logEvent.Float64("temperature", *content.Temperature)
+	}
+	logEvent.Msg("Updated room configuration from state event")
 }
 
 func (oc *OpenAIConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
@@ -219,6 +239,9 @@ func (oc *OpenAIConnector) GetDBMetaTypes() database.MetaTypes {
 		},
 		UserLogin: func() any {
 			return &UserLoginMetadata{}
+		},
+		Ghost: func() any {
+			return &GhostMetadata{}
 		},
 	}
 }

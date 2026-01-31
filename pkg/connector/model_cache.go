@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -215,16 +216,12 @@ func parseOpenRouterPricing(p *openRouterPricing) *OpenRouterPricing {
 
 	var pricing OpenRouterPricing
 	if p.Prompt != "" {
-		// Parse as float, pricing is per token in strings
-		var promptCost float64
-		if err := json.Unmarshal([]byte(p.Prompt), &promptCost); err == nil {
-			// OpenRouter gives cost per token, convert to per 1M
+		if promptCost, err := strconv.ParseFloat(p.Prompt, 64); err == nil {
 			pricing.PromptCostPer1M = promptCost * 1_000_000
 		}
 	}
 	if p.Completion != "" {
-		var completionCost float64
-		if err := json.Unmarshal([]byte(p.Completion), &completionCost); err == nil {
+		if completionCost, err := strconv.ParseFloat(p.Completion, 64); err == nil {
 			pricing.CompletionCostPer1M = completionCost * 1_000_000
 		}
 	}
