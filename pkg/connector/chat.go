@@ -27,9 +27,10 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 		oc.log.Error().Err(err).Msg("Failed to list models, using fallback")
 		// Return default model as fallback based on provider
 		meta := loginMetadata(oc.UserLogin)
+		fallbackID := DefaultModelForProvider(meta.Provider)
 		models = []ModelInfo{{
-			ID:       DefaultModelForProvider(meta.Provider),
-			Name:     "GPT 4o Mini",
+			ID:       fallbackID,
+			Name:     FormatModelDisplay(fallbackID),
 			Provider: meta.Provider,
 		}}
 	}
@@ -520,8 +521,8 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 	if config.SystemPrompt != "" {
 		meta.SystemPrompt = config.SystemPrompt
 	}
-	if config.Temperature > 0 {
-		meta.Temperature = config.Temperature
+	if config.Temperature != nil {
+		meta.Temperature = *config.Temperature
 	}
 	if config.MaxContextMessages > 0 {
 		meta.MaxContextMessages = config.MaxContextMessages
@@ -658,7 +659,7 @@ func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Por
 	stateContent := &RoomConfigEventContent{
 		Model:                  meta.Model,
 		SystemPrompt:           meta.SystemPrompt,
-		Temperature:            meta.Temperature,
+		Temperature:            &meta.Temperature,
 		MaxContextMessages:     meta.MaxContextMessages,
 		MaxCompletionTokens:    meta.MaxCompletionTokens,
 		ReasoningEffort:        meta.ReasoningEffort,
