@@ -265,28 +265,12 @@ func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 }
 
 func (oc *AIClient) Connect(ctx context.Context) {
-	// Use a default model for validation (any model works to verify credentials)
-	model := "gpt-4o-mini"
-	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	_, err := oc.api.Models.Get(timeoutCtx, model)
-	if err != nil {
-		oc.log.Warn().Err(err).Str("model", model).Msg("Failed to validate OpenAI credentials")
-		oc.UserLogin.BridgeState.Send(status.BridgeState{
-			StateEvent: status.StateTransientDisconnect,
-			Error:      "openai-auth-error",
-			Message:    "Failed to validate OpenAI credentials",
-			Info: map[string]any{
-				"model": model,
-				"error": err.Error(),
-			},
-		})
-		return
-	}
+	// Trust the token - auth errors will be caught during actual API usage
+	// OpenRouter and Beeper provider don't support the GET /v1/models/{model} endpoint
 	oc.loggedIn.Store(true)
 	oc.UserLogin.BridgeState.Send(status.BridgeState{
 		StateEvent: status.StateConnected,
-		Message:    "Connected to OpenAI",
+		Message:    "Connected",
 	})
 }
 
@@ -1811,16 +1795,29 @@ func (oc *AIClient) streamingResponseWithRetry(
 }
 
 func (oc *AIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, err error) {
+	// Check for auth errors (401/403) - trigger reauth
+	if IsAuthError(err) {
+		oc.loggedIn.Store(false)
+		oc.UserLogin.BridgeState.Send(status.BridgeState{
+			StateEvent: status.StateTransientDisconnect,
+			Error:      "auth-error",
+			Message:    "Authentication failed - please re-login",
+			Info: map[string]any{
+				"error": err.Error(),
+			},
+		})
+	}
+
 	if portal == nil || portal.Bridge == nil || evt == nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to send message via OpenAI")
 		return
 	}
-	status := bridgev2.WrapErrorInStatus(err).
+	msgStatus := bridgev2.WrapErrorInStatus(err).
 		WithStatus(event.MessageStatusRetriable).
 		WithMessage("Failed to reach OpenAI").
 		WithIsCertain(true).
 		WithSendNotice(true)
-	portal.Bridge.Matrix.SendMessageStatus(ctx, &status, bridgev2.StatusEventInfoFromEvent(evt))
+	portal.Bridge.Matrix.SendMessageStatus(ctx, &msgStatus, bridgev2.StatusEventInfoFromEvent(evt))
 }
 
 // sendPendingStatus sends a PENDING status for a message that is queued
