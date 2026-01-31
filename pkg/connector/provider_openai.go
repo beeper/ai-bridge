@@ -288,9 +288,10 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 				continue
 			}
 
+			fullModelID := AddModelPrefix(BackendOpenAI, model.ID)
 			models = append(models, ModelInfo{
-				ID:                  AddModelPrefix(BackendOpenAI, model.ID),
-				Name:                formatModelDisplayName(model.ID),
+				ID:                  fullModelID,
+				Name:                GetModelDisplayName(fullModelID),
 				Provider:            "openai",
 				SupportsVision:      strings.Contains(model.ID, "vision") || strings.Contains(model.ID, "4o") || strings.Contains(model.ID, "4-turbo"),
 				SupportsToolCalling: true,
@@ -312,9 +313,9 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	return models, nil
 }
 
-// defaultOpenAIModels returns known OpenAI models
+// defaultOpenAIModels returns known OpenAI models from the manifest
 func defaultOpenAIModels() []ModelInfo {
-	return GetDefaultModels("openai")
+	return GetOpenAIModels()
 }
 
 // ToOpenAITools converts tool definitions to OpenAI Responses API format

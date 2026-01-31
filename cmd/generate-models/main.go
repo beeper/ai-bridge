@@ -11,9 +11,135 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/beeper/ai-bridge/pkg/connector"
 )
+
+// modelConfig is the SINGLE SOURCE OF TRUTH for which models are available.
+// Only model IDs and optional display name overrides are defined here.
+// ALL capabilities are fetched from the OpenRouter API.
+//
+// Map format: model_id -> display_name (empty string = use API name)
+var modelConfig = struct {
+	// Models to fetch from OpenRouter - ID -> display name override (empty = use API name)
+	Models map[string]string
+	// Aliases for stable references
+	Aliases map[string]string
+	// Direct OpenAI models (not via OpenRouter)
+	OpenAIModels []OpenAIModel
+}{
+	Models: map[string]string{
+		// MiniMax
+		"minimax/minimax-m2.1": "MiniMax M2.1",
+		"minimax/minimax-m2":   "MiniMax M2",
+
+		// GLM (Z.AI) - supports reasoning via parameter
+		"z-ai/glm-4.7":  "GLM 4.7",
+		"z-ai/glm-4.6v": "GLM 4.6V",
+
+		// Kimi (Moonshot)
+		"moonshotai/kimi-k2-0905":     "Kimi K2 (0905)",
+		"moonshotai/kimi-k2-thinking": "Kimi K2 (Thinking)",
+
+		// Qwen
+		"qwen/qwen3-235b-a22b-thinking-2507": "Qwen 3 235B (Thinking)",
+		"qwen/qwen3-235b-a22b":               "Qwen 3 235B",
+
+		// Grok (xAI)
+		"x-ai/grok-4.1-fast": "Grok 4.1 Fast",
+
+		// DeepSeek
+		"deepseek/deepseek-v3.2": "DeepSeek v3.2",
+
+		// Llama (Meta)
+		"meta-llama/llama-4-scout":    "Llama 4 Scout",
+		"meta-llama/llama-4-maverick": "Llama 4 Maverick",
+
+		// Gemini (Google) via OpenRouter
+		"google/gemini-2.5-flash-image":     "Nano Banana",
+		"google/gemini-3-flash-preview":     "Gemini 3 Flash",
+		"google/gemini-3-pro-image-preview": "Nano Banana Pro",
+		"google/gemini-3-pro-preview":       "Gemini 3 Pro",
+
+		// Claude (Anthropic) via OpenRouter
+		"anthropic/claude-sonnet-4.5": "Claude Sonnet 4.5",
+		"anthropic/claude-opus-4.5":   "Claude Opus 4.5",
+		"anthropic/claude-haiku-4.5":  "Claude Haiku 4.5",
+
+		// GPT (OpenAI) via OpenRouter
+		"openai/gpt-5-image":  "GPT ImageGen 1.5",
+		"openai/gpt-5.2":      "GPT-5.2",
+		"openai/gpt-5-mini":   "GPT-5 mini",
+		"openai/gpt-oss-20b":  "GPT OSS 20B",
+		"openai/gpt-oss-120b": "GPT OSS 120B",
+	},
+	Aliases: map[string]string{
+		// Default alias
+		"beeper/default": "anthropic/claude-sonnet-4.5",
+
+		// Stable aliases that can be remapped
+		"beeper/fast":      "openai/gpt-5-mini",
+		"beeper/smart":     "openai/gpt-5.2",
+		"beeper/reasoning": "openai/gpt-5.2", // Uses reasoning effort parameter
+	},
+	OpenAIModels: []OpenAIModel{
+		{
+			ID:                  "openai/o1",
+			Name:                "O1",
+			Description:         "Advanced reasoning model",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			SupportsReasoning:   true,
+			SupportsWebSearch:   true,
+			ContextWindow:       200000,
+			MaxOutputTokens:     100000,
+		},
+		{
+			ID:                  "openai/o1-mini",
+			Name:                "O1 Mini",
+			Description:         "Fast reasoning model",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			SupportsReasoning:   true,
+			SupportsWebSearch:   true,
+			ContextWindow:       128000,
+			MaxOutputTokens:     65536,
+		},
+		{
+			ID:                  "openai/o3-mini",
+			Name:                "O3 Mini",
+			Description:         "Latest reasoning model",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			SupportsReasoning:   true,
+			SupportsWebSearch:   true,
+			ContextWindow:       200000,
+			MaxOutputTokens:     100000,
+		},
+		{
+			ID:                  "openai/gpt-4-turbo",
+			Name:                "GPT 4 Turbo",
+			Description:         "Previous generation GPT-4 with vision",
+			SupportsVision:      true,
+			SupportsToolCalling: true,
+			SupportsReasoning:   false,
+			SupportsWebSearch:   true,
+			ContextWindow:       128000,
+			MaxOutputTokens:     4096,
+		},
+	},
+}
+
+// OpenAIModel represents a direct OpenAI model (not via OpenRouter)
+type OpenAIModel struct {
+	ID                  string
+	Name                string
+	Description         string
+	SupportsVision      bool
+	SupportsToolCalling bool
+	SupportsReasoning   bool
+	SupportsWebSearch   bool
+	ContextWindow       int
+	MaxOutputTokens     int
+}
 
 // OpenRouterArchitecture contains model architecture information
 type OpenRouterArchitecture struct {
@@ -70,7 +196,7 @@ type ModelCapabilities struct {
 
 func main() {
 	token := flag.String("openrouter-token", "", "OpenRouter API token")
-	outputFile := flag.String("output", "pkg/connector/beeper_models_generated.go", "Output Go file")
+	outputFile := flag.String("output", "pkg/connector/models_generated.go", "Output Go file")
 	jsonFile := flag.String("json", "pkg/connector/beeper_models.json", "Output JSON file for clients")
 	flag.Parse()
 
@@ -89,7 +215,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error generating file: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Generated %s with %d models\n", *outputFile, len(connector.BeeperModelList))
+	fmt.Printf("Generated %s with %d models\n", *outputFile, len(modelConfig.Models)+len(modelConfig.OpenAIModels))
 
 	if err := generateJSONFile(models, *jsonFile); err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating JSON file: %v\n", err)
@@ -211,37 +337,41 @@ func generateGoFile(apiModels map[string]OpenRouterModel, outputPath string) err
 
 package connector
 
-// BeeperModelsGenerated contains model definitions fetched from OpenRouter API.
-// The model list is manually curated in cmd/generate-models/main.go.
-// All capabilities are auto-detected from the OpenRouter API.
-var BeeperModelsGenerated = []ModelInfo{
+// ModelManifest contains all model definitions and aliases.
+// Models are fetched from OpenRouter API, aliases are defined in the generator config.
+var ModelManifest = struct {
+	Models  map[string]ModelInfo
+	Aliases map[string]string
+}{
+	Models: map[string]ModelInfo{
 `)
 
 	// Get sorted model IDs for deterministic output
-	modelIDs := sortedKeys(connector.BeeperModelList)
+	modelIDs := sortedKeys(modelConfig.Models)
 
 	for _, modelID := range modelIDs {
-		displayName := connector.BeeperModelList[modelID]
+		displayName := modelConfig.Models[modelID]
 		apiModel, hasAPIData := apiModels[modelID]
 		caps := detectCapabilities(modelID, apiModel, hasAPIData)
 
-		buf.WriteString(fmt.Sprintf(`	{
-		ID:                  %q,
-		Name:                %q,
-		Provider:            "openrouter",
-		SupportsVision:      %t,
-		SupportsToolCalling: %t,
-		SupportsReasoning:   %t,
-		SupportsWebSearch:   %t,
-		SupportsImageGen:    %t,
-		SupportsAudio:       %t,
-		SupportsVideo:       %t,
-		SupportsPDF:         %t,
-		ContextWindow:       %d,
-		MaxOutputTokens:     %d,
-		AvailableTools:      %s,
-	},
+		buf.WriteString(fmt.Sprintf(`		%q: {
+			ID:                  %q,
+			Name:                %q,
+			Provider:            "openrouter",
+			SupportsVision:      %t,
+			SupportsToolCalling: %t,
+			SupportsReasoning:   %t,
+			SupportsWebSearch:   %t,
+			SupportsImageGen:    %t,
+			SupportsAudio:       %t,
+			SupportsVideo:       %t,
+			SupportsPDF:         %t,
+			ContextWindow:       %d,
+			MaxOutputTokens:     %d,
+			AvailableTools:      %s,
+		},
 `,
+			modelID,
 			modelID,
 			displayName,
 			caps.Vision,
@@ -258,13 +388,59 @@ var BeeperModelsGenerated = []ModelInfo{
 		))
 	}
 
-	buf.WriteString(`}
+	// Add direct OpenAI models
+	for _, model := range modelConfig.OpenAIModels {
+		caps := ModelCapabilities{
+			Vision:      model.SupportsVision,
+			ToolCalling: model.SupportsToolCalling,
+			Reasoning:   model.SupportsReasoning,
+			WebSearch:   model.SupportsWebSearch,
+		}
+		buf.WriteString(fmt.Sprintf(`		%q: {
+			ID:                  %q,
+			Name:                %q,
+			Provider:            "openai",
+			Description:         %q,
+			SupportsVision:      %t,
+			SupportsToolCalling: %t,
+			SupportsReasoning:   %t,
+			SupportsWebSearch:   %t,
+			SupportsImageGen:    false,
+			SupportsAudio:       false,
+			SupportsVideo:       false,
+			SupportsPDF:         false,
+			ContextWindow:       %d,
+			MaxOutputTokens:     %d,
+			AvailableTools:      %s,
+		},
+`,
+			model.ID,
+			model.ID,
+			model.Name,
+			model.Description,
+			model.SupportsVision,
+			model.SupportsToolCalling,
+			model.SupportsReasoning,
+			model.SupportsWebSearch,
+			model.ContextWindow,
+			model.MaxOutputTokens,
+			availableToolsGo(caps),
+		))
+	}
 
-// GetBeeperModelsGenerated returns the auto-generated Beeper models list.
-func GetBeeperModelsGenerated() []ModelInfo {
-	result := make([]ModelInfo, len(BeeperModelsGenerated))
-	copy(result, BeeperModelsGenerated)
-	return result
+	buf.WriteString(`	},
+	Aliases: map[string]string{
+`)
+
+	// Add aliases
+	aliasKeys := sortedKeys(modelConfig.Aliases)
+	for _, alias := range aliasKeys {
+		target := modelConfig.Aliases[alias]
+		buf.WriteString(fmt.Sprintf(`		%q: %q,
+`, alias, target))
+	}
+
+	buf.WriteString(`	},
 }
 `)
 
@@ -276,6 +452,7 @@ type JSONModelInfo struct {
 	ID                  string   `json:"id"`
 	Name                string   `json:"name"`
 	Provider            string   `json:"provider"`
+	Description         string   `json:"description,omitempty"`
 	SupportsVision      bool     `json:"supports_vision"`
 	SupportsToolCalling bool     `json:"supports_tool_calling"`
 	SupportsReasoning   bool     `json:"supports_reasoning"`
@@ -289,13 +466,19 @@ type JSONModelInfo struct {
 	AvailableTools      []string `json:"available_tools,omitempty"`
 }
 
+// JSONManifest is the full manifest structure for JSON output
+type JSONManifest struct {
+	Models  []JSONModelInfo   `json:"models"`
+	Aliases map[string]string `json:"aliases"`
+}
+
 func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) error {
 	var models []JSONModelInfo
 
-	modelIDs := sortedKeys(connector.BeeperModelList)
-
+	// Add OpenRouter models
+	modelIDs := sortedKeys(modelConfig.Models)
 	for _, modelID := range modelIDs {
-		displayName := connector.BeeperModelList[modelID]
+		displayName := modelConfig.Models[modelID]
 		apiModel, hasAPIData := apiModels[modelID]
 		caps := detectCapabilities(modelID, apiModel, hasAPIData)
 
@@ -317,7 +500,35 @@ func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) e
 		})
 	}
 
-	data, err := json.MarshalIndent(models, "", "  ")
+	// Add direct OpenAI models
+	for _, model := range modelConfig.OpenAIModels {
+		caps := ModelCapabilities{
+			Vision:      model.SupportsVision,
+			ToolCalling: model.SupportsToolCalling,
+			Reasoning:   model.SupportsReasoning,
+			WebSearch:   model.SupportsWebSearch,
+		}
+		models = append(models, JSONModelInfo{
+			ID:                  model.ID,
+			Name:                model.Name,
+			Provider:            "openai",
+			Description:         model.Description,
+			SupportsVision:      model.SupportsVision,
+			SupportsToolCalling: model.SupportsToolCalling,
+			SupportsReasoning:   model.SupportsReasoning,
+			SupportsWebSearch:   model.SupportsWebSearch,
+			ContextWindow:       model.ContextWindow,
+			MaxOutputTokens:     model.MaxOutputTokens,
+			AvailableTools:      availableToolsJSON(caps),
+		})
+	}
+
+	manifest := JSONManifest{
+		Models:  models,
+		Aliases: modelConfig.Aliases,
+	}
+
+	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return err
 	}
