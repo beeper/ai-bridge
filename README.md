@@ -21,8 +21,6 @@ Beeper Plus users can use most popular models with their existing subscription.
 | Provider | Example Models |
 |----------|----------------|
 | OpenAI | gpt-4o, gpt-4o-mini, o1, o3-mini |
-| Anthropic | claude-3-5-sonnet, claude-3-opus, claude-3-haiku |
-| Google | gemini-2.0-flash, gemini-1.5-pro |
 | OpenRouter | Various (pass-through) |
 
 ## Setup
