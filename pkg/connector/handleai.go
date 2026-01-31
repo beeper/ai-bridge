@@ -664,6 +664,9 @@ func (oc *AIClient) streamChatCompletions(
 		firstToken:  true,
 	}
 
+	// Track active tool calls by index
+	activeTools := make(map[int]*activeToolCall)
+
 	oc.emitGenerationStatus(ctx, portal, state, "starting", "Starting generation...", nil)
 
 	for stream.Next() {
@@ -691,6 +694,67 @@ func (oc *AIClient) streamChatCompletions(
 				}
 			}
 
+			// Handle tool calls from Chat Completions API
+			for _, toolDelta := range choice.Delta.ToolCalls {
+				toolIdx := int(toolDelta.Index)
+				tool, exists := activeTools[toolIdx]
+				if !exists {
+					tool = &activeToolCall{
+						callID:      NewCallID(),
+						toolType:    ToolTypeFunction,
+						startedAtMs: time.Now().UnixMilli(),
+					}
+					activeTools[toolIdx] = tool
+				}
+
+				// Capture tool ID if provided (used by OpenAI for tracking)
+				if toolDelta.ID != "" && tool.callID == "" {
+					tool.callID = toolDelta.ID
+				}
+
+				// Update tool name if provided in this delta
+				if toolDelta.Function.Name != "" {
+					tool.toolName = toolDelta.Function.Name
+
+					// Ensure we have an initial message for tool call events
+					if state.firstToken {
+						state.firstToken = false
+						state.firstTokenAtMs = time.Now().UnixMilli()
+						oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
+						state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID)
+						if state.initialEventID == "" {
+							log.Error().Msg("Failed to send initial streaming message for tool call")
+							return false, nil
+						}
+					}
+
+					// Send tool call timeline event on first delta with name
+					if tool.eventID == "" {
+						tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
+						oc.emitGenerationStatus(ctx, portal, state, "tool_use",
+							fmt.Sprintf("Calling %s...", tool.toolName), &GenerationDetails{
+								CurrentTool: tool.toolName,
+								CallID:      tool.callID,
+							})
+					}
+				}
+
+				// Accumulate arguments
+				if toolDelta.Function.Arguments != "" {
+					tool.input.WriteString(toolDelta.Function.Arguments)
+
+					// Stream tool input delta
+					if state.initialEventID != "" {
+						state.sequenceNum++
+						oc.emitStreamDelta(ctx, portal, state, StreamContentToolInput,
+							toolDelta.Function.Arguments, map[string]any{
+								"call_id":   tool.callID,
+								"tool_name": tool.toolName,
+							})
+					}
+				}
+			}
+
 			if choice.FinishReason != "" {
 				state.finishReason = string(choice.FinishReason)
 			}
@@ -704,6 +768,54 @@ func (oc *AIClient) streamChatCompletions(
 		log.Error().Err(err).Msg("Chat Completions stream error")
 		oc.notifyMatrixSendFailure(ctx, portal, evt, err)
 		return false, nil
+	}
+
+	// Execute any accumulated tool calls
+	for _, tool := range activeTools {
+		if tool.input.Len() > 0 && tool.toolName != "" && meta.ToolsEnabled {
+			result, err := oc.executeBuiltinTool(ctx, tool.toolName, tool.input.String())
+			resultStatus := ResultStatusSuccess
+			if err != nil {
+				log.Warn().Err(err).Str("tool", tool.toolName).Msg("Tool execution failed (Chat Completions)")
+				result = fmt.Sprintf("Error: %s", err.Error())
+				resultStatus = ResultStatusError
+			}
+
+			// Parse input for storage
+			var inputMap map[string]any
+			_ = json.Unmarshal([]byte(tool.input.String()), &inputMap)
+
+			// Send tool result timeline event
+			resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, result, resultStatus)
+
+			// Track tool call in metadata
+			state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+				CallID:        tool.callID,
+				ToolName:      tool.toolName,
+				ToolType:      string(tool.toolType),
+				Input:         inputMap,
+				Output:        map[string]any{"result": result},
+				Status:        string(ToolStatusCompleted),
+				ResultStatus:  string(resultStatus),
+				StartedAtMs:   tool.startedAtMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				CallEventID:   tool.eventID.String(),
+				ResultEventID: resultEventID.String(),
+			})
+
+			// Stream result
+			if state.initialEventID != "" {
+				state.sequenceNum++
+				oc.emitStreamDelta(ctx, portal, state, StreamContentToolResult, result, map[string]any{
+					"call_id":   tool.callID,
+					"tool_name": tool.toolName,
+					"status":    "completed",
+				})
+			}
+
+			// Update status back to generating if there might be more content
+			oc.emitGenerationStatus(ctx, portal, state, "generating", "Continuing generation...", nil)
+		}
 	}
 
 	state.completedAtMs = time.Now().UnixMilli()
@@ -729,9 +841,11 @@ func (oc *AIClient) streamChatCompletions(
 				Model:          modelID,
 				TurnID:         state.turnID,
 				AgentID:        state.agentID,
+				ToolCalls:      state.toolCalls,
 				StartedAtMs:    state.startedAtMs,
 				FirstTokenAtMs: state.firstTokenAtMs,
 				CompletedAtMs:  state.completedAtMs,
+				HasToolCalls:   len(state.toolCalls) > 0,
 			},
 		}
 		if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, assistantMsg); err != nil {
@@ -743,6 +857,7 @@ func (oc *AIClient) streamChatCompletions(
 		Str("turn_id", state.turnID).
 		Str("finish_reason", state.finishReason).
 		Int("content_length", state.accumulated.Len()).
+		Int("tool_calls", len(state.toolCalls)).
 		Msg("Chat Completions streaming finished")
 
 	oc.maybeGenerateTitle(ctx, portal, state.accumulated.String())

@@ -306,10 +306,7 @@ func (oc *AIClient) handleFork(
 	// 5. Copy messages to new chat
 	copiedCount := oc.copyMessagesToChat(runCtx, newPortal, messagesToCopy)
 
-	// 6. Broadcast room state
-	go oc.BroadcastRoomState(runCtx, newPortal)
-
-	// 7. Send notice with link
+	// 6. Send notice with link
 	roomLink := fmt.Sprintf("https://matrix.to/#/%s", newPortal.MXID)
 	oc.sendSystemNotice(runCtx, portal, fmt.Sprintf(
 		"Forked %d messages to new chat.\nOpen: %s",
@@ -352,9 +349,6 @@ func (oc *AIClient) handleNewChat(
 		oc.sendSystemNotice(runCtx, portal, "Failed to create room: "+err.Error())
 		return
 	}
-
-	// Broadcast room state
-	go oc.BroadcastRoomState(runCtx, newPortal)
 
 	// Send confirmation with link
 	roomLink := fmt.Sprintf("https://matrix.to/#/%s", newPortal.MXID)
@@ -508,6 +502,14 @@ func (oc *AIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.Cha
 			IsFull:      true,
 			OtherUserID: modelUserID(modelID),
 			MemberMap:   members,
+		},
+		// Broadcast initial room config after room creation so desktop clients
+		// can read the model and other settings from room state
+		ExtraUpdates: func(ctx context.Context, portal *bridgev2.Portal) bool {
+			if err := oc.BroadcastRoomState(ctx, portal); err != nil {
+				oc.log.Warn().Err(err).Msg("Failed to broadcast initial room state")
+			}
+			return false // no portal changes needed
 		},
 	}
 }
@@ -801,8 +803,6 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 			oc.log.Err(err).Msg("Failed to create Matrix room for existing portal")
 		}
 		oc.sendWelcomeMessage(ctx, portals[0])
-		// Broadcast initial room state
-		go oc.BroadcastRoomState(ctx, portals[0])
 		return err
 	}
 	resp, err := oc.createChat(ctx, "Welcome to AI Chats", "") // Default room title
@@ -816,8 +816,6 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		return err
 	}
 	oc.sendWelcomeMessage(ctx, resp.Portal)
-	// Broadcast initial room state
-	go oc.BroadcastRoomState(ctx, resp.Portal)
 	oc.log.Info().Stringer("portal", resp.PortalKey).Msg("Default AI chat room created")
 	return nil
 }
