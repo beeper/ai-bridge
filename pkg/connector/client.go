@@ -868,8 +868,6 @@ func (oc *AIClient) convertMxcToHttp(mxcURL string) string {
 	return fmt.Sprintf("https://%s/_matrix/media/v3/download/%s/%s", homeserver, server, mediaID)
 }
 
-// Ghost and intent helpers
-
 // ensureGhostDisplayName ensures the ghost has its display name set before sending messages.
 // This fixes the issue where ghosts appear with raw user IDs instead of formatted names.
 func (oc *AIClient) ensureGhostDisplayName(ctx context.Context, modelID string) {
@@ -901,8 +899,6 @@ func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal)
 	}
 	return ghost.Intent
 }
-
-// Utility functions
 
 func (oc *AIClient) backgroundContext(_ context.Context) context.Context {
 	// Always prefer BackgroundCtx for long-running operations that outlive request context
