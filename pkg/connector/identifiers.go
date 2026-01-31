@@ -108,3 +108,8 @@ func parseChatSlug(slug string) int {
 	}
 	return 0
 }
+
+// MakeMessageID creates a message ID from a Matrix event ID
+func MakeMessageID(eventID id.EventID) networkid.MessageID {
+	return networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID)))
+}

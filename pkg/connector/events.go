@@ -79,9 +79,6 @@ var ApprovalRequestEventType = event.Type{
 	Class: event.MessageEventType,
 }
 
-// Legacy alias for backward compatibility
-var StreamTokenEventType = StreamDeltaEventType
-
 // =============================================================================
 // STATE EVENT TYPES (room configuration)
 // =============================================================================
@@ -118,9 +115,6 @@ const (
 	StreamContentToolResult StreamContentType = "tool_result"
 	StreamContentCode       StreamContentType = "code"
 	StreamContentImage      StreamContentType = "image"
-
-	// Legacy alias
-	StreamContentReasoning StreamContentType = "thinking"
 )
 
 // =============================================================================
