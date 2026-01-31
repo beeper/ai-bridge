@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rs/xid"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -17,9 +18,9 @@ func makeUserLoginID(mxid id.UserID) networkid.UserLoginID {
 	return networkid.UserLoginID(fmt.Sprintf("openai:%s", escaped))
 }
 
-func portalKeyForChat(loginID networkid.UserLoginID, slug string) networkid.PortalKey {
+func portalKeyForChat(loginID networkid.UserLoginID) networkid.PortalKey {
 	return networkid.PortalKey{
-		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:%s", loginID, slug)),
+		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:%s", loginID, xid.New().String())),
 		Receiver: loginID,
 	}
 }
@@ -99,11 +100,16 @@ func formatChatSlug(index int) string {
 	return fmt.Sprintf("chat-%d", index)
 }
 
-func parseChatSlug(slug string) int {
+func parseChatSlug(slug string) (int, bool) {
 	if suffix, ok := strings.CutPrefix(slug, "chat-"); ok {
 		if idx, err := strconv.Atoi(suffix); err == nil {
-			return idx
+			return idx, true
 		}
 	}
-	return 0
+	return 0, false
+}
+
+// MakeMessageID creates a message ID from a Matrix event ID
+func MakeMessageID(eventID id.EventID) networkid.MessageID {
+	return networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID)))
 }

@@ -1,6 +1,10 @@
-# ai-bridge
+# Bridge AI chats into Beeper
 
-Multi-provider AI bridge for Beeper. Supports OpenAI, Anthropic, Google Gemini, and OpenRouter via the mautrix-go bridgev2 framework.
+AI bridge is a multi-provider Matrix bridge for chatting with any model from providers like OpenAI, Anthropic, Google Gemini, and OpenRouter. It's built on the bridgev2 framework.
+
+AI bridge works best with Beeper Desktop.
+
+Beeper Plus users can use most popular models with their existing subscription.
 
 ## Features
 

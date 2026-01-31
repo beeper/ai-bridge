@@ -23,15 +23,24 @@ type ContentPartType string
 const (
 	ContentTypeText  ContentPartType = "text"
 	ContentTypeImage ContentPartType = "image"
+	ContentTypePDF   ContentPartType = "pdf"
+	ContentTypeAudio ContentPartType = "audio"
+	ContentTypeVideo ContentPartType = "video"
 )
 
-// ContentPart represents a single piece of content (text or image)
+// ContentPart represents a single piece of content (text, image, PDF, audio, or video)
 type ContentPart struct {
-	Type     ContentPartType
-	Text     string
-	ImageURL string // For URL-based images
-	ImageB64 string // For base64-encoded images
-	MimeType string // e.g., "image/png", "image/jpeg"
+	Type        ContentPartType
+	Text        string
+	ImageURL    string
+	ImageB64    string
+	MimeType    string
+	PDFURL      string
+	PDFB64      string
+	AudioB64    string
+	AudioFormat string // wav, mp3, webm, ogg, flac
+	VideoURL    string
+	VideoB64    string
 }
 
 // UnifiedMessage is a provider-agnostic message format
@@ -64,6 +73,17 @@ func (m *UnifiedMessage) HasImages() bool {
 	return false
 }
 
+// HasMultimodalContent returns true if the message contains any non-text content
+func (m *UnifiedMessage) HasMultimodalContent() bool {
+	for _, part := range m.Content {
+		switch part.Type {
+		case ContentTypeImage, ContentTypePDF, ContentTypeAudio, ContentTypeVideo:
+			return true
+		}
+	}
+	return false
+}
+
 // NewTextMessage creates a simple text message
 func NewTextMessage(role MessageRole, text string) UnifiedMessage {
 	return UnifiedMessage{
@@ -83,10 +103,6 @@ func NewImageMessage(role MessageRole, imageURL, mimeType string) UnifiedMessage
 		},
 	}
 }
-
-// ====================
-// OpenAI Conversions
-// ====================
 
 // ToOpenAIResponsesInput converts unified messages to OpenAI Responses API format
 func ToOpenAIResponsesInput(messages []UnifiedMessage) responses.ResponseInputParam {
