@@ -4,10 +4,6 @@ import (
 	"maunium.net/go/mautrix/event"
 )
 
-// =============================================================================
-// TIMELINE EVENT TYPES (persistent, queryable)
-// =============================================================================
-
 // AssistantTurnEventType is the container event for an assistant's response
 var AssistantTurnEventType = event.Type{
 	Type:  "com.beeper.ai.assistant_turn",
@@ -50,10 +46,6 @@ var StepBoundaryEventType = event.Type{
 	Class: event.MessageEventType,
 }
 
-// =============================================================================
-// EPHEMERAL EVENT TYPES (true EDUs - not persisted)
-// =============================================================================
-
 // StreamDeltaEventType is the custom event type for streaming token updates
 // This replaces the old StreamTokenEventType with true ephemeral semantics
 var StreamDeltaEventType = event.Type{
@@ -79,10 +71,6 @@ var ApprovalRequestEventType = event.Type{
 	Class: event.MessageEventType,
 }
 
-// =============================================================================
-// STATE EVENT TYPES (room configuration)
-// =============================================================================
-
 // RoomConfigEventType is the Matrix state event type for AI room configuration
 var RoomConfigEventType = event.Type{
 	Type:  "com.beeper.ai.room_config",
@@ -101,10 +89,6 @@ var AgentsEventType = event.Type{
 	Class: event.StateEventType,
 }
 
-// =============================================================================
-// STREAM CONTENT TYPES
-// =============================================================================
-
 // StreamContentType identifies the type of content in a stream delta
 type StreamContentType string
 
@@ -116,10 +100,6 @@ const (
 	StreamContentCode       StreamContentType = "code"
 	StreamContentImage      StreamContentType = "image"
 )
-
-// =============================================================================
-// STATUS TYPES
-// =============================================================================
 
 // TurnStatus represents the state of an assistant turn
 type TurnStatus string
@@ -165,10 +145,6 @@ const (
 	ToolTypeMCP      ToolType = "mcp"
 )
 
-// =============================================================================
-// ERROR CODES (for com.beeper.ai.error events)
-// =============================================================================
-
 const (
 	// Retryable errors
 	ErrorContextTooLong = "context_too_long"
@@ -180,10 +156,6 @@ const (
 	ErrorCancelled    = "cancelled"
 	ErrorInvalidInput = "invalid_input"
 )
-
-// =============================================================================
-// TIMELINE EVENT CONTENT STRUCTURES
-// =============================================================================
 
 // AssistantTurnContent represents the content of an assistant turn event
 type AssistantTurnContent struct {
@@ -426,10 +398,6 @@ type StepDisplay struct {
 	Label string `json:"label,omitempty"`
 }
 
-// =============================================================================
-// EPHEMERAL EVENT CONTENT STRUCTURES
-// =============================================================================
-
 // StreamDeltaContent represents a streaming delta event
 type StreamDeltaContent struct {
 	TurnID      string            `json:"turn_id"`
@@ -549,10 +517,6 @@ type ApprovalAction struct {
 	Style string `json:"style,omitempty"` // "primary", "secondary", "tertiary"
 }
 
-// =============================================================================
-// STATE EVENT CONTENT STRUCTURES
-// =============================================================================
-
 // RoomConfigEventContent represents the content of the room config state event
 type RoomConfigEventContent struct {
 	Model               string  `json:"model,omitempty"`
@@ -636,10 +600,6 @@ type OrchestrationConfig struct {
 	MaxConcurrent int    `json:"max_concurrent,omitempty"`
 }
 
-// =============================================================================
-// IMAGE GENERATION METADATA
-// =============================================================================
-
 // ImageGenerationMetadata is added to m.image events for AI-generated images
 type ImageGenerationMetadata struct {
 	TurnID        string `json:"turn_id,omitempty"`
@@ -650,10 +610,6 @@ type ImageGenerationMetadata struct {
 	Style         string `json:"style,omitempty"`   // "vivid", "natural"
 	Quality       string `json:"quality,omitempty"` // "standard", "hd"
 }
-
-// =============================================================================
-// ATTACHMENT METADATA
-// =============================================================================
 
 // AttachmentMetadata describes files attached to user messages
 type AttachmentMetadata struct {
