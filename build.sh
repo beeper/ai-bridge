@@ -1,2 +1,2 @@
 #!/bin/sh
-BINARY_NAME=ai-bridge go tool maubuild "$@"
+BINARY_NAME=ai go tool maubuild "$@"
