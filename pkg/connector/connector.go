@@ -267,63 +267,40 @@ func (oc *OpenAIConnector) hasBeeperConfig() bool {
 	return oc.Config.Beeper.BaseURL != "" && oc.Config.Beeper.Token != ""
 }
 
+// Package-level flow definitions
+var (
+	beeperFlow = bridgev2.LoginFlow{
+		ID:          LoginFlowIDBeeper,
+		Name:        "Beeper AI",
+		Description: "Connect to Beeper AI (automatic)",
+	}
+	baseFlows = []bridgev2.LoginFlow{
+		{ID: LoginFlowIDOpenAI, Name: "OpenAI", Description: "Use your own OpenAI API key."},
+		{ID: LoginFlowIDOpenRouter, Name: "OpenRouter", Description: "Use your own OpenRouter API key."},
+		{ID: LoginFlowIDCustom, Name: "Custom OpenAI-compatible", Description: "Use a custom OpenAI-compatible API endpoint."},
+	}
+)
+
 func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
-	// Cloud mode: show ONLY the Beeper flow (auto-completes using config)
 	if oc.hasBeeperConfig() {
-		return []bridgev2.LoginFlow{
-			{
-				ID:          LoginFlowIDBeeper,
-				Name:        "Beeper AI",
-				Description: "Connect to Beeper AI (automatic)",
-			},
-		}
+		// When Beeper credentials are available, show Beeper as first option plus self-hosted options
+		return append([]bridgev2.LoginFlow{beeperFlow}, baseFlows...)
 	}
-
-	// Self-hosted mode: show provider options (user provides own API keys)
-	return []bridgev2.LoginFlow{
-		{
-			ID:          LoginFlowIDOpenAI,
-			Name:        "OpenAI",
-			Description: "Use your own OpenAI API key.",
-		},
-		{
-			ID:          LoginFlowIDOpenRouter,
-			Name:        "OpenRouter",
-			Description: "Use your own OpenRouter API key.",
-		},
-		{
-			ID:          LoginFlowIDCustom,
-			Name:        "Custom OpenAI-compatible",
-			Description: "Use a custom OpenAI-compatible API endpoint.",
-		},
-	}
-}
-
-// validFlowIDs is the set of valid login flow IDs
-var validFlowIDs = map[string]bool{
-	LoginFlowIDBeeper:     true,
-	LoginFlowIDOpenAI:     true,
-	LoginFlowIDOpenRouter: true,
-	LoginFlowIDCustom:     true,
+	return baseFlows
 }
 
 func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
-	if !validFlowIDs[flowID] {
-		return nil, fmt.Errorf("unknown login flow: %s", flowID)
-	}
-
-	// Enforce availability rules matching GetLoginFlows
-	if oc.hasBeeperConfig() {
-		// Cloud mode: only Beeper flow is allowed
-		if flowID != LoginFlowIDBeeper {
-			return nil, fmt.Errorf("login flow %s is not available", flowID)
-		}
-	} else {
-		// Self-hosted mode: Beeper flow is not allowed
-		if flowID == LoginFlowIDBeeper {
-			return nil, fmt.Errorf("login flow %s is not available", flowID)
+	// Validate by checking if flowID is in available flows
+	flows := oc.GetLoginFlows()
+	valid := false
+	for _, f := range flows {
+		if f.ID == flowID {
+			valid = true
+			break
 		}
 	}
-
+	if !valid {
+		return nil, fmt.Errorf("login flow %s is not available", flowID)
+	}
 	return &OpenAILogin{User: user, Connector: oc, FlowID: flowID, Provider: flowID}, nil
 }
