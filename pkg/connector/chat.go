@@ -47,12 +47,10 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 			continue
 		}
 
-		// Create user info - pass ModelInfo for accurate capability detection
-		caps := getModelCapabilities(model.ID, model)
 		contacts = append(contacts, &bridgev2.ResolveIdentifierResponse{
 			UserID: userID,
 			UserInfo: &bridgev2.UserInfo{
-				Name:        ptr.Ptr(FormatModelDisplayWithVision(model.ID, caps)),
+				Name:        ptr.Ptr(FormatModelDisplay(model.ID)),
 				IsBot:       ptr.Ptr(false),
 				Identifiers: []string{model.ID},
 			},
@@ -87,9 +85,6 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 		oc.log.Warn().Str("model", modelID).Msg("Model not in cache, assuming valid")
 	}
 
-	// Compute capabilities for this model - pass ModelInfo for accurate detection if available
-	caps := getModelCapabilities(modelID, modelInfo)
-
 	// Get or create ghost
 	userID := modelUserID(modelID)
 	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
@@ -103,7 +98,7 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 	var chatResp *bridgev2.CreateChatResponse
 	if createChat {
 		oc.log.Info().Str("model", modelID).Msg("Creating new chat for model")
-		chatResp, err = oc.createNewChat(ctx, modelID, caps)
+		chatResp, err = oc.createNewChat(ctx, modelID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create chat: %w", err)
 		}
@@ -122,7 +117,7 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 }
 
 // createNewChat creates a new portal for a specific model
-func (oc *AIClient) createNewChat(ctx context.Context, modelID string, _ ModelCapabilities) (*bridgev2.CreateChatResponse, error) {
+func (oc *AIClient) createNewChat(ctx context.Context, modelID string) (*bridgev2.CreateChatResponse, error) {
 	portal, chatInfo, err := oc.initPortalForChat(ctx, PortalInitOpts{
 		ModelID: modelID,
 	})
@@ -738,6 +733,7 @@ func (oc *AIClient) bootstrap(ctx context.Context) {
 func (oc *AIClient) waitForLoginPersisted(ctx context.Context) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
+	timeout := time.After(60 * time.Second)
 	for {
 		_, err := oc.UserLogin.Bridge.DB.UserLogin.GetByID(ctx, oc.UserLogin.ID)
 		if err == nil {
@@ -745,6 +741,9 @@ func (oc *AIClient) waitForLoginPersisted(ctx context.Context) {
 		}
 		select {
 		case <-ctx.Done():
+			return
+		case <-timeout:
+			oc.log.Warn().Msg("Timed out waiting for login to persist, continuing anyway")
 			return
 		case <-ticker.C:
 		}

@@ -517,9 +517,8 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 
 	// Parse model from ghost ID (format: "model-{escaped-model-id}")
 	if modelID := parseModelFromGhostID(ghostID); modelID != "" {
-		caps := getModelCapabilities(modelID, nil)
 		return &bridgev2.UserInfo{
-			Name:         ptr.Ptr(FormatModelDisplayWithVision(modelID, caps)),
+			Name:         ptr.Ptr(FormatModelDisplay(modelID)),
 			IsBot:        ptr.Ptr(false),
 			Identifiers:  []string{modelID},
 			ExtraUpdates: updateGhostLastSync,
@@ -1082,8 +1081,7 @@ func (oc *AIClient) ensureGhostDisplayName(ctx context.Context, modelID string) 
 	}
 	// Only update if name is not already set
 	if ghost.Name == "" || !ghost.NameSet {
-		caps := getModelCapabilities(modelID, oc.findModelInfo(modelID))
-		displayName := FormatModelDisplayWithVision(modelID, caps)
+		displayName := FormatModelDisplay(modelID)
 		ghost.UpdateInfo(ctx, &bridgev2.UserInfo{
 			Name:  ptr.Ptr(displayName),
 			IsBot: ptr.Ptr(false),

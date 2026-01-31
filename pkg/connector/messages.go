@@ -30,7 +30,7 @@ const (
 
 // ContentPart represents a single piece of content (text, image, PDF, audio, or video)
 type ContentPart struct {
-	Type     ContentPartType
+	Type        ContentPartType
 	Text        string
 	ImageURL    string
 	ImageB64    string
