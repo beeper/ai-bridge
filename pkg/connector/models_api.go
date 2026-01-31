@@ -35,12 +35,13 @@ func GetModelDisplayName(modelID string) string {
 
 // IsKnownModel checks if a model ID (or alias) is in the manifest.
 func IsKnownModel(modelID string) bool {
-	// Check if it's an alias
-	if _, ok := ModelManifest.Aliases[modelID]; ok {
-		return true
+	// Resolve alias if present
+	resolvedID := modelID
+	if target, ok := ModelManifest.Aliases[modelID]; ok {
+		resolvedID = target
 	}
-	// Check if it's a direct model ID
-	_, ok := ModelManifest.Models[modelID]
+	// Check if resolved ID exists in Models
+	_, ok := ModelManifest.Models[resolvedID]
 	return ok
 }
 

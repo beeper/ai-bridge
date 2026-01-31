@@ -185,16 +185,23 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 	var pmeta *PortalMetadata
 	if opts.CopyFrom != nil {
 		pmeta = &PortalMetadata{
-			Model:               opts.CopyFrom.Model,
-			Slug:                slug,
-			Title:               title,
-			SystemPrompt:        opts.CopyFrom.SystemPrompt,
-			Temperature:         opts.CopyFrom.Temperature,
-			MaxContextMessages:  opts.CopyFrom.MaxContextMessages,
-			MaxCompletionTokens: opts.CopyFrom.MaxCompletionTokens,
-			ReasoningEffort:     opts.CopyFrom.ReasoningEffort,
-			Capabilities:        opts.CopyFrom.Capabilities,
-			ToolsEnabled:        opts.CopyFrom.ToolsEnabled,
+			Model:                  opts.CopyFrom.Model,
+			Slug:                   slug,
+			Title:                  title,
+			SystemPrompt:           opts.CopyFrom.SystemPrompt,
+			Temperature:            opts.CopyFrom.Temperature,
+			MaxContextMessages:     opts.CopyFrom.MaxContextMessages,
+			MaxCompletionTokens:    opts.CopyFrom.MaxCompletionTokens,
+			ReasoningEffort:        opts.CopyFrom.ReasoningEffort,
+			Capabilities:           opts.CopyFrom.Capabilities,
+			ToolsEnabled:           opts.CopyFrom.ToolsEnabled,
+			ConversationMode:       opts.CopyFrom.ConversationMode,
+			WebSearchEnabled:       opts.CopyFrom.WebSearchEnabled,
+			FileSearchEnabled:      opts.CopyFrom.FileSearchEnabled,
+			CodeInterpreterEnabled: opts.CopyFrom.CodeInterpreterEnabled,
+			EmitThinking:           opts.CopyFrom.EmitThinking,
+			EmitToolArgs:           opts.CopyFrom.EmitToolArgs,
+			DefaultAgentID:         opts.CopyFrom.DefaultAgentID,
 		}
 		modelID = opts.CopyFrom.Model
 	} else {
@@ -760,7 +767,7 @@ func (oc *AIClient) syncChatCounter(ctx context.Context) error {
 	maxIdx := meta.NextChatIndex
 	for _, portal := range portals {
 		pm := portalMeta(portal)
-		if idx := parseChatSlug(pm.Slug); idx > maxIdx {
+		if idx, ok := parseChatSlug(pm.Slug); ok && idx > maxIdx {
 			maxIdx = idx
 		}
 	}

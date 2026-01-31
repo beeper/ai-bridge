@@ -152,14 +152,33 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 	if content.ConversationMode != "" {
 		changes = append(changes, fmt.Sprintf("conversation_mode=%s", content.ConversationMode))
 	}
-	if content.ToolsEnabled != nil && *content.ToolsEnabled {
-		changes = append(changes, "tools=on")
+	if content.ToolsEnabled != nil {
+		if *content.ToolsEnabled {
+			changes = append(changes, "tools=on")
+		} else {
+			changes = append(changes, "tools=off")
+		}
 	}
-	if content.WebSearchEnabled != nil && *content.WebSearchEnabled {
-		changes = append(changes, "web_search=on")
+	if content.WebSearchEnabled != nil {
+		if *content.WebSearchEnabled {
+			changes = append(changes, "web_search=on")
+		} else {
+			changes = append(changes, "web_search=off")
+		}
 	}
-	if content.CodeInterpreterEnabled != nil && *content.CodeInterpreterEnabled {
-		changes = append(changes, "code_interpreter=on")
+	if content.FileSearchEnabled != nil {
+		if *content.FileSearchEnabled {
+			changes = append(changes, "file_search=on")
+		} else {
+			changes = append(changes, "file_search=off")
+		}
+	}
+	if content.CodeInterpreterEnabled != nil {
+		if *content.CodeInterpreterEnabled {
+			changes = append(changes, "code_interpreter=on")
+		} else {
+			changes = append(changes, "code_interpreter=off")
+		}
 	}
 
 	if len(changes) > 0 {
