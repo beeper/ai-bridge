@@ -779,19 +779,6 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	}
 }
 
-// sendFinalEditWithReasoning sends an edit event including reasoning/thinking content
-// Deprecated: Use sendFinalAssistantTurn instead
-func (oc *AIClient) sendFinalEditWithReasoning(ctx context.Context, portal *bridgev2.Portal, initialEventID id.EventID, content string, reasoning string, meta *PortalMetadata, finishReason string) {
-	state := &streamingState{
-		turnID:         NewTurnID(),
-		initialEventID: initialEventID,
-		finishReason:   finishReason,
-	}
-	state.accumulated.WriteString(content)
-	state.reasoning.WriteString(reasoning)
-	oc.sendFinalAssistantTurn(ctx, portal, state, meta)
-}
-
 // emitStreamDelta sends a streaming delta event to the room
 func (oc *AIClient) emitStreamDelta(ctx context.Context, portal *bridgev2.Portal, state *streamingState, contentType StreamContentType, delta string, extra map[string]any) {
 	if portal == nil || portal.MXID == "" {
@@ -834,41 +821,6 @@ func (oc *AIClient) emitStreamDelta(ctx context.Context, portal *bridgev2.Portal
 			Str("content_type", string(contentType)).
 			Int("seq", state.sequenceNum).
 			Msg("Failed to emit stream delta")
-	}
-}
-
-// emitStreamEvent sends a streaming delta event to the room (legacy compatibility)
-func (oc *AIClient) emitStreamEvent(ctx context.Context, portal *bridgev2.Portal, relatedEventID id.EventID, contentType StreamContentType, delta string, seq int, metadata map[string]any) {
-	if portal == nil || portal.MXID == "" {
-		return
-	}
-	intent := oc.getModelIntent(ctx, portal)
-	if intent == nil {
-		return
-	}
-	eventContent := &event.Content{
-		Raw: map[string]any{
-			"body":         delta,
-			"content_type": string(contentType),
-			"seq":          seq,
-			"m.relates_to": map[string]any{
-				"rel_type": "m.reference",
-				"event_id": relatedEventID.String(),
-			},
-		},
-	}
-	// Merge optional metadata (tool_name, item_id, status, etc.)
-	// Skip reserved keys that metadata cannot overwrite
-	reservedKeys := map[string]bool{
-		"body": true, "content_type": true, "seq": true, "m.relates_to": true,
-	}
-	for k, v := range metadata {
-		if !reservedKeys[k] {
-			eventContent.Raw[k] = v
-		}
-	}
-	if _, err := intent.SendMessage(ctx, portal.MXID, StreamDeltaEventType, eventContent, nil); err != nil {
-		oc.log.Warn().Err(err).Stringer("related_event_id", relatedEventID).Str("content_type", string(contentType)).Int("seq", seq).Msg("Failed to emit stream event")
 	}
 }
 

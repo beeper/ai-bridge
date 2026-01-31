@@ -28,10 +28,10 @@ type OpenAIRemoteMessage struct {
 	Metadata  *MessageMetadata
 
 	// New schema fields
-	FormattedContent string            // HTML formatted content
-	ReplyToEventID   id.EventID        // For m.relates_to threading
-	ToolCallEventIDs []string          // References to tool call events
-	ImageEventIDs    []string          // References to generated image events
+	FormattedContent string     // HTML formatted content
+	ReplyToEventID   id.EventID // For m.relates_to threading
+	ToolCallEventIDs []string   // References to tool call events
+	ImageEventIDs    []string   // References to generated image events
 }
 
 func (m *OpenAIRemoteMessage) GetType() bridgev2.RemoteEventType {
@@ -194,8 +194,8 @@ func (m *OpenAIRemoteMessage) ConvertMessage(ctx context.Context, portal *bridge
 	// Build m.relates_to for threading if we have a reply target
 	if m.ReplyToEventID != "" {
 		extra["m.relates_to"] = map[string]any{
-			"rel_type":       "m.thread",
-			"event_id":       m.ReplyToEventID.String(),
+			"rel_type":        "m.thread",
+			"event_id":        m.ReplyToEventID.String(),
 			"is_falling_back": true,
 			"m.in_reply_to": map[string]any{
 				"event_id": m.ReplyToEventID.String(),
