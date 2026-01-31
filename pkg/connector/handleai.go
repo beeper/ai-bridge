@@ -21,8 +21,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
-
-	"github.com/beeper/ai-bridge/pkg/aiid"
 )
 
 const (
@@ -545,7 +543,7 @@ func (oc *AIClient) streamingResponse(
 		// This is CRITICAL - without this, the AI only sees user messages and tries to answer all of them
 		modelID := oc.effectiveModel(meta)
 		assistantMsg := &database.Message{
-			ID:        aiid.MakeMessageID(state.initialEventID),
+			ID:        MakeMessageID(state.initialEventID),
 			Room:      portal.PortalKey,
 			SenderID:  modelUserID(modelID),
 			MXID:      state.initialEventID,

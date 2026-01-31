@@ -223,10 +223,7 @@ type pendingMessage struct {
 	Meta        *PortalMetadata
 	Type        pendingMessageType
 	MessageBody string              // For text, regenerate, edit_regenerate (caption for media)
-	ImageURL    string              // For image messages
-	PDFURL      string              // For PDF messages
-	AudioURL    string              // For audio messages
-	VideoURL    string              // For video messages
+	MediaURL    string              // For media messages (image, PDF, audio, video)
 	MimeType    string              // MIME type of the media
 	TargetMsgID networkid.MessageID // For edit_regenerate
 }
@@ -438,14 +435,8 @@ func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 	switch pending.Type {
 	case pendingTypeText:
 		promptMessages, err = oc.buildPrompt(ctx, pending.Portal, pending.Meta, pending.MessageBody)
-	case pendingTypeImage:
-		promptMessages, err = oc.buildPromptWithImage(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.ImageURL)
-	case pendingTypePDF:
-		promptMessages, err = oc.buildPromptWithPDF(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.PDFURL, pending.MimeType)
-	case pendingTypeAudio:
-		promptMessages, err = oc.buildPromptWithAudio(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.AudioURL, pending.MimeType)
-	case pendingTypeVideo:
-		promptMessages, err = oc.buildPromptWithVideo(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.VideoURL)
+	case pendingTypeImage, pendingTypePDF, pendingTypeAudio, pendingTypeVideo:
+		promptMessages, err = oc.buildPromptWithMedia(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.MediaURL, pending.MimeType, pending.Type)
 	case pendingTypeRegenerate:
 		promptMessages, err = oc.buildPromptForRegenerate(ctx, pending.Portal, pending.Meta, pending.MessageBody)
 	case pendingTypeEditRegenerate:
@@ -804,91 +795,19 @@ func (oc *AIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal, me
 	return prompt, nil
 }
 
-// buildPromptWithImage builds a prompt that includes an image URL
-func (oc *AIClient) buildPromptWithImage(
+// buildPromptWithMedia builds a prompt with media content (image, PDF, audio, or video)
+func (oc *AIClient) buildPromptWithMedia(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	caption string,
-	imageURL string,
-) ([]openai.ChatCompletionMessageParamUnion, error) {
-	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
-	if err != nil {
-		return nil, err
-	}
-
-	// Build the user message with image
-	// Convert Matrix mxc:// URL to HTTP URL for download
-	httpURL := oc.convertMxcToHttp(imageURL)
-
-	imageContent := openai.ChatCompletionContentPartUnionParam{
-		OfImageURL: &openai.ChatCompletionContentPartImageParam{
-			ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
-				URL:    httpURL,
-				Detail: "auto",
-			},
-		},
-	}
-
-	textContent := openai.ChatCompletionContentPartUnionParam{
-		OfText: &openai.ChatCompletionContentPartTextParam{
-			Text: caption,
-		},
-	}
-
-	// Create user message with both image and text
-	userMsg := openai.ChatCompletionMessageParamUnion{
-		OfUser: &openai.ChatCompletionUserMessageParam{
-			Content: openai.ChatCompletionUserMessageParamContentUnion{
-				OfArrayOfContentParts: []openai.ChatCompletionContentPartUnionParam{
-					textContent,
-					imageContent,
-				},
-			},
-		},
-	}
-
-	prompt = append(prompt, userMsg)
-	return prompt, nil
-}
-
-// buildPromptWithPDF builds a prompt with a PDF file for document analysis
-func (oc *AIClient) buildPromptWithPDF(
-	ctx context.Context,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-	caption string,
-	pdfURL string,
+	mediaURL string,
 	mimeType string,
+	mediaType pendingMessageType,
 ) ([]openai.ChatCompletionMessageParamUnion, error) {
 	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
 	if err != nil {
 		return nil, err
-	}
-
-	// Download and base64 encode the PDF
-	b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, pdfURL, 50) // 50MB limit
-	if err != nil {
-		return nil, fmt.Errorf("failed to download PDF: %w", err)
-	}
-	if actualMimeType == "" || actualMimeType == "application/octet-stream" {
-		actualMimeType = mimeType
-	}
-	if actualMimeType == "" {
-		actualMimeType = "application/pdf"
-	}
-
-	// Build data URL for the PDF
-	dataURL := fmt.Sprintf("data:%s;base64,%s", actualMimeType, b64Data)
-
-	// OpenRouter uses file content type for PDFs
-	// Format: {"type": "file", "file": {"filename": "doc.pdf", "file_data": "data:application/pdf;base64,..."}}
-	fileContent := openai.ChatCompletionContentPartUnionParam{
-		OfFile: &openai.ChatCompletionContentPartFileParam{
-			File: openai.ChatCompletionContentPartFileFileParam{
-				FileData: openai.String(dataURL),
-			},
-		},
 	}
 
 	textContent := openai.ChatCompletionContentPartUnionParam{
@@ -897,110 +816,87 @@ func (oc *AIClient) buildPromptWithPDF(
 		},
 	}
 
+	var mediaContent openai.ChatCompletionContentPartUnionParam
+
+	switch mediaType {
+	case pendingTypeImage:
+		// Convert Matrix mxc:// URL to HTTP URL for direct access
+		httpURL := oc.convertMxcToHttp(mediaURL)
+		mediaContent = openai.ChatCompletionContentPartUnionParam{
+			OfImageURL: &openai.ChatCompletionContentPartImageParam{
+				ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
+					URL:    httpURL,
+					Detail: "auto",
+				},
+			},
+		}
+
+	case pendingTypePDF:
+		// Download and base64 encode the PDF
+		b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, 50) // 50MB limit
+		if err != nil {
+			return nil, fmt.Errorf("failed to download PDF: %w", err)
+		}
+		if actualMimeType == "" || actualMimeType == "application/octet-stream" {
+			actualMimeType = mimeType
+		}
+		if actualMimeType == "" {
+			actualMimeType = "application/pdf"
+		}
+		dataURL := fmt.Sprintf("data:%s;base64,%s", actualMimeType, b64Data)
+		mediaContent = openai.ChatCompletionContentPartUnionParam{
+			OfFile: &openai.ChatCompletionContentPartFileParam{
+				File: openai.ChatCompletionContentPartFileFileParam{
+					FileData: openai.String(dataURL),
+				},
+			},
+		}
+
+	case pendingTypeAudio:
+		// Download and base64 encode the audio
+		b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, 25) // 25MB limit
+		if err != nil {
+			return nil, fmt.Errorf("failed to download audio: %w", err)
+		}
+		if actualMimeType == "" || actualMimeType == "application/octet-stream" {
+			actualMimeType = mimeType
+		}
+		audioFormat := getAudioFormat(actualMimeType)
+		mediaContent = openai.ChatCompletionContentPartUnionParam{
+			OfInputAudio: &openai.ChatCompletionContentPartInputAudioParam{
+				InputAudio: openai.ChatCompletionContentPartInputAudioInputAudioParam{
+					Data:   b64Data,
+					Format: audioFormat,
+				},
+			},
+		}
+
+	case pendingTypeVideo:
+		// Video uses text-based approach with URL (SDK doesn't have native video support)
+		httpURL := oc.convertMxcToHttp(mediaURL)
+		videoPrompt := fmt.Sprintf("%s\n\nVideo URL: %s", caption, httpURL)
+		userMsg := openai.ChatCompletionMessageParamUnion{
+			OfUser: &openai.ChatCompletionUserMessageParam{
+				Content: openai.ChatCompletionUserMessageParamContentUnion{
+					OfString: openai.String(videoPrompt),
+				},
+			},
+		}
+		prompt = append(prompt, userMsg)
+		return prompt, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported media type: %s", mediaType)
+	}
+
+	// Create user message with both text and media content
 	userMsg := openai.ChatCompletionMessageParamUnion{
 		OfUser: &openai.ChatCompletionUserMessageParam{
 			Content: openai.ChatCompletionUserMessageParamContentUnion{
 				OfArrayOfContentParts: []openai.ChatCompletionContentPartUnionParam{
 					textContent,
-					fileContent,
+					mediaContent,
 				},
-			},
-		},
-	}
-
-	prompt = append(prompt, userMsg)
-	return prompt, nil
-}
-
-// buildPromptWithAudio builds a prompt with audio content for audio-capable models
-func (oc *AIClient) buildPromptWithAudio(
-	ctx context.Context,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-	caption string,
-	audioURL string,
-	mimeType string,
-) ([]openai.ChatCompletionMessageParamUnion, error) {
-	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
-	if err != nil {
-		return nil, err
-	}
-
-	// Download and base64 encode the audio
-	b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, audioURL, 25) // 25MB limit
-	if err != nil {
-		return nil, fmt.Errorf("failed to download audio: %w", err)
-	}
-	if actualMimeType == "" || actualMimeType == "application/octet-stream" {
-		actualMimeType = mimeType
-	}
-
-	// Get audio format for OpenRouter API
-	audioFormat := getAudioFormat(actualMimeType)
-
-	// OpenRouter uses input_audio content type
-	// Format: {"type": "input_audio", "input_audio": {"data": "base64...", "format": "wav"}}
-	audioContent := openai.ChatCompletionContentPartUnionParam{
-		OfInputAudio: &openai.ChatCompletionContentPartInputAudioParam{
-			InputAudio: openai.ChatCompletionContentPartInputAudioInputAudioParam{
-				Data:   b64Data,
-				Format: audioFormat,
-			},
-		},
-	}
-
-	textContent := openai.ChatCompletionContentPartUnionParam{
-		OfText: &openai.ChatCompletionContentPartTextParam{
-			Text: caption,
-		},
-	}
-
-	userMsg := openai.ChatCompletionMessageParamUnion{
-		OfUser: &openai.ChatCompletionUserMessageParam{
-			Content: openai.ChatCompletionUserMessageParamContentUnion{
-				OfArrayOfContentParts: []openai.ChatCompletionContentPartUnionParam{
-					textContent,
-					audioContent,
-				},
-			},
-		},
-	}
-
-	prompt = append(prompt, userMsg)
-	return prompt, nil
-}
-
-// buildPromptWithVideo builds a prompt with video content for video-capable models
-func (oc *AIClient) buildPromptWithVideo(
-	ctx context.Context,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-	caption string,
-	videoURL string,
-) ([]openai.ChatCompletionMessageParamUnion, error) {
-	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert mxc:// URL to HTTP URL for video passthrough
-	httpURL := oc.convertMxcToHttp(videoURL)
-
-	// OpenRouter expects video_url content type for video
-	// We pass the URL directly rather than base64 encoding due to video sizes
-	// Note: The OpenAI SDK may not have direct video support, so we use a generic approach
-	// Format: {"type": "video_url", "video_url": {"url": "https://..."}}
-	// Since the OpenAI Go SDK may not have native video support, we'll construct the message manually
-	// For now, we'll use the image URL approach which some models accept for video
-
-	// TODO: Once OpenRouter/OpenAI SDK adds proper video support, update this
-	// For now, we use a text-based approach with the video URL
-	videoPrompt := fmt.Sprintf("%s\n\nVideo URL: %s", caption, httpURL)
-
-	userMsg := openai.ChatCompletionMessageParamUnion{
-		OfUser: &openai.ChatCompletionUserMessageParam{
-			Content: openai.ChatCompletionUserMessageParamContentUnion{
-				OfString: openai.String(videoPrompt),
 			},
 		},
 	}
