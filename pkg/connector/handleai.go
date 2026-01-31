@@ -1530,7 +1530,9 @@ func (oc *AIClient) maybeGenerateTitle(ctx context.Context, portal *bridgev2.Por
 
 	// Generate title in background to not block the message flow
 	go func() {
-		bgCtx := oc.backgroundContext(ctx)
+		// Use a bounded timeout to prevent goroutine leaks if the API blocks
+		bgCtx, cancel := context.WithTimeout(oc.backgroundContext(ctx), 15*time.Second)
+		defer cancel()
 
 		// Fetch the last user message from database
 		messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(bgCtx, portal.PortalKey, 10)
@@ -1569,13 +1571,29 @@ func (oc *AIClient) maybeGenerateTitle(ctx context.Context, portal *bridgev2.Por
 	}()
 }
 
+// getTitleGenerationModel returns the model to use for generating chat titles.
+// Priority: UserLoginMetadata.TitleGenerationModel > provider-specific default > current model
+func (oc *AIClient) getTitleGenerationModel() string {
+	meta := loginMetadata(oc.UserLogin)
+
+	// Use configured title generation model if set
+	if meta.TitleGenerationModel != "" {
+		return meta.TitleGenerationModel
+	}
+
+	// Provider-specific defaults for title generation
+	switch meta.Provider {
+	case ProviderOpenRouter:
+		return "openai/gpt-5-nano"
+	default:
+		// For other providers, use the current/default model
+		return oc.effectiveModelForAPI(nil)
+	}
+}
+
 // generateRoomTitle asks the model to generate a short descriptive title for the conversation
 func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistantResponse string) (string, error) {
-	model := oc.effectiveModelForAPI(nil)
-	// Use a faster/cheaper model for title generation if available
-	if strings.HasPrefix(model, "gpt-4") {
-		model = "gpt-4o-mini"
-	}
+	model := oc.getTitleGenerationModel()
 
 	// Build Responses API input
 	input := responses.ResponseInputParam{
