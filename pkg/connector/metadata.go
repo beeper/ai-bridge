@@ -147,7 +147,9 @@ func (mm *MessageMetadata) CopyFrom(other any) {
 	if src.ReasoningTokens != 0 {
 		mm.ReasoningTokens = src.ReasoningTokens
 	}
-	mm.HasToolCalls = src.HasToolCalls
+	if src.HasToolCalls {
+		mm.HasToolCalls = true
+	}
 
 	// Copy new fields
 	if src.TurnID != "" {
