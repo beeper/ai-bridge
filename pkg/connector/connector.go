@@ -134,8 +134,8 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 	if content.Model != "" {
 		changes = append(changes, fmt.Sprintf("model=%s", content.Model))
 	}
-	if content.Temperature > 0 {
-		changes = append(changes, fmt.Sprintf("temperature=%.2f", content.Temperature))
+	if content.Temperature != nil {
+		changes = append(changes, fmt.Sprintf("temperature=%.2f", *content.Temperature))
 	}
 	if content.MaxContextMessages > 0 {
 		changes = append(changes, fmt.Sprintf("context=%d messages", content.MaxContextMessages))
@@ -166,10 +166,11 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 		client.sendSystemNotice(ctx, portal, fmt.Sprintf("Configuration updated: %s", strings.Join(changes, ", ")))
 	}
 
-	log.Info().
-		Str("model", content.Model).
-		Float64("temperature", content.Temperature).
-		Msg("Updated room configuration from state event")
+	logEvent := log.Info().Str("model", content.Model)
+	if content.Temperature != nil {
+		logEvent = logEvent.Float64("temperature", *content.Temperature)
+	}
+	logEvent.Msg("Updated room configuration from state event")
 }
 
 func (oc *OpenAIConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {

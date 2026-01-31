@@ -568,7 +568,9 @@ func (oc *AIClient) streamingResponse(
 				FirstTokenAtMs:     state.firstTokenAtMs,
 				CompletedAtMs:      state.completedAtMs,
 				ThinkingContent:    state.reasoning.String(),
-				ThinkingTokenCount: len(strings.Fields(state.reasoning.String())), // Approximate token count
+				// TODO: Replace with proper token counter (e.g., tiktoken) for accurate counts
+				// Current approximation uses word count (~1.3 tokens per word for English)
+				ThinkingTokenCount: len(strings.Fields(state.reasoning.String())),
 				HasToolCalls:       len(state.toolCalls) > 0,
 			},
 		}
@@ -722,6 +724,7 @@ func (oc *AIClient) streamChatCompletions(
 			Metadata: &MessageMetadata{
 				Role:           "assistant",
 				Body:           state.accumulated.String(),
+				CompletionID:   state.responseID,
 				FinishReason:   state.finishReason,
 				Model:          modelID,
 				TurnID:         state.turnID,
@@ -764,8 +767,11 @@ func (oc *AIClient) convertToResponsesInput(messages []openai.ChatCompletionMess
 
 			if len(msg.OfUser.Content.OfArrayOfContentParts) > 0 {
 				for _, part := range msg.OfUser.Content.OfArrayOfContentParts {
-					if part.OfText != nil {
-						textContent = part.OfText.Text
+					if part.OfText != nil && part.OfText.Text != "" {
+						if textContent != "" {
+							textContent += "\n"
+						}
+						textContent += part.OfText.Text
 					}
 					if part.OfImageURL != nil && part.OfImageURL.ImageURL.URL != "" {
 						hasMultimodal = true

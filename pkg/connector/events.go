@@ -520,7 +520,7 @@ type ApprovalAction struct {
 type RoomConfigEventContent struct {
 	Model               string  `json:"model,omitempty"`
 	SystemPrompt        string  `json:"system_prompt,omitempty"`
-	Temperature         float64 `json:"temperature,omitempty"`
+	Temperature         *float64 `json:"temperature,omitempty"`
 	MaxContextMessages  int     `json:"max_context_messages,omitempty"`
 	MaxCompletionTokens int     `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string  `json:"reasoning_effort,omitempty"`

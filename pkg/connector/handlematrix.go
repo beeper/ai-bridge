@@ -270,7 +270,7 @@ func (oc *AIClient) handleMediaMessage(
 			"The current model (%s) does not support %s. Please switch to a capable model using /model.",
 			oc.effectiveModel(meta), config.capabilityName,
 		))
-		return nil, nil
+		return &bridgev2.MatrixMessageResponse{}, nil
 	}
 
 	// Get the media URL
