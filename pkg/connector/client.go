@@ -14,6 +14,7 @@ import (
 	"go.mau.fi/util/ptr"
 
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
@@ -253,9 +254,6 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 	return oc, nil
 }
 
-// Room queue management
-
-// acquireRoom tries to acquire a room for processing. Returns false if the room is already busy.
 func (oc *AIClient) acquireRoom(roomID id.RoomID) bool {
 	oc.activeRoomsMu.Lock()
 	defer oc.activeRoomsMu.Unlock()
@@ -298,6 +296,69 @@ func (oc *AIClient) popNextPending(roomID id.RoomID) *pendingMessage {
 		delete(oc.pendingMessages, roomID)
 	}
 	return &msg
+}
+
+// dispatchOrQueue handles the common room acquisition pattern for message processing.
+// If the room is available, it dispatches the completion immediately and returns the userMessage for DB.
+// If the room is busy, it queues the message and sends a PENDING status.
+// Returns (shouldReturnDBMessage, isPending).
+func (oc *AIClient) dispatchOrQueue(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	userMessage *database.Message,
+	pending pendingMessage,
+	promptMessages []openai.ChatCompletionMessageParamUnion,
+) (dbMessage *database.Message, isPending bool) {
+	if oc.acquireRoom(portal.MXID) {
+		go func() {
+			defer func() {
+				oc.releaseRoom(portal.MXID)
+				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
+			}()
+			oc.dispatchCompletionInternal(ctx, evt, portal, meta, promptMessages)
+		}()
+		return userMessage, false
+	}
+
+	// Room busy - save message ourselves and queue for later
+	if userMessage != nil {
+		userMessage.MXID = evt.ID
+		if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, userMessage); err != nil {
+			oc.log.Err(err).Msg("Failed to save queued message to database")
+		}
+	}
+
+	oc.queuePendingMessage(portal.MXID, pending)
+	oc.sendPendingStatus(ctx, portal, evt, "Waiting for previous response")
+	return nil, true
+}
+
+// dispatchOrQueueWithStatus is like dispatchOrQueue but sends SUCCESS status when room is acquired.
+// Used for regenerate/edit operations where we need to acknowledge the command.
+func (oc *AIClient) dispatchOrQueueWithStatus(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	pending pendingMessage,
+	promptMessages []openai.ChatCompletionMessageParamUnion,
+) {
+	if oc.acquireRoom(portal.MXID) {
+		oc.sendSuccessStatus(ctx, portal, evt)
+		go func() {
+			defer func() {
+				oc.releaseRoom(portal.MXID)
+				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
+			}()
+			oc.dispatchCompletionInternal(ctx, evt, portal, meta, promptMessages)
+		}()
+		return
+	}
+
+	oc.queuePendingMessage(portal.MXID, pending)
+	oc.sendPendingStatus(ctx, portal, evt, "Waiting for previous response")
 }
 
 // processNextPending processes the next pending message for a room if one exists
@@ -357,8 +418,6 @@ func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 	}()
 }
 
-// Connection lifecycle
-
 func (oc *AIClient) Connect(ctx context.Context) {
 	// Trust the token - auth errors will be caught during actual API usage
 	// OpenRouter and Beeper provider don't support the GET /v1/models/{model} endpoint
@@ -389,8 +448,6 @@ func (oc *AIClient) IsThisUser(ctx context.Context, userID networkid.UserID) boo
 	return userID == humanUserID(oc.UserLogin.ID)
 }
 
-// Chat and user info
-
 func (oc *AIClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 	meta := portalMeta(portal)
 	title := meta.Title
@@ -413,12 +470,8 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 	// Parse model from ghost ID (format: "model-{escaped-model-id}")
 	if modelID := parseModelFromGhostID(ghostID); modelID != "" {
 		caps := getModelCapabilities(modelID, nil)
-		displayName := FormatModelDisplay(modelID)
-		if caps.SupportsVision {
-			displayName += " (Vision)"
-		}
 		return &bridgev2.UserInfo{
-			Name:         ptr.Ptr(displayName),
+			Name:         ptr.Ptr(FormatModelDisplayWithVision(modelID, caps)),
 			IsBot:        ptr.Ptr(false),
 			Identifiers:  []string{modelID},
 			ExtraUpdates: updateGhostLastSync,
@@ -466,8 +519,6 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 
 	return caps
 }
-
-// Model and prompt configuration
 
 // effectiveModel returns the full prefixed model ID (e.g., "openai/gpt-5.2")
 // Used for routing and display purposes
@@ -640,8 +691,6 @@ func (oc *AIClient) findModelInfo(modelID string) *ModelInfo {
 	}
 	return nil
 }
-
-// Prompt building
 
 // buildBasePrompt builds the system prompt and history portion of a prompt.
 // This is the common pattern used by buildPrompt and buildPromptWithImage.
@@ -830,11 +879,8 @@ func (oc *AIClient) ensureGhostDisplayName(ctx context.Context, modelID string) 
 	}
 	// Only update if name is not already set
 	if ghost.Name == "" || !ghost.NameSet {
-		displayName := FormatModelDisplay(modelID)
 		caps := getModelCapabilities(modelID, oc.findModelInfo(modelID))
-		if caps.SupportsVision {
-			displayName += " (Vision)"
-		}
+		displayName := FormatModelDisplayWithVision(modelID, caps)
 		ghost.UpdateInfo(ctx, &bridgev2.UserInfo{
 			Name:  ptr.Ptr(displayName),
 			IsBot: ptr.Ptr(false),
