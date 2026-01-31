@@ -133,6 +133,15 @@ func FormatModelDisplay(modelID string) string {
 	return formatModelDisplayName(actualModel)
 }
 
+// FormatModelDisplayWithVision formats a model ID for display, appending " (Vision)" if supported
+func FormatModelDisplayWithVision(modelID string, caps ModelCapabilities) string {
+	name := FormatModelDisplay(modelID)
+	if caps.SupportsVision {
+		name += " (Vision)"
+	}
+	return name
+}
+
 // formatModelDisplayName formats a model name for display
 func formatModelDisplayName(model string) string {
 	// Handle common model naming patterns
@@ -144,20 +153,14 @@ func formatModelDisplayName(model string) string {
 	// Capitalize words
 	words := strings.Fields(model)
 	for i, word := range words {
-		// Special cases for model names
-		switch strings.ToLower(word) {
+		lower := strings.ToLower(word)
+		switch lower {
 		case "gpt":
 			words[i] = "GPT"
 		case "o1", "o3":
 			words[i] = strings.ToUpper(word)
-		case "claude":
-			words[i] = "Claude"
-		case "gemini":
-			words[i] = "Gemini"
-		case "pro", "mini", "flash", "opus", "sonnet", "haiku":
-			words[i] = caser.String(word)
 		default:
-			// Keep version numbers and other short words as-is
+			// Keep version numbers and other short words as-is, title-case the rest
 			if len(word) <= 3 {
 				words[i] = word
 			} else {

@@ -49,20 +49,14 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 
 		// Create user info - pass ModelInfo for accurate capability detection
 		caps := getModelCapabilities(model.ID, model)
-		displayName := FormatModelDisplay(model.ID)
-		if caps.SupportsVision {
-			displayName += " (Vision)"
-		}
-
 		contacts = append(contacts, &bridgev2.ResolveIdentifierResponse{
 			UserID: userID,
 			UserInfo: &bridgev2.UserInfo{
-				Name:        ptr.Ptr(displayName),
+				Name:        ptr.Ptr(FormatModelDisplayWithVision(model.ID, caps)),
 				IsBot:       ptr.Ptr(false),
 				Identifiers: []string{model.ID},
 			},
 			Ghost: ghost,
-			// Chat will be created on-demand via ResolveIdentifier
 		})
 	}
 
@@ -128,50 +122,16 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 }
 
 // createNewChat creates a new portal for a specific model
-func (oc *AIClient) createNewChat(ctx context.Context, modelID string, caps ModelCapabilities) (*bridgev2.CreateChatResponse, error) {
-	chatIndex, err := oc.allocateNextChatIndex(ctx)
+func (oc *AIClient) createNewChat(ctx context.Context, modelID string, _ ModelCapabilities) (*bridgev2.CreateChatResponse, error) {
+	portal, chatInfo, err := oc.initPortalForChat(ctx, PortalInitOpts{
+		ModelID: modelID,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Create portal metadata with model-specific settings
-	// Per-room settings (SystemPrompt, Temperature, etc.) start at zero values
-	// and use hardcoded defaults until user overrides via /commands
-	portalMeta := &PortalMetadata{
-		Model:        modelID,
-		Slug:         formatChatSlug(chatIndex),
-		Title:        fmt.Sprintf("AI Chat with %s", FormatModelDisplay(modelID)),
-		Capabilities: caps,
-	}
-
-	portalKey := portalKeyForChat(oc.UserLogin.ID)
-
-	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get portal: %w", err)
-	}
-
-	// Set portal metadata
-	portal.Metadata = portalMeta
-	portal.RoomType = database.RoomTypeDM
-	portal.OtherUserID = modelUserID(modelID)
-	portal.Name = portalMeta.Title
-	portal.NameSet = true
-
-	if err := portal.Save(ctx); err != nil {
-		return nil, fmt.Errorf("failed to save portal: %w", err)
-	}
-
-	// Create chat info with proper member list
-	chatInfo := &bridgev2.ChatInfo{
-		Name:    ptr.Ptr(portalMeta.Title),
-		Topic:   ptr.Ptr(fmt.Sprintf("Conversation with %s", modelID)),
-		Type:    ptr.Ptr(database.RoomTypeDM),
-		Members: oc.buildChatMembers(modelID),
-	}
-
 	return &bridgev2.CreateChatResponse{
-		PortalKey:  portalKey,
+		PortalKey:  portal.PortalKey,
 		PortalInfo: chatInfo,
 		Portal:     portal,
 	}, nil
@@ -192,45 +152,79 @@ func (oc *AIClient) allocateNextChatIndex(ctx context.Context) (int, error) {
 	return meta.NextChatIndex, nil
 }
 
-// buildChatMembers creates the standard member list for a chat portal
-func (oc *AIClient) buildChatMembers(modelID string) *bridgev2.ChatMemberList {
-	caps := getModelCapabilities(modelID, nil)
-	displayName := FormatModelDisplay(modelID)
-	if caps.SupportsVision {
-		displayName += " (Vision)"
+// PortalInitOpts contains options for initializing a chat portal
+type PortalInitOpts struct {
+	ModelID      string
+	Title        string
+	SystemPrompt string
+	CopyFrom     *PortalMetadata // For forked chats - copies config from source
+}
+
+// initPortalForChat handles common portal initialization logic.
+// Returns the configured portal, chat info, and any error.
+func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
+	chatIndex, err := oc.allocateNextChatIndex(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	return &bridgev2.ChatMemberList{
-		MemberMap: map[networkid.UserID]bridgev2.ChatMember{
-			humanUserID(oc.UserLogin.ID): {
-				EventSender: bridgev2.EventSender{
-					IsFromMe:    true,
-					SenderLogin: oc.UserLogin.ID,
-				},
-				Membership: event.MembershipJoin,
-				MemberEventExtra: map[string]any{
-					"com.beeper.exclude_from_timeline": true,
-				},
-			},
-			modelUserID(modelID): {
-				EventSender: bridgev2.EventSender{
-					Sender:      modelUserID(modelID),
-					SenderLogin: oc.UserLogin.ID,
-				},
-				Membership: event.MembershipJoin,
-				MemberEventExtra: map[string]any{
-					"com.beeper.exclude_from_timeline": true,
-				},
-				UserInfo: &bridgev2.UserInfo{
-					Name:        ptr.Ptr(displayName),
-					IsBot:       ptr.Ptr(false),
-					Identifiers: []string{modelID},
-				},
-			},
-		},
-		IsFull:           true,
-		TotalMemberCount: 2,
+	slug := formatChatSlug(chatIndex)
+	modelID := opts.ModelID
+	if modelID == "" {
+		modelID = oc.effectiveModel(nil)
 	}
+
+	title := opts.Title
+	if title == "" {
+		title = fmt.Sprintf("AI Chat with %s", FormatModelDisplay(modelID))
+	}
+
+	portalKey := portalKeyForChat(oc.UserLogin.ID)
+	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get portal: %w", err)
+	}
+
+	// Initialize or copy metadata
+	var pmeta *PortalMetadata
+	if opts.CopyFrom != nil {
+		pmeta = &PortalMetadata{
+			Model:               opts.CopyFrom.Model,
+			Slug:                slug,
+			Title:               title,
+			SystemPrompt:        opts.CopyFrom.SystemPrompt,
+			Temperature:         opts.CopyFrom.Temperature,
+			MaxContextMessages:  opts.CopyFrom.MaxContextMessages,
+			MaxCompletionTokens: opts.CopyFrom.MaxCompletionTokens,
+			ReasoningEffort:     opts.CopyFrom.ReasoningEffort,
+			Capabilities:        opts.CopyFrom.Capabilities,
+			ToolsEnabled:        opts.CopyFrom.ToolsEnabled,
+		}
+		modelID = opts.CopyFrom.Model
+	} else {
+		pmeta = &PortalMetadata{
+			Model:        modelID,
+			Slug:         slug,
+			Title:        title,
+			SystemPrompt: opts.SystemPrompt,
+			Capabilities: getModelCapabilities(modelID, oc.findModelInfo(modelID)),
+		}
+	}
+	portal.Metadata = pmeta
+
+	portal.RoomType = database.RoomTypeDM
+	portal.OtherUserID = modelUserID(modelID)
+	portal.Name = title
+	portal.NameSet = true
+	portal.Topic = pmeta.SystemPrompt
+	portal.TopicSet = pmeta.SystemPrompt != ""
+
+	if err := portal.Save(ctx); err != nil {
+		return nil, nil, fmt.Errorf("failed to save portal: %w", err)
+	}
+
+	chatInfo := oc.composeChatInfo(title, pmeta.SystemPrompt, modelID)
+	return portal, chatInfo, nil
 }
 
 // handleFork creates a new chat and copies messages from the current conversation
@@ -373,63 +367,16 @@ func (oc *AIClient) createForkedChat(
 	sourcePortal *bridgev2.Portal,
 	sourceMeta *PortalMetadata,
 ) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
-	// Allocate new chat index
-	chatIndex, err := oc.allocateNextChatIndex(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	slug := formatChatSlug(chatIndex)
-
-	// Generate title
 	sourceTitle := sourceMeta.Title
 	if sourceTitle == "" {
 		sourceTitle = sourcePortal.Name
 	}
 	title := fmt.Sprintf("%s (Fork)", sourceTitle)
 
-	// Create portal key
-	portalKey := portalKeyForChat(oc.UserLogin.ID)
-
-	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Copy configuration from source
-	portal.Metadata = &PortalMetadata{
-		Model:               sourceMeta.Model,
-		Slug:                slug,
-		Title:               title,
-		SystemPrompt:        sourceMeta.SystemPrompt,
-		Temperature:         sourceMeta.Temperature,
-		MaxContextMessages:  sourceMeta.MaxContextMessages,
-		MaxCompletionTokens: sourceMeta.MaxCompletionTokens,
-		ReasoningEffort:     sourceMeta.ReasoningEffort,
-		Capabilities:        sourceMeta.Capabilities,
-		ToolsEnabled:        sourceMeta.ToolsEnabled,
-	}
-
-	portal.RoomType = database.RoomTypeDM
-	portal.OtherUserID = modelUserID(sourceMeta.Model)
-	portal.Name = title
-	portal.NameSet = true
-	portal.Topic = sourceMeta.SystemPrompt
-	portal.TopicSet = sourceMeta.SystemPrompt != ""
-
-	if err := portal.Save(ctx); err != nil {
-		return nil, nil, err
-	}
-
-	// Create chat info
-	chatInfo := &bridgev2.ChatInfo{
-		Name:    ptr.Ptr(title),
-		Topic:   ptr.Ptr(sourceMeta.SystemPrompt),
-		Type:    ptr.Ptr(database.RoomTypeDM),
-		Members: oc.buildChatMembers(sourceMeta.Model),
-	}
-
-	return portal, chatInfo, nil
+	return oc.initPortalForChat(ctx, PortalInitOpts{
+		Title:    title,
+		CopyFrom: sourceMeta,
+	})
 }
 
 // copyMessagesToChat queues messages to be bridged to the new chat
@@ -496,38 +443,9 @@ func (oc *AIClient) copyMessagesToChat(
 
 // createNewChatWithModel creates a new chat portal with the specified model and default settings
 func (oc *AIClient) createNewChatWithModel(ctx context.Context, modelID string) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
-	chatIndex, err := oc.allocateNextChatIndex(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	slug := formatChatSlug(chatIndex)
-	modelName := FormatModelDisplay(modelID)
-	title := fmt.Sprintf("AI Chat with %s", modelName)
-
-	key := portalKeyForChat(oc.UserLogin.ID)
-	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, key)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	pmeta := portalMeta(portal)
-	pmeta.Slug = slug
-	pmeta.Title = title
-	pmeta.Model = modelID
-	pmeta.Capabilities = getModelCapabilities(modelID, oc.findModelInfo(modelID))
-
-	portal.RoomType = database.RoomTypeDM
-	portal.OtherUserID = modelUserID(modelID)
-	portal.Name = title
-	portal.NameSet = true
-
-	if err := portal.Save(ctx); err != nil {
-		return nil, nil, err
-	}
-
-	info := oc.composeChatInfo(title, "", modelID) // No default system prompt
-	return portal, info, nil
+	return oc.initPortalForChat(ctx, PortalInitOpts{
+		ModelID: modelID,
+	})
 }
 
 // chatInfoFromPortal builds ChatInfo from an existing portal
@@ -921,48 +839,9 @@ func (oc *AIClient) createChat(ctx context.Context, title, systemPrompt string) 
 }
 
 func (oc *AIClient) spawnPortal(ctx context.Context, title, systemPrompt string) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
-	oc.chatLock.Lock()
-	defer oc.chatLock.Unlock()
 	oc.log.Debug().Str("title", title).Msg("Allocating portal for new chat")
-
-	// Get default model for new chats
-	defaultModelID := oc.effectiveModel(nil)
-
-	meta := loginMetadata(oc.UserLogin)
-	meta.NextChatIndex++
-	index := meta.NextChatIndex
-	slug := formatChatSlug(index)
-	if title == "" {
-		modelName := FormatModelDisplay(defaultModelID)
-		title = fmt.Sprintf("AI Chat with %s", modelName)
-	}
-	key := portalKeyForChat(oc.UserLogin.ID)
-	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, key)
-	if err != nil {
-		meta.NextChatIndex--
-		return nil, nil, err
-	}
-	pmeta := portalMeta(portal)
-	pmeta.Slug = slug
-	pmeta.Title = title
-	pmeta.Model = defaultModelID
-	pmeta.Capabilities = getModelCapabilities(defaultModelID, oc.findModelInfo(defaultModelID))
-	if systemPrompt != "" {
-		pmeta.SystemPrompt = systemPrompt
-	}
-	portal.RoomType = database.RoomTypeDM
-	portal.OtherUserID = modelUserID(defaultModelID)
-	portal.Name = title
-	portal.NameSet = true
-	portal.Topic = systemPrompt
-	portal.TopicSet = systemPrompt != ""
-	if err := portal.Save(ctx); err != nil {
-		meta.NextChatIndex--
-		return nil, nil, err
-	}
-	if err := oc.UserLogin.Save(ctx); err != nil {
-		return nil, nil, err
-	}
-	info := oc.composeChatInfo(title, systemPrompt, defaultModelID)
-	return portal, info, nil
+	return oc.initPortalForChat(ctx, PortalInitOpts{
+		Title:        title,
+		SystemPrompt: systemPrompt,
+	})
 }

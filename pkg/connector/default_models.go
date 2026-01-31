@@ -1,5 +1,7 @@
 package connector
 
+import "slices"
+
 // DefaultModels contains all default model definitions for each provider.
 // This consolidates model definitions that were previously duplicated across provider files.
 var DefaultModels = map[string][]ModelInfo{
@@ -66,10 +68,7 @@ func GetDefaultModels(provider string) []ModelInfo {
 	if !ok {
 		return nil
 	}
-	// Return a copy
-	result := make([]ModelInfo, len(models))
-	copy(result, models)
-	return result
+	return slices.Clone(models)
 }
 
 // GetAllBeeperModels returns all Beeper models from the generated file.

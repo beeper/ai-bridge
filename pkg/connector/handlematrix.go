@@ -62,45 +62,17 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		Timestamp: time.Now(),
 	}
 
-	// Try to acquire room SYNCHRONOUSLY - no race condition
-	if oc.acquireRoom(portal.MXID) {
-		// Room acquired - framework will save message and send SUCCESS
-		go func() {
-			defer func() {
-				oc.releaseRoom(portal.MXID)
-				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
-			}()
-			oc.dispatchCompletionInternal(ctx, msg.Event, portal, meta, promptMessages)
-		}()
-
-		return &bridgev2.MatrixMessageResponse{
-			DB: userMessage,
-		}, nil
-	}
-
-	// Room busy - handle message saving ourselves to control status
-	userMessage.MXID = msg.Event.ID
-	err = oc.UserLogin.Bridge.DB.Message.Insert(ctx, userMessage)
-	if err != nil {
-		oc.log.Err(err).Msg("Failed to save queued message to database")
-		// Continue anyway - the message will still be processed
-	}
-
-	// Queue the message for later processing (prompt built fresh when processed)
-	oc.queuePendingMessage(portal.MXID, pendingMessage{
+	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
 		Event:       msg.Event,
 		Portal:      portal,
 		Meta:        meta,
 		Type:        pendingTypeText,
 		MessageBody: body,
-	})
+	}, promptMessages)
 
-	// Send PENDING status - message shows "Sending..." in client
-	oc.sendPendingStatus(ctx, portal, msg.Event, "Waiting for previous response")
-
-	// Return Pending: true so framework doesn't override our PENDING status with SUCCESS
 	return &bridgev2.MatrixMessageResponse{
-		Pending: true,
+		DB:      dbMsg,
+		Pending: isPending,
 	}, nil
 }
 
@@ -211,27 +183,14 @@ func (oc *AIClient) regenerateFromEdit(
 		}
 	}
 
-	// Dispatch a new completion with synchronous room acquisition
-	if oc.acquireRoom(portal.MXID) {
-		oc.sendSuccessStatus(ctx, portal, evt)
-		go func() {
-			defer func() {
-				oc.releaseRoom(portal.MXID)
-				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
-			}()
-			oc.dispatchCompletionInternal(ctx, evt, portal, meta, promptMessages)
-		}()
-	} else {
-		oc.queuePendingMessage(portal.MXID, pendingMessage{
-			Event:       evt,
-			Portal:      portal,
-			Meta:        meta,
-			Type:        pendingTypeEditRegenerate,
-			MessageBody: newBody,
-			TargetMsgID: editedMessage.ID,
-		})
-		oc.sendPendingStatus(ctx, portal, evt, "Waiting for previous response")
-	}
+	oc.dispatchOrQueueWithStatus(ctx, evt, portal, meta, pendingMessage{
+		Event:       evt,
+		Portal:      portal,
+		Meta:        meta,
+		Type:        pendingTypeEditRegenerate,
+		MessageBody: newBody,
+		TargetMsgID: editedMessage.ID,
+	}, promptMessages)
 
 	return nil
 }
@@ -285,45 +244,18 @@ func (oc *AIClient) handleImageMessage(
 		Timestamp: time.Now(),
 	}
 
-	// Try to acquire room SYNCHRONOUSLY - no race condition
-	if oc.acquireRoom(portal.MXID) {
-		// Room acquired - framework will save message and send SUCCESS
-		go func() {
-			defer func() {
-				oc.releaseRoom(portal.MXID)
-				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
-			}()
-			oc.dispatchCompletionInternal(ctx, msg.Event, portal, meta, promptMessages)
-		}()
-
-		return &bridgev2.MatrixMessageResponse{
-			DB: userMessage,
-		}, nil
-	}
-
-	// Room busy - handle message saving ourselves to control status
-	userMessage.MXID = msg.Event.ID
-	err = oc.UserLogin.Bridge.DB.Message.Insert(ctx, userMessage)
-	if err != nil {
-		oc.log.Err(err).Msg("Failed to save queued image message to database")
-	}
-
-	// Queue the message for later processing (prompt built fresh when processed)
-	oc.queuePendingMessage(portal.MXID, pendingMessage{
+	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
 		Event:       msg.Event,
 		Portal:      portal,
 		Meta:        meta,
 		Type:        pendingTypeImage,
 		MessageBody: caption,
 		ImageURL:    string(imageURL),
-	})
+	}, promptMessages)
 
-	// Send PENDING status - message shows "Sending..." in client
-	oc.sendPendingStatus(ctx, portal, msg.Event, "Waiting for previous response")
-
-	// Return Pending: true so framework doesn't override our PENDING status with SUCCESS
 	return &bridgev2.MatrixMessageResponse{
-		Pending: true,
+		DB:      dbMsg,
+		Pending: isPending,
 	}, nil
 }
 
@@ -662,26 +594,13 @@ func (oc *AIClient) handleRegenerate(
 		return
 	}
 
-	// Dispatch new completion with synchronous room acquisition
-	if oc.acquireRoom(portal.MXID) {
-		oc.sendSuccessStatus(runCtx, portal, evt)
-		go func() {
-			defer func() {
-				oc.releaseRoom(portal.MXID)
-				oc.processNextPending(oc.backgroundContext(runCtx), portal.MXID)
-			}()
-			oc.dispatchCompletionInternal(runCtx, evt, portal, meta, prompt)
-		}()
-	} else {
-		oc.queuePendingMessage(portal.MXID, pendingMessage{
-			Event:       evt,
-			Portal:      portal,
-			Meta:        meta,
-			Type:        pendingTypeRegenerate,
-			MessageBody: userMeta.Body,
-		})
-		oc.sendPendingStatus(runCtx, portal, evt, "Waiting for previous response")
-	}
+	oc.dispatchOrQueueWithStatus(runCtx, evt, portal, meta, pendingMessage{
+		Event:       evt,
+		Portal:      portal,
+		Meta:        meta,
+		Type:        pendingTypeRegenerate,
+		MessageBody: userMeta.Body,
+	}, prompt)
 }
 
 // buildPromptForRegenerate builds a prompt for regeneration, excluding the last assistant message

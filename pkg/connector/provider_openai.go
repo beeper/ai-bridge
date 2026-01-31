@@ -19,6 +19,13 @@ type OpenAIProvider struct {
 	baseURL string
 }
 
+// reasoningEffortMap maps string effort levels to SDK constants
+var reasoningEffortMap = map[string]responses.ReasoningEffort{
+	"low":    responses.ReasoningEffortLow,
+	"medium": responses.ReasoningEffortMedium,
+	"high":   responses.ReasoningEffortHigh,
+}
+
 // NewOpenAIProvider creates a new OpenAI provider
 func NewOpenAIProvider(apiKey string, log zerolog.Logger) (*OpenAIProvider, error) {
 	return NewOpenAIProviderWithBaseURL(apiKey, "", log)
@@ -94,20 +101,9 @@ func (o *OpenAIProvider) buildResponsesParams(params GenerateParams) responses.R
 	}
 
 	// Handle reasoning effort for o1/o3 models
-	if params.ReasoningEffort != "" && params.ReasoningEffort != "none" {
-		switch params.ReasoningEffort {
-		case "low":
-			responsesParams.Reasoning = responses.ReasoningParam{
-				Effort: responses.ReasoningEffortLow,
-			}
-		case "medium":
-			responsesParams.Reasoning = responses.ReasoningParam{
-				Effort: responses.ReasoningEffortMedium,
-			}
-		case "high":
-			responsesParams.Reasoning = responses.ReasoningParam{
-				Effort: responses.ReasoningEffortHigh,
-			}
+	if effort, ok := reasoningEffortMap[params.ReasoningEffort]; ok {
+		responsesParams.Reasoning = responses.ReasoningParam{
+			Effort: effort,
 		}
 	}
 

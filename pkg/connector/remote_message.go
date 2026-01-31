@@ -74,28 +74,31 @@ func (m *OpenAIRemoteMessage) ConvertMessage(ctx context.Context, portal *bridge
 
 	// Build Extra map with AI-specific metadata
 	extra := map[string]any{}
+	addIfNotEmpty := func(key string, val any) {
+		switch v := val.(type) {
+		case string:
+			if v != "" {
+				extra[key] = v
+			}
+		case int64:
+			if v > 0 {
+				extra[key] = v
+			}
+		case bool:
+			if v {
+				extra[key] = v
+			}
+		}
+	}
+
 	if m.Metadata != nil {
-		if m.Metadata.CompletionID != "" {
-			extra["com.beeper.ai.completion_id"] = m.Metadata.CompletionID
-		}
-		if m.Metadata.FinishReason != "" {
-			extra["com.beeper.ai.finish_reason"] = m.Metadata.FinishReason
-		}
-		if m.Metadata.PromptTokens > 0 {
-			extra["com.beeper.ai.prompt_tokens"] = m.Metadata.PromptTokens
-		}
-		if m.Metadata.CompletionTokens > 0 {
-			extra["com.beeper.ai.completion_tokens"] = m.Metadata.CompletionTokens
-		}
-		if m.Metadata.Model != "" {
-			extra["com.beeper.ai.model"] = m.Metadata.Model
-		}
-		if m.Metadata.ReasoningTokens > 0 {
-			extra["com.beeper.ai.reasoning_tokens"] = m.Metadata.ReasoningTokens
-		}
-		if m.Metadata.HasToolCalls {
-			extra["com.beeper.ai.has_tool_calls"] = m.Metadata.HasToolCalls
-		}
+		addIfNotEmpty("com.beeper.ai.completion_id", m.Metadata.CompletionID)
+		addIfNotEmpty("com.beeper.ai.finish_reason", m.Metadata.FinishReason)
+		addIfNotEmpty("com.beeper.ai.prompt_tokens", m.Metadata.PromptTokens)
+		addIfNotEmpty("com.beeper.ai.completion_tokens", m.Metadata.CompletionTokens)
+		addIfNotEmpty("com.beeper.ai.model", m.Metadata.Model)
+		addIfNotEmpty("com.beeper.ai.reasoning_tokens", m.Metadata.ReasoningTokens)
+		addIfNotEmpty("com.beeper.ai.has_tool_calls", m.Metadata.HasToolCalls)
 	}
 
 	// Get model from portal metadata as fallback
