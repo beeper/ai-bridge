@@ -421,12 +421,35 @@ func (oc *AIClient) streamingResponse(
 }
 
 // convertToResponsesInput converts Chat Completion messages to Responses API input items
+// NOTE: This currently extracts text content only. For multimodal messages (images, PDFs, audio, video),
+// the media URL/description is appended to the text content. Full multimodal support for Responses API
+// would require using the native array content format which may not be fully supported.
 func (oc *AIClient) convertToResponsesInput(messages []openai.ChatCompletionMessageParamUnion, _ *PortalMetadata) responses.ResponseInputParam {
 	var input responses.ResponseInputParam
 
 	for _, msg := range messages {
 		// Use shared helper to extract content and role (avoids JSON roundtrip)
 		content, role := extractMessageContent(msg)
+
+		// Also extract any multimodal content descriptions for user messages
+		if msg.OfUser != nil && msg.OfUser.Content.OfArrayOfContentParts != nil {
+			var extraContent []string
+			for _, part := range msg.OfUser.Content.OfArrayOfContentParts {
+				if part.OfImageURL != nil && part.OfImageURL.ImageURL.URL != "" {
+					extraContent = append(extraContent, "[Image: "+part.OfImageURL.ImageURL.URL+"]")
+				}
+				if part.OfInputAudio != nil {
+					extraContent = append(extraContent, "[Audio content attached]")
+				}
+				if part.OfFile != nil {
+					extraContent = append(extraContent, "[File content attached]")
+				}
+			}
+			if len(extraContent) > 0 {
+				content = content + "\n" + strings.Join(extraContent, "\n")
+			}
+		}
+
 		if role == "" || content == "" {
 			continue
 		}

@@ -61,6 +61,9 @@ type ModelCapabilities struct {
 	Reasoning       bool
 	WebSearch       bool
 	ImageGen        bool
+	Audio           bool
+	Video           bool
+	PDF             bool
 	ContextWindow   int
 	MaxOutputTokens int
 }
@@ -151,6 +154,18 @@ func detectCapabilities(modelID string, apiModel OpenRouterModel, hasAPIData boo
 	// Image Generation: "image" in architecture.output_modalities
 	caps.ImageGen = slices.Contains(apiModel.Architecture.OutputModalities, "image")
 
+	// Audio: "audio" in architecture.input_modalities
+	caps.Audio = slices.Contains(apiModel.Architecture.InputModalities, "audio")
+
+	// Video: "video" in architecture.input_modalities
+	caps.Video = slices.Contains(apiModel.Architecture.InputModalities, "video")
+
+	// PDF: "file" in architecture.input_modalities (OpenRouter uses "file" for document support)
+	// Also check for specific PDF-capable models
+	caps.PDF = slices.Contains(apiModel.Architecture.InputModalities, "file") ||
+		strings.Contains(modelID, "claude") || // Claude models support PDFs
+		strings.Contains(modelID, "gemini") // Gemini models support PDFs
+
 	// Tool Calling: "tools" in supported_parameters
 	caps.ToolCalling = slices.Contains(apiModel.SupportedParameters, "tools")
 
@@ -223,6 +238,9 @@ var BeeperModelsGenerated = []ModelInfo{
 		SupportsReasoning:   %t,
 		SupportsWebSearch:   %t,
 		SupportsImageGen:    %t,
+		SupportsAudio:       %t,
+		SupportsVideo:       %t,
+		SupportsPDF:         %t,
 		ContextWindow:       %d,
 		MaxOutputTokens:     %d,
 		AvailableTools:      %s,
@@ -235,6 +253,9 @@ var BeeperModelsGenerated = []ModelInfo{
 			caps.Reasoning,
 			caps.WebSearch,
 			caps.ImageGen,
+			caps.Audio,
+			caps.Video,
+			caps.PDF,
 			caps.ContextWindow,
 			caps.MaxOutputTokens,
 			availableToolsGo(caps),
@@ -264,6 +285,9 @@ type JSONModelInfo struct {
 	SupportsReasoning   bool     `json:"supports_reasoning"`
 	SupportsWebSearch   bool     `json:"supports_web_search"`
 	SupportsImageGen    bool     `json:"supports_image_gen,omitempty"`
+	SupportsAudio       bool     `json:"supports_audio,omitempty"`
+	SupportsVideo       bool     `json:"supports_video,omitempty"`
+	SupportsPDF         bool     `json:"supports_pdf,omitempty"`
 	ContextWindow       int      `json:"context_window,omitempty"`
 	MaxOutputTokens     int      `json:"max_output_tokens,omitempty"`
 	AvailableTools      []string `json:"available_tools,omitempty"`
@@ -288,6 +312,9 @@ func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) e
 			SupportsReasoning:   caps.Reasoning,
 			SupportsWebSearch:   caps.WebSearch,
 			SupportsImageGen:    caps.ImageGen,
+			SupportsAudio:       caps.Audio,
+			SupportsVideo:       caps.Video,
+			SupportsPDF:         caps.PDF,
 			ContextWindow:       caps.ContextWindow,
 			MaxOutputTokens:     caps.MaxOutputTokens,
 			AvailableTools:      availableToolsJSON(caps),

@@ -20,6 +20,8 @@ type ModelCapabilities struct {
 	SupportsReasoning bool `json:"supports_reasoning"` // Models that support reasoning_effort parameter
 	SupportsPDF       bool `json:"supports_pdf"`
 	SupportsImageGen  bool `json:"supports_image_gen"`
+	SupportsAudio     bool `json:"supports_audio"` // Models that accept audio input
+	SupportsVideo     bool `json:"supports_video"` // Models that accept video input
 }
 
 // UserLoginMetadata is stored on each login row to keep per-user settings.

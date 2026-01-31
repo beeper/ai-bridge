@@ -1,6 +1,6 @@
 # Bridge AI chats into Beeper
 
-AI bridge is a multi-provider Matrix bridge for chatting with any model from most providers OpenAI, Anthropic, Google Gemini, and OpenRouter. It's built on bridgev2 framework.
+AI bridge is a multi-provider Matrix bridge for chatting with any model from providers like OpenAI, Anthropic, Google Gemini, and OpenRouter. It's built on the bridgev2 framework.
 
 AI bridge works best with Beeper Desktop.
 
