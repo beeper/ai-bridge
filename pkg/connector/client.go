@@ -93,6 +93,55 @@ var aiBaseCaps = &event.RoomFeatures{
 	TypingNotifications: true,
 }
 
+// buildCapabilityID constructs a deterministic capability ID based on model modalities.
+// Suffixes are sorted alphabetically to ensure the same capabilities produce the same ID.
+func buildCapabilityID(caps ModelCapabilities) string {
+	var suffixes []string
+
+	// Add suffixes in alphabetical order for determinism
+	if caps.SupportsImageGen {
+		suffixes = append(suffixes, "imagegen")
+	}
+	if caps.SupportsPDF {
+		suffixes = append(suffixes, "pdf")
+	}
+	if caps.SupportsVision {
+		suffixes = append(suffixes, "vision")
+	}
+
+	if len(suffixes) == 0 {
+		return aiCapID()
+	}
+	return aiCapID() + "+" + strings.Join(suffixes, "+")
+}
+
+// visionFileFeatures returns FileFeatures for vision-capable models
+func visionFileFeatures() *event.FileFeatures {
+	return &event.FileFeatures{
+		MimeTypes: map[string]event.CapabilitySupportLevel{
+			"image/png":  event.CapLevelFullySupported,
+			"image/jpeg": event.CapLevelFullySupported,
+			"image/webp": event.CapLevelFullySupported,
+			"image/gif":  event.CapLevelFullySupported,
+		},
+		Caption:          event.CapLevelFullySupported,
+		MaxCaptionLength: AIMaxTextLength,
+		MaxSize:          20 * 1024 * 1024, // 20MB
+	}
+}
+
+// pdfFileFeatures returns FileFeatures for PDF-capable models
+func pdfFileFeatures() *event.FileFeatures {
+	return &event.FileFeatures{
+		MimeTypes: map[string]event.CapabilitySupportLevel{
+			"application/pdf": event.CapLevelFullySupported,
+		},
+		Caption:          event.CapLevelFullySupported,
+		MaxCaptionLength: AIMaxTextLength,
+		MaxSize:          50 * 1024 * 1024, // 50MB for PDFs
+	}
+}
+
 type AIClient struct {
 	UserLogin *bridgev2.UserLogin
 	connector *OpenAIConnector
@@ -403,44 +452,19 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 	// Clone base capabilities
 	caps := ptr.Clone(aiBaseCaps)
 
-	// Build dynamic capability ID based on supported features
-	capID := aiCapID()
+	// Build dynamic capability ID from modalities
+	caps.ID = buildCapabilityID(meta.Capabilities)
 
-	// Add image input support if model supports vision
+	// Apply file capabilities based on modalities
 	if meta.Capabilities.SupportsVision {
-		capID += "+vision"
-		caps.File[event.MsgImage] = &event.FileFeatures{
-			MimeTypes: map[string]event.CapabilitySupportLevel{
-				"image/png":  event.CapLevelFullySupported,
-				"image/jpeg": event.CapLevelFullySupported,
-				"image/webp": event.CapLevelFullySupported,
-				"image/gif":  event.CapLevelFullySupported,
-			},
-			Caption:          event.CapLevelFullySupported,
-			MaxCaptionLength: AIMaxTextLength,
-			MaxSize:          20 * 1024 * 1024, // 20MB
-		}
+		caps.File[event.MsgImage] = visionFileFeatures()
 	}
-
-	// Add PDF support if model supports it
 	if meta.Capabilities.SupportsPDF {
-		capID += "+pdf"
-		caps.File[event.MsgFile] = &event.FileFeatures{
-			MimeTypes: map[string]event.CapabilitySupportLevel{
-				"application/pdf": event.CapLevelFullySupported,
-			},
-			Caption:          event.CapLevelFullySupported,
-			MaxCaptionLength: AIMaxTextLength,
-			MaxSize:          50 * 1024 * 1024, // 50MB
-		}
+		caps.File[event.MsgFile] = pdfFileFeatures()
 	}
+	// Note: ImageGen is output capability - doesn't affect file upload features
+	// Note: Reasoning is processing mode - doesn't affect room features
 
-	// Add image generation marker if model supports it (for UI hints)
-	if meta.Capabilities.SupportsImageGen {
-		capID += "+imagegen"
-	}
-
-	caps.ID = capID
 	return caps
 }
 
