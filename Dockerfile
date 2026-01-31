@@ -13,7 +13,7 @@ ENV UID=1337 \
 
 RUN apk add --no-cache su-exec ca-certificates olm bash jq yq-go curl
 
-COPY --from=builder /build/ai-bridge /usr/bin/ai-bridge
+COPY --from=builder /build/ai /usr/bin/ai
 COPY --from=builder /build/docker-run.sh /docker-run.sh
 VOLUME /data
 
