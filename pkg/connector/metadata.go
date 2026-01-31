@@ -1,11 +1,8 @@
 package connector
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"time"
-
 	"go.mau.fi/util/jsontime"
+	"go.mau.fi/util/random"
 	"maunium.net/go/mautrix/bridgev2/database"
 )
 
@@ -193,12 +190,7 @@ func NewCallID() string {
 	return "call_" + generateShortID()
 }
 
-// generateShortID generates a short unique ID (12 chars) using crypto/rand
+// generateShortID generates a short unique ID (12 chars)
 func generateShortID() string {
-	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to timestamp if crypto/rand fails
-		return hex.EncodeToString([]byte(time.Now().Format("060102150405")))[:12]
-	}
-	return hex.EncodeToString(b)
+	return random.String(12)
 }
