@@ -190,8 +190,9 @@ type AIClient struct {
 	// Provider abstraction layer - all providers use OpenAI SDK
 	provider AIProvider
 
-	loggedIn atomic.Bool
-	chatLock sync.Mutex
+	loggedIn      atomic.Bool
+	chatLock      sync.Mutex
+	bootstrapOnce sync.Once // Ensures bootstrap only runs once per client instance
 
 	// Turn-based message queuing: only one response per room at a time
 	activeRooms   map[id.RoomID]bool
@@ -503,7 +504,7 @@ func (oc *AIClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*
 		if portal.Name != "" {
 			title = portal.Name
 		} else {
-			title = "ChatGPT"
+			title = "AI Chat"
 		}
 	}
 	return &bridgev2.ChatInfo{
@@ -669,16 +670,12 @@ func (oc *AIClient) validateModel(ctx context.Context, modelID string) (bool, er
 		}
 	}
 
-	// Check against OpenRouter's model list (cached)
-	_, actualModel := ParseModelPrefix(modelID)
-	if IsValidOpenRouterModel(actualModel) {
-		return true, nil
-	}
-
 	// Try to validate by making a minimal API call as last resort
 	timeoutCtx, cancel := context.WithTimeout(ctx, modelValidationTimeout)
 	defer cancel()
 
+	// Strip provider prefix for direct API validation (e.g., "openai/gpt-4o" -> "gpt-4o")
+	_, actualModel := ParseModelPrefix(modelID)
 	_, err = oc.api.Models.Get(timeoutCtx, actualModel)
 	return err == nil, nil
 }

@@ -127,7 +127,7 @@ func (ol *OpenAILogin) credentialsStep() *bridgev2.LoginStep {
 }
 
 func (ol *OpenAILogin) finishLogin(ctx context.Context, apiKey, baseURL string) (*bridgev2.LoginStep, error) {
-	loginID := makeUserLoginID(ol.User.MXID)
+	loginID := makeUserLoginID(ol.User.MXID, ol.Provider, apiKey)
 	meta := &UserLoginMetadata{
 		Provider: ol.Provider,
 		APIKey:   apiKey,
@@ -135,7 +135,7 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, apiKey, baseURL string) 
 	}
 	login, err := ol.User.NewLogin(ctx, &database.UserLogin{
 		ID:         loginID,
-		RemoteName: "Beeper AI",
+		RemoteName: formatRemoteName(ol.Provider, apiKey, baseURL),
 		Metadata:   meta,
 	}, nil)
 	if err != nil {
@@ -166,4 +166,28 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, apiKey, baseURL string) 
 			UserLogin:   login,
 		},
 	}, nil
+}
+
+// formatRemoteName generates a display name for the account based on provider.
+func formatRemoteName(provider, apiKey, baseURL string) string {
+	switch provider {
+	case ProviderBeeper:
+		return "Beeper AI"
+	case ProviderOpenAI:
+		return fmt.Sprintf("OpenAI (%s)", maskAPIKey(apiKey))
+	case ProviderOpenRouter:
+		return fmt.Sprintf("OpenRouter (%s)", maskAPIKey(apiKey))
+	case ProviderCustom:
+		return fmt.Sprintf("Custom (%s, %s)", baseURL, maskAPIKey(apiKey))
+	default:
+		return "AI Bridge"
+	}
+}
+
+// maskAPIKey returns a masked version of the API key showing first 3 and last 3 chars.
+func maskAPIKey(key string) string {
+	if len(key) <= 6 {
+		return "***"
+	}
+	return fmt.Sprintf("%s...%s", key[:3], key[len(key)-3:])
 }

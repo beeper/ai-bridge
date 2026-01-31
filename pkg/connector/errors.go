@@ -160,12 +160,7 @@ const defaultContextWindow = 8192
 
 // GetModelContextWindow returns the context window size for a model
 func GetModelContextWindow(modelID string) int {
-	// First, try runtime cache from OpenRouter
-	if size := GetOpenRouterContextWindow(modelID); size > 0 {
-		return size
-	}
-
-	// Fall back to hardcoded values
+	// Use hardcoded fallback values
 	// Check exact match first
 	if size, ok := fallbackContextWindows[modelID]; ok {
 		return size

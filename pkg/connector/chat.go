@@ -723,7 +723,9 @@ func (oc *AIClient) sendSystemNotice(ctx context.Context, portal *bridgev2.Porta
 
 func (oc *AIClient) scheduleBootstrap() {
 	backgroundCtx := oc.UserLogin.Bridge.BackgroundCtx
-	go oc.bootstrap(backgroundCtx)
+	oc.bootstrapOnce.Do(func() {
+		go oc.bootstrap(backgroundCtx)
+	})
 }
 
 func (oc *AIClient) bootstrap(ctx context.Context) {
@@ -779,7 +781,7 @@ func (oc *AIClient) syncChatCounter(ctx context.Context) error {
 }
 
 func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
-	oc.log.Debug().Msg("Ensuring default ChatGPT room exists")
+	oc.log.Debug().Msg("Ensuring default AI chat room exists")
 	portals, err := oc.listAllChatPortals(ctx)
 	if err != nil {
 		oc.log.Err(err).Msg("Failed to list chat portals")
@@ -803,7 +805,7 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		go oc.BroadcastRoomState(ctx, portals[0])
 		return err
 	}
-	resp, err := oc.createChat(ctx, "", "") // No default system prompt
+	resp, err := oc.createChat(ctx, "Welcome to AI Chats", "") // Default room title
 	if err != nil {
 		oc.log.Err(err).Msg("Failed to create default portal")
 		return err
@@ -816,7 +818,7 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 	oc.sendWelcomeMessage(ctx, resp.Portal)
 	// Broadcast initial room state
 	go oc.BroadcastRoomState(ctx, resp.Portal)
-	oc.log.Info().Stringer("portal", resp.PortalKey).Msg("Default ChatGPT room created")
+	oc.log.Info().Stringer("portal", resp.PortalKey).Msg("Default AI chat room created")
 	return nil
 }
 

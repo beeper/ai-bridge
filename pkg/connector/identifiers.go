@@ -1,6 +1,8 @@
 package connector
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -13,9 +15,15 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
-func makeUserLoginID(mxid id.UserID) networkid.UserLoginID {
+// makeUserLoginID creates a unique login ID for each account.
+// The ID includes the provider and a hash of the API key to ensure
+// multiple accounts of the same provider have distinct login IDs.
+func makeUserLoginID(mxid id.UserID, provider, apiKey string) networkid.UserLoginID {
 	escaped := url.PathEscape(string(mxid))
-	return networkid.UserLoginID(fmt.Sprintf("openai:%s", escaped))
+	// Hash the API key to create unique but stable identifier per account
+	keyHash := sha256.Sum256([]byte(apiKey))
+	keyHashShort := hex.EncodeToString(keyHash[:8]) // First 8 bytes = 16 hex chars
+	return networkid.UserLoginID(fmt.Sprintf("openai:%s:%s:%s", escaped, provider, keyHashShort))
 }
 
 func portalKeyForChat(loginID networkid.UserLoginID) networkid.PortalKey {
