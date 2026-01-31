@@ -20,7 +20,7 @@ func MakeUserLoginID(mxid id.UserID) networkid.UserLoginID {
 // MakePortalKey creates a new portal key for a chat
 func MakePortalKey(loginID networkid.UserLoginID) networkid.PortalKey {
 	return networkid.PortalKey{
-		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:%s", loginID, xid.New().String())),
+		ID:       networkid.PortalID(fmt.Sprintf("%s|%s", loginID, xid.New().String())),
 		Receiver: loginID,
 	}
 }
@@ -59,13 +59,13 @@ func ParseModelFromGhostID(ghostID string) string {
 }
 
 // ParsePortalID extracts the login ID and chat ID from a portal ID
-// Format: "openai:{loginID}:{chatID}"
+// Format: "{loginID}|{chatID}"
 func ParsePortalID(portalID networkid.PortalID) (loginID, chatID string) {
-	parts := strings.SplitN(string(portalID), ":", 3)
-	if len(parts) == 3 && parts[0] == "openai" {
-		return parts[1], parts[2]
+	loginID, chatID, ok := strings.Cut(string(portalID), "|")
+	if !ok {
+		return "", ""
 	}
-	return "", ""
+	return loginID, chatID
 }
 
 // FormatChatSlug creates a chat slug from an index

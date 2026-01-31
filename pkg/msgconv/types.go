@@ -74,6 +74,27 @@ func (m *UnifiedMessage) HasImages() bool {
 	return false
 }
 
+// hasNonTextParts returns true if parts contain any non-text content
+func hasNonTextParts(parts []ContentPart) bool {
+	for _, part := range parts {
+		if part.Type != ContentTypeText {
+			return true
+		}
+	}
+	return false
+}
+
+// concatenateText joins all text parts with newlines
+func concatenateText(parts []ContentPart) string {
+	var texts []string
+	for _, part := range parts {
+		if part.Type == ContentTypeText && part.Text != "" {
+			texts = append(texts, part.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
+}
+
 // NewTextMessage creates a simple text message
 func NewTextMessage(role MessageRole, text string) UnifiedMessage {
 	return UnifiedMessage{
@@ -98,6 +119,53 @@ func NewImageMessage(role MessageRole, imageURL, mimeType string) UnifiedMessage
 // OpenAI Conversions
 // ====================
 
+// buildResponsesContent converts ContentPart slice to Responses API content format
+func buildResponsesContent(parts []ContentPart) responses.EasyInputMessageContentUnionParam {
+	// If only text parts, use simple string format
+	if !hasNonTextParts(parts) {
+		return responses.EasyInputMessageContentUnionParam{
+			OfString: openai.String(concatenateText(parts)),
+		}
+	}
+
+	// Build array of content parts
+	var contentList responses.ResponseInputMessageContentListParam
+	for _, part := range parts {
+		switch part.Type {
+		case ContentTypeText:
+			if part.Text != "" {
+				contentList = append(contentList, responses.ResponseInputContentUnionParam{
+					OfInputText: &responses.ResponseInputTextParam{
+						Text: part.Text,
+					},
+				})
+			}
+		case ContentTypeImage:
+			imageURL := part.ImageURL
+			if imageURL == "" && part.ImageB64 != "" {
+				// Convert base64 to data URL
+				mimeType := part.MimeType
+				if mimeType == "" {
+					mimeType = "image/png"
+				}
+				imageURL = "data:" + mimeType + ";base64," + part.ImageB64
+			}
+			if imageURL != "" {
+				contentList = append(contentList, responses.ResponseInputContentUnionParam{
+					OfInputImage: &responses.ResponseInputImageParam{
+						ImageURL: openai.String(imageURL),
+						Detail:   responses.ResponseInputImageDetailAuto,
+					},
+				})
+			}
+		}
+	}
+
+	return responses.EasyInputMessageContentUnionParam{
+		OfInputItemContentList: contentList,
+	}
+}
+
 // ToOpenAIResponsesInput converts unified messages to OpenAI Responses API format
 func ToOpenAIResponsesInput(messages []UnifiedMessage) responses.ResponseInputParam {
 	var result responses.ResponseInputParam
@@ -114,12 +182,11 @@ func ToOpenAIResponsesInput(messages []UnifiedMessage) responses.ResponseInputPa
 				},
 			})
 		case RoleUser:
+			// User messages can have multimodal content
 			result = append(result, responses.ResponseInputItemUnionParam{
 				OfMessage: &responses.EasyInputMessageParam{
-					Role: responses.EasyInputMessageRoleUser,
-					Content: responses.EasyInputMessageContentUnionParam{
-						OfString: openai.String(msg.Text()),
-					},
+					Role:    responses.EasyInputMessageRoleUser,
+					Content: buildResponsesContent(msg.Content),
 				},
 			})
 		case RoleAssistant:
