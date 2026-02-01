@@ -471,19 +471,15 @@ func ToOpenAITools(tools []ToolDefinition) []responses.ToolUnionParam {
 
 	var result []responses.ToolUnionParam
 	for _, tool := range tools {
-		funcParam := responses.FunctionToolParam{
-			Name:        tool.Name,
-			Description: openai.String(tool.Description),
+		// Use SDK helper which properly sets all required fields including Type
+		toolParam := responses.ToolParamOfFunction(tool.Name, tool.Parameters, true)
+
+		// Add description if available (SDK helper doesn't support this directly)
+		if tool.Description != "" && toolParam.OfFunction != nil {
+			toolParam.OfFunction.Description = openai.String(tool.Description)
 		}
 
-		// Parameters is map[string]any in the SDK
-		if tool.Parameters != nil {
-			funcParam.Parameters = tool.Parameters
-		}
-
-		result = append(result, responses.ToolUnionParam{
-			OfFunction: &funcParam,
-		})
+		result = append(result, toolParam)
 	}
 
 	return result

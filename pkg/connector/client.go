@@ -1265,6 +1265,20 @@ func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal)
 	return ghost.Intent
 }
 
+// ensureModelInRoom ensures the current model's ghost is joined to the portal room.
+// This should be called before any operations that require the model to be in the room
+// (typing indicators, sending messages, etc.) to handle race conditions with model switching.
+func (oc *AIClient) ensureModelInRoom(ctx context.Context, portal *bridgev2.Portal) error {
+	if portal == nil || portal.MXID == "" {
+		return fmt.Errorf("invalid portal")
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return fmt.Errorf("failed to get model intent")
+	}
+	return intent.EnsureJoined(ctx, portal.MXID)
+}
+
 func (oc *AIClient) backgroundContext(_ context.Context) context.Context {
 	// Always prefer BackgroundCtx for long-running operations that outlive request context
 	if oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.BackgroundCtx != nil {

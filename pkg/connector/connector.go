@@ -7,12 +7,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
 	"go.mau.fi/util/configupgrade"
 
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/matrix"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 )
 
 const (
@@ -49,6 +52,14 @@ func (oc *OpenAIConnector) Start(ctx context.Context) error {
 		oc.Config.Bridge.CommandPrefix = "!ai"
 	}
 
+	// Register AI commands with the command processor
+	if proc, ok := oc.br.Commands.(*commands.Processor); ok {
+		oc.registerCommands(proc)
+		oc.br.Log.Info().Msg("Registered AI commands with command processor")
+	} else {
+		oc.br.Log.Warn().Type("commands_type", oc.br.Commands).Msg("Failed to register AI commands: command processor type assertion failed")
+	}
+
 	// Register custom Matrix event handlers
 	oc.registerCustomEventHandlers()
 
@@ -67,10 +78,16 @@ func (oc *OpenAIConnector) registerCustomEventHandlers() {
 		return
 	}
 
-	// Register handler for user-editable room settings event
-	// No handler needed for room_capabilities - users can't send it (power levels block them)
+	// Register handler for direct room settings state events
 	matrixConnector.EventProcessor.On(RoomSettingsEventType, oc.handleRoomSettingsEvent)
-	oc.br.Log.Info().Msg("Registered room settings event handler")
+
+	// Register handler for BeeperSendState wrapper events (desktop E2EE state updates)
+	matrixConnector.EventProcessor.On(event.BeeperSendState, oc.handleBeeperSendStateEvent)
+
+	oc.br.Log.Info().
+		Str("beeper_send_state_type", event.BeeperSendState.Type).
+		Str("beeper_send_state_class", event.BeeperSendState.Class.Name()).
+		Msg("Registered room settings event handlers (direct and BeeperSendState)")
 }
 
 // handleRoomSettingsEvent processes Matrix room settings state events from users
@@ -81,8 +98,27 @@ func (oc *OpenAIConnector) handleRoomSettingsEvent(ctx context.Context, evt *eve
 		Str("sender", evt.Sender.String()).
 		Logger()
 
+	// Parse event content
+	var content RoomSettingsEventContent
+	if err := json.Unmarshal(evt.Content.VeryRaw, &content); err != nil {
+		log.Warn().Err(err).Msg("Failed to parse room settings event content")
+		return
+	}
+
+	oc.processRoomSettingsContent(ctx, evt.RoomID, evt.Sender, &content, log)
+}
+
+// processRoomSettingsContent handles the common logic for updating portal settings
+// Called by both handleRoomSettingsEvent and handleBeeperSendStateEvent
+func (oc *OpenAIConnector) processRoomSettingsContent(
+	ctx context.Context,
+	roomID id.RoomID,
+	sender id.UserID,
+	content *RoomSettingsEventContent,
+	log zerolog.Logger,
+) {
 	// Look up portal by Matrix room ID
-	portal, err := oc.br.GetPortalByMXID(ctx, evt.RoomID)
+	portal, err := oc.br.GetPortalByMXID(ctx, roomID)
 	if err != nil {
 		log.Err(err).Msg("Failed to get portal for room settings event")
 		return
@@ -92,15 +128,8 @@ func (oc *OpenAIConnector) handleRoomSettingsEvent(ctx context.Context, evt *eve
 		return
 	}
 
-	// Parse event content
-	var content RoomSettingsEventContent
-	if err := json.Unmarshal(evt.Content.VeryRaw, &content); err != nil {
-		log.Warn().Err(err).Msg("Failed to parse room settings event content")
-		return
-	}
-
 	// Get the user who sent the event and their login
-	user, err := oc.br.GetUserByMXID(ctx, evt.Sender)
+	user, err := oc.br.GetUserByMXID(ctx, sender)
 	if err != nil || user == nil {
 		log.Warn().Err(err).Msg("Failed to get user for room settings event")
 		return
@@ -133,7 +162,7 @@ func (oc *OpenAIConnector) handleRoomSettingsEvent(ctx context.Context, evt *eve
 	}
 
 	// Update portal metadata
-	client.updatePortalConfig(ctx, portal, &content)
+	client.updatePortalConfig(ctx, portal, content)
 
 	// Send confirmation notice
 	var changes []string
@@ -175,6 +204,47 @@ func (oc *OpenAIConnector) handleRoomSettingsEvent(ctx context.Context, evt *eve
 		logEvent = logEvent.Float64("temperature", *content.Temperature)
 	}
 	logEvent.Msg("Updated room settings from state event")
+}
+
+// handleBeeperSendStateEvent processes com.beeper.send_state wrapper events
+// This is used by the desktop client to send state events in encrypted rooms
+func (oc *OpenAIConnector) handleBeeperSendStateEvent(ctx context.Context, evt *event.Event) {
+	log := oc.br.Log.With().
+		Str("component", "beeper_send_state_handler").
+		Str("room_id", evt.RoomID.String()).
+		Str("sender", evt.Sender.String()).
+		Str("event_type", evt.Type.Type).
+		Str("event_class", evt.Type.Class.Name()).
+		Logger()
+
+	log.Info().RawJSON("raw_content", evt.Content.VeryRaw).Msg("Received BeeperSendState event")
+
+	// Parse the wrapper content
+	var wrapperContent event.BeeperSendStateEventContent
+	if err := json.Unmarshal(evt.Content.VeryRaw, &wrapperContent); err != nil {
+		log.Debug().Err(err).Msg("Failed to parse BeeperSendState content")
+		return
+	}
+
+	// Only process AI room settings events
+	if wrapperContent.Type != RoomSettingsEventType.Type {
+		return
+	}
+
+	log.Debug().
+		Str("inner_type", wrapperContent.Type).
+		Str("state_key", wrapperContent.StateKey).
+		Msg("Processing BeeperSendState wrapper for AI room settings")
+
+	// Parse the inner room settings content
+	var content RoomSettingsEventContent
+	if err := json.Unmarshal(wrapperContent.Content.VeryRaw, &content); err != nil {
+		log.Warn().Err(err).Msg("Failed to parse inner room settings content")
+		return
+	}
+
+	// Reuse existing handler logic with the parsed content
+	oc.processRoomSettingsContent(ctx, evt.RoomID, evt.Sender, &content, log)
 }
 
 func (oc *OpenAIConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
