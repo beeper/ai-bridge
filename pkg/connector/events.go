@@ -631,6 +631,20 @@ const (
 	ToolCodeInterpreter = "code_interpreter"
 )
 
+// Relation types
+const (
+	RelReplace   = "m.replace"
+	RelReference = "m.reference"
+	RelThread    = "m.thread"
+)
+
+// Content field keys
+const (
+	BeeperAIKey           = "com.beeper.ai"
+	BeeperAIToolCallKey   = "com.beeper.ai.tool_call"
+	BeeperAIToolResultKey = "com.beeper.ai.tool_result"
+)
+
 // ModelInfo describes a single AI model's capabilities
 type ModelInfo struct {
 	ID                  string   `json:"id"`

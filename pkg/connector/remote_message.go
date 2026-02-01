@@ -187,13 +187,13 @@ func (m *OpenAIRemoteMessage) ConvertMessage(ctx context.Context, portal *bridge
 
 	// Only add the block if we have content
 	if len(aiContent) > 0 {
-		extra["com.beeper.ai"] = aiContent
+		extra[BeeperAIKey] = aiContent
 	}
 
 	// Build m.relates_to for threading if we have a reply target
 	if m.ReplyToEventID != "" {
 		extra["m.relates_to"] = map[string]any{
-			"rel_type":        "m.thread",
+			"rel_type":        RelThread,
 			"event_id":        m.ReplyToEventID.String(),
 			"is_falling_back": true,
 			"m.in_reply_to": map[string]any{

@@ -237,14 +237,17 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, meta *PortalMet
 		}
 	}
 
-	// Add built-in provider tools if enabled
-	if oc.isToolEnabled(meta, ToolNameWebSearchProvider) {
-		params.Tools = append(params.Tools, responses.ToolParamOfWebSearchPreview(responses.WebSearchPreviewToolTypeWebSearchPreview))
-		log.Debug().Msg("Web search tool enabled")
-	}
-	if oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
-		params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
-		log.Debug().Msg("Code interpreter tool enabled")
+	// Add built-in provider tools if enabled (only for native OpenAI, not OpenRouter)
+	// OpenRouter's Responses API only supports function-type tools
+	if !oc.isOpenRouterProvider() {
+		if oc.isToolEnabled(meta, ToolNameWebSearchProvider) {
+			params.Tools = append(params.Tools, responses.ToolParamOfWebSearchPreview(responses.WebSearchPreviewToolTypeWebSearchPreview))
+			log.Debug().Msg("Web search tool enabled")
+		}
+		if oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
+			params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
+			log.Debug().Msg("Code interpreter tool enabled")
+		}
 	}
 
 	// Add builtin function tools if model supports tool calling
@@ -406,7 +409,13 @@ func (oc *AIClient) streamingResponse(
 			}
 
 			if state.initialEventID != "" && oc.isToolEnabled(meta, streamEvent.Name) {
-				result, err := oc.executeBuiltinTool(ctx, streamEvent.Name, streamEvent.Arguments)
+				// Wrap context with bridge info for tools that need it (e.g., set_room_title)
+				toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
+					Client: oc,
+					Portal: portal,
+					Meta:   meta,
+				})
+				result, err := oc.executeBuiltinTool(toolCtx, streamEvent.Name, streamEvent.Arguments)
 				resultStatus := ResultStatusSuccess
 				if err != nil {
 					log.Warn().Err(err).Str("tool", streamEvent.Name).Msg("Tool execution failed")
@@ -795,7 +804,13 @@ func (oc *AIClient) streamChatCompletions(
 	// Execute any accumulated tool calls
 	for _, tool := range activeTools {
 		if tool.input.Len() > 0 && tool.toolName != "" && oc.isToolEnabled(meta, tool.toolName) {
-			result, err := oc.executeBuiltinTool(ctx, tool.toolName, tool.input.String())
+			// Wrap context with bridge info for tools that need it (e.g., set_room_title)
+			toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
+				Client: oc,
+				Portal: portal,
+				Meta:   meta,
+			})
+			result, err := oc.executeBuiltinTool(toolCtx, tool.toolName, tool.input.String())
 			resultStatus := ResultStatusSuccess
 			if err != nil {
 				log.Warn().Err(err).Str("tool", tool.toolName).Msg("Tool execution failed (Chat Completions)")
@@ -994,9 +1009,9 @@ func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridge
 
 	eventContent := &event.Content{
 		Raw: map[string]any{
-			"msgtype": "m.text",
+			"msgtype": event.MsgText,
 			"body":    content,
-			"com.beeper.ai": map[string]any{
+			BeeperAIKey: map[string]any{
 				"turn_id": turnID,
 				"status":  string(TurnStatusGenerating),
 			},
@@ -1065,17 +1080,17 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	// Send edit event with m.replace relation and m.new_content
 	eventContent := &event.Content{
 		Raw: map[string]any{
-			"msgtype": "m.text",
+			"msgtype": event.MsgText,
 			"body":    "* " + content, // Fallback with edit marker
 			"m.new_content": map[string]any{
-				"msgtype": "m.text",
+				"msgtype": event.MsgText,
 				"body":    content,
 			},
 			"m.relates_to": map[string]any{
-				"rel_type": "m.replace",
+				"rel_type": RelReplace,
 				"event_id": state.initialEventID.String(),
 			},
-			"com.beeper.ai":                 aiMetadata,
+			BeeperAIKey:                     aiMetadata,
 			"com.beeper.dont_render_edited": true, // Don't show "edited" indicator for streaming updates
 		},
 	}
@@ -1110,7 +1125,7 @@ func (oc *AIClient) emitStreamDelta(ctx context.Context, portal *bridgev2.Portal
 			"delta":        delta,
 			"seq":          state.sequenceNum,
 			"m.relates_to": map[string]any{
-				"rel_type": "m.reference",
+				"rel_type": RelReference,
 				"event_id": state.initialEventID.String(),
 			},
 		},
@@ -1259,11 +1274,11 @@ func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Port
 
 	eventContent := &event.Content{
 		Raw: map[string]any{
-			"body":                    fmt.Sprintf("Calling %s...", displayTitle),
-			"msgtype":                 "m.notice",
-			"com.beeper.ai.tool_call": toolCallData,
+			"body":              fmt.Sprintf("Calling %s...", displayTitle),
+			"msgtype":           event.MsgNotice,
+			BeeperAIToolCallKey: toolCallData,
 			"m.relates_to": map[string]any{
-				"rel_type": "m.reference",
+				"rel_type": RelReference,
 				"event_id": state.initialEventID.String(),
 			},
 		},
@@ -1326,11 +1341,11 @@ func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Po
 
 	eventContent := &event.Content{
 		Raw: map[string]any{
-			"body":                      bodyText,
-			"msgtype":                   "m.notice",
-			"com.beeper.ai.tool_result": toolResultData,
+			"body":                bodyText,
+			"msgtype":             event.MsgNotice,
+			BeeperAIToolResultKey: toolResultData,
 			"m.relates_to": map[string]any{
-				"rel_type": "m.reference",
+				"rel_type": RelReference,
 				"event_id": tool.eventID.String(),
 			},
 		},
@@ -1591,7 +1606,7 @@ func (oc *AIClient) sendGeneratedImage(
 
 	// Build image message content with AI metadata
 	rawContent := map[string]any{
-		"msgtype": "m.image",
+		"msgtype": event.MsgImage,
 		"body":    fileName,
 		"info": map[string]any{
 			"mimetype": mimeType,
