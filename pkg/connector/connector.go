@@ -151,7 +151,7 @@ func (oc *OpenAIConnector) processRoomSettingsContent(
 
 	// Validate model if specified
 	if content.Model != "" {
-		valid, err := client.validateModel(ctx, content.Model)
+		resolved, valid, err := client.resolveModelID(ctx, content.Model)
 		if err != nil {
 			log.Warn().Err(err).Str("model", content.Model).Msg("Failed to validate model")
 		} else if !valid {
@@ -159,6 +159,7 @@ func (oc *OpenAIConnector) processRoomSettingsContent(
 			client.sendSystemNotice(ctx, portal, fmt.Sprintf("Invalid model: %s. Configuration not applied.", content.Model))
 			return
 		}
+		content.Model = resolved
 	}
 
 	// Update portal metadata

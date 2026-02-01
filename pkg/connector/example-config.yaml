@@ -12,14 +12,14 @@ beeper:
 # These are used when a room doesn't have a specific model configured.
 providers:
   beeper:
-    default_model: "openai/gpt-5.2"
+    default_model: "google/gemini-2.5-flash"
     # PDF processing engine for OpenRouter's file-parser plugin.
     # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
     default_pdf_engine: "mistral-ocr"
   openai:
     default_model: "openai/gpt-4o-mini"
   openrouter:
-    default_model: "anthropic/claude-sonnet-4.5"
+    default_model: "google/gemini-2.5-flash"
     # PDF processing engine for OpenRouter's file-parser plugin.
     # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
     default_pdf_engine: "mistral-ocr"
@@ -32,7 +32,3 @@ providers:
 default_system_prompt: |
   You are a helpful assistant.
 model_cache_duration: 6h
-
-bridge:
-  # Command prefix for management commands like `!ai config`.
-  command_prefix: "!ai"
