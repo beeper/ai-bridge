@@ -19,20 +19,21 @@ const (
 
 // providerConfig defines login configuration for a provider
 type providerConfig struct {
-	baseURL  string // API base URL (empty if provided at runtime)
-	keyName  string // Display name for API key field
-	keyDesc  string // Description for API key field
-	needsURL bool   // Whether provider needs URL input
-	urlName  string // Display name for URL field
-	urlDesc  string // Description for URL field
+	baseURL    string // API base URL (empty if provided at runtime)
+	keyName    string // Display name for API key field
+	keyDesc    string // Description for API key field
+	needsURL   bool   // Whether provider needs URL input
+	urlName    string // Display name for URL field
+	urlDesc    string // Description for URL field
+	defaultURL string // Default value for URL field (pre-populated in login form)
 }
 
 // providerConfigs maps providers to their unified configuration
 var providerConfigs = map[string]providerConfig{
-	ProviderBeeper:     {"", "Beeper Access Token", "Your Beeper Matrix access token", true, "Beeper AI Proxy URL", "Your Beeper homeserver AI proxy endpoint"},
-	ProviderOpenAI:     {"https://api.openai.com/v1", "OpenAI API Key", "Generate one at https://platform.openai.com/account/api-keys", false, "", ""},
-	ProviderOpenRouter: {"https://openrouter.ai/api/v1", "OpenRouter API Key", "Generate one at https://openrouter.ai/keys", false, "", ""},
-	ProviderCustom:     {"", "API Key", "API key for authentication", true, "Base URL", "OpenAI-compatible API endpoint (e.g., https://api.example.com/v1)"},
+	ProviderBeeper:     {"", "Beeper Access Token", "Your Beeper Matrix access token", true, "Beeper AI Proxy URL", "Your Beeper homeserver AI proxy endpoint", ""},
+	ProviderOpenAI:     {"https://api.openai.com/v1", "OpenAI API Key", "Generate one at https://platform.openai.com/account/api-keys", false, "", "", ""},
+	ProviderOpenRouter: {"https://openrouter.ai/api/v1", "OpenRouter API Key", "Generate one at https://openrouter.ai/keys", false, "", "", ""},
+	ProviderCustom:     {"", "API Key", "API key for authentication", true, "Base URL", "OpenAI-compatible API endpoint (e.g., https://api.example.com/v1)", "https://api.example.com/v1"},
 }
 
 var (
@@ -87,10 +88,11 @@ func (ol *OpenAILogin) credentialsStep() *bridgev2.LoginStep {
 	var fields []bridgev2.LoginInputDataField
 	if cfg.needsURL {
 		fields = append(fields, bridgev2.LoginInputDataField{
-			Type:        bridgev2.LoginInputFieldTypeURL,
-			ID:          "base_url",
-			Name:        cfg.urlName,
-			Description: cfg.urlDesc,
+			Type:         bridgev2.LoginInputFieldTypeURL,
+			ID:           "base_url",
+			Name:         cfg.urlName,
+			Description:  cfg.urlDesc,
+			DefaultValue: cfg.defaultURL,
 		})
 	}
 	fields = append(fields, bridgev2.LoginInputDataField{
