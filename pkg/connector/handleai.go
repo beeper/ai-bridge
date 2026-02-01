@@ -2147,36 +2147,14 @@ func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistan
 		return "", err
 	}
 
-	// Extract text from response output
-	var title string
-	for _, item := range resp.Output {
-		switch msg := item.AsAny().(type) {
-		case responses.ResponseOutputMessage:
-			// Standard message output
-			for _, contentPart := range msg.Content {
-				if text, ok := contentPart.AsAny().(responses.ResponseOutputText); ok {
-					title = text.Text
-					break
-				}
-			}
-		case responses.ResponseReasoningItem:
-			// Reasoning model output - extract from summary
-			for _, summary := range msg.Summary {
-				if summary.Text != "" {
-					title = summary.Text
-					break
-				}
-			}
-		}
-		if title != "" {
-			break
-		}
-	}
+	// Use SDK's convenience method to extract text from response
+	title := resp.OutputText()
 
 	if title == "" {
 		oc.log.Warn().
 			Str("model", model).
 			Int("output_items", len(resp.Output)).
+			Str("status", string(resp.Status)).
 			Msg("Title generation returned no content")
 		return "", fmt.Errorf("no response from model")
 	}
