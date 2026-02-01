@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/random"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -21,19 +22,23 @@ type ModelCapabilities struct {
 	SupportsReasoning   bool `json:"supports_reasoning"` // Models that support reasoning_effort parameter
 	SupportsPDF         bool `json:"supports_pdf"`
 	SupportsImageGen    bool `json:"supports_image_gen"`
-	SupportsAudio       bool `json:"supports_audio"`       // Models that accept audio input
-	SupportsVideo       bool `json:"supports_video"`       // Models that accept video input
+	SupportsAudio       bool `json:"supports_audio"`        // Models that accept audio input
+	SupportsVideo       bool `json:"supports_video"`        // Models that accept video input
 	SupportsToolCalling bool `json:"supports_tool_calling"` // Models that support function calling
 }
 
-// ToolsConfig stores per-room tool configuration
-// nil values mean "auto" (use defaults based on model/provider capabilities)
+// ToolEntry stores a tool definition with its enabled state
+// Uses MCP SDK types for future MCP integration
+type ToolEntry struct {
+	Tool    mcp.Tool `json:"tool"`              // MCP SDK tool definition (name, description, annotations)
+	Enabled *bool    `json:"enabled,omitempty"` // nil = auto (use defaults), true/false = explicit
+	Type    string   `json:"type"`              // builtin, provider, plugin, mcp
+}
+
+// ToolsConfig stores per-room tool configuration using MCP SDK types
+// Tools map stores tool definitions + enabled state
 type ToolsConfig struct {
-	Calculator          *bool `json:"calculator,omitempty"`            // Builtin calculator tool
-	WebSearch           *bool `json:"web_search,omitempty"`            // Builtin DuckDuckGo search (fallback when :online is off)
-	WebSearchProvider   bool  `json:"web_search_provider,omitempty"`   // OpenAI web search tool
-	CodeInterpreter     bool  `json:"code_interpreter,omitempty"`      // OpenAI code interpreter
-	UseOpenRouterOnline *bool `json:"use_openrouter_online,omitempty"` // OpenRouter :online plugin (default for OpenRouter)
+	Tools map[string]*ToolEntry `json:"tools,omitempty"` // Tool name -> entry
 }
 
 // PDFConfig stores per-room PDF processing configuration
@@ -79,18 +84,14 @@ type PortalMetadata struct {
 	WelcomeSent         bool              `json:"welcome_sent,omitempty"`
 	Capabilities        ModelCapabilities `json:"capabilities,omitempty"`
 	LastRoomStateSync   int64             `json:"last_room_state_sync,omitempty"` // Track when we've synced room state
-	ToolsEnabled        bool              `json:"tools_enabled,omitempty"`        // Legacy: Enable function calling tools (deprecated, use ToolsConfig)
-	ToolsConfig         ToolsConfig       `json:"tools_config,omitempty"`         // Per-tool configuration
+	ToolsConfig         ToolsConfig       `json:"tools_config,omitempty"`         // Per-tool configuration using MCP SDK types
 	PDFConfig           *PDFConfig        `json:"pdf_config,omitempty"`           // Per-room PDF processing configuration
 
-	ConversationMode       string `json:"conversation_mode,omitempty"`
-	LastResponseID         string `json:"last_response_id,omitempty"`
-	WebSearchEnabled       bool   `json:"web_search_enabled,omitempty"`
-	FileSearchEnabled      bool   `json:"file_search_enabled,omitempty"`
-	CodeInterpreterEnabled bool   `json:"code_interpreter_enabled,omitempty"`
-	EmitThinking           bool   `json:"emit_thinking,omitempty"`
-	EmitToolArgs           bool   `json:"emit_tool_args,omitempty"`
-	DefaultAgentID         string `json:"default_agent_id,omitempty"`
+	ConversationMode string `json:"conversation_mode,omitempty"`
+	LastResponseID   string `json:"last_response_id,omitempty"`
+	EmitThinking     bool   `json:"emit_thinking,omitempty"`
+	EmitToolArgs     bool   `json:"emit_tool_args,omitempty"`
+	DefaultAgentID   string `json:"default_agent_id,omitempty"`
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild

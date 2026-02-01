@@ -695,8 +695,14 @@ func (oc *AIClient) effectiveMaxTokens(meta *PortalMetadata) int {
 	return defaultMaxTokens
 }
 
-// effectivePDFEngine returns the PDF engine to use for the room/provider
-// Priority: room config > provider config > mistral-ocr (default)
+// isOpenRouterProvider checks if the current provider is OpenRouter or Beeper (which uses OpenRouter)
+func (oc *AIClient) isOpenRouterProvider() bool {
+	loginMeta := loginMetadata(oc.UserLogin)
+	return loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper
+}
+
+// effectivePDFEngine returns the PDF engine to use for the given portal.
+// Priority: room-level PDFConfig > provider-level config > default "mistral-ocr"
 func (oc *AIClient) effectivePDFEngine(meta *PortalMetadata) string {
 	// Room-level override
 	if meta != nil && meta.PDFConfig != nil && meta.PDFConfig.Engine != "" {
@@ -705,27 +711,18 @@ func (oc *AIClient) effectivePDFEngine(meta *PortalMetadata) string {
 
 	// Provider-level config
 	loginMeta := loginMetadata(oc.UserLogin)
-	providers := oc.connector.Config.Providers
-
 	switch loginMeta.Provider {
 	case ProviderBeeper:
-		if providers.Beeper.DefaultPDFEngine != "" {
-			return providers.Beeper.DefaultPDFEngine
+		if engine := oc.connector.Config.Providers.Beeper.DefaultPDFEngine; engine != "" {
+			return engine
 		}
 	case ProviderOpenRouter:
-		if providers.OpenRouter.DefaultPDFEngine != "" {
-			return providers.OpenRouter.DefaultPDFEngine
+		if engine := oc.connector.Config.Providers.OpenRouter.DefaultPDFEngine; engine != "" {
+			return engine
 		}
 	}
 
-	// Default to mistral-ocr (best quality, paid)
-	return "mistral-ocr"
-}
-
-// isOpenRouterProvider checks if the current provider is OpenRouter or Beeper (which uses OpenRouter)
-func (oc *AIClient) isOpenRouterProvider() bool {
-	loginMeta := loginMetadata(oc.UserLogin)
-	return loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper
+	return "mistral-ocr" // Default
 }
 
 // validateModel checks if a model is available for this user

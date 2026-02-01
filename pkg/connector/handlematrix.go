@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3"
+	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -776,13 +777,13 @@ func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal
 	// Provider tools
 	sb.WriteString("\nProvider Tools:\n")
 	wsStatus := "✗"
-	if meta.ToolsConfig.WebSearchProvider || meta.WebSearchEnabled {
+	if oc.isToolEnabled(meta, ToolNameWebSearchProvider) {
 		wsStatus = "✓"
 	}
 	sb.WriteString(fmt.Sprintf("  [%s] web_search_provider: Native provider web search\n", wsStatus))
 
 	ciStatus := "✗"
-	if meta.ToolsConfig.CodeInterpreter || meta.CodeInterpreterEnabled {
+	if oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
 		ciStatus = "✓"
 	}
 	sb.WriteString(fmt.Sprintf("  [%s] code_interpreter: Execute Python code\n", ciStatus))
@@ -796,19 +797,27 @@ func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal
 
 // setAllTools enables or disables all tools
 func (oc *AIClient) setAllTools(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, enabled bool, isOpenRouter bool) {
-	meta.ToolsConfig.Calculator = &enabled
-	meta.ToolsConfig.WebSearch = &enabled
+	loginMeta := loginMetadata(oc.UserLogin)
+	ensureToolsConfig(meta, loginMeta.Provider)
 
-	if isOpenRouter {
-		meta.ToolsConfig.UseOpenRouterOnline = &enabled
-		// If enabling online, disable builtin web_search (they overlap)
-		if enabled {
-			meta.ToolsConfig.WebSearch = ptrFalse()
+	// Set all tools to the same state
+	for name, entry := range meta.ToolsConfig.Tools {
+		if entry == nil {
+			continue
 		}
+		// Skip online plugin for non-OpenRouter
+		if name == ToolNameOnline && !isOpenRouter {
+			continue
+		}
+		entry.Enabled = &enabled
 	}
 
-	// Legacy field for backwards compatibility
-	meta.ToolsEnabled = enabled
+	// If enabling online, disable builtin web_search (they overlap)
+	if isOpenRouter && enabled {
+		if wsEntry, ok := meta.ToolsConfig.Tools[ToolNameWebSearch]; ok && wsEntry != nil {
+			wsEntry.Enabled = ptr.Ptr(false)
+		}
+	}
 
 	if err := portal.Save(ctx); err != nil {
 		oc.log.Warn().Err(err).Msg("Failed to save portal after tools change")
@@ -826,34 +835,33 @@ func (oc *AIClient) setAllTools(ctx context.Context, portal *bridgev2.Portal, me
 
 // setToolEnabled enables or disables a specific tool
 func (oc *AIClient) setToolEnabled(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, toolName string, enabled bool, isOpenRouter bool) {
-	validTool := true
-	switch toolName {
-	case "calculator", "calc":
-		meta.ToolsConfig.Calculator = &enabled
-	case "web_search", "websearch", "search":
-		meta.ToolsConfig.WebSearch = &enabled
-	case "online":
-		if isOpenRouter {
-			meta.ToolsConfig.UseOpenRouterOnline = &enabled
-			// If enabling online, disable builtin web_search to avoid duplication
-			if enabled {
-				meta.ToolsConfig.WebSearch = ptrFalse()
-			}
-		} else {
-			oc.sendSystemNotice(ctx, portal, "The 'online' plugin is only available with OpenRouter.")
-			return
-		}
-	case "web_search_provider", "websearchprovider", "provider_search":
-		meta.ToolsConfig.WebSearchProvider = enabled
-	case "code_interpreter", "codeinterpreter", "interpreter":
-		meta.ToolsConfig.CodeInterpreter = enabled
-	default:
-		validTool = false
-	}
+	loginMeta := loginMetadata(oc.UserLogin)
+	ensureToolsConfig(meta, loginMeta.Provider)
 
-	if !validTool {
+	// Normalize tool name
+	normalizedName := normalizeToolName(toolName)
+
+	// Check if tool exists
+	entry, ok := meta.ToolsConfig.Tools[normalizedName]
+	if !ok || entry == nil {
 		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Unknown tool: %s. Available: calculator, web_search, online, web_search_provider, code_interpreter", toolName))
 		return
+	}
+
+	// Validate online plugin for non-OpenRouter
+	if normalizedName == ToolNameOnline && !isOpenRouter {
+		oc.sendSystemNotice(ctx, portal, "The 'online' plugin is only available with OpenRouter.")
+		return
+	}
+
+	// Apply the toggle
+	entry.Enabled = &enabled
+
+	// If enabling online, disable builtin web_search to avoid duplication
+	if normalizedName == ToolNameOnline && enabled {
+		if wsEntry, ok := meta.ToolsConfig.Tools[ToolNameWebSearch]; ok && wsEntry != nil {
+			wsEntry.Enabled = ptr.Ptr(false)
+		}
 	}
 
 	if err := portal.Save(ctx); err != nil {
@@ -868,12 +876,6 @@ func (oc *AIClient) setToolEnabled(ctx context.Context, portal *bridgev2.Portal,
 		status = "enabled"
 	}
 	oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Tool '%s' %s.", toolName, status))
-}
-
-// ptrFalse returns a pointer to false
-func ptrFalse() *bool {
-	f := false
-	return &f
 }
 
 // handleRegenerate regenerates the last AI response

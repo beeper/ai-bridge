@@ -3,7 +3,6 @@ package connector
 import (
 	"errors"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -140,47 +139,4 @@ func IsModelNotFound(err error) bool {
 		return apiErr.StatusCode == 404
 	}
 	return false
-}
-
-// fallbackContextWindows stores fallback context window sizes for known models
-// Used when runtime cache is unavailable
-var fallbackContextWindows = map[string]int{
-	"gpt-4o":        128000,
-	"gpt-4o-mini":   128000,
-	"gpt-4-turbo":   128000,
-	"gpt-4":         8192,
-	"gpt-4-32k":     32768,
-	"gpt-3.5-turbo": 16385,
-	"o1":            128000,
-	"o1-mini":       128000,
-	"o3-mini":       200000,
-}
-
-const defaultContextWindow = 8192
-
-// GetModelContextWindow returns the context window size for a model
-func GetModelContextWindow(modelID string) int {
-	// Use hardcoded fallback values
-	// Check exact match first
-	if size, ok := fallbackContextWindows[modelID]; ok {
-		return size
-	}
-
-	// Check prefix matches (for versioned models like gpt-4o-2024-05-13)
-	// Sort by descending length so longer prefixes match first
-	prefixes := make([]string, 0, len(fallbackContextWindows))
-	for prefix := range fallbackContextWindows {
-		prefixes = append(prefixes, prefix)
-	}
-	sort.Slice(prefixes, func(i, j int) bool {
-		return len(prefixes[i]) > len(prefixes[j])
-	})
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(modelID, prefix) {
-			return fallbackContextWindows[prefix]
-		}
-	}
-
-	// Default fallback for unknown models
-	return defaultContextWindow
 }

@@ -22,6 +22,22 @@ type OpenAIProvider struct {
 	baseURL string
 }
 
+// pdfEngineContextKey is the context key for per-request PDF engine override
+type pdfEngineContextKey struct{}
+
+// GetPDFEngineFromContext retrieves the PDF engine override from context
+func GetPDFEngineFromContext(ctx context.Context) string {
+	if engine, ok := ctx.Value(pdfEngineContextKey{}).(string); ok {
+		return engine
+	}
+	return ""
+}
+
+// WithPDFEngine adds a PDF engine override to the context
+func WithPDFEngine(ctx context.Context, engine string) context.Context {
+	return context.WithValue(ctx, pdfEngineContextKey{}, engine)
+}
+
 // reasoningEffortMap maps string effort levels to SDK constants
 var reasoningEffortMap = map[string]responses.ReasoningEffort{
 	"low":    responses.ReasoningEffortLow,
@@ -361,20 +377,34 @@ type PDFPluginConfig struct {
 }
 
 // MakePDFPluginMiddleware creates middleware that injects the file-parser plugin for PDFs.
-// The engine parameter controls which PDF parsing engine to use: pdf-text, mistral-ocr, or native.
-func MakePDFPluginMiddleware(engine string) option.Middleware {
-	// Validate engine, default to mistral-ocr
-	switch engine {
+// The defaultEngine parameter is used as a fallback when no per-request engine is set in context.
+// To set a per-request engine, use WithPDFEngine() to add it to the request context.
+func MakePDFPluginMiddleware(defaultEngine string) option.Middleware {
+	// Validate default engine, default to mistral-ocr
+	switch defaultEngine {
 	case "pdf-text", "mistral-ocr", "native":
 		// valid
 	default:
-		engine = "mistral-ocr"
+		defaultEngine = "mistral-ocr"
 	}
 
 	return func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
 		// Only modify POST requests with JSON body (API calls)
 		if req.Method != http.MethodPost || req.Body == nil {
 			return next(req)
+		}
+
+		// Check context for per-request engine override
+		engine := GetPDFEngineFromContext(req.Context())
+		if engine == "" {
+			engine = defaultEngine
+		}
+		// Validate per-request engine
+		switch engine {
+		case "pdf-text", "mistral-ocr", "native":
+			// valid
+		default:
+			engine = defaultEngine
 		}
 
 		contentType := req.Header.Get("Content-Type")

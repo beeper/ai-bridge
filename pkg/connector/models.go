@@ -1,7 +1,6 @@
 package connector
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -48,15 +47,6 @@ func HasValidPrefix(modelID string) bool {
 	return backend != ""
 }
 
-// GetModelPrefix returns just the prefix portion of a model ID
-func GetModelPrefix(modelID string) string {
-	parts := strings.SplitN(modelID, "/", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-	return parts[0]
-}
-
 // AddModelPrefix adds a prefix to a model ID if it doesn't have one
 func AddModelPrefix(backend ModelBackend, modelID string) string {
 	if HasValidPrefix(modelID) {
@@ -76,48 +66,6 @@ func DefaultModelForProvider(provider string) string {
 		return DefaultModelBeeper
 	default:
 		return DefaultModelOpenAI
-	}
-}
-
-// ValidateModelForProvider checks if a model can be used with a given provider
-// Returns an error if the model's backend doesn't match the provider
-func ValidateModelForProvider(modelID, provider string) error {
-	backend, _ := ParseModelPrefix(modelID)
-
-	// No prefix - legacy model, needs to be updated
-	if backend == "" {
-		return fmt.Errorf("model %q is missing backend prefix (use openai/%s or openrouter/%s)", modelID, modelID, modelID)
-	}
-
-	switch provider {
-	case ProviderBeeper:
-		// Beeper supports all backends via OpenRouter
-		return nil
-	case ProviderOpenAI:
-		if backend != BackendOpenAI {
-			return fmt.Errorf("OpenAI provider only supports openai/* models, got %q", modelID)
-		}
-	case ProviderOpenRouter:
-		if backend != BackendOpenRouter {
-			return fmt.Errorf("OpenRouter provider only supports openrouter/* models, got %q", modelID)
-		}
-	case ProviderCustom:
-		// Custom provider accepts any model (relies on user's endpoint)
-		return nil
-	}
-
-	return nil
-}
-
-// BackendForProvider returns the expected backend for a provider
-func BackendForProvider(provider string) ModelBackend {
-	switch provider {
-	case ProviderOpenAI:
-		return BackendOpenAI
-	case ProviderOpenRouter:
-		return BackendOpenRouter
-	default:
-		return ""
 	}
 }
 

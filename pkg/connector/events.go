@@ -70,9 +70,17 @@ var ApprovalRequestEventType = event.Type{
 	Class: event.MessageEventType,
 }
 
-// RoomConfigEventType is the Matrix state event type for AI room configuration
-var RoomConfigEventType = event.Type{
-	Type:  "com.beeper.ai.room_config",
+// RoomCapabilitiesEventType is the Matrix state event type for bridge-controlled capabilities
+// Protected by power levels (100) so only the bridge bot can modify
+var RoomCapabilitiesEventType = event.Type{
+	Type:  "com.beeper.ai.room_capabilities",
+	Class: event.StateEventType,
+}
+
+// RoomSettingsEventType is the Matrix state event type for user-editable settings
+// Normal power level (0) so users can modify
+var RoomSettingsEventType = event.Type{
+	Type:  "com.beeper.ai.room_settings",
 	Class: event.StateEventType,
 }
 
@@ -522,42 +530,29 @@ type ReasoningEffortOption struct {
 	Label string `json:"label"` // Display name
 }
 
-// RoomConfigEventContent represents the content of the room config state event
-type RoomConfigEventContent struct {
-	Model               string   `json:"model,omitempty"`
-	SystemPrompt        string   `json:"system_prompt,omitempty"`
-	Temperature         *float64 `json:"temperature,omitempty"`
-	MaxContextMessages  int      `json:"max_context_messages,omitempty"`
-	MaxCompletionTokens int      `json:"max_completion_tokens,omitempty"`
-	ReasoningEffort     string   `json:"reasoning_effort,omitempty"`
-	ToolsEnabled        *bool    `json:"tools_enabled,omitempty"`
-	ConversationMode    string   `json:"conversation_mode,omitempty"` // "messages" or "responses"
+// RoomCapabilitiesEventContent represents bridge-controlled room capabilities
+// This is protected by power levels (100) so only the bridge bot can modify
+type RoomCapabilitiesEventContent struct {
+	Capabilities           *ModelCapabilities      `json:"capabilities,omitempty"`
+	AvailableTools         []ToolInfo              `json:"available_tools,omitempty"`
+	ReasoningEffortOptions []ReasoningEffortOption `json:"reasoning_effort_options,omitempty"`
+	Provider               string                  `json:"provider,omitempty"`
+}
 
-	// Responses API built-in tools
-	WebSearchEnabled       *bool `json:"web_search_enabled,omitempty"`
-	FileSearchEnabled      *bool `json:"file_search_enabled,omitempty"`
-	CodeInterpreterEnabled *bool `json:"code_interpreter_enabled,omitempty"`
-
-	// Advanced settings
-	EmitThinking   *bool  `json:"emit_thinking,omitempty"`
-	EmitToolArgs   *bool  `json:"emit_tool_args,omitempty"`
-	DefaultAgentID string `json:"default_agent_id,omitempty"`
-
-	// Model capabilities
-	Capabilities *ModelCapabilities `json:"capabilities,omitempty"`
-
-	// Streaming configuration
-	Streaming *StreamingConfig `json:"streaming,omitempty"`
-
-	// Per-tool configuration and availability
-	ToolsConfig    *ToolsConfig `json:"tools_config,omitempty"`
-	AvailableTools []ToolInfo   `json:"available_tools,omitempty"`
-
-	// Tool toggle request from client (not persisted in state, just for updates)
-	ToolToggle *ToolToggle `json:"tool_toggle,omitempty"`
-
-	// Available reasoning effort levels for current model
-	ReasoningEfforts []ReasoningEffortOption `json:"reasoning_efforts,omitempty"`
+// RoomSettingsEventContent represents user-editable room settings
+// This uses normal power levels (0) so users can modify
+type RoomSettingsEventContent struct {
+	Model               string      `json:"model,omitempty"`
+	SystemPrompt        string      `json:"system_prompt,omitempty"`
+	Temperature         *float64    `json:"temperature,omitempty"`
+	MaxContextMessages  int         `json:"max_context_messages,omitempty"`
+	MaxCompletionTokens int         `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string      `json:"reasoning_effort,omitempty"`
+	ConversationMode    string      `json:"conversation_mode,omitempty"` // "messages" or "responses"
+	EmitThinking        *bool       `json:"emit_thinking,omitempty"`
+	EmitToolArgs        *bool       `json:"emit_tool_args,omitempty"`
+	DefaultAgentID      string      `json:"default_agent_id,omitempty"`
+	ToolToggle          *ToolToggle `json:"tool_toggle,omitempty"` // Single field for toggling any tool
 }
 
 // ToolToggle represents a request to toggle a specific tool on/off
@@ -569,8 +564,8 @@ type ToolToggle struct {
 // ToolInfo describes a tool and its status for room state broadcasting
 type ToolInfo struct {
 	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`           // Human-readable name for UI
-	Type        string `json:"type"`                   // "builtin", "provider", "plugin"
+	DisplayName string `json:"display_name"` // Human-readable name for UI
+	Type        string `json:"type"`         // "builtin", "provider", "plugin", "mcp"
 	Description string `json:"description,omitempty"`
 	Enabled     bool   `json:"enabled"`
 	Available   bool   `json:"available"` // Based on model capabilities and provider
