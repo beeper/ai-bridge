@@ -993,9 +993,10 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 	notice := fmt.Sprintf("Switched from %s to %s", oldModelName, newModelName)
 	oc.sendSystemNotice(ctx, portal, notice)
 
-	// Update bridge info to resend room features state event with new capabilities
+	// Update bridge info and capabilities to resend room features state event with new capabilities
 	// This ensures the client knows what features the new model supports (vision, audio, etc.)
 	portal.UpdateBridgeInfo(ctx)
+	portal.UpdateCapabilities(ctx, oc.UserLogin, true)
 }
 
 // BroadcastRoomState sends current room capabilities and settings to Matrix room state
@@ -1386,18 +1387,6 @@ func (oc *AIClient) listAllChatPortals(ctx context.Context) ([]*bridgev2.Portal,
 	return portals, nil
 }
 
-func (oc *AIClient) createChat(ctx context.Context, title, systemPrompt string) (*bridgev2.CreateChatResponse, error) {
-	portal, info, err := oc.spawnPortal(ctx, title, systemPrompt)
-	if err != nil {
-		return nil, err
-	}
-	return &bridgev2.CreateChatResponse{
-		PortalKey:  portal.PortalKey,
-		Portal:     portal,
-		PortalInfo: info,
-	}, nil
-}
-
 func (oc *AIClient) createChatWithKey(ctx context.Context, title, systemPrompt string, portalKey networkid.PortalKey) (*bridgev2.CreateChatResponse, error) {
 	portal, info, err := oc.initPortalForChat(ctx, PortalInitOpts{
 		Title:        title,
@@ -1412,14 +1401,6 @@ func (oc *AIClient) createChatWithKey(ctx context.Context, title, systemPrompt s
 		Portal:     portal,
 		PortalInfo: info,
 	}, nil
-}
-
-func (oc *AIClient) spawnPortal(ctx context.Context, title, systemPrompt string) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
-	oc.log.Debug().Str("title", title).Msg("Allocating portal for new chat")
-	return oc.initPortalForChat(ctx, PortalInitOpts{
-		Title:        title,
-		SystemPrompt: systemPrompt,
-	})
 }
 
 // HandleMatrixMessageRemove handles message deletions from Matrix

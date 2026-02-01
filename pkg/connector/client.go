@@ -621,27 +621,32 @@ func updateGhostLastSync(_ context.Context, ghost *bridgev2.Ghost) bool {
 func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
 	meta := portalMeta(portal)
 
+	// Always recompute capabilities from the current model to ensure they're up-to-date
+	// This handles cases where stored metadata might be stale
+	modelID := oc.effectiveModel(meta)
+	modelCaps := getModelCapabilities(modelID, oc.findModelInfo(modelID))
+
 	// Clone base capabilities
 	caps := ptr.Clone(aiBaseCaps)
 
 	// Build dynamic capability ID from modalities
-	caps.ID = buildCapabilityID(meta.Capabilities)
+	caps.ID = buildCapabilityID(modelCaps)
 
 	// Apply file capabilities based on modalities
-	if meta.Capabilities.SupportsVision {
+	if modelCaps.SupportsVision {
 		caps.File[event.MsgImage] = visionFileFeatures()
 	}
 
 	// OpenRouter/Beeper: all models support PDF via file-parser plugin
 	// For other providers, check model's native PDF support
-	if meta.Capabilities.SupportsPDF || oc.isOpenRouterProvider() {
+	if modelCaps.SupportsPDF || oc.isOpenRouterProvider() {
 		caps.File[event.MsgFile] = pdfFileFeatures()
 	}
 
-	if meta.Capabilities.SupportsAudio {
+	if modelCaps.SupportsAudio {
 		caps.File[event.MsgAudio] = audioFileFeatures()
 	}
-	if meta.Capabilities.SupportsVideo {
+	if modelCaps.SupportsVideo {
 		caps.File[event.MsgVideo] = videoFileFeatures()
 	}
 	// Note: ImageGen is output capability - doesn't affect file upload features
@@ -651,7 +656,7 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 }
 
 // effectiveModel returns the full prefixed model ID (e.g., "openai/gpt-5.2")
-// Priority: Room → User → Provider → Global
+// Priority: Room ? User ? Provider ? Global
 func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 	if meta != nil && meta.Model != "" {
 		return meta.Model
@@ -707,7 +712,7 @@ func (oc *AIClient) defaultModelForProvider() string {
 }
 
 // effectivePrompt returns the system prompt to use
-// Priority: Room → User → Bridge Config
+// Priority: Room ? User ? Bridge Config
 func (oc *AIClient) effectivePrompt(meta *PortalMetadata) string {
 	// Room-level override takes priority
 	if meta != nil && meta.SystemPrompt != "" {
@@ -760,6 +765,8 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, meta *PortalMetada
 	return builder.Build()
 }
 
+// effectiveTemperature returns the temperature to use
+// Priority: Room → User → Default (0.4)
 func (oc *AIClient) effectiveTemperature(meta *PortalMetadata) float64 {
 	if meta != nil && meta.Temperature > 0 {
 		return meta.Temperature
@@ -772,7 +779,7 @@ func (oc *AIClient) effectiveTemperature(meta *PortalMetadata) float64 {
 }
 
 // effectiveReasoningEffort returns the reasoning effort to use
-// Priority: Room → User → "" (none)
+// Priority: Room ? User ? "" (none)
 func (oc *AIClient) effectiveReasoningEffort(meta *PortalMetadata) string {
 	if meta != nil && meta.ReasoningEffort != "" {
 		return meta.ReasoningEffort
@@ -852,6 +859,63 @@ func (oc *AIClient) validateModel(ctx context.Context, modelID string) (bool, er
 	_, actualModel := ParseModelPrefix(modelID)
 	_, err = oc.api.Models.Get(timeoutCtx, actualModel)
 	return err == nil, nil
+}
+
+// resolveModelID tries to normalize a user-provided model to a known model ID.
+// It accepts exact IDs, aliases, display names, and suffix-only IDs (e.g. "gpt-4o-mini").
+func (oc *AIClient) resolveModelID(ctx context.Context, modelID string) (string, bool, error) {
+	normalized := strings.TrimSpace(modelID)
+	if normalized == "" {
+		return "", true, nil
+	}
+
+	normalized = ResolveAlias(normalized)
+
+	models, err := oc.listAvailableModels(ctx, false)
+	if err == nil {
+		for _, model := range models {
+			if model.ID == normalized {
+				return model.ID, true, nil
+			}
+		}
+
+		lower := strings.ToLower(normalized)
+		for _, model := range models {
+			if strings.ToLower(model.ID) == lower {
+				return model.ID, true, nil
+			}
+		}
+
+		for _, model := range models {
+			if strings.EqualFold(model.Name, normalized) {
+				return model.ID, true, nil
+			}
+		}
+
+		if !strings.Contains(normalized, "/") {
+			var match string
+			for _, model := range models {
+				if strings.HasSuffix(model.ID, "/"+normalized) {
+					if match != "" && match != model.ID {
+						return "", false, nil
+					}
+					match = model.ID
+				}
+			}
+			if match != "" {
+				return match, true, nil
+			}
+		}
+	}
+
+	valid, err := oc.validateModel(ctx, normalized)
+	if err != nil {
+		return "", false, err
+	}
+	if valid {
+		return normalized, true, nil
+	}
+	return "", false, nil
 }
 
 // listAvailableModels fetches models from OpenAI API and caches them

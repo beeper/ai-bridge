@@ -48,6 +48,7 @@ type streamingState struct {
 	responseID             string
 	sequenceNum            int
 	firstToken             bool
+	skipNextTextDelta      bool
 }
 
 // newStreamingState creates a new streaming state with initialized fields
@@ -403,12 +404,18 @@ func (oc *AIClient) streamingResponse(
 					log.Error().Msg("Failed to send initial streaming message")
 					return false, nil
 				}
+				// Initial message already includes this delta
+				state.skipNextTextDelta = true
 				// Update status to generating
 				oc.emitGenerationStatus(ctx, portal, state, "generating", "Generating response...", nil)
 			}
 
 			// Stream every text delta immediately (no debouncing for snappy UX)
 			if !state.firstToken && state.initialEventID != "" {
+				if state.skipNextTextDelta {
+					state.skipNextTextDelta = false
+					break
+				}
 				state.sequenceNum++
 				oc.emitStreamDelta(ctx, portal, state, StreamContentText, streamEvent.Delta, nil)
 			}
@@ -1087,10 +1094,16 @@ func (oc *AIClient) streamChatCompletions(
 						log.Error().Msg("Failed to send initial streaming message")
 						return false, nil
 					}
+					// Initial message already includes this delta
+					state.skipNextTextDelta = true
 					oc.emitGenerationStatus(ctx, portal, state, "generating", "Generating response...", nil)
 				}
 
 				if !state.firstToken && state.initialEventID != "" {
+					if state.skipNextTextDelta {
+						state.skipNextTextDelta = false
+						continue
+					}
 					state.sequenceNum++
 					oc.emitStreamDelta(ctx, portal, state, StreamContentText, choice.Delta.Content, nil)
 				}
