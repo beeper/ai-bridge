@@ -131,7 +131,16 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	// Check if model supports tool calling
 	supportsTools := meta.Capabilities.SupportsToolCalling
 
-	var tools []ToolInfo
+	// Get agent policy ONCE before the loop to avoid redundant lookups
+	var agentPolicy *tools.Policy
+	var agent *agents.AgentDefinition
+	store := NewAgentStoreAdapter(oc)
+	agent, err := store.GetAgentForRoom(context.Background(), meta)
+	if err == nil && agent != nil {
+		agentPolicy = agents.CreatePolicyFromProfile(agent, tools.DefaultRegistry())
+	}
+
+	var toolsList []ToolInfo
 
 	for name, entry := range meta.ToolsConfig.Tools {
 		if entry == nil {
@@ -150,9 +159,26 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 			available = true // Provider decides actual support
 		}
 
-		enabled, source, reason := oc.getToolStateWithSource(meta, name, entry, isOpenRouter)
+		// Check agent policy first (if we have an agent)
+		var enabled bool
+		var source SettingSource
+		var reason string
 
-		tools = append(tools, ToolInfo{
+		if agentPolicy != nil {
+			// Boss agent with boss tools - skip policy check
+			isBossWithBossTool := agent != nil && agents.IsBossAgent(agent.ID) && tools.IsBossTool(name)
+			if !isBossWithBossTool && !agentPolicy.IsAllowed(name) {
+				enabled = false
+				source = SourceAgentPolicy
+				reason = "Disabled by agent policy"
+			} else {
+				enabled, source, reason = oc.getToolStateWithSource(meta, name, entry, isOpenRouter)
+			}
+		} else {
+			enabled, source, reason = oc.getToolStateWithSource(meta, name, entry, isOpenRouter)
+		}
+
+		toolsList = append(toolsList, ToolInfo{
 			Name:        name,
 			DisplayName: displayName,
 			Description: entry.Tool.Description,
@@ -164,7 +190,7 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 		})
 	}
 
-	return tools
+	return toolsList
 }
 
 // getToolStateWithSource returns enabled state plus source and reason
@@ -1629,7 +1655,7 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		return err
 	}
 	oc.sendWelcomeMessage(ctx, portal)
-	oc.log.Info().Stringer("portal", portal.PortalKey).Msg("Welcome to AI Chats room created")
+	oc.log.Info().Stringer("portal", portal.PortalKey).Msg("New AI Chat room created")
 	return nil
 }
 
