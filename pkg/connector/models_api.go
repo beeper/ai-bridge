@@ -1,5 +1,7 @@
 package connector
 
+import "strings"
+
 // Model API provides a unified interface for looking up models and aliases.
 // All data comes from the generated ModelManifest in models_generated.go.
 
@@ -19,12 +21,12 @@ func GetModelDisplayName(modelID string) string {
 	return resolvedID
 }
 
-// GetOpenAIModels returns all models from the manifest that use the "openai" provider.
-// These are models accessed directly via OpenAI's API.
+// GetOpenAIModels returns all models from the manifest with the "openai/" prefix.
+// These models work with both OpenRouter and direct OpenAI API access.
 func GetOpenAIModels() []ModelInfo {
 	var models []ModelInfo
 	for _, info := range ModelManifest.Models {
-		if info.Provider == "openai" {
+		if strings.HasPrefix(info.ID, "openai/") {
 			models = append(models, info)
 		}
 	}
