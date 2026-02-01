@@ -275,17 +275,17 @@ func (oc *AIClient) streamingResponseWithRetry(
 ) {
 	// OpenRouter multimodal inputs are handled via Chat Completions.
 	if oc.isOpenRouterProvider() && hasMultimodalContent(prompt) {
-		oc.responseWithRetry(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
+		oc.responseWithRetryAndReasoningFallback(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
 		return
 	}
 	// Use Chat Completions API for audio (native support)
 	// SDK v3.16.0 has ResponseInputAudioParam but it's not wired into the union
 	if hasAudioContent(prompt) {
-		oc.responseWithRetry(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
+		oc.responseWithRetryAndReasoningFallback(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
 		return
 	}
 	// Use Responses API for other content (images, files, text)
-	oc.responseWithRetry(ctx, evt, portal, meta, prompt, oc.streamingResponse, "responses")
+	oc.responseWithRetryAndReasoningFallback(ctx, evt, portal, meta, prompt, oc.streamingResponse, "responses")
 }
 
 // buildResponsesAPIParams creates common Responses API parameters for both streaming and non-streaming paths
@@ -1748,8 +1748,6 @@ func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Port
 	switch tool.toolName {
 	case "web_search":
 		displayTitle = "Web Search"
-	case "code_interpreter":
-		displayTitle = "Code Interpreter"
 	case "image_generation":
 		displayTitle = "Image Generation"
 	}
@@ -1970,8 +1968,17 @@ func (oc *AIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev
 		})
 	}
 
-	// Check for rate limit errors - send transient disconnect
-	if IsRateLimitError(err) {
+	// Check for billing errors - send transient disconnect with billing message
+	if IsBillingError(err) {
+		oc.UserLogin.BridgeState.Send(status.BridgeState{
+			StateEvent: status.StateTransientDisconnect,
+			Error:      AIBillingError,
+			Message:    "Billing issue with AI provider. Please check your account credits.",
+		})
+	}
+
+	// Check for rate limit or overloaded errors - send transient disconnect
+	if IsRateLimitError(err) || IsOverloadedError(err) {
 		oc.UserLogin.BridgeState.Send(status.BridgeState{
 			StateEvent: status.StateTransientDisconnect,
 			Error:      AIRateLimited,
@@ -1984,12 +1991,8 @@ func (oc *AIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev
 		return
 	}
 
-	// Map error to state code for user feedback
-	errorCode := MapErrorToStateCode(err)
-	errorMessage := "Failed to reach OpenAI"
-	if humanErr, ok := BridgeStateHumanErrors[errorCode]; ok {
-		errorMessage = humanErr
-	}
+	// Use FormatUserFacingError for consistent, user-friendly error messages
+	errorMessage := FormatUserFacingError(err)
 
 	msgStatus := bridgev2.WrapErrorInStatus(err).
 		WithStatus(event.MessageStatusRetriable).

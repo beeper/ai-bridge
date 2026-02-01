@@ -3,9 +3,9 @@ package tools
 // Tool group constants for policy composition (like OpenClaw's TOOL_GROUPS).
 const (
 	GroupSearch    = "group:search"
-	GroupCode      = "group:code"
 	GroupCalc      = "group:calc"
 	GroupBuilder   = "group:builder"
+	GroupChat      = "group:chat"
 	GroupMessaging = "group:messaging"
 	GroupSessions  = "group:sessions"
 	GroupMemory    = "group:memory"

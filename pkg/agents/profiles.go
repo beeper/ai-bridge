@@ -27,9 +27,9 @@ const (
 // Matches OpenClaw's TOOL_GROUPS pattern.
 var ToolGroups = map[string][]string{
 	tools.GroupSearch:    {"web_search"},
-	tools.GroupCode:      {"code_interpreter"},
 	tools.GroupCalc:      {"calculator"},
 	tools.GroupBuilder:   {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "create_room", "modify_room", "list_rooms"},
+	tools.GroupChat:      {"set_chat_info"},
 	tools.GroupMessaging: {"message"},
 	tools.GroupSessions:  {"sessions_list", "sessions_history", "sessions_send", "session_status"},
 	tools.GroupMemory:    {"memory_search", "memory_get"},
@@ -39,10 +39,10 @@ var ToolGroups = map[string][]string{
 // ProfileAllowlists define which tool groups each profile allows.
 // Matches OpenClaw's TOOL_PROFILES pattern.
 var ProfileAllowlists = map[ToolProfile][]string{
-	ProfileMinimal:   {},
-	ProfileCoding:    {tools.GroupCalc, tools.GroupSearch, tools.GroupCode},
-	ProfileMessaging: {tools.GroupMessaging, tools.GroupSessions},
-	ProfileFull:      {tools.GroupCalc, tools.GroupSearch, tools.GroupCode},
+	ProfileMinimal:   {tools.GroupSearch, tools.GroupChat},
+	ProfileCoding:    {tools.GroupCalc, tools.GroupSearch, tools.GroupChat},
+	ProfileMessaging: {tools.GroupSearch, tools.GroupChat, tools.GroupMessaging, tools.GroupSessions},
+	ProfileFull:      {tools.GroupCalc, tools.GroupSearch, tools.GroupChat},
 	ProfileBoss:      {tools.GroupBuilder},
 }
 

@@ -431,14 +431,6 @@ func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal
 		sb.WriteString(fmt.Sprintf("  [%s] %s: %s%s\n", status, tool.Name, tool.Description, availability))
 	}
 
-	// Provider tools
-	sb.WriteString("\nProvider Tools:\n")
-	ciStatus := "✗"
-	if oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
-		ciStatus = "✓"
-	}
-	sb.WriteString(fmt.Sprintf("  [%s] code_interpreter: Execute Python code\n", ciStatus))
-
 	if !supportsTools {
 		sb.WriteString(fmt.Sprintf("\nNote: Current model (%s) may not support tool calling.\n", oc.effectiveModel(meta)))
 	}
@@ -484,7 +476,7 @@ func (oc *AIClient) setToolEnabled(ctx context.Context, portal *bridgev2.Portal,
 	// Check if tool exists
 	entry, ok := meta.ToolsConfig.Tools[normalizedName]
 	if !ok || entry == nil {
-		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Unknown tool: %s. Available: calculator, web_search, code_interpreter", toolName))
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Unknown tool: %s. Available: calculator, web_search, set_chat_info", toolName))
 		return
 	}
 

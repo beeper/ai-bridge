@@ -27,6 +27,7 @@ const (
 	ToolNameWebSearch       = "web_search"
 	ToolNameCodeInterpreter = "code_interpreter"
 	ToolNameSetRoomTitle    = "set_room_title"
+	ToolNameSetChatInfo     = "set_chat_info"
 )
 
 // getDefaultToolsConfig returns the default tools configuration for a new room.
