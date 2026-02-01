@@ -271,15 +271,10 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 		Str("detected_provider", loginMetadata(oc.UserLogin).Provider).
 		Msg("Provider detection for tool filtering")
 
-	if !isOpenRouter {
-		if oc.isToolEnabled(meta, ToolNameWebSearchProvider) {
-			params.Tools = append(params.Tools, responses.ToolParamOfWebSearchPreview(responses.WebSearchPreviewToolTypeWebSearchPreview))
-			log.Debug().Msg("Web search tool enabled")
-		}
-		if oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
-			params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
-			log.Debug().Msg("Code interpreter tool enabled")
-		}
+	// Add provider-side tools (code interpreter handled by provider API)
+	if oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
+		params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
+		log.Debug().Msg("Code interpreter tool enabled")
 	}
 
 	// Add builtin function tools if model supports tool calling
@@ -1011,14 +1006,9 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 		}
 	}
 
-	// Add tools (same as initial request)
-	if !oc.isOpenRouterProvider() {
-		if oc.isToolEnabled(meta, ToolNameWebSearchProvider) {
-			params.Tools = append(params.Tools, responses.ToolParamOfWebSearchPreview(responses.WebSearchPreviewToolTypeWebSearchPreview))
-		}
-		if oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
-			params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
-		}
+	// Add provider-side tools
+	if oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
+		params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
 	}
 	if meta.Capabilities.SupportsToolCalling {
 		enabledTools := GetEnabledBuiltinTools(func(name string) bool {
@@ -1823,6 +1813,12 @@ func (oc *AIClient) executeBossTool(ctx context.Context, toolName string, args m
 		result, err = executor.ExecuteListModels(ctx, args)
 	case "list_tools":
 		result, err = executor.ExecuteListTools(ctx, args)
+	case "create_room":
+		result, err = executor.ExecuteCreateRoom(ctx, args)
+	case "modify_room":
+		result, err = executor.ExecuteModifyRoom(ctx, args)
+	case "list_rooms":
+		result, err = executor.ExecuteListRooms(ctx, args)
 	default:
 		return nil // Not a boss tool
 	}

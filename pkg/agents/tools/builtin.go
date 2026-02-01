@@ -5,7 +5,6 @@ const (
 	GroupSearch  = "group:search"
 	GroupCode    = "group:code"
 	GroupCalc    = "group:calc"
-	GroupOnline  = "group:online"
 	GroupBuilder = "group:builder"
 )
 

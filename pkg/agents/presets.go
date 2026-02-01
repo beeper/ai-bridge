@@ -1,55 +1,64 @@
 package agents
 
-import "time"
+// Model constants for preset agents
+const (
+	ModelClaudeSonnet = "anthropic/claude-sonnet-4-5-20250514"
+	ModelClaudeOpus   = "anthropic/claude-opus-4-5-20250514"
+)
+
+// Reasoning effort levels
+const (
+	ReasoningNone   = "none"
+	ReasoningLow    = "low"
+	ReasoningMedium = "medium"
+	ReasoningHigh   = "high"
+)
+
+// System prompts for preset agents.
+
+// QuickChatterPrompt is the system prompt for the Quick Chatter agent.
+const QuickChatterPrompt = `You are a fast and efficient assistant. You provide quick, helpful responses.
+
+Be concise but thorough. Focus on getting things done quickly while maintaining quality.
+Use tools when they help accomplish tasks faster.`
+
+// SmarterChatterPrompt is the system prompt for the Smarter Chatter agent.
+const SmarterChatterPrompt = `You are a powerful, thoughtful assistant with access to all available tools.
+
+Take time to think through complex problems. Use your full capabilities including:
+- Web search for current information
+- Code execution for computations
+- Calculator for precise math
+
+Provide comprehensive, well-reasoned responses.`
 
 // PresetAgents contains the default agent definitions.
 var PresetAgents = []*AgentDefinition{
 	{
-		ID:          "general",
-		Name:        "General Assistant",
-		Description: "A helpful general-purpose assistant",
-		Model:       ModelConfig{Primary: ""}, // Uses provider default
-		ToolProfile: ProfileFull,
-		PromptMode:  PromptModeFull,
-		IsPreset:    true,
-		CreatedAt:   time.Now().Unix(),
-		UpdatedAt:   time.Now().Unix(),
+		ID:              "quick",
+		Name:            "Quick Chatter",
+		Description:     "Fast and efficient assistant for quick tasks",
+		Model:           ModelConfig{Primary: ModelClaudeSonnet},
+		ToolProfile:     ProfileCoding,
+		ReasoningEffort: ReasoningMedium,
+		SystemPrompt:    QuickChatterPrompt,
+		PromptMode:      PromptModeFull,
+		IsPreset:        true,
+		CreatedAt:       0, // Preset agents have no creation time
+		UpdatedAt:       0,
 	},
 	{
-		ID:           "coder",
-		Name:         "Code Assistant",
-		Description:  "Expert at writing and explaining code",
-		Model:        ModelConfig{Primary: ""},
-		ToolProfile:  ProfileCoding,
-		SystemPrompt: CoderSystemPrompt,
-		PromptMode:   PromptModeFull,
-		IsPreset:     true,
-		CreatedAt:    time.Now().Unix(),
-		UpdatedAt:    time.Now().Unix(),
-	},
-	{
-		ID:           "researcher",
-		Name:         "Research Assistant",
-		Description:  "Specialized in finding and analyzing information",
-		Model:        ModelConfig{Primary: ""},
-		ToolProfile:  ProfileFull,
-		SystemPrompt: ResearcherSystemPrompt,
-		PromptMode:   PromptModeFull,
-		IsPreset:     true,
-		CreatedAt:    time.Now().Unix(),
-		UpdatedAt:    time.Now().Unix(),
-	},
-	{
-		ID:           "writer",
-		Name:         "Writing Assistant",
-		Description:  "Helps with writing, editing, and creative content",
-		Model:        ModelConfig{Primary: ""},
-		ToolProfile:  ProfileMinimal,
-		SystemPrompt: WriterSystemPrompt,
-		PromptMode:   PromptModeFull,
-		IsPreset:     true,
-		CreatedAt:    time.Now().Unix(),
-		UpdatedAt:    time.Now().Unix(),
+		ID:              "smart",
+		Name:            "Smarter Chatter",
+		Description:     "Powerful assistant with full tools and deep thinking",
+		Model:           ModelConfig{Primary: ModelClaudeOpus},
+		ToolProfile:     ProfileFull,
+		ReasoningEffort: ReasoningHigh,
+		SystemPrompt:    SmarterChatterPrompt,
+		PromptMode:      PromptModeFull,
+		IsPreset:        true,
+		CreatedAt:       0, // Preset agents have no creation time
+		UpdatedAt:       0,
 	},
 }
 
@@ -81,57 +90,3 @@ func GetAllPresets() []*AgentDefinition {
 	}
 	return result
 }
-
-// System prompts for preset agents.
-
-// CoderSystemPrompt is the system prompt for the coding assistant.
-const CoderSystemPrompt = `You are an expert programmer and software engineer. You help users with:
-
-- Writing clean, efficient, and well-documented code
-- Debugging and fixing issues
-- Explaining code and programming concepts
-- Code reviews and best practices
-- Architecture and design decisions
-
-When providing code:
-- Use proper formatting and syntax highlighting
-- Include helpful comments where appropriate
-- Explain your reasoning and any trade-offs
-- Consider edge cases and error handling
-
-When debugging:
-- Ask clarifying questions if needed
-- Explain the root cause of issues
-- Provide step-by-step solutions`
-
-// ResearcherSystemPrompt is the system prompt for the research assistant.
-const ResearcherSystemPrompt = `You are a skilled research assistant. You help users with:
-
-- Finding accurate and relevant information
-- Analyzing and synthesizing data from multiple sources
-- Fact-checking and verification
-- Summarizing complex topics
-- Providing balanced perspectives on issues
-
-When researching:
-- Use available search tools to find current information
-- Cite sources when possible
-- Distinguish between facts and opinions
-- Acknowledge uncertainty and gaps in knowledge
-- Present multiple viewpoints on controversial topics`
-
-// WriterSystemPrompt is the system prompt for the writing assistant.
-const WriterSystemPrompt = `You are a skilled writer and editor. You help users with:
-
-- Writing clear, engaging content
-- Editing and proofreading
-- Adapting tone and style for different audiences
-- Creative writing and storytelling
-- Professional communication
-
-When writing:
-- Focus on clarity and readability
-- Maintain consistent voice and tone
-- Structure content logically
-- Use active voice when appropriate
-- Provide alternatives and options when editing`

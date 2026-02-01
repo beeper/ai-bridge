@@ -92,19 +92,22 @@ type UserLoginMetadata struct {
 
 // CustomAgentData stores a user-created agent definition.
 type CustomAgentData struct {
-	ID            string          `json:"id"`
-	Name          string          `json:"name"`
-	Description   string          `json:"description,omitempty"`
-	AvatarURL     string          `json:"avatar_url,omitempty"`
-	Model         string          `json:"model,omitempty"`
-	ModelFallback []string        `json:"model_fallback,omitempty"`
-	SystemPrompt  string          `json:"system_prompt,omitempty"`
-	PromptMode    string          `json:"prompt_mode,omitempty"`
-	ToolProfile   string          `json:"tool_profile,omitempty"`
-	ToolOverrides map[string]bool `json:"tool_overrides,omitempty"`
-	Temperature   float64         `json:"temperature,omitempty"`
-	CreatedAt     int64           `json:"created_at"`
-	UpdatedAt     int64           `json:"updated_at"`
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	Description     string          `json:"description,omitempty"`
+	AvatarURL       string          `json:"avatar_url,omitempty"`
+	Model           string          `json:"model,omitempty"`
+	ModelFallback   []string        `json:"model_fallback,omitempty"`
+	SystemPrompt    string          `json:"system_prompt,omitempty"`
+	PromptMode      string          `json:"prompt_mode,omitempty"`
+	ToolProfile     string          `json:"tool_profile,omitempty"`
+	ToolOverrides   map[string]bool `json:"tool_overrides,omitempty"`
+	Temperature     float64         `json:"temperature,omitempty"`
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	IdentityName    string          `json:"identity_name,omitempty"`
+	IdentityPersona string          `json:"identity_persona,omitempty"`
+	CreatedAt       int64           `json:"created_at"`
+	UpdatedAt       int64           `json:"updated_at"`
 }
 
 // PortalMetadata stores per-room tuning knobs for the assistant.

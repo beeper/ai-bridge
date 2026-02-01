@@ -27,8 +27,9 @@ type AgentDefinition struct {
 	ToolOverrides map[string]bool `json:"tool_overrides,omitempty"` // explicit allow/deny
 
 	// Agent behavior
-	Temperature float64   `json:"temperature,omitempty"`
-	Identity    *Identity `json:"identity,omitempty"` // custom identity for prompt
+	Temperature     float64   `json:"temperature,omitempty"`
+	ReasoningEffort string    `json:"reasoning_effort,omitempty"` // none, low, medium, high
+	Identity        *Identity `json:"identity,omitempty"`         // custom identity for prompt
 
 	// Metadata
 	IsPreset  bool  `json:"is_preset,omitempty"`
@@ -87,18 +88,19 @@ func (a *AgentDefinition) Clone() *AgentDefinition {
 	}
 
 	clone := &AgentDefinition{
-		ID:           a.ID,
-		Name:         a.Name,
-		Description:  a.Description,
-		AvatarURL:    a.AvatarURL,
-		Model:        a.Model.Clone(),
-		SystemPrompt: a.SystemPrompt,
-		PromptMode:   a.PromptMode,
-		ToolProfile:  a.ToolProfile,
-		Temperature:  a.Temperature,
-		IsPreset:     a.IsPreset,
-		CreatedAt:    a.CreatedAt,
-		UpdatedAt:    a.UpdatedAt,
+		ID:              a.ID,
+		Name:            a.Name,
+		Description:     a.Description,
+		AvatarURL:       a.AvatarURL,
+		Model:           a.Model.Clone(),
+		SystemPrompt:    a.SystemPrompt,
+		PromptMode:      a.PromptMode,
+		ToolProfile:     a.ToolProfile,
+		Temperature:     a.Temperature,
+		ReasoningEffort: a.ReasoningEffort,
+		IsPreset:        a.IsPreset,
+		CreatedAt:       a.CreatedAt,
+		UpdatedAt:       a.UpdatedAt,
 	}
 
 	if a.ToolOverrides != nil {

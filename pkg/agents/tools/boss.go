@@ -25,6 +25,10 @@ type AgentStoreInterface interface {
 	DeleteAgent(ctx context.Context, agentID string) error
 	ListModels(ctx context.Context) ([]ModelData, error)
 	ListAvailableTools(ctx context.Context) ([]ToolInfo, error)
+	// Room management
+	CreateRoom(ctx context.Context, room RoomData) (string, error)
+	ModifyRoom(ctx context.Context, roomID string, updates RoomData) error
+	ListRooms(ctx context.Context) ([]RoomData, error)
 }
 
 // AgentData represents agent data for boss tools (avoids import cycle).
@@ -48,6 +52,16 @@ type ModelData struct {
 	Name        string `json:"name"`
 	Provider    string `json:"provider,omitempty"`
 	Description string `json:"description,omitempty"`
+}
+
+// RoomData represents room data for boss tools.
+type RoomData struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	AgentID        string `json:"agent_id,omitempty"`
+	DefaultAgentID string `json:"default_agent_id,omitempty"`
+	SystemPrompt   string `json:"system_prompt,omitempty"`
+	CreatedAt      int64  `json:"created_at"`
 }
 
 // NewBossToolExecutor creates a new boss tool executor.
@@ -226,9 +240,87 @@ var ListToolsDef = &Tool{
 	Group: GroupBuilder,
 }
 
+// CreateRoomTool tool definition.
+var CreateRoomTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "create_room",
+		Description: "Create a new chat room with a specific agent",
+		Annotations: &mcp.ToolAnnotations{Title: "Create Room"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "Display name for the room",
+				},
+				"agent_id": map[string]any{
+					"type":        "string",
+					"description": "ID of the agent to assign to this room (e.g., 'quick', 'smart', or a custom agent ID)",
+				},
+				"system_prompt": map[string]any{
+					"type":        "string",
+					"description": "Optional custom system prompt override for this room",
+				},
+			},
+			"required": []string{"name", "agent_id"},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
+// ModifyRoomTool tool definition.
+var ModifyRoomTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "modify_room",
+		Description: "Modify an existing room's configuration",
+		Annotations: &mcp.ToolAnnotations{Title: "Modify Room"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"room_id": map[string]any{
+					"type":        "string",
+					"description": "ID of the room to modify",
+				},
+				"name": map[string]any{
+					"type":        "string",
+					"description": "New display name for the room",
+				},
+				"agent_id": map[string]any{
+					"type":        "string",
+					"description": "New agent ID to assign to this room",
+				},
+				"system_prompt": map[string]any{
+					"type":        "string",
+					"description": "New system prompt override for this room",
+				},
+			},
+			"required": []string{"room_id"},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
+// ListRoomsTool tool definition.
+var ListRoomsTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "list_rooms",
+		Description: "List all chat rooms and their assigned agents",
+		Annotations: &mcp.ToolAnnotations{Title: "List Rooms"},
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
 // BossTools returns all boss agent tools.
 func BossTools() []*Tool {
 	return []*Tool{
+		// Agent management
 		CreateAgentTool,
 		ForkAgentTool,
 		EditAgentTool,
@@ -236,6 +328,10 @@ func BossTools() []*Tool {
 		ListAgentsTool,
 		ListModelsTool,
 		ListToolsDef,
+		// Room management
+		CreateRoomTool,
+		ModifyRoomTool,
+		ListRoomsTool,
 	}
 }
 
@@ -251,8 +347,20 @@ func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[str
 	systemPrompt := ReadStringDefault(input, "system_prompt", "")
 	toolProfile := ReadStringDefault(input, "tool_profile", "full")
 
-	// Generate unique ID
-	agentID := uuid.NewString()[:8]
+	// Generate unique ID and check for collisions
+	existingAgents, err := e.store.LoadAgents(ctx)
+	if err != nil {
+		return ErrorResult("create_agent", fmt.Sprintf("failed to load agents: %v", err)), nil
+	}
+
+	var agentID string
+	for i := 0; i < 10; i++ { // Try up to 10 times to find a unique ID
+		agentID = uuid.NewString()
+		if _, exists := existingAgents[agentID]; !exists {
+			break
+		}
+	}
+
 	now := time.Now().Unix()
 
 	agent := AgentData{
@@ -297,8 +405,15 @@ func (e *BossToolExecutor) ExecuteForkAgent(ctx context.Context, input map[strin
 
 	newName := ReadStringDefault(input, "new_name", fmt.Sprintf("%s (Fork)", source.Name))
 
-	// Create forked agent
-	agentID := uuid.NewString()[:8]
+	// Generate unique ID (full UUID, check for collisions)
+	var agentID string
+	for i := 0; i < 10; i++ {
+		agentID = uuid.NewString()
+		if _, exists := agents[agentID]; !exists {
+			break
+		}
+	}
+
 	now := time.Now().Unix()
 
 	forked := AgentData{
@@ -480,12 +595,100 @@ func (e *BossToolExecutor) ExecuteListTools(ctx context.Context, _ map[string]an
 	profiles := map[string][]string{
 		"minimal": {},
 		"coding":  {GroupCalc, GroupSearch, GroupCode},
-		"full":    {GroupCalc, GroupSearch, GroupCode, GroupOnline},
+		"full":    {GroupCalc, GroupSearch, GroupCode},
 	}
 
 	return JSONResult(map[string]any{
 		"tools":    toolList,
 		"count":    len(toolList),
 		"profiles": profiles,
+	}), nil
+}
+
+// ExecuteCreateRoom handles the create_room tool.
+func (e *BossToolExecutor) ExecuteCreateRoom(ctx context.Context, input map[string]any) (*Result, error) {
+	name, err := ReadString(input, "name", true)
+	if err != nil {
+		return ErrorResult("create_room", err.Error()), nil
+	}
+
+	agentID, err := ReadString(input, "agent_id", true)
+	if err != nil {
+		return ErrorResult("create_room", err.Error()), nil
+	}
+
+	systemPrompt := ReadStringDefault(input, "system_prompt", "")
+
+	room := RoomData{
+		Name:           name,
+		AgentID:        agentID,
+		DefaultAgentID: agentID,
+		SystemPrompt:   systemPrompt,
+		CreatedAt:      time.Now().Unix(),
+	}
+
+	roomID, err := e.store.CreateRoom(ctx, room)
+	if err != nil {
+		return ErrorResult("create_room", fmt.Sprintf("failed to create room: %v", err)), nil
+	}
+
+	return JSONResult(map[string]any{
+		"success":  true,
+		"room_id":  roomID,
+		"agent_id": agentID,
+		"message":  fmt.Sprintf("Created room '%s' with agent '%s'", name, agentID),
+	}), nil
+}
+
+// ExecuteModifyRoom handles the modify_room tool.
+func (e *BossToolExecutor) ExecuteModifyRoom(ctx context.Context, input map[string]any) (*Result, error) {
+	roomID, err := ReadString(input, "room_id", true)
+	if err != nil {
+		return ErrorResult("modify_room", err.Error()), nil
+	}
+
+	updates := RoomData{}
+
+	if name, _ := ReadString(input, "name", false); name != "" {
+		updates.Name = name
+	}
+	if agentID, _ := ReadString(input, "agent_id", false); agentID != "" {
+		updates.AgentID = agentID
+	}
+	if prompt, _ := ReadString(input, "system_prompt", false); prompt != "" {
+		updates.SystemPrompt = prompt
+	}
+
+	if err := e.store.ModifyRoom(ctx, roomID, updates); err != nil {
+		return ErrorResult("modify_room", fmt.Sprintf("failed to modify room: %v", err)), nil
+	}
+
+	return JSONResult(map[string]any{
+		"success": true,
+		"room_id": roomID,
+		"message": fmt.Sprintf("Modified room '%s'", roomID),
+	}), nil
+}
+
+// ExecuteListRooms handles the list_rooms tool.
+func (e *BossToolExecutor) ExecuteListRooms(ctx context.Context, _ map[string]any) (*Result, error) {
+	rooms, err := e.store.ListRooms(ctx)
+	if err != nil {
+		return ErrorResult("list_rooms", fmt.Sprintf("failed to list rooms: %v", err)), nil
+	}
+
+	var roomList []map[string]any
+	for _, room := range rooms {
+		roomList = append(roomList, map[string]any{
+			"id":         room.ID,
+			"name":       room.Name,
+			"agent_id":   room.AgentID,
+			"created_at": room.CreatedAt,
+		})
+	}
+
+	return JSONResult(map[string]any{
+		"rooms": roomList,
+		"count": len(roomList),
 	}), nil
 }

@@ -21,63 +21,40 @@ import (
 
 // Tool name constants
 const (
-	ToolNameCalculator        = "calculator"
-	ToolNameWebSearch         = "web_search"
-	ToolNameOnline            = "online"
-	ToolNameWebSearchProvider = "web_search_provider"
-	ToolNameCodeInterpreter   = "code_interpreter"
-	ToolNameSetRoomTitle      = "set_room_title"
+	ToolNameCalculator      = "calculator"
+	ToolNameWebSearch       = "web_search"
+	ToolNameCodeInterpreter = "code_interpreter"
+	ToolNameSetRoomTitle    = "set_room_title"
 )
 
-// getDefaultToolsConfig returns the default tools configuration for a new room
-// using MCP SDK types. OpenRouter/Beeper use :online plugin by default,
-// other providers use builtin web search.
-func getDefaultToolsConfig(provider string) ToolsConfig {
-	isOpenRouter := provider == ProviderOpenRouter || provider == ProviderBeeper
-
+// getDefaultToolsConfig returns the default tools configuration for a new room.
+func getDefaultToolsConfig(_ string) ToolsConfig {
 	config := ToolsConfig{
 		Tools: make(map[string]*ToolEntry),
 	}
 
-	// Register builtin tools
+	// Calculator - arithmetic and math
 	registerTool(&config, mcp.Tool{
 		Name:        ToolNameCalculator,
 		Description: "Perform arithmetic calculations",
 		Annotations: &mcp.ToolAnnotations{Title: "Calculator"},
 	}, "builtin")
 
+	// Web search - uses DuckDuckGo
 	registerTool(&config, mcp.Tool{
 		Name:        ToolNameWebSearch,
-		Description: "Search the web using DuckDuckGo",
+		Description: "Search the web for information",
 		Annotations: &mcp.ToolAnnotations{Title: "Web Search"},
 	}, "builtin")
 
-	// OpenRouter :online plugin
-	if isOpenRouter {
-		registerTool(&config, mcp.Tool{
-			Name:        ToolNameOnline,
-			Description: "Real-time web search via OpenRouter",
-			Annotations: &mcp.ToolAnnotations{Title: "Online Search"},
-		}, "plugin")
-		// Enable online by default, disable builtin web_search
-		config.Tools[ToolNameOnline].Enabled = ptr.Ptr(true)
-		config.Tools[ToolNameWebSearch].Enabled = ptr.Ptr(false)
-	}
-
-	// Provider tools (available on all providers, provider decides actual support)
-	registerTool(&config, mcp.Tool{
-		Name:        ToolNameWebSearchProvider,
-		Description: "Native provider web search API",
-		Annotations: &mcp.ToolAnnotations{Title: "Provider Web Search"},
-	}, "provider")
-
+	// Code interpreter - Python execution (provider handles)
 	registerTool(&config, mcp.Tool{
 		Name:        ToolNameCodeInterpreter,
-		Description: "Execute Python code in sandbox",
+		Description: "Execute Python code for calculations and data analysis",
 		Annotations: &mcp.ToolAnnotations{Title: "Code Interpreter"},
 	}, "provider")
 
-	// Builtin bridge tools
+	// Room title tool
 	registerTool(&config, mcp.Tool{
 		Name:        ToolNameSetRoomTitle,
 		Description: "Set the chat room title",
@@ -127,11 +104,6 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 			continue
 		}
 
-		// Skip online plugin for non-OpenRouter providers
-		if name == ToolNameOnline && !isOpenRouter {
-			continue
-		}
-
 		// Get display name from MCP annotations or fall back to tool name
 		displayName := entry.Tool.Name
 		if entry.Tool.Annotations != nil && entry.Tool.Annotations.Title != "" {
@@ -162,18 +134,13 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 }
 
 // getToolStateWithSource returns enabled state plus source and reason
-func (oc *AIClient) getToolStateWithSource(meta *PortalMetadata, toolName string, entry *ToolEntry, isOpenRouter bool) (bool, SettingSource, string) {
-	// 1. Check provider limitations first
-	if toolName == ToolNameOnline && !isOpenRouter {
-		return false, SourceProviderLimit, "Only available with OpenRouter/Beeper"
-	}
-
-	// 2. Check room-level explicit setting
+func (oc *AIClient) getToolStateWithSource(meta *PortalMetadata, toolName string, entry *ToolEntry, _ bool) (bool, SettingSource, string) {
+	// 1. Check room-level explicit setting
 	if entry.Enabled != nil {
 		return *entry.Enabled, SourceRoomOverride, ""
 	}
 
-	// 3. Check user-level defaults
+	// 2. Check user-level defaults
 	loginMeta := loginMetadata(oc.UserLogin)
 	if loginMeta.Defaults != nil && loginMeta.Defaults.Tools != nil {
 		if enabled, ok := loginMeta.Defaults.Tools[toolName]; ok {
@@ -181,7 +148,7 @@ func (oc *AIClient) getToolStateWithSource(meta *PortalMetadata, toolName string
 		}
 	}
 
-	// 4. Fall back to provider/global default
+	// 3. Fall back to global default
 	return oc.getDefaultToolState(meta, toolName), SourceGlobalDefault, ""
 }
 
@@ -210,33 +177,10 @@ func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
 // getDefaultToolState returns the default enabled state for a tool
 // Most tools are enabled by default when the model supports them
 func (oc *AIClient) getDefaultToolState(meta *PortalMetadata, toolName string) bool {
-	loginMeta := loginMetadata(oc.UserLogin)
-	provider := loginMeta.Provider
-	isOpenRouter := provider == ProviderOpenRouter || provider == ProviderBeeper
-
 	switch toolName {
-	case ToolNameCalculator:
-		// Calculator enabled by default if model supports tools
-		return meta.Capabilities.SupportsToolCalling
-	case ToolNameWebSearch:
-		// Web search disabled by default if online plugin is enabled (to avoid duplication)
-		if isOpenRouter {
-			if entry, ok := meta.ToolsConfig.Tools[ToolNameOnline]; ok && entry != nil && entry.Enabled != nil && *entry.Enabled {
-				return false
-			}
-		}
-		return meta.Capabilities.SupportsToolCalling
-	case ToolNameOnline:
-		// Online plugin enabled by default for OpenRouter/Beeper
-		return isOpenRouter
-	case ToolNameWebSearchProvider:
-		// Provider web search enabled by default if model supports tools
-		return meta.Capabilities.SupportsToolCalling
-	case ToolNameCodeInterpreter:
-		// Code interpreter enabled by default if model supports tools
+	case ToolNameCalculator, ToolNameWebSearch, ToolNameCodeInterpreter:
 		return meta.Capabilities.SupportsToolCalling
 	default:
-		// Unknown tools enabled by default if model supports tools
 		return meta.Capabilities.SupportsToolCalling
 	}
 }
@@ -245,8 +189,6 @@ func (oc *AIClient) getDefaultToolState(meta *PortalMetadata, toolName string) b
 func (oc *AIClient) applyToolToggle(meta *PortalMetadata, toggle ToolToggle, provider string) {
 	// Ensure tools config is initialized
 	ensureToolsConfig(meta, provider)
-
-	isOpenRouter := provider == ProviderOpenRouter || provider == ProviderBeeper
 
 	// Normalize tool name aliases
 	toolName := normalizeToolName(toggle.Name)
@@ -258,21 +200,8 @@ func (oc *AIClient) applyToolToggle(meta *PortalMetadata, toggle ToolToggle, pro
 		return
 	}
 
-	// Validate online plugin for non-OpenRouter
-	if toolName == ToolNameOnline && !isOpenRouter {
-		oc.log.Warn().Str("tool", toolName).Msg("Online plugin only available with OpenRouter")
-		return
-	}
-
 	// Apply toggle
 	entry.Enabled = &toggle.Enabled
-
-	// If enabling online, disable builtin web_search to avoid duplication
-	if toolName == ToolNameOnline && toggle.Enabled {
-		if wsEntry, ok := meta.ToolsConfig.Tools[ToolNameWebSearch]; ok && wsEntry != nil {
-			wsEntry.Enabled = ptr.Ptr(false)
-		}
-	}
 
 	oc.log.Info().Str("tool", toolName).Bool("enabled", toggle.Enabled).Msg("Applied tool toggle from client")
 }
@@ -284,9 +213,7 @@ func normalizeToolName(name string) string {
 		return ToolNameCalculator
 	case "websearch", "search":
 		return ToolNameWebSearch
-	case "websearchprovider", "provider_search":
-		return ToolNameWebSearchProvider
-	case "codeinterpreter", "interpreter":
+	case "codeinterpreter", "interpreter", "code":
 		return ToolNameCodeInterpreter
 	default:
 		return name
@@ -385,7 +312,7 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 
 // ResolveIdentifier resolves an agent ID to a ghost and optionally creates a chat
 func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	// Identifier can be an agent ID (e.g., "general", "coder") or model ID for backwards compatibility
+	// Identifier can be an agent ID (e.g., "quick", "smart", "boss") or model ID for backwards compatibility
 	id := strings.TrimSpace(identifier)
 	if id == "" {
 		return nil, fmt.Errorf("identifier is required")
@@ -1280,15 +1207,18 @@ func (oc *AIClient) bootstrap(ctx context.Context) {
 		oc.log.Warn().Err(err).Msg("Failed to sync chat counter")
 		return
 	}
-	if err := oc.ensureDefaultChat(logCtx); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to ensure default chat")
+
+	// Create the Agent Builder room first (Meta Chatter / Boss agent)
+	// This is the primary room for managing agents and rooms
+	if err := oc.ensureBuilderRoom(logCtx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to ensure builder room")
 		return
 	}
 
-	// Create the Agent Builder room if not exists
-	if err := oc.ensureBuilderRoom(logCtx); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to ensure builder room")
-		// Continue anyway - builder room is optional for core functionality
+	// Create a default chat room with Quick Chatter agent
+	if err := oc.ensureDefaultChat(logCtx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to ensure default chat")
+		// Continue anyway - default chat is optional
 	}
 
 	// Mark bootstrap as complete only after successful completion
@@ -1407,8 +1337,13 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		return err
 	}
 
-	defaultPortalKey := portalKeyForDefaultChat(oc.UserLogin.ID)
-	resp, err := oc.createChatWithKey(ctx, "Welcome to AI Chats", "", defaultPortalKey) // Default room title
+	// Create default chat with Quick Chatter agent
+	quickAgent := agents.GetPresetByID("quick")
+	if quickAgent == nil {
+		return fmt.Errorf("quick chatter agent preset not found")
+	}
+
+	resp, err := oc.createAgentChat(ctx, quickAgent)
 	if err != nil {
 		oc.log.Err(err).Msg("Failed to create default portal")
 		return err

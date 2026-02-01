@@ -22,18 +22,17 @@ const (
 
 // ToolGroups maps group names to tool names for policy composition.
 var ToolGroups = map[string][]string{
-	tools.GroupSearch:  {"web_search", "web_search_provider"},
+	tools.GroupSearch:  {"web_search"},
 	tools.GroupCode:    {"code_interpreter"},
 	tools.GroupCalc:    {"calculator"},
-	tools.GroupOnline:  {":online"},
-	tools.GroupBuilder: {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools"},
+	tools.GroupBuilder: {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "create_room", "modify_room", "list_rooms"},
 }
 
 // ProfileAllowlists define which tool groups each profile allows.
 var ProfileAllowlists = map[ToolProfile][]string{
 	ProfileMinimal: {},
 	ProfileCoding:  {tools.GroupCalc, tools.GroupSearch, tools.GroupCode},
-	ProfileFull:    {tools.GroupCalc, tools.GroupSearch, tools.GroupCode, tools.GroupOnline},
+	ProfileFull:    {tools.GroupCalc, tools.GroupSearch, tools.GroupCode},
 	ProfileBoss:    {tools.GroupBuilder},
 }
 

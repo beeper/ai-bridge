@@ -3,14 +3,17 @@ package connector
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
+	"maunium.net/go/mautrix/bridgev2"
 )
 
 // AgentStoreAdapter implements agents.AgentStore using the connector's data sources.
 type AgentStoreAdapter struct {
 	client *AIClient
+	mu     sync.Mutex // protects read-modify-write operations on custom agents
 }
 
 // NewAgentStoreAdapter creates a new agent store adapter.
@@ -59,7 +62,7 @@ func (s *AgentStoreAdapter) saveCustomAgentsToMetadata(ctx context.Context, agen
 
 // customAgentDataToDefinition converts CustomAgentData to AgentDefinition.
 func customAgentDataToDefinition(data *CustomAgentData) *agents.AgentDefinition {
-	return &agents.AgentDefinition{
+	def := &agents.AgentDefinition{
 		ID:          data.ID,
 		Name:        data.Name,
 		Description: data.Description,
@@ -68,34 +71,54 @@ func customAgentDataToDefinition(data *CustomAgentData) *agents.AgentDefinition 
 			Primary:   data.Model,
 			Fallbacks: data.ModelFallback,
 		},
-		SystemPrompt:  data.SystemPrompt,
-		PromptMode:    agents.PromptMode(data.PromptMode),
-		ToolProfile:   agents.ToolProfile(data.ToolProfile),
-		ToolOverrides: data.ToolOverrides,
-		Temperature:   data.Temperature,
-		IsPreset:      false,
-		CreatedAt:     data.CreatedAt,
-		UpdatedAt:     data.UpdatedAt,
+		SystemPrompt:    data.SystemPrompt,
+		PromptMode:      agents.PromptMode(data.PromptMode),
+		ToolProfile:     agents.ToolProfile(data.ToolProfile),
+		ToolOverrides:   data.ToolOverrides,
+		Temperature:     data.Temperature,
+		ReasoningEffort: data.ReasoningEffort,
+		IsPreset:        false,
+		CreatedAt:       data.CreatedAt,
+		UpdatedAt:       data.UpdatedAt,
 	}
+
+	// Restore Identity if it was saved
+	if data.IdentityName != "" || data.IdentityPersona != "" {
+		def.Identity = &agents.Identity{
+			Name:    data.IdentityName,
+			Persona: data.IdentityPersona,
+		}
+	}
+
+	return def
 }
 
 // agentDefinitionToCustomData converts AgentDefinition to CustomAgentData.
 func agentDefinitionToCustomData(agent *agents.AgentDefinition) *CustomAgentData {
-	return &CustomAgentData{
-		ID:            agent.ID,
-		Name:          agent.Name,
-		Description:   agent.Description,
-		AvatarURL:     agent.AvatarURL,
-		Model:         agent.Model.Primary,
-		ModelFallback: agent.Model.Fallbacks,
-		SystemPrompt:  agent.SystemPrompt,
-		PromptMode:    string(agent.PromptMode),
-		ToolProfile:   string(agent.ToolProfile),
-		ToolOverrides: agent.ToolOverrides,
-		Temperature:   agent.Temperature,
-		CreatedAt:     agent.CreatedAt,
-		UpdatedAt:     agent.UpdatedAt,
+	data := &CustomAgentData{
+		ID:              agent.ID,
+		Name:            agent.Name,
+		Description:     agent.Description,
+		AvatarURL:       agent.AvatarURL,
+		Model:           agent.Model.Primary,
+		ModelFallback:   agent.Model.Fallbacks,
+		SystemPrompt:    agent.SystemPrompt,
+		PromptMode:      string(agent.PromptMode),
+		ToolProfile:     string(agent.ToolProfile),
+		ToolOverrides:   agent.ToolOverrides,
+		Temperature:     agent.Temperature,
+		ReasoningEffort: agent.ReasoningEffort,
+		CreatedAt:       agent.CreatedAt,
+		UpdatedAt:       agent.UpdatedAt,
 	}
+
+	// Preserve Identity if present
+	if agent.Identity != nil {
+		data.IdentityName = agent.Identity.Name
+		data.IdentityPersona = agent.Identity.Persona
+	}
+
+	return data
 }
 
 // SaveAgent implements agents.AgentStore.
@@ -108,6 +131,10 @@ func (s *AgentStoreAdapter) SaveAgent(ctx context.Context, agent *agents.AgentDe
 	if agent.IsPreset {
 		return agents.ErrAgentIsPreset
 	}
+
+	// Lock to prevent race conditions during read-modify-write
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Load existing custom agents
 	customAgents := s.loadCustomAgentsFromMetadata()
@@ -129,6 +156,10 @@ func (s *AgentStoreAdapter) DeleteAgent(ctx context.Context, agentID string) err
 	if agents.IsPreset(agentID) || agents.IsBossAgent(agentID) {
 		return agents.ErrAgentIsPreset
 	}
+
+	// Lock to prevent race conditions during read-modify-write
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Load existing custom agents
 	customAgents := s.loadCustomAgentsFromMetadata()
@@ -204,14 +235,14 @@ func (s *AgentStoreAdapter) GetAgentByID(ctx context.Context, agentID string) (*
 }
 
 // GetAgentForRoom returns the agent assigned to a room.
-// Falls back to the general assistant if no specific agent is set.
+// Falls back to the Quick Chatter if no specific agent is set.
 func (s *AgentStoreAdapter) GetAgentForRoom(ctx context.Context, meta *PortalMetadata) (*agents.AgentDefinition, error) {
 	agentID := meta.AgentID
 	if agentID == "" {
 		agentID = meta.DefaultAgentID
 	}
 	if agentID == "" {
-		agentID = "general" // Default to general assistant
+		agentID = "quick" // Default to Quick Chatter
 	}
 
 	return s.GetAgentByID(ctx, agentID)
@@ -334,6 +365,115 @@ func (b *BossStoreAdapter) ListModels(ctx context.Context) ([]tools.ModelData, e
 // ListAvailableTools implements tools.AgentStoreInterface.
 func (b *BossStoreAdapter) ListAvailableTools(ctx context.Context) ([]tools.ToolInfo, error) {
 	return b.store.ListAvailableTools(ctx)
+}
+
+// CreateRoom implements tools.AgentStoreInterface.
+func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) (string, error) {
+	// Get the agent to verify it exists
+	agent, err := b.store.GetAgentByID(ctx, room.AgentID)
+	if err != nil {
+		return "", fmt.Errorf("agent '%s' not found: %w", room.AgentID, err)
+	}
+
+	// Create the portal via createAgentChat
+	resp, err := b.store.client.createAgentChat(ctx, agent)
+	if err != nil {
+		return "", fmt.Errorf("failed to create room: %w", err)
+	}
+
+	// Get the portal to apply any overrides
+	portal, err := b.store.client.UserLogin.Bridge.GetPortalByKey(ctx, resp.PortalKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to get created portal: %w", err)
+	}
+
+	// Apply custom name and system prompt if provided
+	pm := portalMeta(portal)
+	if room.Name != "" {
+		pm.Title = room.Name
+		portal.Name = room.Name
+	}
+	if room.SystemPrompt != "" {
+		pm.SystemPrompt = room.SystemPrompt
+	}
+
+	if err := portal.Save(ctx); err != nil {
+		b.store.client.log.Warn().Err(err).Msg("Failed to save room overrides")
+	}
+
+	// Create the Matrix room
+	if err := portal.CreateMatrixRoom(ctx, b.store.client.UserLogin, resp.PortalInfo); err != nil {
+		return "", fmt.Errorf("failed to create Matrix room: %w", err)
+	}
+
+	return string(portal.PortalKey.ID), nil
+}
+
+// ModifyRoom implements tools.AgentStoreInterface.
+func (b *BossStoreAdapter) ModifyRoom(ctx context.Context, roomID string, updates tools.RoomData) error {
+	// Find the portal by listing all and matching ID
+	portals, err := b.store.client.listAllChatPortals(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list portals: %w", err)
+	}
+
+	var portal *bridgev2.Portal
+	for _, p := range portals {
+		if string(p.PortalKey.ID) == roomID {
+			portal = p
+			break
+		}
+	}
+	if portal == nil {
+		return fmt.Errorf("room '%s' not found", roomID)
+	}
+
+	pm := portalMeta(portal)
+
+	// Apply updates
+	if updates.Name != "" {
+		portal.Name = updates.Name
+		pm.Title = updates.Name
+	}
+	if updates.AgentID != "" {
+		// Verify agent exists
+		agent, err := b.store.GetAgentByID(ctx, updates.AgentID)
+		if err != nil {
+			return fmt.Errorf("agent '%s' not found: %w", updates.AgentID, err)
+		}
+		pm.AgentID = agent.ID
+		pm.DefaultAgentID = agent.ID
+		portal.OtherUserID = agentUserID(agent.ID)
+	}
+	if updates.SystemPrompt != "" {
+		pm.SystemPrompt = updates.SystemPrompt
+	}
+
+	return portal.Save(ctx)
+}
+
+// ListRooms implements tools.AgentStoreInterface.
+func (b *BossStoreAdapter) ListRooms(ctx context.Context) ([]tools.RoomData, error) {
+	portals, err := b.store.client.listAllChatPortals(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list rooms: %w", err)
+	}
+
+	var rooms []tools.RoomData
+	for _, portal := range portals {
+		pm := portalMeta(portal)
+		name := portal.Name
+		if name == "" {
+			name = pm.Title
+		}
+		rooms = append(rooms, tools.RoomData{
+			ID:      string(portal.PortalKey.ID),
+			Name:    name,
+			AgentID: pm.AgentID,
+		})
+	}
+
+	return rooms, nil
 }
 
 // Verify interface compliance

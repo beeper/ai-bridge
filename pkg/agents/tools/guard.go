@@ -9,9 +9,11 @@ import (
 // and ensure tool results are properly matched to requests.
 // Based on clawdbot's session-tool-result-guard pattern.
 type Guard struct {
-	mu      sync.Mutex
-	pending map[string]*PendingCall // callID -> pending call info
-	timeout time.Duration
+	mu       sync.Mutex
+	pending  map[string]*PendingCall // callID -> pending call info
+	timeout  time.Duration
+	stopChan chan struct{}          // signals cleanup goroutine to stop
+	stopped  bool                   // true if Stop() has been called
 }
 
 // PendingCall tracks a tool call waiting for result.
@@ -24,16 +26,56 @@ type PendingCall struct {
 }
 
 // NewGuard creates a new guard with the specified timeout.
+// The guard starts a background goroutine that periodically cleans up stale entries.
+// Call Stop() when the guard is no longer needed to stop the cleanup goroutine.
 func NewGuard(timeout time.Duration) *Guard {
-	return &Guard{
-		pending: make(map[string]*PendingCall),
-		timeout: timeout,
+	g := &Guard{
+		pending:  make(map[string]*PendingCall),
+		timeout:  timeout,
+		stopChan: make(chan struct{}),
 	}
+	go g.cleanupLoop()
+	return g
 }
 
 // DefaultGuard creates a guard with a 5-minute timeout.
 func DefaultGuard() *Guard {
 	return NewGuard(5 * time.Minute)
+}
+
+// cleanupLoop runs in the background and periodically removes stale pending calls.
+func (g *Guard) cleanupLoop() {
+	// Cleanup every minute or at timeout/2, whichever is smaller
+	interval := g.timeout / 2
+	if interval > time.Minute {
+		interval = time.Minute
+	}
+	if interval < 10*time.Second {
+		interval = 10 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			g.CleanupStale()
+		case <-g.stopChan:
+			return
+		}
+	}
+}
+
+// Stop stops the background cleanup goroutine.
+// After calling Stop, the guard should not be used.
+func (g *Guard) Stop() {
+	g.mu.Lock()
+	if !g.stopped {
+		g.stopped = true
+		close(g.stopChan)
+	}
+	g.mu.Unlock()
 }
 
 // Register marks a tool call as pending.
