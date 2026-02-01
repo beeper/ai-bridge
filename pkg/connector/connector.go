@@ -52,6 +52,9 @@ func (oc *OpenAIConnector) Start(ctx context.Context) error {
 	// Register custom Matrix event handlers
 	oc.registerCustomEventHandlers()
 
+	// Initialize provisioning API endpoints
+	oc.initProvisioning()
+
 	return nil
 }
 

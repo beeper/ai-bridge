@@ -1,6 +1,6 @@
 .DS_Store
 .claude/settings.local.json
-/ai-bridge
+/ai
 logs/
 *.db*
 *.yaml

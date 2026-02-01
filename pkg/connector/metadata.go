@@ -54,6 +54,15 @@ type FileAnnotation struct {
 	CreatedAt  int64  `json:"created_at"`           // Unix timestamp when cached
 }
 
+// UserDefaults stores user-level default settings for new chats
+type UserDefaults struct {
+	Model           string          `json:"model,omitempty"`
+	SystemPrompt    string          `json:"system_prompt,omitempty"`
+	Temperature     *float64        `json:"temperature,omitempty"`
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	Tools           map[string]bool `json:"tools,omitempty"` // tool_name → enabled
+}
+
 // UserLoginMetadata is stored on each login row to keep per-user settings.
 type UserLoginMetadata struct {
 	Persona              string      `json:"persona,omitempty"`
@@ -68,6 +77,9 @@ type UserLoginMetadata struct {
 	// FileAnnotationCache stores parsed PDF content from OpenRouter's file-parser plugin
 	// Key is the file hash (SHA256), pruned after 7 days
 	FileAnnotationCache map[string]FileAnnotation `json:"file_annotation_cache,omitempty"`
+
+	// User-level defaults for new chats (set via provisioning API)
+	Defaults *UserDefaults `json:"defaults,omitempty"`
 }
 
 // PortalMetadata stores per-room tuning knobs for the assistant.
