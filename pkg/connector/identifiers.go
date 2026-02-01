@@ -55,27 +55,14 @@ func humanUserID(loginID networkid.UserLoginID) networkid.UserID {
 }
 
 func portalMeta(portal *bridgev2.Portal) *PortalMetadata {
-	if portal.Metadata == nil {
-		meta := &PortalMetadata{}
-		portal.Metadata = meta
-		return meta
-	}
-	if typed, ok := portal.Metadata.(*PortalMetadata); ok {
-		return typed
-	}
-	meta := &PortalMetadata{}
-	portal.Metadata = meta
-	return meta
+	return portal.Metadata.(*PortalMetadata)
 }
 
 func messageMeta(msg *database.Message) *MessageMetadata {
-	if msg == nil {
+	if msg == nil || msg.Metadata == nil {
 		return nil
 	}
-	if meta, ok := msg.Metadata.(*MessageMetadata); ok {
-		return meta
-	}
-	return nil
+	return msg.Metadata.(*MessageMetadata)
 }
 
 // shouldIncludeInHistory checks if a message should be included in LLM history.
@@ -96,12 +83,7 @@ func shouldIncludeInHistory(meta *MessageMetadata) bool {
 }
 
 func loginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
-	meta, ok := login.Metadata.(*UserLoginMetadata)
-	if !ok || meta == nil {
-		meta = &UserLoginMetadata{}
-		login.Metadata = meta
-	}
-	return meta
+	return login.Metadata.(*UserLoginMetadata)
 }
 
 func formatChatSlug(index int) string {

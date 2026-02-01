@@ -28,18 +28,8 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 
 	// Handle media messages based on type
 	switch msg.Content.MsgType {
-	case event.MsgImage, event.MsgVideo, event.MsgAudio:
+	case event.MsgImage, event.MsgVideo, event.MsgAudio, event.MsgFile:
 		return oc.handleMediaMessage(ctx, msg, portal, meta, msg.Content.MsgType)
-	case event.MsgFile:
-		// Check if it's a PDF
-		mimeType := ""
-		if msg.Content.Info != nil {
-			mimeType = msg.Content.Info.MimeType
-		}
-		if mimeType == "application/pdf" {
-			return oc.handlePDFMessage(ctx, msg, portal, meta)
-		}
-		return nil, fmt.Errorf("unsupported file type: %s", mimeType)
 	case event.MsgText, event.MsgNotice, event.MsgEmote:
 		// Continue to text handling below
 	default:
@@ -251,6 +241,16 @@ var mediaConfigs = map[event.MessageType]mediaConfig{
 	},
 }
 
+// pdfConfig is handled separately due to special OpenRouter capability check
+var pdfConfig = mediaConfig{
+	msgType:         pendingTypePDF,
+	capabilityCheck: func(c *ModelCapabilities) bool { return c.SupportsPDF },
+	capabilityName:  "PDF analysis",
+	defaultCaption:  "Please analyze this PDF document.",
+	bodySuffix:      " [PDF]",
+	defaultMimeType: "application/pdf",
+}
+
 // handleMediaMessage processes media messages (image, PDF, audio, video)
 func (oc *AIClient) handleMediaMessage(
 	ctx context.Context,
@@ -261,12 +261,31 @@ func (oc *AIClient) handleMediaMessage(
 ) (*bridgev2.MatrixMessageResponse, error) {
 	// Get config for this media type
 	config, ok := mediaConfigs[msgType]
+	isPDF := false
+
+	// Handle PDF files (MsgFile with application/pdf MIME type)
+	if msgType == event.MsgFile {
+		mimeType := ""
+		if msg.Content.Info != nil {
+			mimeType = msg.Content.Info.MimeType
+		}
+		if mimeType == "application/pdf" {
+			config = pdfConfig
+			isPDF = true
+			ok = true
+		}
+	}
+
 	if !ok {
 		return nil, fmt.Errorf("unsupported media type: %s", msgType)
 	}
 
-	// Check capability
-	if !config.capabilityCheck(&meta.Capabilities) {
+	// Check capability (PDF has special OpenRouter handling via file-parser plugin)
+	capabilityOK := config.capabilityCheck(&meta.Capabilities)
+	if isPDF && !capabilityOK && oc.isOpenRouterProvider() {
+		capabilityOK = true // OpenRouter supports PDF via file-parser plugin
+	}
+	if !capabilityOK {
 		oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
 			"The current model (%s) does not support %s. Please switch to a capable model using /model.",
 			oc.effectiveModel(meta), config.capabilityName,
@@ -335,85 +354,6 @@ func (oc *AIClient) handleMediaMessage(
 	}, nil
 }
 
-// handlePDFMessage processes a PDF file message for PDF-capable models
-func (oc *AIClient) handlePDFMessage(
-	ctx context.Context,
-	msg *bridgev2.MatrixMessage,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-) (*bridgev2.MatrixMessageResponse, error) {
-	// Check if model supports PDF
-	// OpenRouter/Beeper: all models support PDF via file-parser plugin
-	if !meta.Capabilities.SupportsPDF && !oc.isOpenRouterProvider() {
-		oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
-			"The current model (%s) does not support PDF analysis. "+
-				"Please switch to a PDF-capable model using /model.",
-			oc.effectiveModel(meta),
-		))
-		return &bridgev2.MatrixMessageResponse{}, nil
-	}
-
-	// Get the file URL from the message
-	fileURL := msg.Content.URL
-	if fileURL == "" && msg.Content.File != nil {
-		fileURL = msg.Content.File.URL
-	}
-	if fileURL == "" {
-		return nil, fmt.Errorf("PDF message has no URL")
-	}
-
-	// Get encrypted file info if present (for E2EE rooms)
-	var encryptedFile *event.EncryptedFileInfo
-	if msg.Content.File != nil {
-		encryptedFile = msg.Content.File
-	}
-
-	// Get MIME type
-	mimeType := "application/pdf"
-	if msg.Content.Info != nil && msg.Content.Info.MimeType != "" {
-		mimeType = msg.Content.Info.MimeType
-	}
-
-	// Get caption (body is usually the filename or caption)
-	caption := strings.TrimSpace(msg.Content.Body)
-	if caption == "" || (msg.Content.Info != nil && caption == msg.Content.Info.MimeType) {
-		caption = "Please analyze this PDF document."
-	}
-
-	// Build prompt with PDF
-	promptMessages, err := oc.buildPromptWithMedia(ctx, portal, meta, caption, string(fileURL), mimeType, encryptedFile, pendingTypePDF)
-	if err != nil {
-		return nil, err
-	}
-
-	userMessage := &database.Message{
-		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
-		Room:     portal.PortalKey,
-		SenderID: humanUserID(oc.UserLogin.ID),
-		Metadata: &MessageMetadata{
-			Role: "user",
-			Body: caption + " [PDF]",
-		},
-		Timestamp: time.Now(),
-	}
-
-	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
-		Event:         msg.Event,
-		Portal:        portal,
-		Meta:          meta,
-		Type:          pendingTypePDF,
-		MessageBody:   caption,
-		MediaURL:      string(fileURL),
-		MimeType:      mimeType,
-		EncryptedFile: encryptedFile,
-	}, promptMessages)
-
-	return &bridgev2.MatrixMessageResponse{
-		DB:      dbMsg,
-		Pending: isPending,
-	}, nil
-}
-
 // handleCommand checks if the message is a command and handles it
 // Returns true if the message was a command and was handled
 func (oc *AIClient) handleCommand(
@@ -439,14 +379,15 @@ func (oc *AIClient) handleCommand(
 	return false
 }
 
+// commandAliases maps command aliases to their canonical names
+var commandAliases = map[string]string{
+	"/temperature": "/temp",
+	"/system":      "/prompt",
+	"/maxtokens":   "/tokens",
+}
+
 // handleSlashCommand handles slash commands like /model, /temp, /prompt
-func (oc *AIClient) handleSlashCommand(
-	ctx context.Context,
-	evt *event.Event,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-	body string,
-) bool {
+func (oc *AIClient) handleSlashCommand(ctx context.Context, evt *event.Event, portal *bridgev2.Portal, meta *PortalMetadata, body string) bool {
 	parts := strings.SplitN(body, " ", 2)
 	cmd := strings.ToLower(parts[0])
 	var arg string
@@ -454,235 +395,232 @@ func (oc *AIClient) handleSlashCommand(
 		arg = strings.TrimSpace(parts[1])
 	}
 
+	// Resolve aliases
+	if canonical, ok := commandAliases[cmd]; ok {
+		cmd = canonical
+	}
+
+	// Command registry
 	switch cmd {
 	case "/model":
-		if arg == "" {
-			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current model: %s", oc.effectiveModel(meta)))
-			return true
-		}
-		// Validate model
-		valid, err := oc.validateModel(ctx, arg)
-		if err != nil || !valid {
-			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Invalid model: %s", arg))
-			return true
-		}
-		// Update model
-		meta.Model = arg
-		meta.Capabilities = getModelCapabilities(arg, oc.findModelInfo(arg))
-		if err := portal.Save(ctx); err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to save portal after model change")
-		}
-		// Ensure the new model's ghost has its display name set
-		oc.ensureGhostDisplayName(ctx, arg)
-		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Model changed to: %s", arg))
-		return true
-
-	case "/temp", "/temperature":
-		if arg == "" {
-			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current temperature: %.2f", oc.effectiveTemperature(meta)))
-			return true
-		}
-		var temp float64
-		if _, err := fmt.Sscanf(arg, "%f", &temp); err != nil || temp < 0 || temp > 2 {
-			oc.sendSystemNotice(ctx, portal, "Invalid temperature. Must be between 0 and 2.")
-			return true
-		}
-		meta.Temperature = temp
-		if err := portal.Save(ctx); err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to save portal after temperature change")
-		}
-		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Temperature set to: %.2f", temp))
-		return true
-
-	case "/prompt", "/system":
-		if arg == "" {
-			current := oc.effectivePrompt(meta)
-			if current == "" {
-				current = "(none)"
-			} else if len(current) > 100 {
-				current = current[:100] + "..."
-			}
-			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current system prompt: %s", current))
-			return true
-		}
-		meta.SystemPrompt = arg
-		if err := portal.Save(ctx); err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to save portal after prompt change")
-		}
-		oc.sendSystemNotice(ctx, portal, "System prompt updated.")
-		return true
-
+		return oc.cmdModel(ctx, portal, meta, arg)
+	case "/temp":
+		return oc.cmdTemp(ctx, portal, meta, arg)
+	case "/prompt":
+		return oc.cmdPrompt(ctx, portal, meta, arg)
 	case "/context":
-		if arg == "" {
-			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current context limit: %d messages", oc.historyLimit(meta)))
-			return true
-		}
-		var limit int
-		if _, err := fmt.Sscanf(arg, "%d", &limit); err != nil || limit < 1 || limit > 100 {
-			oc.sendSystemNotice(ctx, portal, "Invalid context limit. Must be between 1 and 100.")
-			return true
-		}
-		meta.MaxContextMessages = limit
-		if err := portal.Save(ctx); err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to save portal after context change")
-		}
-		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Context limit set to: %d messages", limit))
-		return true
-
-	case "/tokens", "/maxtokens":
-		if arg == "" {
-			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current max tokens: %d", oc.effectiveMaxTokens(meta)))
-			return true
-		}
-		var tokens int
-		if _, err := fmt.Sscanf(arg, "%d", &tokens); err != nil || tokens < 1 || tokens > 16384 {
-			oc.sendSystemNotice(ctx, portal, "Invalid max tokens. Must be between 1 and 16384.")
-			return true
-		}
-		meta.MaxCompletionTokens = tokens
-		if err := portal.Save(ctx); err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to save portal after tokens change")
-		}
-		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Max tokens set to: %d", tokens))
-		return true
-
+		return oc.cmdContext(ctx, portal, meta, arg)
+	case "/tokens":
+		return oc.cmdTokens(ctx, portal, meta, arg)
 	case "/config":
-		mode := meta.ConversationMode
-		if mode == "" {
-			mode = "messages"
-		}
-		config := fmt.Sprintf(
-			"Current configuration:\n"+
-				"• Model: %s\n"+
-				"• Temperature: %.2f\n"+
-				"• Context: %d messages\n"+
-				"• Max tokens: %d\n"+
-				"• Vision: %v\n"+
-				"• Mode: %s",
-			oc.effectiveModel(meta),
-			oc.effectiveTemperature(meta),
-			oc.historyLimit(meta),
-			oc.effectiveMaxTokens(meta),
-			meta.Capabilities.SupportsVision,
-			mode,
-		)
-		oc.sendSystemNotice(ctx, portal, config)
-		return true
-
+		return oc.cmdConfig(ctx, portal, meta)
 	case "/tools":
 		go oc.handleToolsCommand(ctx, portal, meta, arg)
 		return true
-
 	case "/mode":
-		mode := meta.ConversationMode
-		if mode == "" {
-			mode = "messages"
-		}
-		if arg == "" {
-			modeHelp := "Conversation modes:\n" +
-				"• messages - Build full message history for each request (default)\n" +
-				"• responses - Use OpenAI's previous_response_id for context chaining\n\n" +
-				"Current mode: " + mode
-			oc.sendSystemNotice(ctx, portal, modeHelp)
-			return true
-		}
-		newMode := strings.ToLower(arg)
-		if newMode != "messages" && newMode != "responses" {
-			oc.sendSystemNotice(ctx, portal, "Invalid mode. Use 'messages' or 'responses'.")
-			return true
-		}
-		meta.ConversationMode = newMode
-		if newMode == "messages" {
-			meta.LastResponseID = "" // Clear when switching to messages mode
-		}
-		if err := portal.Save(ctx); err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to save portal after mode change")
-		}
-		if err := oc.BroadcastRoomState(ctx, portal); err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to broadcast room state after mode change")
-		}
-		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Conversation mode set to: %s", newMode))
-		return true
-
+		return oc.cmdMode(ctx, portal, meta, arg)
 	case "/help":
-		help := "Available commands:\n" +
-			"• /model [name] - Get or set the AI model\n" +
-			"• /models - List all available models\n" +
-			"• /temp [0-2] - Get or set temperature\n" +
-			"• /prompt [text] - Get or set system prompt\n" +
-			"• /context [1-100] - Get or set context message limit\n" +
-			"• /tokens [1-16384] - Get or set max completion tokens\n" +
-			"• /tools [on|off] [tool] - Enable/disable tools (per-tool or all)\n" +
-			"• /mode [messages|responses] - Set conversation context mode\n" +
-			"• /new [model] - Create a new chat (uses current model if none specified)\n" +
-			"• /fork [event_id] - Fork conversation to a new chat\n" +
-			"• /config - Show current configuration\n" +
-			"• /regenerate - Regenerate the last response\n" +
-			"• /help - Show this help message"
-		oc.sendSystemNotice(ctx, portal, help)
-		return true
-
+		return oc.cmdHelp(ctx, portal)
 	case "/fork":
 		go oc.handleFork(ctx, evt, portal, meta, arg)
 		return true
-
 	case "/new":
 		go oc.handleNewChat(ctx, evt, portal, meta, arg)
 		return true
-
 	case "/regenerate":
 		go oc.handleRegenerate(ctx, evt, portal, meta)
 		return true
-
 	case "/models":
-		models, err := oc.listAvailableModels(ctx, false)
-		if err != nil {
-			oc.sendSystemNotice(ctx, portal, "Failed to fetch models")
-			return true
+		return oc.cmdModels(ctx, portal, meta)
+	}
+	return false
+}
+
+// Command handlers
+
+func (oc *AIClient) cmdModel(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, arg string) bool {
+	if arg == "" {
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current model: %s", oc.effectiveModel(meta)))
+		return true
+	}
+	if valid, err := oc.validateModel(ctx, arg); err != nil || !valid {
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Invalid model: %s", arg))
+		return true
+	}
+	meta.Model = arg
+	meta.Capabilities = getModelCapabilities(arg, oc.findModelInfo(arg))
+	oc.savePortalQuiet(ctx, portal, "model change")
+	oc.ensureGhostDisplayName(ctx, arg)
+	oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Model changed to: %s", arg))
+	return true
+}
+
+func (oc *AIClient) cmdTemp(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, arg string) bool {
+	if arg == "" {
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current temperature: %.2f", oc.effectiveTemperature(meta)))
+		return true
+	}
+	var temp float64
+	if _, err := fmt.Sscanf(arg, "%f", &temp); err != nil || temp < 0 || temp > 2 {
+		oc.sendSystemNotice(ctx, portal, "Invalid temperature. Must be between 0 and 2.")
+		return true
+	}
+	meta.Temperature = temp
+	oc.savePortalQuiet(ctx, portal, "temperature change")
+	oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Temperature set to: %.2f", temp))
+	return true
+}
+
+func (oc *AIClient) cmdPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, arg string) bool {
+	if arg == "" {
+		current := oc.effectivePrompt(meta)
+		if current == "" {
+			current = "(none)"
+		} else if len(current) > 100 {
+			current = current[:100] + "..."
 		}
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current system prompt: %s", current))
+		return true
+	}
+	meta.SystemPrompt = arg
+	oc.savePortalQuiet(ctx, portal, "prompt change")
+	oc.sendSystemNotice(ctx, portal, "System prompt updated.")
+	return true
+}
 
-		var sb strings.Builder
-		sb.WriteString("Available models:\n\n")
+func (oc *AIClient) cmdContext(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, arg string) bool {
+	if arg == "" {
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current context limit: %d messages", oc.historyLimit(meta)))
+		return true
+	}
+	var limit int
+	if _, err := fmt.Sscanf(arg, "%d", &limit); err != nil || limit < 1 || limit > 100 {
+		oc.sendSystemNotice(ctx, portal, "Invalid context limit. Must be between 1 and 100.")
+		return true
+	}
+	meta.MaxContextMessages = limit
+	oc.savePortalQuiet(ctx, portal, "context change")
+	oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Context limit set to: %d messages", limit))
+	return true
+}
 
-		for _, m := range models {
-			// Build capability icons
-			var caps []string
-			if m.SupportsVision {
-				caps = append(caps, "👁 Vision")
-			}
-			if m.SupportsReasoning {
-				caps = append(caps, "🧠 Reasoning")
-			}
-			if m.SupportsWebSearch {
-				caps = append(caps, "🔍 Web Search")
-			}
-			if m.SupportsImageGen {
-				caps = append(caps, "🎨 Image Gen")
-			}
-			if m.SupportsToolCalling {
-				caps = append(caps, "🔧 Tools")
-			}
+func (oc *AIClient) cmdTokens(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, arg string) bool {
+	if arg == "" {
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Current max tokens: %d", oc.effectiveMaxTokens(meta)))
+		return true
+	}
+	var tokens int
+	if _, err := fmt.Sscanf(arg, "%d", &tokens); err != nil || tokens < 1 || tokens > 16384 {
+		oc.sendSystemNotice(ctx, portal, "Invalid max tokens. Must be between 1 and 16384.")
+		return true
+	}
+	meta.MaxCompletionTokens = tokens
+	oc.savePortalQuiet(ctx, portal, "tokens change")
+	oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Max tokens set to: %d", tokens))
+	return true
+}
 
-			// Format: **Model Name** (model/id)
-			// Capabilities
-			sb.WriteString(fmt.Sprintf("• **%s** (`%s`)\n", m.Name, m.ID))
-			if m.Description != "" {
-				sb.WriteString(fmt.Sprintf("  %s\n", m.Description))
-			}
-			if len(caps) > 0 {
-				sb.WriteString(fmt.Sprintf("  %s\n", strings.Join(caps, " · ")))
-			}
-			sb.WriteString("\n")
-		}
+func (oc *AIClient) cmdConfig(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) bool {
+	mode := meta.ConversationMode
+	if mode == "" {
+		mode = "messages"
+	}
+	config := fmt.Sprintf(
+		"Current configuration:\n• Model: %s\n• Temperature: %.2f\n• Context: %d messages\n• Max tokens: %d\n• Vision: %v\n• Mode: %s",
+		oc.effectiveModel(meta), oc.effectiveTemperature(meta), oc.historyLimit(meta),
+		oc.effectiveMaxTokens(meta), meta.Capabilities.SupportsVision, mode)
+	oc.sendSystemNotice(ctx, portal, config)
+	return true
+}
 
-		sb.WriteString(fmt.Sprintf("Current: **%s**\n", oc.effectiveModel(meta)))
-		sb.WriteString("Use `/model <id>` to switch models")
+func (oc *AIClient) cmdMode(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, arg string) bool {
+	mode := meta.ConversationMode
+	if mode == "" {
+		mode = "messages"
+	}
+	if arg == "" {
+		oc.sendSystemNotice(ctx, portal, "Conversation modes:\n• messages - Build full message history for each request (default)\n• responses - Use OpenAI's previous_response_id for context chaining\n\nCurrent mode: "+mode)
+		return true
+	}
+	newMode := strings.ToLower(arg)
+	if newMode != "messages" && newMode != "responses" {
+		oc.sendSystemNotice(ctx, portal, "Invalid mode. Use 'messages' or 'responses'.")
+		return true
+	}
+	meta.ConversationMode = newMode
+	if newMode == "messages" {
+		meta.LastResponseID = ""
+	}
+	oc.savePortalQuiet(ctx, portal, "mode change")
+	_ = oc.BroadcastRoomState(ctx, portal)
+	oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Conversation mode set to: %s", newMode))
+	return true
+}
 
-		oc.sendSystemNotice(ctx, portal, sb.String())
+func (oc *AIClient) cmdHelp(ctx context.Context, portal *bridgev2.Portal) bool {
+	help := "Available commands:\n" +
+		"• /model [name] - Get or set the AI model\n" +
+		"• /models - List all available models\n" +
+		"• /temp [0-2] - Get or set temperature\n" +
+		"• /prompt [text] - Get or set system prompt\n" +
+		"• /context [1-100] - Get or set context message limit\n" +
+		"• /tokens [1-16384] - Get or set max completion tokens\n" +
+		"• /tools [on|off] [tool] - Enable/disable tools (per-tool or all)\n" +
+		"• /mode [messages|responses] - Set conversation context mode\n" +
+		"• /new [model] - Create a new chat (uses current model if none specified)\n" +
+		"• /fork [event_id] - Fork conversation to a new chat\n" +
+		"• /config - Show current configuration\n" +
+		"• /regenerate - Regenerate the last response\n" +
+		"• /help - Show this help message"
+	oc.sendSystemNotice(ctx, portal, help)
+	return true
+}
+
+func (oc *AIClient) cmdModels(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) bool {
+	models, err := oc.listAvailableModels(ctx, false)
+	if err != nil {
+		oc.sendSystemNotice(ctx, portal, "Failed to fetch models")
 		return true
 	}
 
-	return false
+	var sb strings.Builder
+	sb.WriteString("Available models:\n\n")
+	for _, m := range models {
+		var caps []string
+		if m.SupportsVision {
+			caps = append(caps, "👁 Vision")
+		}
+		if m.SupportsReasoning {
+			caps = append(caps, "🧠 Reasoning")
+		}
+		if m.SupportsWebSearch {
+			caps = append(caps, "🔍 Web Search")
+		}
+		if m.SupportsImageGen {
+			caps = append(caps, "🎨 Image Gen")
+		}
+		if m.SupportsToolCalling {
+			caps = append(caps, "🔧 Tools")
+		}
+		sb.WriteString(fmt.Sprintf("• **%s** (`%s`)\n", m.Name, m.ID))
+		if m.Description != "" {
+			sb.WriteString(fmt.Sprintf("  %s\n", m.Description))
+		}
+		if len(caps) > 0 {
+			sb.WriteString(fmt.Sprintf("  %s\n", strings.Join(caps, " · ")))
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(fmt.Sprintf("Current: **%s**\nUse `/model <id>` to switch models", oc.effectiveModel(meta)))
+	oc.sendSystemNotice(ctx, portal, sb.String())
+	return true
+}
+
+// savePortalQuiet saves portal and logs errors without failing
+func (oc *AIClient) savePortalQuiet(ctx context.Context, portal *bridgev2.Portal, action string) {
+	if err := portal.Save(ctx); err != nil {
+		oc.log.Warn().Err(err).Str("action", action).Msg("Failed to save portal")
+	}
 }
 
 // handleToolsCommand handles the /tools command for per-tool management

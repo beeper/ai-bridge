@@ -2,11 +2,13 @@ package connector
 
 import (
 	"errors"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
+	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/status"
 )
 
@@ -27,6 +29,45 @@ var BridgeStateHumanErrors = map[status.BridgeStateErrorCode]string{
 	AIModelNotFound:  "The requested model is not available.",
 	AIProviderError:  "The AI provider returned an error.",
 }
+
+// Pre-defined bridgev2.RespError constants for consistent error responses
+var (
+	ErrAPIKeyRequired = bridgev2.RespError{
+		ErrCode:    "IO.AI_BRIDGE.API_KEY_REQUIRED",
+		Err:        "please enter an API key",
+		StatusCode: http.StatusBadRequest,
+	}
+	ErrBaseURLRequired = bridgev2.RespError{
+		ErrCode:    "IO.AI_BRIDGE.BASE_URL_REQUIRED",
+		Err:        "please enter a base URL",
+		StatusCode: http.StatusBadRequest,
+	}
+	ErrAPIKeyInvalid = bridgev2.RespError{
+		ErrCode:    "IO.AI_BRIDGE.INVALID_API_KEY",
+		Err:        "the provided API key is invalid",
+		StatusCode: http.StatusUnauthorized,
+	}
+	ErrProviderUnavailable = bridgev2.RespError{
+		ErrCode:    "IO.AI_BRIDGE.PROVIDER_UNAVAILABLE",
+		Err:        "the AI provider is currently unavailable",
+		StatusCode: http.StatusServiceUnavailable,
+	}
+	ErrContextLengthExceeded = bridgev2.RespError{
+		ErrCode:    "IO.AI_BRIDGE.CONTEXT_LENGTH_EXCEEDED",
+		Err:        "message context too long, some messages were truncated",
+		StatusCode: http.StatusRequestEntityTooLarge,
+	}
+	ErrUnsupportedMediaType = bridgev2.RespError{
+		ErrCode:    "IO.AI_BRIDGE.UNSUPPORTED_MEDIA_TYPE",
+		Err:        "this media type is not supported by the current model",
+		StatusCode: http.StatusUnsupportedMediaType,
+	}
+	ErrModelNotFound = bridgev2.RespError{
+		ErrCode:    "IO.AI_BRIDGE.MODEL_NOT_FOUND",
+		Err:        "the requested model is not available",
+		StatusCode: http.StatusNotFound,
+	}
+)
 
 // MapErrorToStateCode maps an API error to a bridge state error code.
 // Returns empty string if the error doesn't map to a known state code.
