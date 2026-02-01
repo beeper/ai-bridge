@@ -1920,42 +1920,17 @@ func (oc *AIClient) notifyContextLengthExceeded(
 	oc.sendSystemNotice(ctx, portal, message)
 }
 
-// truncatePrompt removes older messages from the prompt while preserving
-// the system message (if any) and the latest user message
+// truncatePrompt intelligently prunes messages while preserving conversation coherence.
+// Uses smart context pruning that:
+// 1. Never removes system prompt or latest user message
+// 2. First truncates large tool results (keeps head + tail)
+// 3. Removes oldest messages while keeping tool call/result pairs together
+// 4. Preserves recent context with higher priority
 func (oc *AIClient) truncatePrompt(
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) []openai.ChatCompletionMessageParamUnion {
-	if len(prompt) <= 2 {
-		return nil // Can't truncate further
-	}
-
-	// Determine if first message is system prompt
-	hasSystem := prompt[0].OfSystem != nil
-
-	// Calculate how many history messages to keep
-	historyCount := len(prompt)
-	startIdx := 0
-	if hasSystem {
-		historyCount-- // Don't count system
-		startIdx = 1
-	}
-	historyCount-- // Don't count latest user message
-
-	// Remove approximately half of history
-	keepCount := max(historyCount/2, 1)
-
-	// Build new prompt: [system] + [last N history] + [latest user]
-	var result []openai.ChatCompletionMessageParamUnion
-
-	if hasSystem {
-		result = append(result, prompt[0])
-	}
-
-	// Keep only the most recent history messages
-	historyStart := max(len(prompt)-1-keepCount, startIdx)
-
-	result = append(result, prompt[historyStart:]...)
-	return result
+	// Use smart truncation with 50% reduction target
+	return smartTruncatePrompt(prompt, 0.5)
 }
 
 // setModelTyping sets the typing indicator for the current model's ghost user

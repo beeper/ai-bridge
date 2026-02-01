@@ -2,11 +2,12 @@ package agents
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
 )
 
-// ToolProfile defines access levels (like pi-agent).
+// ToolProfile defines access levels (like OpenClaw's tool profiles).
 type ToolProfile string
 
 const (
@@ -14,6 +15,8 @@ const (
 	ProfileMinimal ToolProfile = "minimal"
 	// ProfileCoding allows filesystem, runtime, and session tools.
 	ProfileCoding ToolProfile = "coding"
+	// ProfileMessaging allows messaging and session tools.
+	ProfileMessaging ToolProfile = "messaging"
 	// ProfileFull allows all standard tools.
 	ProfileFull ToolProfile = "full"
 	// ProfileBoss allows agent management tools.
@@ -21,19 +24,26 @@ const (
 )
 
 // ToolGroups maps group names to tool names for policy composition.
+// Matches OpenClaw's TOOL_GROUPS pattern.
 var ToolGroups = map[string][]string{
-	tools.GroupSearch:  {"web_search"},
-	tools.GroupCode:    {"code_interpreter"},
-	tools.GroupCalc:    {"calculator"},
-	tools.GroupBuilder: {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "create_room", "modify_room", "list_rooms"},
+	tools.GroupSearch:    {"web_search"},
+	tools.GroupCode:      {"code_interpreter"},
+	tools.GroupCalc:      {"calculator"},
+	tools.GroupBuilder:   {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "create_room", "modify_room", "list_rooms"},
+	tools.GroupMessaging: {"message"},
+	tools.GroupSessions:  {"sessions_list", "sessions_history", "sessions_send", "session_status"},
+	tools.GroupMemory:    {"memory_search", "memory_get"},
+	tools.GroupWeb:       {"web_search", "web_fetch"},
 }
 
 // ProfileAllowlists define which tool groups each profile allows.
+// Matches OpenClaw's TOOL_PROFILES pattern.
 var ProfileAllowlists = map[ToolProfile][]string{
-	ProfileMinimal: {},
-	ProfileCoding:  {tools.GroupCalc, tools.GroupSearch, tools.GroupCode},
-	ProfileFull:    {tools.GroupCalc, tools.GroupSearch, tools.GroupCode},
-	ProfileBoss:    {tools.GroupBuilder},
+	ProfileMinimal:   {},
+	ProfileCoding:    {tools.GroupCalc, tools.GroupSearch, tools.GroupCode},
+	ProfileMessaging: {tools.GroupMessaging, tools.GroupSessions},
+	ProfileFull:      {tools.GroupCalc, tools.GroupSearch, tools.GroupCode},
+	ProfileBoss:      {tools.GroupBuilder},
 }
 
 // ResolveTools returns allowed tool names for an agent based on its profile and overrides.
@@ -110,7 +120,16 @@ func CreatePolicyFromProfile(agent *AgentDefinition, registry *tools.Registry) *
 		policy.AllowGroup(registry, group)
 	}
 
-	// Apply overrides
+	// Apply alsoAllow (additive, supports wildcards)
+	for _, toolName := range agent.ToolAlsoAllow {
+		if strings.Contains(toolName, "*") {
+			policy.AllowPattern(toolName)
+		} else {
+			policy.Allow(toolName)
+		}
+	}
+
+	// Apply overrides (can override alsoAllow)
 	for toolName, allowed := range agent.ToolOverrides {
 		if allowed {
 			policy.Allow(toolName)

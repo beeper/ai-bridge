@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
+	"github.com/beeper/ai-bridge/pkg/agents/tools"
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
@@ -153,9 +154,20 @@ func (oc *AIClient) getToolStateWithSource(meta *PortalMetadata, toolName string
 }
 
 // isToolEnabled checks if a specific tool is enabled
-// Priority: Room → User → Provider/Model defaults
+// Priority: Agent Policy → Room → User → Provider/Model defaults
 func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
-	// 1. Check room-level explicit setting
+	// 0. Check agent policy first (if room has an agent assigned)
+	store := NewAgentStoreAdapter(oc)
+	agent, err := store.GetAgentForRoom(context.Background(), meta)
+	if err == nil && agent != nil {
+		// Use agent policy to check if tool is allowed
+		policy := agents.CreatePolicyFromProfile(agent, tools.DefaultRegistry())
+		if !policy.IsAllowed(toolName) {
+			return false
+		}
+	}
+
+	// 1. Check room-level explicit setting (can enable tools the agent allows)
 	if entry, ok := meta.ToolsConfig.Tools[toolName]; ok && entry != nil {
 		if entry.Enabled != nil {
 			return *entry.Enabled

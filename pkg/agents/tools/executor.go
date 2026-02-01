@@ -3,14 +3,46 @@ package tools
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strings"
 )
 
 // Policy defines which tools are allowed or denied.
+// Supports wildcard patterns like OpenClaw (e.g., "mcp_*", "*").
 type Policy struct {
-	Allowed   map[string]bool // Explicitly allowed tools
-	Denied    map[string]bool // Explicitly denied tools
-	AllowAll  bool            // If true, allow all tools except denied
-	DenyAll   bool            // If true, deny all tools except allowed
+	Allowed       map[string]bool // Explicitly allowed tools
+	Denied        map[string]bool // Explicitly denied tools
+	AllowPatterns []string        // Wildcard patterns to allow (e.g., "mcp_*")
+	DenyPatterns  []string        // Wildcard patterns to deny
+	AllowAll      bool            // If true, allow all tools except denied
+	DenyAll       bool            // If true, deny all tools except allowed
+}
+
+// matchesPattern checks if a tool name matches a pattern.
+// Supports "*" as wildcard (e.g., "mcp_*" matches "mcp_filesystem_read").
+func matchesPattern(name, pattern string) bool {
+	// Exact match or universal wildcard
+	if pattern == "*" {
+		return true
+	}
+	if pattern == name {
+		return true
+	}
+
+	// No wildcard, must be exact match
+	if !strings.Contains(pattern, "*") {
+		return false
+	}
+
+	// Convert pattern to regex: "mcp_*" -> "^mcp_.*$"
+	regexPattern := "^" + regexp.QuoteMeta(pattern) + "$"
+	regexPattern = strings.ReplaceAll(regexPattern, "\\*", ".*")
+
+	matched, err := regexp.MatchString(regexPattern, name)
+	if err != nil {
+		return false
+	}
+	return matched
 }
 
 // NewPolicy creates a new empty policy.
@@ -53,6 +85,18 @@ func (p *Policy) Deny(name string) *Policy {
 	return p
 }
 
+// AllowPattern adds a wildcard pattern to allow (e.g., "mcp_*").
+func (p *Policy) AllowPattern(pattern string) *Policy {
+	p.AllowPatterns = append(p.AllowPatterns, pattern)
+	return p
+}
+
+// DenyPattern adds a wildcard pattern to deny.
+func (p *Policy) DenyPattern(pattern string) *Policy {
+	p.DenyPatterns = append(p.DenyPatterns, pattern)
+	return p
+}
+
 // AllowGroup allows all tools in a group.
 func (p *Policy) AllowGroup(registry *Registry, group string) *Policy {
 	for _, name := range registry.ToolsInGroup(group) {
@@ -71,9 +115,23 @@ func (p *Policy) DenyGroup(registry *Registry, group string) *Policy {
 
 // IsAllowed checks if a tool is allowed by this policy.
 func (p *Policy) IsAllowed(name string) bool {
+	// Check deny patterns first (most restrictive)
+	for _, pattern := range p.DenyPatterns {
+		if matchesPattern(name, pattern) {
+			return false
+		}
+	}
+
 	// Explicit deny takes precedence
 	if p.Denied[name] {
 		return false
+	}
+
+	// Check allow patterns
+	for _, pattern := range p.AllowPatterns {
+		if matchesPattern(name, pattern) {
+			return true
+		}
 	}
 
 	// Explicit allow

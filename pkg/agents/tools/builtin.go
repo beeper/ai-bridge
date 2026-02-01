@@ -1,11 +1,15 @@
 package tools
 
-// Tool group constants for policy composition.
+// Tool group constants for policy composition (like OpenClaw's TOOL_GROUPS).
 const (
-	GroupSearch  = "group:search"
-	GroupCode    = "group:code"
-	GroupCalc    = "group:calc"
-	GroupBuilder = "group:builder"
+	GroupSearch    = "group:search"
+	GroupCode      = "group:code"
+	GroupCalc      = "group:calc"
+	GroupBuilder   = "group:builder"
+	GroupMessaging = "group:messaging"
+	GroupSessions  = "group:sessions"
+	GroupMemory    = "group:memory"
+	GroupWeb       = "group:web"
 )
 
 // BuiltinTools returns all locally-executable builtin tools.

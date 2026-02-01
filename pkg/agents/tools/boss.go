@@ -40,6 +40,7 @@ type AgentData struct {
 	SystemPrompt  string          `json:"system_prompt,omitempty"`
 	ToolProfile   string          `json:"tool_profile,omitempty"`
 	ToolOverrides map[string]bool `json:"tool_overrides,omitempty"`
+	ToolAlsoAllow []string        `json:"tool_also_allow,omitempty"`
 	Temperature   float64         `json:"temperature,omitempty"`
 	IsPreset      bool            `json:"is_preset,omitempty"`
 	CreatedAt     int64           `json:"created_at"`
@@ -96,8 +97,13 @@ var CreateAgentTool = &Tool{
 				},
 				"tool_profile": map[string]any{
 					"type":        "string",
-					"enum":        []string{"minimal", "coding", "full"},
-					"description": "Tool access level: minimal (none), coding (calc, search, code), full (all)",
+					"enum":        []string{"minimal", "coding", "messaging", "full"},
+					"description": "Tool access level: minimal (none), coding (calc, search, code), messaging (message, sessions), full (all)",
+				},
+				"tool_also_allow": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Additional tools to allow (supports wildcards like 'mcp_*')",
 				},
 			},
 			"required": []string{"name"},
@@ -163,8 +169,13 @@ var EditAgentTool = &Tool{
 				},
 				"tool_profile": map[string]any{
 					"type":        "string",
-					"enum":        []string{"minimal", "coding", "full"},
+					"enum":        []string{"minimal", "coding", "messaging", "full"},
 					"description": "New tool access level",
+				},
+				"tool_also_allow": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Additional tools to allow (supports wildcards like 'mcp_*')",
 				},
 			},
 			"required": []string{"agent_id"},
@@ -346,6 +357,7 @@ func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[str
 	model := ReadStringDefault(input, "model", "")
 	systemPrompt := ReadStringDefault(input, "system_prompt", "")
 	toolProfile := ReadStringDefault(input, "tool_profile", "full")
+	toolAlsoAllow := ReadStringArray(input, "tool_also_allow")
 
 	// Generate unique ID and check for collisions
 	existingAgents, err := e.store.LoadAgents(ctx)
@@ -364,15 +376,16 @@ func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[str
 	now := time.Now().Unix()
 
 	agent := AgentData{
-		ID:           agentID,
-		Name:         name,
-		Description:  description,
-		Model:        model,
-		SystemPrompt: systemPrompt,
-		ToolProfile:  toolProfile,
-		IsPreset:     false,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:            agentID,
+		Name:          name,
+		Description:   description,
+		Model:         model,
+		SystemPrompt:  systemPrompt,
+		ToolProfile:   toolProfile,
+		ToolAlsoAllow: toolAlsoAllow,
+		IsPreset:      false,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 
 	if err := e.store.SaveAgent(ctx, agent); err != nil {
@@ -424,6 +437,7 @@ func (e *BossToolExecutor) ExecuteForkAgent(ctx context.Context, input map[strin
 		SystemPrompt:  source.SystemPrompt,
 		ToolProfile:   source.ToolProfile,
 		ToolOverrides: source.ToolOverrides,
+		ToolAlsoAllow: source.ToolAlsoAllow,
 		Temperature:   source.Temperature,
 		IsPreset:      false,
 		CreatedAt:     now,
@@ -478,6 +492,9 @@ func (e *BossToolExecutor) ExecuteEditAgent(ctx context.Context, input map[strin
 	}
 	if profile, _ := ReadString(input, "tool_profile", false); profile != "" {
 		agent.ToolProfile = profile
+	}
+	if alsoAllow := ReadStringArray(input, "tool_also_allow"); len(alsoAllow) > 0 {
+		agent.ToolAlsoAllow = alsoAllow
 	}
 
 	agent.UpdatedAt = time.Now().Unix()

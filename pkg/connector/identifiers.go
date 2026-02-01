@@ -75,16 +75,6 @@ func parseAgentFromGhostID(ghostID string) (string, bool) {
 	return "", false
 }
 
-// isAgentGhost checks if a ghost ID corresponds to an agent.
-func isAgentGhost(ghostID string) bool {
-	return strings.HasPrefix(ghostID, "agent-")
-}
-
-// isModelGhost checks if a ghost ID corresponds to a model.
-func isModelGhost(ghostID string) bool {
-	return strings.HasPrefix(ghostID, "model-")
-}
-
 func humanUserID(loginID networkid.UserLoginID) networkid.UserID {
 	return networkid.UserID(fmt.Sprintf("openai-user:%s", loginID))
 }

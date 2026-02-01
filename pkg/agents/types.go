@@ -22,9 +22,10 @@ type AgentDefinition struct {
 	SystemPrompt string     `json:"system_prompt,omitempty"`
 	PromptMode   PromptMode `json:"prompt_mode,omitempty"` // full, minimal, none
 
-	// Tool policy (like pi-agent profiles)
-	ToolProfile   ToolProfile     `json:"tool_profile,omitempty"`   // minimal, coding, full, boss
-	ToolOverrides map[string]bool `json:"tool_overrides,omitempty"` // explicit allow/deny
+	// Tool policy (like OpenClaw profiles)
+	ToolProfile   ToolProfile     `json:"tool_profile,omitempty"`    // minimal, coding, messaging, full, boss
+	ToolOverrides map[string]bool `json:"tool_overrides,omitempty"`  // explicit allow/deny
+	ToolAlsoAllow []string        `json:"tool_also_allow,omitempty"` // additive allows (supports wildcards)
 
 	// Agent behavior
 	Temperature     float64   `json:"temperature,omitempty"`
@@ -106,6 +107,11 @@ func (a *AgentDefinition) Clone() *AgentDefinition {
 	if a.ToolOverrides != nil {
 		clone.ToolOverrides = make(map[string]bool)
 		maps.Copy(clone.ToolOverrides, a.ToolOverrides)
+	}
+
+	if a.ToolAlsoAllow != nil {
+		clone.ToolAlsoAllow = make([]string, len(a.ToolAlsoAllow))
+		copy(clone.ToolAlsoAllow, a.ToolAlsoAllow)
 	}
 
 	if a.Identity != nil {

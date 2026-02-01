@@ -102,6 +102,7 @@ type CustomAgentData struct {
 	PromptMode      string          `json:"prompt_mode,omitempty"`
 	ToolProfile     string          `json:"tool_profile,omitempty"`
 	ToolOverrides   map[string]bool `json:"tool_overrides,omitempty"`
+	ToolAlsoAllow   []string        `json:"tool_also_allow,omitempty"` // Additive tool allows (supports wildcards)
 	Temperature     float64         `json:"temperature,omitempty"`
 	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
 	IdentityName    string          `json:"identity_name,omitempty"`
