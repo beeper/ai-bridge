@@ -516,6 +516,12 @@ type ApprovalAction struct {
 	Style string `json:"style,omitempty"` // "primary", "secondary", "tertiary"
 }
 
+// ReasoningEffortOption represents an available reasoning effort level
+type ReasoningEffortOption struct {
+	Value string `json:"value"` // minimal, low, medium, high, xhigh
+	Label string `json:"label"` // Display name
+}
+
 // RoomConfigEventContent represents the content of the room config state event
 type RoomConfigEventContent struct {
 	Model               string   `json:"model,omitempty"`
@@ -549,6 +555,9 @@ type RoomConfigEventContent struct {
 
 	// Tool toggle request from client (not persisted in state, just for updates)
 	ToolToggle *ToolToggle `json:"tool_toggle,omitempty"`
+
+	// Available reasoning effort levels for current model
+	ReasoningEfforts []ReasoningEffortOption `json:"reasoning_efforts,omitempty"`
 }
 
 // ToolToggle represents a request to toggle a specific tool on/off

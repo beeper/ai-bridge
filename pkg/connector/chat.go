@@ -928,6 +928,16 @@ func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Por
 		}
 	}
 
+	// Build reasoning effort options if model supports reasoning
+	var reasoningEfforts []ReasoningEffortOption
+	if meta.Capabilities.SupportsReasoning {
+		reasoningEfforts = []ReasoningEffortOption{
+			{Value: "low", Label: "Low"},
+			{Value: "medium", Label: "Medium"},
+			{Value: "high", Label: "High"},
+		}
+	}
+
 	stateContent := &RoomConfigEventContent{
 		Model:                  meta.Model,
 		SystemPrompt:           meta.SystemPrompt,
@@ -946,6 +956,7 @@ func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Por
 		Capabilities:           &meta.Capabilities,
 		ToolsConfig:            &meta.ToolsConfig,
 		AvailableTools:         oc.buildAvailableTools(meta),
+		ReasoningEfforts:       reasoningEfforts,
 	}
 
 	// Use bot intent to send state event

@@ -606,6 +606,7 @@ func (oc *AIClient) handleSlashCommand(
 	case "/help":
 		help := "Available commands:\n" +
 			"• /model [name] - Get or set the AI model\n" +
+			"• /models - List all available models\n" +
 			"• /temp [0-2] - Get or set temperature\n" +
 			"• /prompt [text] - Get or set system prompt\n" +
 			"• /context [1-100] - Get or set context message limit\n" +
@@ -630,6 +631,53 @@ func (oc *AIClient) handleSlashCommand(
 
 	case "/regenerate":
 		go oc.handleRegenerate(ctx, evt, portal, meta)
+		return true
+
+	case "/models":
+		models, err := oc.listAvailableModels(ctx, false)
+		if err != nil {
+			oc.sendSystemNotice(ctx, portal, "Failed to fetch models")
+			return true
+		}
+
+		var sb strings.Builder
+		sb.WriteString("Available models:\n\n")
+
+		for _, m := range models {
+			// Build capability icons
+			var caps []string
+			if m.SupportsVision {
+				caps = append(caps, "👁 Vision")
+			}
+			if m.SupportsReasoning {
+				caps = append(caps, "🧠 Reasoning")
+			}
+			if m.SupportsWebSearch {
+				caps = append(caps, "🔍 Web Search")
+			}
+			if m.SupportsImageGen {
+				caps = append(caps, "🎨 Image Gen")
+			}
+			if m.SupportsToolCalling {
+				caps = append(caps, "🔧 Tools")
+			}
+
+			// Format: **Model Name** (model/id)
+			// Capabilities
+			sb.WriteString(fmt.Sprintf("• **%s** (`%s`)\n", m.Name, m.ID))
+			if m.Description != "" {
+				sb.WriteString(fmt.Sprintf("  %s\n", m.Description))
+			}
+			if len(caps) > 0 {
+				sb.WriteString(fmt.Sprintf("  %s\n", strings.Join(caps, " · ")))
+			}
+			sb.WriteString("\n")
+		}
+
+		sb.WriteString(fmt.Sprintf("Current: **%s**\n", oc.effectiveModel(meta)))
+		sb.WriteString("Use `/model <id>` to switch models")
+
+		oc.sendSystemNotice(ctx, portal, sb.String())
 		return true
 	}
 
