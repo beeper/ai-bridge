@@ -479,6 +479,7 @@ type PortalInitOpts struct {
 	Title        string
 	SystemPrompt string
 	CopyFrom     *PortalMetadata // For forked chats - copies config from source
+	PortalKey    *networkid.PortalKey
 }
 
 // initPortalForChat handles common portal initialization logic.
@@ -501,6 +502,9 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 	}
 
 	portalKey := portalKeyForChat(oc.UserLogin.ID)
+	if opts.PortalKey != nil {
+		portalKey = *opts.PortalKey
+	}
 	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get portal: %w", err)
@@ -1257,31 +1261,80 @@ func (oc *AIClient) syncChatCounter(ctx context.Context) error {
 
 func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 	oc.log.Debug().Msg("Ensuring default AI chat room exists")
+	loginMeta := loginMetadata(oc.UserLogin)
+
+	if loginMeta.DefaultChatPortalID != "" {
+		portalKey := networkid.PortalKey{
+			ID:       networkid.PortalID(loginMeta.DefaultChatPortalID),
+			Receiver: oc.UserLogin.ID,
+		}
+		portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
+		if err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to load default chat portal by ID")
+		} else if portal != nil {
+			if portal.MXID != "" {
+				oc.log.Debug().Stringer("portal", portal.PortalKey).Msg("Existing default chat already has MXID")
+				return nil
+			}
+			info := oc.chatInfoFromPortal(portal)
+			oc.log.Info().Stringer("portal", portal.PortalKey).Msg("Default chat missing MXID; creating Matrix room")
+			err := portal.CreateMatrixRoom(ctx, oc.UserLogin, info)
+			if err != nil {
+				oc.log.Err(err).Msg("Failed to create Matrix room for default chat")
+			}
+			oc.sendWelcomeMessage(ctx, portal)
+			return err
+		}
+	}
+
 	portals, err := oc.listAllChatPortals(ctx)
 	if err != nil {
 		oc.log.Err(err).Msg("Failed to list chat portals")
 		return err
 	}
+
+	var defaultPortal *bridgev2.Portal
+	var minIdx int
 	for _, portal := range portals {
-		if portal.MXID != "" {
-			oc.log.Debug().Stringer("portal", portal.PortalKey).Msg("Existing chat already has MXID")
-			return nil
+		pm := portalMeta(portal)
+		if idx, ok := parseChatSlug(pm.Slug); ok {
+			if defaultPortal == nil || idx < minIdx {
+				minIdx = idx
+				defaultPortal = portal
+			}
+		} else if defaultPortal == nil {
+			defaultPortal = portal
 		}
 	}
-	if len(portals) > 0 {
-		info := oc.chatInfoFromPortal(portals[0])
-		oc.log.Info().Stringer("portal", portals[0].PortalKey).Msg("Existing portal missing MXID; creating Matrix room")
-		err := portals[0].CreateMatrixRoom(ctx, oc.UserLogin, info)
+
+	if defaultPortal != nil {
+		loginMeta.DefaultChatPortalID = string(defaultPortal.PortalKey.ID)
+		if err := oc.UserLogin.Save(ctx); err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to persist default chat portal ID")
+		}
+		if defaultPortal.MXID != "" {
+			oc.log.Debug().Stringer("portal", defaultPortal.PortalKey).Msg("Existing chat already has MXID")
+			return nil
+		}
+		info := oc.chatInfoFromPortal(defaultPortal)
+		oc.log.Info().Stringer("portal", defaultPortal.PortalKey).Msg("Existing portal missing MXID; creating Matrix room")
+		err := defaultPortal.CreateMatrixRoom(ctx, oc.UserLogin, info)
 		if err != nil {
 			oc.log.Err(err).Msg("Failed to create Matrix room for existing portal")
 		}
-		oc.sendWelcomeMessage(ctx, portals[0])
+		oc.sendWelcomeMessage(ctx, defaultPortal)
 		return err
 	}
-	resp, err := oc.createChat(ctx, "Welcome to AI Chats", "") // Default room title
+
+	defaultPortalKey := portalKeyForDefaultChat(oc.UserLogin.ID)
+	resp, err := oc.createChatWithKey(ctx, "Welcome to AI Chats", "", defaultPortalKey) // Default room title
 	if err != nil {
 		oc.log.Err(err).Msg("Failed to create default portal")
 		return err
+	}
+	loginMeta.DefaultChatPortalID = string(resp.PortalKey.ID)
+	if err := oc.UserLogin.Save(ctx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to persist default chat portal ID")
 	}
 	err = resp.Portal.CreateMatrixRoom(ctx, oc.UserLogin, resp.PortalInfo)
 	if err != nil {
@@ -1319,6 +1372,22 @@ func (oc *AIClient) listAllChatPortals(ctx context.Context) ([]*bridgev2.Portal,
 
 func (oc *AIClient) createChat(ctx context.Context, title, systemPrompt string) (*bridgev2.CreateChatResponse, error) {
 	portal, info, err := oc.spawnPortal(ctx, title, systemPrompt)
+	if err != nil {
+		return nil, err
+	}
+	return &bridgev2.CreateChatResponse{
+		PortalKey:  portal.PortalKey,
+		Portal:     portal,
+		PortalInfo: info,
+	}, nil
+}
+
+func (oc *AIClient) createChatWithKey(ctx context.Context, title, systemPrompt string, portalKey networkid.PortalKey) (*bridgev2.CreateChatResponse, error) {
+	portal, info, err := oc.initPortalForChat(ctx, PortalInitOpts{
+		Title:        title,
+		SystemPrompt: systemPrompt,
+		PortalKey:    &portalKey,
+	})
 	if err != nil {
 		return nil, err
 	}

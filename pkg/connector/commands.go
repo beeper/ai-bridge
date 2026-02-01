@@ -412,6 +412,30 @@ func fnRegenerate(ce *commands.Event) {
 	go client.handleRegenerate(ce.Ctx, nil, ce.Portal, meta)
 }
 
+// CommandTitle handles the !ai title command
+var CommandTitle = &commands.FullHandler{
+	Func:    fnTitle,
+	Name:    "title",
+	Aliases: []string{"retitle"},
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Regenerate the chat room title",
+	},
+	RequiresPortal: true,
+	RequiresLogin:  true,
+}
+
+func fnTitle(ce *commands.Event) {
+	client := getAIClient(ce)
+	if client == nil || ce.Portal == nil {
+		ce.Reply("Failed to access AI configuration")
+		return
+	}
+
+	// Run async
+	go client.handleRegenerateTitle(ce.Ctx, ce.Portal)
+}
+
 // CommandModels handles the !ai models command
 var CommandModels = &commands.FullHandler{
 	Func: fnModels,
@@ -492,10 +516,11 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 		CommandNew,
 		CommandFork,
 		CommandRegenerate,
+		CommandTitle,
 		CommandModels,
 	)
 	oc.br.Log.Info().
 		Str("section", HelpSectionAI.Name).
 		Int("section_order", HelpSectionAI.Order).
-		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, tools, mode, new, fork, regenerate, models")
+		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, tools, mode, new, fork, regenerate, title, models")
 }
