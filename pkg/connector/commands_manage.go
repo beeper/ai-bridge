@@ -1,0 +1,62 @@
+package connector
+
+import (
+	"maunium.net/go/mautrix/bridgev2/commands"
+	"maunium.net/go/mautrix/bridgev2/networkid"
+)
+
+// CommandManage handles the !ai manage command.
+// This creates or opens the Builder room for advanced users to manage custom agents.
+var CommandManage = &commands.FullHandler{
+	Func: fnManage,
+	Name: "manage",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Open the agent management room (for creating custom agents)",
+	},
+	RequiresLogin: true,
+}
+
+func fnManage(ce *commands.Event) {
+	client := getAIClient(ce)
+	if client == nil {
+		ce.Reply("Failed to access AI configuration")
+		return
+	}
+
+	meta := loginMetadata(client.UserLogin)
+
+	// Check if Builder room already exists
+	if meta.BuilderRoomID != "" {
+		portalKey := networkid.PortalKey{
+			ID:       meta.BuilderRoomID,
+			Receiver: client.UserLogin.ID,
+		}
+		portal, err := client.UserLogin.Bridge.GetPortalByKey(ce.Ctx, portalKey)
+		if err == nil && portal != nil && portal.MXID != "" {
+			ce.Reply("Agent management room: %s", portal.MXID)
+			return
+		}
+		// Room doesn't exist anymore, will create new one
+	}
+
+	// Create Builder room on-demand
+	if err := client.ensureBuilderRoom(ce.Ctx); err != nil {
+		ce.Reply("Failed to create management room: %v", err)
+		return
+	}
+
+	// Get the newly created room
+	meta = loginMetadata(client.UserLogin)
+	portalKey := networkid.PortalKey{
+		ID:       meta.BuilderRoomID,
+		Receiver: client.UserLogin.ID,
+	}
+	portal, err := client.UserLogin.Bridge.GetPortalByKey(ce.Ctx, portalKey)
+	if err != nil || portal == nil || portal.MXID == "" {
+		ce.Reply("Management room created but could not retrieve link")
+		return
+	}
+
+	ce.Reply("Created agent management room: %s\n\nIn this room you can:\n- Create custom agents\n- Manage existing agents\n- Configure advanced settings", portal.MXID)
+}

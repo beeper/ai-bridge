@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 	"github.com/rs/zerolog"
@@ -88,6 +89,19 @@ type functionCallOutput struct {
 	name      string // Tool name (for stateless continuations)
 	arguments string // Raw arguments JSON (for stateless continuations)
 	output    string // The result from executing the tool
+}
+
+func buildFunctionCallOutputItem(callID, output string, includeID bool) responses.ResponseInputItemUnionParam {
+	item := responses.ResponseInputItemFunctionCallOutputParam{
+		CallID: callID,
+		Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
+			OfString: param.NewOpt(output),
+		},
+	}
+	if includeID {
+		item.ID = param.NewOpt("fc_output_" + callID)
+	}
+	return responses.ResponseInputItemUnionParam{OfFunctionCallOutput: &item}
 }
 
 // saveAssistantMessage saves the completed assistant message to the database
@@ -590,7 +604,7 @@ func (oc *AIClient) streamingResponse(
 				resultStatus = ResultStatusError
 				result = fmt.Sprintf("Error: tool %s is disabled", streamEvent.Name)
 			} else {
-				// Wrap context with bridge info for tools that need it (e.g., set_room_title)
+				// Wrap context with bridge info for tools that need it (e.g., set_chat_info)
 				toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
 					Client: oc,
 					Portal: portal,
@@ -842,8 +856,7 @@ func (oc *AIClient) streamingResponse(
 					}
 					state.baseInput = append(state.baseInput, responses.ResponseInputItemParamOfFunctionCall(args, output.callID, output.name))
 				}
-				// Use SDK helper to ensure Type field is properly set
-				state.baseInput = append(state.baseInput, responses.ResponseInputItemParamOfFunctionCallOutput(output.callID, output.output))
+				state.baseInput = append(state.baseInput, buildFunctionCallOutputItem(output.callID, output.output, true))
 			}
 		}
 
@@ -1083,8 +1096,7 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 			}
 			input = append(input, responses.ResponseInputItemParamOfFunctionCall(args, output.callID, output.name))
 		}
-		// Use SDK helper to ensure Type field is properly set
-		input = append(input, responses.ResponseInputItemParamOfFunctionCallOutput(output.callID, output.output))
+		input = append(input, buildFunctionCallOutputItem(output.callID, output.output, isOpenRouter))
 	}
 	params.Input = responses.ResponseNewParamsInputUnion{
 		OfInputItemList: input,
@@ -1285,7 +1297,7 @@ func (oc *AIClient) streamChatCompletions(
 	// Execute any accumulated tool calls
 	for _, tool := range activeTools {
 		if tool.input.Len() > 0 && tool.toolName != "" && oc.isToolEnabled(meta, tool.toolName) {
-			// Wrap context with bridge info for tools that need it (e.g., set_room_title)
+			// Wrap context with bridge info for tools that need it (e.g., set_chat_info)
 			toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
 				Client: oc,
 				Portal: portal,
@@ -1750,6 +1762,8 @@ func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Port
 		displayTitle = "Web Search"
 	case "image_generation":
 		displayTitle = "Image Generation"
+	case ToolNameSetChatInfo:
+		displayTitle = "Set Chat Info"
 	}
 
 	toolCallData := map[string]any{
@@ -2455,6 +2469,30 @@ func (oc *AIClient) setRoomName(ctx context.Context, portal *bridgev2.Portal, na
 	}
 
 	oc.log.Debug().Str("name", name).Msg("Set Matrix room name")
+	return nil
+}
+
+// setRoomTopic sets the Matrix room topic via m.room.topic state event
+func (oc *AIClient) setRoomTopic(ctx context.Context, portal *bridgev2.Portal, topic string) error {
+	if portal.MXID == "" {
+		return fmt.Errorf("portal has no Matrix room ID")
+	}
+
+	bot := oc.UserLogin.Bridge.Bot
+	_, err := bot.SendState(ctx, portal.MXID, event.StateTopic, "", &event.Content{
+		Parsed: &event.TopicEventContent{Topic: topic},
+	}, time.Time{})
+
+	if err != nil {
+		return fmt.Errorf("failed to set room topic: %w", err)
+	}
+
+	portal.Topic = topic
+	if err := portal.Save(ctx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to save portal after setting room topic")
+	}
+
+	oc.log.Debug().Str("topic", topic).Msg("Set Matrix room topic")
 	return nil
 }
 

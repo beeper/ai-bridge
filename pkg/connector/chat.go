@@ -23,11 +23,13 @@ import (
 
 // Tool name constants
 const (
-	ToolNameCalculator      = "calculator"
-	ToolNameWebSearch       = "web_search"
+	ToolNameCalculator = "calculator"
+	ToolNameWebSearch  = "web_search"
+	// Deprecated: removed from toolset; kept to clean up legacy configs.
 	ToolNameCodeInterpreter = "code_interpreter"
-	ToolNameSetRoomTitle    = "set_room_title"
-	ToolNameSetChatInfo     = "set_chat_info"
+	// Deprecated: replaced by set_chat_info; kept to clean up legacy configs.
+	ToolNameSetRoomTitle = "set_room_title"
+	ToolNameSetChatInfo  = "set_chat_info"
 )
 
 // getDefaultToolsConfig returns the default tools configuration for a new room.
@@ -74,11 +76,47 @@ func registerTool(config *ToolsConfig, tool mcp.Tool, toolType string) {
 
 // ensureToolsConfig ensures the portal has a valid ToolsConfig, initializing if empty
 func ensureToolsConfig(meta *PortalMetadata, provider string) bool {
-	if len(meta.ToolsConfig.Tools) > 0 {
-		return false
+	changed := false
+	if meta.ToolsConfig.Tools == nil {
+		meta.ToolsConfig.Tools = make(map[string]*ToolEntry)
+		changed = true
 	}
-	meta.ToolsConfig = getDefaultToolsConfig(provider)
-	return true
+	if len(meta.ToolsConfig.Tools) == 0 {
+		meta.ToolsConfig = getDefaultToolsConfig(provider)
+		return true
+	}
+
+	// Remove deprecated tools
+	if _, ok := meta.ToolsConfig.Tools[ToolNameSetRoomTitle]; ok {
+		delete(meta.ToolsConfig.Tools, ToolNameSetRoomTitle)
+		changed = true
+	}
+	if _, ok := meta.ToolsConfig.Tools[ToolNameCodeInterpreter]; ok {
+		delete(meta.ToolsConfig.Tools, ToolNameCodeInterpreter)
+		changed = true
+	}
+
+	// Ensure web search tool exists (enabled by default unless explicitly disabled)
+	if _, ok := meta.ToolsConfig.Tools[ToolNameWebSearch]; !ok {
+		registerTool(&meta.ToolsConfig, mcp.Tool{
+			Name:        ToolNameWebSearch,
+			Description: "Search the web for information",
+			Annotations: &mcp.ToolAnnotations{Title: "Web Search"},
+		}, "builtin")
+		changed = true
+	}
+
+	// Ensure chat info tool exists
+	if _, ok := meta.ToolsConfig.Tools[ToolNameSetChatInfo]; !ok {
+		registerTool(&meta.ToolsConfig, mcp.Tool{
+			Name:        ToolNameSetChatInfo,
+			Description: "Set the chat title and/or description (patches existing values)",
+			Annotations: &mcp.ToolAnnotations{Title: "Set Chat Info"},
+		}, "builtin")
+		changed = true
+	}
+
+	return changed
 }
 
 // buildAvailableTools returns a list of ToolInfo for all tools based on current config
@@ -187,7 +225,10 @@ func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
 
 // getDefaultToolState returns the default enabled state for a tool
 // Most tools are enabled by default when the model supports them
-func (oc *AIClient) getDefaultToolState(meta *PortalMetadata, _ string) bool {
+func (oc *AIClient) getDefaultToolState(meta *PortalMetadata, toolName string) bool {
+	if toolName == ToolNameWebSearch {
+		return true
+	}
 	return meta.Capabilities.SupportsToolCalling
 }
 
@@ -220,7 +261,7 @@ func normalizeToolName(name string) string {
 	case "websearch", "search":
 		return ToolNameWebSearch
 	case "chatinfo", "chat_info", "setchatinfo", "setroomtitle", "set_room_title":
-		return ToolNameSetRoomTitle
+		return ToolNameSetChatInfo
 	default:
 		return name
 	}
@@ -350,7 +391,7 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 
 // ResolveIdentifier resolves an agent ID to a ghost and optionally creates a chat
 func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	// Identifier can be an agent ID (e.g., "quick", "smart", "boss") or model ID for backwards compatibility
+	// Identifier can be an agent ID (e.g., "beeper", "boss") or model ID for backwards compatibility
 	id := strings.TrimSpace(identifier)
 	if id == "" {
 		return nil, fmt.Errorf("identifier is required")
@@ -368,7 +409,7 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 		return oc.resolveAgentIdentifier(ctx, agent, createChat)
 	}
 
-	// Try to find as agent first (bare agent ID like "boss", "quick", "smart")
+	// Try to find as agent first (bare agent ID like "beeper", "boss")
 	agent, err := store.GetAgentByID(ctx, id)
 	if err == nil && agent != nil {
 		return oc.resolveAgentIdentifier(ctx, agent, createChat)
@@ -993,11 +1034,25 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 
 // handleModelSwitch generates membership change events when switching models
 // This creates leave/join events to show the model transition in the room timeline
+// For agent rooms, it swaps the agent+model ghost (e.g., "Beeper AI (Claude)" -> "Beeper AI (GPT)")
 func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Portal, oldModel, newModel string) {
 	if oldModel == newModel || oldModel == "" || newModel == "" {
 		return
 	}
 
+	meta := portalMeta(portal)
+	agentID := meta.AgentID
+	if agentID == "" {
+		agentID = meta.DefaultAgentID
+	}
+
+	// Check if this is an agent room - use agent+model ghosts for swap
+	if agentID != "" {
+		oc.handleAgentModelSwitch(ctx, portal, agentID, oldModel, newModel)
+		return
+	}
+
+	// For non-agent rooms, use model-only ghosts
 	oc.log.Info().
 		Str("old_model", oldModel).
 		Str("new_model", newModel).
@@ -1078,6 +1133,92 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 
 	// Update bridge info and capabilities to resend room features state event with new capabilities
 	// This ensures the client knows what features the new model supports (vision, audio, etc.)
+	portal.UpdateBridgeInfo(ctx)
+	portal.UpdateCapabilities(ctx, oc.UserLogin, true)
+}
+
+// handleAgentModelSwitch handles model switching for agent rooms.
+// Swaps the agent+model ghost (e.g., "Beeper AI (Claude)" -> "Beeper AI (GPT)")
+func (oc *AIClient) handleAgentModelSwitch(ctx context.Context, portal *bridgev2.Portal, agentID, oldModel, newModel string) {
+	// Get the agent to determine display name
+	store := NewAgentStoreAdapter(oc)
+	agent, err := store.GetAgentByID(ctx, agentID)
+	if err != nil || agent == nil {
+		oc.log.Warn().Err(err).Str("agent", agentID).Msg("Agent not found for model switch")
+		return
+	}
+
+	oc.log.Info().
+		Str("agent", agentID).
+		Str("old_model", oldModel).
+		Str("new_model", newModel).
+		Stringer("portal", portal.PortalKey).
+		Msg("Handling agent model switch")
+
+	oldGhostID := agentModelUserID(agentID, oldModel)
+	newGhostID := agentModelUserID(agentID, newModel)
+
+	oldDisplayName := oc.agentModelDisplayName(agent.Name, oldModel)
+	newDisplayName := oc.agentModelDisplayName(agent.Name, newModel)
+
+	// Create member changes: old agent+model leaves, new agent+model joins
+	memberChanges := &bridgev2.ChatMemberList{
+		MemberMap: bridgev2.ChatMemberMap{
+			oldGhostID: {
+				EventSender: bridgev2.EventSender{
+					Sender:      oldGhostID,
+					SenderLogin: oc.UserLogin.ID,
+				},
+				Membership:     event.MembershipLeave,
+				PrevMembership: event.MembershipJoin,
+			},
+			newGhostID: {
+				EventSender: bridgev2.EventSender{
+					Sender:      newGhostID,
+					SenderLogin: oc.UserLogin.ID,
+				},
+				Membership: event.MembershipJoin,
+				UserInfo: &bridgev2.UserInfo{
+					Name:  ptr.Ptr(newDisplayName),
+					IsBot: ptr.Ptr(true),
+				},
+				MemberEventExtra: map[string]any{
+					"displayname":          newDisplayName,
+					"com.beeper.ai.model":  newModel,
+					"com.beeper.ai.agent":  agentID,
+				},
+			},
+		},
+	}
+
+	// Update portal's OtherUserID to new agent+model ghost
+	portal.OtherUserID = newGhostID
+
+	// Queue the ChatInfoChange event
+	evt := &simplevent.ChatInfoChange{
+		EventMeta: simplevent.EventMeta{
+			Type:      bridgev2.RemoteEventChatInfoChange,
+			PortalKey: portal.PortalKey,
+			Timestamp: time.Now(),
+			LogContext: func(c zerolog.Context) zerolog.Context {
+				return c.Str("action", "agent_model_switch").
+					Str("agent", agentID).
+					Str("old_model", oldModel).
+					Str("new_model", newModel)
+			},
+		},
+		ChatInfoChange: &bridgev2.ChatInfoChange{
+			MemberChanges: memberChanges,
+		},
+	}
+
+	oc.UserLogin.QueueRemoteEvent(evt)
+
+	// Send a notice about the model change
+	notice := fmt.Sprintf("Switched from %s to %s", oldDisplayName, newDisplayName)
+	oc.sendSystemNotice(ctx, portal, notice)
+
+	// Update bridge info and capabilities
 	portal.UpdateBridgeInfo(ctx)
 	portal.UpdateCapabilities(ctx, oc.UserLogin, true)
 }
@@ -1292,14 +1433,7 @@ func (oc *AIClient) bootstrap(ctx context.Context) {
 		return
 	}
 
-	// Create the Agent Builder room first (Meta Chatter / Boss agent)
-	// This is the primary room for managing agents and rooms
-	if err := oc.ensureBuilderRoom(logCtx); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to ensure builder room")
-		return
-	}
-
-	// Create a default chat room with Quick Chatter agent
+	// Create default chat room with Beeper AI agent
 	if err := oc.ensureDefaultChat(logCtx); err != nil {
 		oc.log.Warn().Err(err).Msg("Failed to ensure default chat")
 		// Continue anyway - default chat is optional
@@ -1421,22 +1555,22 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		return err
 	}
 
-	// Create default chat with Quick Chatter agent and "Welcome to AI Chats" title
-	quickAgent := agents.GetPresetByID("quick")
-	if quickAgent == nil {
-		return fmt.Errorf("quick chatter agent preset not found")
+	// Create default chat with Beeper AI agent
+	beeperAgent := agents.GetBeeperAI()
+	if beeperAgent == nil {
+		return fmt.Errorf("beeper AI agent not found")
 	}
 
 	// Determine model from agent config or use default
-	modelID := quickAgent.Model.Primary
+	modelID := beeperAgent.Model.Primary
 	if modelID == "" {
 		modelID = oc.effectiveModel(nil)
 	}
 
 	portal, chatInfo, err := oc.initPortalForChat(ctx, PortalInitOpts{
 		ModelID:      modelID,
-		Title:        "Welcome to AI Chats",
-		SystemPrompt: quickAgent.SystemPrompt,
+		Title:        "New AI Chat",
+		SystemPrompt: beeperAgent.SystemPrompt,
 	})
 	if err != nil {
 		oc.log.Err(err).Msg("Failed to create default portal")
@@ -1445,19 +1579,24 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 
 	// Set agent-specific metadata
 	pm := portalMeta(portal)
-	pm.AgentID = quickAgent.ID
-	pm.DefaultAgentID = quickAgent.ID
-	if quickAgent.SystemPrompt != "" {
-		pm.SystemPrompt = quickAgent.SystemPrompt
+	pm.AgentID = beeperAgent.ID
+	pm.DefaultAgentID = beeperAgent.ID
+	if beeperAgent.SystemPrompt != "" {
+		pm.SystemPrompt = beeperAgent.SystemPrompt
 	}
 
-	// Update the OtherUserID to be the agent ghost
-	portal.OtherUserID = agentUserID(quickAgent.ID)
+	// Update the OtherUserID to be the agent+model ghost
+	// This allows different model variants to have different ghosts
+	agentGhostID := agentModelUserID(beeperAgent.ID, modelID)
+	portal.OtherUserID = agentGhostID
 
 	if err := portal.Save(ctx); err != nil {
 		oc.log.Err(err).Msg("Failed to save portal with agent config")
 		return err
 	}
+
+	// Get display name for agent+model combination
+	agentDisplayName := oc.agentModelDisplayName(beeperAgent.Name, modelID)
 
 	// Update chat info members to use agent ghost
 	members := chatInfo.Members
@@ -1468,13 +1607,16 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		members.MemberMap = make(bridgev2.ChatMemberMap)
 	}
 	humanID := humanUserID(oc.UserLogin.ID)
-	agentID := agentUserID(quickAgent.ID)
 	humanMember := members.MemberMap[humanID]
 	humanMember.EventSender = bridgev2.EventSender{Sender: humanID}
 	members.MemberMap[humanID] = humanMember
-	agentMember := members.MemberMap[agentID]
-	agentMember.EventSender = bridgev2.EventSender{Sender: agentID}
-	members.MemberMap[agentID] = agentMember
+	agentMember := members.MemberMap[agentGhostID]
+	agentMember.EventSender = bridgev2.EventSender{Sender: agentGhostID}
+	agentMember.UserInfo = &bridgev2.UserInfo{
+		Name:  ptr.Ptr(agentDisplayName),
+		IsBot: ptr.Ptr(true),
+	}
+	members.MemberMap[agentGhostID] = agentMember
 	chatInfo.Members = members
 
 	loginMeta.DefaultChatPortalID = string(portal.PortalKey.ID)

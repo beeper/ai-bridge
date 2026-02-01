@@ -513,7 +513,7 @@ type ToolProgressContent struct {
 	Status   ToolStatus           `json:"status"`
 	Progress *ToolProgressDetails `json:"progress,omitempty"`
 
-	// Output preview (for code interpreter, etc.)
+	// Output preview (for long-running tools, etc.)
 	OutputPreview *ToolOutputPreview `json:"output_preview,omitempty"`
 }
 

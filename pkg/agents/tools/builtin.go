@@ -17,6 +17,7 @@ func BuiltinTools() []*Tool {
 	return []*Tool{
 		Calculator,
 		WebSearch,
+		ChatInfo,
 	}
 }
 

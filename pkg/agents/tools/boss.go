@@ -98,7 +98,7 @@ var CreateAgentTool = &Tool{
 				"tool_profile": map[string]any{
 					"type":        "string",
 					"enum":        []string{"minimal", "coding", "messaging", "full"},
-					"description": "Tool access level: minimal (none), coding (calc, search, code), messaging (message, sessions), full (all)",
+					"description": "Tool access level: minimal (web search + chat info), coding (calculator + web search + chat info), messaging (web search + chat info + messaging/session tools), full (all available tools)",
 				},
 				"tool_also_allow": map[string]any{
 					"type":        "array",
@@ -170,7 +170,7 @@ var EditAgentTool = &Tool{
 				"tool_profile": map[string]any{
 					"type":        "string",
 					"enum":        []string{"minimal", "coding", "messaging", "full"},
-					"description": "New tool access level",
+					"description": "New tool access level: minimal (web search + chat info), coding (calculator + web search + chat info), messaging (web search + chat info + messaging/session tools), full (all available tools)",
 				},
 				"tool_also_allow": map[string]any{
 					"type":        "array",

@@ -80,19 +80,24 @@ func BuiltinTools() []ToolDefinition {
 			Execute: executeWebSearch,
 		},
 		{
-			Name:        ToolNameSetRoomTitle,
-			Description: "Set the title/name of the current chat room. Use this when the user asks to rename the chat or set a title.",
+			Name:        ToolNameSetChatInfo,
+			Description: "Patch the current chat's title and/or description (omit fields to keep them unchanged).",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"title": map[string]any{
 						"type":        "string",
-						"description": "The new title for the room",
+						"description": "Optional. The new title for the chat",
+					},
+					"description": map[string]any{
+						"type":        "string",
+						"description": "Optional. The new description/topic for the chat (empty string clears it)",
 					},
 				},
-				"required": []string{"title"},
+				"minProperties":        1,
+				"additionalProperties": false,
 			},
-			Execute: executeSetRoomTitle,
+			Execute: executeSetChatInfo,
 		},
 	}
 }
@@ -316,27 +321,62 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 	return response.String(), nil
 }
 
-// executeSetRoomTitle sets the room name using bridge context
-func executeSetRoomTitle(ctx context.Context, args map[string]any) (string, error) {
-	title, ok := args["title"].(string)
-	if !ok || title == "" {
-		return "", fmt.Errorf("missing or invalid 'title' argument")
+// executeSetChatInfo patches the room title and/or description using bridge context.
+func executeSetChatInfo(ctx context.Context, args map[string]any) (string, error) {
+	rawTitle, hasTitle := args["title"]
+	rawDesc, hasDesc := args["description"]
+	if !hasTitle && !hasDesc {
+		return "", fmt.Errorf("missing 'title' or 'description' argument")
+	}
+
+	var title string
+	if hasTitle {
+		if s, ok := rawTitle.(string); ok {
+			title = strings.TrimSpace(s)
+		} else {
+			return "", fmt.Errorf("invalid 'title' argument")
+		}
+		if title == "" {
+			return "", fmt.Errorf("title cannot be empty")
+		}
+	}
+
+	var description string
+	if hasDesc {
+		if s, ok := rawDesc.(string); ok {
+			description = strings.TrimSpace(s)
+		} else {
+			return "", fmt.Errorf("invalid 'description' argument")
+		}
 	}
 
 	btc := GetBridgeToolContext(ctx)
 	if btc == nil {
 		return "", fmt.Errorf("bridge context not available")
 	}
-
 	if btc.Portal == nil {
 		return "", fmt.Errorf("portal not available")
 	}
 
-	if err := btc.Client.setRoomName(ctx, btc.Portal, title); err != nil {
-		return "", fmt.Errorf("failed to set room title: %w", err)
+	var updates []string
+	if hasTitle {
+		if err := btc.Client.setRoomName(ctx, btc.Portal, title); err != nil {
+			return "", fmt.Errorf("failed to set room title: %w", err)
+		}
+		updates = append(updates, fmt.Sprintf("title=%s", title))
+	}
+	if hasDesc {
+		if err := btc.Client.setRoomTopic(ctx, btc.Portal, description); err != nil {
+			return "", fmt.Errorf("failed to set room description: %w", err)
+		}
+		if description == "" {
+			updates = append(updates, "description=cleared")
+		} else {
+			updates = append(updates, fmt.Sprintf("description=%s", description))
+		}
 	}
 
-	return fmt.Sprintf("Room title set to: %s", title), nil
+	return fmt.Sprintf("Chat info updated: %s", strings.Join(updates, ", ")), nil
 }
 
 // GetBuiltinTool returns a builtin tool by name, or nil if not found

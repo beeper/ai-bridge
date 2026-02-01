@@ -812,7 +812,7 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 				Description: tool.Description,
 				Type:        agenttools.ToolType(tool.Type),
 				Group:       "",
-				Enabled:     tool.Enabled,
+				Enabled:     tool.Enabled && tool.Available,
 			})
 		}
 	}

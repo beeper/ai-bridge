@@ -256,7 +256,7 @@ func (s *AgentStoreAdapter) GetAgentForRoom(ctx context.Context, meta *PortalMet
 		agentID = meta.DefaultAgentID
 	}
 	if agentID == "" {
-		agentID = "quick" // Default to Quick Chatter
+		agentID = agents.DefaultAgentID // Default to Beeper AI
 	}
 
 	return s.GetAgentByID(ctx, agentID)
