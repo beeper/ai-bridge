@@ -25,6 +25,7 @@ const (
 	ToolNameOnline            = "online"
 	ToolNameWebSearchProvider = "web_search_provider"
 	ToolNameCodeInterpreter   = "code_interpreter"
+	ToolNameSetRoomTitle      = "set_room_title"
 )
 
 // getDefaultToolsConfig returns the default tools configuration for a new room
@@ -74,6 +75,13 @@ func getDefaultToolsConfig(provider string) ToolsConfig {
 		Description: "Execute Python code in sandbox",
 		Annotations: &mcp.ToolAnnotations{Title: "Code Interpreter"},
 	}, "provider")
+
+	// Builtin bridge tools
+	registerTool(&config, mcp.Tool{
+		Name:        ToolNameSetRoomTitle,
+		Description: "Set the chat room title",
+		Annotations: &mcp.ToolAnnotations{Title: "Set Room Title"},
+	}, "builtin")
 
 	return config
 }

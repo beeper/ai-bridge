@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"maunium.net/go/mautrix/bridgev2"
 )
 
 // ToolDefinition defines a tool that can be used by the AI
@@ -19,6 +21,29 @@ type ToolDefinition struct {
 	Description string
 	Parameters  map[string]any
 	Execute     func(ctx context.Context, args map[string]any) (string, error)
+}
+
+// BridgeToolContext provides bridge-specific context for tool execution
+type BridgeToolContext struct {
+	Client *AIClient
+	Portal *bridgev2.Portal
+	Meta   *PortalMetadata
+}
+
+// bridgeToolContextKey is the context key for BridgeToolContext
+type bridgeToolContextKey struct{}
+
+// WithBridgeToolContext adds bridge context to a context
+func WithBridgeToolContext(ctx context.Context, btc *BridgeToolContext) context.Context {
+	return context.WithValue(ctx, bridgeToolContextKey{}, btc)
+}
+
+// GetBridgeToolContext retrieves bridge context from a context
+func GetBridgeToolContext(ctx context.Context) *BridgeToolContext {
+	if v := ctx.Value(bridgeToolContextKey{}); v != nil {
+		return v.(*BridgeToolContext)
+	}
+	return nil
 }
 
 // BuiltinTools returns the list of available builtin tools
@@ -53,6 +78,21 @@ func BuiltinTools() []ToolDefinition {
 				"required": []string{"query"},
 			},
 			Execute: executeWebSearch,
+		},
+		{
+			Name:        ToolNameSetRoomTitle,
+			Description: "Set the title/name of the current chat room. Use this when the user asks to rename the chat or set a title.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"title": map[string]any{
+						"type":        "string",
+						"description": "The new title for the room",
+					},
+				},
+				"required": []string{"title"},
+			},
+			Execute: executeSetRoomTitle,
 		},
 	}
 }
@@ -274,6 +314,29 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 	}
 
 	return response.String(), nil
+}
+
+// executeSetRoomTitle sets the room name using bridge context
+func executeSetRoomTitle(ctx context.Context, args map[string]any) (string, error) {
+	title, ok := args["title"].(string)
+	if !ok || title == "" {
+		return "", fmt.Errorf("missing or invalid 'title' argument")
+	}
+
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("bridge context not available")
+	}
+
+	if btc.Portal == nil {
+		return "", fmt.Errorf("portal not available")
+	}
+
+	if err := btc.Client.setRoomName(ctx, btc.Portal, title); err != nil {
+		return "", fmt.Errorf("failed to set room title: %w", err)
+	}
+
+	return fmt.Sprintf("Room title set to: %s", title), nil
 }
 
 // GetBuiltinTool returns a builtin tool by name, or nil if not found
