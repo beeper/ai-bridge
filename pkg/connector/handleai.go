@@ -2123,7 +2123,7 @@ func (oc *AIClient) getTitleGenerationModel() string {
 
 	// Provider-specific defaults for title generation
 	switch meta.Provider {
-	case ProviderOpenRouter:
+	case ProviderOpenRouter, ProviderBeeper:
 		return "google/gemini-2.5-flash"
 	default:
 		// For non-OpenRouter providers, title generation is disabled.
@@ -2142,8 +2142,7 @@ func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistan
 
 	oc.log.Debug().Str("model", model).Msg("Generating room title")
 
-	// Use Responses API for OpenRouter compatibility (plugins field is only valid here)
-	resp, err := oc.api.Responses.New(ctx, responses.ResponseNewParams{
+	params := responses.ResponseNewParams{
 		Model: shared.ResponsesModel(model),
 		Input: responses.ResponseNewParamsInputUnion{
 			OfString: openai.String(fmt.Sprintf(
@@ -2152,7 +2151,22 @@ func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistan
 			)),
 		},
 		MaxOutputTokens: openai.Int(20),
-	})
+	}
+
+	// Disable reasoning for title generation to keep it fast and cheap.
+	if oc.isOpenRouterProvider() {
+		params.Reasoning = shared.ReasoningParam{
+			Effort: shared.ReasoningEffortNone,
+		}
+	}
+
+	// Use Responses API for OpenRouter compatibility (plugins field is only valid here)
+	resp, err := oc.api.Responses.New(ctx, params)
+	if err != nil && params.Reasoning.Effort != "" {
+		oc.log.Warn().Err(err).Str("model", model).Msg("Title generation failed with reasoning disabled; retrying without reasoning param")
+		params.Reasoning = shared.ReasoningParam{}
+		resp, err = oc.api.Responses.New(ctx, params)
+	}
 	if err != nil {
 		oc.log.Warn().Err(err).Str("model", model).Msg("Title generation API call failed")
 		return "", err
