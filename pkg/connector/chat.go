@@ -17,6 +17,146 @@ import (
 	"maunium.net/go/mautrix/event"
 )
 
+// getDefaultToolsConfig returns the default tools configuration for a new room
+// based on the model and provider. OpenRouter/Beeper use :online plugin by default,
+// other providers use builtin web search.
+func getDefaultToolsConfig(modelID string, provider string) ToolsConfig {
+	config := ToolsConfig{
+		Calculator: ptr.Ptr(true), // Calculator always enabled for models that support tools
+	}
+
+	// OpenRouter/Beeper: use :online plugin for web search by default (more comprehensive)
+	if provider == ProviderOpenRouter || provider == ProviderBeeper {
+		config.UseOpenRouterOnline = ptr.Ptr(true)
+		config.WebSearch = ptr.Ptr(false) // Don't use builtin when :online is on
+	} else {
+		// Other providers: use builtin web search
+		config.WebSearch = ptr.Ptr(true)
+		config.UseOpenRouterOnline = ptr.Ptr(false)
+	}
+
+	return config
+}
+
+// migrateToolsConfig migrates old ToolsEnabled setting to new ToolsConfig
+// Returns true if migration was performed
+func migrateToolsConfig(meta *PortalMetadata, provider string) bool {
+	// Check if already migrated (ToolsConfig has any non-nil values)
+	if meta.ToolsConfig.Calculator != nil || meta.ToolsConfig.WebSearch != nil || meta.ToolsConfig.UseOpenRouterOnline != nil {
+		return false
+	}
+
+	// If legacy ToolsEnabled is true, migrate to new config
+	if meta.ToolsEnabled {
+		meta.ToolsConfig = ToolsConfig{
+			Calculator: ptr.Ptr(true),
+			WebSearch:  ptr.Ptr(true),
+		}
+		// For OpenRouter/Beeper, also enable :online
+		if provider == ProviderOpenRouter || provider == ProviderBeeper {
+			meta.ToolsConfig.UseOpenRouterOnline = ptr.Ptr(true)
+		}
+		return true
+	}
+
+	return false
+}
+
+// buildAvailableTools returns a list of ToolInfo for all tools based on current config
+func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
+	loginMeta := loginMetadata(oc.UserLogin)
+	provider := loginMeta.Provider
+	isOpenRouter := provider == ProviderOpenRouter || provider == ProviderBeeper
+
+	// Check if model supports tool calling
+	supportsTools := meta.Capabilities.SupportsToolCalling
+
+	var tools []ToolInfo
+
+	// Calculator builtin tool
+	tools = append(tools, ToolInfo{
+		Name:        "calculator",
+		Type:        "builtin",
+		Description: "Perform arithmetic calculations",
+		Enabled:     oc.isToolEnabled(meta, "calculator"),
+		Available:   supportsTools,
+	})
+
+	// Web search builtin tool (DuckDuckGo)
+	tools = append(tools, ToolInfo{
+		Name:        "web_search",
+		Type:        "builtin",
+		Description: "Search the web using DuckDuckGo",
+		Enabled:     oc.isToolEnabled(meta, "web_search"),
+		Available:   supportsTools,
+	})
+
+	// OpenRouter :online plugin
+	if isOpenRouter {
+		tools = append(tools, ToolInfo{
+			Name:        "online",
+			Type:        "plugin",
+			Description: "OpenRouter web search plugin (appends :online to model)",
+			Enabled:     oc.isToolEnabled(meta, "online"),
+			Available:   true, // Always available on OpenRouter
+		})
+	}
+
+	// OpenAI provider web search tool
+	tools = append(tools, ToolInfo{
+		Name:        "web_search_provider",
+		Type:        "provider",
+		Description: "Native provider web search",
+		Enabled:     meta.ToolsConfig.WebSearchProvider || meta.WebSearchEnabled,
+		Available:   true, // Let the provider decide
+	})
+
+	// Code interpreter
+	tools = append(tools, ToolInfo{
+		Name:        "code_interpreter",
+		Type:        "provider",
+		Description: "Execute Python code",
+		Enabled:     meta.ToolsConfig.CodeInterpreter || meta.CodeInterpreterEnabled,
+		Available:   true, // Let the provider decide
+	})
+
+	return tools
+}
+
+// isToolEnabled checks if a specific tool is enabled based on ToolsConfig
+func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
+	switch toolName {
+	case "calculator":
+		if meta.ToolsConfig.Calculator != nil {
+			return *meta.ToolsConfig.Calculator
+		}
+		// Default: enabled if model supports tools
+		return meta.Capabilities.SupportsToolCalling
+	case "web_search":
+		if meta.ToolsConfig.WebSearch != nil {
+			return *meta.ToolsConfig.WebSearch
+		}
+		// Default: enabled unless :online is on
+		if meta.ToolsConfig.UseOpenRouterOnline != nil && *meta.ToolsConfig.UseOpenRouterOnline {
+			return false
+		}
+		return meta.Capabilities.SupportsToolCalling
+	case "online":
+		if meta.ToolsConfig.UseOpenRouterOnline != nil {
+			return *meta.ToolsConfig.UseOpenRouterOnline
+		}
+		// Default: enabled for OpenRouter/Beeper
+		loginMeta := loginMetadata(oc.UserLogin)
+		return loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper
+	case "web_search_provider":
+		return meta.ToolsConfig.WebSearchProvider || meta.WebSearchEnabled
+	case "code_interpreter":
+		return meta.ToolsConfig.CodeInterpreter || meta.CodeInterpreterEnabled
+	default:
+		return false
+	}
+}
+
 // SearchUsers searches available AI models by name/ID
 func (oc *AIClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.ResolveIdentifierResponse, error) {
 	oc.log.Debug().Str("query", query).Msg("User search requested")
@@ -233,6 +373,7 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 
 	// Initialize or copy metadata
 	var pmeta *PortalMetadata
+	loginMeta := loginMetadata(oc.UserLogin)
 	if opts.CopyFrom != nil {
 		pmeta = &PortalMetadata{
 			Model:                  opts.CopyFrom.Model,
@@ -245,6 +386,7 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 			ReasoningEffort:        opts.CopyFrom.ReasoningEffort,
 			Capabilities:           opts.CopyFrom.Capabilities,
 			ToolsEnabled:           opts.CopyFrom.ToolsEnabled,
+			ToolsConfig:            opts.CopyFrom.ToolsConfig,
 			ConversationMode:       opts.CopyFrom.ConversationMode,
 			WebSearchEnabled:       opts.CopyFrom.WebSearchEnabled,
 			FileSearchEnabled:      opts.CopyFrom.FileSearchEnabled,
@@ -261,6 +403,7 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 			Title:        title,
 			SystemPrompt: opts.SystemPrompt,
 			Capabilities: getModelCapabilities(modelID, oc.findModelInfo(modelID)),
+			ToolsConfig:  getDefaultToolsConfig(modelID, loginMeta.Provider),
 		}
 	}
 	portal.Metadata = pmeta
@@ -733,6 +876,14 @@ func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Por
 
 	meta := portalMeta(portal)
 
+	// Migrate legacy ToolsEnabled to ToolsConfig if needed
+	loginMeta := loginMetadata(oc.UserLogin)
+	if migrateToolsConfig(meta, loginMeta.Provider) {
+		if err := portal.Save(ctx); err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to save portal after tools migration")
+		}
+	}
+
 	stateContent := &RoomConfigEventContent{
 		Model:                  meta.Model,
 		SystemPrompt:           meta.SystemPrompt,
@@ -749,6 +900,8 @@ func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Por
 		EmitToolArgs:           ptr.Ptr(meta.EmitToolArgs),
 		DefaultAgentID:         meta.DefaultAgentID,
 		Capabilities:           &meta.Capabilities,
+		ToolsConfig:            &meta.ToolsConfig,
+		AvailableTools:         oc.buildAvailableTools(meta),
 	}
 
 	// Use bot intent to send state event
@@ -934,4 +1087,39 @@ func (oc *AIClient) spawnPortal(ctx context.Context, title, systemPrompt string)
 		Title:        title,
 		SystemPrompt: systemPrompt,
 	})
+}
+
+// HandleMatrixMessageRemove handles message deletions from Matrix
+// For AI bridge, we just delete from our database - there's no "remote" to sync to
+func (oc *AIClient) HandleMatrixMessageRemove(ctx context.Context, msg *bridgev2.MatrixMessageRemove) error {
+	oc.log.Debug().
+		Stringer("event_id", msg.TargetMessage.MXID).
+		Stringer("portal", msg.Portal.PortalKey).
+		Msg("Handling message deletion")
+
+	// Delete from our database - the Matrix side is already handled by the bridge framework
+	if err := oc.UserLogin.Bridge.DB.Message.Delete(ctx, msg.TargetMessage.RowID); err != nil {
+		oc.log.Warn().Err(err).Stringer("event_id", msg.TargetMessage.MXID).Msg("Failed to delete message from database")
+		return err
+	}
+
+	return nil
+}
+
+// HandleMatrixDisappearingTimer handles disappearing message timer changes from Matrix
+// For AI bridge, we just update the portal's disappear field - the bridge framework handles the actual deletion
+func (oc *AIClient) HandleMatrixDisappearingTimer(ctx context.Context, msg *bridgev2.MatrixDisappearingTimer) (bool, error) {
+	oc.log.Debug().
+		Stringer("portal", msg.Portal.PortalKey).
+		Str("type", string(msg.Content.Type)).
+		Dur("timer", msg.Content.Timer.Duration).
+		Msg("Handling disappearing timer change")
+
+	// Convert event to database setting and update portal
+	setting := database.DisappearingSettingFromEvent(msg.Content)
+	changed := msg.Portal.UpdateDisappearingSetting(ctx, setting, bridgev2.UpdateDisappearingSettingOpts{
+		Save: true,
+	})
+
+	return changed, nil
 }

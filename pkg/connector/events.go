@@ -542,6 +542,19 @@ type RoomConfigEventContent struct {
 
 	// Streaming configuration
 	Streaming *StreamingConfig `json:"streaming,omitempty"`
+
+	// Per-tool configuration and availability
+	ToolsConfig    *ToolsConfig `json:"tools_config,omitempty"`
+	AvailableTools []ToolInfo   `json:"available_tools,omitempty"`
+}
+
+// ToolInfo describes a tool and its status for room state broadcasting
+type ToolInfo struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`        // "builtin", "provider", "plugin"
+	Description string `json:"description,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	Available   bool   `json:"available"` // Based on model capabilities and provider
 }
 
 // StreamingConfig contains streaming behavior settings

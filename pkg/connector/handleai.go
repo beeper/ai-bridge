@@ -179,14 +179,25 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, meta *PortalMet
 		}
 	}
 
-	// Add built-in tools if enabled
-	if meta.WebSearchEnabled {
+	// Add built-in provider tools if enabled
+	if meta.WebSearchEnabled || meta.ToolsConfig.WebSearchProvider {
 		params.Tools = append(params.Tools, responses.ToolParamOfWebSearchPreview(responses.WebSearchPreviewToolTypeWebSearchPreview))
 		log.Debug().Msg("Web search tool enabled")
 	}
-	if meta.CodeInterpreterEnabled {
+	if meta.CodeInterpreterEnabled || meta.ToolsConfig.CodeInterpreter {
 		params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
 		log.Debug().Msg("Code interpreter tool enabled")
+	}
+
+	// Add builtin function tools if model supports tool calling
+	if meta.Capabilities.SupportsToolCalling {
+		enabledTools := GetEnabledBuiltinTools(func(name string) bool {
+			return oc.isToolEnabled(meta, name)
+		})
+		if len(enabledTools) > 0 {
+			params.Tools = append(params.Tools, ToOpenAITools(enabledTools)...)
+			log.Debug().Int("count", len(enabledTools)).Msg("Added builtin function tools")
+		}
 	}
 
 	return params
