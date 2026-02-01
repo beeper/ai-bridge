@@ -1434,22 +1434,6 @@ func (oc *AIClient) listAllChatPortals(ctx context.Context) ([]*bridgev2.Portal,
 	return portals, nil
 }
 
-func (oc *AIClient) createChatWithKey(ctx context.Context, title, systemPrompt string, portalKey networkid.PortalKey) (*bridgev2.CreateChatResponse, error) {
-	portal, info, err := oc.initPortalForChat(ctx, PortalInitOpts{
-		Title:        title,
-		SystemPrompt: systemPrompt,
-		PortalKey:    &portalKey,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &bridgev2.CreateChatResponse{
-		PortalKey:  portal.PortalKey,
-		Portal:     portal,
-		PortalInfo: info,
-	}, nil
-}
-
 // HandleMatrixMessageRemove handles message deletions from Matrix
 // For AI bridge, we just delete from our database - there's no "remote" to sync to
 func (oc *AIClient) HandleMatrixMessageRemove(ctx context.Context, msg *bridgev2.MatrixMessageRemove) error {

@@ -33,13 +33,6 @@ func portalKeyForChat(loginID networkid.UserLoginID) networkid.PortalKey {
 	}
 }
 
-func portalKeyForDefaultChat(loginID networkid.UserLoginID) networkid.PortalKey {
-	return networkid.PortalKey{
-		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:default", loginID)),
-		Receiver: loginID,
-	}
-}
-
 func modelUserID(modelID string) networkid.UserID {
 	// Convert "gpt-4o" to "model-gpt-4o"
 	return networkid.UserID(fmt.Sprintf("model-%s", url.PathEscape(modelID)))

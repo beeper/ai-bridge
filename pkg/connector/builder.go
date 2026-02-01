@@ -94,29 +94,8 @@ func (oc *AIClient) createBuilderRoom(ctx context.Context) (*bridgev2.Portal, *b
 	return portal, chatInfo, nil
 }
 
-// initPresetsInBuilder is a no-op since preset agents are loaded from code.
-// Custom agents are stored in UserLoginMetadata.CustomAgents and persisted
-// to the bridge database. This approach is simpler than Matrix state events.
-func (oc *AIClient) initPresetsInBuilder(_ context.Context, _ *bridgev2.Portal) error {
-	oc.log.Debug().Msg("Preset agents loaded from code, custom agents stored in metadata")
-	return nil
-}
-
 // isBuilderRoom checks if a portal is the Builder room.
 func (oc *AIClient) isBuilderRoom(portal *bridgev2.Portal) bool {
 	meta := loginMetadata(oc.UserLogin)
 	return meta.BuilderRoomID != "" && portal.PortalKey.ID == meta.BuilderRoomID
-}
-
-// getBuilderRoomPortal returns the Builder room portal if it exists.
-func (oc *AIClient) getBuilderRoomPortal(ctx context.Context) (*bridgev2.Portal, error) {
-	meta := loginMetadata(oc.UserLogin)
-	if meta.BuilderRoomID == "" {
-		return nil, fmt.Errorf("builder room not initialized")
-	}
-
-	return oc.UserLogin.Bridge.GetPortalByKey(ctx, networkid.PortalKey{
-		ID:       meta.BuilderRoomID,
-		Receiver: oc.UserLogin.ID,
-	})
 }
