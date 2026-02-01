@@ -16,7 +16,7 @@ const (
 // Default models for each provider
 const (
 	DefaultModelOpenAI     = "openai/gpt-5.2"
-	DefaultModelOpenRouter = "anthropic/claude-sonnet-4.5"
+	DefaultModelOpenRouter = "google/gemini-2.5-flash"
 	DefaultModelBeeper     = "anthropic/claude-sonnet-4.5"
 )
 
