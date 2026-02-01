@@ -403,6 +403,9 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 		pm.SystemPrompt = room.SystemPrompt
 		portal.Topic = room.SystemPrompt
 		portal.TopicSet = true
+		if resp.PortalInfo != nil {
+			resp.PortalInfo.Topic = &room.SystemPrompt
+		}
 	}
 
 	if err := portal.Save(ctx); err != nil {
@@ -417,6 +420,11 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 	if room.Name != "" {
 		if err := b.store.client.setRoomName(ctx, portal, room.Name); err != nil {
 			b.store.client.log.Warn().Err(err).Msg("Failed to set Matrix room name")
+		}
+	}
+	if room.SystemPrompt != "" {
+		if err := b.store.client.setRoomTopic(ctx, portal, room.SystemPrompt); err != nil {
+			b.store.client.log.Warn().Err(err).Msg("Failed to set Matrix room topic")
 		}
 	}
 
@@ -469,6 +477,11 @@ func (b *BossStoreAdapter) ModifyRoom(ctx context.Context, roomID string, update
 	if updates.Name != "" && portal.MXID != "" {
 		if err := b.store.client.setRoomName(ctx, portal, updates.Name); err != nil {
 			b.store.client.log.Warn().Err(err).Msg("Failed to set Matrix room name")
+		}
+	}
+	if updates.SystemPrompt != "" && portal.MXID != "" {
+		if err := b.store.client.setRoomTopic(ctx, portal, updates.SystemPrompt); err != nil {
+			b.store.client.log.Warn().Err(err).Msg("Failed to set Matrix room topic")
 		}
 	}
 

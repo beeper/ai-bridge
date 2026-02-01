@@ -28,3 +28,44 @@ providers:
 default_system_prompt: |
   You are a helpful assistant.
 model_cache_duration: 6h
+
+# Context pruning configuration (OpenClaw-style).
+# Reduces token usage by intelligently truncating old tool results.
+# Disabled by default - opt-in feature.
+pruning:
+  # Enable proactive context pruning
+  enabled: false
+
+  # Ratio of context window usage that triggers soft trimming (0.0-1.0)
+  # At 30% usage, large tool results start getting truncated
+  soft_trim_ratio: 0.3
+
+  # Ratio of context window usage that triggers hard clearing (0.0-1.0)
+  # At 50% usage, old tool results are replaced with placeholder
+  hard_clear_ratio: 0.5
+
+  # Number of recent assistant messages to protect from pruning
+  keep_last_assistants: 3
+
+  # Minimum total chars in prunable tool results before hard clear kicks in
+  min_prunable_chars: 50000
+
+  # Tool results larger than this are candidates for soft trimming
+  soft_trim_max_chars: 4000
+
+  # When soft trimming, keep this many chars from the start
+  soft_trim_head_chars: 1500
+
+  # When soft trimming, keep this many chars from the end
+  soft_trim_tail_chars: 1500
+
+  # Enable/disable hard clear phase
+  hard_clear_enabled: true
+
+  # Placeholder text for hard-cleared tool results
+  hard_clear_placeholder: "[Old tool result content cleared]"
+
+  # Tool patterns to allow/deny pruning (supports wildcards: exec*, *_search)
+  # Empty means all tools are prunable unless denied
+  # tools_allow: []
+  # tools_deny: []

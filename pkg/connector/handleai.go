@@ -341,6 +341,9 @@ func (oc *AIClient) streamingResponse(
 	oc.setModelTyping(ctx, portal, true)
 	defer oc.setModelTyping(ctx, portal, false)
 
+	// Apply proactive context pruning if enabled
+	messages = oc.applyProactivePruning(ctx, messages, meta)
+
 	// Build Responses API params using shared helper
 	params := oc.buildResponsesAPIParams(ctx, portal, meta, messages)
 
@@ -1052,6 +1055,9 @@ func (oc *AIClient) streamChatCompletions(
 
 	oc.setModelTyping(ctx, portal, true)
 	defer oc.setModelTyping(ctx, portal, false)
+
+	// Apply proactive context pruning if enabled
+	messages = oc.applyProactivePruning(ctx, messages, meta)
 
 	params := openai.ChatCompletionNewParams{
 		Model:    oc.effectiveModelForAPI(meta),
@@ -2324,5 +2330,77 @@ func (oc *AIClient) setRoomName(ctx context.Context, portal *bridgev2.Portal, na
 	}
 
 	oc.log.Debug().Str("name", name).Msg("Set Matrix room name")
+	return nil
+}
+
+// applyProactivePruning applies context pruning before sending to the API
+func (oc *AIClient) applyProactivePruning(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion, meta *PortalMetadata) []openai.ChatCompletionMessageParamUnion {
+	config := oc.connector.Config.Pruning
+	if config == nil || !config.Enabled {
+		return messages
+	}
+
+	// Get model context window (default to 128k if unknown)
+	contextWindow := oc.getModelContextWindow(meta)
+	if contextWindow <= 0 {
+		contextWindow = 128000
+	}
+
+	log := zerolog.Ctx(ctx)
+	beforeCount := len(messages)
+
+	pruned := PruneContext(messages, config, contextWindow)
+
+	if len(pruned) != beforeCount {
+		log.Debug().
+			Int("before", beforeCount).
+			Int("after", len(pruned)).
+			Int("context_window", contextWindow).
+			Msg("Applied proactive context pruning")
+	}
+
+	return pruned
+}
+
+// getModelContextWindow returns the context window size for the current model
+func (oc *AIClient) getModelContextWindow(meta *PortalMetadata) int {
+	modelID := oc.effectiveModel(meta)
+
+	// Check cached model info first
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta.ModelCache != nil {
+		for _, m := range loginMeta.ModelCache.Models {
+			if m.ID == modelID {
+				return m.ContextWindow
+			}
+		}
+	}
+
+	// Fallback: check built-in model manifest
+	if m, ok := ModelManifest.Models[modelID]; ok {
+		return m.ContextWindow
+	}
+
+	// Default for unknown models
+	return 128000
+}
+
+// setRoomTopic updates the room topic in portal metadata
+// Note: Matrix room topic state events are not sent as mautrix event types may not support it
+func (oc *AIClient) setRoomTopic(ctx context.Context, portal *bridgev2.Portal, topic string) error {
+	if portal.MXID == "" {
+		return fmt.Errorf("portal has no Matrix room ID")
+	}
+
+	// Update portal metadata
+	meta := portalMeta(portal)
+	meta.SystemPrompt = topic
+	portal.Topic = topic
+	portal.TopicSet = true
+	if err := portal.Save(ctx); err != nil {
+		return fmt.Errorf("failed to save portal: %w", err)
+	}
+
+	oc.log.Debug().Str("topic", topic).Msg("Set room topic in metadata")
 	return nil
 }

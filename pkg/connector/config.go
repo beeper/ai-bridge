@@ -20,6 +20,9 @@ type Config struct {
 	// Global settings
 	DefaultSystemPrompt string        `yaml:"default_system_prompt"`
 	ModelCacheDuration  time.Duration `yaml:"model_cache_duration"`
+
+	// Context pruning configuration (OpenClaw-style)
+	Pruning *PruningConfig `yaml:"pruning"`
 }
 
 // BeeperConfig contains Beeper AI proxy credentials for automatic login.
@@ -65,4 +68,16 @@ func upgradeConfig(helper configupgrade.Helper) {
 
 	// Bridge-specific configuration
 	helper.Copy(configupgrade.Str, "bridge", "command_prefix")
+
+	// Context pruning configuration
+	helper.Copy(configupgrade.Bool, "pruning", "enabled")
+	helper.Copy(configupgrade.Float, "pruning", "soft_trim_ratio")
+	helper.Copy(configupgrade.Float, "pruning", "hard_clear_ratio")
+	helper.Copy(configupgrade.Int, "pruning", "keep_last_assistants")
+	helper.Copy(configupgrade.Int, "pruning", "min_prunable_chars")
+	helper.Copy(configupgrade.Int, "pruning", "soft_trim_max_chars")
+	helper.Copy(configupgrade.Int, "pruning", "soft_trim_head_chars")
+	helper.Copy(configupgrade.Int, "pruning", "soft_trim_tail_chars")
+	helper.Copy(configupgrade.Bool, "pruning", "hard_clear_enabled")
+	helper.Copy(configupgrade.Str, "pruning", "hard_clear_placeholder")
 }

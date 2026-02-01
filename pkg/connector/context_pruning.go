@@ -2,26 +2,85 @@ package connector
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/openai/openai-go/v3"
 )
 
-// Context pruning settings - can be made configurable later
+// PruningConfig configures context pruning behavior (matches OpenClaw's AgentContextPruningConfig)
+type PruningConfig struct {
+	// Enabled turns on proactive context pruning
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// SoftTrimRatio is the context usage ratio (0.0-1.0) that triggers soft trimming
+	// Default: 0.3 (30% of context window)
+	SoftTrimRatio float64 `yaml:"soft_trim_ratio" json:"soft_trim_ratio,omitempty"`
+
+	// HardClearRatio is the context usage ratio (0.0-1.0) that triggers hard clearing
+	// Default: 0.5 (50% of context window)
+	HardClearRatio float64 `yaml:"hard_clear_ratio" json:"hard_clear_ratio,omitempty"`
+
+	// KeepLastAssistants protects the N most recent assistant messages from pruning
+	// Default: 3
+	KeepLastAssistants int `yaml:"keep_last_assistants" json:"keep_last_assistants,omitempty"`
+
+	// MinPrunableChars is the minimum total chars in prunable tool results before hard clear kicks in
+	// Default: 50000
+	MinPrunableChars int `yaml:"min_prunable_chars" json:"min_prunable_chars,omitempty"`
+
+	// SoftTrimMaxChars is the threshold for considering a tool result "large" (triggering soft trim)
+	// Default: 4000
+	SoftTrimMaxChars int `yaml:"soft_trim_max_chars" json:"soft_trim_max_chars,omitempty"`
+
+	// SoftTrimHeadChars is how many chars to keep from the start when soft trimming
+	// Default: 1500
+	SoftTrimHeadChars int `yaml:"soft_trim_head_chars" json:"soft_trim_head_chars,omitempty"`
+
+	// SoftTrimTailChars is how many chars to keep from the end when soft trimming
+	// Default: 1500
+	SoftTrimTailChars int `yaml:"soft_trim_tail_chars" json:"soft_trim_tail_chars,omitempty"`
+
+	// HardClearEnabled allows disabling hard clear phase
+	// Default: true
+	HardClearEnabled *bool `yaml:"hard_clear_enabled" json:"hard_clear_enabled,omitempty"`
+
+	// HardClearPlaceholder is the text that replaces cleared tool results
+	// Default: "[Old tool result content cleared]"
+	HardClearPlaceholder string `yaml:"hard_clear_placeholder" json:"hard_clear_placeholder,omitempty"`
+
+	// ToolsAllow is a list of tool name patterns to prune (supports wildcards: exec*, *_search)
+	// Empty means all tools are prunable (unless in deny list)
+	ToolsAllow []string `yaml:"tools_allow" json:"tools_allow,omitempty"`
+
+	// ToolsDeny is a list of tool name patterns to never prune (supports wildcards)
+	ToolsDeny []string `yaml:"tools_deny" json:"tools_deny,omitempty"`
+}
+
+// DefaultPruningConfig returns OpenClaw's default settings
+func DefaultPruningConfig() *PruningConfig {
+	enabled := true
+	return &PruningConfig{
+		Enabled:              false, // Off by default, user must opt-in
+		SoftTrimRatio:        0.3,
+		HardClearRatio:       0.5,
+		KeepLastAssistants:   3,
+		MinPrunableChars:     50000,
+		SoftTrimMaxChars:     4000,
+		SoftTrimHeadChars:    1500,
+		SoftTrimTailChars:    1500,
+		HardClearEnabled:     &enabled,
+		HardClearPlaceholder: "[Old tool result content cleared]",
+	}
+}
+
+// Constants matching OpenClaw
 const (
-	// Approximate characters per token for estimation
-	charsPerToken = 4
+	// Approximate characters per token for estimation (OpenClaw uses 4)
+	charsPerTokenEstimate = 4
 
-	// When pruning tool results, keep this many chars from head
-	toolResultHeadChars = 2000
-
-	// When pruning tool results, keep this many chars from tail
-	toolResultTailChars = 1000
-
-	// Minimum messages to keep (besides system + latest user)
-	minHistoryMessages = 2
-
-	// Threshold for considering a tool result "large" and prunable
-	largeToolResultChars = 4000
+	// Approximate chars for an image in context (OpenClaw uses 8000)
+	imageCharEstimate = 8000
 )
 
 // messageInfo holds metadata about a message for pruning decisions
@@ -29,218 +88,435 @@ type messageInfo struct {
 	index        int
 	role         string
 	charCount    int
-	tokenCount   int
-	isToolCall   bool // assistant message with tool calls
-	isToolResult bool // tool result message
-	toolCallID   string
-	prunable     bool
-	pruned       bool
+	isToolCall   bool   // assistant message with tool calls
+	isToolResult bool   // tool result message
+	toolCallID   string // for tool results
+	toolName     string // for tool results (used for allow/deny matching)
+	hasImages    bool   // tool result contains images (never prune these)
 }
 
-// estimateTokens estimates token count from character count
-func estimateTokens(chars int) int {
-	return (chars + charsPerToken - 1) / charsPerToken
+// estimateChars estimates character count from a message (OpenClaw approach)
+func estimateMessageChars(msg openai.ChatCompletionMessageParamUnion) int {
+	switch {
+	case msg.OfSystem != nil:
+		return len(extractSystemContent(msg.OfSystem.Content))
+
+	case msg.OfUser != nil:
+		chars := len(extractUserContent(msg.OfUser.Content))
+		// Add image estimates
+		for _, part := range msg.OfUser.Content.OfArrayOfContentParts {
+			if part.OfImageURL != nil {
+				chars += imageCharEstimate
+			}
+		}
+		return chars
+
+	case msg.OfAssistant != nil:
+		chars := len(extractAssistantContent(msg.OfAssistant.Content))
+		// Add tool call arguments
+		for _, tc := range msg.OfAssistant.ToolCalls {
+			if tc.OfFunction != nil {
+				chars += len(tc.OfFunction.Function.Name) + len(tc.OfFunction.Function.Arguments)
+			}
+		}
+		return chars
+
+	case msg.OfTool != nil:
+		return len(extractToolContent(msg.OfTool.Content))
+	}
+	return 0
 }
 
 // analyzeMessage extracts metadata from a message for pruning decisions
 func analyzeMessage(msg openai.ChatCompletionMessageParamUnion, index int) messageInfo {
 	info := messageInfo{
-		index: index,
+		index:     index,
+		charCount: estimateMessageChars(msg),
 	}
 
 	switch {
 	case msg.OfSystem != nil:
 		info.role = "system"
-		content := extractSystemContent(msg.OfSystem.Content)
-		info.charCount = len(content)
-		// System messages are never prunable
-		info.prunable = false
 
 	case msg.OfUser != nil:
 		info.role = "user"
-		content := extractUserContent(msg.OfUser.Content)
-		info.charCount = len(content)
-		// Add image token estimates
-		for _, part := range msg.OfUser.Content.OfArrayOfContentParts {
-			if part.OfImageURL != nil {
-				// Images consume significant tokens (~85 tokens for low detail, 765+ for high)
-				info.charCount += 3000 // Conservative estimate
-			}
-		}
-		info.prunable = true
 
 	case msg.OfAssistant != nil:
 		info.role = "assistant"
-		content := extractAssistantContent(msg.OfAssistant.Content)
-		info.charCount = len(content)
-		// Check for tool calls
-		if len(msg.OfAssistant.ToolCalls) > 0 {
-			info.isToolCall = true
-			for _, tc := range msg.OfAssistant.ToolCalls {
-				if tc.OfFunction != nil {
-					info.charCount += len(tc.OfFunction.Function.Name) + len(tc.OfFunction.Function.Arguments)
-				}
-			}
-		}
-		info.prunable = true
+		info.isToolCall = len(msg.OfAssistant.ToolCalls) > 0
 
 	case msg.OfTool != nil:
 		info.role = "tool"
 		info.isToolResult = true
 		info.toolCallID = msg.OfTool.ToolCallID
-		content := extractToolContent(msg.OfTool.Content)
-		info.charCount = len(content)
-		// Large tool results are prunable (can be truncated)
-		info.prunable = info.charCount > largeToolResultChars
+		// Note: OpenAI SDK doesn't expose tool name on result, we'd need to track from call
+		// For now, all tool results are potentially prunable unless they have images
+		// Images in tool results: check content parts
+		for _, part := range msg.OfTool.Content.OfArrayOfContentParts {
+			// Tool results typically don't have image parts in OpenAI format,
+			// but we check anyway for safety
+			_ = part // OpenAI tool content is text-only currently
+		}
 	}
 
-	info.tokenCount = estimateTokens(info.charCount)
 	return info
 }
 
-// truncateToolResult truncates a large tool result keeping head and tail
-func truncateToolResult(content string) string {
-	if len(content) <= toolResultHeadChars+toolResultTailChars+100 {
+// compiledPattern represents a pre-compiled tool name pattern
+type compiledPattern struct {
+	kind  string // "all", "exact", or "regex"
+	value string
+	regex *regexp.Regexp
+}
+
+// compilePattern compiles a tool name pattern (supports wildcards like exec*, *_search)
+func compilePattern(pattern string) compiledPattern {
+	pattern = strings.TrimSpace(strings.ToLower(pattern))
+	if pattern == "" {
+		return compiledPattern{kind: "exact", value: ""}
+	}
+	if pattern == "*" {
+		return compiledPattern{kind: "all"}
+	}
+	if !strings.Contains(pattern, "*") {
+		return compiledPattern{kind: "exact", value: pattern}
+	}
+	// Convert glob pattern to regex
+	escaped := regexp.QuoteMeta(pattern)
+	rePattern := "^" + strings.ReplaceAll(escaped, "\\*", ".*") + "$"
+	re, err := regexp.Compile(rePattern)
+	if err != nil {
+		return compiledPattern{kind: "exact", value: pattern}
+	}
+	return compiledPattern{kind: "regex", regex: re}
+}
+
+// matchesPattern checks if a tool name matches a compiled pattern
+func matchesPattern(toolName string, p compiledPattern) bool {
+	switch p.kind {
+	case "all":
+		return true
+	case "exact":
+		return toolName == p.value
+	case "regex":
+		return p.regex != nil && p.regex.MatchString(toolName)
+	}
+	return false
+}
+
+// matchesAnyPattern checks if a tool name matches any of the patterns
+func matchesAnyPattern(toolName string, patterns []compiledPattern) bool {
+	for _, p := range patterns {
+		if matchesPattern(toolName, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// makeToolPrunablePredicate creates a function that checks if a tool is prunable (OpenClaw pattern)
+func makeToolPrunablePredicate(config *PruningConfig) func(toolName string) bool {
+	if config == nil {
+		return func(string) bool { return true }
+	}
+
+	var allowPatterns, denyPatterns []compiledPattern
+	for _, p := range config.ToolsAllow {
+		allowPatterns = append(allowPatterns, compilePattern(p))
+	}
+	for _, p := range config.ToolsDeny {
+		denyPatterns = append(denyPatterns, compilePattern(p))
+	}
+
+	return func(toolName string) bool {
+		normalized := strings.TrimSpace(strings.ToLower(toolName))
+		// Check deny list first
+		if matchesAnyPattern(normalized, denyPatterns) {
+			return false
+		}
+		// If no allow list, everything not denied is allowed
+		if len(allowPatterns) == 0 {
+			return true
+		}
+		// Otherwise must be in allow list
+		return matchesAnyPattern(normalized, allowPatterns)
+	}
+}
+
+// softTrimToolResult truncates a large tool result keeping head and tail (OpenClaw style)
+func softTrimToolResult(content string, config *PruningConfig) string {
+	headChars := config.SoftTrimHeadChars
+	tailChars := config.SoftTrimTailChars
+	if headChars <= 0 {
+		headChars = 1500
+	}
+	if tailChars <= 0 {
+		tailChars = 1500
+	}
+
+	// Don't trim if content is small enough
+	if len(content) <= headChars+tailChars+100 {
 		return content
 	}
 
-	head := content[:toolResultHeadChars]
-	tail := content[len(content)-toolResultTailChars:]
-	omitted := len(content) - toolResultHeadChars - toolResultTailChars
+	head := content[:headChars]
+	tail := content[len(content)-tailChars:]
 
-	return head + fmt.Sprintf("\n\n[... %d characters omitted ...]\n\n", omitted) + tail
+	return fmt.Sprintf("%s\n...\n%s\n\n[Tool result trimmed: kept first %d chars and last %d chars of %d chars.]",
+		head, tail, headChars, tailChars, len(content))
 }
 
-// smartTruncatePrompt intelligently prunes messages while preserving conversation coherence.
-// Strategy:
-// 1. Never remove system prompt or latest user message
-// 2. First, truncate large tool results (keep head + tail)
-// 3. Then remove oldest messages, keeping tool call/result pairs together
-// 4. Preserve recent context with higher priority
-func smartTruncatePrompt(
+// findAssistantCutoffIndex finds the index where protected tail starts (OpenClaw pattern)
+// Messages at or after this index are protected from pruning
+func findAssistantCutoffIndex(messages []messageInfo, keepLastAssistants int) int {
+	if keepLastAssistants <= 0 {
+		return len(messages) // Everything is potentially prunable
+	}
+
+	remaining := keepLastAssistants
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].role != "assistant" {
+			continue
+		}
+		remaining--
+		if remaining == 0 {
+			return i
+		}
+	}
+
+	// Not enough assistant messages - nothing is prunable
+	return len(messages)
+}
+
+// findFirstUserIndex finds the index of the first user message (OpenClaw pattern)
+// Never prune anything before this - protects bootstrap/identity files
+func findFirstUserIndex(messages []messageInfo) int {
+	for i, m := range messages {
+		if m.role == "user" {
+			return i
+		}
+	}
+	return len(messages) // No user message found
+}
+
+// estimateTotalChars calculates total character count for messages
+func estimateTotalChars(messages []messageInfo) int {
+	total := 0
+	for _, m := range messages {
+		total += m.charCount
+	}
+	return total
+}
+
+// PruneContext prunes messages to fit within context window (OpenClaw algorithm)
+// Phase 1: Soft trim - truncate large tool results to head+tail
+// Phase 2: Hard clear - replace old tool results with placeholder
+func PruneContext(
 	prompt []openai.ChatCompletionMessageParamUnion,
-	targetReduction float64, // 0.5 = reduce by 50%
+	config *PruningConfig,
+	contextWindowTokens int,
 ) []openai.ChatCompletionMessageParamUnion {
-	if len(prompt) <= 2 {
-		return nil // Can't truncate further
+	if config == nil || !config.Enabled {
+		return prompt
+	}
+	if len(prompt) == 0 || contextWindowTokens <= 0 {
+		return prompt
+	}
+
+	// Apply defaults for any missing config values
+	cfg := applyPruningDefaults(config)
+
+	// Convert token window to char window (OpenClaw uses chars/4)
+	charWindow := contextWindowTokens * charsPerTokenEstimate
+	if charWindow <= 0 {
+		return prompt
 	}
 
 	// Analyze all messages
 	messages := make([]messageInfo, len(prompt))
-	totalTokens := 0
 	for i, msg := range prompt {
 		messages[i] = analyzeMessage(msg, i)
-		totalTokens += messages[i].tokenCount
 	}
 
-	targetTokens := int(float64(totalTokens) * (1 - targetReduction))
-	currentTokens := totalTokens
+	// Find boundaries
+	cutoffIndex := findAssistantCutoffIndex(messages, cfg.KeepLastAssistants)
+	firstUserIndex := findFirstUserIndex(messages)
+	pruneStartIndex := firstUserIndex // Never prune before first user message
 
-	// Phase 1: Truncate large tool results first
-	for i := range messages {
-		if currentTokens <= targetTokens {
-			break
+	// Calculate current usage ratio
+	totalChars := estimateTotalChars(messages)
+	ratio := float64(totalChars) / float64(charWindow)
+
+	// If under soft trim threshold, no pruning needed
+	if ratio < cfg.SoftTrimRatio {
+		return prompt
+	}
+
+	// Create predicate for tool pruning
+	isToolPrunable := makeToolPrunablePredicate(cfg)
+
+	// Find prunable tool result indices
+	var prunableToolIndexes []int
+	for i := pruneStartIndex; i < cutoffIndex; i++ {
+		m := messages[i]
+		if !m.isToolResult {
+			continue
 		}
-		if messages[i].role == "tool" && messages[i].charCount > largeToolResultChars {
-			// Truncate this tool result
-			oldChars := messages[i].charCount
-			newChars := toolResultHeadChars + toolResultTailChars + 100
-			savedTokens := estimateTokens(oldChars - newChars)
-			currentTokens -= savedTokens
-			messages[i].pruned = true
-			messages[i].charCount = newChars
-			messages[i].tokenCount = estimateTokens(newChars)
+		if m.hasImages {
+			continue // Never prune tool results with images
 		}
-	}
-
-	// Phase 2: Remove oldest messages if still over target
-	// Find boundaries: system prompt (index 0 if present), latest user message
-	systemIdx := -1
-	latestUserIdx := -1
-	if len(messages) > 0 && messages[0].role == "system" {
-		systemIdx = 0
-	}
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].role == "user" {
-			latestUserIdx = i
-			break
+		if !isToolPrunable(m.toolName) {
+			continue
 		}
+		prunableToolIndexes = append(prunableToolIndexes, i)
 	}
 
-	// Mark messages for removal from oldest to newest
-	startIdx := 0
-	if systemIdx == 0 {
-		startIdx = 1
-	}
+	// Phase 1: Soft trim - truncate large tool results
+	result := make([]openai.ChatCompletionMessageParamUnion, len(prompt))
+	copy(result, prompt)
 
-	removedCount := 0
-	for i := startIdx; i < len(messages) && currentTokens > targetTokens; i++ {
-		// Don't remove the latest user message
-		if i == latestUserIdx {
+	for _, i := range prunableToolIndexes {
+		msg := result[i]
+		if msg.OfTool == nil {
+			continue
+		}
+		content := extractToolContent(msg.OfTool.Content)
+		if len(content) <= cfg.SoftTrimMaxChars {
 			continue
 		}
 
-		// Don't remove if it would leave fewer than minHistoryMessages
-		remainingHistory := len(messages) - removedCount - 2 // -2 for system and latest user
-		if remainingHistory <= minHistoryMessages {
+		// Soft trim this tool result
+		trimmed := softTrimToolResult(content, cfg)
+		result[i] = openai.ToolMessage(trimmed, msg.OfTool.ToolCallID)
+
+		// Update char count
+		oldChars := messages[i].charCount
+		newChars := len(trimmed)
+		totalChars += newChars - oldChars
+		messages[i].charCount = newChars
+	}
+
+	// Recalculate ratio after soft trim
+	ratio = float64(totalChars) / float64(charWindow)
+
+	// If under hard clear threshold, we're done
+	if ratio < cfg.HardClearRatio {
+		return result
+	}
+
+	// Check if hard clear is enabled
+	hardClearEnabled := cfg.HardClearEnabled == nil || *cfg.HardClearEnabled
+	if !hardClearEnabled {
+		return result
+	}
+
+	// Check if there's enough prunable content for hard clear
+	var prunableToolChars int
+	for _, i := range prunableToolIndexes {
+		prunableToolChars += messages[i].charCount
+	}
+	if prunableToolChars < cfg.MinPrunableChars {
+		return result
+	}
+
+	// Phase 2: Hard clear - replace old tool results with placeholder
+	placeholder := cfg.HardClearPlaceholder
+	if placeholder == "" {
+		placeholder = "[Old tool result content cleared]"
+	}
+
+	for _, i := range prunableToolIndexes {
+		if ratio < cfg.HardClearRatio {
 			break
 		}
-
-		// If this is a tool call, also mark its results for removal
-		if messages[i].isToolCall {
-			currentTokens -= messages[i].tokenCount
-			messages[i].pruned = true
-			removedCount++
-
-			// Find and remove associated tool results
-			for j := i + 1; j < len(messages); j++ {
-				if messages[j].isToolResult {
-					currentTokens -= messages[j].tokenCount
-					messages[j].pruned = true
-					removedCount++
-				} else if messages[j].role == "assistant" || messages[j].role == "user" {
-					break // Stop at next non-tool message
-				}
-			}
+		msg := result[i]
+		if msg.OfTool == nil {
 			continue
 		}
 
-		// If this is a tool result without its call being removed, skip it
-		// (we don't want orphaned tool results)
-		if messages[i].isToolResult {
-			continue
-		}
+		// Replace with placeholder
+		result[i] = openai.ToolMessage(placeholder, msg.OfTool.ToolCallID)
 
-		// Remove this message
-		currentTokens -= messages[i].tokenCount
-		messages[i].pruned = true
-		removedCount++
+		// Update totals
+		oldChars := messages[i].charCount
+		newChars := len(placeholder)
+		totalChars += newChars - oldChars
+		ratio = float64(totalChars) / float64(charWindow)
 	}
 
-	// Build result, applying truncation to tool results and skipping removed messages
-	var result []openai.ChatCompletionMessageParamUnion
-	for i, info := range messages {
-		if info.pruned && info.role != "tool" {
-			continue // Skip removed messages (except tool results which get truncated)
-		}
+	return result
+}
 
-		msg := prompt[i]
+// applyPruningDefaults fills in default values for any missing config fields
+func applyPruningDefaults(config *PruningConfig) *PruningConfig {
+	cfg := *config // Copy
+	defaults := DefaultPruningConfig()
 
-		// Apply truncation to large tool results
-		if info.role == "tool" && info.pruned {
-			if msg.OfTool != nil && msg.OfTool.Content.OfString.Value != "" {
-				truncated := truncateToolResult(msg.OfTool.Content.OfString.Value)
-				msg = openai.ToolMessage(truncated, msg.OfTool.ToolCallID)
-			}
-		}
-
-		result = append(result, msg)
+	if cfg.SoftTrimRatio <= 0 {
+		cfg.SoftTrimRatio = defaults.SoftTrimRatio
+	}
+	if cfg.HardClearRatio <= 0 {
+		cfg.HardClearRatio = defaults.HardClearRatio
+	}
+	if cfg.KeepLastAssistants <= 0 {
+		cfg.KeepLastAssistants = defaults.KeepLastAssistants
+	}
+	if cfg.MinPrunableChars <= 0 {
+		cfg.MinPrunableChars = defaults.MinPrunableChars
+	}
+	if cfg.SoftTrimMaxChars <= 0 {
+		cfg.SoftTrimMaxChars = defaults.SoftTrimMaxChars
+	}
+	if cfg.SoftTrimHeadChars <= 0 {
+		cfg.SoftTrimHeadChars = defaults.SoftTrimHeadChars
+	}
+	if cfg.SoftTrimTailChars <= 0 {
+		cfg.SoftTrimTailChars = defaults.SoftTrimTailChars
+	}
+	if cfg.HardClearPlaceholder == "" {
+		cfg.HardClearPlaceholder = defaults.HardClearPlaceholder
 	}
 
-	// Sanity check: if we removed too much, return at least system + latest user
-	if len(result) < 2 {
+	return &cfg
+}
+
+// smartTruncatePrompt is the fallback for context_length errors (reactive pruning)
+// Uses simple 50% reduction strategy
+func smartTruncatePrompt(
+	prompt []openai.ChatCompletionMessageParamUnion,
+	targetReduction float64,
+) []openai.ChatCompletionMessageParamUnion {
+	if len(prompt) <= 2 {
 		return nil
 	}
 
+	// Use PruneContext with aggressive settings for reactive pruning
+	config := &PruningConfig{
+		Enabled:           true,
+		SoftTrimRatio:     0.0, // Always soft trim
+		HardClearRatio:    0.0, // Always hard clear
+		KeepLastAssistants: 2,
+		MinPrunableChars:  0,
+		SoftTrimMaxChars:  2000,
+		SoftTrimHeadChars: 1000,
+		SoftTrimTailChars: 500,
+	}
+
+	// Estimate a reasonable context window from message count
+	// This is a fallback when we don't know the actual limit
+	estimatedTokens := 0
+	for _, msg := range prompt {
+		estimatedTokens += estimateMessageChars(msg) / charsPerTokenEstimate
+	}
+	// Target reduction means we want to keep (1-targetReduction) of tokens
+	targetTokens := int(float64(estimatedTokens) * (1 - targetReduction))
+	if targetTokens < 1000 {
+		targetTokens = 1000
+	}
+
+	result := PruneContext(prompt, config, targetTokens)
+	if len(result) < 2 {
+		return nil
+	}
 	return result
 }
