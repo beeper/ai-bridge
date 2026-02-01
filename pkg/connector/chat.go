@@ -121,6 +121,7 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 
 	var tools []ToolInfo
 
+	// Add builtin tools from config
 	for name, entry := range meta.ToolsConfig.Tools {
 		if entry == nil {
 			continue
@@ -155,6 +156,24 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 			Source:      source,
 			Reason:      reason,
 		})
+	}
+
+	// Add Desktop MCP tools if available
+	if oc.mcpClient != nil && oc.mcpClient.HasDesktopTools() {
+		mcpTools := oc.mcpClient.GetDesktopTools()
+		for _, mcpTool := range mcpTools {
+			tools = append(tools, ToolInfo{
+				Name:        mcpTool.Name,
+				DisplayName: mcpTool.Name,
+				Description: mcpTool.Description,
+				InputSchema: mcpTool.InputSchema,
+				Type:        "mcp",
+				Enabled:     true,
+				Available:   supportsTools,
+				Source:      SourceGlobalDefault,
+				Reason:      "Desktop MCP tool",
+			})
+		}
 	}
 
 	return tools

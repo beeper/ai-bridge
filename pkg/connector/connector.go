@@ -84,10 +84,16 @@ func (oc *OpenAIConnector) registerCustomEventHandlers() {
 	// Register handler for BeeperSendState wrapper events (desktop E2EE state updates)
 	matrixConnector.EventProcessor.On(event.BeeperSendState, oc.handleBeeperSendStateEvent)
 
+	// Register MCP over Matrix event handlers for Desktop IPC
+	matrixConnector.EventProcessor.On(DesktopHelloEventType, oc.handleDesktopHelloEvent)
+	matrixConnector.EventProcessor.On(MCPResponseEventType, oc.handleMCPResponseEvent)
+	matrixConnector.EventProcessor.On(MCPNotificationEventType, oc.handleMCPNotificationEvent)
+
 	oc.br.Log.Info().
 		Str("beeper_send_state_type", event.BeeperSendState.Type).
 		Str("beeper_send_state_class", event.BeeperSendState.Class.Name()).
 		Msg("Registered room settings event handlers (direct and BeeperSendState)")
+	oc.br.Log.Info().Msg("Registered MCP over Matrix event handlers for Desktop IPC")
 }
 
 // handleRoomSettingsEvent processes Matrix room settings state events from users
@@ -392,4 +398,191 @@ func (oc *OpenAIConnector) getLoginForPortal(ctx context.Context, user *bridgev2
 	}
 
 	return login
+}
+
+// =============================================================================
+// MCP over Matrix Event Handlers
+// =============================================================================
+
+// handleDesktopHelloEvent processes desktop_hello events from Beeper Desktop
+// This establishes the IPC connection and triggers MCP initialization
+func (oc *OpenAIConnector) handleDesktopHelloEvent(ctx context.Context, evt *event.Event) {
+	log := oc.br.Log.With().
+		Str("component", "desktop_hello_handler").
+		Str("room_id", evt.RoomID.String()).
+		Str("sender", evt.Sender.String()).
+		Logger()
+
+	// Parse the hello content
+	content, err := ParseDesktopHello(evt.Content.VeryRaw)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to parse desktop hello content")
+		return
+	}
+
+	if content.DeviceID == "" {
+		log.Warn().Msg("Desktop hello missing device_id")
+		return
+	}
+
+	log = log.With().
+		Str("device_id", content.DeviceID).
+		Str("device_name", content.DeviceName).
+		Str("app_version", content.AppVersion).
+		Logger()
+
+	log.Info().Msg("Received desktop hello")
+
+	// Find the user login for the sender
+	user, err := oc.br.GetUserByMXID(ctx, evt.Sender)
+	if err != nil || user == nil {
+		log.Warn().Err(err).Msg("Failed to get user for desktop hello")
+		return
+	}
+
+	login := user.GetDefaultLogin()
+	if login == nil {
+		log.Warn().Msg("User has no active login")
+		return
+	}
+
+	client, ok := login.Client.(*AIClient)
+	if !ok || client == nil {
+		log.Warn().Msg("Invalid client type for user login")
+		return
+	}
+
+	// Store the device info
+	meta := loginMetadata(login)
+	if meta.DesktopDevices == nil {
+		meta.DesktopDevices = make(map[string]*DesktopDeviceInfo)
+	}
+
+	meta.DesktopDevices[content.DeviceID] = &DesktopDeviceInfo{
+		DeviceID:   content.DeviceID,
+		DeviceName: content.DeviceName,
+		RoomID:     evt.RoomID,
+		LastSeen:   time.Now().Unix(),
+		AppVersion: content.AppVersion,
+		Online:     true,
+	}
+
+	// Set as preferred if no preference exists
+	if meta.PreferredDesktopDeviceID == "" {
+		meta.PreferredDesktopDeviceID = content.DeviceID
+	}
+
+	// Save the updated metadata
+	if err := login.Save(ctx); err != nil {
+		log.Err(err).Msg("Failed to save login metadata")
+		return
+	}
+
+	log.Info().Msg("Stored desktop device mapping")
+
+	// Initialize MCP connection asynchronously
+	go func() {
+		initCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		if err := client.initializeMCPConnection(initCtx, content.DeviceID); err != nil {
+			log.Err(err).Msg("Failed to initialize MCP connection")
+		}
+	}()
+}
+
+// handleMCPResponseEvent processes MCP response events from Beeper Desktop
+func (oc *OpenAIConnector) handleMCPResponseEvent(ctx context.Context, evt *event.Event) {
+	log := oc.br.Log.With().
+		Str("component", "mcp_response_handler").
+		Str("room_id", evt.RoomID.String()).
+		Str("sender", evt.Sender.String()).
+		Logger()
+
+	// Parse the response content
+	content, err := ParseMCPResponse(evt.Content.VeryRaw)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to parse MCP response content")
+		return
+	}
+
+	log.Debug().
+		Str("device_id", content.DeviceID).
+		Interface("request_id", content.MCP.ID).
+		Msg("Received MCP response")
+
+	// Find the user login for the sender
+	user, err := oc.br.GetUserByMXID(ctx, evt.Sender)
+	if err != nil || user == nil {
+		log.Warn().Err(err).Msg("Failed to get user for MCP response")
+		return
+	}
+
+	login := user.GetDefaultLogin()
+	if login == nil {
+		log.Warn().Msg("User has no active login")
+		return
+	}
+
+	client, ok := login.Client.(*AIClient)
+	if !ok || client == nil {
+		log.Warn().Msg("Invalid client type for user login")
+		return
+	}
+
+	// Route to MCP client
+	if client.mcpClient != nil {
+		client.mcpClient.HandleResponse(content)
+	}
+}
+
+// handleMCPNotificationEvent processes MCP notification events from Beeper Desktop
+func (oc *OpenAIConnector) handleMCPNotificationEvent(ctx context.Context, evt *event.Event) {
+	log := oc.br.Log.With().
+		Str("component", "mcp_notification_handler").
+		Str("room_id", evt.RoomID.String()).
+		Str("sender", evt.Sender.String()).
+		Logger()
+
+	// Parse the notification content
+	content, err := ParseMCPNotification(evt.Content.VeryRaw)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to parse MCP notification content")
+		return
+	}
+
+	log.Debug().
+		Str("device_id", content.DeviceID).
+		Str("method", content.MCP.Method).
+		Msg("Received MCP notification")
+
+	// Handle tools/list_changed notification
+	if content.MCP.Method == "notifications/tools/list_changed" {
+		// Find the user login and refresh tools
+		user, err := oc.br.GetUserByMXID(ctx, evt.Sender)
+		if err != nil || user == nil {
+			log.Warn().Err(err).Msg("Failed to get user for MCP notification")
+			return
+		}
+
+		login := user.GetDefaultLogin()
+		if login == nil {
+			return
+		}
+
+		client, ok := login.Client.(*AIClient)
+		if !ok || client == nil {
+			return
+		}
+
+		// Refresh tools asynchronously
+		go func() {
+			refreshCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			if err := client.refreshMCPTools(refreshCtx, content.DeviceID); err != nil {
+				log.Err(err).Msg("Failed to refresh MCP tools")
+			}
+		}()
+	}
 }

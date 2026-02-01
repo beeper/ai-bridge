@@ -502,6 +502,79 @@ func fnModels(ce *commands.Event) {
 	ce.Reply(sb.String())
 }
 
+// CommandDesktop handles the !ai desktop command
+var CommandDesktop = &commands.FullHandler{
+	Func: fnDesktop,
+	Name: "desktop",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Manage connected Desktop devices",
+		Args:        "[list|prefer _device_id_]",
+	},
+	RequiresLogin: true,
+}
+
+func fnDesktop(ce *commands.Event) {
+	client := getAIClient(ce)
+	if client == nil {
+		ce.Reply("Failed to access AI configuration")
+		return
+	}
+
+	loginMeta := loginMetadata(client.UserLogin)
+
+	if len(ce.Args) == 0 || ce.Args[0] == "list" {
+		// List connected devices
+		if len(loginMeta.DesktopDevices) == 0 {
+			ce.Reply("No Desktop devices connected. Open the AI bridge account pane in Beeper Desktop and click \"Connect Desktop\" to link a device.")
+			return
+		}
+
+		var sb strings.Builder
+		sb.WriteString("Connected Desktop devices:\n\n")
+		for _, device := range loginMeta.DesktopDevices {
+			preferred := ""
+			if device.DeviceID == loginMeta.PreferredDesktopDeviceID {
+				preferred = " (preferred)"
+			}
+			online := "offline"
+			if device.Online {
+				online = "online"
+			}
+			toolCount := len(device.Tools)
+			sb.WriteString(fmt.Sprintf("• **%s** (`%s`)%s\n", device.DeviceName, device.DeviceID, preferred))
+			sb.WriteString(fmt.Sprintf("  Status: %s, Tools: %d\n", online, toolCount))
+		}
+		sb.WriteString(fmt.Sprintf("\nUse `!ai desktop prefer <device_id>` to set the preferred device"))
+		ce.Reply(sb.String())
+		return
+	}
+
+	if ce.Args[0] == "prefer" || ce.Args[0] == "set" {
+		if len(ce.Args) < 2 {
+			ce.Reply("Usage: !ai desktop prefer <device_id>")
+			return
+		}
+
+		deviceID := ce.Args[1]
+		if _, ok := loginMeta.DesktopDevices[deviceID]; !ok {
+			ce.Reply("Device '%s' not found. Use `!ai desktop list` to see connected devices.", deviceID)
+			return
+		}
+
+		loginMeta.PreferredDesktopDeviceID = deviceID
+		if err := client.UserLogin.Save(ce.Ctx); err != nil {
+			ce.Reply("Failed to save preference: %v", err)
+			return
+		}
+
+		ce.Reply("Preferred Desktop device set to: %s", deviceID)
+		return
+	}
+
+	ce.Reply("Usage: !ai desktop [list|prefer <device_id>]")
+}
+
 // registerCommands registers all AI commands with the command processor
 func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 	proc.AddHandlers(
@@ -518,9 +591,10 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 		CommandRegenerate,
 		CommandTitle,
 		CommandModels,
+		CommandDesktop,
 	)
 	oc.br.Log.Info().
 		Str("section", HelpSectionAI.Name).
 		Int("section_order", HelpSectionAI.Order).
-		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, tools, mode, new, fork, regenerate, title, models")
+		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, tools, mode, new, fork, regenerate, title, models, desktop")
 }

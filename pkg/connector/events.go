@@ -600,14 +600,15 @@ type ToolToggle struct {
 
 // ToolInfo describes a tool and its status for room state broadcasting
 type ToolInfo struct {
-	Name        string        `json:"name"`
-	DisplayName string        `json:"display_name"` // Human-readable name for UI
-	Type        string        `json:"type"`         // "builtin", "provider", "plugin", "mcp"
-	Description string        `json:"description,omitempty"`
-	Enabled     bool          `json:"enabled"`
-	Available   bool          `json:"available"`        // Based on model capabilities and provider
-	Source      SettingSource `json:"source,omitempty"` // Where enabled state came from
-	Reason      string        `json:"reason,omitempty"` // Only when limited/unavailable
+	Name        string         `json:"name"`
+	DisplayName string         `json:"display_name"` // Human-readable name for UI
+	Type        string         `json:"type"`         // "builtin", "provider", "plugin", "mcp"
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema,omitempty"` // JSON Schema for tool parameters
+	Enabled     bool           `json:"enabled"`
+	Available   bool           `json:"available"`        // Based on model capabilities and provider
+	Source      SettingSource  `json:"source,omitempty"` // Where enabled state came from
+	Reason      string         `json:"reason,omitempty"` // Only when limited/unavailable
 }
 
 // StreamingConfig contains streaming behavior settings
@@ -706,4 +707,81 @@ type AttachmentMetadata struct {
 	Size     int    `json:"size,omitempty"`
 	Width    int    `json:"width,omitempty"`  // For images
 	Height   int    `json:"height,omitempty"` // For images
+}
+
+// =============================================================================
+// MCP over Matrix Transport Events
+// =============================================================================
+
+// DesktopHelloEventType is sent by Desktop to Bridge on IPC room creation and every launch
+var DesktopHelloEventType = event.Type{
+	Type:  "com.beeper.ai.desktop_hello",
+	Class: event.MessageEventType,
+}
+
+// MCPRequestEventType is used by Bridge to send MCP JSON-RPC requests to Desktop
+var MCPRequestEventType = event.Type{
+	Type:  "com.beeper.ai.mcp.request",
+	Class: event.MessageEventType,
+}
+
+// MCPResponseEventType is used by Desktop to send MCP JSON-RPC responses to Bridge
+var MCPResponseEventType = event.Type{
+	Type:  "com.beeper.ai.mcp.response",
+	Class: event.MessageEventType,
+}
+
+// MCPNotificationEventType is used for MCP notifications (either direction, no response expected)
+var MCPNotificationEventType = event.Type{
+	Type:  "com.beeper.ai.mcp.notification",
+	Class: event.MessageEventType,
+}
+
+// DesktopHelloContent is the content of a desktop_hello event
+type DesktopHelloContent struct {
+	DeviceID   string `json:"device_id"`
+	DeviceName string `json:"device_name,omitempty"`
+	AppVersion string `json:"app_version,omitempty"`
+}
+
+// MCPRequestContent wraps an MCP JSON-RPC request for Matrix transport
+type MCPRequestContent struct {
+	DeviceID string         `json:"device_id"`
+	MCP      MCPJSONRPCBase `json:"mcp"`
+}
+
+// MCPResponseContent wraps an MCP JSON-RPC response for Matrix transport
+type MCPResponseContent struct {
+	DeviceID string         `json:"device_id"`
+	MCP      MCPJSONRPCBase `json:"mcp"`
+}
+
+// MCPNotificationContent wraps an MCP notification for Matrix transport
+type MCPNotificationContent struct {
+	DeviceID string         `json:"device_id"`
+	MCP      MCPJSONRPCBase `json:"mcp"`
+}
+
+// MCPJSONRPCBase represents a generic JSON-RPC 2.0 message
+type MCPJSONRPCBase struct {
+	JSONRPC string         `json:"jsonrpc"`
+	ID      any            `json:"id,omitempty"` // string, number, or null
+	Method  string         `json:"method,omitempty"`
+	Params  map[string]any `json:"params,omitempty"`
+	Result  any            `json:"result,omitempty"`
+	Error   *MCPRPCError   `json:"error,omitempty"`
+}
+
+// MCPRPCError represents a JSON-RPC 2.0 error
+type MCPRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
+}
+
+// MCPTool represents an MCP tool definition received from Desktop
+type MCPTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"inputSchema,omitempty"`
 }
