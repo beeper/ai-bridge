@@ -19,7 +19,7 @@ providers:
   openai:
     default_model: "openai/gpt-4o-mini"
   openrouter:
-    default_model: "openrouter/openai/gpt-4o-mini"
+    default_model: "anthropic/claude-sonnet-4.5"
     # PDF processing engine for OpenRouter's file-parser plugin.
     # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
     default_pdf_engine: "mistral-ocr"
