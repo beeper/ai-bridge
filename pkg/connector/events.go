@@ -588,8 +588,6 @@ type RoomSettingsEventContent struct {
 	MaxCompletionTokens int         `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string      `json:"reasoning_effort,omitempty"`
 	ConversationMode    string      `json:"conversation_mode,omitempty"` // "messages" or "responses"
-	EmitThinking        *bool       `json:"emit_thinking,omitempty"`
-	EmitToolArgs        *bool       `json:"emit_tool_args,omitempty"`
 	DefaultAgentID      string      `json:"default_agent_id,omitempty"`
 	ToolToggle          *ToolToggle `json:"tool_toggle,omitempty"` // Single field for toggling any tool
 }
@@ -614,9 +612,7 @@ type ToolInfo struct {
 
 // StreamingConfig contains streaming behavior settings
 type StreamingConfig struct {
-	Enabled      bool `json:"enabled,omitempty"`
-	EmitThinking bool `json:"emit_thinking,omitempty"`
-	EmitToolArgs bool `json:"emit_tool_args,omitempty"`
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // ModelCapabilitiesEventContent represents available models and their capabilities

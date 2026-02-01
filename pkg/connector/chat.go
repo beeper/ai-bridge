@@ -522,8 +522,6 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 			Capabilities:        opts.CopyFrom.Capabilities,
 			ToolsConfig:         opts.CopyFrom.ToolsConfig,
 			ConversationMode:    opts.CopyFrom.ConversationMode,
-			EmitThinking:        opts.CopyFrom.EmitThinking,
-			EmitToolArgs:        opts.CopyFrom.EmitToolArgs,
 			DefaultAgentID:      opts.CopyFrom.DefaultAgentID,
 		}
 		modelID = opts.CopyFrom.Model
@@ -878,13 +876,6 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 	if config.ConversationMode != "" {
 		meta.ConversationMode = config.ConversationMode
 	}
-	// Boolean fields - only apply when explicitly set (non-nil)
-	if config.EmitThinking != nil {
-		meta.EmitThinking = *config.EmitThinking
-	}
-	if config.EmitToolArgs != nil {
-		meta.EmitToolArgs = *config.EmitToolArgs
-	}
 	if config.DefaultAgentID != "" {
 		meta.DefaultAgentID = config.DefaultAgentID
 	}
@@ -1134,8 +1125,6 @@ func (oc *AIClient) broadcastSettings(ctx context.Context, portal *bridgev2.Port
 		MaxCompletionTokens: meta.MaxCompletionTokens,
 		ReasoningEffort:     meta.ReasoningEffort,
 		ConversationMode:    meta.ConversationMode,
-		EmitThinking:        ptr.Ptr(meta.EmitThinking),
-		EmitToolArgs:        ptr.Ptr(meta.EmitToolArgs),
 		DefaultAgentID:      meta.DefaultAgentID,
 		// Note: ToolToggle is only for setting changes, not broadcasts
 	}

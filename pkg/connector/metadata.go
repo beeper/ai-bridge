@@ -101,8 +101,6 @@ type PortalMetadata struct {
 
 	ConversationMode string `json:"conversation_mode,omitempty"`
 	LastResponseID   string `json:"last_response_id,omitempty"`
-	EmitThinking     bool   `json:"emit_thinking,omitempty"`
-	EmitToolArgs     bool   `json:"emit_tool_args,omitempty"`
 	DefaultAgentID   string `json:"default_agent_id,omitempty"`
 }
 
