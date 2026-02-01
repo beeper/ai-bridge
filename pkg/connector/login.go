@@ -17,34 +17,22 @@ const (
 	ProviderCustom     = "custom"     // Custom OpenAI-compatible endpoint
 )
 
-// Login flow IDs
-const (
-	LoginFlowIDBeeper     = "beeper"     // Cloud mode (auto-completes using config credentials)
-	LoginFlowIDOpenAI     = "openai"     // Self-hosted
-	LoginFlowIDOpenRouter = "openrouter" // Self-hosted
-	LoginFlowIDCustom     = "custom"     // Self-hosted
-)
-
-// providerBaseURLs maps provider names to their API base URLs
-// For Beeper provider, the base URL is provided by the SDK (hungryserv endpoint)
-var providerBaseURLs = map[string]string{
-	ProviderOpenAI:     "https://api.openai.com/v1",
-	ProviderOpenRouter: "https://openrouter.ai/api/v1",
+// providerConfig defines login configuration for a provider
+type providerConfig struct {
+	baseURL  string // API base URL (empty if provided at runtime)
+	keyName  string // Display name for API key field
+	keyDesc  string // Description for API key field
+	needsURL bool   // Whether provider needs URL input
+	urlName  string // Display name for URL field
+	urlDesc  string // Description for URL field
 }
 
-// providerFieldConfig defines the login form fields for a provider
-type providerFieldConfig struct {
-	keyName, keyDesc string
-	needsURL         bool
-	urlName, urlDesc string
-}
-
-// providerFieldConfigs maps providers to their login field configuration
-var providerFieldConfigs = map[string]providerFieldConfig{
-	ProviderBeeper:     {"Beeper Access Token", "Your Beeper Matrix access token", true, "Beeper AI Proxy URL", "Your Beeper homeserver AI proxy endpoint"},
-	ProviderOpenAI:     {"OpenAI API Key", "Generate one at https://platform.openai.com/account/api-keys", false, "", ""},
-	ProviderOpenRouter: {"OpenRouter API Key", "Generate one at https://openrouter.ai/keys", false, "", ""},
-	ProviderCustom:     {"API Key", "API key for authentication", true, "Base URL", "OpenAI-compatible API endpoint (e.g., https://api.example.com/v1)"},
+// providerConfigs maps providers to their unified configuration
+var providerConfigs = map[string]providerConfig{
+	ProviderBeeper:     {"", "Beeper Access Token", "Your Beeper Matrix access token", true, "Beeper AI Proxy URL", "Your Beeper homeserver AI proxy endpoint"},
+	ProviderOpenAI:     {"https://api.openai.com/v1", "OpenAI API Key", "Generate one at https://platform.openai.com/account/api-keys", false, "", ""},
+	ProviderOpenRouter: {"https://openrouter.ai/api/v1", "OpenRouter API Key", "Generate one at https://openrouter.ai/keys", false, "", ""},
+	ProviderCustom:     {"", "API Key", "API key for authentication", true, "Base URL", "OpenAI-compatible API endpoint (e.g., https://api.example.com/v1)"},
 }
 
 var (
@@ -73,31 +61,27 @@ func (ol *OpenAILogin) Cancel() {}
 func (ol *OpenAILogin) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
 	key := strings.TrimSpace(input["api_key"])
 	if key == "" {
-		return nil, fmt.Errorf("please enter an API key")
+		return nil, &ErrAPIKeyRequired
 	}
 
+	cfg := providerConfigs[ol.Provider]
 	var baseURL string
-	switch ol.Provider {
-	case ProviderBeeper, ProviderCustom:
+	if cfg.needsURL {
 		baseURL = strings.TrimSpace(input["base_url"])
 		if baseURL == "" {
-			return nil, fmt.Errorf("please enter a base URL")
+			return nil, &ErrBaseURLRequired
 		}
-	default:
-		baseURL = providerBaseURLs[ol.Provider]
-	}
-
-	if baseURL == "" && (ol.Provider == ProviderOpenAI || ol.Provider == ProviderOpenRouter) {
-		return nil, fmt.Errorf("no base URL configured for provider %s", ol.Provider)
+	} else {
+		baseURL = cfg.baseURL
 	}
 
 	return ol.finishLogin(ctx, key, baseURL)
 }
 
 func (ol *OpenAILogin) credentialsStep() *bridgev2.LoginStep {
-	cfg, ok := providerFieldConfigs[ol.Provider]
+	cfg, ok := providerConfigs[ol.Provider]
 	if !ok {
-		cfg = providerFieldConfigs[ProviderCustom]
+		cfg = providerConfigs[ProviderCustom]
 	}
 
 	var fields []bridgev2.LoginInputDataField
@@ -148,15 +132,9 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, apiKey, baseURL string) 
 		return nil, fmt.Errorf("failed to load client: %w", err)
 	}
 
-	// Get the client from login.Client field (set by LoadUserLogin)
-	client := login.Client
-	if client == nil {
-		return nil, fmt.Errorf("failed to load client: client is nil")
-	}
-
 	// Trigger connection in background with a long-lived context
 	// (the request context gets cancelled after login returns)
-	go client.Connect(login.Log.WithContext(context.Background()))
+	go login.Client.Connect(login.Log.WithContext(context.Background()))
 
 	return &bridgev2.LoginStep{
 		Type:   bridgev2.LoginStepTypeComplete,

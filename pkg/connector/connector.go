@@ -254,17 +254,17 @@ func (oc *OpenAIConnector) hasBeeperConfig() bool {
 	return oc.Config.Beeper.BaseURL != "" && oc.Config.Beeper.Token != ""
 }
 
-// Package-level flow definitions
+// Package-level flow definitions (use Provider* constants as flow IDs)
 var (
 	beeperFlow = bridgev2.LoginFlow{
-		ID:          LoginFlowIDBeeper,
+		ID:          ProviderBeeper,
 		Name:        "Beeper AI",
 		Description: "Connect to Beeper AI (automatic)",
 	}
 	baseFlows = []bridgev2.LoginFlow{
-		{ID: LoginFlowIDOpenAI, Name: "OpenAI", Description: "Use your own OpenAI API key."},
-		{ID: LoginFlowIDOpenRouter, Name: "OpenRouter", Description: "Use your own OpenRouter API key."},
-		{ID: LoginFlowIDCustom, Name: "Custom OpenAI-compatible", Description: "Use a custom OpenAI-compatible API endpoint."},
+		{ID: ProviderOpenAI, Name: "OpenAI", Description: "Use your own OpenAI API key."},
+		{ID: ProviderOpenRouter, Name: "OpenRouter", Description: "Use your own OpenRouter API key."},
+		{ID: ProviderCustom, Name: "Custom OpenAI-compatible", Description: "Use a custom OpenAI-compatible API endpoint."},
 	}
 )
 

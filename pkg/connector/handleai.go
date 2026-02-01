@@ -46,6 +46,16 @@ type streamingState struct {
 	firstToken     bool
 }
 
+// newStreamingState creates a new streaming state with initialized fields
+func newStreamingState(meta *PortalMetadata) *streamingState {
+	return &streamingState{
+		turnID:      NewTurnID(),
+		agentID:     meta.DefaultAgentID,
+		startedAtMs: time.Now().UnixMilli(),
+		firstToken:  true,
+	}
+}
+
 // generatedImage tracks a pending image from image generation
 type generatedImage struct {
 	itemID   string
@@ -61,6 +71,54 @@ type activeToolCall struct {
 	input       strings.Builder
 	startedAtMs int64
 	eventID     id.EventID // Event ID of the tool call timeline event
+}
+
+// saveAssistantMessage saves the completed assistant message to the database
+func (oc *AIClient) saveAssistantMessage(
+	ctx context.Context,
+	log zerolog.Logger,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	meta *PortalMetadata,
+) {
+	modelID := oc.effectiveModel(meta)
+	assistantMsg := &database.Message{
+		ID:        MakeMessageID(state.initialEventID),
+		Room:      portal.PortalKey,
+		SenderID:  modelUserID(modelID),
+		MXID:      state.initialEventID,
+		Timestamp: time.Now(),
+		Metadata: &MessageMetadata{
+			Role:           "assistant",
+			Body:           state.accumulated.String(),
+			CompletionID:   state.responseID,
+			FinishReason:   state.finishReason,
+			Model:          modelID,
+			TurnID:         state.turnID,
+			AgentID:        state.agentID,
+			ToolCalls:      state.toolCalls,
+			StartedAtMs:    state.startedAtMs,
+			FirstTokenAtMs: state.firstTokenAtMs,
+			CompletedAtMs:  state.completedAtMs,
+			HasToolCalls:   len(state.toolCalls) > 0,
+			// Reasoning fields (only populated by Responses API)
+			ThinkingContent:    state.reasoning.String(),
+			ThinkingTokenCount: len(strings.Fields(state.reasoning.String())),
+		},
+	}
+	if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, assistantMsg); err != nil {
+		log.Warn().Err(err).Msg("Failed to save assistant message to database")
+	} else {
+		log.Debug().Str("msg_id", string(assistantMsg.ID)).Msg("Saved assistant message to database")
+	}
+
+	// Save LastResponseID for "responses" mode context chaining
+	if meta.ConversationMode == "responses" && state.responseID != "" {
+		meta.LastResponseID = state.responseID
+		if err := portal.Save(ctx); err != nil {
+			log.Warn().Err(err).Msg("Failed to save portal after storing response ID")
+		}
+	}
 }
 
 // dispatchCompletionInternal contains the actual completion logic
@@ -237,12 +295,7 @@ func (oc *AIClient) streamingResponse(
 	}
 
 	// Initialize streaming state with turn tracking
-	state := &streamingState{
-		turnID:      NewTurnID(),
-		agentID:     meta.DefaultAgentID, // Use default agent for now
-		startedAtMs: time.Now().UnixMilli(),
-		firstToken:  true,
-	}
+	state := newStreamingState(meta)
 
 	// Track active tool calls
 	activeTools := make(map[string]*activeToolCall)
@@ -561,49 +614,7 @@ func (oc *AIClient) streamingResponse(
 	// Send final edit to persist complete content with metadata (including reasoning)
 	if state.initialEventID != "" {
 		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
-
-		// Save assistant message to database for history reconstruction
-		// This is CRITICAL - without this, the AI only sees user messages and tries to answer all of them
-		modelID := oc.effectiveModel(meta)
-		assistantMsg := &database.Message{
-			ID:        MakeMessageID(state.initialEventID),
-			Room:      portal.PortalKey,
-			SenderID:  modelUserID(modelID),
-			MXID:      state.initialEventID,
-			Timestamp: time.Now(),
-			Metadata: &MessageMetadata{
-				Role:            "assistant",
-				Body:            state.accumulated.String(),
-				CompletionID:    state.responseID,
-				FinishReason:    state.finishReason,
-				Model:           modelID,
-				TurnID:          state.turnID,
-				AgentID:         state.agentID,
-				ToolCalls:       state.toolCalls,
-				StartedAtMs:     state.startedAtMs,
-				FirstTokenAtMs:  state.firstTokenAtMs,
-				CompletedAtMs:   state.completedAtMs,
-				ThinkingContent: state.reasoning.String(),
-				// TODO: Replace with proper token counter (e.g., tiktoken) for accurate counts
-				// Current approximation uses word count (~1.3 tokens per word for English)
-				ThinkingTokenCount: len(strings.Fields(state.reasoning.String())),
-				HasToolCalls:       len(state.toolCalls) > 0,
-			},
-		}
-		if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, assistantMsg); err != nil {
-			log.Warn().Err(err).Msg("Failed to save assistant message to database")
-		} else {
-			log.Debug().Str("msg_id", string(assistantMsg.ID)).Msg("Saved assistant message to database")
-		}
-
-		// Save LastResponseID for "responses" mode context chaining AFTER message persistence
-		// This ensures we don't save an ID for a message that failed to persist
-		if meta.ConversationMode == "responses" && state.responseID != "" {
-			meta.LastResponseID = state.responseID
-			if err := portal.Save(ctx); err != nil {
-				log.Warn().Err(err).Msg("Failed to save portal after storing response ID")
-			}
-		}
+		oc.saveAssistantMessage(ctx, log, portal, state, meta)
 	}
 
 	// Send any generated images as separate messages
@@ -673,12 +684,7 @@ func (oc *AIClient) streamChatCompletions(
 		return false, nil
 	}
 
-	state := &streamingState{
-		turnID:      NewTurnID(),
-		agentID:     meta.DefaultAgentID,
-		startedAtMs: time.Now().UnixMilli(),
-		firstToken:  true,
-	}
+	state := newStreamingState(meta)
 
 	// Track active tool calls by index
 	activeTools := make(map[int]*activeToolCall)
@@ -840,33 +846,7 @@ func (oc *AIClient) streamChatCompletions(
 	// Send final edit and save to database
 	if state.initialEventID != "" {
 		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
-
-		// Save assistant message to database for history reconstruction
-		modelID := oc.effectiveModel(meta)
-		assistantMsg := &database.Message{
-			ID:        MakeMessageID(state.initialEventID),
-			Room:      portal.PortalKey,
-			SenderID:  modelUserID(modelID),
-			MXID:      state.initialEventID,
-			Timestamp: time.Now(),
-			Metadata: &MessageMetadata{
-				Role:           "assistant",
-				Body:           state.accumulated.String(),
-				CompletionID:   state.responseID,
-				FinishReason:   state.finishReason,
-				Model:          modelID,
-				TurnID:         state.turnID,
-				AgentID:        state.agentID,
-				ToolCalls:      state.toolCalls,
-				StartedAtMs:    state.startedAtMs,
-				FirstTokenAtMs: state.firstTokenAtMs,
-				CompletedAtMs:  state.completedAtMs,
-				HasToolCalls:   len(state.toolCalls) > 0,
-			},
-		}
-		if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, assistantMsg); err != nil {
-			log.Warn().Err(err).Msg("Failed to save assistant message to database")
-		}
+		oc.saveAssistantMessage(ctx, log, portal, state, meta)
 	}
 
 	log.Info().
