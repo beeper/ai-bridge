@@ -362,11 +362,21 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 		return nil, fmt.Errorf("identifier is required")
 	}
 
-	// Try to find as agent first
 	store := NewAgentStoreAdapter(oc)
+
+	// Check if identifier has "agent-" prefix (ghost user ID format)
+	// If so, extract the bare agent ID and do agent-only lookup
+	if agentID, isAgentPrefix := parseAgentFromGhostID(id); isAgentPrefix {
+		agent, err := store.GetAgentByID(ctx, agentID)
+		if err != nil || agent == nil {
+			return nil, fmt.Errorf("agent '%s' not found", agentID)
+		}
+		return oc.resolveAgentIdentifier(ctx, agent, createChat)
+	}
+
+	// Try to find as agent first (bare agent ID like "boss", "quick", "smart")
 	agent, err := store.GetAgentByID(ctx, id)
 	if err == nil && agent != nil {
-		// Found as agent
 		return oc.resolveAgentIdentifier(ctx, agent, createChat)
 	}
 
