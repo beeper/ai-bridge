@@ -71,6 +71,7 @@ type UserLoginMetadata struct {
 	BaseURL              string      `json:"base_url,omitempty"`               // Per-user API endpoint
 	TitleGenerationModel string      `json:"title_generation_model,omitempty"` // Model to use for generating chat titles
 	NextChatIndex        int         `json:"next_chat_index,omitempty"`
+	DefaultChatPortalID  string      `json:"default_chat_portal_id,omitempty"`
 	ModelCache           *ModelCache `json:"model_cache,omitempty"`
 	ChatsSynced          bool        `json:"chats_synced,omitempty"` // True after initial bootstrap completed successfully
 

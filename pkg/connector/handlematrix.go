@@ -603,6 +603,79 @@ func (oc *AIClient) handleRegenerate(
 	}, prompt)
 }
 
+// handleRegenerateTitle regenerates the current room title from recent messages.
+func (oc *AIClient) handleRegenerateTitle(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+) {
+	runCtx := oc.backgroundContext(ctx)
+	runCtx = oc.log.WithContext(runCtx)
+
+	history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(runCtx, portal.PortalKey, 20)
+	if err != nil || len(history) == 0 {
+		oc.sendSystemNotice(runCtx, portal, "No messages to generate a title from.")
+		return
+	}
+
+	var lastUserMessage *database.Message
+	var lastAssistantMessage *database.Message
+	for _, msg := range history {
+		msgMeta := messageMeta(msg)
+		if !shouldIncludeInHistory(msgMeta) {
+			continue
+		}
+		if lastAssistantMessage == nil && msgMeta.Role == "assistant" {
+			lastAssistantMessage = msg
+		}
+		if lastUserMessage == nil && msgMeta.Role == "user" {
+			lastUserMessage = msg
+		}
+		if lastUserMessage != nil && lastAssistantMessage != nil {
+			break
+		}
+	}
+
+	if lastUserMessage == nil {
+		oc.sendSystemNotice(runCtx, portal, "No user message found to generate a title from.")
+		return
+	}
+
+	userMeta := messageMeta(lastUserMessage)
+	if userMeta == nil || userMeta.Body == "" {
+		oc.sendSystemNotice(runCtx, portal, "Cannot generate title: message content not available.")
+		return
+	}
+
+	assistantBody := ""
+	if lastAssistantMessage != nil {
+		assistantMeta := messageMeta(lastAssistantMessage)
+		if assistantMeta != nil {
+			assistantBody = assistantMeta.Body
+		}
+	}
+
+	oc.sendSystemNotice(runCtx, portal, "Regenerating title...")
+
+	title, err := oc.generateRoomTitle(runCtx, userMeta.Body, assistantBody)
+	if err != nil {
+		oc.sendSystemNotice(runCtx, portal, "Failed to generate title: "+err.Error())
+		return
+	}
+
+	title = strings.TrimSpace(title)
+	if title == "" {
+		oc.sendSystemNotice(runCtx, portal, "Failed to generate title: empty response.")
+		return
+	}
+
+	if err := oc.setRoomName(runCtx, portal, title); err != nil {
+		oc.sendSystemNotice(runCtx, portal, "Failed to set room title: "+err.Error())
+		return
+	}
+
+	oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Room title updated to: %s", title))
+}
+
 // buildPromptForRegenerate builds a prompt for regeneration, excluding the last assistant message
 func (oc *AIClient) buildPromptForRegenerate(
 	ctx context.Context,

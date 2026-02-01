@@ -2055,6 +2055,10 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 func (oc *AIClient) maybeGenerateTitle(ctx context.Context, portal *bridgev2.Portal, assistantResponse string) {
 	meta := portalMeta(portal)
 
+	if !oc.isOpenRouterProvider() {
+		return
+	}
+
 	// Skip if title was already generated
 	if meta.TitleGenerated {
 		return
@@ -2108,6 +2112,10 @@ func (oc *AIClient) maybeGenerateTitle(ctx context.Context, portal *bridgev2.Por
 func (oc *AIClient) getTitleGenerationModel() string {
 	meta := loginMetadata(oc.UserLogin)
 
+	if meta.Provider != ProviderOpenRouter && meta.Provider != ProviderBeeper {
+		return ""
+	}
+
 	// Use configured title generation model if set
 	if meta.TitleGenerationModel != "" {
 		return meta.TitleGenerationModel
@@ -2116,10 +2124,10 @@ func (oc *AIClient) getTitleGenerationModel() string {
 	// Provider-specific defaults for title generation
 	switch meta.Provider {
 	case ProviderOpenRouter:
-		return "openai/gpt-5-nano"
+		return "google/gemini-2.5-flash"
 	default:
-		// For other providers, use the current/default model
-		return oc.effectiveModelForAPI(nil)
+		// For non-OpenRouter providers, title generation is disabled.
+		return ""
 	}
 }
 
@@ -2128,6 +2136,9 @@ func (oc *AIClient) getTitleGenerationModel() string {
 // field that is only valid for Responses API, not Chat Completions API)
 func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistantResponse string) (string, error) {
 	model := oc.getTitleGenerationModel()
+	if model == "" {
+		return "", fmt.Errorf("title generation disabled for this provider")
+	}
 
 	oc.log.Debug().Str("model", model).Msg("Generating room title")
 
@@ -2147,8 +2158,7 @@ func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistan
 		return "", err
 	}
 
-	// Use SDK's convenience method to extract text from response
-	title := resp.OutputText()
+	title := extractTitleFromResponse(resp)
 
 	if title == "" {
 		oc.log.Warn().
@@ -2165,6 +2175,46 @@ func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistan
 		title = title[:50]
 	}
 	return title, nil
+}
+
+func extractTitleFromResponse(resp *responses.Response) string {
+	var content strings.Builder
+	var reasoning strings.Builder
+
+	for _, item := range resp.Output {
+		switch item := item.AsAny().(type) {
+		case responses.ResponseOutputMessage:
+			for _, part := range item.Content {
+				// OpenRouter sometimes returns "text" instead of "output_text".
+				if part.Type == "output_text" || part.Type == "text" {
+					if part.Text != "" {
+						content.WriteString(part.Text)
+					}
+					continue
+				}
+				if part.Text != "" {
+					content.WriteString(part.Text)
+				}
+				if part.Type == "refusal" && part.Refusal != "" {
+					content.WriteString(part.Refusal)
+				}
+			}
+		case responses.ResponseReasoningItem:
+			for _, summary := range item.Summary {
+				if summary.Text != "" {
+					reasoning.WriteString(summary.Text)
+				}
+			}
+		}
+	}
+
+	if content.Len() > 0 {
+		return content.String()
+	}
+	if reasoning.Len() > 0 {
+		return reasoning.String()
+	}
+	return ""
 }
 
 // setRoomName sets the Matrix room name via m.room.name state event
