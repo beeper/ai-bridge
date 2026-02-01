@@ -1,8 +1,19 @@
 package connector
 
 import (
+	"reflect"
+
 	"maunium.net/go/mautrix/event"
 )
+
+// init registers custom AI event types with mautrix's TypeMap
+// so the state store can properly parse them during sync
+func init() {
+	event.TypeMap[RoomCapabilitiesEventType] = reflect.TypeOf(RoomCapabilitiesEventContent{})
+	event.TypeMap[RoomSettingsEventType] = reflect.TypeOf(RoomSettingsEventContent{})
+	event.TypeMap[ModelCapabilitiesEventType] = reflect.TypeOf(ModelCapabilitiesEventContent{})
+	event.TypeMap[AgentsEventType] = reflect.TypeOf(AgentsEventContent{})
+}
 
 // AssistantTurnEventType is the container event for an assistant's response
 var AssistantTurnEventType = event.Type{

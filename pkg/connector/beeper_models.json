@@ -220,6 +220,187 @@
       ]
     },
     {
+      "id": "openai/chatgpt-4o-latest",
+      "name": "ChatGPT-4o",
+      "provider": "openrouter",
+      "supports_vision": true,
+      "supports_tool_calling": false,
+      "supports_reasoning": false,
+      "supports_web_search": false,
+      "context_window": 128000,
+      "max_output_tokens": 16384
+    },
+    {
+      "id": "openai/gpt-4.1",
+      "name": "GPT-4.1",
+      "provider": "openrouter",
+      "supports_vision": true,
+      "supports_tool_calling": true,
+      "supports_reasoning": false,
+      "supports_web_search": true,
+      "supports_pdf": true,
+      "context_window": 1047576,
+      "max_output_tokens": 32768,
+      "available_tools": [
+        "web_search",
+        "function_calling"
+      ]
+    },
+    {
+      "id": "openai/gpt-4o",
+      "name": "GPT-4o",
+      "provider": "openrouter",
+      "supports_vision": true,
+      "supports_tool_calling": true,
+      "supports_reasoning": false,
+      "supports_web_search": true,
+      "supports_pdf": true,
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "available_tools": [
+        "web_search",
+        "function_calling"
+      ]
+    },
+    {
+      "id": "openai/gpt-4o-mini",
+      "name": "GPT-4o Mini",
+      "provider": "openrouter",
+      "supports_vision": true,
+      "supports_tool_calling": true,
+      "supports_reasoning": false,
+      "supports_web_search": true,
+      "supports_pdf": true,
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "available_tools": [
+        "web_search",
+        "function_calling"
+      ]
+    },
+    {
+      "id": "openai/gpt-5",
+      "name": "GPT-5",
+      "provider": "openrouter",
+      "supports_vision": true,
+      "supports_tool_calling": true,
+      "supports_reasoning": true,
+      "supports_web_search": true,
+      "supports_pdf": true,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "available_tools": [
+        "web_search",
+        "function_calling"
+      ]
+    },
+    {
+      "id": "openai/gpt-5-mini",
+      "name": "GPT-5 Mini",
+      "provider": "openrouter",
+      "supports_vision": true,
+      "supports_tool_calling": true,
+      "supports_reasoning": true,
+      "supports_web_search": true,
+      "supports_pdf": true,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "available_tools": [
+        "web_search",
+        "function_calling"
+      ]
+    },
+    {
+      "id": "openai/gpt-5-nano",
+      "name": "GPT-5 Nano",
+      "provider": "openrouter",
+      "supports_vision": true,
+      "supports_tool_calling": true,
+      "supports_reasoning": true,
+      "supports_web_search": true,
+      "supports_pdf": true,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "available_tools": [
+        "web_search",
+        "function_calling"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.2",
+      "name": "GPT-5.2",
+      "provider": "openrouter",
+      "supports_vision": true,
+      "supports_tool_calling": true,
+      "supports_reasoning": true,
+      "supports_web_search": true,
+      "supports_pdf": true,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "available_tools": [
+        "web_search",
+        "function_calling"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.2-pro",
+      "name": "GPT-5.2 Pro",
+      "provider": "openrouter",
+      "supports_vision": true,
+      "supports_tool_calling": true,
+      "supports_reasoning": true,
+      "supports_web_search": true,
+      "supports_pdf": true,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "available_tools": [
+        "web_search",
+        "function_calling"
+      ]
+    },
+    {
+      "id": "openai/o1",
+      "name": "O1",
+      "provider": "openrouter",
+      "supports_vision": true,
+      "supports_tool_calling": true,
+      "supports_reasoning": false,
+      "supports_web_search": false,
+      "supports_pdf": true,
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "available_tools": [
+        "function_calling"
+      ]
+    },
+    {
+      "id": "openai/o1-mini",
+      "name": "O1 Mini",
+      "provider": "openrouter",
+      "supports_vision": false,
+      "supports_tool_calling": true,
+      "supports_reasoning": false,
+      "supports_web_search": false,
+      "available_tools": [
+        "function_calling"
+      ]
+    },
+    {
+      "id": "openai/o3-mini",
+      "name": "O3 Mini",
+      "provider": "openrouter",
+      "supports_vision": false,
+      "supports_tool_calling": true,
+      "supports_reasoning": false,
+      "supports_web_search": false,
+      "supports_pdf": true,
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "available_tools": [
+        "function_calling"
+      ]
+    },
+    {
       "id": "qwen/qwen3-235b-a22b",
       "name": "Qwen 3 235B",
       "provider": "openrouter",
@@ -286,179 +467,6 @@
       "supports_web_search": false,
       "context_window": 202752,
       "max_output_tokens": 65535,
-      "available_tools": [
-        "function_calling"
-      ]
-    },
-    {
-      "id": "openai/o1",
-      "name": "O1",
-      "provider": "openai",
-      "description": "Advanced reasoning model",
-      "supports_vision": true,
-      "supports_tool_calling": true,
-      "supports_reasoning": true,
-      "supports_web_search": true,
-      "context_window": 200000,
-      "max_output_tokens": 100000,
-      "available_tools": [
-        "web_search",
-        "function_calling"
-      ]
-    },
-    {
-      "id": "openai/o1-mini",
-      "name": "O1 Mini",
-      "provider": "openai",
-      "description": "Fast reasoning model",
-      "supports_vision": true,
-      "supports_tool_calling": true,
-      "supports_reasoning": true,
-      "supports_web_search": true,
-      "context_window": 128000,
-      "max_output_tokens": 65536,
-      "available_tools": [
-        "web_search",
-        "function_calling"
-      ]
-    },
-    {
-      "id": "openai/o3-mini",
-      "name": "O3 Mini",
-      "provider": "openai",
-      "description": "Latest reasoning model",
-      "supports_vision": true,
-      "supports_tool_calling": true,
-      "supports_reasoning": true,
-      "supports_web_search": true,
-      "context_window": 200000,
-      "max_output_tokens": 100000,
-      "available_tools": [
-        "web_search",
-        "function_calling"
-      ]
-    },
-    {
-      "id": "openai/gpt-5",
-      "name": "GPT-5",
-      "provider": "openai",
-      "description": "Flagship GPT model",
-      "supports_vision": true,
-      "supports_tool_calling": true,
-      "supports_reasoning": false,
-      "supports_web_search": true,
-      "context_window": 128000,
-      "max_output_tokens": 16384,
-      "available_tools": [
-        "web_search",
-        "function_calling"
-      ]
-    },
-    {
-      "id": "openai/gpt-5.2",
-      "name": "GPT-5.2",
-      "provider": "openai",
-      "description": "Latest GPT model",
-      "supports_vision": true,
-      "supports_tool_calling": true,
-      "supports_reasoning": false,
-      "supports_web_search": true,
-      "context_window": 128000,
-      "max_output_tokens": 16384,
-      "available_tools": [
-        "web_search",
-        "function_calling"
-      ]
-    },
-    {
-      "id": "openai/gpt-5.2-pro",
-      "name": "GPT-5.2 Pro",
-      "provider": "openai",
-      "description": "GPT-5.2 with extended capabilities",
-      "supports_vision": true,
-      "supports_tool_calling": true,
-      "supports_reasoning": true,
-      "supports_web_search": true,
-      "context_window": 200000,
-      "max_output_tokens": 32768,
-      "available_tools": [
-        "web_search",
-        "function_calling"
-      ]
-    },
-    {
-      "id": "openai/gpt-5-mini",
-      "name": "GPT-5 Mini",
-      "provider": "openai",
-      "description": "Fast and efficient GPT-5",
-      "supports_vision": true,
-      "supports_tool_calling": true,
-      "supports_reasoning": false,
-      "supports_web_search": true,
-      "context_window": 128000,
-      "max_output_tokens": 16384,
-      "available_tools": [
-        "web_search",
-        "function_calling"
-      ]
-    },
-    {
-      "id": "openai/gpt-5-nano",
-      "name": "GPT-5 Nano",
-      "provider": "openai",
-      "description": "Lightweight GPT-5",
-      "supports_vision": true,
-      "supports_tool_calling": true,
-      "supports_reasoning": false,
-      "supports_web_search": false,
-      "context_window": 64000,
-      "max_output_tokens": 8192,
-      "available_tools": [
-        "function_calling"
-      ]
-    },
-    {
-      "id": "openai/gpt-4.1",
-      "name": "GPT-4.1",
-      "provider": "openai",
-      "description": "Updated GPT-4 model",
-      "supports_vision": true,
-      "supports_tool_calling": true,
-      "supports_reasoning": false,
-      "supports_web_search": true,
-      "context_window": 128000,
-      "max_output_tokens": 16384,
-      "available_tools": [
-        "web_search",
-        "function_calling"
-      ]
-    },
-    {
-      "id": "openai/gpt-oss-20b",
-      "name": "GPT OSS 20B",
-      "provider": "openai",
-      "description": "Open-source GPT 20B parameters",
-      "supports_vision": false,
-      "supports_tool_calling": true,
-      "supports_reasoning": false,
-      "supports_web_search": false,
-      "context_window": 32000,
-      "max_output_tokens": 8192,
-      "available_tools": [
-        "function_calling"
-      ]
-    },
-    {
-      "id": "openai/gpt-oss-120b",
-      "name": "GPT OSS 120B",
-      "provider": "openai",
-      "description": "Open-source GPT 120B parameters",
-      "supports_vision": false,
-      "supports_tool_calling": true,
-      "supports_reasoning": false,
-      "supports_web_search": false,
-      "context_window": 32000,
-      "max_output_tokens": 8192,
       "available_tools": [
         "function_calling"
       ]
