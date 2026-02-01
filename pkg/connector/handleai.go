@@ -180,11 +180,11 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, meta *PortalMet
 	}
 
 	// Add built-in provider tools if enabled
-	if meta.WebSearchEnabled || meta.ToolsConfig.WebSearchProvider {
+	if oc.isToolEnabled(meta, ToolNameWebSearchProvider) {
 		params.Tools = append(params.Tools, responses.ToolParamOfWebSearchPreview(responses.WebSearchPreviewToolTypeWebSearchPreview))
 		log.Debug().Msg("Web search tool enabled")
 	}
-	if meta.CodeInterpreterEnabled || meta.ToolsConfig.CodeInterpreter {
+	if oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
 		params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
 		log.Debug().Msg("Code interpreter tool enabled")
 	}
@@ -223,6 +223,11 @@ func (oc *AIClient) streamingResponse(
 
 	// Build Responses API params using shared helper
 	params := oc.buildResponsesAPIParams(ctx, meta, messages)
+
+	// Inject per-room PDF engine into context for OpenRouter/Beeper providers
+	if oc.isOpenRouterProvider() {
+		ctx = WithPDFEngine(ctx, oc.effectivePDFEngine(meta))
+	}
 
 	stream := oc.api.Responses.NewStreaming(ctx, params)
 	if stream == nil {
@@ -347,7 +352,7 @@ func (oc *AIClient) streamingResponse(
 				activeTools[streamEvent.ItemID] = tool
 			}
 
-			if state.initialEventID != "" && meta.ToolsEnabled {
+			if state.initialEventID != "" && oc.isToolEnabled(meta, streamEvent.Name) {
 				result, err := oc.executeBuiltinTool(ctx, streamEvent.Name, streamEvent.Arguments)
 				resultStatus := ResultStatusSuccess
 				if err != nil {
@@ -783,7 +788,7 @@ func (oc *AIClient) streamChatCompletions(
 
 	// Execute any accumulated tool calls
 	for _, tool := range activeTools {
-		if tool.input.Len() > 0 && tool.toolName != "" && meta.ToolsEnabled {
+		if tool.input.Len() > 0 && tool.toolName != "" && oc.isToolEnabled(meta, tool.toolName) {
 			result, err := oc.executeBuiltinTool(ctx, tool.toolName, tool.input.String())
 			resultStatus := ResultStatusSuccess
 			if err != nil {

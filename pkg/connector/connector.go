@@ -64,15 +64,16 @@ func (oc *OpenAIConnector) registerCustomEventHandlers() {
 		return
 	}
 
-	// Register handler for our custom room config event
-	matrixConnector.EventProcessor.On(RoomConfigEventType, oc.handleRoomConfigEvent)
-	oc.br.Log.Info().Msg("Registered custom room config event handler")
+	// Register handler for user-editable room settings event
+	// No handler needed for room_capabilities - users can't send it (power levels block them)
+	matrixConnector.EventProcessor.On(RoomSettingsEventType, oc.handleRoomSettingsEvent)
+	oc.br.Log.Info().Msg("Registered room settings event handler")
 }
 
-// handleRoomConfigEvent processes Matrix room config state events
-func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event.Event) {
+// handleRoomSettingsEvent processes Matrix room settings state events from users
+func (oc *OpenAIConnector) handleRoomSettingsEvent(ctx context.Context, evt *event.Event) {
 	log := oc.br.Log.With().
-		Str("component", "room_config_handler").
+		Str("component", "room_settings_handler").
 		Str("room_id", evt.RoomID.String()).
 		Str("sender", evt.Sender.String()).
 		Logger()
@@ -80,25 +81,25 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 	// Look up portal by Matrix room ID
 	portal, err := oc.br.GetPortalByMXID(ctx, evt.RoomID)
 	if err != nil {
-		log.Err(err).Msg("Failed to get portal for room config event")
+		log.Err(err).Msg("Failed to get portal for room settings event")
 		return
 	}
 	if portal == nil {
-		log.Debug().Msg("No portal found for room, ignoring config event")
+		log.Debug().Msg("No portal found for room, ignoring settings event")
 		return
 	}
 
 	// Parse event content
-	var content RoomConfigEventContent
+	var content RoomSettingsEventContent
 	if err := json.Unmarshal(evt.Content.VeryRaw, &content); err != nil {
-		log.Warn().Err(err).Msg("Failed to parse room config event content")
+		log.Warn().Err(err).Msg("Failed to parse room settings event content")
 		return
 	}
 
 	// Get the user who sent the event and their login
 	user, err := oc.br.GetUserByMXID(ctx, evt.Sender)
 	if err != nil || user == nil {
-		log.Warn().Err(err).Msg("Failed to get user for room config event")
+		log.Warn().Err(err).Msg("Failed to get user for room settings event")
 		return
 	}
 
@@ -106,7 +107,7 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 	// This ensures we use the right provider when user has multiple accounts
 	login := oc.getLoginForPortal(ctx, user, portal)
 	if login == nil {
-		log.Warn().Msg("User has no active login, cannot process config")
+		log.Warn().Msg("User has no active login, cannot process settings")
 		return
 	}
 
@@ -154,34 +155,6 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 	if content.ConversationMode != "" {
 		changes = append(changes, fmt.Sprintf("conversation_mode=%s", content.ConversationMode))
 	}
-	if content.ToolsEnabled != nil {
-		if *content.ToolsEnabled {
-			changes = append(changes, "tools=on")
-		} else {
-			changes = append(changes, "tools=off")
-		}
-	}
-	if content.WebSearchEnabled != nil {
-		if *content.WebSearchEnabled {
-			changes = append(changes, "web_search=on")
-		} else {
-			changes = append(changes, "web_search=off")
-		}
-	}
-	if content.FileSearchEnabled != nil {
-		if *content.FileSearchEnabled {
-			changes = append(changes, "file_search=on")
-		} else {
-			changes = append(changes, "file_search=off")
-		}
-	}
-	if content.CodeInterpreterEnabled != nil {
-		if *content.CodeInterpreterEnabled {
-			changes = append(changes, "code_interpreter=on")
-		} else {
-			changes = append(changes, "code_interpreter=off")
-		}
-	}
 	if content.ToolToggle != nil {
 		state := "off"
 		if content.ToolToggle.Enabled {
@@ -198,7 +171,7 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 	if content.Temperature != nil {
 		logEvent = logEvent.Float64("temperature", *content.Temperature)
 	}
-	logEvent.Msg("Updated room configuration from state event")
+	logEvent.Msg("Updated room settings from state event")
 }
 
 func (oc *OpenAIConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {

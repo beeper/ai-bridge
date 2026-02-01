@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 
@@ -17,49 +18,85 @@ import (
 	"maunium.net/go/mautrix/event"
 )
 
+// Tool name constants
+const (
+	ToolNameCalculator        = "calculator"
+	ToolNameWebSearch         = "web_search"
+	ToolNameOnline            = "online"
+	ToolNameWebSearchProvider = "web_search_provider"
+	ToolNameCodeInterpreter   = "code_interpreter"
+)
+
 // getDefaultToolsConfig returns the default tools configuration for a new room
-// based on the model and provider. OpenRouter/Beeper use :online plugin by default,
+// using MCP SDK types. OpenRouter/Beeper use :online plugin by default,
 // other providers use builtin web search.
-func getDefaultToolsConfig(modelID string, provider string) ToolsConfig {
+func getDefaultToolsConfig(provider string) ToolsConfig {
+	isOpenRouter := provider == ProviderOpenRouter || provider == ProviderBeeper
+
 	config := ToolsConfig{
-		Calculator: ptr.Ptr(true), // Calculator always enabled for models that support tools
+		Tools: make(map[string]*ToolEntry),
 	}
 
-	// OpenRouter/Beeper: use :online plugin for web search by default (more comprehensive)
-	if provider == ProviderOpenRouter || provider == ProviderBeeper {
-		config.UseOpenRouterOnline = ptr.Ptr(true)
-		config.WebSearch = ptr.Ptr(false) // Don't use builtin when :online is on
-	} else {
-		// Other providers: use builtin web search
-		config.WebSearch = ptr.Ptr(true)
-		config.UseOpenRouterOnline = ptr.Ptr(false)
+	// Register builtin tools
+	registerTool(&config, mcp.Tool{
+		Name:        ToolNameCalculator,
+		Description: "Perform arithmetic calculations",
+		Annotations: &mcp.ToolAnnotations{Title: "Calculator"},
+	}, "builtin")
+
+	registerTool(&config, mcp.Tool{
+		Name:        ToolNameWebSearch,
+		Description: "Search the web using DuckDuckGo",
+		Annotations: &mcp.ToolAnnotations{Title: "Web Search"},
+	}, "builtin")
+
+	// OpenRouter :online plugin
+	if isOpenRouter {
+		registerTool(&config, mcp.Tool{
+			Name:        ToolNameOnline,
+			Description: "Real-time web search via OpenRouter",
+			Annotations: &mcp.ToolAnnotations{Title: "Online Search"},
+		}, "plugin")
+		// Enable online by default, disable builtin web_search
+		config.Tools[ToolNameOnline].Enabled = ptr.Ptr(true)
+		config.Tools[ToolNameWebSearch].Enabled = ptr.Ptr(false)
 	}
+
+	// Provider tools (available on all providers, provider decides actual support)
+	registerTool(&config, mcp.Tool{
+		Name:        ToolNameWebSearchProvider,
+		Description: "Native provider web search API",
+		Annotations: &mcp.ToolAnnotations{Title: "Provider Web Search"},
+	}, "provider")
+
+	registerTool(&config, mcp.Tool{
+		Name:        ToolNameCodeInterpreter,
+		Description: "Execute Python code in sandbox",
+		Annotations: &mcp.ToolAnnotations{Title: "Code Interpreter"},
+	}, "provider")
 
 	return config
 }
 
-// migrateToolsConfig migrates old ToolsEnabled setting to new ToolsConfig
-// Returns true if migration was performed
-func migrateToolsConfig(meta *PortalMetadata, provider string) bool {
-	// Check if already migrated (ToolsConfig has any non-nil values)
-	if meta.ToolsConfig.Calculator != nil || meta.ToolsConfig.WebSearch != nil || meta.ToolsConfig.UseOpenRouterOnline != nil {
+// registerTool registers a tool in the ToolsConfig using MCP SDK types
+func registerTool(config *ToolsConfig, tool mcp.Tool, toolType string) {
+	if config.Tools == nil {
+		config.Tools = make(map[string]*ToolEntry)
+	}
+	config.Tools[tool.Name] = &ToolEntry{
+		Tool: tool,
+		Type: toolType,
+		// Enabled stays nil = auto (uses defaults based on context)
+	}
+}
+
+// ensureToolsConfig ensures the portal has a valid ToolsConfig, initializing if empty
+func ensureToolsConfig(meta *PortalMetadata, provider string) bool {
+	if len(meta.ToolsConfig.Tools) > 0 {
 		return false
 	}
-
-	// If legacy ToolsEnabled is true, migrate to new config
-	if meta.ToolsEnabled {
-		meta.ToolsConfig = ToolsConfig{
-			Calculator: ptr.Ptr(true),
-			WebSearch:  ptr.Ptr(true),
-		}
-		// For OpenRouter/Beeper, also enable :online
-		if provider == ProviderOpenRouter || provider == ProviderBeeper {
-			meta.ToolsConfig.UseOpenRouterOnline = ptr.Ptr(true)
-		}
-		return true
-	}
-
-	return false
+	meta.ToolsConfig = getDefaultToolsConfig(provider)
+	return true
 }
 
 // buildAvailableTools returns a list of ToolInfo for all tools based on current config
@@ -68,130 +105,142 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	provider := loginMeta.Provider
 	isOpenRouter := provider == ProviderOpenRouter || provider == ProviderBeeper
 
+	// Ensure tools config is initialized
+	ensureToolsConfig(meta, provider)
+
 	// Check if model supports tool calling
 	supportsTools := meta.Capabilities.SupportsToolCalling
 
 	var tools []ToolInfo
 
-	// Calculator builtin tool
-	tools = append(tools, ToolInfo{
-		Name:        "calculator",
-		DisplayName: "Calculator",
-		Type:        "builtin",
-		Description: "Perform arithmetic calculations",
-		Enabled:     oc.isToolEnabled(meta, "calculator"),
-		Available:   supportsTools,
-	})
+	for name, entry := range meta.ToolsConfig.Tools {
+		if entry == nil {
+			continue
+		}
 
-	// Web search builtin tool (DuckDuckGo)
-	tools = append(tools, ToolInfo{
-		Name:        "web_search",
-		DisplayName: "Web Search",
-		Type:        "builtin",
-		Description: "Search the web using DuckDuckGo",
-		Enabled:     oc.isToolEnabled(meta, "web_search"),
-		Available:   supportsTools,
-	})
+		// Skip online plugin for non-OpenRouter providers
+		if name == ToolNameOnline && !isOpenRouter {
+			continue
+		}
 
-	// OpenRouter :online plugin
-	if isOpenRouter {
+		// Get display name from MCP annotations or fall back to tool name
+		displayName := entry.Tool.Name
+		if entry.Tool.Annotations != nil && entry.Tool.Annotations.Title != "" {
+			displayName = entry.Tool.Annotations.Title
+		}
+
+		// Determine availability based on tool type
+		available := supportsTools
+		if entry.Type == "plugin" || entry.Type == "provider" {
+			available = true // Provider decides actual support
+		}
+
 		tools = append(tools, ToolInfo{
-			Name:        "online",
-			DisplayName: "Online Search",
-			Type:        "plugin",
-			Description: "Real-time web search via OpenRouter",
-			Enabled:     oc.isToolEnabled(meta, "online"),
-			Available:   true, // Always available on OpenRouter
+			Name:        name,
+			DisplayName: displayName,
+			Description: entry.Tool.Description,
+			Type:        entry.Type,
+			Enabled:     oc.isToolEnabled(meta, name),
+			Available:   available,
 		})
 	}
-
-	// OpenAI provider web search tool
-	tools = append(tools, ToolInfo{
-		Name:        "web_search_provider",
-		DisplayName: "Provider Web Search",
-		Type:        "provider",
-		Description: "Native provider web search API",
-		Enabled:     meta.ToolsConfig.WebSearchProvider || meta.WebSearchEnabled,
-		Available:   true, // Let the provider decide
-	})
-
-	// Code interpreter
-	tools = append(tools, ToolInfo{
-		Name:        "code_interpreter",
-		DisplayName: "Code Interpreter",
-		Type:        "provider",
-		Description: "Execute Python code in sandbox",
-		Enabled:     meta.ToolsConfig.CodeInterpreter || meta.CodeInterpreterEnabled,
-		Available:   true, // Let the provider decide
-	})
 
 	return tools
 }
 
 // isToolEnabled checks if a specific tool is enabled based on ToolsConfig
 func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
+	// Look up in tools map
+	if entry, ok := meta.ToolsConfig.Tools[toolName]; ok && entry != nil {
+		if entry.Enabled != nil {
+			return *entry.Enabled
+		}
+	}
+
+	// Use defaults based on tool type and context
+	return oc.getDefaultToolState(meta, toolName)
+}
+
+// getDefaultToolState returns the default enabled state for a tool
+func (oc *AIClient) getDefaultToolState(meta *PortalMetadata, toolName string) bool {
+	loginMeta := loginMetadata(oc.UserLogin)
+	provider := loginMeta.Provider
+	isOpenRouter := provider == ProviderOpenRouter || provider == ProviderBeeper
+
 	switch toolName {
-	case "calculator":
-		if meta.ToolsConfig.Calculator != nil {
-			return *meta.ToolsConfig.Calculator
-		}
-		// Default: enabled if model supports tools
+	case ToolNameCalculator:
+		// Calculator enabled by default if model supports tools
 		return meta.Capabilities.SupportsToolCalling
-	case "web_search":
-		if meta.ToolsConfig.WebSearch != nil {
-			return *meta.ToolsConfig.WebSearch
-		}
-		// Default: enabled unless :online is on
-		if meta.ToolsConfig.UseOpenRouterOnline != nil && *meta.ToolsConfig.UseOpenRouterOnline {
-			return false
+	case ToolNameWebSearch:
+		// Web search disabled by default if online plugin is enabled
+		if isOpenRouter {
+			if entry, ok := meta.ToolsConfig.Tools[ToolNameOnline]; ok && entry != nil && entry.Enabled != nil && *entry.Enabled {
+				return false
+			}
 		}
 		return meta.Capabilities.SupportsToolCalling
-	case "online":
-		if meta.ToolsConfig.UseOpenRouterOnline != nil {
-			return *meta.ToolsConfig.UseOpenRouterOnline
-		}
-		// Default: enabled for OpenRouter/Beeper
-		loginMeta := loginMetadata(oc.UserLogin)
-		return loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper
-	case "web_search_provider":
-		return meta.ToolsConfig.WebSearchProvider || meta.WebSearchEnabled
-	case "code_interpreter":
-		return meta.ToolsConfig.CodeInterpreter || meta.CodeInterpreterEnabled
+	case ToolNameOnline:
+		// Online plugin enabled by default for OpenRouter/Beeper
+		return isOpenRouter
+	case ToolNameWebSearchProvider, ToolNameCodeInterpreter:
+		// Provider tools disabled by default
+		return false
 	default:
+		// Unknown tools disabled by default
 		return false
 	}
 }
 
-// applyToolToggle applies a tool toggle from client without sending notices
-// This is used when processing room config state events from clients
-func (oc *AIClient) applyToolToggle(_ context.Context, _ *bridgev2.Portal, meta *PortalMetadata, toolName string, enabled bool, isOpenRouter bool) {
-	switch toolName {
-	case "calculator", "calc":
-		meta.ToolsConfig.Calculator = &enabled
-	case "web_search", "websearch", "search":
-		meta.ToolsConfig.WebSearch = &enabled
-	case "online":
-		if isOpenRouter {
-			meta.ToolsConfig.UseOpenRouterOnline = &enabled
-			// If enabling online, disable builtin web_search to avoid duplication
-			if enabled {
-				f := false
-				meta.ToolsConfig.WebSearch = &f
-			}
-		} else {
-			oc.log.Warn().Str("tool", toolName).Msg("Online plugin only available with OpenRouter")
-			return
-		}
-	case "web_search_provider", "websearchprovider", "provider_search":
-		meta.ToolsConfig.WebSearchProvider = enabled
-	case "code_interpreter", "codeinterpreter", "interpreter":
-		meta.ToolsConfig.CodeInterpreter = enabled
-	default:
-		oc.log.Warn().Str("tool", toolName).Msg("Unknown tool in toggle request")
+// applyToolToggle applies a tool toggle from client
+func (oc *AIClient) applyToolToggle(meta *PortalMetadata, toggle ToolToggle, provider string) {
+	// Ensure tools config is initialized
+	ensureToolsConfig(meta, provider)
+
+	isOpenRouter := provider == ProviderOpenRouter || provider == ProviderBeeper
+
+	// Normalize tool name aliases
+	toolName := normalizeToolName(toggle.Name)
+
+	// Check if tool exists
+	entry, ok := meta.ToolsConfig.Tools[toolName]
+	if !ok || entry == nil {
+		oc.log.Warn().Str("tool", toggle.Name).Msg("Unknown tool in toggle request")
 		return
 	}
 
-	oc.log.Info().Str("tool", toolName).Bool("enabled", enabled).Msg("Applied tool toggle from client")
+	// Validate online plugin for non-OpenRouter
+	if toolName == ToolNameOnline && !isOpenRouter {
+		oc.log.Warn().Str("tool", toolName).Msg("Online plugin only available with OpenRouter")
+		return
+	}
+
+	// Apply toggle
+	entry.Enabled = &toggle.Enabled
+
+	// If enabling online, disable builtin web_search to avoid duplication
+	if toolName == ToolNameOnline && toggle.Enabled {
+		if wsEntry, ok := meta.ToolsConfig.Tools[ToolNameWebSearch]; ok && wsEntry != nil {
+			wsEntry.Enabled = ptr.Ptr(false)
+		}
+	}
+
+	oc.log.Info().Str("tool", toolName).Bool("enabled", toggle.Enabled).Msg("Applied tool toggle from client")
+}
+
+// normalizeToolName converts common aliases to canonical tool names
+func normalizeToolName(name string) string {
+	switch name {
+	case "calc":
+		return ToolNameCalculator
+	case "websearch", "search":
+		return ToolNameWebSearch
+	case "websearchprovider", "provider_search":
+		return ToolNameWebSearchProvider
+	case "codeinterpreter", "interpreter":
+		return ToolNameCodeInterpreter
+	default:
+		return name
+	}
 }
 
 // SearchUsers searches available AI models by name/ID
@@ -413,24 +462,20 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 	loginMeta := loginMetadata(oc.UserLogin)
 	if opts.CopyFrom != nil {
 		pmeta = &PortalMetadata{
-			Model:                  opts.CopyFrom.Model,
-			Slug:                   slug,
-			Title:                  title,
-			SystemPrompt:           opts.CopyFrom.SystemPrompt,
-			Temperature:            opts.CopyFrom.Temperature,
-			MaxContextMessages:     opts.CopyFrom.MaxContextMessages,
-			MaxCompletionTokens:    opts.CopyFrom.MaxCompletionTokens,
-			ReasoningEffort:        opts.CopyFrom.ReasoningEffort,
-			Capabilities:           opts.CopyFrom.Capabilities,
-			ToolsEnabled:           opts.CopyFrom.ToolsEnabled,
-			ToolsConfig:            opts.CopyFrom.ToolsConfig,
-			ConversationMode:       opts.CopyFrom.ConversationMode,
-			WebSearchEnabled:       opts.CopyFrom.WebSearchEnabled,
-			FileSearchEnabled:      opts.CopyFrom.FileSearchEnabled,
-			CodeInterpreterEnabled: opts.CopyFrom.CodeInterpreterEnabled,
-			EmitThinking:           opts.CopyFrom.EmitThinking,
-			EmitToolArgs:           opts.CopyFrom.EmitToolArgs,
-			DefaultAgentID:         opts.CopyFrom.DefaultAgentID,
+			Model:               opts.CopyFrom.Model,
+			Slug:                slug,
+			Title:               title,
+			SystemPrompt:        opts.CopyFrom.SystemPrompt,
+			Temperature:         opts.CopyFrom.Temperature,
+			MaxContextMessages:  opts.CopyFrom.MaxContextMessages,
+			MaxCompletionTokens: opts.CopyFrom.MaxCompletionTokens,
+			ReasoningEffort:     opts.CopyFrom.ReasoningEffort,
+			Capabilities:        opts.CopyFrom.Capabilities,
+			ToolsConfig:         opts.CopyFrom.ToolsConfig,
+			ConversationMode:    opts.CopyFrom.ConversationMode,
+			EmitThinking:        opts.CopyFrom.EmitThinking,
+			EmitToolArgs:        opts.CopyFrom.EmitToolArgs,
+			DefaultAgentID:      opts.CopyFrom.DefaultAgentID,
 		}
 		modelID = opts.CopyFrom.Model
 	} else {
@@ -440,7 +485,7 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 			Title:        title,
 			SystemPrompt: opts.SystemPrompt,
 			Capabilities: getModelCapabilities(modelID, oc.findModelInfo(modelID)),
-			ToolsConfig:  getDefaultToolsConfig(modelID, loginMeta.Provider),
+			ToolsConfig:  getDefaultToolsConfig(loginMeta.Provider),
 		}
 	}
 	portal.Metadata = pmeta
@@ -732,6 +777,14 @@ func (oc *AIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.Cha
 			IsFull:      true,
 			OtherUserID: modelUserID(modelID),
 			MemberMap:   members,
+			// Set power levels so only bridge bot can modify room_capabilities (100)
+			// while any user can modify room_settings (0)
+			PowerLevels: &bridgev2.PowerLevelOverrides{
+				Events: map[event.Type]int{
+					RoomCapabilitiesEventType: 100, // Only bridge bot
+					RoomSettingsEventType:     0,   // Any user
+				},
+			},
 		},
 		// Broadcast initial room config after room creation so desktop clients
 		// can read the model and other settings from room state
@@ -744,9 +797,10 @@ func (oc *AIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.Cha
 	}
 }
 
-// updatePortalConfig applies room config to portal metadata
-func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Portal, config *RoomConfigEventContent) {
+// updatePortalConfig applies room settings to portal metadata
+func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Portal, config *RoomSettingsEventContent) {
 	meta := portalMeta(portal)
+	loginMeta := loginMetadata(oc.UserLogin)
 
 	// Track old model for membership change
 	oldModel := meta.Model
@@ -776,18 +830,6 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 		meta.ConversationMode = config.ConversationMode
 	}
 	// Boolean fields - only apply when explicitly set (non-nil)
-	if config.ToolsEnabled != nil {
-		meta.ToolsEnabled = *config.ToolsEnabled
-	}
-	if config.WebSearchEnabled != nil {
-		meta.WebSearchEnabled = *config.WebSearchEnabled
-	}
-	if config.FileSearchEnabled != nil {
-		meta.FileSearchEnabled = *config.FileSearchEnabled
-	}
-	if config.CodeInterpreterEnabled != nil {
-		meta.CodeInterpreterEnabled = *config.CodeInterpreterEnabled
-	}
 	if config.EmitThinking != nil {
 		meta.EmitThinking = *config.EmitThinking
 	}
@@ -800,9 +842,7 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 
 	// Handle tool toggle from client
 	if config.ToolToggle != nil {
-		loginMeta := loginMetadata(oc.UserLogin)
-		isOpenRouter := loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper
-		oc.applyToolToggle(ctx, portal, meta, config.ToolToggle.Name, config.ToolToggle.Enabled, isOpenRouter)
+		oc.applyToolToggle(meta, *config.ToolToggle, loginMeta.Provider)
 	}
 
 	meta.LastRoomStateSync = time.Now().Unix()
@@ -912,19 +952,28 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 	portal.UpdateBridgeInfo(ctx)
 }
 
-// BroadcastRoomState sends current room config to Matrix room state
+// BroadcastRoomState sends current room capabilities and settings to Matrix room state
 func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Portal) error {
+	if err := oc.broadcastCapabilities(ctx, portal); err != nil {
+		return err
+	}
+	return oc.broadcastSettings(ctx, portal)
+}
+
+// broadcastCapabilities sends bridge-controlled capabilities to Matrix room state
+// This event is protected by power levels (100) so only the bridge bot can modify
+func (oc *AIClient) broadcastCapabilities(ctx context.Context, portal *bridgev2.Portal) error {
 	if portal.MXID == "" {
 		return fmt.Errorf("portal has no Matrix room ID")
 	}
 
 	meta := portalMeta(portal)
-
-	// Migrate legacy ToolsEnabled to ToolsConfig if needed
 	loginMeta := loginMetadata(oc.UserLogin)
-	if migrateToolsConfig(meta, loginMeta.Provider) {
+
+	// Ensure tools config is initialized
+	if ensureToolsConfig(meta, loginMeta.Provider) {
 		if err := portal.Save(ctx); err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to save portal after tools migration")
+			oc.log.Warn().Err(err).Msg("Failed to save portal after tools initialization")
 		}
 	}
 
@@ -938,35 +987,57 @@ func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Por
 		}
 	}
 
-	stateContent := &RoomConfigEventContent{
-		Model:                  meta.Model,
-		SystemPrompt:           meta.SystemPrompt,
-		Temperature:            &meta.Temperature,
-		MaxContextMessages:     meta.MaxContextMessages,
-		MaxCompletionTokens:    meta.MaxCompletionTokens,
-		ReasoningEffort:        meta.ReasoningEffort,
-		ToolsEnabled:           ptr.Ptr(meta.ToolsEnabled),
-		ConversationMode:       meta.ConversationMode,
-		WebSearchEnabled:       ptr.Ptr(meta.WebSearchEnabled),
-		FileSearchEnabled:      ptr.Ptr(meta.FileSearchEnabled),
-		CodeInterpreterEnabled: ptr.Ptr(meta.CodeInterpreterEnabled),
-		EmitThinking:           ptr.Ptr(meta.EmitThinking),
-		EmitToolArgs:           ptr.Ptr(meta.EmitToolArgs),
-		DefaultAgentID:         meta.DefaultAgentID,
+	content := &RoomCapabilitiesEventContent{
 		Capabilities:           &meta.Capabilities,
-		ToolsConfig:            &meta.ToolsConfig,
 		AvailableTools:         oc.buildAvailableTools(meta),
-		ReasoningEfforts:       reasoningEfforts,
+		ReasoningEffortOptions: reasoningEfforts,
+		Provider:               loginMeta.Provider,
 	}
 
-	// Use bot intent to send state event
 	bot := oc.UserLogin.Bridge.Bot
-	_, err := bot.SendState(ctx, portal.MXID, RoomConfigEventType, "", &event.Content{
-		Parsed: stateContent,
+	_, err := bot.SendState(ctx, portal.MXID, RoomCapabilitiesEventType, "", &event.Content{
+		Parsed: content,
 	}, time.Time{})
 
 	if err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to broadcast room state")
+		oc.log.Warn().Err(err).Msg("Failed to broadcast room capabilities")
+		return err
+	}
+
+	oc.log.Debug().Str("model", meta.Model).Msg("Broadcasted room capabilities")
+	return nil
+}
+
+// broadcastSettings sends user-editable settings to Matrix room state
+// This event uses normal power levels (0) so users can modify
+func (oc *AIClient) broadcastSettings(ctx context.Context, portal *bridgev2.Portal) error {
+	if portal.MXID == "" {
+		return fmt.Errorf("portal has no Matrix room ID")
+	}
+
+	meta := portalMeta(portal)
+
+	content := &RoomSettingsEventContent{
+		Model:               meta.Model,
+		SystemPrompt:        meta.SystemPrompt,
+		Temperature:         &meta.Temperature,
+		MaxContextMessages:  meta.MaxContextMessages,
+		MaxCompletionTokens: meta.MaxCompletionTokens,
+		ReasoningEffort:     meta.ReasoningEffort,
+		ConversationMode:    meta.ConversationMode,
+		EmitThinking:        ptr.Ptr(meta.EmitThinking),
+		EmitToolArgs:        ptr.Ptr(meta.EmitToolArgs),
+		DefaultAgentID:      meta.DefaultAgentID,
+		// Note: ToolToggle is only for setting changes, not broadcasts
+	}
+
+	bot := oc.UserLogin.Bridge.Bot
+	_, err := bot.SendState(ctx, portal.MXID, RoomSettingsEventType, "", &event.Content{
+		Parsed: content,
+	}, time.Time{})
+
+	if err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to broadcast room settings")
 		return err
 	}
 
@@ -975,7 +1046,7 @@ func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Por
 		oc.log.Warn().Err(err).Msg("Failed to save portal after state broadcast")
 	}
 
-	oc.log.Debug().Str("model", meta.Model).Msg("Broadcasted room state")
+	oc.log.Debug().Str("model", meta.Model).Msg("Broadcasted room settings")
 	return nil
 }
 
