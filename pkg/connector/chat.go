@@ -1002,12 +1002,36 @@ func (oc *AIClient) scheduleBootstrap() {
 func (oc *AIClient) bootstrap(ctx context.Context) {
 	logCtx := oc.log.With().Str("component", "openai-chat-bootstrap").Logger().WithContext(ctx)
 	oc.waitForLoginPersisted(logCtx)
+
+	meta := loginMetadata(oc.UserLogin)
+
+	// Check if bootstrap already completed successfully
+	if meta.ChatsSynced {
+		oc.log.Debug().Msg("Chats already synced, skipping bootstrap")
+		// Still sync counter in case portals were created externally
+		if err := oc.syncChatCounter(logCtx); err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to sync chat counter")
+		}
+		return
+	}
+
+	oc.log.Info().Msg("Starting bootstrap for new login")
+
 	if err := oc.syncChatCounter(logCtx); err != nil {
 		oc.log.Warn().Err(err).Msg("Failed to sync chat counter")
 		return
 	}
 	if err := oc.ensureDefaultChat(logCtx); err != nil {
 		oc.log.Warn().Err(err).Msg("Failed to ensure default chat")
+		return
+	}
+
+	// Mark bootstrap as complete only after successful completion
+	meta.ChatsSynced = true
+	if err := oc.UserLogin.Save(logCtx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to save ChatsSynced flag")
+	} else {
+		oc.log.Info().Msg("Bootstrap completed successfully, ChatsSynced flag set")
 	}
 }
 

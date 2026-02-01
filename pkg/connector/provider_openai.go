@@ -1,8 +1,11 @@
 package connector
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -62,6 +65,39 @@ func NewOpenAIProviderWithUserID(apiKey, baseURL, userID string, log zerolog.Log
 	return &OpenAIProvider{
 		client:  client,
 		log:     log.With().Str("provider", "openai").Logger(),
+		baseURL: baseURL,
+	}, nil
+}
+
+// NewOpenAIProviderWithPDFPlugin creates an OpenAI provider with PDF plugin middleware.
+// Used for OpenRouter/Beeper to enable universal PDF support via file-parser plugin.
+func NewOpenAIProviderWithPDFPlugin(apiKey, baseURL, userID, pdfEngine string, log zerolog.Logger) (*OpenAIProvider, error) {
+	opts := []option.RequestOption{
+		option.WithAPIKey(apiKey),
+	}
+
+	if baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
+	}
+
+	// Add user_id query parameter if provided
+	if userID != "" {
+		opts = append(opts, option.WithMiddleware(func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+			q := req.URL.Query()
+			q.Set("user_id", userID)
+			req.URL.RawQuery = q.Encode()
+			return next(req)
+		}))
+	}
+
+	// Add PDF plugin middleware
+	opts = append(opts, option.WithMiddleware(MakePDFPluginMiddleware(pdfEngine)))
+
+	client := openai.NewClient(opts...)
+
+	return &OpenAIProvider{
+		client:  client,
+		log:     log.With().Str("provider", "openai").Str("pdf_engine", pdfEngine).Logger(),
 		baseURL: baseURL,
 	}, nil
 }
@@ -316,6 +352,85 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 // defaultOpenAIModels returns known OpenAI models from the manifest
 func defaultOpenAIModels() []ModelInfo {
 	return GetOpenAIModels()
+}
+
+// PDFPluginConfig holds configuration for the PDF file-parser plugin
+type PDFPluginConfig struct {
+	ID     string          `json:"id"`
+	Config json.RawMessage `json:"config,omitempty"`
+}
+
+// MakePDFPluginMiddleware creates middleware that injects the file-parser plugin for PDFs.
+// The engine parameter controls which PDF parsing engine to use: pdf-text, mistral-ocr, or native.
+func MakePDFPluginMiddleware(engine string) option.Middleware {
+	// Validate engine, default to mistral-ocr
+	switch engine {
+	case "pdf-text", "mistral-ocr", "native":
+		// valid
+	default:
+		engine = "mistral-ocr"
+	}
+
+	return func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+		// Only modify POST requests with JSON body (API calls)
+		if req.Method != http.MethodPost || req.Body == nil {
+			return next(req)
+		}
+
+		contentType := req.Header.Get("Content-Type")
+		if !strings.Contains(contentType, "application/json") {
+			return next(req)
+		}
+
+		// Read the existing body
+		bodyBytes, err := io.ReadAll(req.Body)
+		if err != nil {
+			return next(req)
+		}
+		req.Body.Close()
+
+		// Parse as JSON
+		var body map[string]any
+		if err := json.Unmarshal(bodyBytes, &body); err != nil {
+			// Not valid JSON, pass through
+			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			return next(req)
+		}
+
+		// Add plugins array with file-parser plugin
+		plugins := []map[string]any{
+			{
+				"id": "file-parser",
+				"pdf": map[string]any{
+					"engine": engine,
+				},
+			},
+		}
+
+		// Merge with existing plugins if any
+		if existingPlugins, ok := body["plugins"].([]any); ok {
+			for _, p := range existingPlugins {
+				if pMap, ok := p.(map[string]any); ok {
+					plugins = append(plugins, pMap)
+				}
+			}
+		}
+		body["plugins"] = plugins
+
+		// Re-encode
+		newBody, err := json.Marshal(body)
+		if err != nil {
+			// Encoding failed, use original
+			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			return next(req)
+		}
+
+		req.Body = io.NopCloser(bytes.NewReader(newBody))
+		req.ContentLength = int64(len(newBody))
+		req.Header.Set("Content-Length", fmt.Sprintf("%d", len(newBody)))
+
+		return next(req)
+	}
 }
 
 // ToOpenAITools converts tool definitions to OpenAI Responses API format

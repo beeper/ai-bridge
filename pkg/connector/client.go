@@ -234,14 +234,15 @@ const (
 // pendingMessage represents a queued message waiting for AI processing
 // Prompt is built fresh when processing starts to ensure up-to-date history
 type pendingMessage struct {
-	Event       *event.Event
-	Portal      *bridgev2.Portal
-	Meta        *PortalMetadata
-	Type        pendingMessageType
-	MessageBody string              // For text, regenerate, edit_regenerate (caption for media)
-	MediaURL    string              // For media messages (image, PDF, audio, video)
-	MimeType    string              // MIME type of the media
-	TargetMsgID networkid.MessageID // For edit_regenerate
+	Event         *event.Event
+	Portal        *bridgev2.Portal
+	Meta          *PortalMetadata
+	Type          pendingMessageType
+	MessageBody   string                   // For text, regenerate, edit_regenerate (caption for media)
+	MediaURL      string                   // For media messages (image, PDF, audio, video)
+	MimeType      string                   // MIME type of the media
+	EncryptedFile *event.EncryptedFileInfo // For encrypted Matrix media (E2EE rooms)
+	TargetMsgID   networkid.MessageID      // For edit_regenerate
 }
 
 func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey string) (*AIClient, error) {
@@ -281,7 +282,14 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		userID := login.User.MXID.String()
 
 		openrouterURL := beeperBaseURL + "/openrouter/v1"
-		provider, err := NewOpenAIProviderWithUserID(key, openrouterURL, userID, log)
+
+		// Get PDF engine from provider config
+		pdfEngine := connector.Config.Providers.Beeper.DefaultPDFEngine
+		if pdfEngine == "" {
+			pdfEngine = "mistral-ocr" // Default
+		}
+
+		provider, err := NewOpenAIProviderWithPDFPlugin(key, openrouterURL, userID, pdfEngine, log)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Beeper provider: %w", err)
 		}
@@ -294,7 +302,14 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		if openrouterURL == "" {
 			openrouterURL = "https://openrouter.ai/api/v1"
 		}
-		provider, err := NewOpenAIProviderWithBaseURL(key, openrouterURL, log)
+
+		// Get PDF engine from provider config
+		pdfEngine := connector.Config.Providers.OpenRouter.DefaultPDFEngine
+		if pdfEngine == "" {
+			pdfEngine = "mistral-ocr" // Default
+		}
+
+		provider, err := NewOpenAIProviderWithPDFPlugin(key, openrouterURL, "", pdfEngine, log)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OpenRouter provider: %w", err)
 		}
@@ -452,7 +467,7 @@ func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 	case pendingTypeText:
 		promptMessages, err = oc.buildPrompt(ctx, pending.Portal, pending.Meta, pending.MessageBody)
 	case pendingTypeImage, pendingTypePDF, pendingTypeAudio, pendingTypeVideo:
-		promptMessages, err = oc.buildPromptWithMedia(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.MediaURL, pending.MimeType, pending.Type)
+		promptMessages, err = oc.buildPromptWithMedia(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.MediaURL, pending.MimeType, pending.EncryptedFile, pending.Type)
 	case pendingTypeRegenerate:
 		promptMessages, err = oc.buildPromptForRegenerate(ctx, pending.Portal, pending.Meta, pending.MessageBody)
 	case pendingTypeEditRegenerate:
@@ -574,9 +589,13 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 	if meta.Capabilities.SupportsVision {
 		caps.File[event.MsgImage] = visionFileFeatures()
 	}
-	if meta.Capabilities.SupportsPDF {
+
+	// OpenRouter/Beeper: all models support PDF via file-parser plugin
+	// For other providers, check model's native PDF support
+	if meta.Capabilities.SupportsPDF || oc.isOpenRouterProvider() {
 		caps.File[event.MsgFile] = pdfFileFeatures()
 	}
+
 	if meta.Capabilities.SupportsAudio {
 		caps.File[event.MsgAudio] = audioFileFeatures()
 	}
@@ -674,6 +693,39 @@ func (oc *AIClient) effectiveMaxTokens(meta *PortalMetadata) int {
 		return meta.MaxCompletionTokens
 	}
 	return defaultMaxTokens
+}
+
+// effectivePDFEngine returns the PDF engine to use for the room/provider
+// Priority: room config > provider config > mistral-ocr (default)
+func (oc *AIClient) effectivePDFEngine(meta *PortalMetadata) string {
+	// Room-level override
+	if meta != nil && meta.PDFConfig != nil && meta.PDFConfig.Engine != "" {
+		return meta.PDFConfig.Engine
+	}
+
+	// Provider-level config
+	loginMeta := loginMetadata(oc.UserLogin)
+	providers := oc.connector.Config.Providers
+
+	switch loginMeta.Provider {
+	case ProviderBeeper:
+		if providers.Beeper.DefaultPDFEngine != "" {
+			return providers.Beeper.DefaultPDFEngine
+		}
+	case ProviderOpenRouter:
+		if providers.OpenRouter.DefaultPDFEngine != "" {
+			return providers.OpenRouter.DefaultPDFEngine
+		}
+	}
+
+	// Default to mistral-ocr (best quality, paid)
+	return "mistral-ocr"
+}
+
+// isOpenRouterProvider checks if the current provider is OpenRouter or Beeper (which uses OpenRouter)
+func (oc *AIClient) isOpenRouterProvider() bool {
+	loginMeta := loginMetadata(oc.UserLogin)
+	return loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper
 }
 
 // validateModel checks if a model is available for this user
@@ -821,6 +873,7 @@ func (oc *AIClient) buildPromptWithMedia(
 	caption string,
 	mediaURL string,
 	mimeType string,
+	encryptedFile *event.EncryptedFileInfo,
 	mediaType pendingMessageType,
 ) ([]openai.ChatCompletionMessageParamUnion, error) {
 	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
@@ -838,20 +891,41 @@ func (oc *AIClient) buildPromptWithMedia(
 
 	switch mediaType {
 	case pendingTypeImage:
-		// Convert Matrix mxc:// URL to HTTP URL for direct access
-		httpURL := oc.convertMxcToHttp(mediaURL)
-		mediaContent = openai.ChatCompletionContentPartUnionParam{
-			OfImageURL: &openai.ChatCompletionContentPartImageParam{
-				ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
-					URL:    httpURL,
-					Detail: "auto",
+		// For encrypted media, download+decrypt+base64
+		// For non-encrypted, use direct URL (provider can fetch)
+		if encryptedFile != nil {
+			b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, encryptedFile, 20) // 20MB limit for images
+			if err != nil {
+				return nil, fmt.Errorf("failed to download image: %w", err)
+			}
+			if actualMimeType == "" || actualMimeType == "application/octet-stream" {
+				actualMimeType = mimeType
+			}
+			dataURL := fmt.Sprintf("data:%s;base64,%s", actualMimeType, b64Data)
+			mediaContent = openai.ChatCompletionContentPartUnionParam{
+				OfImageURL: &openai.ChatCompletionContentPartImageParam{
+					ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
+						URL:    dataURL,
+						Detail: "auto",
+					},
 				},
-			},
+			}
+		} else {
+			// Non-encrypted: use HTTP URL directly
+			httpURL := oc.convertMxcToHttp(mediaURL)
+			mediaContent = openai.ChatCompletionContentPartUnionParam{
+				OfImageURL: &openai.ChatCompletionContentPartImageParam{
+					ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
+						URL:    httpURL,
+						Detail: "auto",
+					},
+				},
+			}
 		}
 
 	case pendingTypePDF:
-		// Download and base64 encode the PDF
-		b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, 50) // 50MB limit
+		// Download and base64 encode the PDF (always need to encode, encrypted or not)
+		b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, encryptedFile, 50) // 50MB limit
 		if err != nil {
 			return nil, fmt.Errorf("failed to download PDF: %w", err)
 		}
@@ -871,8 +945,8 @@ func (oc *AIClient) buildPromptWithMedia(
 		}
 
 	case pendingTypeAudio:
-		// Download and base64 encode the audio
-		b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, 25) // 25MB limit
+		// Download and base64 encode the audio (always need to encode)
+		b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, encryptedFile, 25) // 25MB limit
 		if err != nil {
 			return nil, fmt.Errorf("failed to download audio: %w", err)
 		}
@@ -890,7 +964,30 @@ func (oc *AIClient) buildPromptWithMedia(
 		}
 
 	case pendingTypeVideo:
-		// Video uses text-based approach with URL (SDK doesn't have native video support)
+		// For encrypted video, download+decrypt+base64
+		// For non-encrypted, use direct URL
+		if encryptedFile != nil {
+			b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, encryptedFile, 100) // 100MB limit for video
+			if err != nil {
+				return nil, fmt.Errorf("failed to download video: %w", err)
+			}
+			if actualMimeType == "" || actualMimeType == "application/octet-stream" {
+				actualMimeType = mimeType
+			}
+			dataURL := fmt.Sprintf("data:%s;base64,%s", actualMimeType, b64Data)
+			videoPrompt := fmt.Sprintf("%s\n\nVideo data URL: %s", caption, dataURL)
+			userMsg := openai.ChatCompletionMessageParamUnion{
+				OfUser: &openai.ChatCompletionUserMessageParam{
+					Content: openai.ChatCompletionUserMessageParamContentUnion{
+						OfString: openai.String(videoPrompt),
+					},
+				},
+			}
+			prompt = append(prompt, userMsg)
+			return prompt, nil
+		}
+
+		// Non-encrypted: use HTTP URL directly
 		httpURL := oc.convertMxcToHttp(mediaURL)
 		videoPrompt := fmt.Sprintf("%s\n\nVideo URL: %s", caption, httpURL)
 		userMsg := openai.ChatCompletionMessageParamUnion{
@@ -1003,11 +1100,18 @@ func (oc *AIClient) convertMxcToHttp(mxcURL string) string {
 }
 
 // downloadAndEncodeMedia downloads media from Matrix and returns base64-encoded data
+// If encryptedFile is provided, decrypts the media using AES-CTR
 // maxSizeMB limits the download size (0 = no limit)
 // Returns (base64Data, mimeType, error)
-func (oc *AIClient) downloadAndEncodeMedia(ctx context.Context, mxcURL string, maxSizeMB int) (string, string, error) {
+func (oc *AIClient) downloadAndEncodeMedia(ctx context.Context, mxcURL string, encryptedFile *event.EncryptedFileInfo, maxSizeMB int) (string, string, error) {
+	// For encrypted media, use the URL from the encrypted file info
+	downloadURL := mxcURL
+	if encryptedFile != nil {
+		downloadURL = string(encryptedFile.URL)
+	}
+
 	// Convert mxc:// to HTTP URL
-	httpURL := oc.convertMxcToHttp(mxcURL)
+	httpURL := oc.convertMxcToHttp(downloadURL)
 
 	// Create HTTP request with context
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, httpURL, nil)
@@ -1055,6 +1159,13 @@ func (oc *AIClient) downloadAndEncodeMedia(ctx context.Context, mxcURL string, m
 		maxBytes := int64(maxSizeMB * 1024 * 1024)
 		if int64(len(data)) > maxBytes {
 			return "", "", fmt.Errorf("media too large (max %d MB)", maxSizeMB)
+		}
+	}
+
+	// Decrypt if encrypted (E2EE media)
+	if encryptedFile != nil {
+		if err := encryptedFile.DecryptInPlace(data); err != nil {
+			return "", "", fmt.Errorf("failed to decrypt media: %w", err)
 		}
 	}
 

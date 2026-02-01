@@ -37,6 +37,7 @@ var modelConfig = struct {
 		"z-ai/glm-4.6v": "GLM 4.6V",
 
 		// Kimi (Moonshot)
+		"moonshotai/kimi-k2.5":        "Kimi K2.5",
 		"moonshotai/kimi-k2-0905":     "Kimi K2 (0905)",
 		"moonshotai/kimi-k2-thinking": "Kimi K2 (Thinking)",
 
@@ -66,8 +67,9 @@ var modelConfig = struct {
 		"anthropic/claude-haiku-4.5":  "Claude Haiku 4.5",
 
 		// GPT (OpenAI) via OpenRouter
+		"openai/gpt-5.2":      "GPT-5.2 (Instant)",
 		"openai/gpt-5-image":  "GPT ImageGen 1.5",
-		"openai/gpt-5.2":      "GPT-5.2",
+		"openai/gpt-5.2-pro":  "GPT-5.2 (Reasoning)",
 		"openai/gpt-5-mini":   "GPT-5 mini",
 		"openai/gpt-oss-20b":  "GPT OSS 20B",
 		"openai/gpt-oss-120b": "GPT OSS 120B",
@@ -114,17 +116,6 @@ var modelConfig = struct {
 			SupportsWebSearch:   true,
 			ContextWindow:       200000,
 			MaxOutputTokens:     100000,
-		},
-		{
-			ID:                  "openai/gpt-4-turbo",
-			Name:                "GPT 4 Turbo",
-			Description:         "Previous generation GPT-4 with vision",
-			SupportsVision:      true,
-			SupportsToolCalling: true,
-			SupportsReasoning:   false,
-			SupportsWebSearch:   true,
-			ContextWindow:       128000,
-			MaxOutputTokens:     4096,
 		},
 	},
 }

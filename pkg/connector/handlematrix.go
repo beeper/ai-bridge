@@ -294,8 +294,14 @@ func (oc *AIClient) handleMediaMessage(
 		caption = config.defaultCaption
 	}
 
+	// Get encrypted file info if present (for E2EE rooms)
+	var encryptedFile *event.EncryptedFileInfo
+	if msg.Content.File != nil {
+		encryptedFile = msg.Content.File
+	}
+
 	// Build prompt with media
-	promptMessages, err := oc.buildPromptWithMedia(ctx, portal, meta, caption, string(mediaURL), mimeType, config.msgType)
+	promptMessages, err := oc.buildPromptWithMedia(ctx, portal, meta, caption, string(mediaURL), mimeType, encryptedFile, config.msgType)
 	if err != nil {
 		return nil, err
 	}
@@ -312,13 +318,14 @@ func (oc *AIClient) handleMediaMessage(
 	}
 
 	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
-		Event:       msg.Event,
-		Portal:      portal,
-		Meta:        meta,
-		Type:        config.msgType,
-		MessageBody: caption,
-		MediaURL:    string(mediaURL),
-		MimeType:    mimeType,
+		Event:         msg.Event,
+		Portal:        portal,
+		Meta:          meta,
+		Type:          config.msgType,
+		MessageBody:   caption,
+		MediaURL:      string(mediaURL),
+		MimeType:      mimeType,
+		EncryptedFile: encryptedFile,
 	}, promptMessages)
 
 	return &bridgev2.MatrixMessageResponse{
@@ -335,7 +342,8 @@ func (oc *AIClient) handlePDFMessage(
 	meta *PortalMetadata,
 ) (*bridgev2.MatrixMessageResponse, error) {
 	// Check if model supports PDF
-	if !meta.Capabilities.SupportsPDF {
+	// OpenRouter/Beeper: all models support PDF via file-parser plugin
+	if !meta.Capabilities.SupportsPDF && !oc.isOpenRouterProvider() {
 		oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
 			"The current model (%s) does not support PDF analysis. "+
 				"Please switch to a PDF-capable model using /model.",
@@ -353,6 +361,12 @@ func (oc *AIClient) handlePDFMessage(
 		return nil, fmt.Errorf("PDF message has no URL")
 	}
 
+	// Get encrypted file info if present (for E2EE rooms)
+	var encryptedFile *event.EncryptedFileInfo
+	if msg.Content.File != nil {
+		encryptedFile = msg.Content.File
+	}
+
 	// Get MIME type
 	mimeType := "application/pdf"
 	if msg.Content.Info != nil && msg.Content.Info.MimeType != "" {
@@ -366,7 +380,7 @@ func (oc *AIClient) handlePDFMessage(
 	}
 
 	// Build prompt with PDF
-	promptMessages, err := oc.buildPromptWithMedia(ctx, portal, meta, caption, string(fileURL), mimeType, pendingTypePDF)
+	promptMessages, err := oc.buildPromptWithMedia(ctx, portal, meta, caption, string(fileURL), mimeType, encryptedFile, pendingTypePDF)
 	if err != nil {
 		return nil, err
 	}
@@ -383,13 +397,14 @@ func (oc *AIClient) handlePDFMessage(
 	}
 
 	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
-		Event:       msg.Event,
-		Portal:      portal,
-		Meta:        meta,
-		Type:        pendingTypePDF,
-		MessageBody: caption,
-		MediaURL:    string(fileURL),
-		MimeType:    mimeType,
+		Event:         msg.Event,
+		Portal:        portal,
+		Meta:          meta,
+		Type:          pendingTypePDF,
+		MessageBody:   caption,
+		MediaURL:      string(fileURL),
+		MimeType:      mimeType,
+		EncryptedFile: encryptedFile,
 	}, promptMessages)
 
 	return &bridgev2.MatrixMessageResponse{

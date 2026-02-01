@@ -102,7 +102,9 @@ func (oc *OpenAIConnector) handleRoomConfigEvent(ctx context.Context, evt *event
 		return
 	}
 
-	login := user.GetDefaultLogin()
+	// Use getLoginForPortal to find the correct login based on portal's receiver
+	// This ensures we use the right provider when user has multiple accounts
+	login := oc.getLoginForPortal(ctx, user, portal)
 	if login == nil {
 		log.Warn().Msg("User has no active login, cannot process config")
 		return
@@ -315,4 +317,32 @@ func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User,
 		return nil, fmt.Errorf("login flow %s is not available", flowID)
 	}
 	return &OpenAILogin{User: user, Connector: oc, FlowID: flowID, Provider: flowID}, nil
+}
+
+// getLoginForPortal finds the correct user login based on the portal's Receiver.
+// This ensures we use the correct provider/API credentials when a user has multiple accounts.
+func (oc *OpenAIConnector) getLoginForPortal(ctx context.Context, user *bridgev2.User, portal *bridgev2.Portal) *bridgev2.UserLogin {
+	if portal == nil {
+		return user.GetDefaultLogin()
+	}
+
+	// The portal's Receiver field contains the UserLogin ID that owns this portal
+	receiverID := portal.Receiver
+	if receiverID == "" {
+		oc.br.Log.Warn().Stringer("portal", portal.PortalKey).Msg("Portal has no receiver, using default login")
+		return user.GetDefaultLogin()
+	}
+
+	// Get the specific login that matches the portal's receiver
+	login, err := oc.br.GetExistingUserLoginByID(ctx, receiverID)
+	if err != nil || login == nil {
+		oc.br.Log.Warn().
+			Err(err).
+			Stringer("portal", portal.PortalKey).
+			Str("receiver", string(receiverID)).
+			Msg("Failed to get login for portal receiver, using default login")
+		return user.GetDefaultLogin()
+	}
+
+	return login
 }
