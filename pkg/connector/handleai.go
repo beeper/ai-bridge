@@ -1992,37 +1992,49 @@ func (oc *AIClient) getTitleGenerationModel() string {
 }
 
 // generateRoomTitle asks the model to generate a short descriptive title for the conversation
-// Uses Chat Completions API for universal provider compatibility (Responses API non-streaming
-// isn't supported by all providers like OpenRouter)
+// Uses Responses API for OpenRouter compatibility (the PDF plugins middleware adds a 'plugins'
+// field that is only valid for Responses API, not Chat Completions API)
 func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistantResponse string) (string, error) {
 	model := oc.getTitleGenerationModel()
 
 	oc.log.Debug().Str("model", model).Msg("Generating room title")
 
-	// Use Chat Completions API for universal compatibility
-	resp, err := oc.api.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model: model,
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage("Generate a very short title (3-5 words max) that summarizes this conversation. Reply with ONLY the title, no quotes, no punctuation at the end."),
-			openai.UserMessage(fmt.Sprintf("User: %s\n\nAssistant: %s", userMessage, assistantResponse)),
+	// Use Responses API for OpenRouter compatibility (plugins field is only valid here)
+	resp, err := oc.api.Responses.New(ctx, responses.ResponseNewParams{
+		Model: shared.ResponsesModel(model),
+		Input: responses.ResponseNewParamsInputUnion{
+			OfString: openai.String(fmt.Sprintf(
+				"Generate a very short title (3-5 words max) that summarizes this conversation. Reply with ONLY the title, no quotes, no punctuation at the end.\n\nUser: %s\n\nAssistant: %s",
+				userMessage, assistantResponse,
+			)),
 		},
-		MaxCompletionTokens: openai.Int(20),
+		MaxOutputTokens: openai.Int(20),
 	})
 	if err != nil {
 		oc.log.Warn().Err(err).Str("model", model).Msg("Title generation API call failed")
 		return "", err
 	}
 
-	// Extract title from response
+	// Extract text from response output
 	var title string
-	if len(resp.Choices) > 0 && resp.Choices[0].Message.Content != "" {
-		title = resp.Choices[0].Message.Content
+	for _, item := range resp.Output {
+		if msg, ok := item.AsAny().(responses.ResponseOutputMessage); ok {
+			for _, contentPart := range msg.Content {
+				if text, ok := contentPart.AsAny().(responses.ResponseOutputText); ok {
+					title = text.Text
+					break
+				}
+			}
+			if title != "" {
+				break
+			}
+		}
 	}
 
 	if title == "" {
 		oc.log.Warn().
 			Str("model", model).
-			Int("choices", len(resp.Choices)).
+			Int("output_items", len(resp.Output)).
 			Msg("Title generation returned no content")
 		return "", fmt.Errorf("no response from model")
 	}
