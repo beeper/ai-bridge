@@ -546,12 +546,22 @@ type RoomConfigEventContent struct {
 	// Per-tool configuration and availability
 	ToolsConfig    *ToolsConfig `json:"tools_config,omitempty"`
 	AvailableTools []ToolInfo   `json:"available_tools,omitempty"`
+
+	// Tool toggle request from client (not persisted in state, just for updates)
+	ToolToggle *ToolToggle `json:"tool_toggle,omitempty"`
+}
+
+// ToolToggle represents a request to toggle a specific tool on/off
+type ToolToggle struct {
+	Name    string `json:"name"`    // Tool name (e.g., "calculator", "web_search", "online")
+	Enabled bool   `json:"enabled"` // Desired state
 }
 
 // ToolInfo describes a tool and its status for room state broadcasting
 type ToolInfo struct {
 	Name        string `json:"name"`
-	Type        string `json:"type"`        // "builtin", "provider", "plugin"
+	DisplayName string `json:"display_name"`           // Human-readable name for UI
+	Type        string `json:"type"`                   // "builtin", "provider", "plugin"
 	Description string `json:"description,omitempty"`
 	Enabled     bool   `json:"enabled"`
 	Available   bool   `json:"available"` // Based on model capabilities and provider
