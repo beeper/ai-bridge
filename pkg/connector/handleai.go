@@ -36,7 +36,7 @@ type streamingState struct {
 	firstTokenAtMs int64
 	completedAtMs  int64
 
-	baseInput             responses.ResponseInputParam
+	baseInput              responses.ResponseInputParam
 	accumulated            strings.Builder
 	reasoning              strings.Builder
 	toolCalls              []ToolCallMetadata
@@ -501,23 +501,23 @@ func (oc *AIClient) streamingResponse(
 
 			// Store result for API continuation
 			tool.result = result
-					args := strings.TrimSpace(tool.input.String())
-					if args == "" {
-						args = strings.TrimSpace(streamEvent.Arguments)
-					}
-					if args == "" {
-						args = "{}"
-					}
-					name := strings.TrimSpace(tool.toolName)
-					if name == "" {
-						name = strings.TrimSpace(streamEvent.Name)
-					}
-					state.pendingFunctionOutputs = append(state.pendingFunctionOutputs, functionCallOutput{
-						callID:    streamEvent.ItemID,
-						name:      name,
-						arguments: args,
-						output:    result,
-					})
+			args := strings.TrimSpace(tool.input.String())
+			if args == "" {
+				args = strings.TrimSpace(streamEvent.Arguments)
+			}
+			if args == "" {
+				args = "{}"
+			}
+			name := strings.TrimSpace(tool.toolName)
+			if name == "" {
+				name = strings.TrimSpace(streamEvent.Name)
+			}
+			state.pendingFunctionOutputs = append(state.pendingFunctionOutputs, functionCallOutput{
+				callID:    streamEvent.ItemID,
+				name:      name,
+				arguments: args,
+				output:    result,
+			})
 
 			// Parse input for storage
 			var inputMap map[string]any
@@ -950,8 +950,8 @@ func (oc *AIClient) streamingResponse(
 // buildContinuationParams builds params for continuing a response after tool execution
 func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalMetadata) responses.ResponseNewParams {
 	params := responses.ResponseNewParams{
-		Model:              shared.ResponsesModel(oc.effectiveModelForAPI(meta)),
-		MaxOutputTokens:    openai.Int(int64(oc.effectiveMaxTokens(meta))),
+		Model:           shared.ResponsesModel(oc.effectiveModelForAPI(meta)),
+		MaxOutputTokens: openai.Int(int64(oc.effectiveMaxTokens(meta))),
 	}
 
 	if systemPrompt := oc.effectivePrompt(meta); systemPrompt != "" {
