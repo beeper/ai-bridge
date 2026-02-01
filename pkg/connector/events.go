@@ -101,7 +101,7 @@ type StreamContentType string
 
 const (
 	StreamContentText       StreamContentType = "text"
-	StreamContentThinking   StreamContentType = "thinking"
+	StreamContentReasoning  StreamContentType = "reasoning"
 	StreamContentToolInput  StreamContentType = "tool_input"
 	StreamContentToolResult StreamContentType = "tool_result"
 	StreamContentCode       StreamContentType = "code"

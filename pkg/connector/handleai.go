@@ -300,7 +300,7 @@ func (oc *AIClient) streamingResponse(
 			// Stream reasoning tokens in real-time
 			if !state.firstToken && state.initialEventID != "" {
 				state.sequenceNum++
-				oc.emitStreamDelta(ctx, portal, state, StreamContentThinking, streamEvent.Delta, nil)
+				oc.emitStreamDelta(ctx, portal, state, StreamContentReasoning, streamEvent.Delta, nil)
 			}
 
 		case "response.function_call_arguments.delta":
