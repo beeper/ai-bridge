@@ -774,11 +774,17 @@ func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) 
 
 	// List models from the provider
 	if oc.provider != nil {
-		models, err := oc.provider.ListModels(timeoutCtx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list models: %w", err)
+		// For OpenRouter/Beeper providers, use curated manifest models directly
+		// The API's ListModels filters for OpenAI prefixes which don't match OpenRouter model IDs
+		if oc.isOpenRouterProvider() {
+			allModels = GetOpenRouterModels()
+		} else {
+			models, err := oc.provider.ListModels(timeoutCtx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to list models: %w", err)
+			}
+			allModels = models
 		}
-		allModels = models
 	}
 
 	// Update cache

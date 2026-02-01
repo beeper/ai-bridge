@@ -31,6 +31,18 @@ func GetOpenAIModels() []ModelInfo {
 	return models
 }
 
+// GetOpenRouterModels returns all models from the manifest that use the "openrouter" provider.
+// These are models accessed via OpenRouter's API (including Beeper's OpenRouter proxy).
+func GetOpenRouterModels() []ModelInfo {
+	var models []ModelInfo
+	for _, info := range ModelManifest.Models {
+		if info.Provider == "openrouter" {
+			models = append(models, info)
+		}
+	}
+	return models
+}
+
 // ResolveAlias returns the actual model ID for a given alias.
 // If the input is not an alias, it returns the input unchanged.
 func ResolveAlias(modelID string) string {
