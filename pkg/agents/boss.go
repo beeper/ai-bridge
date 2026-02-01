@@ -1,7 +1,5 @@
 package agents
 
-import "time"
-
 // BossAgent is the special agent that manages other agents and rooms.
 // This is the "Meta Chatter" - uses Claude Opus with medium thinking.
 var BossAgent = &AgentDefinition{
@@ -14,8 +12,8 @@ var BossAgent = &AgentDefinition{
 	SystemPrompt:    BossSystemPrompt,
 	PromptMode:      PromptModeFull,
 	IsPreset:        true,
-	CreatedAt:       time.Now().Unix(),
-	UpdatedAt:       time.Now().Unix(),
+	CreatedAt:       0, // Preset agents have no creation time
+	UpdatedAt:       0,
 }
 
 // GetBossAgent returns a copy of the Boss agent definition.

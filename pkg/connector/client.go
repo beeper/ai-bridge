@@ -656,15 +656,36 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 }
 
 // effectiveModel returns the full prefixed model ID (e.g., "openai/gpt-5.2")
-// Priority: Room ? User ? Provider ? Global
+// Priority: Room → Agent → User → Provider → Global
 func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
+	// Room-level model override takes priority
 	if meta != nil && meta.Model != "" {
 		return meta.Model
 	}
+
+	// Check if an agent is assigned and use its model
+	if meta != nil {
+		agentID := meta.AgentID
+		if agentID == "" {
+			agentID = meta.DefaultAgentID
+		}
+		if agentID != "" {
+			// Load the agent to get its model
+			store := NewAgentStoreAdapter(oc)
+			agent, err := store.GetAgentByID(context.Background(), agentID)
+			if err == nil && agent != nil && agent.Model.Primary != "" {
+				return agent.Model.Primary
+			}
+		}
+	}
+
+	// User-level default
 	loginMeta := loginMetadata(oc.UserLogin)
 	if loginMeta.Defaults != nil && loginMeta.Defaults.Model != "" {
 		return loginMeta.Defaults.Model
 	}
+
+	// Provider default from config
 	return oc.defaultModelForProvider()
 }
 
