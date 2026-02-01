@@ -736,14 +736,8 @@ func (oc *AIClient) streamingResponse(
 					}
 					state.baseInput = append(state.baseInput, responses.ResponseInputItemParamOfFunctionCall(args, output.callID, output.name))
 				}
-				state.baseInput = append(state.baseInput, responses.ResponseInputItemUnionParam{
-					OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
-						CallID: output.callID,
-						Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
-							OfString: openai.String(output.output),
-						},
-					},
-				})
+				// Use SDK helper to ensure Type field is properly set
+				state.baseInput = append(state.baseInput, responses.ResponseInputItemParamOfFunctionCallOutput(output.callID, output.output))
 			}
 		}
 
@@ -977,14 +971,8 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 			}
 			input = append(input, responses.ResponseInputItemParamOfFunctionCall(args, output.callID, output.name))
 		}
-		input = append(input, responses.ResponseInputItemUnionParam{
-			OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
-				CallID: output.callID,
-				Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
-					OfString: openai.String(output.output),
-				},
-			},
-		})
+		// Use SDK helper to ensure Type field is properly set
+		input = append(input, responses.ResponseInputItemParamOfFunctionCallOutput(output.callID, output.output))
 	}
 	params.Input = responses.ResponseNewParamsInputUnion{
 		OfInputItemList: input,
