@@ -13,17 +13,17 @@ const (
 	BackendOpenRouter ModelBackend = "openrouter"
 )
 
-// Default models for each provider (with prefixes)
+// Default models for each provider
 const (
 	DefaultModelOpenAI     = "openai/gpt-5.2"
-	DefaultModelOpenRouter = "openrouter/anthropic/claude-sonnet-4.5"
+	DefaultModelOpenRouter = "anthropic/claude-sonnet-4.5"
 	DefaultModelBeeper     = "anthropic/claude-sonnet-4.5"
 )
 
 // ParseModelPrefix extracts the backend and actual model ID from a prefixed model
 // Examples:
 //   - "openai/gpt-5.2" → (BackendOpenAI, "gpt-5.2")
-//   - "openrouter/openai/gpt-5" → (BackendOpenRouter, "openai/gpt-5")
+//   - "anthropic/claude-sonnet-4.5" (no routing prefix) → ("", "anthropic/claude-sonnet-4.5")
 //   - "gpt-4o" (no prefix) → ("", "gpt-4o")
 func ParseModelPrefix(modelID string) (backend ModelBackend, actualModel string) {
 	parts := strings.SplitN(modelID, "/", 2)
