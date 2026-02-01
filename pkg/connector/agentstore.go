@@ -88,6 +88,7 @@ func (s *AgentStoreAdapter) loadCustomAgentsFromState(ctx context.Context) (map[
 }
 
 // saveCustomAgentsToState saves custom agents to the Builder room's Matrix state event.
+// If the Builder room doesn't exist, it creates one automatically.
 func (s *AgentStoreAdapter) saveCustomAgentsToState(ctx context.Context, agentsMap map[string]*AgentDefinitionContent) error {
 	// Get Builder room
 	portal, err := s.getBuilderPortal(ctx)
@@ -95,7 +96,14 @@ func (s *AgentStoreAdapter) saveCustomAgentsToState(ctx context.Context, agentsM
 		return fmt.Errorf("failed to get builder portal: %w", err)
 	}
 	if portal == nil || portal.MXID == "" {
-		return fmt.Errorf("builder room not created yet")
+		// Auto-create Builder room when saving first custom agent
+		if err := s.client.ensureBuilderRoom(ctx); err != nil {
+			return fmt.Errorf("failed to create builder room: %w", err)
+		}
+		portal, err = s.getBuilderPortal(ctx)
+		if err != nil || portal == nil || portal.MXID == "" {
+			return fmt.Errorf("builder room not available after creation")
+		}
 	}
 
 	// Send the custom agents state event
