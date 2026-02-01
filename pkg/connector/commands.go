@@ -5,8 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/agents"
 	"maunium.net/go/mautrix/bridgev2/commands"
+
+	"github.com/beeper/ai-bridge/pkg/agents"
 )
 
 // HelpSectionAI is the help section for AI-related commands

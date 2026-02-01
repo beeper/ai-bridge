@@ -9,12 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/agents/tools"
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 	"github.com/rs/zerolog"
+
+	"github.com/beeper/ai-bridge/pkg/agents"
+	"github.com/beeper/ai-bridge/pkg/agents/tools"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -500,6 +502,11 @@ func (oc *AIClient) streamingResponse(
 				activeTools[streamEvent.ItemID] = tool
 			}
 
+			// Update tool name from done event (delta events don't have the name)
+			if tool.toolName == "" && streamEvent.Name != "" {
+				tool.toolName = streamEvent.Name
+			}
+
 			// Store the item ID for continuation (this is the call_id for the Responses API)
 			tool.itemID = streamEvent.ItemID
 
@@ -838,6 +845,12 @@ func (oc *AIClient) streamingResponse(
 					tool.input.WriteString(streamEvent.Arguments)
 					activeTools[streamEvent.ItemID] = tool
 				}
+
+				// Update tool name from done event (delta events don't have the name)
+				if tool.toolName == "" && streamEvent.Name != "" {
+					tool.toolName = streamEvent.Name
+				}
+
 				tool.itemID = streamEvent.ItemID
 
 				if !ensureInitialEvent() {
@@ -1027,6 +1040,19 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 			params.Tools = append(params.Tools, ToOpenAITools(enabledTools)...)
 		}
 	}
+
+	// Add boss tools for Boss agent rooms (needed for multi-turn tool use)
+	agentID := meta.AgentID
+	if agentID == "" {
+		agentID = meta.DefaultAgentID
+	}
+	if agents.IsBossAgent(agentID) {
+		bossTools := tools.BossTools()
+		params.Tools = append(params.Tools, bossToolsToOpenAI(bossTools)...)
+	}
+
+	// Prevent duplicate tool names (Anthropic rejects duplicates)
+	params.Tools = dedupeToolParams(params.Tools)
 
 	return params
 }
@@ -1720,6 +1746,14 @@ func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Po
 
 	// Truncate result for body if too long
 	bodyText := result
+	var parsedResult any
+	if err := json.Unmarshal([]byte(result), &parsedResult); err == nil {
+		if obj, ok := parsedResult.(map[string]any); ok {
+			if msg, ok := obj["message"].(string); ok && msg != "" {
+				bodyText = msg
+			}
+		}
+	}
 	if len(bodyText) > 200 {
 		bodyText = bodyText[:200] + "..."
 	}
@@ -1743,9 +1777,8 @@ func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Po
 	}
 
 	if result != "" {
-		toolResultData["output"] = map[string]any{
-			"result": result,
-		}
+		// Keep the output shape stable: { output: { result: "<string payload>" } }
+		toolResultData["output"] = map[string]any{"result": result}
 	}
 
 	eventContent := &event.Content{
@@ -2085,7 +2118,8 @@ func (oc *AIClient) sendGeneratedImage(
 	return resp.EventID, nil
 }
 
-// sendWelcomeMessage sends a welcome message when a new chat is created
+// sendWelcomeMessage sends a welcome message when a new chat is created.
+// The message is excluded from LLM history so it doesn't affect conversation context.
 func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Portal) {
 	meta := portalMeta(portal)
 	if meta.WelcomeSent {
@@ -2099,18 +2133,40 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 		return // Don't send if we can't persist state
 	}
 
-	modelID := oc.effectiveModel(meta)
-	modelName := FormatModelDisplay(modelID)
-	body := fmt.Sprintf("This chat was created automatically. Send a message to start talking to %s.", modelName)
+	// Determine sender and display name based on whether this is an agent room
+	var senderID networkid.UserID
+	var displayName string
 
-	// Ensure ghost display name is set before sending welcome message
-	oc.ensureGhostDisplayName(ctx, modelID)
+	agentID := meta.AgentID
+	if agentID == "" {
+		agentID = meta.DefaultAgentID
+	}
+
+	if agentID != "" {
+		// Agent room - use agent ghost
+		senderID = agentUserID(agentID)
+		store := NewAgentStoreAdapter(oc)
+		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil {
+			displayName = agent.Name
+			oc.ensureAgentGhostDisplayName(ctx, agentID, displayName)
+		} else {
+			displayName = agentID // Fallback to agent ID
+		}
+	} else {
+		// Model room - use model ghost
+		modelID := oc.effectiveModel(meta)
+		senderID = modelUserID(modelID)
+		displayName = modelContactName(modelID, oc.findModelInfo(modelID))
+		oc.ensureGhostDisplayName(ctx, modelID)
+	}
+
+	body := fmt.Sprintf("Hello! I'm %s. Send a message to start our conversation.", displayName)
 
 	event := &OpenAIRemoteMessage{
 		PortalKey: portal.PortalKey,
 		ID:        networkid.MessageID(fmt.Sprintf("openai:welcome:%s", uuid.NewString())),
 		Sender: bridgev2.EventSender{
-			Sender:      modelUserID(modelID),
+			Sender:      senderID,
 			ForceDMUser: true,
 			SenderLogin: oc.UserLogin.ID,
 			IsFromMe:    false,
@@ -2118,8 +2174,9 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 		Content:   body,
 		Timestamp: time.Now(),
 		Metadata: &MessageMetadata{
-			Role: "assistant",
-			Body: body,
+			Role:               "assistant",
+			Body:               body,
+			ExcludeFromHistory: true, // Don't include in LLM context
 		},
 	}
 	oc.UserLogin.QueueRemoteEvent(event)

@@ -6,12 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/agents"
-	"github.com/beeper/ai-bridge/pkg/agents/tools"
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
+
+	"github.com/beeper/ai-bridge/pkg/agents"
+	"github.com/beeper/ai-bridge/pkg/agents/tools"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -279,9 +280,9 @@ func (oc *AIClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.
 	return results, nil
 }
 
-// GetContactList returns a list of available AI agents as contacts
+// GetContactList returns a list of available AI agents and models as contacts
 func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
-	oc.log.Debug().Msg("Agent contact list requested")
+	oc.log.Debug().Msg("Contact list requested")
 
 	// Load agents
 	store := NewAgentStoreAdapter(oc)
@@ -317,7 +318,39 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 		})
 	}
 
-	oc.log.Info().Int("count", len(contacts)).Msg("Returning agent contact list")
+	// Add contacts for available models
+	models, err := oc.listAvailableModels(ctx, false)
+	if err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to load model contact list")
+	} else {
+		for i := range models {
+			model := &models[i]
+			if model.ID == "" {
+				continue
+			}
+			userID := modelUserID(model.ID)
+			ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
+			if err != nil {
+				oc.log.Warn().Err(err).Str("model", model.ID).Msg("Failed to get ghost for model")
+				continue
+			}
+
+			// Ensure ghost display name is set before returning
+			oc.ensureGhostDisplayNameWithGhost(ctx, ghost, model.ID, model)
+
+			contacts = append(contacts, &bridgev2.ResolveIdentifierResponse{
+				UserID: userID,
+				UserInfo: &bridgev2.UserInfo{
+					Name:        ptr.Ptr(modelContactName(model.ID, model)),
+					IsBot:       ptr.Ptr(false),
+					Identifiers: modelContactIdentifiers(model.ID, model),
+				},
+				Ghost: ghost,
+			})
+		}
+	}
+
+	oc.log.Info().Int("count", len(contacts)).Msg("Returning contact list")
 	return contacts, nil
 }
 
@@ -338,6 +371,13 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 	}
 
 	// Fallback: try as model ID for backwards compatibility
+	resolved, valid, err := oc.resolveModelID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if valid && resolved != "" {
+		return oc.resolveModelIdentifier(ctx, resolved, createChat)
+	}
 	return oc.resolveModelIdentifier(ctx, id, createChat)
 }
 
@@ -394,12 +434,13 @@ func (oc *AIClient) resolveModelIdentifier(ctx context.Context, modelID string, 
 		}
 	}
 
+	info := oc.findModelInfo(modelID)
 	return &bridgev2.ResolveIdentifierResponse{
 		UserID: userID,
 		UserInfo: &bridgev2.UserInfo{
-			Name:        ptr.Ptr(FormatModelDisplay(modelID)),
+			Name:        ptr.Ptr(modelContactName(modelID, info)),
 			IsBot:       ptr.Ptr(false),
-			Identifiers: []string{modelID},
+			Identifiers: modelContactIdentifiers(modelID, info),
 		},
 		Ghost: ghost,
 		Chat:  chatResp,
@@ -440,9 +481,37 @@ func (oc *AIClient) createAgentChat(ctx context.Context, agent *agents.AgentDefi
 
 	// Update chat info members to use agent ghost
 	chatInfo.Members = &bridgev2.ChatMemberList{
-		MemberMap: map[networkid.UserID]bridgev2.ChatMember{
-			humanUserID(oc.UserLogin.ID): {EventSender: bridgev2.EventSender{Sender: humanUserID(oc.UserLogin.ID)}},
-			agentUserID(agent.ID):        {EventSender: bridgev2.EventSender{Sender: agentUserID(agent.ID)}},
+		IsFull:      true,
+		OtherUserID: agentUserID(agent.ID),
+		MemberMap: bridgev2.ChatMemberMap{
+			humanUserID(oc.UserLogin.ID): {
+				EventSender: bridgev2.EventSender{
+					IsFromMe:    true,
+					SenderLogin: oc.UserLogin.ID,
+				},
+				Membership: event.MembershipJoin,
+			},
+			agentUserID(agent.ID): {
+				EventSender: bridgev2.EventSender{
+					Sender:      agentUserID(agent.ID),
+					SenderLogin: oc.UserLogin.ID,
+				},
+				Membership: event.MembershipJoin,
+				UserInfo: &bridgev2.UserInfo{
+					Name:        ptr.Ptr(agent.Name),
+					IsBot:       ptr.Ptr(true),
+					Identifiers: []string{agent.ID},
+				},
+				MemberEventExtra: map[string]any{
+					"displayname": agent.Name,
+				},
+			},
+		},
+		PowerLevels: &bridgev2.PowerLevelOverrides{
+			Events: map[event.Type]int{
+				RoomCapabilitiesEventType: 100,
+				RoomSettingsEventType:     0,
+			},
 		},
 	}
 
@@ -511,7 +580,8 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 
 	title := opts.Title
 	if title == "" {
-		title = fmt.Sprintf("AI Chat with %s", FormatModelDisplay(modelID))
+		modelName := modelContactName(modelID, oc.findModelInfo(modelID))
+		title = fmt.Sprintf("AI Chat with %s", modelName)
 	}
 
 	portalKey := portalKeyForChat(oc.UserLogin.ID)
@@ -688,11 +758,14 @@ func (oc *AIClient) handleNewChat(
 		return
 	}
 
+	// Send welcome message (excluded from LLM history)
+	oc.sendWelcomeMessage(runCtx, newPortal)
+
 	// Send confirmation with link
 	roomLink := fmt.Sprintf("https://matrix.to/#/%s", newPortal.MXID)
 	oc.sendSystemNotice(runCtx, portal, fmt.Sprintf(
 		"Created new %s chat.\nOpen: %s",
-		FormatModelDisplay(modelID), roomLink,
+		modelContactName(modelID, oc.findModelInfo(modelID)), roomLink,
 	))
 }
 
@@ -792,7 +865,7 @@ func (oc *AIClient) chatInfoFromPortal(portal *bridgev2.Portal) *bridgev2.ChatIn
 		if portal.Name != "" {
 			title = portal.Name
 		} else {
-			title = FormatModelDisplay(modelID)
+			title = modelContactName(modelID, oc.findModelInfo(modelID))
 		}
 	}
 	return oc.composeChatInfo(title, meta.SystemPrompt, modelID)
@@ -803,7 +876,8 @@ func (oc *AIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.Cha
 	if modelID == "" {
 		modelID = oc.effectiveModel(nil)
 	}
-	modelName := FormatModelDisplay(modelID)
+	modelInfo := oc.findModelInfo(modelID)
+	modelName := modelContactName(modelID, modelInfo)
 	if title == "" {
 		title = modelName
 	}
@@ -822,13 +896,15 @@ func (oc *AIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.Cha
 			},
 			Membership: event.MembershipJoin,
 			UserInfo: &bridgev2.UserInfo{
-				Name:  ptr.Ptr(modelName),
-				IsBot: ptr.Ptr(false),
+				Name:        ptr.Ptr(modelName),
+				IsBot:       ptr.Ptr(false),
+				Identifiers: modelContactIdentifiers(modelID, modelInfo),
 			},
 			// Set displayname directly in membership event content
 			// This works because MemberEventContent.Displayname has omitempty
 			MemberEventExtra: map[string]any{
-				"displayname": modelName,
+				"displayname":         modelName,
+				"com.beeper.ai.model": modelID,
 			},
 		},
 	}
@@ -932,8 +1008,10 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 		Stringer("portal", portal.PortalKey).
 		Msg("Handling model switch")
 
-	oldModelName := FormatModelDisplay(oldModel)
-	newModelName := FormatModelDisplay(newModel)
+	oldInfo := oc.findModelInfo(oldModel)
+	newInfo := oc.findModelInfo(newModel)
+	oldModelName := modelContactName(oldModel, oldInfo)
+	newModelName := modelContactName(newModel, newInfo)
 
 	// Pre-update the new model ghost's profile before queueing the event
 	// This ensures the ghost has a display name set in its Matrix profile
@@ -941,10 +1019,7 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 	if err != nil {
 		oc.log.Warn().Err(err).Str("model", newModel).Msg("Failed to get ghost for model switch")
 	} else {
-		newGhost.UpdateInfo(ctx, &bridgev2.UserInfo{
-			Name:  ptr.Ptr(newModelName),
-			IsBot: ptr.Ptr(false),
-		})
+		oc.ensureGhostDisplayNameWithGhost(ctx, newGhost, newModel, newInfo)
 	}
 
 	// Create member changes: old model leaves, new model joins
@@ -967,11 +1042,13 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 				},
 				Membership: event.MembershipJoin,
 				UserInfo: &bridgev2.UserInfo{
-					Name:  ptr.Ptr(newModelName),
-					IsBot: ptr.Ptr(false),
+					Name:        ptr.Ptr(newModelName),
+					IsBot:       ptr.Ptr(false),
+					Identifiers: modelContactIdentifiers(newModel, newInfo),
 				},
 				MemberEventExtra: map[string]any{
-					"displayname": newModelName,
+					"displayname":         newModelName,
+					"com.beeper.ai.model": newModel,
 				},
 			},
 		},

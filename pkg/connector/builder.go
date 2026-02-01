@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/beeper/ai-bridge/pkg/agents"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+
+	"github.com/beeper/ai-bridge/pkg/agents"
 )
 
 // Builder room constants
@@ -47,6 +48,9 @@ func (oc *AIClient) ensureBuilderRoom(ctx context.Context) error {
 	if err := portal.CreateMatrixRoom(ctx, oc.UserLogin, chatInfo); err != nil {
 		return fmt.Errorf("failed to create matrix room for builder: %w", err)
 	}
+
+	// Send welcome message (excluded from LLM history)
+	oc.sendWelcomeMessage(ctx, portal)
 
 	// Store the Builder room ID
 	meta.BuilderRoomID = portal.PortalKey.ID

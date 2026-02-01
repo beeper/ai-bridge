@@ -84,9 +84,14 @@ func messageMeta(msg *database.Message) *MessageMetadata {
 }
 
 // shouldIncludeInHistory checks if a message should be included in LLM history.
-// Filters out commands (messages starting with /) and non-conversation messages.
+// Filters out commands (messages starting with /), non-conversation messages,
+// and messages explicitly excluded (e.g., welcome messages).
 func shouldIncludeInHistory(meta *MessageMetadata) bool {
 	if meta == nil || meta.Body == "" {
+		return false
+	}
+	// Skip messages explicitly excluded (welcome messages, etc.)
+	if meta.ExcludeFromHistory {
 		return false
 	}
 	// Skip command messages

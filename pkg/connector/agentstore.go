@@ -7,12 +7,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/agents"
-	"github.com/beeper/ai-bridge/pkg/agents/tools"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/matrix"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+
+	"github.com/beeper/ai-bridge/pkg/agents"
+	"github.com/beeper/ai-bridge/pkg/agents/tools"
 )
 
 // AgentStoreAdapter implements agents.AgentStore using Matrix state events.
@@ -446,6 +447,9 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 	if err := portal.CreateMatrixRoom(ctx, b.store.client.UserLogin, resp.PortalInfo); err != nil {
 		return "", fmt.Errorf("failed to create Matrix room: %w", err)
 	}
+
+	// Send welcome message (excluded from LLM history)
+	b.store.client.sendWelcomeMessage(ctx, portal)
 
 	if room.Name != "" {
 		if err := b.store.client.setRoomName(ctx, portal, room.Name); err != nil {

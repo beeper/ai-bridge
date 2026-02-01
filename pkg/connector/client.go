@@ -15,11 +15,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/openai/openai-go/v3"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/ptr"
+
+	"github.com/beeper/ai-bridge/pkg/agents"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -589,10 +590,11 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 
 	// Parse model from ghost ID (format: "model-{escaped-model-id}")
 	if modelID := parseModelFromGhostID(ghostID); modelID != "" {
+		info := oc.findModelInfo(modelID)
 		return &bridgev2.UserInfo{
-			Name:         ptr.Ptr(FormatModelDisplay(modelID)),
+			Name:         ptr.Ptr(modelContactName(modelID, info)),
 			IsBot:        ptr.Ptr(false),
-			Identifiers:  []string{modelID},
+			Identifiers:  modelContactIdentifiers(modelID, info),
 			ExtraUpdates: updateGhostLastSync,
 		}, nil
 	}
@@ -933,6 +935,30 @@ func (oc *AIClient) resolveModelID(ctx context.Context, modelID string) (string,
 		for _, model := range models {
 			if strings.EqualFold(model.Name, normalized) {
 				return model.ID, true, nil
+			}
+		}
+
+		if strings.Contains(normalized, "/") {
+			parts := strings.SplitN(normalized, "/", 2)
+			providerPart := parts[0]
+			rest := parts[1]
+			if providerPart != "" && rest != "" {
+				for _, model := range models {
+					modelProvider := model.Provider
+					if modelProvider == "" {
+						if backend, _ := ParseModelPrefix(model.ID); backend != "" {
+							modelProvider = string(backend)
+						}
+					}
+					if modelProvider == "" || !strings.EqualFold(modelProvider, providerPart) {
+						continue
+					}
+					if strings.EqualFold(model.ID, rest) ||
+						strings.EqualFold(model.Name, rest) ||
+						strings.HasSuffix(strings.ToLower(model.ID), "/"+strings.ToLower(rest)) {
+						return model.ID, true, nil
+					}
+				}
 			}
 		}
 
@@ -1438,12 +1464,19 @@ func (oc *AIClient) ensureGhostDisplayName(ctx context.Context, modelID string) 
 	if err != nil || ghost == nil {
 		return
 	}
-	// Only update if name is not already set
-	if ghost.Name == "" || !ghost.NameSet {
-		displayName := FormatModelDisplay(modelID)
+	oc.ensureGhostDisplayNameWithGhost(ctx, ghost, modelID, oc.findModelInfo(modelID))
+}
+
+func (oc *AIClient) ensureGhostDisplayNameWithGhost(ctx context.Context, ghost *bridgev2.Ghost, modelID string, info *ModelInfo) {
+	if ghost == nil {
+		return
+	}
+	displayName := modelContactName(modelID, info)
+	if ghost.Name == "" || !ghost.NameSet || ghost.Name != displayName {
 		ghost.UpdateInfo(ctx, &bridgev2.UserInfo{
-			Name:  ptr.Ptr(displayName),
-			IsBot: ptr.Ptr(false),
+			Name:        ptr.Ptr(displayName),
+			IsBot:       ptr.Ptr(false),
+			Identifiers: modelContactIdentifiers(modelID, info),
 		})
 		oc.log.Debug().Str("model", modelID).Str("name", displayName).Msg("Updated ghost display name")
 	}

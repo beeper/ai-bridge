@@ -184,6 +184,9 @@ func (o *OpenAIProvider) buildResponsesParams(params GenerateParams) responses.R
 		})
 	}
 
+	// Ensure tool names are unique – Anthropic rejects duplicates
+	responsesParams.Tools = dedupeToolParams(responsesParams.Tools)
+
 	return responsesParams
 }
 
@@ -581,5 +584,31 @@ func ToOpenAITools(tools []ToolDefinition) []responses.ToolUnionParam {
 		result = append(result, toolParam)
 	}
 
+	return result
+}
+
+// dedupeToolParams removes tools with duplicate identifiers to satisfy providers
+// like Anthropic that reject duplicated tool names.
+func dedupeToolParams(tools []responses.ToolUnionParam) []responses.ToolUnionParam {
+	seen := make(map[string]struct{}, len(tools))
+	var result []responses.ToolUnionParam
+	for _, t := range tools {
+		key := ""
+		switch {
+		case t.OfFunction != nil:
+			key = "function:" + t.OfFunction.Name
+		case t.OfCodeInterpreter != nil:
+			key = "code_interpreter"
+		case t.OfWebSearch != nil:
+			key = "web_search"
+		default:
+			key = fmt.Sprintf("%v", t) // fallback, should rarely hit
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, t)
+	}
 	return result
 }

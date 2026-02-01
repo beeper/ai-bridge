@@ -145,6 +145,9 @@ type MessageMetadata struct {
 	// Thinking/reasoning content (embedded, not separate)
 	ThinkingContent    string `json:"thinking_content,omitempty"`     // Full thinking text
 	ThinkingTokenCount int    `json:"thinking_token_count,omitempty"` // Number of thinking tokens
+
+	// History exclusion
+	ExcludeFromHistory bool `json:"exclude_from_history,omitempty"` // Exclude from LLM context (e.g., welcome messages)
 }
 
 // ToolCallMetadata tracks a tool call within a message
