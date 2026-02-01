@@ -150,6 +150,9 @@ func ParseContextLengthError(err error) *ContextLengthError {
 func IsRateLimitError(err error) bool {
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) {
+		if strings.EqualFold(apiErr.Code, "rate_limit_exceeded") {
+			return true
+		}
 		return apiErr.StatusCode == 429
 	}
 	return false
@@ -159,6 +162,9 @@ func IsRateLimitError(err error) bool {
 func IsServerError(err error) bool {
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) {
+		if strings.EqualFold(apiErr.Code, "server_error") {
+			return true
+		}
 		return apiErr.StatusCode >= 500
 	}
 	return false
