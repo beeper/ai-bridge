@@ -93,16 +93,6 @@ func (r *Result) IsError() bool {
 	return r.Status == ResultError
 }
 
-// GetText returns the first text content block, if any.
-func (r *Result) GetText() string {
-	for _, block := range r.Content {
-		if block.Type == "text" {
-			return block.Text
-		}
-	}
-	return ""
-}
-
 // HasImages returns true if the result contains image blocks.
 func (r *Result) HasImages() bool {
 	for _, block := range r.Content {

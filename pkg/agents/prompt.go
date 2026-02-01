@@ -120,10 +120,8 @@ func buildIdentitySection(agent *AgentDefinition) string {
 	}
 
 	var identity strings.Builder
-	if agent.Identity != nil && agent.Identity.Name != "" {
-		identity.WriteString(fmt.Sprintf("You are %s.", agent.Identity.Name))
-	} else if agent.Name != "" {
-		identity.WriteString(fmt.Sprintf("You are %s.", agent.Name))
+	if name := agent.EffectiveName(); name != "" {
+		identity.WriteString(fmt.Sprintf("You are %s.", name))
 	}
 
 	if agent.Description != "" {

@@ -346,6 +346,16 @@ func BossTools() []*Tool {
 	}
 }
 
+// IsBossTool checks if a tool name is a Boss agent tool.
+func IsBossTool(toolName string) bool {
+	for _, t := range BossTools() {
+		if t.Name == toolName {
+			return true
+		}
+	}
+	return false
+}
+
 // ExecuteCreateAgent handles the create_agent tool.
 func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[string]any) (*Result, error) {
 	name, err := ReadString(input, "name", true)
@@ -359,19 +369,7 @@ func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[str
 	toolProfile := ReadStringDefault(input, "tool_profile", "full")
 	toolAlsoAllow := ReadStringArray(input, "tool_also_allow")
 
-	// Generate unique ID and check for collisions
-	existingAgents, err := e.store.LoadAgents(ctx)
-	if err != nil {
-		return ErrorResult("create_agent", fmt.Sprintf("failed to load agents: %v", err)), nil
-	}
-
-	var agentID string
-	for i := 0; i < 10; i++ { // Try up to 10 times to find a unique ID
-		agentID = uuid.NewString()
-		if _, exists := existingAgents[agentID]; !exists {
-			break
-		}
-	}
+	agentID := uuid.NewString()
 
 	now := time.Now().Unix()
 
@@ -418,14 +416,7 @@ func (e *BossToolExecutor) ExecuteForkAgent(ctx context.Context, input map[strin
 
 	newName := ReadStringDefault(input, "new_name", fmt.Sprintf("%s (Fork)", source.Name))
 
-	// Generate unique ID (full UUID, check for collisions)
-	var agentID string
-	for i := 0; i < 10; i++ {
-		agentID = uuid.NewString()
-		if _, exists := agents[agentID]; !exists {
-			break
-		}
-	}
+	agentID := uuid.NewString()
 
 	now := time.Now().Unix()
 

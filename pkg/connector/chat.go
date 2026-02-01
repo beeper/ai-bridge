@@ -160,6 +160,10 @@ func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
 	store := NewAgentStoreAdapter(oc)
 	agent, err := store.GetAgentForRoom(context.Background(), meta)
 	if err == nil && agent != nil {
+		// Boss agent has its own tools - always allow Boss tools for Boss agent
+		if agents.IsBossAgent(agent.ID) && tools.IsBossTool(toolName) {
+			return true
+		}
 		// Use agent policy to check if tool is allowed
 		policy := agents.CreatePolicyFromProfile(agent, tools.DefaultRegistry())
 		if !policy.IsAllowed(toolName) {
@@ -188,13 +192,8 @@ func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
 
 // getDefaultToolState returns the default enabled state for a tool
 // Most tools are enabled by default when the model supports them
-func (oc *AIClient) getDefaultToolState(meta *PortalMetadata, toolName string) bool {
-	switch toolName {
-	case ToolNameCalculator, ToolNameWebSearch, ToolNameCodeInterpreter:
-		return meta.Capabilities.SupportsToolCalling
-	default:
-		return meta.Capabilities.SupportsToolCalling
-	}
+func (oc *AIClient) getDefaultToolState(meta *PortalMetadata, _ string) bool {
+	return meta.Capabilities.SupportsToolCalling
 }
 
 // applyToolToggle applies a tool toggle from client

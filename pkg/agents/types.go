@@ -172,3 +172,11 @@ func (a *AgentDefinition) Validate() error {
 func (a *AgentDefinition) IsCustom() bool {
 	return !a.IsPreset
 }
+
+// EffectiveName returns the agent's display name, preferring identity name over the base name.
+func (a *AgentDefinition) EffectiveName() string {
+	if a.Identity != nil && a.Identity.Name != "" {
+		return a.Identity.Name
+	}
+	return a.Name
+}

@@ -126,22 +126,12 @@ func (s *AgentStoreAdapter) getBuilderPortal(ctx context.Context) (*bridgev2.Por
 	})
 }
 
-// SaveAgent implements agents.AgentStore.
-// It saves an agent to the Builder room's Matrix state event.
-func (s *AgentStoreAdapter) SaveAgent(ctx context.Context, agent *agents.AgentDefinition) error {
-	if err := agent.Validate(); err != nil {
-		return err
-	}
-
-	if agent.IsPreset {
-		return agents.ErrAgentIsPreset
-	}
-
-	// Lock to prevent race conditions during read-modify-write
+// modifyCustomAgents handles the common load-modify-save pattern for custom agents.
+// The operation function receives the current agents map and can modify it.
+func (s *AgentStoreAdapter) modifyCustomAgents(ctx context.Context, operation func(map[string]*AgentDefinitionContent) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Load existing custom agents from state
 	customAgents, err := s.loadCustomAgentsFromState(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load existing agents: %w", err)
@@ -150,12 +140,33 @@ func (s *AgentStoreAdapter) SaveAgent(ctx context.Context, agent *agents.AgentDe
 		customAgents = make(map[string]*AgentDefinitionContent)
 	}
 
-	// Add/update this agent
-	customAgents[agent.ID] = ToAgentDefinitionContent(agent)
+	if err := operation(customAgents); err != nil {
+		return err
+	}
 
-	// Save back to state
 	if err := s.saveCustomAgentsToState(ctx, customAgents); err != nil {
 		return fmt.Errorf("failed to save agents: %w", err)
+	}
+
+	return nil
+}
+
+// SaveAgent implements agents.AgentStore.
+// It saves an agent to the Builder room's Matrix state event.
+func (s *AgentStoreAdapter) SaveAgent(ctx context.Context, agent *agents.AgentDefinition) error {
+	if err := agent.Validate(); err != nil {
+		return err
+	}
+	if agent.IsPreset {
+		return agents.ErrAgentIsPreset
+	}
+
+	err := s.modifyCustomAgents(ctx, func(customAgents map[string]*AgentDefinitionContent) error {
+		customAgents[agent.ID] = ToAgentDefinitionContent(agent)
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	s.client.log.Info().Str("agent_id", agent.ID).Str("name", agent.Name).Msg("Saved custom agent to Matrix state")
@@ -168,27 +179,15 @@ func (s *AgentStoreAdapter) DeleteAgent(ctx context.Context, agentID string) err
 		return agents.ErrAgentIsPreset
 	}
 
-	// Lock to prevent race conditions during read-modify-write
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Load existing custom agents from state
-	customAgents, err := s.loadCustomAgentsFromState(ctx)
+	err := s.modifyCustomAgents(ctx, func(customAgents map[string]*AgentDefinitionContent) error {
+		if customAgents[agentID] == nil {
+			return agents.ErrAgentNotFound
+		}
+		delete(customAgents, agentID)
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("failed to load existing agents: %w", err)
-	}
-
-	// Check if agent exists
-	if customAgents == nil || customAgents[agentID] == nil {
-		return agents.ErrAgentNotFound
-	}
-
-	// Remove this agent
-	delete(customAgents, agentID)
-
-	// Save back to state
-	if err := s.saveCustomAgentsToState(ctx, customAgents); err != nil {
-		return fmt.Errorf("failed to save agents: %w", err)
+		return err
 	}
 
 	s.client.log.Info().Str("agent_id", agentID).Msg("Deleted custom agent from Matrix state")

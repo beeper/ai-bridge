@@ -7,6 +7,37 @@ import (
 	"reflect"
 )
 
+// schemaTransform is a function that recursively transforms a schema map.
+type schemaTransform func(map[string]any) map[string]any
+
+// transformSchemaRecursive applies a transform function recursively to nested maps and arrays.
+func transformSchemaRecursive(schema map[string]any, transform schemaTransform) map[string]any {
+	result := make(map[string]any)
+	for k, v := range schema {
+		if nested, ok := v.(map[string]any); ok {
+			result[k] = transform(nested)
+		} else if arr, ok := v.([]any); ok {
+			result[k] = transformArrayRecursive(arr, transform)
+		} else {
+			result[k] = v
+		}
+	}
+	return result
+}
+
+// transformArrayRecursive applies a transform function to array elements.
+func transformArrayRecursive(arr []any, transform schemaTransform) []any {
+	result := make([]any, len(arr))
+	for i, item := range arr {
+		if m, ok := item.(map[string]any); ok {
+			result[i] = transform(m)
+		} else {
+			result[i] = item
+		}
+	}
+	return result
+}
+
 // CleanSchemaForProvider adjusts tool schemas for specific providers.
 // Gemini requires flattened schemas without $ref, allOf, anyOf, oneOf.
 // Based on clawdbot's clean-for-gemini pattern.
@@ -25,41 +56,21 @@ func cleanForGemini(schema map[string]any) map[string]any {
 		return nil
 	}
 
-	cleaned := make(map[string]any)
+	// Filter out unsupported keys, then recursively transform
+	filtered := make(map[string]any)
 	for k, v := range schema {
-		// Remove $ref, allOf, anyOf, oneOf - Gemini doesn't support these
 		switch k {
-		case "$ref", "allOf", "anyOf", "oneOf", "$schema", "$id":
-			continue
-		case "format":
-			// Gemini is strict about format; remove to avoid errors
+		case "$ref", "allOf", "anyOf", "oneOf", "$schema", "$id", "format":
 			continue
 		case "additionalProperties":
-			// Gemini sometimes has issues with this
 			if b, ok := v.(bool); ok && !b {
 				continue
 			}
 		}
-
-		// Recursively clean nested objects
-		if nested, ok := v.(map[string]any); ok {
-			cleaned[k] = cleanForGemini(nested)
-		} else if arr, ok := v.([]any); ok {
-			// Clean array items
-			cleanedArr := make([]any, len(arr))
-			for i, item := range arr {
-				if m, ok := item.(map[string]any); ok {
-					cleanedArr[i] = cleanForGemini(m)
-				} else {
-					cleanedArr[i] = item
-				}
-			}
-			cleaned[k] = cleanedArr
-		} else {
-			cleaned[k] = v
-		}
+		filtered[k] = v
 	}
-	return cleaned
+
+	return transformSchemaRecursive(filtered, cleanForGemini)
 }
 
 // FlattenSchema resolves $ref and combines allOf into a single schema.
@@ -104,25 +115,10 @@ func FlattenSchema(schema map[string]any, definitions map[string]any) map[string
 	}
 
 	// Recursively flatten nested schemas
-	result := make(map[string]any)
-	for k, v := range schema {
-		if nested, ok := v.(map[string]any); ok {
-			result[k] = FlattenSchema(nested, definitions)
-		} else if arr, ok := v.([]any); ok {
-			flatArr := make([]any, len(arr))
-			for i, item := range arr {
-				if m, ok := item.(map[string]any); ok {
-					flatArr[i] = FlattenSchema(m, definitions)
-				} else {
-					flatArr[i] = item
-				}
-			}
-			result[k] = flatArr
-		} else {
-			result[k] = v
-		}
+	flatten := func(s map[string]any) map[string]any {
+		return FlattenSchema(s, definitions)
 	}
-	return result
+	return transformSchemaRecursive(schema, flatten)
 }
 
 // resolveRef resolves a JSON Schema $ref to its definition.

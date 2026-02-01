@@ -225,10 +225,7 @@ type ContextStats struct {
 func (s ContextStats) UsagePercent() float64 {
 	msgPercent := float64(s.MessageCount) / float64(s.MaxMessages) * 100
 	tokPercent := float64(s.TokenEstimate) / float64(s.MaxTokens) * 100
-	if msgPercent > tokPercent {
-		return msgPercent
-	}
-	return tokPercent
+	return max(msgPercent, tokPercent)
 }
 
 // IsHealthy returns true if usage is below 80% on all metrics.
