@@ -12,8 +12,8 @@ type Guard struct {
 	mu       sync.Mutex
 	pending  map[string]*PendingCall // callID -> pending call info
 	timeout  time.Duration
-	stopChan chan struct{}          // signals cleanup goroutine to stop
-	stopped  bool                   // true if Stop() has been called
+	stopChan chan struct{} // signals cleanup goroutine to stop
+	stopped  bool          // true if Stop() has been called
 }
 
 // PendingCall tracks a tool call waiting for result.

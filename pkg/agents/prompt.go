@@ -11,14 +11,14 @@ import (
 // SystemPromptParams contains all inputs for building a system prompt.
 // This follows the clawdbot/openclaw flat params pattern.
 type SystemPromptParams struct {
-	Agent       *AgentDefinition  // Agent config (from member event)
-	ExtraPrompt string            // Room-level system prompt addition
-	RoomInfo    *RoomInfo         // Title, topic for LLM context
-	Tools       []tools.ToolInfo  // Available tools
-	RuntimeInfo *RuntimeInfo      // Agent ID, model, channel
-	Timezone    string            // User timezone
-	Date        time.Time         // Current date
-	PromptMode  PromptMode        // full/minimal/none (overrides agent's mode if set)
+	Agent       *AgentDefinition   // Agent config (from member event)
+	ExtraPrompt string             // Room-level system prompt addition
+	RoomInfo    *RoomInfo          // Title, topic for LLM context
+	Tools       []tools.ToolInfo   // Available tools
+	RuntimeInfo *RuntimeInfo       // Agent ID, model, channel
+	Timezone    string             // User timezone
+	Date        time.Time          // Current date
+	PromptMode  PromptMode         // full/minimal/none (overrides agent's mode if set)
 	AgentList   []*AgentDefinition // For Boss agent: list of available agents
 }
 

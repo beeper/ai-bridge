@@ -492,14 +492,14 @@ func smartTruncatePrompt(
 
 	// Use PruneContext with aggressive settings for reactive pruning
 	config := &PruningConfig{
-		Enabled:           true,
-		SoftTrimRatio:     0.0, // Always soft trim
-		HardClearRatio:    0.0, // Always hard clear
+		Enabled:            true,
+		SoftTrimRatio:      0.0, // Always soft trim
+		HardClearRatio:     0.0, // Always hard clear
 		KeepLastAssistants: 2,
-		MinPrunableChars:  0,
-		SoftTrimMaxChars:  2000,
-		SoftTrimHeadChars: 1000,
-		SoftTrimTailChars: 500,
+		MinPrunableChars:   0,
+		SoftTrimMaxChars:   2000,
+		SoftTrimHeadChars:  1000,
+		SoftTrimTailChars:  500,
 	}
 
 	// Estimate a reasonable context window from message count

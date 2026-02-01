@@ -11,10 +11,10 @@ import (
 
 // Tool wraps an MCP tool with execution logic and metadata.
 type Tool struct {
-	mcp.Tool                                                            // Name, Description, InputSchema
-	Type    ToolType                                                    // builtin, provider, plugin, mcp
-	Group   string                                                      // group:search, group:code, etc.
-	Execute func(ctx context.Context, input map[string]any) (*Result, error) // nil for provider tools
+	mcp.Tool                                                                  // Name, Description, InputSchema
+	Type     ToolType                                                         // builtin, provider, plugin, mcp
+	Group    string                                                           // group:search, group:code, etc.
+	Execute  func(ctx context.Context, input map[string]any) (*Result, error) // nil for provider tools
 }
 
 // ToolType categorizes tools by their execution model.

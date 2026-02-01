@@ -86,13 +86,13 @@ func TestPruneContext(t *testing.T) {
 			userMsg("Thanks"),
 		}
 		config := &PruningConfig{
-			Enabled:           true,
-			SoftTrimRatio:     0.1,  // Low threshold to trigger pruning
-			HardClearRatio:    0.9,  // High to avoid hard clear
+			Enabled:            true,
+			SoftTrimRatio:      0.1, // Low threshold to trigger pruning
+			HardClearRatio:     0.9, // High to avoid hard clear
 			KeepLastAssistants: 1,
-			SoftTrimMaxChars:  4000,
-			SoftTrimHeadChars: 1500,
-			SoftTrimTailChars: 1500,
+			SoftTrimMaxChars:   4000,
+			SoftTrimHeadChars:  1500,
+			SoftTrimTailChars:  1500,
 		}
 
 		result := PruneContext(prompt, config, 5000) // Small context window
@@ -222,7 +222,7 @@ func TestPruneContext(t *testing.T) {
 			systemMsg("System"),
 			assistantMsg("Loading identity..."),
 			toolResultMsg(bootstrapContent, "call_bootstrap"), // Should be protected
-			userMsg("Hello"), // First user message
+			userMsg("Hello"),                                  // First user message
 			assistantMsg("Hi!"),
 			toolResultMsg(strings.Repeat("x", 10000), "call_after"),
 			userMsg("Latest"),

@@ -44,12 +44,12 @@ type SearchResult struct {
 
 // SearchResponse represents the search response.
 type SearchResponse struct {
-	Query        string         `json:"query"`
-	Answer       string         `json:"answer,omitempty"`
-	Summary      string         `json:"summary,omitempty"`
-	Definition   string         `json:"definition,omitempty"`
-	Results      []SearchResult `json:"results,omitempty"`
-	NoResults    bool           `json:"no_results,omitempty"`
+	Query      string         `json:"query"`
+	Answer     string         `json:"answer,omitempty"`
+	Summary    string         `json:"summary,omitempty"`
+	Definition string         `json:"definition,omitempty"`
+	Results    []SearchResult `json:"results,omitempty"`
+	NoResults  bool           `json:"no_results,omitempty"`
 }
 
 // executeWebSearch performs a web search using DuckDuckGo.

@@ -2384,34 +2384,6 @@ func (oc *AIClient) getModelContextWindow(meta *PortalMetadata) int {
 	return 128000
 }
 
-// setChatInfo updates room display info (title, topic) - NOT system prompt.
-// This decouples display fields from the actual system prompt.
-func (oc *AIClient) setChatInfo(ctx context.Context, portal *bridgev2.Portal, key, value string) error {
-	if portal.MXID == "" {
-		return fmt.Errorf("portal has no Matrix room ID")
-	}
-
-	meta := portalMeta(portal)
-	switch key {
-	case "title", "name":
-		portal.Name = value
-		portal.NameSet = true
-		meta.Title = value
-		oc.log.Debug().Str("title", value).Msg("Set room title")
-	case "topic", "description":
-		portal.Topic = value
-		portal.TopicSet = true
-		oc.log.Debug().Str("topic", value).Msg("Set room topic")
-	default:
-		return fmt.Errorf("unknown chat info key: %s (valid keys: title, name, topic, description)", key)
-	}
-
-	if err := portal.Save(ctx); err != nil {
-		return fmt.Errorf("failed to save portal: %w", err)
-	}
-	return nil
-}
-
 // setRoomSystemPrompt updates the room's system prompt in metadata.
 // This is separate from room topic (which is display-only).
 func (oc *AIClient) setRoomSystemPrompt(ctx context.Context, portal *bridgev2.Portal, prompt string) error {

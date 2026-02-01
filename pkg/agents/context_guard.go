@@ -17,8 +17,8 @@ type ContextGuard struct {
 	maxTurnsPerMinute int
 
 	// Current state
-	messageCount  int
-	tokenEstimate int
+	messageCount   int
+	tokenEstimate  int
 	turnTimestamps []time.Time
 
 	// Session info
@@ -42,10 +42,10 @@ type ContextWarning struct {
 type ContextWarningType string
 
 const (
-	WarningHighMessageCount   ContextWarningType = "high_message_count"
-	WarningHighTokenUsage     ContextWarningType = "high_token_usage"
-	WarningHighTurnRate       ContextWarningType = "high_turn_rate"
-	WarningContextOverflow    ContextWarningType = "context_overflow"
+	WarningHighMessageCount ContextWarningType = "high_message_count"
+	WarningHighTokenUsage   ContextWarningType = "high_token_usage"
+	WarningHighTurnRate     ContextWarningType = "high_turn_rate"
+	WarningContextOverflow  ContextWarningType = "context_overflow"
 )
 
 // ContextGuardConfig holds configuration for the context guard.

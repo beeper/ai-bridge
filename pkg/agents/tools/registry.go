@@ -9,7 +9,7 @@ import (
 // Registry manages available tools with grouping and aliasing support.
 type Registry struct {
 	mu      sync.RWMutex
-	tools   map[string]*Tool   // name -> tool
+	tools   map[string]*Tool    // name -> tool
 	groups  map[string][]string // group name -> tool names
 	aliases map[string]string   // alias -> canonical name
 }

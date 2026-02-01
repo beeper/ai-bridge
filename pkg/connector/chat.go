@@ -559,7 +559,6 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 	portal.Name = title
 	portal.NameSet = true
 	// Note: portal.Topic is NOT set to SystemPrompt - they are separate concepts
-	// Topic can be set via setChatInfo() if needed
 
 	if err := portal.Save(ctx); err != nil {
 		return nil, nil, fmt.Errorf("failed to save portal: %w", err)
