@@ -62,6 +62,12 @@ func fnModel(ce *commands.Event) {
 		return
 	}
 
+	// Protect rooms with Boss agent from overrides
+	if agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID) {
+		ce.Reply("Cannot change model in a room managed by the Boss agent")
+		return
+	}
+
 	modelID := ce.Args[0]
 	valid, err := client.validateModel(ce.Ctx, modelID)
 	if err != nil || !valid {
@@ -100,6 +106,12 @@ func fnTemp(ce *commands.Event) {
 
 	if len(ce.Args) == 0 {
 		ce.Reply("Current temperature: %.2f", client.effectiveTemperature(meta))
+		return
+	}
+
+	// Protect rooms with Boss agent from overrides
+	if agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID) {
+		ce.Reply("Cannot change temperature in a room managed by the Boss agent")
 		return
 	}
 
@@ -144,6 +156,12 @@ func fnPrompt(ce *commands.Event) {
 			current = current[:100] + "..."
 		}
 		ce.Reply("Current system prompt: %s", current)
+		return
+	}
+
+	// Protect rooms with Boss agent from overrides
+	if agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID) {
+		ce.Reply("Cannot change system prompt in a room managed by the Boss agent")
 		return
 	}
 
@@ -570,6 +588,12 @@ func fnAgent(ce *commands.Event) {
 			return
 		}
 		ce.Reply("Current agent: **%s** (`%s`)\n%s", agent.Name, agent.ID, agent.Description)
+		return
+	}
+
+	// Protect rooms with Boss agent from overrides
+	if agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID) {
+		ce.Reply("Cannot change agent in a room managed by the Boss agent")
 		return
 	}
 

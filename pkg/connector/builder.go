@@ -82,11 +82,10 @@ func (oc *AIClient) createBuilderRoom(ctx context.Context) (*bridgev2.Portal, *b
 	pm.AgentID = bossAgent.ID
 	pm.DefaultAgentID = bossAgent.ID
 	pm.SystemPrompt = agents.BossSystemPrompt
-	// Model stays empty to use default
+	pm.Model = bossAgent.Model.Primary // Explicit model - always use Boss agent's model
+	pm.IsBuilderRoom = true            // Mark as protected from overrides
 
 	// Re-save portal with updated metadata
-	portal.Topic = pm.SystemPrompt
-	portal.TopicSet = true
 	if err := portal.Save(ctx); err != nil {
 		return nil, nil, fmt.Errorf("failed to save portal with agent config: %w", err)
 	}

@@ -559,8 +559,8 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 	portal.OtherUserID = modelUserID(modelID)
 	portal.Name = title
 	portal.NameSet = true
-	portal.Topic = pmeta.SystemPrompt
-	portal.TopicSet = pmeta.SystemPrompt != ""
+	// Note: portal.Topic is NOT set to SystemPrompt - they are separate concepts
+	// Topic can be set via setChatInfo() if needed
 
 	if err := portal.Save(ctx); err != nil {
 		return nil, nil, fmt.Errorf("failed to save portal: %w", err)

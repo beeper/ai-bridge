@@ -2,15 +2,20 @@ package connector
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/matrix"
+	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/event"
 )
 
-// AgentStoreAdapter implements agents.AgentStore using the connector's data sources.
+// AgentStoreAdapter implements agents.AgentStore using Matrix state events.
 type AgentStoreAdapter struct {
 	client *AIClient
 	mu     sync.Mutex // protects read-modify-write operations on custom agents
@@ -35,96 +40,94 @@ func (s *AgentStoreAdapter) LoadAgents(ctx context.Context) (map[string]*agents.
 	// Add boss agent
 	result[agents.BossAgent.ID] = agents.BossAgent.Clone()
 
-	// Load custom agents from UserLoginMetadata
-	customAgents := s.loadCustomAgentsFromMetadata()
-	for id, data := range customAgents {
-		result[id] = customAgentDataToDefinition(data)
+	// Load custom agents from Matrix state event in Builder room
+	customAgents, err := s.loadCustomAgentsFromState(ctx)
+	if err != nil {
+		s.client.log.Warn().Err(err).Msg("Failed to load custom agents from Matrix state")
+		// Continue with just presets if state load fails
+	}
+	for id, content := range customAgents {
+		result[id] = FromAgentDefinitionContent(content)
 	}
 
 	return result, nil
 }
 
-// loadCustomAgentsFromMetadata retrieves custom agents from UserLoginMetadata.
-func (s *AgentStoreAdapter) loadCustomAgentsFromMetadata() map[string]*CustomAgentData {
+// loadCustomAgentsFromState loads custom agents from the Builder room's Matrix state event.
+func (s *AgentStoreAdapter) loadCustomAgentsFromState(ctx context.Context) (map[string]*AgentDefinitionContent, error) {
+	// Get Builder room
+	portal, err := s.getBuilderPortal(ctx)
+	if err != nil || portal == nil || portal.MXID == "" {
+		return nil, nil // No Builder room yet, return empty
+	}
+
+	// Get the Matrix connector to read state events
+	matrixConn, ok := s.client.UserLogin.Bridge.Matrix.(*matrix.Connector)
+	if !ok {
+		return nil, fmt.Errorf("matrix connector not available")
+	}
+
+	// Read the custom agents state event
+	evt, err := matrixConn.GetStateEvent(ctx, portal.MXID, CustomAgentsEventType, "")
+	if err != nil {
+		// State event doesn't exist yet - this is normal for new users
+		return nil, nil
+	}
+
+	// Parse the content
+	var content CustomAgentsEventContent
+	if err := json.Unmarshal(evt.Content.VeryRaw, &content); err != nil {
+		return nil, fmt.Errorf("failed to parse custom agents event: %w", err)
+	}
+
+	if content.Agents == nil {
+		return make(map[string]*AgentDefinitionContent), nil
+	}
+	return content.Agents, nil
+}
+
+// saveCustomAgentsToState saves custom agents to the Builder room's Matrix state event.
+func (s *AgentStoreAdapter) saveCustomAgentsToState(ctx context.Context, agentsMap map[string]*AgentDefinitionContent) error {
+	// Get Builder room
+	portal, err := s.getBuilderPortal(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get builder portal: %w", err)
+	}
+	if portal == nil || portal.MXID == "" {
+		return fmt.Errorf("builder room not created yet")
+	}
+
+	// Send the custom agents state event
+	content := &CustomAgentsEventContent{
+		Agents: agentsMap,
+	}
+
+	bot := s.client.UserLogin.Bridge.Bot
+	_, err = bot.SendState(ctx, portal.MXID, CustomAgentsEventType, "", &event.Content{
+		Parsed: content,
+	}, time.Time{})
+	if err != nil {
+		return fmt.Errorf("failed to send state event: %w", err)
+	}
+
+	return nil
+}
+
+// getBuilderPortal returns the Builder room portal if it exists.
+func (s *AgentStoreAdapter) getBuilderPortal(ctx context.Context) (*bridgev2.Portal, error) {
 	meta := loginMetadata(s.client.UserLogin)
-	if meta.CustomAgents == nil {
-		return make(map[string]*CustomAgentData)
-	}
-	return meta.CustomAgents
-}
-
-// saveCustomAgentsToMetadata persists custom agents to UserLoginMetadata.
-func (s *AgentStoreAdapter) saveCustomAgentsToMetadata(ctx context.Context, agentsMap map[string]*CustomAgentData) error {
-	meta := loginMetadata(s.client.UserLogin)
-	meta.CustomAgents = agentsMap
-	return s.client.UserLogin.Save(ctx)
-}
-
-// customAgentDataToDefinition converts CustomAgentData to AgentDefinition.
-func customAgentDataToDefinition(data *CustomAgentData) *agents.AgentDefinition {
-	def := &agents.AgentDefinition{
-		ID:          data.ID,
-		Name:        data.Name,
-		Description: data.Description,
-		AvatarURL:   data.AvatarURL,
-		Model: agents.ModelConfig{
-			Primary:   data.Model,
-			Fallbacks: data.ModelFallback,
-		},
-		SystemPrompt:    data.SystemPrompt,
-		PromptMode:      agents.PromptMode(data.PromptMode),
-		ToolProfile:     agents.ToolProfile(data.ToolProfile),
-		ToolOverrides:   data.ToolOverrides,
-		ToolAlsoAllow:   data.ToolAlsoAllow,
-		Temperature:     data.Temperature,
-		ReasoningEffort: data.ReasoningEffort,
-		IsPreset:        false,
-		CreatedAt:       data.CreatedAt,
-		UpdatedAt:       data.UpdatedAt,
+	if meta.BuilderRoomID == "" {
+		return nil, nil
 	}
 
-	// Restore Identity if it was saved
-	if data.IdentityName != "" || data.IdentityPersona != "" {
-		def.Identity = &agents.Identity{
-			Name:    data.IdentityName,
-			Persona: data.IdentityPersona,
-		}
-	}
-
-	return def
-}
-
-// agentDefinitionToCustomData converts AgentDefinition to CustomAgentData.
-func agentDefinitionToCustomData(agent *agents.AgentDefinition) *CustomAgentData {
-	data := &CustomAgentData{
-		ID:              agent.ID,
-		Name:            agent.Name,
-		Description:     agent.Description,
-		AvatarURL:       agent.AvatarURL,
-		Model:           agent.Model.Primary,
-		ModelFallback:   agent.Model.Fallbacks,
-		SystemPrompt:    agent.SystemPrompt,
-		PromptMode:      string(agent.PromptMode),
-		ToolProfile:     string(agent.ToolProfile),
-		ToolOverrides:   agent.ToolOverrides,
-		ToolAlsoAllow:   agent.ToolAlsoAllow,
-		Temperature:     agent.Temperature,
-		ReasoningEffort: agent.ReasoningEffort,
-		CreatedAt:       agent.CreatedAt,
-		UpdatedAt:       agent.UpdatedAt,
-	}
-
-	// Preserve Identity if present
-	if agent.Identity != nil {
-		data.IdentityName = agent.Identity.Name
-		data.IdentityPersona = agent.Identity.Persona
-	}
-
-	return data
+	return s.client.UserLogin.Bridge.GetPortalByKey(ctx, networkid.PortalKey{
+		ID:       meta.BuilderRoomID,
+		Receiver: s.client.UserLogin.ID,
+	})
 }
 
 // SaveAgent implements agents.AgentStore.
-// It saves an agent to the UserLoginMetadata.
+// It saves an agent to the Builder room's Matrix state event.
 func (s *AgentStoreAdapter) SaveAgent(ctx context.Context, agent *agents.AgentDefinition) error {
 	if err := agent.Validate(); err != nil {
 		return err
@@ -138,18 +141,24 @@ func (s *AgentStoreAdapter) SaveAgent(ctx context.Context, agent *agents.AgentDe
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Load existing custom agents
-	customAgents := s.loadCustomAgentsFromMetadata()
+	// Load existing custom agents from state
+	customAgents, err := s.loadCustomAgentsFromState(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load existing agents: %w", err)
+	}
+	if customAgents == nil {
+		customAgents = make(map[string]*AgentDefinitionContent)
+	}
 
 	// Add/update this agent
-	customAgents[agent.ID] = agentDefinitionToCustomData(agent)
+	customAgents[agent.ID] = ToAgentDefinitionContent(agent)
 
-	// Save back to metadata
-	if err := s.saveCustomAgentsToMetadata(ctx, customAgents); err != nil {
+	// Save back to state
+	if err := s.saveCustomAgentsToState(ctx, customAgents); err != nil {
 		return fmt.Errorf("failed to save agents: %w", err)
 	}
 
-	s.client.log.Info().Str("agent_id", agent.ID).Str("name", agent.Name).Msg("Saved custom agent")
+	s.client.log.Info().Str("agent_id", agent.ID).Str("name", agent.Name).Msg("Saved custom agent to Matrix state")
 	return nil
 }
 
@@ -163,23 +172,26 @@ func (s *AgentStoreAdapter) DeleteAgent(ctx context.Context, agentID string) err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Load existing custom agents
-	customAgents := s.loadCustomAgentsFromMetadata()
+	// Load existing custom agents from state
+	customAgents, err := s.loadCustomAgentsFromState(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load existing agents: %w", err)
+	}
 
 	// Check if agent exists
-	if _, exists := customAgents[agentID]; !exists {
+	if customAgents == nil || customAgents[agentID] == nil {
 		return agents.ErrAgentNotFound
 	}
 
 	// Remove this agent
 	delete(customAgents, agentID)
 
-	// Save back to metadata
-	if err := s.saveCustomAgentsToMetadata(ctx, customAgents); err != nil {
+	// Save back to state
+	if err := s.saveCustomAgentsToState(ctx, customAgents); err != nil {
 		return fmt.Errorf("failed to save agents: %w", err)
 	}
 
-	s.client.log.Info().Str("agent_id", agentID).Msg("Deleted custom agent")
+	s.client.log.Info().Str("agent_id", agentID).Msg("Deleted custom agent from Matrix state")
 	return nil
 }
 
@@ -267,27 +279,37 @@ func (s *AgentStoreAdapter) CreateExecutorForAgent(agent *agents.AgentDefinition
 
 // ToAgentDefinitionContent converts an AgentDefinition to its Matrix event form.
 func ToAgentDefinitionContent(agent *agents.AgentDefinition) *AgentDefinitionContent {
-	return &AgentDefinitionContent{
-		ID:            agent.ID,
-		Name:          agent.Name,
-		Description:   agent.Description,
-		AvatarURL:     agent.AvatarURL,
-		Model:         agent.Model.Primary,
-		ModelFallback: agent.Model.Fallbacks,
-		SystemPrompt:  agent.SystemPrompt,
-		PromptMode:    string(agent.PromptMode),
-		ToolProfile:   string(agent.ToolProfile),
-		ToolOverrides: agent.ToolOverrides,
-		Temperature:   agent.Temperature,
-		IsPreset:      agent.IsPreset,
-		CreatedAt:     agent.CreatedAt,
-		UpdatedAt:     agent.UpdatedAt,
+	content := &AgentDefinitionContent{
+		ID:              agent.ID,
+		Name:            agent.Name,
+		Description:     agent.Description,
+		AvatarURL:       agent.AvatarURL,
+		Model:           agent.Model.Primary,
+		ModelFallback:   agent.Model.Fallbacks,
+		SystemPrompt:    agent.SystemPrompt,
+		PromptMode:      string(agent.PromptMode),
+		ToolProfile:     string(agent.ToolProfile),
+		ToolOverrides:   agent.ToolOverrides,
+		ToolAlsoAllow:   agent.ToolAlsoAllow,
+		Temperature:     agent.Temperature,
+		ReasoningEffort: agent.ReasoningEffort,
+		IsPreset:        agent.IsPreset,
+		CreatedAt:       agent.CreatedAt,
+		UpdatedAt:       agent.UpdatedAt,
 	}
+
+	// Include Identity if present
+	if agent.Identity != nil {
+		content.IdentityName = agent.Identity.Name
+		content.IdentityPersona = agent.Identity.Persona
+	}
+
+	return content
 }
 
 // FromAgentDefinitionContent converts a Matrix event form to AgentDefinition.
 func FromAgentDefinitionContent(content *AgentDefinitionContent) *agents.AgentDefinition {
-	return &agents.AgentDefinition{
+	def := &agents.AgentDefinition{
 		ID:          content.ID,
 		Name:        content.Name,
 		Description: content.Description,
@@ -296,15 +318,27 @@ func FromAgentDefinitionContent(content *AgentDefinitionContent) *agents.AgentDe
 			Primary:   content.Model,
 			Fallbacks: content.ModelFallback,
 		},
-		SystemPrompt:  content.SystemPrompt,
-		PromptMode:    agents.PromptMode(content.PromptMode),
-		ToolProfile:   agents.ToolProfile(content.ToolProfile),
-		ToolOverrides: content.ToolOverrides,
-		Temperature:   content.Temperature,
-		IsPreset:      content.IsPreset,
-		CreatedAt:     content.CreatedAt,
-		UpdatedAt:     content.UpdatedAt,
+		SystemPrompt:    content.SystemPrompt,
+		PromptMode:      agents.PromptMode(content.PromptMode),
+		ToolProfile:     agents.ToolProfile(content.ToolProfile),
+		ToolOverrides:   content.ToolOverrides,
+		ToolAlsoAllow:   content.ToolAlsoAllow,
+		Temperature:     content.Temperature,
+		ReasoningEffort: content.ReasoningEffort,
+		IsPreset:        content.IsPreset,
+		CreatedAt:       content.CreatedAt,
+		UpdatedAt:       content.UpdatedAt,
 	}
+
+	// Restore Identity if present
+	if content.IdentityName != "" || content.IdentityPersona != "" {
+		def.Identity = &agents.Identity{
+			Name:    content.IdentityName,
+			Persona: content.IdentityPersona,
+		}
+	}
+
+	return def
 }
 
 // BossStoreAdapter implements tools.AgentStoreInterface for boss tool execution.
@@ -401,11 +435,8 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 	}
 	if room.SystemPrompt != "" {
 		pm.SystemPrompt = room.SystemPrompt
-		portal.Topic = room.SystemPrompt
-		portal.TopicSet = true
-		if resp.PortalInfo != nil {
-			resp.PortalInfo.Topic = &room.SystemPrompt
-		}
+		// Note: portal.Topic is NOT set to SystemPrompt - they are separate concepts
+		// Topic is for display only, SystemPrompt is for LLM context
 	}
 
 	if err := portal.Save(ctx); err != nil {
@@ -423,8 +454,8 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 		}
 	}
 	if room.SystemPrompt != "" {
-		if err := b.store.client.setRoomTopic(ctx, portal, room.SystemPrompt); err != nil {
-			b.store.client.log.Warn().Err(err).Msg("Failed to set Matrix room topic")
+		if err := b.store.client.setRoomSystemPrompt(ctx, portal, room.SystemPrompt); err != nil {
+			b.store.client.log.Warn().Err(err).Msg("Failed to set room system prompt")
 		}
 	}
 
@@ -470,8 +501,7 @@ func (b *BossStoreAdapter) ModifyRoom(ctx context.Context, roomID string, update
 	}
 	if updates.SystemPrompt != "" {
 		pm.SystemPrompt = updates.SystemPrompt
-		portal.Topic = updates.SystemPrompt
-		portal.TopicSet = true
+		// Note: portal.Topic is NOT set to SystemPrompt - they are separate concepts
 	}
 
 	if updates.Name != "" && portal.MXID != "" {
@@ -480,8 +510,8 @@ func (b *BossStoreAdapter) ModifyRoom(ctx context.Context, roomID string, update
 		}
 	}
 	if updates.SystemPrompt != "" && portal.MXID != "" {
-		if err := b.store.client.setRoomTopic(ctx, portal, updates.SystemPrompt); err != nil {
-			b.store.client.log.Warn().Err(err).Msg("Failed to set Matrix room topic")
+		if err := b.store.client.setRoomSystemPrompt(ctx, portal, updates.SystemPrompt); err != nil {
+			b.store.client.log.Warn().Err(err).Msg("Failed to set room system prompt")
 		}
 	}
 

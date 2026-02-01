@@ -2,8 +2,8 @@ package agents
 
 // Model constants for preset agents
 const (
-	ModelClaudeSonnet = "anthropic/claude-sonnet-4-5-20250514"
-	ModelClaudeOpus   = "anthropic/claude-opus-4-5-20250514"
+	ModelClaudeSonnet = "anthropic/claude-sonnet-4.5"
+	ModelClaudeOpus   = "anthropic/claude-opus-4.5"
 )
 
 // Reasoning effort levels

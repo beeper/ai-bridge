@@ -556,9 +556,10 @@ func (oc *AIClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*
 			title = "AI Chat"
 		}
 	}
+	// Use actual portal.Topic, not SystemPrompt (they are separate concepts)
 	return &bridgev2.ChatInfo{
 		Name:  ptr.Ptr(title),
-		Topic: ptrIfNotEmpty(meta.SystemPrompt),
+		Topic: ptrIfNotEmpty(portal.Topic),
 	}, nil
 }
 
@@ -655,13 +656,9 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 
 // effectiveModel returns the full prefixed model ID (e.g., "openai/gpt-5.2")
 // Priority: Room → Agent → User → Provider → Global
+// Exception: Boss agent rooms always use the Boss agent's model (no overrides)
 func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
-	// Room-level model override takes priority
-	if meta != nil && meta.Model != "" {
-		return meta.Model
-	}
-
-	// Check if an agent is assigned and use its model
+	// Check if an agent is assigned
 	if meta != nil {
 		agentID := meta.AgentID
 		if agentID == "" {
@@ -671,10 +668,25 @@ func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 			// Load the agent to get its model
 			store := NewAgentStoreAdapter(oc)
 			agent, err := store.GetAgentByID(context.Background(), agentID)
-			if err == nil && agent != nil && agent.Model.Primary != "" {
-				return agent.Model.Primary
+			if err == nil && agent != nil {
+				// Boss agent rooms always use the Boss model - no overrides allowed
+				if agents.IsBossAgent(agentID) && agent.Model.Primary != "" {
+					return agent.Model.Primary
+				}
+				// For other agents, room override takes priority, then agent model
+				if meta.Model != "" {
+					return meta.Model
+				}
+				if agent.Model.Primary != "" {
+					return agent.Model.Primary
+				}
 			}
 		}
+	}
+
+	// Room-level model override (for rooms without an agent)
+	if meta != nil && meta.Model != "" {
+		return meta.Model
 	}
 
 	// User-level default
@@ -745,9 +757,9 @@ func (oc *AIClient) effectivePrompt(meta *PortalMetadata) string {
 }
 
 // effectiveAgentPrompt returns the system prompt for the agent assigned to the room.
-// This uses the PromptBuilder to generate a full prompt when an agent is configured.
+// This uses BuildSystemPrompt to generate a full prompt with room context when an agent is configured.
 // Returns empty string if no agent is configured.
-func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, meta *PortalMetadata) string {
+func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) string {
 	if meta == nil {
 		return ""
 	}
@@ -768,20 +780,33 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, meta *PortalMetada
 		return ""
 	}
 
-	// Build prompt using PromptBuilder
-	builder := agents.NewPromptBuilder(agent)
+	// Build params for prompt generation
+	params := agents.SystemPromptParams{
+		Agent:       agent,
+		ExtraPrompt: meta.SystemPrompt, // Room-level addition
+		Timezone:    "UTC",             // TODO: get user timezone
+		Date:        time.Now(),
+	}
 
-	// For boss agent, build specialized prompt with agent list
+	// Add room context if available
+	if portal != nil {
+		params.RoomInfo = &agents.RoomInfo{
+			Title: portal.Name,
+			Topic: portal.Topic,
+		}
+	}
+
+	// For boss agent, include agent list
 	if agent.ID == "boss" {
 		agentsMap, _ := store.LoadAgents(ctx)
 		var agentList []*agents.AgentDefinition
 		for _, a := range agentsMap {
 			agentList = append(agentList, a)
 		}
-		return builder.BuildForBoss(agentList)
+		params.AgentList = agentList
 	}
 
-	return builder.Build()
+	return agents.BuildSystemPrompt(params)
 }
 
 // effectiveTemperature returns the temperature to use
@@ -1015,7 +1040,7 @@ func (oc *AIClient) buildBasePrompt(
 	var prompt []openai.ChatCompletionMessageParamUnion
 
 	// Add system prompt - agent prompt takes priority, then room override, then config default
-	systemPrompt := oc.effectiveAgentPrompt(ctx, meta)
+	systemPrompt := oc.effectiveAgentPrompt(ctx, portal, meta)
 	if systemPrompt == "" {
 		systemPrompt = oc.effectivePrompt(meta)
 	}

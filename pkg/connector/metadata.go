@@ -85,30 +85,8 @@ type UserLoginMetadata struct {
 
 	// Agent Builder room for managing agents
 	BuilderRoomID networkid.PortalID `json:"builder_room_id,omitempty"`
-
-	// Custom agents created by the user via the Boss agent
-	CustomAgents map[string]*CustomAgentData `json:"custom_agents,omitempty"`
-}
-
-// CustomAgentData stores a user-created agent definition.
-type CustomAgentData struct {
-	ID              string          `json:"id"`
-	Name            string          `json:"name"`
-	Description     string          `json:"description,omitempty"`
-	AvatarURL       string          `json:"avatar_url,omitempty"`
-	Model           string          `json:"model,omitempty"`
-	ModelFallback   []string        `json:"model_fallback,omitempty"`
-	SystemPrompt    string          `json:"system_prompt,omitempty"`
-	PromptMode      string          `json:"prompt_mode,omitempty"`
-	ToolProfile     string          `json:"tool_profile,omitempty"`
-	ToolOverrides   map[string]bool `json:"tool_overrides,omitempty"`
-	ToolAlsoAllow   []string        `json:"tool_also_allow,omitempty"` // Additive tool allows (supports wildcards)
-	Temperature     float64         `json:"temperature,omitempty"`
-	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
-	IdentityName    string          `json:"identity_name,omitempty"`
-	IdentityPersona string          `json:"identity_persona,omitempty"`
-	CreatedAt       int64           `json:"created_at"`
-	UpdatedAt       int64           `json:"updated_at"`
+	// Note: Custom agents are now stored in Matrix state events (CustomAgentsEventType)
+	// in the Builder room, not in UserLoginMetadata
 }
 
 // PortalMetadata stores per-room tuning knobs for the assistant.
@@ -136,6 +114,7 @@ type PortalMetadata struct {
 	// Agent-related metadata
 	DefaultAgentID string `json:"default_agent_id,omitempty"` // Agent assigned to this room (legacy name, same as AgentID)
 	AgentID        string `json:"agent_id,omitempty"`         // Which agent is the ghost for this room
+	IsBuilderRoom  bool   `json:"is_builder_room,omitempty"`  // True if this is the Manage AI Chats room (protected from overrides)
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild

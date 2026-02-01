@@ -272,8 +272,9 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 		Str("detected_provider", loginMetadata(oc.UserLogin).Provider).
 		Msg("Provider detection for tool filtering")
 
-	// Add provider-side tools (code interpreter handled by provider API)
-	if oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
+	// Add provider-side tools (only native OpenAI supports code_interpreter type)
+	// OpenRouter's Responses API only supports function-type tools
+	if !isOpenRouter && oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
 		params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
 		log.Debug().Msg("Code interpreter tool enabled")
 	}
@@ -303,16 +304,13 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 func bossToolsToOpenAI(bossTools []*tools.Tool) []responses.ToolUnionParam {
 	var result []responses.ToolUnionParam
 	for _, t := range bossTools {
-		funcParam := responses.FunctionToolParam{
-			Name:        t.Name,
-			Description: openai.String(t.Description),
+		schema, _ := t.InputSchema.(map[string]any)
+		// Use SDK helper which properly sets Type field (required by OpenRouter)
+		toolParam := responses.ToolParamOfFunction(t.Name, schema, true)
+		if t.Description != "" && toolParam.OfFunction != nil {
+			toolParam.OfFunction.Description = openai.String(t.Description)
 		}
-		if schema, ok := t.InputSchema.(map[string]any); ok {
-			funcParam.Parameters = schema
-		}
-		result = append(result, responses.ToolUnionParam{
-			OfFunction: &funcParam,
-		})
+		result = append(result, toolParam)
 	}
 	return result
 }
@@ -1016,8 +1014,9 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 		}
 	}
 
-	// Add provider-side tools
-	if oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
+	// Add provider-side tools (only native OpenAI supports code_interpreter type)
+	// OpenRouter's Responses API only supports function-type tools
+	if !isOpenRouter && oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
 		params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
 	}
 	if meta.Capabilities.SupportsToolCalling {
@@ -2385,22 +2384,48 @@ func (oc *AIClient) getModelContextWindow(meta *PortalMetadata) int {
 	return 128000
 }
 
-// setRoomTopic updates the room topic in portal metadata
-// Note: Matrix room topic state events are not sent as mautrix event types may not support it
-func (oc *AIClient) setRoomTopic(ctx context.Context, portal *bridgev2.Portal, topic string) error {
+// setChatInfo updates room display info (title, topic) - NOT system prompt.
+// This decouples display fields from the actual system prompt.
+func (oc *AIClient) setChatInfo(ctx context.Context, portal *bridgev2.Portal, key, value string) error {
 	if portal.MXID == "" {
 		return fmt.Errorf("portal has no Matrix room ID")
 	}
 
-	// Update portal metadata
 	meta := portalMeta(portal)
-	meta.SystemPrompt = topic
-	portal.Topic = topic
-	portal.TopicSet = true
+	switch key {
+	case "title", "name":
+		portal.Name = value
+		portal.NameSet = true
+		meta.Title = value
+		oc.log.Debug().Str("title", value).Msg("Set room title")
+	case "topic", "description":
+		portal.Topic = value
+		portal.TopicSet = true
+		oc.log.Debug().Str("topic", value).Msg("Set room topic")
+	default:
+		return fmt.Errorf("unknown chat info key: %s (valid keys: title, name, topic, description)", key)
+	}
+
+	if err := portal.Save(ctx); err != nil {
+		return fmt.Errorf("failed to save portal: %w", err)
+	}
+	return nil
+}
+
+// setRoomSystemPrompt updates the room's system prompt in metadata.
+// This is separate from room topic (which is display-only).
+func (oc *AIClient) setRoomSystemPrompt(ctx context.Context, portal *bridgev2.Portal, prompt string) error {
+	if portal.MXID == "" {
+		return fmt.Errorf("portal has no Matrix room ID")
+	}
+
+	meta := portalMeta(portal)
+	meta.SystemPrompt = prompt
+
 	if err := portal.Save(ctx); err != nil {
 		return fmt.Errorf("failed to save portal: %w", err)
 	}
 
-	oc.log.Debug().Str("topic", topic).Msg("Set room topic in metadata")
+	oc.log.Debug().Str("prompt_len", fmt.Sprintf("%d", len(prompt))).Msg("Set room system prompt")
 	return nil
 }

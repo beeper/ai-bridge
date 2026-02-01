@@ -8,53 +8,47 @@ import (
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
 )
 
-// PromptBuilder constructs system prompts dynamically.
-type PromptBuilder struct {
-	agent    *AgentDefinition
-	models   []ModelInfo
-	tools    []tools.ToolInfo
-	timezone string
-	date     time.Time
+// SystemPromptParams contains all inputs for building a system prompt.
+// This follows the clawdbot/openclaw flat params pattern.
+type SystemPromptParams struct {
+	Agent       *AgentDefinition  // Agent config (from member event)
+	ExtraPrompt string            // Room-level system prompt addition
+	RoomInfo    *RoomInfo         // Title, topic for LLM context
+	Tools       []tools.ToolInfo  // Available tools
+	RuntimeInfo *RuntimeInfo      // Agent ID, model, channel
+	Timezone    string            // User timezone
+	Date        time.Time         // Current date
+	PromptMode  PromptMode        // full/minimal/none (overrides agent's mode if set)
+	AgentList   []*AgentDefinition // For Boss agent: list of available agents
 }
 
-// NewPromptBuilder creates a new prompt builder for an agent.
-func NewPromptBuilder(agent *AgentDefinition) *PromptBuilder {
-	return &PromptBuilder{
-		agent:    agent,
-		timezone: "UTC",
-		date:     time.Now(),
-	}
+// RoomInfo contains room display information visible to the LLM.
+type RoomInfo struct {
+	Title   string // Room title/name
+	Topic   string // Room topic/description
+	Channel string // e.g., "matrix", "signal"
 }
 
-// WithModels sets available models for the prompt.
-func (b *PromptBuilder) WithModels(models []ModelInfo) *PromptBuilder {
-	b.models = models
-	return b
+// RuntimeInfo contains runtime context for the LLM.
+type RuntimeInfo struct {
+	AgentID string // Current agent ID
+	Model   string // Current model being used
+	Channel string // Communication channel
 }
 
-// WithTools sets available tools for the prompt.
-func (b *PromptBuilder) WithTools(toolInfos []tools.ToolInfo) *PromptBuilder {
-	b.tools = toolInfos
-	return b
-}
-
-// WithTimezone sets the timezone for date/time in the prompt.
-func (b *PromptBuilder) WithTimezone(tz string) *PromptBuilder {
-	b.timezone = tz
-	return b
-}
-
-// WithDate sets the current date for the prompt.
-func (b *PromptBuilder) WithDate(t time.Time) *PromptBuilder {
-	b.date = t
-	return b
-}
-
-// Build returns the complete system prompt based on PromptMode.
-// The constitutional safety block is ALWAYS prepended and cannot be disabled.
-func (b *PromptBuilder) Build() string {
-	if b.agent == nil {
+// BuildSystemPrompt assembles the complete prompt from params.
+// This is the primary prompt building function (clawdbot-style flat params).
+func BuildSystemPrompt(params SystemPromptParams) string {
+	if params.Agent == nil {
 		return ""
+	}
+
+	mode := params.PromptMode
+	if mode == "" {
+		mode = params.Agent.PromptMode
+	}
+	if mode == "" {
+		mode = PromptModeFull
 	}
 
 	var sections []string
@@ -62,84 +56,124 @@ func (b *PromptBuilder) Build() string {
 	// Constitutional safety block is ALWAYS first and cannot be overridden
 	sections = append(sections, ConstitutionalSafetyBlock)
 
-	// Identity line (all modes)
-	if identity := b.buildIdentity(); identity != "" {
+	// Identity section (all modes)
+	if identity := buildIdentitySection(params.Agent); identity != "" {
 		sections = append(sections, identity)
-	}
-
-	mode := b.agent.PromptMode
-	if mode == "" {
-		mode = PromptModeFull
 	}
 
 	switch mode {
 	case PromptModeFull:
 		// Full mode: all sections
-		if base := b.buildBase(); base != "" {
+		if base := buildBaseSection(params.Agent); base != "" {
 			sections = append(sections, base)
 		}
-		if toolsSection := b.buildToolsSection(); toolsSection != "" {
+		if params.ExtraPrompt != "" {
+			sections = append(sections, params.ExtraPrompt)
+		}
+		if roomCtx := buildRoomContextSection(params.RoomInfo); roomCtx != "" {
+			sections = append(sections, roomCtx)
+		}
+		if toolsSection := buildToolsSectionFromList(params.Tools); toolsSection != "" {
 			sections = append(sections, toolsSection)
 		}
-		if dateSection := b.buildDateSection(); dateSection != "" {
+		if runtime := buildRuntimeSection(params.RuntimeInfo); runtime != "" {
+			sections = append(sections, runtime)
+		}
+		if dateSection := buildDateSectionFromParams(params.Date, params.Timezone); dateSection != "" {
 			sections = append(sections, dateSection)
+		}
+		// Boss agent: append agent list
+		if len(params.AgentList) > 0 {
+			sections = append(sections, buildAgentListSection(params.AgentList))
 		}
 
 	case PromptModeMinimal:
-		// Minimal mode: just base prompt, no extras
-		if base := b.buildBase(); base != "" {
+		// Minimal mode: base prompt + extra prompt, no tools/runtime/date
+		if base := buildBaseSection(params.Agent); base != "" {
 			sections = append(sections, base)
+		}
+		if params.ExtraPrompt != "" {
+			sections = append(sections, params.ExtraPrompt)
+		}
+		if roomCtx := buildRoomContextSection(params.RoomInfo); roomCtx != "" {
+			sections = append(sections, roomCtx)
 		}
 
 	case PromptModeNone:
 		// None mode: just identity (already added above)
+		// Still include room context so agent knows where it is
+		if roomCtx := buildRoomContextSection(params.RoomInfo); roomCtx != "" {
+			sections = append(sections, roomCtx)
+		}
 	}
 
-	return strings.Join(sections, "\n\n")
+	return strings.Join(filterEmpty(sections), "\n\n")
 }
 
-// buildIdentity creates the identity section.
-func (b *PromptBuilder) buildIdentity() string {
-	if b.agent.Identity != nil && b.agent.Identity.Persona != "" {
-		return b.agent.Identity.Persona
+// buildIdentitySection creates the identity section from agent definition.
+func buildIdentitySection(agent *AgentDefinition) string {
+	if agent == nil {
+		return ""
+	}
+	if agent.Identity != nil && agent.Identity.Persona != "" {
+		return agent.Identity.Persona
 	}
 
-	// Default identity from agent name and description
 	var identity strings.Builder
-	if b.agent.Identity != nil && b.agent.Identity.Name != "" {
-		identity.WriteString(fmt.Sprintf("You are %s.", b.agent.Identity.Name))
-	} else if b.agent.Name != "" {
-		identity.WriteString(fmt.Sprintf("You are %s.", b.agent.Name))
+	if agent.Identity != nil && agent.Identity.Name != "" {
+		identity.WriteString(fmt.Sprintf("You are %s.", agent.Identity.Name))
+	} else if agent.Name != "" {
+		identity.WriteString(fmt.Sprintf("You are %s.", agent.Name))
 	}
 
-	if b.agent.Description != "" {
+	if agent.Description != "" {
 		if identity.Len() > 0 {
 			identity.WriteString(" ")
 		}
-		identity.WriteString(b.agent.Description)
+		identity.WriteString(agent.Description)
 	}
 
 	return identity.String()
 }
 
-// buildBase creates the base system prompt section.
-func (b *PromptBuilder) buildBase() string {
-	if b.agent.SystemPrompt != "" {
-		return b.agent.SystemPrompt
+// buildBaseSection creates the base system prompt section from agent.
+func buildBaseSection(agent *AgentDefinition) string {
+	if agent == nil {
+		return ""
 	}
-	return ""
+	return agent.SystemPrompt
 }
 
-// buildToolsSection creates the tools description section.
-func (b *PromptBuilder) buildToolsSection() string {
-	if len(b.tools) == 0 {
+// buildRoomContextSection creates the room context section visible to LLM.
+func buildRoomContextSection(info *RoomInfo) string {
+	if info == nil || (info.Title == "" && info.Topic == "") {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("<room_context>\n")
+	if info.Title != "" {
+		sb.WriteString(fmt.Sprintf("Room: %s\n", info.Title))
+	}
+	if info.Topic != "" {
+		sb.WriteString(fmt.Sprintf("Topic: %s\n", info.Topic))
+	}
+	if info.Channel != "" {
+		sb.WriteString(fmt.Sprintf("Channel: %s\n", info.Channel))
+	}
+	sb.WriteString("</room_context>")
+	return sb.String()
+}
+
+// buildToolsSectionFromList creates the tools description section from tool list.
+func buildToolsSectionFromList(toolList []tools.ToolInfo) string {
+	if len(toolList) == 0 {
 		return ""
 	}
 
 	var section strings.Builder
 	section.WriteString("You have access to the following tools:\n")
 
-	for _, tool := range b.tools {
+	for _, tool := range toolList {
 		if tool.Enabled {
 			section.WriteString(fmt.Sprintf("- %s: %s\n", tool.Name, tool.Description))
 		}
@@ -148,27 +182,64 @@ func (b *PromptBuilder) buildToolsSection() string {
 	return section.String()
 }
 
-// buildDateSection creates the date/time context section.
-func (b *PromptBuilder) buildDateSection() string {
-	return fmt.Sprintf("Current date: %s (%s)", b.date.Format("January 2, 2006"), b.timezone)
+// buildRuntimeSection creates the runtime info section.
+func buildRuntimeSection(info *RuntimeInfo) string {
+	if info == nil || (info.AgentID == "" && info.Model == "" && info.Channel == "") {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("<runtime_info>\n")
+	if info.AgentID != "" {
+		sb.WriteString(fmt.Sprintf("Agent ID: %s\n", info.AgentID))
+	}
+	if info.Model != "" {
+		sb.WriteString(fmt.Sprintf("Model: %s\n", info.Model))
+	}
+	if info.Channel != "" {
+		sb.WriteString(fmt.Sprintf("Channel: %s\n", info.Channel))
+	}
+	sb.WriteString("</runtime_info>")
+	return sb.String()
 }
 
-// BuildForBoss creates a specialized prompt for the Boss agent.
-func (b *PromptBuilder) BuildForBoss(agents []*AgentDefinition) string {
-	base := b.Build()
+// buildDateSectionFromParams creates the date/time section from params.
+func buildDateSectionFromParams(date time.Time, timezone string) string {
+	if date.IsZero() {
+		date = time.Now()
+	}
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	return fmt.Sprintf("Current date: %s (%s)", date.Format("January 2, 2006"), timezone)
+}
 
-	var agentList strings.Builder
-	agentList.WriteString("\n\nCurrently available agents:\n")
+// buildAgentListSection creates the agent list section for Boss agent.
+func buildAgentListSection(agents []*AgentDefinition) string {
+	if len(agents) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("Currently available agents:\n")
 	for _, agent := range agents {
 		status := "custom"
 		if agent.IsPreset {
 			status = "preset"
 		}
-		agentList.WriteString(fmt.Sprintf("- %s (%s): %s [%s]\n",
+		sb.WriteString(fmt.Sprintf("- %s (%s): %s [%s]\n",
 			agent.Name, agent.ID, agent.Description, status))
 	}
+	return sb.String()
+}
 
-	return base + agentList.String()
+// filterEmpty removes empty strings from a slice.
+func filterEmpty(sections []string) []string {
+	result := make([]string, 0, len(sections))
+	for _, s := range sections {
+		if s != "" {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // ConstitutionalSafetyBlock contains hardcoded safety rules that CANNOT be overridden
