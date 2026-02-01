@@ -319,17 +319,21 @@ func (oc *AIClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.
 			continue
 		}
 
-		userID := agentUserID(agent.ID)
+		modelID := oc.agentDefaultModel(agent)
+		userID := agentModelUserID(agent.ID, modelID)
 		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
 		if err != nil {
 			oc.log.Warn().Err(err).Str("agent", agent.ID).Msg("Failed to get ghost for search result")
 			continue
 		}
 
+		displayName := oc.agentModelDisplayName(agent.Name, modelID)
+		oc.ensureAgentModelGhostDisplayName(ctx, agent.ID, modelID, agent.Name)
+
 		results = append(results, &bridgev2.ResolveIdentifierResponse{
 			UserID: userID,
 			UserInfo: &bridgev2.UserInfo{
-				Name:        ptr.Ptr(agent.Name),
+				Name:        ptr.Ptr(displayName),
 				IsBot:       ptr.Ptr(true),
 				Identifiers: []string{agent.ID},
 			},
@@ -358,7 +362,8 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 
 	for _, agent := range agentsMap {
 		// Get or create ghost for this agent
-		userID := agentUserID(agent.ID)
+		modelID := oc.agentDefaultModel(agent)
+		userID := agentModelUserID(agent.ID, modelID)
 		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
 		if err != nil {
 			oc.log.Warn().Err(err).Str("agent", agent.ID).Msg("Failed to get ghost for agent")
@@ -366,12 +371,13 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 		}
 
 		// Update ghost display name
-		oc.ensureAgentGhostDisplayName(ctx, agent.ID, agent.Name)
+		displayName := oc.agentModelDisplayName(agent.Name, modelID)
+		oc.ensureAgentModelGhostDisplayName(ctx, agent.ID, modelID, agent.Name)
 
 		contacts = append(contacts, &bridgev2.ResolveIdentifierResponse{
 			UserID: userID,
 			UserInfo: &bridgev2.UserInfo{
-				Name:        ptr.Ptr(agent.Name),
+				Name:        ptr.Ptr(displayName),
 				IsBot:       ptr.Ptr(true),
 				Identifiers: []string{agent.ID},
 			},
@@ -461,7 +467,7 @@ func (oc *AIClient) resolveAgentIdentifier(ctx context.Context, agent *agents.Ag
 	}
 
 	// Ensure ghost display name is set
-	oc.ensureAgentGhostDisplayName(ctx, agent.ID, agent.Name)
+	oc.ensureAgentModelGhostDisplayName(ctx, agent.ID, modelID, agent.Name)
 
 	var chatResp *bridgev2.CreateChatResponse
 	if createChat {
@@ -1209,9 +1215,9 @@ func (oc *AIClient) handleAgentModelSwitch(ctx context.Context, portal *bridgev2
 					IsBot: ptr.Ptr(true),
 				},
 				MemberEventExtra: map[string]any{
-					"displayname":          newDisplayName,
-					"com.beeper.ai.model":  newModel,
-					"com.beeper.ai.agent":  agentID,
+					"displayname":         newDisplayName,
+					"com.beeper.ai.model": newModel,
+					"com.beeper.ai.agent": agentID,
 				},
 			},
 		},

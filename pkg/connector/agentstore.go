@@ -508,7 +508,9 @@ func (b *BossStoreAdapter) ModifyRoom(ctx context.Context, roomID string, update
 		}
 		pm.AgentID = agent.ID
 		pm.DefaultAgentID = agent.ID
-		portal.OtherUserID = agentUserID(agent.ID)
+		modelID := b.store.client.effectiveModel(pm)
+		portal.OtherUserID = agentModelUserID(agent.ID, modelID)
+		b.store.client.ensureAgentModelGhostDisplayName(ctx, agent.ID, modelID, agent.Name)
 	}
 	if updates.SystemPrompt != "" {
 		pm.SystemPrompt = updates.SystemPrompt

@@ -572,21 +572,23 @@ func (oc *AIClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*
 func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	ghostID := string(ghost.ID)
 
-	// Parse agent from ghost ID (format: "agent-{escaped-agent-id}")
-	if agentID, ok := parseAgentFromGhostID(ghostID); ok {
+	// Parse agent+model from ghost ID (format: "agent-{id}:model-{id}")
+	if agentID, modelID, ok := parseAgentModelFromGhostID(ghostID); ok {
 		store := NewAgentStoreAdapter(oc)
 		agent, err := store.GetAgentByID(ctx, agentID)
 		if err == nil && agent != nil {
+			displayName := oc.agentModelDisplayName(agent.Name, modelID)
 			return &bridgev2.UserInfo{
-				Name:         ptr.Ptr(agent.Name),
+				Name:         ptr.Ptr(displayName),
 				IsBot:        ptr.Ptr(true),
 				Identifiers:  []string{agentID},
 				ExtraUpdates: updateGhostLastSync,
 			}, nil
 		}
 		// Fallback for unknown agent
+		displayName := oc.agentModelDisplayName("Unknown Agent", modelID)
 		return &bridgev2.UserInfo{
-			Name:         ptr.Ptr("Unknown Agent"),
+			Name:         ptr.Ptr(displayName),
 			IsBot:        ptr.Ptr(true),
 			Identifiers:  []string{agentID},
 			ExtraUpdates: updateGhostLastSync,
@@ -1506,20 +1508,19 @@ func (oc *AIClient) ensureGhostDisplayNameWithGhost(ctx context.Context, ghost *
 	}
 }
 
-// ensureAgentGhostDisplayName ensures the agent ghost has its display name set.
-// Agents are displayed as bots with their configured name.
-func (oc *AIClient) ensureAgentGhostDisplayName(ctx context.Context, agentID, agentName string) {
-	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, agentUserID(agentID))
+// ensureAgentModelGhostDisplayName ensures the agent+model ghost has its display name set.
+func (oc *AIClient) ensureAgentModelGhostDisplayName(ctx context.Context, agentID, modelID, agentName string) {
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, agentModelUserID(agentID, modelID))
 	if err != nil || ghost == nil {
 		return
 	}
-	// Only update if name is not already set or differs from expected
-	if ghost.Name == "" || !ghost.NameSet || ghost.Name != agentName {
+	displayName := oc.agentModelDisplayName(agentName, modelID)
+	if ghost.Name == "" || !ghost.NameSet || ghost.Name != displayName {
 		ghost.UpdateInfo(ctx, &bridgev2.UserInfo{
-			Name:  ptr.Ptr(agentName),
+			Name:  ptr.Ptr(displayName),
 			IsBot: ptr.Ptr(true),
 		})
-		oc.log.Debug().Str("agent", agentID).Str("name", agentName).Msg("Updated agent ghost display name")
+		oc.log.Debug().Str("agent", agentID).Str("model", modelID).Str("name", displayName).Msg("Updated agent ghost display name")
 	}
 }
 
@@ -1535,15 +1536,16 @@ func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal)
 		agentID = meta.DefaultAgentID
 	}
 
-	// Use agent ghost if an agent is configured
+	// Use agent+model ghost if an agent is configured
 	if agentID != "" {
-		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, agentUserID(agentID))
+		modelID := oc.effectiveModel(meta)
+		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, agentModelUserID(agentID, modelID))
 		if err == nil && ghost != nil {
 			// Ensure the ghost has a display name set
 			store := NewAgentStoreAdapter(oc)
 			agent, _ := store.GetAgentByID(ctx, agentID)
 			if agent != nil {
-				oc.ensureAgentGhostDisplayName(ctx, agentID, agent.Name)
+				oc.ensureAgentModelGhostDisplayName(ctx, agentID, modelID, agent.Name)
 			}
 			return ghost.Intent
 		}

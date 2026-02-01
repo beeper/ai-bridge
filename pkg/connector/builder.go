@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"go.mau.fi/util/ptr"
+
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
@@ -88,6 +90,48 @@ func (oc *AIClient) createBuilderRoom(ctx context.Context) (*bridgev2.Portal, *b
 	pm.SystemPrompt = agents.BossSystemPrompt
 	pm.Model = bossAgent.Model.Primary // Explicit model - always use Boss agent's model
 	pm.IsBuilderRoom = true            // Mark as protected from overrides
+
+	// Use agent+model ghost for the Boss agent
+	modelID := pm.Model
+	if modelID == "" {
+		modelID = oc.effectiveModel(nil)
+	}
+	bossGhostID := agentModelUserID(bossAgent.ID, modelID)
+	bossDisplayName := oc.agentModelDisplayName(bossAgent.Name, modelID)
+	portal.OtherUserID = bossGhostID
+
+	if chatInfo != nil && chatInfo.Members != nil {
+		members := chatInfo.Members
+		if members.MemberMap == nil {
+			members.MemberMap = make(bridgev2.ChatMemberMap)
+		}
+		members.OtherUserID = bossGhostID
+		humanID := humanUserID(oc.UserLogin.ID)
+		humanMember := members.MemberMap[humanID]
+		humanMember.EventSender = bridgev2.EventSender{
+			IsFromMe:    true,
+			SenderLogin: oc.UserLogin.ID,
+		}
+		bossMember := members.MemberMap[bossGhostID]
+		bossMember.EventSender = bridgev2.EventSender{
+			Sender:      bossGhostID,
+			SenderLogin: oc.UserLogin.ID,
+		}
+		bossMember.UserInfo = &bridgev2.UserInfo{
+			Name:  ptr.Ptr(bossDisplayName),
+			IsBot: ptr.Ptr(true),
+		}
+		bossMember.MemberEventExtra = map[string]any{
+			"displayname":         bossDisplayName,
+			"com.beeper.ai.model": modelID,
+			"com.beeper.ai.agent": bossAgent.ID,
+		}
+		members.MemberMap = bridgev2.ChatMemberMap{
+			humanID:     humanMember,
+			bossGhostID: bossMember,
+		}
+		chatInfo.Members = members
+	}
 
 	// Re-save portal with updated metadata
 	if err := portal.Save(ctx); err != nil {

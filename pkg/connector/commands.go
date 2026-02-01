@@ -623,9 +623,10 @@ func fnAgent(ce *commands.Event) {
 	if agent.SystemPrompt != "" {
 		meta.SystemPrompt = agent.SystemPrompt
 	}
-	ce.Portal.OtherUserID = agentUserID(agent.ID)
+	modelID := client.effectiveModel(meta)
+	ce.Portal.OtherUserID = agentModelUserID(agent.ID, modelID)
 	client.savePortalQuiet(ce.Ctx, ce.Portal, "agent change")
-	client.ensureAgentGhostDisplayName(ce.Ctx, agent.ID, agent.Name)
+	client.ensureAgentModelGhostDisplayName(ce.Ctx, agent.ID, modelID, agent.Name)
 	ce.Reply("Agent set to: **%s** (`%s`)", agent.Name, agent.ID)
 }
 

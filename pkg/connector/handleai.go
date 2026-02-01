@@ -2227,11 +2227,12 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 
 	if agentID != "" {
 		// Agent room - use agent ghost
-		senderID = agentUserID(agentID)
+		modelID := oc.effectiveModel(meta)
+		senderID = agentModelUserID(agentID, modelID)
 		store := NewAgentStoreAdapter(oc)
 		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil {
-			displayName = agent.Name
-			oc.ensureAgentGhostDisplayName(ctx, agentID, displayName)
+			displayName = oc.agentModelDisplayName(agent.Name, modelID)
+			oc.ensureAgentModelGhostDisplayName(ctx, agentID, modelID, agent.Name)
 		} else {
 			displayName = agentID // Fallback to agent ID
 		}
