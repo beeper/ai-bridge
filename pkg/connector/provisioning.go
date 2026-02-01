@@ -15,7 +15,7 @@ import (
 type ProvisioningAPI struct {
 	log       zerolog.Logger
 	connector *OpenAIConnector
-	prov      matrix.IProvisioningAPI
+	prov      bridgev2.IProvisioningAPI
 }
 
 // initProvisioning sets up the provisioning API endpoints
