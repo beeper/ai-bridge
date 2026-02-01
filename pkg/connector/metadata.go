@@ -36,6 +36,19 @@ type ToolsConfig struct {
 	UseOpenRouterOnline *bool `json:"use_openrouter_online,omitempty"` // OpenRouter :online plugin (default for OpenRouter)
 }
 
+// PDFConfig stores per-room PDF processing configuration
+type PDFConfig struct {
+	Engine string `json:"engine,omitempty"` // pdf-text (free), mistral-ocr (OCR, paid, default), native
+}
+
+// FileAnnotation stores cached parsed PDF content from OpenRouter's file-parser plugin
+type FileAnnotation struct {
+	FileHash   string `json:"file_hash"`            // SHA256 hash of the file content
+	ParsedText string `json:"parsed_text"`          // Extracted text content
+	PageCount  int    `json:"page_count,omitempty"` // Number of pages
+	CreatedAt  int64  `json:"created_at"`           // Unix timestamp when cached
+}
+
 // UserLoginMetadata is stored on each login row to keep per-user settings.
 type UserLoginMetadata struct {
 	Persona              string      `json:"persona,omitempty"`
@@ -45,6 +58,11 @@ type UserLoginMetadata struct {
 	TitleGenerationModel string      `json:"title_generation_model,omitempty"` // Model to use for generating chat titles
 	NextChatIndex        int         `json:"next_chat_index,omitempty"`
 	ModelCache           *ModelCache `json:"model_cache,omitempty"`
+	ChatsSynced          bool        `json:"chats_synced,omitempty"` // True after initial bootstrap completed successfully
+
+	// FileAnnotationCache stores parsed PDF content from OpenRouter's file-parser plugin
+	// Key is the file hash (SHA256), pruned after 7 days
+	FileAnnotationCache map[string]FileAnnotation `json:"file_annotation_cache,omitempty"`
 }
 
 // PortalMetadata stores per-room tuning knobs for the assistant.
@@ -63,6 +81,7 @@ type PortalMetadata struct {
 	LastRoomStateSync   int64             `json:"last_room_state_sync,omitempty"` // Track when we've synced room state
 	ToolsEnabled        bool              `json:"tools_enabled,omitempty"`        // Legacy: Enable function calling tools (deprecated, use ToolsConfig)
 	ToolsConfig         ToolsConfig       `json:"tools_config,omitempty"`         // Per-tool configuration
+	PDFConfig           *PDFConfig        `json:"pdf_config,omitempty"`           // Per-room PDF processing configuration
 
 	ConversationMode       string `json:"conversation_mode,omitempty"`
 	LastResponseID         string `json:"last_response_id,omitempty"`

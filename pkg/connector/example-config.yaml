@@ -8,15 +8,21 @@ beeper:
   base_url: ""  # Required if using Beeper provider
   token: ""
 
-# Per-provider default models.
+# Per-provider default models and settings.
 # These are used when a room doesn't have a specific model configured.
 providers:
   beeper:
     default_model: "openai/gpt-5.2"
+    # PDF processing engine for OpenRouter's file-parser plugin.
+    # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
+    default_pdf_engine: "mistral-ocr"
   openai:
     default_model: "openai/gpt-4o-mini"
   openrouter:
     default_model: "openrouter/openai/gpt-4o-mini"
+    # PDF processing engine for OpenRouter's file-parser plugin.
+    # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
+    default_pdf_engine: "mistral-ocr"
 
 # Global settings
 default_system_prompt: |
