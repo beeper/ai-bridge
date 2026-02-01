@@ -991,9 +991,10 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 	notice := fmt.Sprintf("Switched from %s to %s", oldModelName, newModelName)
 	oc.sendSystemNotice(ctx, portal, notice)
 
-	// Update bridge info to resend room features state event with new capabilities
+	// Update bridge info and capabilities to resend room features state event with new capabilities
 	// This ensures the client knows what features the new model supports (vision, audio, etc.)
 	portal.UpdateBridgeInfo(ctx)
+	portal.UpdateCapabilities(ctx, oc.UserLogin, true)
 }
 
 // BroadcastRoomState sends current room capabilities and settings to Matrix room state
