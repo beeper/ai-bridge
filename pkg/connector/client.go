@@ -1258,8 +1258,29 @@ func (oc *AIClient) downloadAndEncodeMedia(ctx context.Context, mxcURL string, e
 		return b64Data, mimeType, nil
 	}
 
-	// Convert mxc:// to HTTP URL
-	httpURL := oc.convertMxcToHttp(downloadURL)
+	if strings.HasPrefix(downloadURL, "mxc://") {
+		if oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.Bot == nil {
+			return "", "", fmt.Errorf("matrix API unavailable for MXC media download")
+		}
+		data, err := oc.UserLogin.Bridge.Bot.DownloadMedia(ctx, id.ContentURIString(downloadURL), encryptedFile)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to download media via Matrix API: %w", err)
+		}
+		if maxSizeMB > 0 {
+			maxBytes := int64(maxSizeMB * 1024 * 1024)
+			if int64(len(data)) > maxBytes {
+				return "", "", fmt.Errorf("media too large (max %d MB)", maxSizeMB)
+			}
+		}
+		mimeType := http.DetectContentType(data)
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		b64Data := base64.StdEncoding.EncodeToString(data)
+		return b64Data, mimeType, nil
+	}
+
+	httpURL := downloadURL
 
 	// Create HTTP request with context
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, httpURL, nil)
