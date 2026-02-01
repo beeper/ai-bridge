@@ -805,6 +805,63 @@ func (oc *AIClient) validateModel(ctx context.Context, modelID string) (bool, er
 	return err == nil, nil
 }
 
+// resolveModelID tries to normalize a user-provided model to a known model ID.
+// It accepts exact IDs, aliases, display names, and suffix-only IDs (e.g. "gpt-4o-mini").
+func (oc *AIClient) resolveModelID(ctx context.Context, modelID string) (string, bool, error) {
+	normalized := strings.TrimSpace(modelID)
+	if normalized == "" {
+		return "", true, nil
+	}
+
+	normalized = ResolveAlias(normalized)
+
+	models, err := oc.listAvailableModels(ctx, false)
+	if err == nil {
+		for _, model := range models {
+			if model.ID == normalized {
+				return model.ID, true, nil
+			}
+		}
+
+		lower := strings.ToLower(normalized)
+		for _, model := range models {
+			if strings.ToLower(model.ID) == lower {
+				return model.ID, true, nil
+			}
+		}
+
+		for _, model := range models {
+			if strings.EqualFold(model.Name, normalized) {
+				return model.ID, true, nil
+			}
+		}
+
+		if !strings.Contains(normalized, "/") {
+			var match string
+			for _, model := range models {
+				if strings.HasSuffix(model.ID, "/"+normalized) {
+					if match != "" && match != model.ID {
+						return "", false, nil
+					}
+					match = model.ID
+				}
+			}
+			if match != "" {
+				return match, true, nil
+			}
+		}
+	}
+
+	valid, err := oc.validateModel(ctx, normalized)
+	if err != nil {
+		return "", false, err
+	}
+	if valid {
+		return normalized, true, nil
+	}
+	return "", false, nil
+}
+
 // listAvailableModels fetches models from OpenAI API and caches them
 // Returns ModelInfo list from the provider
 func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) ([]ModelInfo, error) {

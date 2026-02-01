@@ -31,10 +31,6 @@ metrics:
   enabled: true
   listen: 0.0.0.0:9000
 
-bridge:
-  command_prefix: "!ai"
-  sync_with_custom_puppets: false
-
 encryption:
   allow: true
   default: false
@@ -49,7 +45,7 @@ network:
   # Per-provider default models
   providers:
     beeper:
-      default_model: "openai/gpt-5.2"
+      default_model: "google/gemini-2.5-flash"
     openai:
       default_model: "openai/gpt-4o-mini"
     gemini:
@@ -57,7 +53,7 @@ network:
     anthropic:
       default_model: "anthropic/claude-sonnet-4-5-20250929"
     openrouter:
-      default_model: "anthropic/claude-sonnet-4.5"
+      default_model: "google/gemini-2.5-flash"
       # Optional OpenRouter app attribution headers.
       # Defaults: https://beeper.com / Beeper
       # app_referer: "https://example.com"
@@ -67,6 +63,3 @@ network:
   default_system_prompt: |
     You are a helpful assistant.
   model_cache_duration: 6h
-
-  bridge:
-    command_prefix: "!ai"
