@@ -278,8 +278,8 @@ func (oc *OpenAIConnector) GetName() bridgev2.BridgeName {
 		DisplayName:          "Beeper AI",
 		NetworkURL:           "https://www.beeper.com/ai",
 		NetworkIcon:          "mxc://maunium.net/HPiAFz2uVH54camzatoorkWY",
-		NetworkID:            "beeper-ai",
-		BeeperBridgeType:     "beeper-ai",
+		NetworkID:            "ai",
+		BeeperBridgeType:     "ai",
 		DefaultPort:          29345,
 		DefaultCommandPrefix: oc.Config.Bridge.CommandPrefix,
 	}
