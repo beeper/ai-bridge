@@ -21,7 +21,6 @@ import (
 	"go.mau.fi/util/ptr"
 
 	"maunium.net/go/mautrix/bridgev2"
-	matrixconnector "maunium.net/go/mautrix/bridgev2/matrix"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
@@ -1164,44 +1163,6 @@ func (oc *AIClient) buildPromptUpToMessage(
 	}
 
 	return prompt, nil
-}
-
-// convertMxcToHttp converts an mxc:// URL to an HTTP URL via the homeserver
-func (oc *AIClient) convertMxcToHttp(mxcURL string) string {
-	// mxc://server/mediaID -> https://homeserver/_matrix/media/v3/download/server/mediaID
-	if !strings.HasPrefix(mxcURL, "mxc://") {
-		return mxcURL // Already HTTP
-	}
-
-	// Parse mxc URL
-	parts := strings.SplitN(strings.TrimPrefix(mxcURL, "mxc://"), "/", 2)
-	if len(parts) != 2 {
-		return mxcURL
-	}
-
-	server := parts[0]
-	mediaID := parts[1]
-
-	if oc.UserLogin != nil && oc.UserLogin.Bridge != nil {
-		if mediaConnector, ok := oc.UserLogin.Bridge.Matrix.(bridgev2.MatrixConnectorWithPublicMedia); ok {
-			if publicURL := mediaConnector.GetPublicMediaAddress(id.ContentURIString(mxcURL)); publicURL != "" {
-				return publicURL
-			}
-		}
-
-		if matrixConnector, ok := oc.UserLogin.Bridge.Matrix.(*matrixconnector.Connector); ok && matrixConnector.Config != nil {
-			baseURL := strings.TrimRight(matrixConnector.Config.Homeserver.Address, "/")
-			if baseURL != "" {
-				return fmt.Sprintf("%s/_matrix/media/v3/download/%s/%s", baseURL, server, mediaID)
-			}
-		}
-
-		// Fallback to server name if no better option is available.
-		homeserver := oc.UserLogin.Bridge.Matrix.ServerName()
-		return fmt.Sprintf("https://%s/_matrix/media/v3/download/%s/%s", homeserver, server, mediaID)
-	}
-
-	return mxcURL
 }
 
 // downloadAndEncodeMedia downloads media from Matrix and returns base64-encoded data
