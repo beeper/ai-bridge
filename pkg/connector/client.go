@@ -5,7 +5,11 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +21,7 @@ import (
 	"go.mau.fi/util/ptr"
 
 	"maunium.net/go/mautrix/bridgev2"
+	matrixconnector "maunium.net/go/mautrix/bridgev2/matrix"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
@@ -1005,36 +1010,22 @@ func (oc *AIClient) buildPromptWithMedia(
 
 	switch mediaType {
 	case pendingTypeImage:
-		// For encrypted media, download+decrypt+base64
-		// For non-encrypted, use direct URL (provider can fetch)
-		if encryptedFile != nil {
-			b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, encryptedFile, 20) // 20MB limit for images
-			if err != nil {
-				return nil, fmt.Errorf("failed to download image: %w", err)
-			}
-			if actualMimeType == "" || actualMimeType == "application/octet-stream" {
-				actualMimeType = mimeType
-			}
-			dataURL := fmt.Sprintf("data:%s;base64,%s", actualMimeType, b64Data)
-			mediaContent = openai.ChatCompletionContentPartUnionParam{
-				OfImageURL: &openai.ChatCompletionContentPartImageParam{
-					ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
-						URL:    dataURL,
-						Detail: "auto",
-					},
+		// Always download+base64 for images (consistent across cloud/self-hosted)
+		b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, encryptedFile, 20) // 20MB limit for images
+		if err != nil {
+			return nil, fmt.Errorf("failed to download image: %w", err)
+		}
+		if actualMimeType == "" || actualMimeType == "application/octet-stream" {
+			actualMimeType = mimeType
+		}
+		dataURL := fmt.Sprintf("data:%s;base64,%s", actualMimeType, b64Data)
+		mediaContent = openai.ChatCompletionContentPartUnionParam{
+			OfImageURL: &openai.ChatCompletionContentPartImageParam{
+				ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
+					URL:    dataURL,
+					Detail: "auto",
 				},
-			}
-		} else {
-			// Non-encrypted: use HTTP URL directly
-			httpURL := oc.convertMxcToHttp(mediaURL)
-			mediaContent = openai.ChatCompletionContentPartUnionParam{
-				OfImageURL: &openai.ChatCompletionContentPartImageParam{
-					ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
-						URL:    httpURL,
-						Detail: "auto",
-					},
-				},
-			}
+			},
 		}
 
 	case pendingTypePDF:
@@ -1078,32 +1069,16 @@ func (oc *AIClient) buildPromptWithMedia(
 		}
 
 	case pendingTypeVideo:
-		// For encrypted video, download+decrypt+base64
-		// For non-encrypted, use direct URL
-		if encryptedFile != nil {
-			b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, encryptedFile, 100) // 100MB limit for video
-			if err != nil {
-				return nil, fmt.Errorf("failed to download video: %w", err)
-			}
-			if actualMimeType == "" || actualMimeType == "application/octet-stream" {
-				actualMimeType = mimeType
-			}
-			dataURL := fmt.Sprintf("data:%s;base64,%s", actualMimeType, b64Data)
-			videoPrompt := fmt.Sprintf("%s\n\nVideo data URL: %s", caption, dataURL)
-			userMsg := openai.ChatCompletionMessageParamUnion{
-				OfUser: &openai.ChatCompletionUserMessageParam{
-					Content: openai.ChatCompletionUserMessageParamContentUnion{
-						OfString: openai.String(videoPrompt),
-					},
-				},
-			}
-			prompt = append(prompt, userMsg)
-			return prompt, nil
+		// Always download+base64 for video (consistent across cloud/self-hosted)
+		b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, encryptedFile, 100) // 100MB limit for video
+		if err != nil {
+			return nil, fmt.Errorf("failed to download video: %w", err)
 		}
-
-		// Non-encrypted: use HTTP URL directly
-		httpURL := oc.convertMxcToHttp(mediaURL)
-		videoPrompt := fmt.Sprintf("%s\n\nVideo URL: %s", caption, httpURL)
+		if actualMimeType == "" || actualMimeType == "application/octet-stream" {
+			actualMimeType = mimeType
+		}
+		dataURL := fmt.Sprintf("data:%s;base64,%s", actualMimeType, b64Data)
+		videoPrompt := fmt.Sprintf("%s\n\nVideo data URL: %s", caption, dataURL)
 		userMsg := openai.ChatCompletionMessageParamUnion{
 			OfUser: &openai.ChatCompletionUserMessageParam{
 				Content: openai.ChatCompletionUserMessageParamContentUnion{
@@ -1198,9 +1173,6 @@ func (oc *AIClient) convertMxcToHttp(mxcURL string) string {
 		return mxcURL // Already HTTP
 	}
 
-	// Get homeserver URL from bridge config
-	homeserver := oc.UserLogin.Bridge.Matrix.ServerName()
-
 	// Parse mxc URL
 	parts := strings.SplitN(strings.TrimPrefix(mxcURL, "mxc://"), "/", 2)
 	if len(parts) != 2 {
@@ -1210,7 +1182,26 @@ func (oc *AIClient) convertMxcToHttp(mxcURL string) string {
 	server := parts[0]
 	mediaID := parts[1]
 
-	return fmt.Sprintf("https://%s/_matrix/media/v3/download/%s/%s", homeserver, server, mediaID)
+	if oc.UserLogin != nil && oc.UserLogin.Bridge != nil {
+		if mediaConnector, ok := oc.UserLogin.Bridge.Matrix.(bridgev2.MatrixConnectorWithPublicMedia); ok {
+			if publicURL := mediaConnector.GetPublicMediaAddress(id.ContentURIString(mxcURL)); publicURL != "" {
+				return publicURL
+			}
+		}
+
+		if matrixConnector, ok := oc.UserLogin.Bridge.Matrix.(*matrixconnector.Connector); ok && matrixConnector.Config != nil {
+			baseURL := strings.TrimRight(matrixConnector.Config.Homeserver.Address, "/")
+			if baseURL != "" {
+				return fmt.Sprintf("%s/_matrix/media/v3/download/%s/%s", baseURL, server, mediaID)
+			}
+		}
+
+		// Fallback to server name if no better option is available.
+		homeserver := oc.UserLogin.Bridge.Matrix.ServerName()
+		return fmt.Sprintf("https://%s/_matrix/media/v3/download/%s/%s", homeserver, server, mediaID)
+	}
+
+	return mxcURL
 }
 
 // downloadAndEncodeMedia downloads media from Matrix and returns base64-encoded data
@@ -1222,6 +1213,49 @@ func (oc *AIClient) downloadAndEncodeMedia(ctx context.Context, mxcURL string, e
 	downloadURL := mxcURL
 	if encryptedFile != nil {
 		downloadURL = string(encryptedFile.URL)
+	}
+
+	// Handle local file URLs/paths (common in local rooms)
+	if strings.HasPrefix(downloadURL, "file://") || strings.HasPrefix(downloadURL, "/") {
+		path := downloadURL
+		if strings.HasPrefix(path, "file://") {
+			path = strings.TrimPrefix(path, "file://")
+			if unescaped, err := url.PathUnescape(path); err == nil {
+				path = unescaped
+			}
+		}
+
+		info, err := os.Stat(path)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to stat local file: %w", err)
+		}
+		if maxSizeMB > 0 {
+			maxBytes := int64(maxSizeMB * 1024 * 1024)
+			if info.Size() > maxBytes {
+				return "", "", fmt.Errorf("media too large: %d bytes (max %d MB)", info.Size(), maxSizeMB)
+			}
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to read local file: %w", err)
+		}
+		if encryptedFile != nil {
+			if err := encryptedFile.DecryptInPlace(data); err != nil {
+				return "", "", fmt.Errorf("failed to decrypt media: %w", err)
+			}
+		}
+
+		mimeType := mime.TypeByExtension(filepath.Ext(path))
+		if mimeType == "" {
+			mimeType = http.DetectContentType(data)
+		}
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+
+		b64Data := base64.StdEncoding.EncodeToString(data)
+		return b64Data, mimeType, nil
 	}
 
 	// Convert mxc:// to HTTP URL
