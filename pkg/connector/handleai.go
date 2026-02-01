@@ -306,7 +306,20 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 func bossToolsToOpenAI(bossTools []*tools.Tool) []responses.ToolUnionParam {
 	var result []responses.ToolUnionParam
 	for _, t := range bossTools {
-		schema, _ := t.InputSchema.(map[string]any)
+		var schema map[string]any
+		switch v := t.InputSchema.(type) {
+		case nil:
+			schema = nil
+		case map[string]any:
+			schema = v
+		default:
+			encoded, err := json.Marshal(v)
+			if err == nil {
+				if err := json.Unmarshal(encoded, &schema); err != nil {
+					schema = nil
+				}
+			}
+		}
 		// Use SDK helper which properly sets Type field (required by OpenRouter)
 		toolParam := responses.ToolParamOfFunction(t.Name, schema, true)
 		if t.Description != "" && toolParam.OfFunction != nil {

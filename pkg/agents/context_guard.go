@@ -170,7 +170,7 @@ func (g *ContextGuard) checkLimitsLocked() []ContextWarning {
 	}
 
 	// Check turn rate
-	turnsLastMinute := len(g.turnTimestamps)
+	turnsLastMinute := g.turnsLastMinuteLocked(time.Now())
 	if turnsLastMinute >= g.maxTurnsPerMinute {
 		w := ContextWarning{
 			Type:      WarningHighTurnRate,
@@ -192,16 +192,28 @@ func (g *ContextGuard) checkLimitsLocked() []ContextWarning {
 	return warnings
 }
 
+func (g *ContextGuard) turnsLastMinuteLocked(now time.Time) int {
+	cutoff := now.Add(-time.Minute)
+	turnsLastMinute := 0
+	for _, ts := range g.turnTimestamps {
+		if !ts.Before(cutoff) {
+			turnsLastMinute++
+		}
+	}
+	return turnsLastMinute
+}
+
 // Stats returns current usage statistics.
 func (g *ContextGuard) Stats() ContextStats {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
+	turnsLastMinute := g.turnsLastMinuteLocked(time.Now())
 	return ContextStats{
 		SessionID:       g.sessionID,
 		MessageCount:    g.messageCount,
 		TokenEstimate:   g.tokenEstimate,
-		TurnsLastMinute: len(g.turnTimestamps),
+		TurnsLastMinute: turnsLastMinute,
 		Duration:        time.Since(g.startedAt),
 		MaxMessages:     g.maxMessages,
 		MaxTokens:       g.maxTokensEstimate,
@@ -240,10 +252,11 @@ func (g *ContextGuard) ShouldWarn() bool {
 
 	messageThreshold := int(float64(g.maxMessages) * 0.8)
 	tokenThreshold := int(float64(g.maxTokensEstimate) * 0.8)
+	turnsLastMinute := g.turnsLastMinuteLocked(time.Now())
 
 	return g.messageCount >= messageThreshold ||
 		g.tokenEstimate >= tokenThreshold ||
-		len(g.turnTimestamps) >= g.maxTurnsPerMinute
+		turnsLastMinute >= g.maxTurnsPerMinute
 }
 
 // ShouldBlock returns true if any hard limit is exceeded.

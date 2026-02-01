@@ -168,6 +168,16 @@ func buildToolsSectionFromList(toolList []tools.ToolInfo) string {
 		return ""
 	}
 
+	enabledCount := 0
+	for _, tool := range toolList {
+		if tool.Enabled {
+			enabledCount++
+		}
+	}
+	if enabledCount == 0 {
+		return ""
+	}
+
 	var section strings.Builder
 	section.WriteString("You have access to the following tools:\n")
 

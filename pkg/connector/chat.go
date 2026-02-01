@@ -490,40 +490,32 @@ func (oc *AIClient) createAgentChat(ctx context.Context, agent *agents.AgentDefi
 	}
 
 	// Update chat info members to use agent ghost
-	chatInfo.Members = &bridgev2.ChatMemberList{
-		IsFull:      true,
-		OtherUserID: agentUserID(agent.ID),
-		MemberMap: bridgev2.ChatMemberMap{
-			humanUserID(oc.UserLogin.ID): {
-				EventSender: bridgev2.EventSender{
-					IsFromMe:    true,
-					SenderLogin: oc.UserLogin.ID,
-				},
-				Membership: event.MembershipJoin,
-			},
-			agentUserID(agent.ID): {
-				EventSender: bridgev2.EventSender{
-					Sender:      agentUserID(agent.ID),
-					SenderLogin: oc.UserLogin.ID,
-				},
-				Membership: event.MembershipJoin,
-				UserInfo: &bridgev2.UserInfo{
-					Name:        ptr.Ptr(agent.Name),
-					IsBot:       ptr.Ptr(true),
-					Identifiers: []string{agent.ID},
-				},
-				MemberEventExtra: map[string]any{
-					"displayname": agent.Name,
-				},
-			},
-		},
-		PowerLevels: &bridgev2.PowerLevelOverrides{
-			Events: map[event.Type]int{
-				RoomCapabilitiesEventType: 100,
-				RoomSettingsEventType:     0,
-			},
-		},
+	members := chatInfo.Members
+	if members == nil {
+		members = &bridgev2.ChatMemberList{}
 	}
+	members.OtherUserID = agentUserID(agent.ID)
+
+	humanID := humanUserID(oc.UserLogin.ID)
+	agentID := agentUserID(agent.ID)
+
+	humanMember := members.MemberMap[humanID]
+	humanMember.EventSender = bridgev2.EventSender{
+		IsFromMe:    true,
+		SenderLogin: oc.UserLogin.ID,
+	}
+
+	agentMember := members.MemberMap[agentID]
+	agentMember.EventSender = bridgev2.EventSender{
+		Sender:      agentID,
+		SenderLogin: oc.UserLogin.ID,
+	}
+
+	members.MemberMap = bridgev2.ChatMemberMap{
+		humanID: humanMember,
+		agentID: agentMember,
+	}
+	chatInfo.Members = members
 
 	return &bridgev2.CreateChatResponse{
 		PortalKey: portal.PortalKey,
@@ -1474,12 +1466,22 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 	}
 
 	// Update chat info members to use agent ghost
-	chatInfo.Members = &bridgev2.ChatMemberList{
-		MemberMap: map[networkid.UserID]bridgev2.ChatMember{
-			humanUserID(oc.UserLogin.ID): {EventSender: bridgev2.EventSender{Sender: humanUserID(oc.UserLogin.ID)}},
-			agentUserID(quickAgent.ID):   {EventSender: bridgev2.EventSender{Sender: agentUserID(quickAgent.ID)}},
-		},
+	members := chatInfo.Members
+	if members == nil {
+		members = &bridgev2.ChatMemberList{}
 	}
+	if members.MemberMap == nil {
+		members.MemberMap = make(bridgev2.ChatMemberMap)
+	}
+	humanID := humanUserID(oc.UserLogin.ID)
+	agentID := agentUserID(quickAgent.ID)
+	humanMember := members.MemberMap[humanID]
+	humanMember.EventSender = bridgev2.EventSender{Sender: humanID}
+	members.MemberMap[humanID] = humanMember
+	agentMember := members.MemberMap[agentID]
+	agentMember.EventSender = bridgev2.EventSender{Sender: agentID}
+	members.MemberMap[agentID] = agentMember
+	chatInfo.Members = members
 
 	loginMeta.DefaultChatPortalID = string(portal.PortalKey.ID)
 	if err := oc.UserLogin.Save(ctx); err != nil {
