@@ -21,6 +21,7 @@ import (
 	"go.mau.fi/util/ptr"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
+	agenttools "github.com/beeper/ai-bridge/pkg/agents/tools"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -800,6 +801,25 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 			Title: portal.Name,
 			Topic: portal.Topic,
 		}
+	}
+
+	availableTools := oc.buildAvailableTools(meta)
+	if len(availableTools) > 0 {
+		params.Tools = make([]agenttools.ToolInfo, 0, len(availableTools))
+		for _, tool := range availableTools {
+			params.Tools = append(params.Tools, agenttools.ToolInfo{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Type:        agenttools.ToolType(tool.Type),
+				Group:       "",
+				Enabled:     tool.Enabled,
+			})
+		}
+	}
+
+	params.RuntimeInfo = &agents.RuntimeInfo{
+		AgentID: agent.ID,
+		Model:   oc.effectiveModel(meta),
 	}
 
 	// For boss agent, include agent list
