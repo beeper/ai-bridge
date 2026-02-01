@@ -499,4 +499,3 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 		Int("section_order", HelpSectionAI.Order).
 		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, tools, mode, new, fork, regenerate, models")
 }
-
