@@ -76,6 +76,7 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	// Calculator builtin tool
 	tools = append(tools, ToolInfo{
 		Name:        "calculator",
+		DisplayName: "Calculator",
 		Type:        "builtin",
 		Description: "Perform arithmetic calculations",
 		Enabled:     oc.isToolEnabled(meta, "calculator"),
@@ -85,6 +86,7 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	// Web search builtin tool (DuckDuckGo)
 	tools = append(tools, ToolInfo{
 		Name:        "web_search",
+		DisplayName: "Web Search",
 		Type:        "builtin",
 		Description: "Search the web using DuckDuckGo",
 		Enabled:     oc.isToolEnabled(meta, "web_search"),
@@ -95,8 +97,9 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	if isOpenRouter {
 		tools = append(tools, ToolInfo{
 			Name:        "online",
+			DisplayName: "Online Search",
 			Type:        "plugin",
-			Description: "OpenRouter web search plugin (appends :online to model)",
+			Description: "Real-time web search via OpenRouter",
 			Enabled:     oc.isToolEnabled(meta, "online"),
 			Available:   true, // Always available on OpenRouter
 		})
@@ -105,8 +108,9 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	// OpenAI provider web search tool
 	tools = append(tools, ToolInfo{
 		Name:        "web_search_provider",
+		DisplayName: "Provider Web Search",
 		Type:        "provider",
-		Description: "Native provider web search",
+		Description: "Native provider web search API",
 		Enabled:     meta.ToolsConfig.WebSearchProvider || meta.WebSearchEnabled,
 		Available:   true, // Let the provider decide
 	})
@@ -114,8 +118,9 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	// Code interpreter
 	tools = append(tools, ToolInfo{
 		Name:        "code_interpreter",
+		DisplayName: "Code Interpreter",
 		Type:        "provider",
-		Description: "Execute Python code",
+		Description: "Execute Python code in sandbox",
 		Enabled:     meta.ToolsConfig.CodeInterpreter || meta.CodeInterpreterEnabled,
 		Available:   true, // Let the provider decide
 	})
@@ -155,6 +160,38 @@ func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
 	default:
 		return false
 	}
+}
+
+// applyToolToggle applies a tool toggle from client without sending notices
+// This is used when processing room config state events from clients
+func (oc *AIClient) applyToolToggle(_ context.Context, _ *bridgev2.Portal, meta *PortalMetadata, toolName string, enabled bool, isOpenRouter bool) {
+	switch toolName {
+	case "calculator", "calc":
+		meta.ToolsConfig.Calculator = &enabled
+	case "web_search", "websearch", "search":
+		meta.ToolsConfig.WebSearch = &enabled
+	case "online":
+		if isOpenRouter {
+			meta.ToolsConfig.UseOpenRouterOnline = &enabled
+			// If enabling online, disable builtin web_search to avoid duplication
+			if enabled {
+				f := false
+				meta.ToolsConfig.WebSearch = &f
+			}
+		} else {
+			oc.log.Warn().Str("tool", toolName).Msg("Online plugin only available with OpenRouter")
+			return
+		}
+	case "web_search_provider", "websearchprovider", "provider_search":
+		meta.ToolsConfig.WebSearchProvider = enabled
+	case "code_interpreter", "codeinterpreter", "interpreter":
+		meta.ToolsConfig.CodeInterpreter = enabled
+	default:
+		oc.log.Warn().Str("tool", toolName).Msg("Unknown tool in toggle request")
+		return
+	}
+
+	oc.log.Info().Str("tool", toolName).Bool("enabled", enabled).Msg("Applied tool toggle from client")
 }
 
 // SearchUsers searches available AI models by name/ID
@@ -759,6 +796,13 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 	}
 	if config.DefaultAgentID != "" {
 		meta.DefaultAgentID = config.DefaultAgentID
+	}
+
+	// Handle tool toggle from client
+	if config.ToolToggle != nil {
+		loginMeta := loginMetadata(oc.UserLogin)
+		isOpenRouter := loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper
+		oc.applyToolToggle(ctx, portal, meta, config.ToolToggle.Name, config.ToolToggle.Enabled, isOpenRouter)
 	}
 
 	meta.LastRoomStateSync = time.Now().Unix()
