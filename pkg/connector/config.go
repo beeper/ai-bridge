@@ -80,4 +80,12 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Int, "pruning", "soft_trim_tail_chars")
 	helper.Copy(configupgrade.Bool, "pruning", "hard_clear_enabled")
 	helper.Copy(configupgrade.Str, "pruning", "hard_clear_placeholder")
+
+	// Compaction configuration (LLM summarization)
+	helper.Copy(configupgrade.Bool, "pruning", "summarization_enabled")
+	helper.Copy(configupgrade.Str, "pruning", "summarization_model")
+	helper.Copy(configupgrade.Int, "pruning", "max_summary_tokens")
+	helper.Copy(configupgrade.Float, "pruning", "max_history_share")
+	helper.Copy(configupgrade.Int, "pruning", "reserve_tokens")
+	helper.Copy(configupgrade.Str, "pruning", "custom_instructions")
 }

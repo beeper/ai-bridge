@@ -55,6 +55,38 @@ type PruningConfig struct {
 
 	// ToolsDeny is a list of tool name patterns to never prune (supports wildcards)
 	ToolsDeny []string `yaml:"tools_deny" json:"tools_deny,omitempty"`
+
+	// --- Compaction settings (LLM-based summarization) ---
+
+	// SummarizationEnabled enables LLM-based summarization instead of placeholder text
+	// Default: true (when compaction is enabled)
+	SummarizationEnabled *bool `yaml:"summarization_enabled" json:"summarization_enabled,omitempty"`
+
+	// SummarizationModel is the model to use for generating summaries
+	// Default: "google/gemini-2.5-flash" (fast and cheap)
+	SummarizationModel string `yaml:"summarization_model" json:"summarization_model,omitempty"`
+
+	// MaxSummaryTokens is the maximum tokens for generated summaries
+	// Default: 500
+	MaxSummaryTokens int `yaml:"max_summary_tokens" json:"max_summary_tokens,omitempty"`
+
+	// MaxHistoryShare is the maximum ratio of context that history can consume (0.0-1.0)
+	// When exceeded, oldest messages are dropped and summarized
+	// Default: 0.5 (50%)
+	MaxHistoryShare float64 `yaml:"max_history_share" json:"max_history_share,omitempty"`
+
+	// ReserveTokens is the token budget reserved for compaction output
+	// Default: 2000
+	ReserveTokens int `yaml:"reserve_tokens" json:"reserve_tokens,omitempty"`
+
+	// CustomInstructions are additional instructions for the summarization model
+	CustomInstructions string `yaml:"custom_instructions" json:"custom_instructions,omitempty"`
+
+	// MaxHistoryTurns limits conversation history to the last N user turns (and their associated
+	// assistant responses). This reduces token usage for long-running DM sessions.
+	// A value of 0 means no limit (default behavior).
+	// Default: 0 (unlimited)
+	MaxHistoryTurns int `yaml:"max_history_turns" json:"max_history_turns,omitempty"`
 }
 
 // DefaultPruningConfig returns OpenClaw's default settings
@@ -309,6 +341,7 @@ func estimateTotalChars(messages []messageInfo) int {
 }
 
 // PruneContext prunes messages to fit within context window (OpenClaw algorithm)
+// Phase 0: Limit history turns (if MaxHistoryTurns is set)
 // Phase 1: Soft trim - truncate large tool results to head+tail
 // Phase 2: Hard clear - replace old tool results with placeholder
 func PruneContext(
@@ -325,6 +358,12 @@ func PruneContext(
 
 	// Apply defaults for any missing config values
 	cfg := applyPruningDefaults(config)
+
+	// Phase 0: Limit history turns if configured
+	// This is applied first to reduce the working set before other pruning phases
+	if cfg.MaxHistoryTurns > 0 {
+		prompt = LimitHistoryTurns(prompt, cfg.MaxHistoryTurns)
+	}
 
 	// Convert token window to char window (OpenClaw uses chars/4)
 	charWindow := contextWindowTokens * charsPerTokenEstimate
@@ -478,6 +517,55 @@ func applyPruningDefaults(config *PruningConfig) *PruningConfig {
 	}
 
 	return &cfg
+}
+
+// LimitHistoryTurns limits conversation history to the last N user turns (and their associated
+// assistant responses and tool calls). This reduces token usage for long-running sessions.
+// Returns the original prompt if limit is 0 or negative (unlimited).
+func LimitHistoryTurns(
+	prompt []openai.ChatCompletionMessageParamUnion,
+	limit int,
+) []openai.ChatCompletionMessageParamUnion {
+	if limit <= 0 || len(prompt) == 0 {
+		return prompt
+	}
+
+	// Find system message(s) at the start - these are always preserved
+	systemEndIndex := 0
+	for i, msg := range prompt {
+		if msg.OfSystem != nil {
+			systemEndIndex = i + 1
+		} else {
+			break
+		}
+	}
+
+	// Count user turns from the end and find the cutoff point
+	userCount := 0
+	lastUserIndex := len(prompt)
+
+	for i := len(prompt) - 1; i >= systemEndIndex; i-- {
+		msg := prompt[i]
+		if msg.OfUser != nil {
+			userCount++
+			if userCount > limit {
+				// We've exceeded the limit, cut before this user turn's start
+				// But we need to find where this turn's group starts
+				// A "turn" includes the user message and any preceding tool results/calls
+				// that are part of the same exchange
+				result := make([]openai.ChatCompletionMessageParamUnion, 0, systemEndIndex+len(prompt)-lastUserIndex)
+				// Add system messages
+				result = append(result, prompt[:systemEndIndex]...)
+				// Add messages from lastUserIndex onwards
+				result = append(result, prompt[lastUserIndex:]...)
+				return result
+			}
+			lastUserIndex = i
+		}
+	}
+
+	// Didn't exceed limit, return original
+	return prompt
 }
 
 // smartTruncatePrompt is the fallback for context_length errors (reactive pruning)

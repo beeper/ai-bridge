@@ -69,3 +69,26 @@ pruning:
   # Empty means all tools are prunable unless denied
   # tools_allow: []
   # tools_deny: []
+
+  # --- LLM-based summarization (compaction) ---
+  # When enabled, uses an LLM to generate intelligent summaries of compacted
+  # content instead of just using placeholder text. This preserves context better.
+
+  # Enable LLM summarization (default: true when pruning is enabled)
+  summarization_enabled: true
+
+  # Model to use for generating summaries (default: fast model)
+  summarization_model: "google/gemini-2.5-flash"
+
+  # Maximum tokens for generated summaries
+  max_summary_tokens: 500
+
+  # Maximum ratio of context that history can consume (0.0-1.0)
+  # When exceeded, oldest messages are summarized to fit budget
+  max_history_share: 0.5
+
+  # Token budget reserved for compaction output
+  reserve_tokens: 2000
+
+  # Additional instructions for the summarization model
+  # custom_instructions: "Focus on preserving code decisions and TODOs"

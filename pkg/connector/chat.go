@@ -49,18 +49,11 @@ func getDefaultToolsConfig(_ string) ToolsConfig {
 		Annotations: &mcp.ToolAnnotations{Title: "Web Search"},
 	}, "builtin")
 
-	// Code interpreter - Python execution (provider handles)
+	// Chat info tool (title/description)
 	registerTool(&config, mcp.Tool{
-		Name:        ToolNameCodeInterpreter,
-		Description: "Execute Python code for calculations and data analysis",
-		Annotations: &mcp.ToolAnnotations{Title: "Code Interpreter"},
-	}, "provider")
-
-	// Room title tool
-	registerTool(&config, mcp.Tool{
-		Name:        ToolNameSetRoomTitle,
-		Description: "Set the chat room title",
-		Annotations: &mcp.ToolAnnotations{Title: "Set Room Title"},
+		Name:        ToolNameSetChatInfo,
+		Description: "Set the chat title and/or description (patches existing values)",
+		Annotations: &mcp.ToolAnnotations{Title: "Set Chat Info"},
 	}, "builtin")
 
 	return config
@@ -225,8 +218,8 @@ func normalizeToolName(name string) string {
 		return ToolNameCalculator
 	case "websearch", "search":
 		return ToolNameWebSearch
-	case "codeinterpreter", "interpreter", "code":
-		return ToolNameCodeInterpreter
+	case "chatinfo", "chat_info", "setchatinfo", "setroomtitle", "set_room_title":
+		return ToolNameSetRoomTitle
 	default:
 		return name
 	}

@@ -157,6 +157,7 @@ func (oc *AIClient) dispatchCompletionInternal(
 type responseFunc func(ctx context.Context, evt *event.Event, portal *bridgev2.Portal, meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (bool, *ContextLengthError)
 
 // responseWithRetry wraps a response function with context length retry logic
+// It first tries auto-compaction (LLM summarization) before falling back to reactive truncation
 func (oc *AIClient) responseWithRetry(
 	ctx context.Context,
 	evt *event.Event,
@@ -167,6 +168,7 @@ func (oc *AIClient) responseWithRetry(
 	logLabel string,
 ) {
 	currentPrompt := prompt
+	autoCompactionAttempted := false
 
 	for attempt := range maxRetryAttempts {
 		success, cle := responseFn(ctx, evt, portal, meta, currentPrompt)
@@ -174,8 +176,71 @@ func (oc *AIClient) responseWithRetry(
 			return
 		}
 
-		// If we got a context length error, try to truncate and retry
+		// If we got a context length error, try auto-compaction first, then truncation
 		if cle != nil {
+			// Try auto-compaction first (only once per retry loop)
+			if !autoCompactionAttempted {
+				autoCompactionAttempted = true
+
+				// Get context window from model
+				contextWindow := oc.getModelContextWindow(meta)
+				if contextWindow <= 0 {
+					contextWindow = 128000 // Default fallback
+				}
+
+				// Emit compaction start event
+				sessionID := string(portal.MXID)
+				oc.emitCompactionStatus(ctx, portal, &CompactionEvent{
+					Type:           CompactionEventStart,
+					SessionID:      sessionID,
+					MessagesBefore: len(currentPrompt),
+				})
+
+				// Attempt auto-compaction with LLM summarization
+				compactor := oc.getCompactor()
+				result, compacted, compactionSuccess := compactor.CompactOnOverflow(
+					ctx,
+					sessionID,
+					currentPrompt,
+					contextWindow,
+					cle.RequestedTokens,
+				)
+
+				if compactionSuccess && len(compacted) > 2 {
+					// Emit compaction end event
+					oc.emitCompactionStatus(ctx, portal, &CompactionEvent{
+						Type:           CompactionEventEnd,
+						SessionID:      sessionID,
+						MessagesBefore: result.MessagesBefore,
+						MessagesAfter:  result.MessagesAfter,
+						TokensBefore:   result.TokensBefore,
+						TokensAfter:    result.TokensAfter,
+						Summary:        result.Summary,
+						WillRetry:      true,
+					})
+
+					oc.log.Info().
+						Int("messages_before", result.MessagesBefore).
+						Int("messages_after", result.MessagesAfter).
+						Int("tokens_before", result.TokensBefore).
+						Int("tokens_after", result.TokensAfter).
+						Msg("Auto-compaction succeeded, retrying with compacted context")
+
+					currentPrompt = compacted
+					continue
+				}
+
+				// Compaction failed or didn't help enough
+				oc.emitCompactionStatus(ctx, portal, &CompactionEvent{
+					Type:      CompactionEventEnd,
+					SessionID: sessionID,
+					Error:     "compaction did not reduce context sufficiently",
+				})
+
+				oc.log.Warn().Msg("Auto-compaction did not help, falling back to reactive truncation")
+			}
+
+			// Fall back to reactive truncation
 			truncated := oc.truncatePrompt(currentPrompt)
 			if len(truncated) <= 2 {
 				oc.notifyContextLengthExceeded(ctx, portal, cle, false)
@@ -266,20 +331,12 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 		}
 	}
 
-	// Add built-in provider tools if enabled (only for native OpenAI, not OpenRouter)
-	// OpenRouter's Responses API only supports function-type tools
+	// OpenRouter's Responses API only supports function-type tools.
 	isOpenRouter := oc.isOpenRouterProvider()
 	log.Debug().
 		Bool("is_openrouter", isOpenRouter).
 		Str("detected_provider", loginMetadata(oc.UserLogin).Provider).
 		Msg("Provider detection for tool filtering")
-
-	// Add provider-side tools (only native OpenAI supports code_interpreter type)
-	// OpenRouter's Responses API only supports function-type tools
-	if !isOpenRouter && oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
-		params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
-		log.Debug().Msg("Code interpreter tool enabled")
-	}
 
 	// Add builtin function tools if model supports tool calling
 	if meta.Capabilities.SupportsToolCalling {
@@ -1040,11 +1097,7 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 		}
 	}
 
-	// Add provider-side tools (only native OpenAI supports code_interpreter type)
-	// OpenRouter's Responses API only supports function-type tools
-	if !isOpenRouter && oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
-		params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
-	}
+	// OpenRouter's Responses API only supports function-type tools.
 	if meta.Capabilities.SupportsToolCalling {
 		enabledTools := GetEnabledBuiltinTools(func(name string) bool {
 			return oc.isToolEnabled(meta, name)
@@ -2470,4 +2523,76 @@ func (oc *AIClient) setRoomSystemPrompt(ctx context.Context, portal *bridgev2.Po
 
 	oc.log.Debug().Str("prompt_len", fmt.Sprintf("%d", len(prompt))).Msg("Set room system prompt")
 	return nil
+}
+
+// getCompactor returns the compactor instance, creating it lazily if needed
+func (oc *AIClient) getCompactor() *Compactor {
+	oc.compactorOnce.Do(func() {
+		// Build compaction config from pruning config
+		var compactionConfig *CompactionConfig
+		if oc.connector.Config.Pruning != nil {
+			compactionConfig = &CompactionConfig{
+				PruningConfig: oc.connector.Config.Pruning,
+			}
+		} else {
+			compactionConfig = DefaultCompactionConfig()
+		}
+
+		oc.compactor = NewCompactor(&oc.api, oc.log, compactionConfig)
+
+		// Use a fast model for summarization
+		if oc.isOpenRouterProvider() {
+			oc.compactor.SetSummarizationModel("google/gemini-2.5-flash")
+		}
+	})
+	return oc.compactor
+}
+
+// emitCompactionStatus sends a compaction status event to the room
+func (oc *AIClient) emitCompactionStatus(ctx context.Context, portal *bridgev2.Portal, evt *CompactionEvent) {
+	if portal == nil || portal.MXID == "" {
+		return
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return
+	}
+
+	content := map[string]any{
+		"type":       string(evt.Type),
+		"session_id": evt.SessionID,
+	}
+
+	if evt.MessagesBefore > 0 {
+		content["messages_before"] = evt.MessagesBefore
+	}
+	if evt.MessagesAfter > 0 {
+		content["messages_after"] = evt.MessagesAfter
+	}
+	if evt.TokensBefore > 0 {
+		content["tokens_before"] = evt.TokensBefore
+	}
+	if evt.TokensAfter > 0 {
+		content["tokens_after"] = evt.TokensAfter
+	}
+	if evt.Summary != "" {
+		content["summary"] = evt.Summary
+	}
+	if evt.WillRetry {
+		content["will_retry"] = evt.WillRetry
+	}
+	if evt.Error != "" {
+		content["error"] = evt.Error
+	}
+	if evt.Duration > 0 {
+		content["duration_ms"] = evt.Duration.Milliseconds()
+	}
+
+	eventContent := &event.Content{Raw: content}
+
+	if _, err := intent.SendMessage(ctx, portal.MXID, CompactionStatusEventType, eventContent, nil); err != nil {
+		oc.log.Warn().Err(err).
+			Str("type", string(evt.Type)).
+			Msg("Failed to emit compaction status event")
+	}
 }

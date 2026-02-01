@@ -76,6 +76,12 @@ var ToolProgressEventType = event.Type{
 	Class: event.MessageEventType,
 }
 
+// CompactionStatusEventType notifies clients about context compaction
+var CompactionStatusEventType = event.Type{
+	Type:  "com.beeper.ai.compaction_status",
+	Class: event.MessageEventType,
+}
+
 // ApprovalRequestEventType requests user approval for tool execution
 var ApprovalRequestEventType = event.Type{
 	Type:  "com.beeper.ai.approval_request",
@@ -552,6 +558,7 @@ type ReasoningEffortOption struct {
 type SettingSource string
 
 const (
+	SourceAgentPolicy    SettingSource = "agent_policy"
 	SourceRoomOverride   SettingSource = "room_override"
 	SourceUserDefault    SettingSource = "user_default"
 	SourceProviderConfig SettingSource = "provider_config"
@@ -633,7 +640,6 @@ type ModelCapabilitiesEventContent struct {
 const (
 	ToolWebSearch       = "web_search"
 	ToolFunctionCalling = "function_calling"
-	ToolCodeInterpreter = "code_interpreter"
 )
 
 // Relation types

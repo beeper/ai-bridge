@@ -222,6 +222,10 @@ type AIClient struct {
 	// Pending message queue per room (for turn-based behavior)
 	pendingMessages   map[id.RoomID][]pendingMessage
 	pendingMessagesMu sync.Mutex
+
+	// Compactor handles intelligent context compaction with LLM summarization
+	compactor     *Compactor
+	compactorOnce sync.Once
 }
 
 // pendingMessageType indicates what kind of pending message this is
