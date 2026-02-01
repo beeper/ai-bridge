@@ -541,6 +541,33 @@ type ReasoningEffortOption struct {
 	Label string `json:"label"` // Display name
 }
 
+// SettingSource indicates where a setting value came from
+type SettingSource string
+
+const (
+	SourceRoomOverride   SettingSource = "room_override"
+	SourceUserDefault    SettingSource = "user_default"
+	SourceProviderConfig SettingSource = "provider_config"
+	SourceGlobalDefault  SettingSource = "global_default"
+	SourceModelLimit     SettingSource = "model_limitation"
+	SourceProviderLimit  SettingSource = "provider_limitation"
+)
+
+// SettingExplanation describes why a setting has its current value
+type SettingExplanation struct {
+	Value  any           `json:"value"`
+	Source SettingSource `json:"source"`
+	Reason string        `json:"reason,omitempty"` // Only when limited/unavailable
+}
+
+// EffectiveSettings shows current values with source explanations
+type EffectiveSettings struct {
+	Model           SettingExplanation `json:"model"`
+	SystemPrompt    SettingExplanation `json:"system_prompt"`
+	Temperature     SettingExplanation `json:"temperature"`
+	ReasoningEffort SettingExplanation `json:"reasoning_effort"`
+}
+
 // RoomCapabilitiesEventContent represents bridge-controlled room capabilities
 // This is protected by power levels (100) so only the bridge bot can modify
 type RoomCapabilitiesEventContent struct {
@@ -548,6 +575,7 @@ type RoomCapabilitiesEventContent struct {
 	AvailableTools         []ToolInfo              `json:"available_tools,omitempty"`
 	ReasoningEffortOptions []ReasoningEffortOption `json:"reasoning_effort_options,omitempty"`
 	Provider               string                  `json:"provider,omitempty"`
+	EffectiveSettings      *EffectiveSettings      `json:"effective_settings,omitempty"`
 }
 
 // RoomSettingsEventContent represents user-editable room settings
@@ -574,12 +602,14 @@ type ToolToggle struct {
 
 // ToolInfo describes a tool and its status for room state broadcasting
 type ToolInfo struct {
-	Name        string `json:"name"`
-	DisplayName string `json:"display_name"` // Human-readable name for UI
-	Type        string `json:"type"`         // "builtin", "provider", "plugin", "mcp"
-	Description string `json:"description,omitempty"`
-	Enabled     bool   `json:"enabled"`
-	Available   bool   `json:"available"` // Based on model capabilities and provider
+	Name        string        `json:"name"`
+	DisplayName string        `json:"display_name"` // Human-readable name for UI
+	Type        string        `json:"type"`         // "builtin", "provider", "plugin", "mcp"
+	Description string        `json:"description,omitempty"`
+	Enabled     bool          `json:"enabled"`
+	Available   bool          `json:"available"`        // Based on model capabilities and provider
+	Source      SettingSource `json:"source,omitempty"` // Where enabled state came from
+	Reason      string        `json:"reason,omitempty"` // Only when limited/unavailable
 }
 
 // StreamingConfig contains streaming behavior settings

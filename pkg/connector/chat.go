@@ -135,33 +135,71 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 			available = true // Provider decides actual support
 		}
 
+		enabled, source, reason := oc.getToolStateWithSource(meta, name, entry, isOpenRouter)
+
 		tools = append(tools, ToolInfo{
 			Name:        name,
 			DisplayName: displayName,
 			Description: entry.Tool.Description,
 			Type:        entry.Type,
-			Enabled:     oc.isToolEnabled(meta, name),
+			Enabled:     enabled,
 			Available:   available,
+			Source:      source,
+			Reason:      reason,
 		})
 	}
 
 	return tools
 }
 
-// isToolEnabled checks if a specific tool is enabled based on ToolsConfig
+// getToolStateWithSource returns enabled state plus source and reason
+func (oc *AIClient) getToolStateWithSource(meta *PortalMetadata, toolName string, entry *ToolEntry, isOpenRouter bool) (bool, SettingSource, string) {
+	// 1. Check provider limitations first
+	if toolName == ToolNameOnline && !isOpenRouter {
+		return false, SourceProviderLimit, "Only available with OpenRouter/Beeper"
+	}
+
+	// 2. Check room-level explicit setting
+	if entry.Enabled != nil {
+		return *entry.Enabled, SourceRoomOverride, ""
+	}
+
+	// 3. Check user-level defaults
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta.Defaults != nil && loginMeta.Defaults.Tools != nil {
+		if enabled, ok := loginMeta.Defaults.Tools[toolName]; ok {
+			return enabled, SourceUserDefault, ""
+		}
+	}
+
+	// 4. Fall back to provider/global default
+	return oc.getDefaultToolState(meta, toolName), SourceGlobalDefault, ""
+}
+
+// isToolEnabled checks if a specific tool is enabled
+// Priority: Room → User → Provider/Model defaults
 func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
-	// Look up in tools map
+	// 1. Check room-level explicit setting
 	if entry, ok := meta.ToolsConfig.Tools[toolName]; ok && entry != nil {
 		if entry.Enabled != nil {
 			return *entry.Enabled
 		}
 	}
 
-	// Use defaults based on tool type and context
+	// 2. Check user-level defaults
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta.Defaults != nil && loginMeta.Defaults.Tools != nil {
+		if enabled, ok := loginMeta.Defaults.Tools[toolName]; ok {
+			return enabled
+		}
+	}
+
+	// 3. Fall back to provider/model defaults
 	return oc.getDefaultToolState(meta, toolName)
 }
 
 // getDefaultToolState returns the default enabled state for a tool
+// Most tools are enabled by default when the model supports them
 func (oc *AIClient) getDefaultToolState(meta *PortalMetadata, toolName string) bool {
 	loginMeta := loginMetadata(oc.UserLogin)
 	provider := loginMeta.Provider
@@ -172,7 +210,7 @@ func (oc *AIClient) getDefaultToolState(meta *PortalMetadata, toolName string) b
 		// Calculator enabled by default if model supports tools
 		return meta.Capabilities.SupportsToolCalling
 	case ToolNameWebSearch:
-		// Web search disabled by default if online plugin is enabled
+		// Web search disabled by default if online plugin is enabled (to avoid duplication)
 		if isOpenRouter {
 			if entry, ok := meta.ToolsConfig.Tools[ToolNameOnline]; ok && entry != nil && entry.Enabled != nil && *entry.Enabled {
 				return false
@@ -182,12 +220,15 @@ func (oc *AIClient) getDefaultToolState(meta *PortalMetadata, toolName string) b
 	case ToolNameOnline:
 		// Online plugin enabled by default for OpenRouter/Beeper
 		return isOpenRouter
-	case ToolNameWebSearchProvider, ToolNameCodeInterpreter:
-		// Provider tools disabled by default
-		return false
+	case ToolNameWebSearchProvider:
+		// Provider web search enabled by default if model supports tools
+		return meta.Capabilities.SupportsToolCalling
+	case ToolNameCodeInterpreter:
+		// Code interpreter enabled by default if model supports tools
+		return meta.Capabilities.SupportsToolCalling
 	default:
-		// Unknown tools disabled by default
-		return false
+		// Unknown tools enabled by default if model supports tools
+		return meta.Capabilities.SupportsToolCalling
 	}
 }
 
@@ -960,6 +1001,65 @@ func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Por
 	return oc.broadcastSettings(ctx, portal)
 }
 
+// buildEffectiveSettings builds the effective settings with source explanations
+func (oc *AIClient) buildEffectiveSettings(meta *PortalMetadata) *EffectiveSettings {
+	loginMeta := loginMetadata(oc.UserLogin)
+
+	return &EffectiveSettings{
+		Model:           oc.getModelWithSource(meta, loginMeta),
+		SystemPrompt:    oc.getPromptWithSource(meta, loginMeta),
+		Temperature:     oc.getTempWithSource(meta, loginMeta),
+		ReasoningEffort: oc.getReasoningWithSource(meta, loginMeta),
+	}
+}
+
+func (oc *AIClient) getModelWithSource(meta *PortalMetadata, loginMeta *UserLoginMetadata) SettingExplanation {
+	if meta != nil && meta.Model != "" {
+		return SettingExplanation{Value: meta.Model, Source: SourceRoomOverride}
+	}
+	if loginMeta.Defaults != nil && loginMeta.Defaults.Model != "" {
+		return SettingExplanation{Value: loginMeta.Defaults.Model, Source: SourceUserDefault}
+	}
+	return SettingExplanation{Value: oc.defaultModelForProvider(), Source: SourceProviderConfig}
+}
+
+func (oc *AIClient) getPromptWithSource(meta *PortalMetadata, loginMeta *UserLoginMetadata) SettingExplanation {
+	if meta != nil && meta.SystemPrompt != "" {
+		return SettingExplanation{Value: meta.SystemPrompt, Source: SourceRoomOverride}
+	}
+	if loginMeta.Defaults != nil && loginMeta.Defaults.SystemPrompt != "" {
+		return SettingExplanation{Value: loginMeta.Defaults.SystemPrompt, Source: SourceUserDefault}
+	}
+	if oc.connector.Config.DefaultSystemPrompt != "" {
+		return SettingExplanation{Value: oc.connector.Config.DefaultSystemPrompt, Source: SourceProviderConfig}
+	}
+	return SettingExplanation{Value: "", Source: SourceGlobalDefault}
+}
+
+func (oc *AIClient) getTempWithSource(meta *PortalMetadata, loginMeta *UserLoginMetadata) SettingExplanation {
+	if meta != nil && meta.Temperature > 0 {
+		return SettingExplanation{Value: meta.Temperature, Source: SourceRoomOverride}
+	}
+	if loginMeta.Defaults != nil && loginMeta.Defaults.Temperature != nil {
+		return SettingExplanation{Value: *loginMeta.Defaults.Temperature, Source: SourceUserDefault}
+	}
+	return SettingExplanation{Value: defaultTemperature, Source: SourceGlobalDefault}
+}
+
+func (oc *AIClient) getReasoningWithSource(meta *PortalMetadata, loginMeta *UserLoginMetadata) SettingExplanation {
+	// Check model support first
+	if meta != nil && !meta.Capabilities.SupportsReasoning {
+		return SettingExplanation{Value: nil, Source: SourceModelLimit, Reason: "Model does not support reasoning"}
+	}
+	if meta != nil && meta.ReasoningEffort != "" {
+		return SettingExplanation{Value: meta.ReasoningEffort, Source: SourceRoomOverride}
+	}
+	if loginMeta.Defaults != nil && loginMeta.Defaults.ReasoningEffort != "" {
+		return SettingExplanation{Value: loginMeta.Defaults.ReasoningEffort, Source: SourceUserDefault}
+	}
+	return SettingExplanation{Value: "", Source: SourceGlobalDefault}
+}
+
 // broadcastCapabilities sends bridge-controlled capabilities to Matrix room state
 // This event is protected by power levels (100) so only the bridge bot can modify
 func (oc *AIClient) broadcastCapabilities(ctx context.Context, portal *bridgev2.Portal) error {
@@ -992,6 +1092,7 @@ func (oc *AIClient) broadcastCapabilities(ctx context.Context, portal *bridgev2.
 		AvailableTools:         oc.buildAvailableTools(meta),
 		ReasoningEffortOptions: reasoningEfforts,
 		Provider:               loginMeta.Provider,
+		EffectiveSettings:      oc.buildEffectiveSettings(meta),
 	}
 
 	bot := oc.UserLogin.Bridge.Bot

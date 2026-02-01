@@ -230,10 +230,10 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, meta *PortalMet
 		}
 	}
 
-	// Add reasoning effort if configured
-	if meta.ReasoningEffort != "" {
+	// Add reasoning effort if configured (uses inheritance: room → user → default)
+	if reasoningEffort := oc.effectiveReasoningEffort(meta); reasoningEffort != "" {
 		params.Reasoning = shared.ReasoningParam{
-			Effort: shared.ReasoningEffort(meta.ReasoningEffort),
+			Effort: shared.ReasoningEffort(reasoningEffort),
 		}
 	}
 
@@ -1519,17 +1519,42 @@ func (oc *AIClient) sendSuccessStatus(ctx context.Context, portal *bridgev2.Port
 	portal.Bridge.Matrix.SendMessageStatus(ctx, &status, bridgev2.StatusEventInfoFromEvent(evt))
 }
 
-// decodeBase64Image decodes a base64-encoded image and detects its MIME type
+// decodeBase64Image decodes a base64-encoded image and detects its MIME type.
+// Handles both raw base64 and data URL format (data:image/png;base64,...).
 func decodeBase64Image(b64Data string) ([]byte, string, error) {
+	var mimeType string
+
+	// Handle data URL format: data:{mimeType};base64,{data}
+	if after, found := strings.CutPrefix(b64Data, "data:"); found {
+		prefix, data, hasComma := strings.Cut(after, ",")
+		if !hasComma {
+			return nil, "", fmt.Errorf("invalid data URL: no comma found")
+		}
+		// Extract MIME type from "{mimeType};base64" prefix
+		if mime, _, hasBase64 := strings.Cut(prefix, ";base64"); hasBase64 {
+			mimeType = mime
+		}
+		b64Data = data
+	}
+
 	data, err := base64.StdEncoding.DecodeString(b64Data)
 	if err != nil {
-		return nil, "", fmt.Errorf("base64 decode failed: %w", err)
+		// Try URL-safe base64 as fallback
+		data, err = base64.URLEncoding.DecodeString(b64Data)
+		if err != nil {
+			return nil, "", fmt.Errorf("base64 decode failed: %w", err)
+		}
 	}
-	mimeType := http.DetectContentType(data)
-	// Fallback to PNG if detection fails (common for AI-generated images)
-	if mimeType == "application/octet-stream" {
-		mimeType = "image/png"
+
+	// If MIME type wasn't extracted from data URL, detect from bytes
+	if mimeType == "" {
+		mimeType = http.DetectContentType(data)
+		// Fallback to PNG if detection fails (common for AI-generated images)
+		if mimeType == "application/octet-stream" {
+			mimeType = "image/png"
+		}
 	}
+
 	return data, mimeType, nil
 }
 

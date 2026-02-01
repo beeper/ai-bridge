@@ -609,10 +609,14 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 }
 
 // effectiveModel returns the full prefixed model ID (e.g., "openai/gpt-5.2")
-// Used for routing and display purposes
+// Priority: Room → User → Provider → Global
 func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 	if meta != nil && meta.Model != "" {
 		return meta.Model
+	}
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta.Defaults != nil && loginMeta.Defaults.Model != "" {
+		return loginMeta.Defaults.Model
 	}
 	return oc.defaultModelForProvider()
 }
@@ -667,18 +671,43 @@ func (oc *AIClient) defaultModelForProvider() string {
 	}
 }
 
+// effectivePrompt returns the system prompt to use
+// Priority: Room → User → Bridge Config
 func (oc *AIClient) effectivePrompt(meta *PortalMetadata) string {
 	if meta != nil && meta.SystemPrompt != "" {
 		return meta.SystemPrompt
 	}
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta.Defaults != nil && loginMeta.Defaults.SystemPrompt != "" {
+		return loginMeta.Defaults.SystemPrompt
+	}
 	return oc.connector.Config.DefaultSystemPrompt
 }
 
+// effectiveTemperature returns the temperature to use
+// Priority: Room → User → Default (0.4)
 func (oc *AIClient) effectiveTemperature(meta *PortalMetadata) float64 {
 	if meta != nil && meta.Temperature > 0 {
 		return meta.Temperature
 	}
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta.Defaults != nil && loginMeta.Defaults.Temperature != nil {
+		return *loginMeta.Defaults.Temperature
+	}
 	return defaultTemperature
+}
+
+// effectiveReasoningEffort returns the reasoning effort to use
+// Priority: Room → User → "" (none)
+func (oc *AIClient) effectiveReasoningEffort(meta *PortalMetadata) string {
+	if meta != nil && meta.ReasoningEffort != "" {
+		return meta.ReasoningEffort
+	}
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta.Defaults != nil && loginMeta.Defaults.ReasoningEffort != "" {
+		return loginMeta.Defaults.ReasoningEffort
+	}
+	return ""
 }
 
 func (oc *AIClient) historyLimit(meta *PortalMetadata) int {
