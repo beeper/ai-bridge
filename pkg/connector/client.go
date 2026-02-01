@@ -289,7 +289,8 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 			pdfEngine = "mistral-ocr" // Default
 		}
 
-		provider, err := NewOpenAIProviderWithPDFPlugin(key, openrouterURL, userID, pdfEngine, log)
+		headers := openRouterHeaders(connector.Config.Providers.Beeper)
+		provider, err := NewOpenAIProviderWithPDFPlugin(key, openrouterURL, userID, pdfEngine, headers, log)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Beeper provider: %w", err)
 		}
@@ -309,7 +310,8 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 			pdfEngine = "mistral-ocr" // Default
 		}
 
-		provider, err := NewOpenAIProviderWithPDFPlugin(key, openrouterURL, "", pdfEngine, log)
+		headers := openRouterHeaders(connector.Config.Providers.OpenRouter)
+		provider, err := NewOpenAIProviderWithPDFPlugin(key, openrouterURL, "", pdfEngine, headers, log)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OpenRouter provider: %w", err)
 		}
@@ -331,6 +333,24 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 	}
 
 	return oc, nil
+}
+
+func openRouterHeaders(cfg ProviderConfig) map[string]string {
+	headers := map[string]string{}
+	appReferer := strings.TrimSpace(cfg.AppReferer)
+	if appReferer == "" {
+		appReferer = "https://beeper.com"
+	}
+	appTitle := strings.TrimSpace(cfg.AppTitle)
+	if appTitle == "" {
+		appTitle = "Beeper"
+	}
+	headers["HTTP-Referer"] = appReferer
+	headers["X-Title"] = appTitle
+	if len(headers) == 0 {
+		return nil
+	}
+	return headers
 }
 
 func (oc *AIClient) acquireRoom(roomID id.RoomID) bool {

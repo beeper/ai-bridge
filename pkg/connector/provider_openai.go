@@ -85,9 +85,20 @@ func NewOpenAIProviderWithUserID(apiKey, baseURL, userID string, log zerolog.Log
 	}, nil
 }
 
+func appendHeaderOptions(opts []option.RequestOption, headers map[string]string) []option.RequestOption {
+	for key, value := range headers {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		opts = append(opts, option.WithHeader(key, trimmed))
+	}
+	return opts
+}
+
 // NewOpenAIProviderWithPDFPlugin creates an OpenAI provider with PDF plugin middleware.
 // Used for OpenRouter/Beeper to enable universal PDF support via file-parser plugin.
-func NewOpenAIProviderWithPDFPlugin(apiKey, baseURL, userID, pdfEngine string, log zerolog.Logger) (*OpenAIProvider, error) {
+func NewOpenAIProviderWithPDFPlugin(apiKey, baseURL, userID, pdfEngine string, headers map[string]string, log zerolog.Logger) (*OpenAIProvider, error) {
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
 	}
@@ -105,6 +116,8 @@ func NewOpenAIProviderWithPDFPlugin(apiKey, baseURL, userID, pdfEngine string, l
 			return next(req)
 		}))
 	}
+
+	opts = appendHeaderOptions(opts, headers)
 
 	// Add PDF plugin middleware
 	opts = append(opts, option.WithMiddleware(MakePDFPluginMiddleware(pdfEngine)))
@@ -283,6 +296,7 @@ func (o *OpenAIProvider) Generate(ctx context.Context, params GenerateParams) (*
 	var content strings.Builder
 	var toolCalls []ToolCallResult
 
+	var reasoning strings.Builder
 	for _, item := range resp.Output {
 		switch item := item.AsAny().(type) {
 		case responses.ResponseOutputMessage:
@@ -292,6 +306,13 @@ func (o *OpenAIProvider) Generate(ctx context.Context, params GenerateParams) (*
 					content.WriteString(part.Text)
 				}
 			}
+		case responses.ResponseReasoningItem:
+			// Handle reasoning model output - extract from summary
+			for _, summary := range item.Summary {
+				if summary.Text != "" {
+					reasoning.WriteString(summary.Text)
+				}
+			}
 		case responses.ResponseFunctionToolCall:
 			toolCalls = append(toolCalls, ToolCallResult{
 				ID:        item.ID,
@@ -299,6 +320,11 @@ func (o *OpenAIProvider) Generate(ctx context.Context, params GenerateParams) (*
 				Arguments: item.Arguments,
 			})
 		}
+	}
+
+	// If no regular content but we have reasoning, use that as content
+	if content.Len() == 0 && reasoning.Len() > 0 {
+		content = reasoning
 	}
 
 	finishReason := "stop"
@@ -393,6 +419,12 @@ func MakePDFPluginMiddleware(defaultEngine string) option.Middleware {
 		if req.Method != http.MethodPost || req.Body == nil {
 			return next(req)
 		}
+		// Only apply PDF plugin to Responses or Chat Completions requests.
+		isResponses := strings.Contains(req.URL.Path, "/responses")
+		isChatCompletions := strings.Contains(req.URL.Path, "/chat/completions")
+		if !isResponses && !isChatCompletions {
+			return next(req)
+		}
 
 		// Check context for per-request engine override
 		engine := GetPDFEngineFromContext(req.Context())
@@ -423,6 +455,73 @@ func MakePDFPluginMiddleware(defaultEngine string) option.Middleware {
 		var body map[string]any
 		if err := json.Unmarshal(bodyBytes, &body); err != nil {
 			// Not valid JSON, pass through
+			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			return next(req)
+		}
+
+		hasPDF := func() bool {
+			hasPDFFile := func(fileData any) bool {
+				data, ok := fileData.(string)
+				return ok && strings.Contains(data, "application/pdf")
+			}
+			hasPDFInParts := func(parts []any) bool {
+				for _, part := range parts {
+					partMap, ok := part.(map[string]any)
+					if !ok {
+						continue
+					}
+					partType, _ := partMap["type"].(string)
+					switch partType {
+					case "file":
+						if fileObj, ok := partMap["file"].(map[string]any); ok {
+							if hasPDFFile(fileObj["file_data"]) {
+								return true
+							}
+						}
+					case "input_file":
+						if fileObj, ok := partMap["input_file"].(map[string]any); ok {
+							if hasPDFFile(fileObj["file_data"]) {
+								return true
+							}
+						}
+					}
+				}
+				return false
+			}
+			// Chat Completions: messages[].content[]
+			if messages, ok := body["messages"].([]any); ok {
+				for _, msg := range messages {
+					msgMap, ok := msg.(map[string]any)
+					if !ok {
+						continue
+					}
+					content, ok := msgMap["content"].([]any)
+					if ok && hasPDFInParts(content) {
+						return true
+					}
+				}
+			}
+			// Responses: input[] with type=message content[]
+			if inputItems, ok := body["input"].([]any); ok {
+				for _, item := range inputItems {
+					itemMap, ok := item.(map[string]any)
+					if !ok {
+						continue
+					}
+					itemType, _ := itemMap["type"].(string)
+					if itemType != "message" {
+						continue
+					}
+					content, ok := itemMap["content"].([]any)
+					if ok && hasPDFInParts(content) {
+						return true
+					}
+				}
+			}
+			return false
+		}()
+
+		if !hasPDF {
 			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 			return next(req)
 		}

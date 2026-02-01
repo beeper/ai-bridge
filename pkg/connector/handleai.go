@@ -36,6 +36,7 @@ type streamingState struct {
 	firstTokenAtMs int64
 	completedAtMs  int64
 
+	baseInput             responses.ResponseInputParam
 	accumulated            strings.Builder
 	reasoning              strings.Builder
 	toolCalls              []ToolCallMetadata
@@ -79,8 +80,10 @@ type activeToolCall struct {
 
 // functionCallOutput tracks a completed function call output for API continuation
 type functionCallOutput struct {
-	callID string // The ItemID from the stream event (used as call_id in continuation)
-	output string // The result from executing the tool
+	callID    string // The ItemID from the stream event (used as call_id in continuation)
+	name      string // Tool name (for stateless continuations)
+	arguments string // Raw arguments JSON (for stateless continuations)
+	output    string // The result from executing the tool
 }
 
 // saveAssistantMessage saves the completed assistant message to the database
@@ -122,8 +125,8 @@ func (oc *AIClient) saveAssistantMessage(
 		log.Debug().Str("msg_id", string(assistantMsg.ID)).Msg("Saved assistant message to database")
 	}
 
-	// Save LastResponseID for "responses" mode context chaining
-	if meta.ConversationMode == "responses" && state.responseID != "" {
+	// Save LastResponseID for "responses" mode context chaining (OpenAI-only)
+	if meta.ConversationMode == "responses" && state.responseID != "" && !oc.isOpenRouterProvider() {
 		meta.LastResponseID = state.responseID
 		if err := portal.Save(ctx); err != nil {
 			log.Warn().Err(err).Msg("Failed to save portal after storing response ID")
@@ -201,6 +204,11 @@ func (oc *AIClient) streamingResponseWithRetry(
 	meta *PortalMetadata,
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) {
+	// OpenRouter multimodal inputs are handled via Chat Completions.
+	if oc.isOpenRouterProvider() && hasMultimodalContent(prompt) {
+		oc.responseWithRetry(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
+		return
+	}
 	// Use Chat Completions API for audio (native support)
 	// SDK v3.16.0 has ResponseInputAudioParam but it's not wired into the union
 	if hasAudioContent(prompt) {
@@ -220,9 +228,16 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, meta *PortalMet
 		MaxOutputTokens: openai.Int(int64(oc.effectiveMaxTokens(meta))),
 	}
 
-	// Use previous_response_id if in "responses" mode and ID exists
-	if meta.ConversationMode == "responses" && meta.LastResponseID != "" {
+	systemPrompt := oc.effectivePrompt(meta)
+
+	// Use previous_response_id if in "responses" mode and ID exists.
+	// OpenRouter's Responses API is stateless, so always send full history there.
+	usePreviousResponse := meta.ConversationMode == "responses" && meta.LastResponseID != "" && !oc.isOpenRouterProvider()
+	if usePreviousResponse {
 		params.PreviousResponseID = openai.String(meta.LastResponseID)
+		if systemPrompt != "" {
+			params.Instructions = openai.String(systemPrompt)
+		}
 		// Still need to pass the latest user message as input
 		if len(messages) > 0 {
 			latestMsg := messages[len(messages)-1]
@@ -322,6 +337,26 @@ func (oc *AIClient) streamingResponse(
 	// Initialize streaming state with turn tracking
 	state := newStreamingState(meta)
 
+	// Store base input for OpenRouter stateless continuations
+	if params.Input.OfInputItemList != nil {
+		state.baseInput = params.Input.OfInputItemList
+	}
+
+	ensureInitialEvent := func() bool {
+		if state.initialEventID != "" {
+			return true
+		}
+		state.firstToken = false
+		state.firstTokenAtMs = time.Now().UnixMilli()
+		oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
+		state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID)
+		if state.initialEventID == "" {
+			log.Error().Msg("Failed to send initial streaming message for tool call")
+			return false
+		}
+		return true
+	}
+
 	// Track active tool calls
 	activeTools := make(map[string]*activeToolCall)
 
@@ -385,6 +420,9 @@ func (oc *AIClient) streamingResponse(
 			// Get or create active tool call
 			tool, exists := activeTools[streamEvent.ItemID]
 			if !exists {
+				if !ensureInitialEvent() {
+					return false, nil
+				}
 				tool = &activeToolCall{
 					callID:      NewCallID(),
 					toolName:    streamEvent.Name,
@@ -420,6 +458,9 @@ func (oc *AIClient) streamingResponse(
 			tool, exists := activeTools[streamEvent.ItemID]
 			if !exists {
 				// Create tool if we missed the delta events
+				if !ensureInitialEvent() {
+					return false, nil
+				}
 				tool = &activeToolCall{
 					callID:      NewCallID(),
 					toolName:    streamEvent.Name,
@@ -433,61 +474,83 @@ func (oc *AIClient) streamingResponse(
 			// Store the item ID for continuation (this is the call_id for the Responses API)
 			tool.itemID = streamEvent.ItemID
 
-			if state.initialEventID != "" && oc.isToolEnabled(meta, streamEvent.Name) {
+			if !ensureInitialEvent() {
+				return false, nil
+			}
+
+			resultStatus := ResultStatusSuccess
+			var result string
+			if !oc.isToolEnabled(meta, streamEvent.Name) {
+				resultStatus = ResultStatusError
+				result = fmt.Sprintf("Error: tool %s is disabled", streamEvent.Name)
+			} else {
 				// Wrap context with bridge info for tools that need it (e.g., set_room_title)
 				toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
 					Client: oc,
 					Portal: portal,
 					Meta:   meta,
 				})
-				result, err := oc.executeBuiltinTool(toolCtx, streamEvent.Name, streamEvent.Arguments)
-				resultStatus := ResultStatusSuccess
+				var err error
+				result, err = oc.executeBuiltinTool(toolCtx, streamEvent.Name, streamEvent.Arguments)
 				if err != nil {
 					log.Warn().Err(err).Str("tool", streamEvent.Name).Msg("Tool execution failed")
 					result = fmt.Sprintf("Error: %s", err.Error())
 					resultStatus = ResultStatusError
 				}
-
-				// Store result for API continuation
-				tool.result = result
-				state.pendingFunctionOutputs = append(state.pendingFunctionOutputs, functionCallOutput{
-					callID: streamEvent.ItemID,
-					output: result,
-				})
-
-				// Parse input for storage
-				var inputMap map[string]any
-				_ = json.Unmarshal([]byte(streamEvent.Arguments), &inputMap)
-
-				// Send tool result timeline event
-				resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, result, resultStatus)
-
-				// Track tool call in metadata
-				state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-					CallID:        tool.callID,
-					ToolName:      streamEvent.Name,
-					ToolType:      string(tool.toolType),
-					Input:         inputMap,
-					Output:        map[string]any{"result": result},
-					Status:        string(ToolStatusCompleted),
-					ResultStatus:  string(resultStatus),
-					StartedAtMs:   tool.startedAtMs,
-					CompletedAtMs: time.Now().UnixMilli(),
-					CallEventID:   tool.eventID.String(),
-					ResultEventID: resultEventID.String(),
-				})
-
-				// Stream result
-				state.sequenceNum++
-				oc.emitStreamDelta(ctx, portal, state, StreamContentToolResult, result, map[string]any{
-					"call_id":   tool.callID,
-					"tool_name": streamEvent.Name,
-					"status":    "completed",
-				})
-
-				// Update status back to generating
-				oc.emitGenerationStatus(ctx, portal, state, "generating", "Continuing generation...", nil)
 			}
+
+			// Store result for API continuation
+			tool.result = result
+					args := strings.TrimSpace(tool.input.String())
+					if args == "" {
+						args = strings.TrimSpace(streamEvent.Arguments)
+					}
+					if args == "" {
+						args = "{}"
+					}
+					name := strings.TrimSpace(tool.toolName)
+					if name == "" {
+						name = strings.TrimSpace(streamEvent.Name)
+					}
+					state.pendingFunctionOutputs = append(state.pendingFunctionOutputs, functionCallOutput{
+						callID:    streamEvent.ItemID,
+						name:      name,
+						arguments: args,
+						output:    result,
+					})
+
+			// Parse input for storage
+			var inputMap map[string]any
+			_ = json.Unmarshal([]byte(streamEvent.Arguments), &inputMap)
+
+			// Send tool result timeline event
+			resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, result, resultStatus)
+
+			// Track tool call in metadata
+			state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+				CallID:        tool.callID,
+				ToolName:      streamEvent.Name,
+				ToolType:      string(tool.toolType),
+				Input:         inputMap,
+				Output:        map[string]any{"result": result},
+				Status:        string(ToolStatusCompleted),
+				ResultStatus:  string(resultStatus),
+				StartedAtMs:   tool.startedAtMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				CallEventID:   tool.eventID.String(),
+				ResultEventID: resultEventID.String(),
+			})
+
+			// Stream result
+			state.sequenceNum++
+			oc.emitStreamDelta(ctx, portal, state, StreamContentToolResult, result, map[string]any{
+				"call_id":   tool.callID,
+				"tool_name": streamEvent.Name,
+				"status":    "completed",
+			})
+
+			// Update status back to generating
+			oc.emitGenerationStatus(ctx, portal, state, "generating", "Continuing generation...", nil)
 
 		case "response.web_search_call.searching":
 			// Web search starting
@@ -663,6 +726,27 @@ func (oc *AIClient) streamingResponse(
 		// Build continuation request with function call outputs
 		continuationParams := oc.buildContinuationParams(state, meta)
 
+		// OpenRouter Responses API is stateless; persist tool calls in base input.
+		if oc.isOpenRouterProvider() && len(state.baseInput) > 0 {
+			for _, output := range state.pendingFunctionOutputs {
+				if output.name != "" {
+					args := output.arguments
+					if strings.TrimSpace(args) == "" {
+						args = "{}"
+					}
+					state.baseInput = append(state.baseInput, responses.ResponseInputItemParamOfFunctionCall(args, output.callID, output.name))
+				}
+				state.baseInput = append(state.baseInput, responses.ResponseInputItemUnionParam{
+					OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
+						CallID: output.callID,
+						Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
+							OfString: openai.String(output.output),
+						},
+					},
+				})
+			}
+		}
+
 		// Clear pending outputs (they're being sent)
 		state.pendingFunctionOutputs = nil
 
@@ -698,6 +782,9 @@ func (oc *AIClient) streamingResponse(
 			case "response.function_call_arguments.delta":
 				tool, exists := activeTools[streamEvent.ItemID]
 				if !exists {
+					if !ensureInitialEvent() {
+						return false, nil
+					}
 					tool = &activeToolCall{
 						callID:      NewCallID(),
 						toolName:    streamEvent.Name,
@@ -716,6 +803,9 @@ func (oc *AIClient) streamingResponse(
 			case "response.function_call_arguments.done":
 				tool, exists := activeTools[streamEvent.ItemID]
 				if !exists {
+					if !ensureInitialEvent() {
+						return false, nil
+					}
 					tool = &activeToolCall{
 						callID:      NewCallID(),
 						toolName:    streamEvent.Name,
@@ -727,53 +817,75 @@ func (oc *AIClient) streamingResponse(
 				}
 				tool.itemID = streamEvent.ItemID
 
-				if state.initialEventID != "" && oc.isToolEnabled(meta, streamEvent.Name) {
+				if !ensureInitialEvent() {
+					return false, nil
+				}
+
+				resultStatus := ResultStatusSuccess
+				var result string
+				if !oc.isToolEnabled(meta, streamEvent.Name) {
+					resultStatus = ResultStatusError
+					result = fmt.Sprintf("Error: tool %s is disabled", streamEvent.Name)
+				} else {
 					toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
 						Client: oc,
 						Portal: portal,
 						Meta:   meta,
 					})
-					result, err := oc.executeBuiltinTool(toolCtx, streamEvent.Name, streamEvent.Arguments)
-					resultStatus := ResultStatusSuccess
+					var err error
+					result, err = oc.executeBuiltinTool(toolCtx, streamEvent.Name, streamEvent.Arguments)
 					if err != nil {
 						log.Warn().Err(err).Str("tool", streamEvent.Name).Msg("Tool execution failed (continuation)")
 						result = fmt.Sprintf("Error: %s", err.Error())
 						resultStatus = ResultStatusError
 					}
-
-					tool.result = result
-					state.pendingFunctionOutputs = append(state.pendingFunctionOutputs, functionCallOutput{
-						callID: streamEvent.ItemID,
-						output: result,
-					})
-
-					var inputMap map[string]any
-					_ = json.Unmarshal([]byte(streamEvent.Arguments), &inputMap)
-
-					resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, result, resultStatus)
-
-					state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-						CallID:        tool.callID,
-						ToolName:      streamEvent.Name,
-						ToolType:      string(tool.toolType),
-						Input:         inputMap,
-						Output:        map[string]any{"result": result},
-						Status:        string(ToolStatusCompleted),
-						ResultStatus:  string(resultStatus),
-						StartedAtMs:   tool.startedAtMs,
-						CompletedAtMs: time.Now().UnixMilli(),
-						CallEventID:   tool.eventID.String(),
-						ResultEventID: resultEventID.String(),
-					})
-
-					state.sequenceNum++
-					oc.emitStreamDelta(ctx, portal, state, StreamContentToolResult, result, map[string]any{
-						"call_id":   tool.callID,
-						"tool_name": streamEvent.Name,
-						"status":    "completed",
-					})
-					oc.emitGenerationStatus(ctx, portal, state, "generating", "Continuing generation...", nil)
 				}
+
+				tool.result = result
+				args := strings.TrimSpace(tool.input.String())
+				if args == "" {
+					args = strings.TrimSpace(streamEvent.Arguments)
+				}
+				if args == "" {
+					args = "{}"
+				}
+				name := strings.TrimSpace(tool.toolName)
+				if name == "" {
+					name = strings.TrimSpace(streamEvent.Name)
+				}
+				state.pendingFunctionOutputs = append(state.pendingFunctionOutputs, functionCallOutput{
+					callID:    streamEvent.ItemID,
+					name:      name,
+					arguments: args,
+					output:    result,
+				})
+
+				var inputMap map[string]any
+				_ = json.Unmarshal([]byte(streamEvent.Arguments), &inputMap)
+
+				resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, result, resultStatus)
+
+				state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+					CallID:        tool.callID,
+					ToolName:      streamEvent.Name,
+					ToolType:      string(tool.toolType),
+					Input:         inputMap,
+					Output:        map[string]any{"result": result},
+					Status:        string(ToolStatusCompleted),
+					ResultStatus:  string(resultStatus),
+					StartedAtMs:   tool.startedAtMs,
+					CompletedAtMs: time.Now().UnixMilli(),
+					CallEventID:   tool.eventID.String(),
+					ResultEventID: resultEventID.String(),
+				})
+
+				state.sequenceNum++
+				oc.emitStreamDelta(ctx, portal, state, StreamContentToolResult, result, map[string]any{
+					"call_id":   tool.callID,
+					"tool_name": streamEvent.Name,
+					"status":    "completed",
+				})
+				oc.emitGenerationStatus(ctx, portal, state, "generating", "Continuing generation...", nil)
 
 			case "response.completed":
 				state.completedAtMs = time.Now().UnixMilli()
@@ -789,7 +901,6 @@ func (oc *AIClient) streamingResponse(
 
 			case "error":
 				log.Error().Str("error", streamEvent.Message).Msg("Continuation stream error")
-				break
 			}
 		}
 
@@ -840,13 +951,32 @@ func (oc *AIClient) streamingResponse(
 func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalMetadata) responses.ResponseNewParams {
 	params := responses.ResponseNewParams{
 		Model:              shared.ResponsesModel(oc.effectiveModelForAPI(meta)),
-		PreviousResponseID: openai.String(state.responseID),
 		MaxOutputTokens:    openai.Int(int64(oc.effectiveMaxTokens(meta))),
+	}
+
+	if systemPrompt := oc.effectivePrompt(meta); systemPrompt != "" {
+		params.Instructions = openai.String(systemPrompt)
+	}
+
+	isOpenRouter := oc.isOpenRouterProvider()
+	if !isOpenRouter {
+		params.PreviousResponseID = openai.String(state.responseID)
 	}
 
 	// Build function call outputs as input
 	var input responses.ResponseInputParam
+	if isOpenRouter && len(state.baseInput) > 0 {
+		// OpenRouter Responses API is stateless: include full history plus tool calls.
+		input = append(input, state.baseInput...)
+	}
 	for _, output := range state.pendingFunctionOutputs {
+		if isOpenRouter && output.name != "" {
+			args := output.arguments
+			if strings.TrimSpace(args) == "" {
+				args = "{}"
+			}
+			input = append(input, responses.ResponseInputItemParamOfFunctionCall(args, output.callID, output.name))
+		}
 		input = append(input, responses.ResponseInputItemUnionParam{
 			OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
 				CallID: output.callID,
@@ -1229,6 +1359,20 @@ func hasAudioContent(messages []openai.ChatCompletionMessageParamUnion) bool {
 		if msg.OfUser != nil && len(msg.OfUser.Content.OfArrayOfContentParts) > 0 {
 			for _, part := range msg.OfUser.Content.OfArrayOfContentParts {
 				if part.OfInputAudio != nil {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// hasMultimodalContent checks if the prompt contains non-text content (image, file, audio).
+func hasMultimodalContent(messages []openai.ChatCompletionMessageParamUnion) bool {
+	for _, msg := range messages {
+		if msg.OfUser != nil && len(msg.OfUser.Content.OfArrayOfContentParts) > 0 {
+			for _, part := range msg.OfUser.Content.OfArrayOfContentParts {
+				if part.OfImageURL != nil || part.OfFile != nil || part.OfInputAudio != nil {
 					return true
 				}
 			}
@@ -2018,16 +2162,26 @@ func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistan
 	// Extract text from response output
 	var title string
 	for _, item := range resp.Output {
-		if msg, ok := item.AsAny().(responses.ResponseOutputMessage); ok {
+		switch msg := item.AsAny().(type) {
+		case responses.ResponseOutputMessage:
+			// Standard message output
 			for _, contentPart := range msg.Content {
 				if text, ok := contentPart.AsAny().(responses.ResponseOutputText); ok {
 					title = text.Text
 					break
 				}
 			}
-			if title != "" {
-				break
+		case responses.ResponseReasoningItem:
+			// Reasoning model output - extract from summary
+			for _, summary := range msg.Summary {
+				if summary.Text != "" {
+					title = summary.Text
+					break
+				}
 			}
+		}
+		if title != "" {
+			break
 		}
 	}
 

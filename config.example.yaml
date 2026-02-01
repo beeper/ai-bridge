@@ -58,6 +58,10 @@ network:
       default_model: "anthropic/claude-sonnet-4-5-20250929"
     openrouter:
       default_model: "openrouter/openai/gpt-4o-mini"
+      # Optional OpenRouter app attribution headers.
+      # Defaults: https://beeper.com / Beeper
+      # app_referer: "https://example.com"
+      # app_title: "My Matrix AI Bridge"
 
   # Global settings
   default_system_prompt: |

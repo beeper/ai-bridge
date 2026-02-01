@@ -23,6 +23,10 @@ providers:
     # PDF processing engine for OpenRouter's file-parser plugin.
     # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
     default_pdf_engine: "mistral-ocr"
+    # Optional OpenRouter app attribution headers.
+    # Defaults: https://beeper.com / Beeper
+    # app_referer: "https://example.com"
+    # app_title: "My Matrix AI Bridge"
 
 # Global settings
 default_system_prompt: |
