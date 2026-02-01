@@ -554,40 +554,7 @@ func (oc *AIClient) handleSlashCommand(
 		return true
 
 	case "/tools":
-		if arg == "" {
-			status := "disabled"
-			if meta.ToolsEnabled {
-				status = "enabled"
-			}
-			toolList := ""
-			for _, tool := range BuiltinTools() {
-				toolList += fmt.Sprintf("  - %s: %s\n", tool.Name, tool.Description)
-			}
-			oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Tools are currently %s.\n\nAvailable tools:\n%s\nUse /tools on or /tools off to toggle.", status, toolList))
-			return true
-		}
-		switch strings.ToLower(arg) {
-		case "on", "enable", "true", "1":
-			meta.ToolsEnabled = true
-			if err := portal.Save(ctx); err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to save portal after enabling tools")
-			}
-			if err := oc.BroadcastRoomState(ctx, portal); err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to broadcast room state after enabling tools")
-			}
-			oc.sendSystemNotice(ctx, portal, "Tools enabled. The AI can now use calculator and web search.")
-		case "off", "disable", "false", "0":
-			meta.ToolsEnabled = false
-			if err := portal.Save(ctx); err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to save portal after disabling tools")
-			}
-			if err := oc.BroadcastRoomState(ctx, portal); err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to broadcast room state after disabling tools")
-			}
-			oc.sendSystemNotice(ctx, portal, "Tools disabled.")
-		default:
-			oc.sendSystemNotice(ctx, portal, "Invalid option. Use /tools on or /tools off.")
-		}
+		go oc.handleToolsCommand(ctx, portal, meta, arg)
 		return true
 
 	case "/mode":
@@ -628,7 +595,7 @@ func (oc *AIClient) handleSlashCommand(
 			"• /prompt [text] - Get or set system prompt\n" +
 			"• /context [1-100] - Get or set context message limit\n" +
 			"• /tokens [1-16384] - Get or set max completion tokens\n" +
-			"• /tools [on|off] - Enable/disable function calling tools\n" +
+			"• /tools [on|off] [tool] - Enable/disable tools (per-tool or all)\n" +
 			"• /mode [messages|responses] - Set conversation context mode\n" +
 			"• /new [model] - Create a new chat (uses current model if none specified)\n" +
 			"• /fork [event_id] - Fork conversation to a new chat\n" +
@@ -652,6 +619,198 @@ func (oc *AIClient) handleSlashCommand(
 	}
 
 	return false
+}
+
+// handleToolsCommand handles the /tools command for per-tool management
+func (oc *AIClient) handleToolsCommand(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	arg string,
+) {
+	runCtx := oc.backgroundContext(ctx)
+
+	// Get provider info
+	loginMeta := loginMetadata(oc.UserLogin)
+	isOpenRouter := loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper
+
+	// No args - show status
+	if arg == "" {
+		oc.showToolsStatus(runCtx, portal, meta, isOpenRouter)
+		return
+	}
+
+	parts := strings.SplitN(arg, " ", 2)
+	action := strings.ToLower(parts[0])
+	var toolName string
+	if len(parts) > 1 {
+		toolName = strings.ToLower(parts[1])
+	}
+
+	switch action {
+	case "on", "enable", "true", "1":
+		if toolName == "" {
+			// Enable all tools
+			oc.setAllTools(runCtx, portal, meta, true, isOpenRouter)
+		} else {
+			// Enable specific tool
+			oc.setToolEnabled(runCtx, portal, meta, toolName, true, isOpenRouter)
+		}
+	case "off", "disable", "false", "0":
+		if toolName == "" {
+			// Disable all tools
+			oc.setAllTools(runCtx, portal, meta, false, isOpenRouter)
+		} else {
+			// Disable specific tool
+			oc.setToolEnabled(runCtx, portal, meta, toolName, false, isOpenRouter)
+		}
+	case "list":
+		oc.showToolsStatus(runCtx, portal, meta, isOpenRouter)
+	default:
+		oc.sendSystemNotice(runCtx, portal, "Usage:\n"+
+			"• /tools - Show current tool status\n"+
+			"• /tools on - Enable all tools\n"+
+			"• /tools off - Disable all tools\n"+
+			"• /tools on <tool> - Enable specific tool\n"+
+			"• /tools off <tool> - Disable specific tool\n"+
+			"• /tools list - List available tools")
+	}
+}
+
+// showToolsStatus displays the current status of all tools
+func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, isOpenRouter bool) {
+	var sb strings.Builder
+	sb.WriteString("Tool Status:\n\n")
+
+	supportsTools := meta.Capabilities.SupportsToolCalling
+
+	// Builtin tools
+	sb.WriteString("Builtin Tools:\n")
+	for _, tool := range BuiltinTools() {
+		enabled := oc.isToolEnabled(meta, tool.Name)
+		status := "✗"
+		if enabled {
+			status = "✓"
+		}
+		availability := ""
+		if !supportsTools {
+			availability = " (model doesn't support tools)"
+		}
+		sb.WriteString(fmt.Sprintf("  [%s] %s: %s%s\n", status, tool.Name, tool.Description, availability))
+	}
+
+	// OpenRouter plugin
+	if isOpenRouter {
+		sb.WriteString("\nPlugins:\n")
+		onlineEnabled := oc.isToolEnabled(meta, "online")
+		status := "✗"
+		if onlineEnabled {
+			status = "✓"
+		}
+		sb.WriteString(fmt.Sprintf("  [%s] online: OpenRouter web search plugin (:online suffix)\n", status))
+	}
+
+	// Provider tools
+	sb.WriteString("\nProvider Tools:\n")
+	wsStatus := "✗"
+	if meta.ToolsConfig.WebSearchProvider || meta.WebSearchEnabled {
+		wsStatus = "✓"
+	}
+	sb.WriteString(fmt.Sprintf("  [%s] web_search_provider: Native provider web search\n", wsStatus))
+
+	ciStatus := "✗"
+	if meta.ToolsConfig.CodeInterpreter || meta.CodeInterpreterEnabled {
+		ciStatus = "✓"
+	}
+	sb.WriteString(fmt.Sprintf("  [%s] code_interpreter: Execute Python code\n", ciStatus))
+
+	if !supportsTools {
+		sb.WriteString(fmt.Sprintf("\nNote: Current model (%s) may not support tool calling.\n", oc.effectiveModel(meta)))
+	}
+
+	oc.sendSystemNotice(ctx, portal, sb.String())
+}
+
+// setAllTools enables or disables all tools
+func (oc *AIClient) setAllTools(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, enabled bool, isOpenRouter bool) {
+	meta.ToolsConfig.Calculator = &enabled
+	meta.ToolsConfig.WebSearch = &enabled
+
+	if isOpenRouter {
+		meta.ToolsConfig.UseOpenRouterOnline = &enabled
+		// If enabling online, disable builtin web_search (they overlap)
+		if enabled {
+			meta.ToolsConfig.WebSearch = ptrFalse()
+		}
+	}
+
+	// Legacy field for backwards compatibility
+	meta.ToolsEnabled = enabled
+
+	if err := portal.Save(ctx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to save portal after tools change")
+	}
+	if err := oc.BroadcastRoomState(ctx, portal); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to broadcast room state after tools change")
+	}
+
+	status := "disabled"
+	if enabled {
+		status = "enabled"
+	}
+	oc.sendSystemNotice(ctx, portal, fmt.Sprintf("All tools %s.", status))
+}
+
+// setToolEnabled enables or disables a specific tool
+func (oc *AIClient) setToolEnabled(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, toolName string, enabled bool, isOpenRouter bool) {
+	validTool := true
+	switch toolName {
+	case "calculator", "calc":
+		meta.ToolsConfig.Calculator = &enabled
+	case "web_search", "websearch", "search":
+		meta.ToolsConfig.WebSearch = &enabled
+	case "online":
+		if isOpenRouter {
+			meta.ToolsConfig.UseOpenRouterOnline = &enabled
+			// If enabling online, disable builtin web_search to avoid duplication
+			if enabled {
+				meta.ToolsConfig.WebSearch = ptrFalse()
+			}
+		} else {
+			oc.sendSystemNotice(ctx, portal, "The 'online' plugin is only available with OpenRouter.")
+			return
+		}
+	case "web_search_provider", "websearchprovider", "provider_search":
+		meta.ToolsConfig.WebSearchProvider = enabled
+	case "code_interpreter", "codeinterpreter", "interpreter":
+		meta.ToolsConfig.CodeInterpreter = enabled
+	default:
+		validTool = false
+	}
+
+	if !validTool {
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Unknown tool: %s. Available: calculator, web_search, online, web_search_provider, code_interpreter", toolName))
+		return
+	}
+
+	if err := portal.Save(ctx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to save portal after tool change")
+	}
+	if err := oc.BroadcastRoomState(ctx, portal); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to broadcast room state after tool change")
+	}
+
+	status := "disabled"
+	if enabled {
+		status = "enabled"
+	}
+	oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Tool '%s' %s.", toolName, status))
+}
+
+// ptrFalse returns a pointer to false
+func ptrFalse() *bool {
+	f := false
+	return &f
 }
 
 // handleRegenerate regenerates the last AI response

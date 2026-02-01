@@ -25,11 +25,13 @@ import (
 )
 
 var (
-	_ bridgev2.NetworkAPI                    = (*AIClient)(nil)
-	_ bridgev2.IdentifierResolvingNetworkAPI = (*AIClient)(nil)
-	_ bridgev2.ContactListingNetworkAPI      = (*AIClient)(nil)
-	_ bridgev2.UserSearchingNetworkAPI       = (*AIClient)(nil)
-	_ bridgev2.EditHandlingNetworkAPI        = (*AIClient)(nil)
+	_ bridgev2.NetworkAPI                       = (*AIClient)(nil)
+	_ bridgev2.IdentifierResolvingNetworkAPI    = (*AIClient)(nil)
+	_ bridgev2.ContactListingNetworkAPI         = (*AIClient)(nil)
+	_ bridgev2.UserSearchingNetworkAPI          = (*AIClient)(nil)
+	_ bridgev2.EditHandlingNetworkAPI           = (*AIClient)(nil)
+	_ bridgev2.RedactionHandlingNetworkAPI      = (*AIClient)(nil)
+	_ bridgev2.DisappearTimerChangingNetworkAPI = (*AIClient)(nil)
 )
 
 var rejectAllMediaFileFeatures = &event.FileFeatures{
@@ -88,6 +90,9 @@ var aiBaseCaps = &event.RoomFeatures{
 	Reaction:            event.CapLevelRejected,
 	ReadReceipts:        true,
 	TypingNotifications: true,
+	Archive:             true,
+	MarkAsUnread:        true,
+	DeleteChat:          true,
 	DisappearingTimer: &event.DisappearingTimerCapability{
 		Types: []event.DisappearingType{event.DisappearingTypeAfterSend},
 		Timers: []jsontime.Milliseconds{
@@ -595,6 +600,7 @@ func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 
 // effectiveModelForAPI returns the actual model name to send to the API
 // For OpenRouter/Beeper, returns the full model ID (e.g., "openai/gpt-5.2")
+// and optionally appends :online suffix for web search capability
 // For direct providers, strips the prefix (e.g., "openai/gpt-5.2" → "gpt-5.2")
 func (oc *AIClient) effectiveModelForAPI(meta *PortalMetadata) string {
 	modelID := oc.effectiveModel(meta)
@@ -602,6 +608,12 @@ func (oc *AIClient) effectiveModelForAPI(meta *PortalMetadata) string {
 	// OpenRouter and Beeper route through a gateway that expects the full model ID
 	loginMeta := loginMetadata(oc.UserLogin)
 	if loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper {
+		// Append :online suffix if enabled and not already present
+		if meta != nil && oc.isToolEnabled(meta, "online") {
+			if !strings.HasSuffix(modelID, ":online") {
+				modelID = modelID + ":online"
+			}
+		}
 		return modelID
 	}
 
@@ -1144,8 +1156,9 @@ func supportsReasoning(modelID string) bool {
 // Otherwise, it falls back to heuristic detection based on modelID.
 func getModelCapabilities(modelID string, info *ModelInfo) ModelCapabilities {
 	caps := ModelCapabilities{
-		SupportsVision:    detectVisionSupport(modelID),
-		SupportsReasoning: supportsReasoning(modelID),
+		SupportsVision:      detectVisionSupport(modelID),
+		SupportsReasoning:   supportsReasoning(modelID),
+		SupportsToolCalling: true, // Default true, overridden by ModelInfo if available
 	}
 
 	// Use ModelInfo if available (more accurate than heuristics)
@@ -1153,7 +1166,9 @@ func getModelCapabilities(modelID string, info *ModelInfo) ModelCapabilities {
 		caps.SupportsVision = info.SupportsVision
 		caps.SupportsPDF = info.SupportsPDF
 		caps.SupportsImageGen = info.SupportsImageGen
-		// Also override reasoning if the info has it
+		caps.SupportsToolCalling = info.SupportsToolCalling
+		caps.SupportsAudio = info.SupportsAudio
+		caps.SupportsVideo = info.SupportsVideo
 		if info.SupportsReasoning {
 			caps.SupportsReasoning = true
 		}
