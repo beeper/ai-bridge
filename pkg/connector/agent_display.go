@@ -1,10 +1,7 @@
 package connector
 
 import (
-	"context"
 	"fmt"
-
-	"maunium.net/go/mautrix/bridgev2"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 )
@@ -28,27 +25,11 @@ func (oc *AIClient) agentModelDisplayName(agentName, modelID string) string {
 
 // agentDefaultModel returns the default model for an agent.
 func (oc *AIClient) agentDefaultModel(agent *agents.AgentDefinition) string {
+	if agent == nil {
+		return oc.effectiveModel(nil)
+	}
 	if agent.Model.Primary != "" {
 		return agent.Model.Primary
 	}
-	return oc.defaultModelForProvider()
-}
-
-// ensureAgentModelGhostDisplayName updates the ghost's display name for an agent+model combination.
-func (oc *AIClient) ensureAgentModelGhostDisplayName(ctx context.Context, agentID, modelID, agentName string) {
-	userID := agentModelUserID(agentID, modelID)
-	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
-	if err != nil {
-		return
-	}
-
-	displayName := oc.agentModelDisplayName(agentName, modelID)
-	ghost.UpdateInfo(ctx, &bridgev2.UserInfo{
-		Name:  &displayName,
-		IsBot: ptrBool(true),
-	})
-}
-
-func ptrBool(b bool) *bool {
-	return &b
+	return oc.effectiveModel(nil)
 }

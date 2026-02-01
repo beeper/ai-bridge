@@ -597,8 +597,6 @@ func dedupeToolParams(tools []responses.ToolUnionParam) []responses.ToolUnionPar
 		switch {
 		case t.OfFunction != nil:
 			key = "function:" + t.OfFunction.Name
-		case t.OfCodeInterpreter != nil:
-			key = "code_interpreter"
 		case t.OfWebSearch != nil:
 			key = "web_search"
 		default:

@@ -607,6 +607,8 @@ func fnAgent(ce *commands.Event) {
 	if agentID == "none" || agentID == "clear" {
 		meta.AgentID = ""
 		meta.DefaultAgentID = ""
+		modelID := client.effectiveModel(meta)
+		ce.Portal.OtherUserID = modelUserID(modelID)
 		client.savePortalQuiet(ce.Ctx, ce.Portal, "agent cleared")
 		ce.Reply("Agent cleared. Using default model.")
 		return

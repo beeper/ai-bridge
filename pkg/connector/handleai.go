@@ -52,15 +52,19 @@ type streamingState struct {
 	sequenceNum            int
 	firstToken             bool
 	skipNextTextDelta      bool
+
+	// Directive processing
+	sourceEventID id.EventID // The triggering user message event ID (for [[reply_to_current]])
 }
 
 // newStreamingState creates a new streaming state with initialized fields
-func newStreamingState(meta *PortalMetadata) *streamingState {
+func newStreamingState(meta *PortalMetadata, sourceEventID id.EventID) *streamingState {
 	return &streamingState{
-		turnID:      NewTurnID(),
-		agentID:     meta.DefaultAgentID,
-		startedAtMs: time.Now().UnixMilli(),
-		firstToken:  true,
+		turnID:        NewTurnID(),
+		agentID:       meta.DefaultAgentID,
+		startedAtMs:   time.Now().UnixMilli(),
+		firstToken:    true,
+		sourceEventID: sourceEventID,
 	}
 }
 
@@ -444,7 +448,12 @@ func (oc *AIClient) streamingResponse(
 	}
 
 	// Initialize streaming state with turn tracking
-	state := newStreamingState(meta)
+	// Pass source event ID for [[reply_to_current]] directive support
+	var sourceEventID id.EventID
+	if evt != nil {
+		sourceEventID = evt.ID
+	}
+	state := newStreamingState(meta, sourceEventID)
 
 	// Store base input for OpenRouter stateless continuations
 	if params.Input.OfInputItemList != nil {
@@ -1180,7 +1189,12 @@ func (oc *AIClient) streamChatCompletions(
 		return false, nil
 	}
 
-	state := newStreamingState(meta)
+	// Initialize streaming state with source event ID for [[reply_to_current]] support
+	var sourceEventID id.EventID
+	if evt != nil {
+		sourceEventID = evt.ID
+	}
+	state := newStreamingState(meta, sourceEventID)
 
 	// Track active tool calls by index
 	activeTools := make(map[int]*activeToolCall)
@@ -1533,7 +1547,8 @@ func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridge
 	return resp.EventID
 }
 
-// sendFinalAssistantTurn sends an edit event with the complete assistant turn data
+// sendFinalAssistantTurn sends an edit event with the complete assistant turn data.
+// It processes response directives (reply tags, silent replies, reactions) before sending.
 func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata) {
 	if portal == nil || portal.MXID == "" {
 		return
@@ -1543,9 +1558,46 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 		return
 	}
 
-	// Render markdown to HTML for rich display
+	// Parse response directives from accumulated content
 	rawContent := state.accumulated.String()
-	rendered := format.RenderMarkdown(rawContent, true, true)
+	directives := ParseResponseDirectives(rawContent, state.sourceEventID)
+
+	// Send reactions first (even for silent replies)
+	for _, reaction := range directives.Reactions {
+		targetEvent := reaction.EventID
+		if targetEvent == "" {
+			// Default to source event if no explicit target
+			targetEvent = state.sourceEventID
+		}
+		if targetEvent != "" {
+			oc.sendReaction(ctx, portal, targetEvent, reaction.Emoji)
+		}
+	}
+
+	// Handle silent replies - redact the streaming message
+	if directives.IsSilent {
+		oc.log.Debug().
+			Str("turn_id", state.turnID).
+			Str("initial_event_id", state.initialEventID.String()).
+			Msg("Silent reply detected, redacting streaming message")
+
+		// Redact the initial streaming message
+		if state.initialEventID != "" {
+			_, err := intent.SendMessage(ctx, portal.MXID, event.EventRedaction, &event.Content{
+				Parsed: &event.RedactionEventContent{
+					Redacts: state.initialEventID,
+				},
+			}, nil)
+			if err != nil {
+				oc.log.Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact silent reply message")
+			}
+		}
+		return
+	}
+
+	// Use cleaned content (directives stripped)
+	cleanedContent := directives.Text
+	rendered := format.RenderMarkdown(cleanedContent, true, true)
 
 	// Build AI metadata following the new schema
 	aiMetadata := map[string]any{
@@ -1586,6 +1638,19 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 		}
 	}
 
+	// Build m.relates_to with replace relation
+	relatesTo := map[string]any{
+		"rel_type": RelReplace,
+		"event_id": state.initialEventID.String(),
+	}
+
+	// Add reply relation if directive specifies one
+	if directives.ReplyToEventID != "" {
+		relatesTo["m.in_reply_to"] = map[string]any{
+			"event_id": directives.ReplyToEventID.String(),
+		}
+	}
+
 	// Send edit event with m.replace relation and m.new_content
 	eventContent := &event.Content{
 		Raw: map[string]any{
@@ -1599,10 +1664,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 				"format":         rendered.Format,
 				"formatted_body": rendered.FormattedBody,
 			},
-			"m.relates_to": map[string]any{
-				"rel_type": RelReplace,
-				"event_id": state.initialEventID.String(),
-			},
+			"m.relates_to":                  relatesTo,
 			BeeperAIKey:                     aiMetadata,
 			"com.beeper.dont_render_edited": true, // Don't show "edited" indicator for streaming updates
 		},
@@ -1616,7 +1678,42 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 			Str("turn_id", state.turnID).
 			Bool("has_thinking", state.reasoning.Len() > 0).
 			Int("tool_calls", len(state.toolCalls)).
+			Bool("has_reply", directives.ReplyToEventID != "").
+			Int("reactions", len(directives.Reactions)).
 			Msg("Sent final assistant turn with metadata")
+	}
+}
+
+// sendReaction sends a reaction emoji to a Matrix event.
+func (oc *AIClient) sendReaction(ctx context.Context, portal *bridgev2.Portal, targetEventID id.EventID, emoji string) {
+	if portal == nil || portal.MXID == "" || targetEventID == "" || emoji == "" {
+		return
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return
+	}
+
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"m.relates_to": map[string]any{
+				"rel_type": "m.annotation",
+				"event_id": targetEventID.String(),
+				"key":      emoji,
+			},
+		},
+	}
+
+	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventReaction, eventContent, nil); err != nil {
+		oc.log.Warn().Err(err).
+			Stringer("target_event", targetEventID).
+			Str("emoji", emoji).
+			Msg("Failed to send reaction")
+	} else {
+		oc.log.Debug().
+			Stringer("target_event", targetEventID).
+			Str("emoji", emoji).
+			Msg("Sent reaction")
 	}
 }
 

@@ -266,7 +266,7 @@ var CreateRoomTool = &Tool{
 				},
 				"agent_id": map[string]any{
 					"type":        "string",
-					"description": "ID of the agent to assign to this room (e.g., 'quick', 'smart', or a custom agent ID)",
+					"description": "ID of the agent to assign to this room (e.g., 'beeper' or a custom agent ID)",
 				},
 				"system_prompt": map[string]any{
 					"type":        "string",

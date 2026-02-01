@@ -647,6 +647,7 @@ const (
 	RelReplace   = "m.replace"
 	RelReference = "m.reference"
 	RelThread    = "m.thread"
+	RelInReplyTo = "m.in_reply_to"
 )
 
 // Content field keys

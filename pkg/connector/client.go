@@ -1653,9 +1653,6 @@ func detectVisionSupport(modelID string) bool {
 		strings.Contains(modelID, "vision")
 }
 
-// DefaultAgentID is the default agent identifier used when no specific agent is configured
-const DefaultAgentID = "agent_main"
-
 // AgentState tracks the state of an active agent turn
 type AgentState struct {
 	AgentID     string
