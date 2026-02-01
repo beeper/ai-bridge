@@ -1338,28 +1338,63 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		return err
 	}
 
-	// Create default chat with Quick Chatter agent
+	// Create default chat with Quick Chatter agent and "Welcome to AI Chats" title
 	quickAgent := agents.GetPresetByID("quick")
 	if quickAgent == nil {
 		return fmt.Errorf("quick chatter agent preset not found")
 	}
 
-	resp, err := oc.createAgentChat(ctx, quickAgent)
+	// Determine model from agent config or use default
+	modelID := quickAgent.Model.Primary
+	if modelID == "" {
+		modelID = oc.effectiveModel(nil)
+	}
+
+	portal, chatInfo, err := oc.initPortalForChat(ctx, PortalInitOpts{
+		ModelID:      modelID,
+		Title:        "Welcome to AI Chats",
+		SystemPrompt: quickAgent.SystemPrompt,
+	})
 	if err != nil {
 		oc.log.Err(err).Msg("Failed to create default portal")
 		return err
 	}
-	loginMeta.DefaultChatPortalID = string(resp.PortalKey.ID)
+
+	// Set agent-specific metadata
+	pm := portalMeta(portal)
+	pm.AgentID = quickAgent.ID
+	pm.DefaultAgentID = quickAgent.ID
+	if quickAgent.SystemPrompt != "" {
+		pm.SystemPrompt = quickAgent.SystemPrompt
+	}
+
+	// Update the OtherUserID to be the agent ghost
+	portal.OtherUserID = agentUserID(quickAgent.ID)
+
+	if err := portal.Save(ctx); err != nil {
+		oc.log.Err(err).Msg("Failed to save portal with agent config")
+		return err
+	}
+
+	// Update chat info members to use agent ghost
+	chatInfo.Members = &bridgev2.ChatMemberList{
+		MemberMap: map[networkid.UserID]bridgev2.ChatMember{
+			humanUserID(oc.UserLogin.ID): {EventSender: bridgev2.EventSender{Sender: humanUserID(oc.UserLogin.ID)}},
+			agentUserID(quickAgent.ID):   {EventSender: bridgev2.EventSender{Sender: agentUserID(quickAgent.ID)}},
+		},
+	}
+
+	loginMeta.DefaultChatPortalID = string(portal.PortalKey.ID)
 	if err := oc.UserLogin.Save(ctx); err != nil {
 		oc.log.Warn().Err(err).Msg("Failed to persist default chat portal ID")
 	}
-	err = resp.Portal.CreateMatrixRoom(ctx, oc.UserLogin, resp.PortalInfo)
+	err = portal.CreateMatrixRoom(ctx, oc.UserLogin, chatInfo)
 	if err != nil {
 		oc.log.Err(err).Msg("Failed to create Matrix room for default chat")
 		return err
 	}
-	oc.sendWelcomeMessage(ctx, resp.Portal)
-	oc.log.Info().Stringer("portal", resp.PortalKey).Msg("Default AI chat room created")
+	oc.sendWelcomeMessage(ctx, portal)
+	oc.log.Info().Stringer("portal", portal.PortalKey).Msg("Welcome to AI Chats room created")
 	return nil
 }
 

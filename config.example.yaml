@@ -54,10 +54,6 @@ network:
       default_model: "anthropic/claude-sonnet-4-5-20250929"
     openrouter:
       default_model: "google/gemini-2.5-flash"
-      # Optional OpenRouter app attribution headers.
-      # Defaults: https://beeper.com / Beeper
-      # app_referer: "https://example.com"
-      # app_title: "My Matrix AI Bridge"
 
   # Global settings
   default_system_prompt: |

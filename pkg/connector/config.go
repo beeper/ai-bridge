@@ -33,8 +33,6 @@ type BeeperConfig struct {
 type ProviderConfig struct {
 	DefaultModel     string `yaml:"default_model"`
 	DefaultPDFEngine string `yaml:"default_pdf_engine"` // pdf-text, mistral-ocr (default), native
-	AppReferer       string `yaml:"app_referer"`        // OpenRouter HTTP-Referer header
-	AppTitle         string `yaml:"app_title"`          // OpenRouter X-Title header
 }
 
 // ProvidersConfig contains per-provider configuration.
@@ -60,8 +58,6 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Str, "providers", "openai", "default_model")
 	helper.Copy(configupgrade.Str, "providers", "openrouter", "default_model")
 	helper.Copy(configupgrade.Str, "providers", "openrouter", "default_pdf_engine")
-	helper.Copy(configupgrade.Str, "providers", "openrouter", "app_referer")
-	helper.Copy(configupgrade.Str, "providers", "openrouter", "app_title")
 
 	// Global settings
 	helper.Copy(configupgrade.Str, "default_system_prompt")

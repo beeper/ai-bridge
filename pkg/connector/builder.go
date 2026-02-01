@@ -12,11 +12,11 @@ import (
 // Builder room constants
 const (
 	BuilderRoomSlug = "builder"
-	BuilderRoomName = "Agent Builder"
+	BuilderRoomName = "Manage AI Chats"
 )
 
-// ensureBuilderRoom creates or retrieves the Agent Builder room.
-// This special room is where users interact with the Boss agent to manage their agents.
+// ensureBuilderRoom creates or retrieves the "Manage AI Chats" room.
+// This special room is where users interact with the Boss agent to manage their agents and rooms.
 func (oc *AIClient) ensureBuilderRoom(ctx context.Context) error {
 	meta := loginMetadata(oc.UserLogin)
 
@@ -28,14 +28,14 @@ func (oc *AIClient) ensureBuilderRoom(ctx context.Context) error {
 			Receiver: oc.UserLogin.ID,
 		})
 		if err == nil && portal != nil && portal.MXID != "" {
-			oc.log.Debug().Str("room_id", string(meta.BuilderRoomID)).Msg("Builder room already exists")
+			oc.log.Debug().Str("room_id", string(meta.BuilderRoomID)).Msg("Manage AI Chats room already exists")
 			return nil
 		}
 		// Room doesn't exist anymore, clear the reference
 		meta.BuilderRoomID = ""
 	}
 
-	oc.log.Info().Msg("Creating Agent Builder room")
+	oc.log.Info().Msg("Creating Manage AI Chats room")
 
 	// Create the Builder room with Boss agent as the ghost
 	portal, chatInfo, err := oc.createBuilderRoom(ctx)
@@ -57,16 +57,16 @@ func (oc *AIClient) ensureBuilderRoom(ctx context.Context) error {
 	oc.log.Info().
 		Str("portal_id", string(portal.PortalKey.ID)).
 		Str("mxid", string(portal.MXID)).
-		Msg("Agent Builder room created")
+		Msg("Manage AI Chats room created")
 
 	return nil
 }
 
-// createBuilderRoom creates the Builder room portal and chat info.
+// createBuilderRoom creates the "Manage AI Chats" room portal and chat info.
 func (oc *AIClient) createBuilderRoom(ctx context.Context) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
 	bossAgent := agents.GetBossAgent()
 
-	// Use a standard chat initialization with Title set to Builder
+	// Use a standard chat initialization with the management room title
 	opts := PortalInitOpts{
 		Title: BuilderRoomName,
 	}
