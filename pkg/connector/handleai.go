@@ -20,6 +20,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/format"
 	"maunium.net/go/mautrix/id"
 )
 
@@ -35,15 +36,16 @@ type streamingState struct {
 	firstTokenAtMs int64
 	completedAtMs  int64
 
-	accumulated    strings.Builder
-	reasoning      strings.Builder
-	toolCalls      []ToolCallMetadata
-	pendingImages  []generatedImage
-	initialEventID id.EventID
-	finishReason   string
-	responseID     string
-	sequenceNum    int
-	firstToken     bool
+	accumulated            strings.Builder
+	reasoning              strings.Builder
+	toolCalls              []ToolCallMetadata
+	pendingImages          []generatedImage
+	pendingFunctionOutputs []functionCallOutput // Function outputs to send back to API for continuation
+	initialEventID         id.EventID
+	finishReason           string
+	responseID             string
+	sequenceNum            int
+	firstToken             bool
 }
 
 // newStreamingState creates a new streaming state with initialized fields
@@ -71,6 +73,14 @@ type activeToolCall struct {
 	input       strings.Builder
 	startedAtMs int64
 	eventID     id.EventID // Event ID of the tool call timeline event
+	result      string     // Result from tool execution (for continuation)
+	itemID      string     // Item ID from the stream event (used as call_id for continuation)
+}
+
+// functionCallOutput tracks a completed function call output for API continuation
+type functionCallOutput struct {
+	callID string // The ItemID from the stream event (used as call_id in continuation)
+	output string // The result from executing the tool
 }
 
 // saveAssistantMessage saves the completed assistant message to the database
@@ -239,7 +249,13 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, meta *PortalMet
 
 	// Add built-in provider tools if enabled (only for native OpenAI, not OpenRouter)
 	// OpenRouter's Responses API only supports function-type tools
-	if !oc.isOpenRouterProvider() {
+	isOpenRouter := oc.isOpenRouterProvider()
+	log.Debug().
+		Bool("is_openrouter", isOpenRouter).
+		Str("detected_provider", loginMetadata(oc.UserLogin).Provider).
+		Msg("Provider detection for tool filtering")
+
+	if !isOpenRouter {
 		if oc.isToolEnabled(meta, ToolNameWebSearchProvider) {
 			params.Tools = append(params.Tools, responses.ToolParamOfWebSearchPreview(responses.WebSearchPreviewToolTypeWebSearchPreview))
 			log.Debug().Msg("Web search tool enabled")
@@ -277,6 +293,12 @@ func (oc *AIClient) streamingResponse(
 	log := zerolog.Ctx(ctx).With().
 		Str("portal_id", string(portal.ID)).
 		Logger()
+
+	// Ensure model ghost is in the room before any operations
+	if err := oc.ensureModelInRoom(ctx, portal); err != nil {
+		log.Warn().Err(err).Msg("Failed to ensure model is in room")
+		// Continue anyway - typing will fail gracefully
+	}
 
 	// Set typing indicator when streaming starts
 	oc.setModelTyping(ctx, portal, true)
@@ -408,6 +430,9 @@ func (oc *AIClient) streamingResponse(
 				activeTools[streamEvent.ItemID] = tool
 			}
 
+			// Store the item ID for continuation (this is the call_id for the Responses API)
+			tool.itemID = streamEvent.ItemID
+
 			if state.initialEventID != "" && oc.isToolEnabled(meta, streamEvent.Name) {
 				// Wrap context with bridge info for tools that need it (e.g., set_room_title)
 				toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
@@ -422,6 +447,13 @@ func (oc *AIClient) streamingResponse(
 					result = fmt.Sprintf("Error: %s", err.Error())
 					resultStatus = ResultStatusError
 				}
+
+				// Store result for API continuation
+				tool.result = result
+				state.pendingFunctionOutputs = append(state.pendingFunctionOutputs, functionCallOutput{
+					callID: streamEvent.ItemID,
+					output: result,
+				})
 
 				// Parse input for storage
 				var inputMap map[string]any
@@ -620,6 +652,153 @@ func (oc *AIClient) streamingResponse(
 		return false, nil
 	}
 
+	// If there are pending function outputs, send them back to the API for continuation
+	// This loop continues until the model generates a response without tool calls
+	for len(state.pendingFunctionOutputs) > 0 && state.responseID != "" {
+		log.Debug().
+			Int("pending_outputs", len(state.pendingFunctionOutputs)).
+			Str("previous_response_id", state.responseID).
+			Msg("Continuing response with function call outputs")
+
+		// Build continuation request with function call outputs
+		continuationParams := oc.buildContinuationParams(state, meta)
+
+		// Clear pending outputs (they're being sent)
+		state.pendingFunctionOutputs = nil
+
+		// Reset active tools for new iteration
+		activeTools = make(map[string]*activeToolCall)
+
+		// Start continuation stream
+		stream = oc.api.Responses.NewStreaming(ctx, continuationParams)
+		if stream == nil {
+			log.Error().Msg("Failed to create continuation streaming request")
+			break
+		}
+
+		// Process continuation stream events
+		for stream.Next() {
+			streamEvent := stream.Current()
+
+			switch streamEvent.Type {
+			case "response.output_text.delta":
+				state.accumulated.WriteString(streamEvent.Delta)
+				if !state.firstToken && state.initialEventID != "" {
+					state.sequenceNum++
+					oc.emitStreamDelta(ctx, portal, state, StreamContentText, streamEvent.Delta, nil)
+				}
+
+			case "response.reasoning_text.delta":
+				state.reasoning.WriteString(streamEvent.Delta)
+				if !state.firstToken && state.initialEventID != "" {
+					state.sequenceNum++
+					oc.emitStreamDelta(ctx, portal, state, StreamContentReasoning, streamEvent.Delta, nil)
+				}
+
+			case "response.function_call_arguments.delta":
+				tool, exists := activeTools[streamEvent.ItemID]
+				if !exists {
+					tool = &activeToolCall{
+						callID:      NewCallID(),
+						toolName:    streamEvent.Name,
+						toolType:    ToolTypeFunction,
+						startedAtMs: time.Now().UnixMilli(),
+					}
+					activeTools[streamEvent.ItemID] = tool
+					tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
+					oc.emitGenerationStatus(ctx, portal, state, "tool_use", fmt.Sprintf("Calling %s...", streamEvent.Name), &GenerationDetails{
+						CurrentTool: streamEvent.Name,
+						CallID:      tool.callID,
+					})
+				}
+				tool.input.WriteString(streamEvent.Delta)
+
+			case "response.function_call_arguments.done":
+				tool, exists := activeTools[streamEvent.ItemID]
+				if !exists {
+					tool = &activeToolCall{
+						callID:      NewCallID(),
+						toolName:    streamEvent.Name,
+						toolType:    ToolTypeFunction,
+						startedAtMs: time.Now().UnixMilli(),
+					}
+					tool.input.WriteString(streamEvent.Arguments)
+					activeTools[streamEvent.ItemID] = tool
+				}
+				tool.itemID = streamEvent.ItemID
+
+				if state.initialEventID != "" && oc.isToolEnabled(meta, streamEvent.Name) {
+					toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
+						Client: oc,
+						Portal: portal,
+						Meta:   meta,
+					})
+					result, err := oc.executeBuiltinTool(toolCtx, streamEvent.Name, streamEvent.Arguments)
+					resultStatus := ResultStatusSuccess
+					if err != nil {
+						log.Warn().Err(err).Str("tool", streamEvent.Name).Msg("Tool execution failed (continuation)")
+						result = fmt.Sprintf("Error: %s", err.Error())
+						resultStatus = ResultStatusError
+					}
+
+					tool.result = result
+					state.pendingFunctionOutputs = append(state.pendingFunctionOutputs, functionCallOutput{
+						callID: streamEvent.ItemID,
+						output: result,
+					})
+
+					var inputMap map[string]any
+					_ = json.Unmarshal([]byte(streamEvent.Arguments), &inputMap)
+
+					resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, result, resultStatus)
+
+					state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+						CallID:        tool.callID,
+						ToolName:      streamEvent.Name,
+						ToolType:      string(tool.toolType),
+						Input:         inputMap,
+						Output:        map[string]any{"result": result},
+						Status:        string(ToolStatusCompleted),
+						ResultStatus:  string(resultStatus),
+						StartedAtMs:   tool.startedAtMs,
+						CompletedAtMs: time.Now().UnixMilli(),
+						CallEventID:   tool.eventID.String(),
+						ResultEventID: resultEventID.String(),
+					})
+
+					state.sequenceNum++
+					oc.emitStreamDelta(ctx, portal, state, StreamContentToolResult, result, map[string]any{
+						"call_id":   tool.callID,
+						"tool_name": streamEvent.Name,
+						"status":    "completed",
+					})
+					oc.emitGenerationStatus(ctx, portal, state, "generating", "Continuing generation...", nil)
+				}
+
+			case "response.completed":
+				state.completedAtMs = time.Now().UnixMilli()
+				if streamEvent.Response.Status == "completed" {
+					state.finishReason = "stop"
+				} else {
+					state.finishReason = string(streamEvent.Response.Status)
+				}
+				if streamEvent.Response.ID != "" {
+					state.responseID = streamEvent.Response.ID
+				}
+				log.Debug().Str("reason", state.finishReason).Str("response_id", state.responseID).Msg("Continuation stream completed")
+
+			case "error":
+				log.Error().Str("error", streamEvent.Message).Msg("Continuation stream error")
+				break
+			}
+		}
+
+		if err := stream.Err(); err != nil {
+			log.Error().Err(err).Msg("Continuation streaming error")
+			break
+		}
+	}
+
 	// Send final edit to persist complete content with metadata (including reasoning)
 	if state.initialEventID != "" {
 		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
@@ -657,6 +836,58 @@ func (oc *AIClient) streamingResponse(
 	return true, nil
 }
 
+// buildContinuationParams builds params for continuing a response after tool execution
+func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalMetadata) responses.ResponseNewParams {
+	params := responses.ResponseNewParams{
+		Model:              shared.ResponsesModel(oc.effectiveModelForAPI(meta)),
+		PreviousResponseID: openai.String(state.responseID),
+		MaxOutputTokens:    openai.Int(int64(oc.effectiveMaxTokens(meta))),
+	}
+
+	// Build function call outputs as input
+	var input responses.ResponseInputParam
+	for _, output := range state.pendingFunctionOutputs {
+		input = append(input, responses.ResponseInputItemUnionParam{
+			OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
+				CallID: output.callID,
+				Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
+					OfString: openai.String(output.output),
+				},
+			},
+		})
+	}
+	params.Input = responses.ResponseNewParamsInputUnion{
+		OfInputItemList: input,
+	}
+
+	// Add reasoning effort if configured
+	if reasoningEffort := oc.effectiveReasoningEffort(meta); reasoningEffort != "" {
+		params.Reasoning = shared.ReasoningParam{
+			Effort: shared.ReasoningEffort(reasoningEffort),
+		}
+	}
+
+	// Add tools (same as initial request)
+	if !oc.isOpenRouterProvider() {
+		if oc.isToolEnabled(meta, ToolNameWebSearchProvider) {
+			params.Tools = append(params.Tools, responses.ToolParamOfWebSearchPreview(responses.WebSearchPreviewToolTypeWebSearchPreview))
+		}
+		if oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
+			params.Tools = append(params.Tools, responses.ToolParamOfCodeInterpreter("auto"))
+		}
+	}
+	if meta.Capabilities.SupportsToolCalling {
+		enabledTools := GetEnabledBuiltinTools(func(name string) bool {
+			return oc.isToolEnabled(meta, name)
+		})
+		if len(enabledTools) > 0 {
+			params.Tools = append(params.Tools, ToOpenAITools(enabledTools)...)
+		}
+	}
+
+	return params
+}
+
 // streamChatCompletions handles streaming using Chat Completions API (for audio support)
 // This is used as a fallback when the prompt contains audio content, since
 // SDK v3.16.0 has ResponseInputAudioParam defined but NOT wired into ResponseInputContentUnionParam.
@@ -671,6 +902,12 @@ func (oc *AIClient) streamChatCompletions(
 		Str("action", "stream_chat_completions").
 		Str("portal", string(portal.ID)).
 		Logger()
+
+	// Ensure model ghost is in the room before any operations
+	if err := oc.ensureModelInRoom(ctx, portal); err != nil {
+		log.Warn().Err(err).Msg("Failed to ensure model is in room")
+		// Continue anyway - typing will fail gracefully
+	}
 
 	oc.setModelTyping(ctx, portal, true)
 	defer oc.setModelTyping(ctx, portal, false)
@@ -1036,7 +1273,9 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 		return
 	}
 
-	content := state.accumulated.String()
+	// Render markdown to HTML for rich display
+	rawContent := state.accumulated.String()
+	rendered := format.RenderMarkdown(rawContent, true, true)
 
 	// Build AI metadata following the new schema
 	aiMetadata := map[string]any{
@@ -1080,11 +1319,15 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	// Send edit event with m.replace relation and m.new_content
 	eventContent := &event.Content{
 		Raw: map[string]any{
-			"msgtype": event.MsgText,
-			"body":    "* " + content, // Fallback with edit marker
+			"msgtype":        event.MsgText,
+			"body":           "* " + rendered.Body, // Fallback with edit marker
+			"format":         rendered.Format,
+			"formatted_body": "* " + rendered.FormattedBody,
 			"m.new_content": map[string]any{
-				"msgtype": event.MsgText,
-				"body":    content,
+				"msgtype":        event.MsgText,
+				"body":           rendered.Body,
+				"format":         rendered.Format,
+				"formatted_body": rendered.FormattedBody,
 			},
 			"m.relates_to": map[string]any{
 				"rel_type": RelReplace,
@@ -1749,45 +1992,38 @@ func (oc *AIClient) getTitleGenerationModel() string {
 }
 
 // generateRoomTitle asks the model to generate a short descriptive title for the conversation
+// Uses Chat Completions API for universal provider compatibility (Responses API non-streaming
+// isn't supported by all providers like OpenRouter)
 func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistantResponse string) (string, error) {
 	model := oc.getTitleGenerationModel()
 
-	// Build Responses API input
-	input := responses.ResponseInputParam{
-		{
-			OfMessage: &responses.EasyInputMessageParam{
-				Role: responses.EasyInputMessageRoleUser,
-				Content: responses.EasyInputMessageContentUnionParam{
-					OfString: openai.String(fmt.Sprintf("User: %s\n\nAssistant: %s", userMessage, assistantResponse)),
-				},
-			},
-		},
-	}
+	oc.log.Debug().Str("model", model).Msg("Generating room title")
 
-	resp, err := oc.api.Responses.New(ctx, responses.ResponseNewParams{
-		Model:           model,
-		Input:           responses.ResponseNewParamsInputUnion{OfInputItemList: input},
-		Instructions:    openai.String("Generate a very short title (3-5 words max) that summarizes this conversation. Reply with ONLY the title, no quotes, no punctuation at the end."),
-		MaxOutputTokens: openai.Int(20),
+	// Use Chat Completions API for universal compatibility
+	resp, err := oc.api.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		Model: model,
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage("Generate a very short title (3-5 words max) that summarizes this conversation. Reply with ONLY the title, no quotes, no punctuation at the end."),
+			openai.UserMessage(fmt.Sprintf("User: %s\n\nAssistant: %s", userMessage, assistantResponse)),
+		},
+		MaxCompletionTokens: openai.Int(20),
 	})
 	if err != nil {
+		oc.log.Warn().Err(err).Str("model", model).Msg("Title generation API call failed")
 		return "", err
 	}
 
-	// Extract text from response
+	// Extract title from response
 	var title string
-	for _, item := range resp.Output {
-		if msg, ok := item.AsAny().(responses.ResponseOutputMessage); ok {
-			for _, contentPart := range msg.Content {
-				if text, ok := contentPart.AsAny().(responses.ResponseOutputText); ok {
-					title = text.Text
-					break
-				}
-			}
-		}
+	if len(resp.Choices) > 0 && resp.Choices[0].Message.Content != "" {
+		title = resp.Choices[0].Message.Content
 	}
 
 	if title == "" {
+		oc.log.Warn().
+			Str("model", model).
+			Int("choices", len(resp.Choices)).
+			Msg("Title generation returned no content")
 		return "", fmt.Errorf("no response from model")
 	}
 
