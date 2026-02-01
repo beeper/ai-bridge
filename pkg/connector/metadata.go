@@ -5,6 +5,7 @@ import (
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/random"
 	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 )
 
 // ModelCache stores available models (cached in UserLoginMetadata)
@@ -81,6 +82,29 @@ type UserLoginMetadata struct {
 
 	// User-level defaults for new chats (set via provisioning API)
 	Defaults *UserDefaults `json:"defaults,omitempty"`
+
+	// Agent Builder room for managing agents
+	BuilderRoomID networkid.PortalID `json:"builder_room_id,omitempty"`
+
+	// Custom agents created by the user via the Boss agent
+	CustomAgents map[string]*CustomAgentData `json:"custom_agents,omitempty"`
+}
+
+// CustomAgentData stores a user-created agent definition.
+type CustomAgentData struct {
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description,omitempty"`
+	AvatarURL     string          `json:"avatar_url,omitempty"`
+	Model         string          `json:"model,omitempty"`
+	ModelFallback []string        `json:"model_fallback,omitempty"`
+	SystemPrompt  string          `json:"system_prompt,omitempty"`
+	PromptMode    string          `json:"prompt_mode,omitempty"`
+	ToolProfile   string          `json:"tool_profile,omitempty"`
+	ToolOverrides map[string]bool `json:"tool_overrides,omitempty"`
+	Temperature   float64         `json:"temperature,omitempty"`
+	CreatedAt     int64           `json:"created_at"`
+	UpdatedAt     int64           `json:"updated_at"`
 }
 
 // PortalMetadata stores per-room tuning knobs for the assistant.
@@ -102,7 +126,12 @@ type PortalMetadata struct {
 
 	ConversationMode string `json:"conversation_mode,omitempty"`
 	LastResponseID   string `json:"last_response_id,omitempty"`
-	DefaultAgentID   string `json:"default_agent_id,omitempty"`
+	EmitThinking     bool   `json:"emit_thinking,omitempty"`
+	EmitToolArgs     bool   `json:"emit_tool_args,omitempty"`
+
+	// Agent-related metadata
+	DefaultAgentID string `json:"default_agent_id,omitempty"` // Agent assigned to this room (legacy name, same as AgentID)
+	AgentID        string `json:"agent_id,omitempty"`         // Which agent is the ghost for this room
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild

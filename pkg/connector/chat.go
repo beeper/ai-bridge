@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
@@ -292,125 +293,150 @@ func normalizeToolName(name string) string {
 	}
 }
 
-// SearchUsers searches available AI models by name/ID
+// SearchUsers searches available AI agents by name/ID
 func (oc *AIClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.ResolveIdentifierResponse, error) {
-	oc.log.Debug().Str("query", query).Msg("User search requested")
+	oc.log.Debug().Str("query", query).Msg("Agent search requested")
 
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
 		return nil, nil
 	}
 
-	// Fetch available models
-	models, err := oc.listAvailableModels(ctx, false)
+	// Load agents
+	store := NewAgentStoreAdapter(oc)
+	agentsMap, err := store.LoadAgents(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list models: %w", err)
+		return nil, fmt.Errorf("failed to load agents: %w", err)
 	}
 
-	// Filter models by query (match ID or display name)
+	// Filter agents by query (match ID, name, or description)
 	var results []*bridgev2.ResolveIdentifierResponse
-	for i := range models {
-		model := &models[i]
-		displayName := FormatModelDisplay(model.ID)
-
-		// Check if query matches model ID or display name (case-insensitive)
-		if !strings.Contains(strings.ToLower(model.ID), query) &&
-			!strings.Contains(strings.ToLower(displayName), query) &&
-			!strings.Contains(strings.ToLower(model.Name), query) {
+	for _, agent := range agentsMap {
+		// Check if query matches agent ID, name, or description (case-insensitive)
+		if !strings.Contains(strings.ToLower(agent.ID), query) &&
+			!strings.Contains(strings.ToLower(agent.Name), query) &&
+			!strings.Contains(strings.ToLower(agent.Description), query) {
 			continue
 		}
 
-		userID := modelUserID(model.ID)
+		userID := agentUserID(agent.ID)
 		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
 		if err != nil {
-			oc.log.Warn().Err(err).Str("model", model.ID).Msg("Failed to get ghost for search result")
+			oc.log.Warn().Err(err).Str("agent", agent.ID).Msg("Failed to get ghost for search result")
 			continue
 		}
 
 		results = append(results, &bridgev2.ResolveIdentifierResponse{
 			UserID: userID,
 			UserInfo: &bridgev2.UserInfo{
-				Name:        ptr.Ptr(displayName),
-				IsBot:       ptr.Ptr(false),
-				Identifiers: []string{model.ID},
+				Name:        ptr.Ptr(agent.Name),
+				IsBot:       ptr.Ptr(true),
+				Identifiers: []string{agent.ID},
 			},
 			Ghost: ghost,
 		})
 	}
 
-	oc.log.Info().Str("query", query).Int("results", len(results)).Msg("Search completed")
+	oc.log.Info().Str("query", query).Int("results", len(results)).Msg("Agent search completed")
 	return results, nil
 }
 
-// GetContactList returns a list of available AI models as contacts
+// GetContactList returns a list of available AI agents as contacts
 func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
-	oc.log.Debug().Msg("Contact list requested")
+	oc.log.Debug().Msg("Agent contact list requested")
 
-	// Fetch available models (use cache if available)
-	models, err := oc.listAvailableModels(ctx, false)
+	// Load agents
+	store := NewAgentStoreAdapter(oc)
+	agentsMap, err := store.LoadAgents(ctx)
 	if err != nil {
-		oc.log.Error().Err(err).Msg("Failed to list models, using fallback")
-		// Return default model as fallback based on provider
-		meta := loginMetadata(oc.UserLogin)
-		fallbackID := DefaultModelForProvider(meta.Provider)
-		models = []ModelInfo{{
-			ID:       fallbackID,
-			Name:     FormatModelDisplay(fallbackID),
-			Provider: meta.Provider,
-		}}
+		oc.log.Error().Err(err).Msg("Failed to load agents")
+		return nil, fmt.Errorf("failed to load agents: %w", err)
 	}
 
-	// Create a contact for each model
-	contacts := make([]*bridgev2.ResolveIdentifierResponse, 0, len(models))
+	// Create a contact for each agent
+	contacts := make([]*bridgev2.ResolveIdentifierResponse, 0, len(agentsMap))
 
-	for i := range models {
-		model := &models[i]
-		// Get or create ghost for this model
-		userID := modelUserID(model.ID)
+	for _, agent := range agentsMap {
+		// Get or create ghost for this agent
+		userID := agentUserID(agent.ID)
 		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
 		if err != nil {
-			oc.log.Warn().Err(err).Str("model", model.ID).Msg("Failed to get ghost for model")
+			oc.log.Warn().Err(err).Str("agent", agent.ID).Msg("Failed to get ghost for agent")
 			continue
 		}
+
+		// Update ghost display name
+		oc.ensureAgentGhostDisplayName(ctx, agent.ID, agent.Name)
 
 		contacts = append(contacts, &bridgev2.ResolveIdentifierResponse{
 			UserID: userID,
 			UserInfo: &bridgev2.UserInfo{
-				Name:        ptr.Ptr(FormatModelDisplay(model.ID)),
-				IsBot:       ptr.Ptr(false),
-				Identifiers: []string{model.ID},
+				Name:        ptr.Ptr(agent.Name),
+				IsBot:       ptr.Ptr(true),
+				Identifiers: []string{agent.ID},
 			},
 			Ghost: ghost,
 		})
 	}
 
-	oc.log.Info().Int("count", len(contacts)).Msg("Returning model contact list")
+	oc.log.Info().Int("count", len(contacts)).Msg("Returning agent contact list")
 	return contacts, nil
 }
 
-// ResolveIdentifier resolves a model ID to a ghost and optionally creates a chat
+// ResolveIdentifier resolves an agent ID to a ghost and optionally creates a chat
 func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	// Identifier is the model ID (e.g., "gpt-4o", "gpt-4-turbo")
-	modelID := strings.TrimSpace(identifier)
-	if modelID == "" {
-		return nil, fmt.Errorf("model identifier is required")
+	// Identifier can be an agent ID (e.g., "general", "coder") or model ID for backwards compatibility
+	id := strings.TrimSpace(identifier)
+	if id == "" {
+		return nil, fmt.Errorf("identifier is required")
 	}
 
-	// Validate model exists (check cache first)
-	models, _ := oc.listAvailableModels(ctx, false)
-	var modelInfo *ModelInfo
-	for i := range models {
-		if models[i].ID == modelID {
-			modelInfo = &models[i]
-			break
+	// Try to find as agent first
+	store := NewAgentStoreAdapter(oc)
+	agent, err := store.GetAgentByID(ctx, id)
+	if err == nil && agent != nil {
+		// Found as agent
+		return oc.resolveAgentIdentifier(ctx, agent, createChat)
+	}
+
+	// Fallback: try as model ID for backwards compatibility
+	return oc.resolveModelIdentifier(ctx, id, createChat)
+}
+
+// resolveAgentIdentifier resolves an agent to a ghost and optionally creates a chat
+func (oc *AIClient) resolveAgentIdentifier(ctx context.Context, agent *agents.AgentDefinition, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
+	userID := agentUserID(agent.ID)
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ghost: %w", err)
+	}
+
+	// Ensure ghost display name is set
+	oc.ensureAgentGhostDisplayName(ctx, agent.ID, agent.Name)
+
+	var chatResp *bridgev2.CreateChatResponse
+	if createChat {
+		oc.log.Info().Str("agent", agent.ID).Msg("Creating new chat for agent")
+		chatResp, err = oc.createAgentChat(ctx, agent)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create chat: %w", err)
 		}
 	}
 
-	if modelInfo == nil {
-		// Model not in cache, assume it's valid (user might have access to beta models)
-		oc.log.Warn().Str("model", modelID).Msg("Model not in cache, assuming valid")
-	}
+	return &bridgev2.ResolveIdentifierResponse{
+		UserID: userID,
+		UserInfo: &bridgev2.UserInfo{
+			Name:        ptr.Ptr(agent.Name),
+			IsBot:       ptr.Ptr(true),
+			Identifiers: []string{agent.ID},
+		},
+		Ghost: ghost,
+		Chat:  chatResp,
+	}, nil
+}
 
+// resolveModelIdentifier resolves a model ID to a ghost (backwards compatibility)
+func (oc *AIClient) resolveModelIdentifier(ctx context.Context, modelID string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
 	// Get or create ghost
 	userID := modelUserID(modelID)
 	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
@@ -439,6 +465,55 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 		},
 		Ghost: ghost,
 		Chat:  chatResp,
+	}, nil
+}
+
+// createAgentChat creates a new chat room for an agent
+func (oc *AIClient) createAgentChat(ctx context.Context, agent *agents.AgentDefinition) (*bridgev2.CreateChatResponse, error) {
+	// Determine model from agent config or use default
+	modelID := agent.Model.Primary
+	if modelID == "" {
+		modelID = oc.effectiveModel(nil)
+	}
+
+	portal, chatInfo, err := oc.initPortalForChat(ctx, PortalInitOpts{
+		ModelID:      modelID,
+		Title:        fmt.Sprintf("Chat with %s", agent.Name),
+		SystemPrompt: agent.SystemPrompt,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Set agent-specific metadata
+	pm := portalMeta(portal)
+	pm.AgentID = agent.ID
+	pm.DefaultAgentID = agent.ID
+	if agent.SystemPrompt != "" {
+		pm.SystemPrompt = agent.SystemPrompt
+	}
+
+	// Update the OtherUserID to be the agent ghost
+	portal.OtherUserID = agentUserID(agent.ID)
+
+	if err := portal.Save(ctx); err != nil {
+		return nil, fmt.Errorf("failed to save portal with agent config: %w", err)
+	}
+
+	// Update chat info members to use agent ghost
+	chatInfo.Members = &bridgev2.ChatMemberList{
+		MemberMap: map[networkid.UserID]bridgev2.ChatMember{
+			humanUserID(oc.UserLogin.ID): {EventSender: bridgev2.EventSender{Sender: humanUserID(oc.UserLogin.ID)}},
+			agentUserID(agent.ID):        {EventSender: bridgev2.EventSender{Sender: agentUserID(agent.ID)}},
+		},
+	}
+
+	return &bridgev2.CreateChatResponse{
+		PortalKey: portal.PortalKey,
+		PortalInfo: &bridgev2.ChatInfo{
+			Name:    chatInfo.Name,
+			Members: chatInfo.Members,
+		},
 	}, nil
 }
 
@@ -1208,6 +1283,12 @@ func (oc *AIClient) bootstrap(ctx context.Context) {
 	if err := oc.ensureDefaultChat(logCtx); err != nil {
 		oc.log.Warn().Err(err).Msg("Failed to ensure default chat")
 		return
+	}
+
+	// Create the Agent Builder room if not exists
+	if err := oc.ensureBuilderRoom(logCtx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to ensure builder room")
+		// Continue anyway - builder room is optional for core functionality
 	}
 
 	// Mark bootstrap as complete only after successful completion

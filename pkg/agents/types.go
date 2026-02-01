@@ -1,0 +1,166 @@
+// Package agents provides the agent system for AI-powered assistants.
+// An agent is a persistent entity defined by system prompt, tools, and a swappable model.
+// This follows patterns from pi-agent and clawdbot for agent definition and execution.
+package agents
+
+import (
+	"encoding/json"
+	"maps"
+)
+
+// AgentDefinition is the persistent agent configuration.
+type AgentDefinition struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	AvatarURL   string `json:"avatar_url,omitempty"`
+
+	// Model selection (like pi-agent)
+	Model ModelConfig `json:"model"`
+
+	// System prompt (base, sections added dynamically)
+	SystemPrompt string     `json:"system_prompt,omitempty"`
+	PromptMode   PromptMode `json:"prompt_mode,omitempty"` // full, minimal, none
+
+	// Tool policy (like pi-agent profiles)
+	ToolProfile   ToolProfile     `json:"tool_profile,omitempty"`   // minimal, coding, full, boss
+	ToolOverrides map[string]bool `json:"tool_overrides,omitempty"` // explicit allow/deny
+
+	// Agent behavior
+	Temperature float64   `json:"temperature,omitempty"`
+	Identity    *Identity `json:"identity,omitempty"` // custom identity for prompt
+
+	// Metadata
+	IsPreset  bool  `json:"is_preset,omitempty"`
+	CreatedAt int64 `json:"created_at"`
+	UpdatedAt int64 `json:"updated_at"`
+}
+
+// ModelConfig supports primary + fallback chain (like pi-agent).
+type ModelConfig struct {
+	Primary   string   `json:"primary"`             // e.g., "anthropic/claude-sonnet-4.5"
+	Fallbacks []string `json:"fallbacks,omitempty"` // fallback chain
+}
+
+// PromptMode controls system prompt generation (like pi-agent).
+type PromptMode string
+
+const (
+	// PromptModeFull includes all sections in the system prompt.
+	PromptModeFull PromptMode = "full"
+	// PromptModeMinimal includes reduced sections for subagents.
+	PromptModeMinimal PromptMode = "minimal"
+	// PromptModeNone includes just identity, no additional sections.
+	PromptModeNone PromptMode = "none"
+)
+
+// Identity represents a custom agent persona.
+type Identity struct {
+	Name    string `json:"name,omitempty"`
+	Persona string `json:"persona,omitempty"`
+}
+
+// ModelInfo provides metadata about an available model.
+type ModelInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Provider    string `json:"provider,omitempty"`
+	Description string `json:"description,omitempty"`
+
+	// Capabilities
+	SupportsVision        bool `json:"supports_vision,omitempty"`
+	SupportsTools         bool `json:"supports_tools,omitempty"`
+	SupportsReasoning     bool `json:"supports_reasoning,omitempty"`
+	SupportsStreaming     bool `json:"supports_streaming,omitempty"`
+	SupportsCodeExecution bool `json:"supports_code_execution,omitempty"`
+	SupportsWebSearch     bool `json:"supports_web_search,omitempty"`
+
+	// Limits
+	MaxContextTokens    int `json:"max_context_tokens,omitempty"`
+	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
+}
+
+// Clone creates a deep copy of the agent definition.
+func (a *AgentDefinition) Clone() *AgentDefinition {
+	if a == nil {
+		return nil
+	}
+
+	clone := &AgentDefinition{
+		ID:           a.ID,
+		Name:         a.Name,
+		Description:  a.Description,
+		AvatarURL:    a.AvatarURL,
+		Model:        a.Model.Clone(),
+		SystemPrompt: a.SystemPrompt,
+		PromptMode:   a.PromptMode,
+		ToolProfile:  a.ToolProfile,
+		Temperature:  a.Temperature,
+		IsPreset:     a.IsPreset,
+		CreatedAt:    a.CreatedAt,
+		UpdatedAt:    a.UpdatedAt,
+	}
+
+	if a.ToolOverrides != nil {
+		clone.ToolOverrides = make(map[string]bool)
+		maps.Copy(clone.ToolOverrides, a.ToolOverrides)
+	}
+
+	if a.Identity != nil {
+		clone.Identity = &Identity{
+			Name:    a.Identity.Name,
+			Persona: a.Identity.Persona,
+		}
+	}
+
+	return clone
+}
+
+// Clone creates a copy of the model config.
+func (m ModelConfig) Clone() ModelConfig {
+	clone := ModelConfig{
+		Primary: m.Primary,
+	}
+	if m.Fallbacks != nil {
+		clone.Fallbacks = make([]string, len(m.Fallbacks))
+		copy(clone.Fallbacks, m.Fallbacks)
+	}
+	return clone
+}
+
+// EffectiveModel returns the primary model, falling back to a default if empty.
+func (m ModelConfig) EffectiveModel(defaultModel string) string {
+	if m.Primary != "" {
+		return m.Primary
+	}
+	return defaultModel
+}
+
+// MarshalJSON implements json.Marshaler.
+func (a *AgentDefinition) MarshalJSON() ([]byte, error) {
+	type Alias AgentDefinition
+	return json.Marshal((*Alias)(a))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (a *AgentDefinition) UnmarshalJSON(data []byte) error {
+	type Alias AgentDefinition
+	aux := (*Alias)(a)
+	return json.Unmarshal(data, aux)
+}
+
+// Validate checks if the agent definition is valid.
+func (a *AgentDefinition) Validate() error {
+	if a.ID == "" {
+		return ErrMissingAgentID
+	}
+	if a.Name == "" {
+		return ErrMissingAgentName
+	}
+	return nil
+}
+
+// IsCustom returns true if this is a user-created (non-preset) agent.
+func (a *AgentDefinition) IsCustom() bool {
+	return !a.IsPreset
+}

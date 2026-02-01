@@ -13,6 +13,7 @@ func init() {
 	event.TypeMap[RoomSettingsEventType] = reflect.TypeOf(RoomSettingsEventContent{})
 	event.TypeMap[ModelCapabilitiesEventType] = reflect.TypeOf(ModelCapabilitiesEventContent{})
 	event.TypeMap[AgentsEventType] = reflect.TypeOf(AgentsEventContent{})
+	event.TypeMap[CustomAgentsEventType] = reflect.TypeOf(CustomAgentsEventContent{})
 }
 
 // AssistantTurnEventType is the container event for an assistant's response
@@ -104,6 +105,12 @@ var ModelCapabilitiesEventType = event.Type{
 // AgentsEventType configures active agents in a room
 var AgentsEventType = event.Type{
 	Type:  "com.beeper.ai.agents",
+	Class: event.StateEventType,
+}
+
+// CustomAgentsEventType stores user-created agent definitions in the Builder room
+var CustomAgentsEventType = event.Type{
+	Type:  "com.beeper.ai.custom_agents",
 	Class: event.StateEventType,
 }
 
@@ -590,6 +597,8 @@ type RoomSettingsEventContent struct {
 	ConversationMode    string      `json:"conversation_mode,omitempty"` // "messages" or "responses"
 	DefaultAgentID      string      `json:"default_agent_id,omitempty"`
 	ToolToggle          *ToolToggle `json:"tool_toggle,omitempty"` // Single field for toggling any tool
+	EmitThinking        *bool       `json:"emit_thinking,omitempty"`
+	EmitToolArgs        *bool       `json:"emit_tool_args,omitempty"`
 }
 
 // ToolToggle represents a request to toggle a specific tool on/off
@@ -706,4 +715,38 @@ type AttachmentMetadata struct {
 	Size     int    `json:"size,omitempty"`
 	Width    int    `json:"width,omitempty"`  // For images
 	Height   int    `json:"height,omitempty"` // For images
+}
+
+// AgentMemberContent is stored in m.room.member events in the Builder room
+// to persist agent definitions as Matrix state events.
+type AgentMemberContent struct {
+	Membership  string                  `json:"membership"`
+	DisplayName string                  `json:"displayname,omitempty"`
+	AvatarURL   string                  `json:"avatar_url,omitempty"`
+	Agent       *AgentDefinitionContent `json:"com.beeper.ai.agent,omitempty"`
+}
+
+// AgentDefinitionContent stores agent configuration in Matrix state events.
+// This is the serialized form of agents.AgentDefinition for Matrix storage.
+type AgentDefinitionContent struct {
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description,omitempty"`
+	AvatarURL     string          `json:"avatar_url,omitempty"`
+	Model         string          `json:"model,omitempty"`
+	ModelFallback []string        `json:"model_fallback,omitempty"`
+	SystemPrompt  string          `json:"system_prompt,omitempty"`
+	PromptMode    string          `json:"prompt_mode,omitempty"`
+	ToolProfile   string          `json:"tool_profile,omitempty"`
+	ToolOverrides map[string]bool `json:"tool_overrides,omitempty"`
+	Temperature   float64         `json:"temperature,omitempty"`
+	IsPreset      bool            `json:"is_preset,omitempty"`
+	CreatedAt     int64           `json:"created_at"`
+	UpdatedAt     int64           `json:"updated_at"`
+}
+
+// CustomAgentsEventContent stores user-created agent definitions in the Builder room.
+// This is a single state event that contains all custom (non-preset) agents.
+type CustomAgentsEventContent struct {
+	Agents map[string]*AgentDefinitionContent `json:"agents"`
 }

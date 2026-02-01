@@ -3,7 +3,9 @@ package connector
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/beeper/ai-bridge/pkg/agents"
 	"maunium.net/go/mautrix/bridgev2/commands"
 )
 
@@ -518,9 +520,253 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 		CommandRegenerate,
 		CommandTitle,
 		CommandModels,
+		CommandAgent,
+		CommandAgents,
+		CommandCreateAgent,
+		CommandDeleteAgent,
 	)
 	oc.br.Log.Info().
 		Str("section", HelpSectionAI.Name).
 		Int("section_order", HelpSectionAI.Order).
-		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, tools, mode, new, fork, regenerate, title, models")
+		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, tools, mode, new, fork, regenerate, title, models, agent, agents, create-agent, delete-agent")
+}
+
+// CommandAgent handles the !ai agent command
+var CommandAgent = &commands.FullHandler{
+	Func: fnAgent,
+	Name: "agent",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Get or set the agent for this chat",
+		Args:        "[_agent id_]",
+	},
+	RequiresPortal: true,
+	RequiresLogin:  true,
+}
+
+func fnAgent(ce *commands.Event) {
+	client := getAIClient(ce)
+	meta := getPortalMeta(ce)
+	if client == nil || meta == nil {
+		ce.Reply("Failed to access AI configuration")
+		return
+	}
+
+	store := NewAgentStoreAdapter(client)
+
+	if len(ce.Args) == 0 {
+		// Show current agent
+		agentID := meta.AgentID
+		if agentID == "" {
+			agentID = meta.DefaultAgentID
+		}
+		if agentID == "" {
+			ce.Reply("No agent configured. Using default model: %s", client.effectiveModel(meta))
+			return
+		}
+		agent, err := store.GetAgentByID(ce.Ctx, agentID)
+		if err != nil {
+			ce.Reply("Current agent ID: %s (not found)", agentID)
+			return
+		}
+		ce.Reply("Current agent: **%s** (`%s`)\n%s", agent.Name, agent.ID, agent.Description)
+		return
+	}
+
+	// Set agent
+	agentID := ce.Args[0]
+
+	// Special case: "none" clears the agent
+	if agentID == "none" || agentID == "clear" {
+		meta.AgentID = ""
+		meta.DefaultAgentID = ""
+		client.savePortalQuiet(ce.Ctx, ce.Portal, "agent cleared")
+		ce.Reply("Agent cleared. Using default model.")
+		return
+	}
+
+	agent, err := store.GetAgentByID(ce.Ctx, agentID)
+	if err != nil {
+		ce.Reply("Agent not found: %s", agentID)
+		return
+	}
+
+	meta.AgentID = agent.ID
+	meta.DefaultAgentID = agent.ID
+	if agent.SystemPrompt != "" {
+		meta.SystemPrompt = agent.SystemPrompt
+	}
+	ce.Portal.OtherUserID = agentUserID(agent.ID)
+	client.savePortalQuiet(ce.Ctx, ce.Portal, "agent change")
+	client.ensureAgentGhostDisplayName(ce.Ctx, agent.ID, agent.Name)
+	ce.Reply("Agent set to: **%s** (`%s`)", agent.Name, agent.ID)
+}
+
+// CommandAgents handles the !ai agents command
+var CommandAgents = &commands.FullHandler{
+	Func: fnAgents,
+	Name: "agents",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "List available agents",
+	},
+	RequiresLogin: true,
+}
+
+func fnAgents(ce *commands.Event) {
+	client := getAIClient(ce)
+	if client == nil {
+		ce.Reply("Failed to access AI configuration")
+		return
+	}
+
+	store := NewAgentStoreAdapter(client)
+	agentsMap, err := store.LoadAgents(ce.Ctx)
+	if err != nil {
+		ce.Reply("Failed to load agents: %v", err)
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Available Agents\n\n")
+
+	// Group by preset vs custom
+	var presets, custom []string
+	for id, agent := range agentsMap {
+		line := fmt.Sprintf("• **%s** (`%s`)", agent.Name, id)
+		if agent.Description != "" {
+			line += fmt.Sprintf(" - %s", agent.Description)
+		}
+		if agent.IsPreset {
+			presets = append(presets, line)
+		} else {
+			custom = append(custom, line)
+		}
+	}
+
+	if len(presets) > 0 {
+		sb.WriteString("**Presets:**\n")
+		for _, line := range presets {
+			sb.WriteString(line + "\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(custom) > 0 {
+		sb.WriteString("**Custom:**\n")
+		for _, line := range custom {
+			sb.WriteString(line + "\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("Use `!ai agent <id>` to switch agents")
+	ce.Reply(sb.String())
+}
+
+// CommandCreateAgent handles the !ai create-agent command
+var CommandCreateAgent = &commands.FullHandler{
+	Func: fnCreateAgent,
+	Name: "create-agent",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Create a new custom agent",
+		Args:        "<id> <name> [model] [system prompt...]",
+	},
+	RequiresLogin: true,
+}
+
+func fnCreateAgent(ce *commands.Event) {
+	client := getAIClient(ce)
+	if client == nil {
+		ce.Reply("Failed to access AI configuration")
+		return
+	}
+
+	if len(ce.Args) < 2 {
+		ce.Reply("Usage: !ai create-agent <id> <name> [model] [system prompt...]\nExample: !ai create-agent my-helper \"My Helper\" gpt-4o You are a helpful assistant.")
+		return
+	}
+
+	agentID := ce.Args[0]
+	agentName := ce.Args[1]
+
+	// Parse optional model and system prompt
+	var model, systemPrompt string
+	if len(ce.Args) > 2 {
+		model = ce.Args[2]
+	}
+	if len(ce.Args) > 3 {
+		systemPrompt = strings.Join(ce.Args[3:], " ")
+	}
+
+	store := NewAgentStoreAdapter(client)
+
+	// Check if agent already exists
+	if _, err := store.GetAgentByID(ce.Ctx, agentID); err == nil {
+		ce.Reply("Agent with ID '%s' already exists", agentID)
+		return
+	}
+
+	// Create new agent
+	newAgent := &agents.AgentDefinition{
+		ID:           agentID,
+		Name:         agentName,
+		SystemPrompt: systemPrompt,
+		ToolProfile:  agents.ProfileFull,
+		IsPreset:     false,
+		CreatedAt:    time.Now().Unix(),
+		UpdatedAt:    time.Now().Unix(),
+	}
+	if model != "" {
+		newAgent.Model = agents.ModelConfig{Primary: model}
+	}
+
+	if err := store.SaveAgent(ce.Ctx, newAgent); err != nil {
+		ce.Reply("Failed to create agent: %v", err)
+		return
+	}
+
+	ce.Reply("Created agent: **%s** (`%s`)\nUse `!ai agent %s` to use it", agentName, agentID, agentID)
+}
+
+// CommandDeleteAgent handles the !ai delete-agent command
+var CommandDeleteAgent = &commands.FullHandler{
+	Func: fnDeleteAgent,
+	Name: "delete-agent",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Delete a custom agent",
+		Args:        "<id>",
+	},
+	RequiresLogin: true,
+}
+
+func fnDeleteAgent(ce *commands.Event) {
+	client := getAIClient(ce)
+	if client == nil {
+		ce.Reply("Failed to access AI configuration")
+		return
+	}
+
+	if len(ce.Args) < 1 {
+		ce.Reply("Usage: !ai delete-agent <id>")
+		return
+	}
+
+	agentID := ce.Args[0]
+	store := NewAgentStoreAdapter(client)
+
+	// Check if it's a preset
+	if agents.IsPreset(agentID) || agents.IsBossAgent(agentID) {
+		ce.Reply("Cannot delete preset agent: %s", agentID)
+		return
+	}
+
+	if err := store.DeleteAgent(ce.Ctx, agentID); err != nil {
+		ce.Reply("Failed to delete agent: %v", err)
+		return
+	}
+
+	ce.Reply("Deleted agent: %s", agentID)
 }

@@ -1,0 +1,491 @@
+package tools
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// Boss tools for agent management.
+// These are executed via the executor when the Boss agent is active.
+
+// BossToolExecutor handles boss tool execution with access to the agent store.
+type BossToolExecutor struct {
+	store AgentStoreInterface
+}
+
+// AgentStoreInterface is the interface that the boss tools need.
+// This matches the AgentStore interface in the agents package but avoids import cycle.
+type AgentStoreInterface interface {
+	LoadAgents(ctx context.Context) (map[string]AgentData, error)
+	SaveAgent(ctx context.Context, agent AgentData) error
+	DeleteAgent(ctx context.Context, agentID string) error
+	ListModels(ctx context.Context) ([]ModelData, error)
+	ListAvailableTools(ctx context.Context) ([]ToolInfo, error)
+}
+
+// AgentData represents agent data for boss tools (avoids import cycle).
+type AgentData struct {
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description,omitempty"`
+	Model         string          `json:"model,omitempty"`
+	SystemPrompt  string          `json:"system_prompt,omitempty"`
+	ToolProfile   string          `json:"tool_profile,omitempty"`
+	ToolOverrides map[string]bool `json:"tool_overrides,omitempty"`
+	Temperature   float64         `json:"temperature,omitempty"`
+	IsPreset      bool            `json:"is_preset,omitempty"`
+	CreatedAt     int64           `json:"created_at"`
+	UpdatedAt     int64           `json:"updated_at"`
+}
+
+// ModelData represents model data for boss tools.
+type ModelData struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Provider    string `json:"provider,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// NewBossToolExecutor creates a new boss tool executor.
+func NewBossToolExecutor(store AgentStoreInterface) *BossToolExecutor {
+	return &BossToolExecutor{store: store}
+}
+
+// CreateAgent tool definition.
+var CreateAgentTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "create_agent",
+		Description: "Create a new AI agent with custom configuration",
+		Annotations: &mcp.ToolAnnotations{Title: "Create Agent"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "Display name for the agent",
+				},
+				"description": map[string]any{
+					"type":        "string",
+					"description": "Brief description of what the agent does",
+				},
+				"model": map[string]any{
+					"type":        "string",
+					"description": "Model ID to use (e.g., 'anthropic/claude-sonnet-4.5'). Leave empty for default.",
+				},
+				"system_prompt": map[string]any{
+					"type":        "string",
+					"description": "Custom system prompt for the agent",
+				},
+				"tool_profile": map[string]any{
+					"type":        "string",
+					"enum":        []string{"minimal", "coding", "full"},
+					"description": "Tool access level: minimal (none), coding (calc, search, code), full (all)",
+				},
+			},
+			"required": []string{"name"},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
+// ForkAgentTool tool definition.
+var ForkAgentTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "fork_agent",
+		Description: "Create a copy of an existing agent as a new custom agent",
+		Annotations: &mcp.ToolAnnotations{Title: "Fork Agent"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"source_id": map[string]any{
+					"type":        "string",
+					"description": "ID of the agent to copy",
+				},
+				"new_name": map[string]any{
+					"type":        "string",
+					"description": "Name for the new agent (defaults to '[Original Name] (Fork)')",
+				},
+			},
+			"required": []string{"source_id"},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
+// EditAgentTool tool definition.
+var EditAgentTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "edit_agent",
+		Description: "Modify an existing custom agent's configuration",
+		Annotations: &mcp.ToolAnnotations{Title: "Edit Agent"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"agent_id": map[string]any{
+					"type":        "string",
+					"description": "ID of the agent to edit",
+				},
+				"name": map[string]any{
+					"type":        "string",
+					"description": "New display name",
+				},
+				"description": map[string]any{
+					"type":        "string",
+					"description": "New description",
+				},
+				"model": map[string]any{
+					"type":        "string",
+					"description": "New model ID",
+				},
+				"system_prompt": map[string]any{
+					"type":        "string",
+					"description": "New system prompt",
+				},
+				"tool_profile": map[string]any{
+					"type":        "string",
+					"enum":        []string{"minimal", "coding", "full"},
+					"description": "New tool access level",
+				},
+			},
+			"required": []string{"agent_id"},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
+// DeleteAgentTool tool definition.
+var DeleteAgentTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "delete_agent",
+		Description: "Delete a custom agent (preset agents cannot be deleted)",
+		Annotations: &mcp.ToolAnnotations{Title: "Delete Agent"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"agent_id": map[string]any{
+					"type":        "string",
+					"description": "ID of the agent to delete",
+				},
+			},
+			"required": []string{"agent_id"},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
+// ListAgentsTool tool definition.
+var ListAgentsTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "list_agents",
+		Description: "List all available agents (both preset and custom)",
+		Annotations: &mcp.ToolAnnotations{Title: "List Agents"},
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
+// ListModelsTool tool definition.
+var ListModelsTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "list_models",
+		Description: "List all available AI models",
+		Annotations: &mcp.ToolAnnotations{Title: "List Models"},
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
+// ListToolsDef tool definition.
+var ListToolsDef = &Tool{
+	Tool: mcp.Tool{
+		Name:        "list_tools",
+		Description: "List all available tools and their profiles",
+		Annotations: &mcp.ToolAnnotations{Title: "List Tools"},
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
+// BossTools returns all boss agent tools.
+func BossTools() []*Tool {
+	return []*Tool{
+		CreateAgentTool,
+		ForkAgentTool,
+		EditAgentTool,
+		DeleteAgentTool,
+		ListAgentsTool,
+		ListModelsTool,
+		ListToolsDef,
+	}
+}
+
+// ExecuteCreateAgent handles the create_agent tool.
+func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[string]any) (*Result, error) {
+	name, err := ReadString(input, "name", true)
+	if err != nil {
+		return ErrorResult("create_agent", err.Error()), nil
+	}
+
+	description := ReadStringDefault(input, "description", "")
+	model := ReadStringDefault(input, "model", "")
+	systemPrompt := ReadStringDefault(input, "system_prompt", "")
+	toolProfile := ReadStringDefault(input, "tool_profile", "full")
+
+	// Generate unique ID
+	agentID := uuid.NewString()[:8]
+	now := time.Now().Unix()
+
+	agent := AgentData{
+		ID:           agentID,
+		Name:         name,
+		Description:  description,
+		Model:        model,
+		SystemPrompt: systemPrompt,
+		ToolProfile:  toolProfile,
+		IsPreset:     false,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	if err := e.store.SaveAgent(ctx, agent); err != nil {
+		return ErrorResult("create_agent", fmt.Sprintf("failed to save agent: %v", err)), nil
+	}
+
+	return JSONResult(map[string]any{
+		"success":  true,
+		"agent_id": agentID,
+		"message":  fmt.Sprintf("Created agent '%s' with ID '%s'", name, agentID),
+	}), nil
+}
+
+// ExecuteForkAgent handles the fork_agent tool.
+func (e *BossToolExecutor) ExecuteForkAgent(ctx context.Context, input map[string]any) (*Result, error) {
+	sourceID, err := ReadString(input, "source_id", true)
+	if err != nil {
+		return ErrorResult("fork_agent", err.Error()), nil
+	}
+
+	agents, err := e.store.LoadAgents(ctx)
+	if err != nil {
+		return ErrorResult("fork_agent", fmt.Sprintf("failed to load agents: %v", err)), nil
+	}
+
+	source, ok := agents[sourceID]
+	if !ok {
+		return ErrorResult("fork_agent", fmt.Sprintf("agent '%s' not found", sourceID)), nil
+	}
+
+	newName := ReadStringDefault(input, "new_name", fmt.Sprintf("%s (Fork)", source.Name))
+
+	// Create forked agent
+	agentID := uuid.NewString()[:8]
+	now := time.Now().Unix()
+
+	forked := AgentData{
+		ID:            agentID,
+		Name:          newName,
+		Description:   source.Description,
+		Model:         source.Model,
+		SystemPrompt:  source.SystemPrompt,
+		ToolProfile:   source.ToolProfile,
+		ToolOverrides: source.ToolOverrides,
+		Temperature:   source.Temperature,
+		IsPreset:      false,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	if err := e.store.SaveAgent(ctx, forked); err != nil {
+		return ErrorResult("fork_agent", fmt.Sprintf("failed to save forked agent: %v", err)), nil
+	}
+
+	return JSONResult(map[string]any{
+		"success":   true,
+		"agent_id":  agentID,
+		"source_id": sourceID,
+		"message":   fmt.Sprintf("Forked '%s' as '%s' with ID '%s'", source.Name, newName, agentID),
+	}), nil
+}
+
+// ExecuteEditAgent handles the edit_agent tool.
+func (e *BossToolExecutor) ExecuteEditAgent(ctx context.Context, input map[string]any) (*Result, error) {
+	agentID, err := ReadString(input, "agent_id", true)
+	if err != nil {
+		return ErrorResult("edit_agent", err.Error()), nil
+	}
+
+	agents, err := e.store.LoadAgents(ctx)
+	if err != nil {
+		return ErrorResult("edit_agent", fmt.Sprintf("failed to load agents: %v", err)), nil
+	}
+
+	agent, ok := agents[agentID]
+	if !ok {
+		return ErrorResult("edit_agent", fmt.Sprintf("agent '%s' not found", agentID)), nil
+	}
+
+	if agent.IsPreset {
+		return ErrorResult("edit_agent", "cannot modify preset agents - fork it first"), nil
+	}
+
+	// Apply updates
+	if name, _ := ReadString(input, "name", false); name != "" {
+		agent.Name = name
+	}
+	if desc, _ := ReadString(input, "description", false); desc != "" {
+		agent.Description = desc
+	}
+	if model, _ := ReadString(input, "model", false); model != "" {
+		agent.Model = model
+	}
+	if prompt, _ := ReadString(input, "system_prompt", false); prompt != "" {
+		agent.SystemPrompt = prompt
+	}
+	if profile, _ := ReadString(input, "tool_profile", false); profile != "" {
+		agent.ToolProfile = profile
+	}
+
+	agent.UpdatedAt = time.Now().Unix()
+
+	if err := e.store.SaveAgent(ctx, agent); err != nil {
+		return ErrorResult("edit_agent", fmt.Sprintf("failed to save agent: %v", err)), nil
+	}
+
+	return JSONResult(map[string]any{
+		"success":  true,
+		"agent_id": agentID,
+		"message":  fmt.Sprintf("Updated agent '%s'", agent.Name),
+	}), nil
+}
+
+// ExecuteDeleteAgent handles the delete_agent tool.
+func (e *BossToolExecutor) ExecuteDeleteAgent(ctx context.Context, input map[string]any) (*Result, error) {
+	agentID, err := ReadString(input, "agent_id", true)
+	if err != nil {
+		return ErrorResult("delete_agent", err.Error()), nil
+	}
+
+	agents, err := e.store.LoadAgents(ctx)
+	if err != nil {
+		return ErrorResult("delete_agent", fmt.Sprintf("failed to load agents: %v", err)), nil
+	}
+
+	agent, ok := agents[agentID]
+	if !ok {
+		return ErrorResult("delete_agent", fmt.Sprintf("agent '%s' not found", agentID)), nil
+	}
+
+	if agent.IsPreset {
+		return ErrorResult("delete_agent", "cannot delete preset agents"), nil
+	}
+
+	if err := e.store.DeleteAgent(ctx, agentID); err != nil {
+		return ErrorResult("delete_agent", fmt.Sprintf("failed to delete agent: %v", err)), nil
+	}
+
+	return JSONResult(map[string]any{
+		"success":  true,
+		"agent_id": agentID,
+		"message":  fmt.Sprintf("Deleted agent '%s'", agent.Name),
+	}), nil
+}
+
+// ExecuteListAgents handles the list_agents tool.
+func (e *BossToolExecutor) ExecuteListAgents(ctx context.Context, _ map[string]any) (*Result, error) {
+	agents, err := e.store.LoadAgents(ctx)
+	if err != nil {
+		return ErrorResult("list_agents", fmt.Sprintf("failed to load agents: %v", err)), nil
+	}
+
+	var agentList []map[string]any
+	for _, agent := range agents {
+		agentList = append(agentList, map[string]any{
+			"id":           agent.ID,
+			"name":         agent.Name,
+			"description":  agent.Description,
+			"model":        agent.Model,
+			"tool_profile": agent.ToolProfile,
+			"is_preset":    agent.IsPreset,
+		})
+	}
+
+	return JSONResult(map[string]any{
+		"agents": agentList,
+		"count":  len(agentList),
+	}), nil
+}
+
+// ExecuteListModels handles the list_models tool.
+func (e *BossToolExecutor) ExecuteListModels(ctx context.Context, _ map[string]any) (*Result, error) {
+	models, err := e.store.ListModels(ctx)
+	if err != nil {
+		return ErrorResult("list_models", fmt.Sprintf("failed to load models: %v", err)), nil
+	}
+
+	var modelList []map[string]any
+	for _, model := range models {
+		modelList = append(modelList, map[string]any{
+			"id":          model.ID,
+			"name":        model.Name,
+			"provider":    model.Provider,
+			"description": model.Description,
+		})
+	}
+
+	return JSONResult(map[string]any{
+		"models": modelList,
+		"count":  len(modelList),
+	}), nil
+}
+
+// ExecuteListTools handles the list_tools tool.
+func (e *BossToolExecutor) ExecuteListTools(ctx context.Context, _ map[string]any) (*Result, error) {
+	toolInfos, err := e.store.ListAvailableTools(ctx)
+	if err != nil {
+		return ErrorResult("list_tools", fmt.Sprintf("failed to load tools: %v", err)), nil
+	}
+
+	var toolList []map[string]any
+	for _, tool := range toolInfos {
+		toolList = append(toolList, map[string]any{
+			"name":        tool.Name,
+			"description": tool.Description,
+			"type":        string(tool.Type),
+			"group":       tool.Group,
+			"enabled":     tool.Enabled,
+		})
+	}
+
+	// Add profile descriptions
+	profiles := map[string][]string{
+		"minimal": {},
+		"coding":  {GroupCalc, GroupSearch, GroupCode},
+		"full":    {GroupCalc, GroupSearch, GroupCode, GroupOnline},
+	}
+
+	return JSONResult(map[string]any{
+		"tools":    toolList,
+		"count":    len(toolList),
+		"profiles": profiles,
+	}), nil
+}
