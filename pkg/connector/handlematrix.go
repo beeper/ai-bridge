@@ -537,6 +537,9 @@ func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal
 	// Builtin tools
 	sb.WriteString("Builtin Tools:\n")
 	for _, tool := range BuiltinTools() {
+		if tool.Name == ToolNameMessage && !hasAssignedAgent(meta) {
+			continue
+		}
 		enabled := oc.isToolEnabled(meta, tool.Name)
 		status := "✗"
 		if enabled {

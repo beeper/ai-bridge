@@ -28,6 +28,13 @@ const (
 	ToolNameSetChatInfo = "set_chat_info"
 )
 
+func hasAssignedAgent(meta *PortalMetadata) bool {
+	if meta == nil {
+		return false
+	}
+	return meta.AgentID != "" || meta.DefaultAgentID != ""
+}
+
 // getDefaultToolsConfig returns the default tools configuration for a new room.
 func getDefaultToolsConfig(_ string) ToolsConfig {
 	config := ToolsConfig{
@@ -79,7 +86,7 @@ func ensureToolsConfig(meta *PortalMetadata, provider string) bool {
 	}
 	if len(meta.ToolsConfig.Tools) == 0 {
 		meta.ToolsConfig = getDefaultToolsConfig(provider)
-		return true
+		changed = true
 	}
 
 	// Ensure web search tool exists (enabled by default unless explicitly disabled)
@@ -102,6 +109,21 @@ func ensureToolsConfig(meta *PortalMetadata, provider string) bool {
 		changed = true
 	}
 
+	// Only expose message tool when an agent is assigned to the room.
+	if hasAssignedAgent(meta) {
+		if _, ok := meta.ToolsConfig.Tools[ToolNameMessage]; !ok {
+			registerTool(&meta.ToolsConfig, mcp.Tool{
+				Name:        ToolNameMessage,
+				Description: "Send messages and perform channel actions in the current chat",
+				Annotations: &mcp.ToolAnnotations{Title: "Message"},
+			}, "builtin")
+			changed = true
+		}
+	} else if _, ok := meta.ToolsConfig.Tools[ToolNameMessage]; ok {
+		delete(meta.ToolsConfig.Tools, ToolNameMessage)
+		changed = true
+	}
+
 	return changed
 }
 
@@ -121,15 +143,20 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	var agentPolicy *tools.Policy
 	var agent *agents.AgentDefinition
 	store := NewAgentStoreAdapter(oc)
-	agent, err := store.GetAgentForRoom(context.Background(), meta)
-	if err == nil && agent != nil {
-		agentPolicy = agents.CreatePolicyFromProfile(agent, tools.DefaultRegistry())
+	if hasAssignedAgent(meta) {
+		agent, err := store.GetAgentForRoom(context.Background(), meta)
+		if err == nil && agent != nil {
+			agentPolicy = agents.CreatePolicyFromProfile(agent, tools.DefaultRegistry())
+		}
 	}
 
 	var toolsList []ToolInfo
 
 	for name, entry := range meta.ToolsConfig.Tools {
 		if entry == nil {
+			continue
+		}
+		if name == ToolNameMessage && !hasAssignedAgent(meta) {
 			continue
 		}
 
@@ -201,18 +228,24 @@ func (oc *AIClient) getToolStateWithSource(meta *PortalMetadata, toolName string
 // isToolEnabled checks if a specific tool is enabled
 // Priority: Agent Policy → Room → User → Provider/Model defaults
 func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
+	if toolName == ToolNameMessage && !hasAssignedAgent(meta) {
+		return false
+	}
+
 	// 0. Check agent policy first (if room has an agent assigned)
-	store := NewAgentStoreAdapter(oc)
-	agent, err := store.GetAgentForRoom(context.Background(), meta)
-	if err == nil && agent != nil {
-		// Boss agent has its own tools - always allow Boss tools for Boss agent
-		if agents.IsBossAgent(agent.ID) && tools.IsBossTool(toolName) {
-			return true
-		}
-		// Use agent policy to check if tool is allowed
-		policy := agents.CreatePolicyFromProfile(agent, tools.DefaultRegistry())
-		if !policy.IsAllowed(toolName) {
-			return false
+	if hasAssignedAgent(meta) {
+		store := NewAgentStoreAdapter(oc)
+		agent, err := store.GetAgentForRoom(context.Background(), meta)
+		if err == nil && agent != nil {
+			// Boss agent has its own tools - always allow Boss tools for Boss agent
+			if agents.IsBossAgent(agent.ID) && tools.IsBossTool(toolName) {
+				return true
+			}
+			// Use agent policy to check if tool is allowed
+			policy := agents.CreatePolicyFromProfile(agent, tools.DefaultRegistry())
+			if !policy.IsAllowed(toolName) {
+				return false
+			}
 		}
 	}
 
@@ -714,7 +747,7 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 		return nil, nil, fmt.Errorf("failed to save portal: %w", err)
 	}
 
-	chatInfo := oc.composeChatInfo(title, pmeta.SystemPrompt, modelID)
+	chatInfo := oc.composeChatInfo(title, modelID)
 	return portal, chatInfo, nil
 }
 
@@ -948,11 +981,11 @@ func (oc *AIClient) chatInfoFromPortal(portal *bridgev2.Portal) *bridgev2.ChatIn
 			title = modelContactName(modelID, oc.findModelInfo(modelID))
 		}
 	}
-	return oc.composeChatInfo(title, meta.SystemPrompt, modelID)
+	return oc.composeChatInfo(title, modelID)
 }
 
 // composeChatInfo creates a ChatInfo struct for a chat
-func (oc *AIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.ChatInfo {
+func (oc *AIClient) composeChatInfo(title, modelID string) *bridgev2.ChatInfo {
 	if modelID == "" {
 		modelID = oc.effectiveModel(nil)
 	}
@@ -990,7 +1023,7 @@ func (oc *AIClient) composeChatInfo(title, prompt, modelID string) *bridgev2.Cha
 	}
 	return &bridgev2.ChatInfo{
 		Name:  ptr.Ptr(title),
-		Topic: ptrIfNotEmpty(prompt),
+		Topic: nil, // Topic managed via Matrix events, not system prompt
 		Type:  ptr.Ptr(database.RoomTypeDM),
 		Members: &bridgev2.ChatMemberList{
 			IsFull:      true,

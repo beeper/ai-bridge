@@ -2,6 +2,7 @@ package connector
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,21 +128,21 @@ func fnTemp(ce *commands.Event) {
 	ce.Reply("Temperature set to: %.2f", temp)
 }
 
-// CommandPrompt handles the !ai prompt command
-var CommandPrompt = &commands.FullHandler{
-	Func:    fnPrompt,
-	Name:    "prompt",
-	Aliases: []string{"system"},
+// CommandSystemPrompt handles the !ai system-prompt command
+var CommandSystemPrompt = &commands.FullHandler{
+	Func:    fnSystemPrompt,
+	Name:    "system-prompt",
+	Aliases: []string{"prompt", "system"}, // Backwards compatibility
 	Help: commands.HelpMeta{
 		Section:     HelpSectionAI,
-		Description: "Get or set the system prompt",
+		Description: "Get or set the system prompt (shows full constructed prompt)",
 		Args:        "[_text_]",
 	},
 	RequiresPortal: true,
 	RequiresLogin:  true,
 }
 
-func fnPrompt(ce *commands.Event) {
+func fnSystemPrompt(ce *commands.Event) {
 	client := getAIClient(ce)
 	meta := getPortalMeta(ce)
 	if client == nil || meta == nil {
@@ -150,13 +151,20 @@ func fnPrompt(ce *commands.Event) {
 	}
 
 	if len(ce.Args) == 0 {
-		current := client.effectivePrompt(meta)
-		if current == "" {
-			current = "(none)"
-		} else if len(current) > 100 {
-			current = current[:100] + "..."
+		// Show full constructed prompt (agent + room levels merged)
+		fullPrompt := client.effectiveAgentPrompt(ce.Ctx, ce.Portal, meta)
+		if fullPrompt == "" {
+			fullPrompt = client.effectivePrompt(meta)
 		}
-		ce.Reply("Current system prompt: %s", current)
+		if fullPrompt == "" {
+			fullPrompt = "(none)"
+		}
+		// Truncate for display
+		totalLen := len(fullPrompt)
+		if totalLen > 500 {
+			fullPrompt = fullPrompt[:500] + "...\n\n(truncated, full prompt is " + strconv.Itoa(totalLen) + " chars)"
+		}
+		ce.Reply("Current system prompt:\n%s", fullPrompt)
 		return
 	}
 
@@ -167,7 +175,7 @@ func fnPrompt(ce *commands.Event) {
 	}
 
 	meta.SystemPrompt = ce.RawArgs
-	client.savePortalQuiet(ce.Ctx, ce.Portal, "prompt change")
+	client.savePortalQuiet(ce.Ctx, ce.Portal, "system prompt change")
 	ce.Reply("System prompt updated.")
 }
 
@@ -528,7 +536,7 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 	proc.AddHandlers(
 		CommandModel,
 		CommandTemp,
-		CommandPrompt,
+		CommandSystemPrompt,
 		CommandContext,
 		CommandTokens,
 		CommandConfig,
