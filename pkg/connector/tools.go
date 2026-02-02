@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -626,6 +627,15 @@ func executeWebFetch(ctx context.Context, args map[string]any) (string, error) {
 	if !ok || urlStr == "" {
 		return "", fmt.Errorf("missing or invalid 'url' argument")
 	}
+	urlStr = strings.TrimSpace(urlStr)
+	if urlStr == "" {
+		return "", fmt.Errorf("missing or invalid 'url' argument")
+	}
+
+	extractMode := "markdown"
+	if mode, ok := args["extractMode"].(string); ok && strings.EqualFold(strings.TrimSpace(mode), "text") {
+		extractMode = "text"
+	}
 
 	// Parse and validate URL
 	parsedURL, err := url.Parse(urlStr)
@@ -643,6 +653,9 @@ func executeWebFetch(ctx context.Context, args map[string]any) (string, error) {
 	} else if mc, ok := args["maxChars"].(float64); ok && mc > 0 {
 		maxChars = int(mc)
 	}
+	if maxChars < 100 {
+		maxChars = 100
+	}
 
 	// Create HTTP client with timeout
 	client := &http.Client{
@@ -658,6 +671,7 @@ func executeWebFetch(ctx context.Context, args map[string]any) (string, error) {
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 
 	// Make request
+	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch URL: %w", err)
@@ -675,15 +689,59 @@ func executeWebFetch(ctx context.Context, args map[string]any) (string, error) {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// Extract text content (simple approach - strip HTML tags)
-	content := extractTextFromHTML(string(bodyBytes))
-
-	// Truncate to max chars
-	if len(content) > maxChars {
-		content = content[:maxChars] + "...[truncated]"
+	contentType := normalizeContentType(resp.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType = "application/octet-stream"
 	}
 
-	return fmt.Sprintf(`{"url":%q,"content":%q,"length":%d}`, urlStr, content, len(content)), nil
+	extractor := "basic"
+	content := string(bodyBytes)
+	if strings.Contains(contentType, "text/html") {
+		if extractMode == "markdown" {
+			content = htmlToMarkdownBasic(content)
+			extractor = "basic-markdown"
+		} else {
+			content = extractTextFromHTML(content)
+			extractor = "basic-text"
+		}
+	} else if strings.Contains(contentType, "application/json") {
+		var decoded any
+		if err := json.Unmarshal(bodyBytes, &decoded); err == nil {
+			pretty, _ := json.MarshalIndent(decoded, "", "  ")
+			content = string(pretty)
+			extractor = "json"
+		}
+	}
+
+	// Truncate to max chars
+	rawLength := len(content)
+	truncated := false
+	if len(content) > maxChars {
+		content = content[:maxChars] + "...[truncated]"
+		truncated = true
+	}
+
+	finalURL := urlStr
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+	}
+	result := map[string]any{
+		"url":         urlStr,
+		"finalUrl":    finalURL,
+		"status":      resp.StatusCode,
+		"contentType": contentType,
+		"extractMode": extractMode,
+		"extractor":   extractor,
+		"truncated":   truncated,
+		"length":      len(content),
+		"rawLength":   rawLength,
+		"fetchedAt":   time.Now().Format(time.RFC3339),
+		"tookMs":      time.Since(start).Milliseconds(),
+		"text":        content,
+		"content":     content, // Backwards compatibility
+	}
+	resultJSON, _ := json.Marshal(result)
+	return string(resultJSON), nil
 }
 
 // extractTextFromHTML does a simple extraction of text from HTML.
@@ -742,6 +800,72 @@ func extractTextFromHTML(html string) string {
 	}
 
 	return strings.TrimSpace(text)
+}
+
+var (
+	htmlAnchorRegex = regexp.MustCompile(`(?is)<a\s+[^>]*href\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a>`)
+	htmlTagRegex    = regexp.MustCompile(`(?is)<[^>]+>`)
+)
+
+func htmlToMarkdownBasic(html string) string {
+	html = removeHTMLElement(html, "script")
+	html = removeHTMLElement(html, "style")
+	html = removeHTMLElement(html, "noscript")
+
+	for i := 1; i <= 6; i++ {
+		prefix := strings.Repeat("#", i)
+		re := regexp.MustCompile(fmt.Sprintf(`(?is)<h%d[^>]*>(.*?)</h%d>`, i, i))
+		html = re.ReplaceAllString(html, "\n"+prefix+" $1\n")
+	}
+
+	html = htmlAnchorRegex.ReplaceAllStringFunc(html, func(match string) string {
+		parts := htmlAnchorRegex.FindStringSubmatch(match)
+		if len(parts) < 3 {
+			return ""
+		}
+		url := strings.TrimSpace(parts[1])
+		text := strings.TrimSpace(htmlTagRegex.ReplaceAllString(parts[2], ""))
+		if text == "" {
+			text = url
+		}
+		return fmt.Sprintf("[%s](%s)", text, url)
+	})
+
+	html = regexp.MustCompile(`(?is)<br\s*/?>`).ReplaceAllString(html, "\n")
+	html = regexp.MustCompile(`(?is)<li[^>]*>`).ReplaceAllString(html, "\n- ")
+	html = regexp.MustCompile(`(?is)</li>`).ReplaceAllString(html, "\n")
+	html = regexp.MustCompile(`(?is)</p>`).ReplaceAllString(html, "\n")
+	html = regexp.MustCompile(`(?is)<p[^>]*>`).ReplaceAllString(html, "\n")
+	html = regexp.MustCompile(`(?is)</div>`).ReplaceAllString(html, "\n")
+	html = regexp.MustCompile(`(?is)<div[^>]*>`).ReplaceAllString(html, "\n")
+
+	html = htmlTagRegex.ReplaceAllString(html, "")
+
+	text := html
+	text = strings.ReplaceAll(text, "&nbsp;", " ")
+	text = strings.ReplaceAll(text, "&amp;", "&")
+	text = strings.ReplaceAll(text, "&lt;", "<")
+	text = strings.ReplaceAll(text, "&gt;", ">")
+	text = strings.ReplaceAll(text, "&quot;", "\"")
+	text = strings.ReplaceAll(text, "&#39;", "'")
+
+	lines := strings.Split(text, "\n")
+	var cleaned []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			cleaned = append(cleaned, trimmed)
+		}
+	}
+	return strings.Join(cleaned, "\n")
+}
+
+func normalizeContentType(value string) string {
+	if value == "" {
+		return ""
+	}
+	parts := strings.Split(value, ";")
+	return strings.TrimSpace(parts[0])
 }
 
 // removeHTMLElement removes all instances of an HTML element and its content.
