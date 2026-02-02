@@ -42,6 +42,10 @@ func hasBossAgent(meta *PortalMetadata) bool {
 	return agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID)
 }
 
+func isBossPrivilegedTool(toolName string) bool {
+	return tools.IsBossTool(toolName) || toolName == toolspec.GravatarFetchName || toolName == toolspec.GravatarSetName
+}
+
 // getDefaultToolsConfig returns the default tools configuration for a new room.
 func getDefaultToolsConfig(_ string) ToolsConfig {
 	config := ToolsConfig{
@@ -221,8 +225,8 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 		var reason string
 
 		if agentPolicy != nil {
-			// Boss agent with boss tools - skip policy check
-			isBossWithBossTool := agent != nil && agents.IsBossAgent(agent.ID) && tools.IsBossTool(name)
+			// Boss agent with boss-only tools - skip policy check
+			isBossWithBossTool := agent != nil && agents.IsBossAgent(agent.ID) && isBossPrivilegedTool(name)
 			if !isBossWithBossTool && !agentPolicy.IsAllowed(name) {
 				enabled = false
 				source = SourceAgentPolicy
@@ -285,8 +289,8 @@ func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
 		store := NewAgentStoreAdapter(oc)
 		agent, err := store.GetAgentForRoom(context.Background(), meta)
 		if err == nil && agent != nil {
-			// Boss agent has its own tools - always allow Boss tools for Boss agent
-			if agents.IsBossAgent(agent.ID) && tools.IsBossTool(toolName) {
+			// Boss agent has its own tools - always allow boss-only tools for Boss agent
+			if agents.IsBossAgent(agent.ID) && isBossPrivilegedTool(toolName) {
 				return true
 			}
 			// Use agent policy to check if tool is allowed
