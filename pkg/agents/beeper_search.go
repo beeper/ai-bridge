@@ -42,5 +42,5 @@ func GetBeeperSearch() *AgentDefinition {
 
 // IsBeeperSearch checks if an agent ID is the Beeper Search agent.
 func IsBeeperSearch(agentID string) bool {
-	return agentID == "beeper_search"
+	return agentID == BeeperSearchAgent.ID
 }

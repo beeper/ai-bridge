@@ -70,8 +70,6 @@ func getDefaultToolsConfig(_ string) ToolsConfig {
 	registerTool(&config, defaultMemoryGetTool(), "builtin")
 	registerTool(&config, defaultMemoryStoreTool(), "builtin")
 	registerTool(&config, defaultMemoryForgetTool(), "builtin")
-	registerTool(&config, defaultGravatarFetchTool(), "builtin")
-	registerTool(&config, defaultGravatarSetTool(), "builtin")
 
 	return config
 }

@@ -1,5 +1,13 @@
 package tools
 
+import "sync"
+
+var (
+	toolLookupOnce    sync.Once
+	builtinToolByName map[string]*Tool
+	allToolByName     map[string]*Tool
+)
+
 // Tool group constants for policy composition (like OpenClaw's TOOL_GROUPS).
 const (
 	GroupSearch    = "group:search"
@@ -55,20 +63,28 @@ func BuiltinRegistry() *Registry {
 
 // GetBuiltinTool returns a builtin tool by name.
 func GetBuiltinTool(name string) *Tool {
-	for _, tool := range BuiltinTools() {
-		if tool.Name == name {
-			return tool
-		}
-	}
-	return nil
+	toolLookupOnce.Do(initToolLookup)
+	return builtinToolByName[name]
 }
 
 // GetTool returns any tool by name (builtin or provider).
 func GetTool(name string) *Tool {
-	for _, tool := range AllTools() {
-		if tool.Name == name {
-			return tool
+	toolLookupOnce.Do(initToolLookup)
+	return allToolByName[name]
+}
+
+func initToolLookup() {
+	builtinToolByName = make(map[string]*Tool)
+	for _, tool := range BuiltinTools() {
+		if _, exists := builtinToolByName[tool.Name]; !exists {
+			builtinToolByName[tool.Name] = tool
 		}
 	}
-	return nil
+
+	allToolByName = make(map[string]*Tool)
+	for _, tool := range AllTools() {
+		if _, exists := allToolByName[tool.Name]; !exists {
+			allToolByName[tool.Name] = tool
+		}
+	}
 }

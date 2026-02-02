@@ -1480,11 +1480,8 @@ func executeSessionStatus(ctx context.Context, args map[string]any) (string, err
 	}
 
 	// Get current time info
-	now := time.Now()
-	timezone := "UTC"
-	if tz := os.Getenv("TZ"); tz != "" {
-		timezone = tz
-	}
+	timezone, loc := btc.Client.resolveUserTimezone()
+	now := time.Now().In(loc)
 	timeStr := now.Format("2006-01-02 15:04:05")
 	dayOfWeek := now.Weekday().String()
 

@@ -950,12 +950,14 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		return ""
 	}
 
+	timezone, loc := oc.resolveUserTimezone()
+
 	// Build params for prompt generation
 	params := agents.SystemPromptParams{
 		Agent:       agent,
 		ExtraPrompt: meta.SystemPrompt, // Room-level addition
-		Timezone:    "UTC",             // TODO: get user timezone
-		Date:        time.Now(),
+		Timezone:    timezone,
+		Date:        time.Now().In(loc),
 	}
 
 	// Add room context if available
