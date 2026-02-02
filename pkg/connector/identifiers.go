@@ -169,11 +169,6 @@ func globalMemoryPortalKey(loginID networkid.UserLoginID) networkid.PortalKey {
 	}
 }
 
-// isGlobalMemoryRoom checks if a portal ID represents a global memory room.
-func isGlobalMemoryRoom(portalID networkid.PortalID) bool {
-	return strings.HasSuffix(string(portalID), ":global-memory")
-}
-
 // MemoryScope represents where a memory is stored
 type MemoryScope string
 
