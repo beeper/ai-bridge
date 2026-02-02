@@ -1922,7 +1922,7 @@ func (oc *AIClient) generateOutboundLinkPreviews(ctx context.Context, text strin
 	defer cancel()
 
 	previewsWithImages := previewer.FetchPreviews(fetchCtx, urls)
-	
+
 	// Upload images to Matrix and get final previews
 	return UploadPreviewImages(ctx, previewsWithImages, intent, portal.MXID)
 }

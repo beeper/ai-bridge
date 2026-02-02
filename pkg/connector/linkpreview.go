@@ -75,7 +75,7 @@ var globalPreviewCache = &previewCache{
 func (c *previewCache) get(url string) *PreviewWithImage {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	entry, ok := c.entries[url]
 	if !ok || time.Now().After(entry.expiresAt) {
 		return nil
@@ -86,12 +86,12 @@ func (c *previewCache) get(url string) *PreviewWithImage {
 func (c *previewCache) set(url string, preview *PreviewWithImage, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	c.entries[url] = &previewCacheEntry{
 		preview:   preview,
 		expiresAt: time.Now().Add(ttl),
 	}
-	
+
 	// Simple cleanup: remove expired entries if cache is getting large
 	if len(c.entries) > 1000 {
 		now := time.Now()
@@ -290,7 +290,7 @@ func (lp *LinkPreviewer) FetchPreview(ctx context.Context, urlStr string) (*Prev
 				}
 			}
 		}
-		
+
 		imageData, mimeType, width, height := lp.downloadImage(ctx, imageURL)
 		if imageData != nil {
 			result.ImageData = imageData
@@ -314,25 +314,25 @@ func (lp *LinkPreviewer) downloadImage(ctx context.Context, imageURL string) ([]
 	if err != nil {
 		return nil, "", 0, 0
 	}
-	
+
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
 	req.Header.Set("Accept", "image/*")
-	
+
 	resp, err := lp.httpClient.Do(req)
 	if err != nil {
 		return nil, "", 0, 0
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, "", 0, 0
 	}
-	
+
 	contentType := resp.Header.Get("Content-Type")
 	if !strings.HasPrefix(contentType, "image/") {
 		return nil, "", 0, 0
 	}
-	
+
 	// Read with size limit
 	maxBytes := lp.config.MaxImageBytes
 	if maxBytes <= 0 {
@@ -343,20 +343,20 @@ func (lp *LinkPreviewer) downloadImage(ctx context.Context, imageURL string) ([]
 	if err != nil || len(data) == 0 {
 		return nil, "", 0, 0
 	}
-	
+
 	// Detect actual mime type
 	mimeType := http.DetectContentType(data)
 	if !strings.HasPrefix(mimeType, "image/") {
 		return nil, "", 0, 0
 	}
-	
+
 	// Get dimensions
 	width, height := 0, 0
 	if img, _, err := image.DecodeConfig(strings.NewReader(string(data))); err == nil {
 		width = img.Width
 		height = img.Height
 	}
-	
+
 	return data, mimeType, width, height
 }
 
@@ -368,7 +368,7 @@ func (lp *LinkPreviewer) FetchPreviews(ctx context.Context, urls []string) []*Pr
 
 	var wg sync.WaitGroup
 	results := make([]*PreviewWithImage, len(urls))
-	
+
 	for i, u := range urls {
 		wg.Add(1)
 		go func(idx int, urlStr string) {
@@ -403,9 +403,9 @@ func UploadPreviewImages(ctx context.Context, previews []*PreviewWithImage, inte
 		if p == nil || p.Preview == nil {
 			continue
 		}
-		
+
 		preview := p.Preview
-		
+
 		// Upload image if we have data
 		if len(p.ImageData) > 0 && intent != nil {
 			uri, file, err := intent.UploadMedia(ctx, roomID, p.ImageData, "", preview.ImageType)
@@ -414,10 +414,10 @@ func UploadPreviewImages(ctx context.Context, previews []*PreviewWithImage, inte
 				preview.ImageEncryption = file
 			}
 		}
-		
+
 		result = append(result, preview)
 	}
-	
+
 	return result
 }
 
@@ -426,7 +426,7 @@ func ExtractBeeperPreviews(previews []*PreviewWithImage) []*event.BeeperLinkPrev
 	if len(previews) == 0 {
 		return nil
 	}
-	
+
 	result := make([]*event.BeeperLinkPreview, 0, len(previews))
 	for _, p := range previews {
 		if p != nil && p.Preview != nil {

@@ -768,7 +768,7 @@ func (oc *AIClient) effectivePrompt(meta *PortalMetadata) string {
 // getLinkPreviewConfig returns the link preview configuration, with defaults filled in.
 func (oc *AIClient) getLinkPreviewConfig() LinkPreviewConfig {
 	config := DefaultLinkPreviewConfig()
-	
+
 	if oc.connector.Config.LinkPreviews != nil {
 		cfg := oc.connector.Config.LinkPreviews
 		// Apply explicit settings only if they differ from zero values
@@ -797,7 +797,7 @@ func (oc *AIClient) getLinkPreviewConfig() LinkPreviewConfig {
 			config.CacheTTL = cfg.CacheTTL
 		}
 	}
-	
+
 	return config
 }
 
