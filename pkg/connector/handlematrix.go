@@ -35,7 +35,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 	if msg.Event != nil && oc.inboundDedupeCache != nil {
 		dedupeKey := oc.buildDedupeKey(portal.MXID, msg.Event.ID)
 		if oc.inboundDedupeCache.Check(dedupeKey) {
-			oc.log.Debug().Str("event_id", msg.Event.ID.String()).Msg("Skipping duplicate message")
+			oc.log.Debug().Stringer("event_id", msg.Event.ID).Msg("Skipping duplicate message")
 			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 		}
 	}

@@ -19,8 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/shared/media"
 	_ "golang.org/x/image/webp"
+
+	"github.com/beeper/ai-bridge/pkg/shared/media"
 )
 
 type imageGenProvider string

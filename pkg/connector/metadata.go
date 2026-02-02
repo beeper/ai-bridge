@@ -66,15 +66,15 @@ type UserDefaults struct {
 
 // UserLoginMetadata is stored on each login row to keep per-user settings.
 type UserLoginMetadata struct {
-	Persona              string      `json:"persona,omitempty"`
-	Provider             string      `json:"provider,omitempty"` // Selected provider (beeper, openai, openrouter, custom)
-	APIKey               string      `json:"api_key,omitempty"`
-	BaseURL              string      `json:"base_url,omitempty"`               // Per-user API endpoint
-	TitleGenerationModel string      `json:"title_generation_model,omitempty"` // Model to use for generating chat titles
-	NextChatIndex        int         `json:"next_chat_index,omitempty"`
-	DefaultChatPortalID  string      `json:"default_chat_portal_id,omitempty"`
-	ModelCache           *ModelCache `json:"model_cache,omitempty"`
-	ChatsSynced          bool        `json:"chats_synced,omitempty"` // True after initial bootstrap completed successfully
+	Persona              string         `json:"persona,omitempty"`
+	Provider             string         `json:"provider,omitempty"` // Selected provider (beeper, openai, openrouter, custom)
+	APIKey               string         `json:"api_key,omitempty"`
+	BaseURL              string         `json:"base_url,omitempty"`               // Per-user API endpoint
+	TitleGenerationModel string         `json:"title_generation_model,omitempty"` // Model to use for generating chat titles
+	NextChatIndex        int            `json:"next_chat_index,omitempty"`
+	DefaultChatPortalID  string         `json:"default_chat_portal_id,omitempty"`
+	ModelCache           *ModelCache    `json:"model_cache,omitempty"`
+	ChatsSynced          bool           `json:"chats_synced,omitempty"` // True after initial bootstrap completed successfully
 	Gravatar             *GravatarState `json:"gravatar,omitempty"`
 
 	// FileAnnotationCache stores parsed PDF content from OpenRouter's file-parser plugin

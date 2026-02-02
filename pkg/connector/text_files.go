@@ -249,10 +249,10 @@ func buildTextFileMessage(caption string, hasUserCaption bool, filename string, 
 }
 
 var xmlEscapeMap = map[rune]string{
-	'<': "&lt;",
-	'>': "&gt;",
-	'&': "&amp;",
-	'"': "&quot;",
+	'<':  "&lt;",
+	'>':  "&gt;",
+	'&':  "&amp;",
+	'"':  "&quot;",
 	'\'': "&apos;",
 }
 
