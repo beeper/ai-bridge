@@ -467,7 +467,7 @@ func (oc *AIClient) streamingResponse(
 		state.firstToken = false
 		state.firstTokenAtMs = time.Now().UnixMilli()
 		oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
-		state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID)
+		state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID, state.sourceEventID)
 		if state.initialEventID == "" {
 			log.Error().Msg("Failed to send initial streaming message for tool call")
 			return false
@@ -495,7 +495,7 @@ func (oc *AIClient) streamingResponse(
 				state.firstTokenAtMs = time.Now().UnixMilli()
 				// Ensure ghost display name is set before sending the first message
 				oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
-				state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID)
+				state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID, state.sourceEventID)
 				if state.initialEventID == "" {
 					log.Error().Msg("Failed to send initial streaming message")
 					return false, nil
@@ -525,7 +525,7 @@ func (oc *AIClient) streamingResponse(
 				state.firstTokenAtMs = time.Now().UnixMilli()
 				oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
 				// Send empty initial message - will be replaced with content later
-				state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID)
+				state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID, state.sourceEventID)
 				if state.initialEventID == "" {
 					log.Error().Msg("Failed to send initial streaming message")
 					return false, nil
@@ -1212,7 +1212,7 @@ func (oc *AIClient) streamChatCompletions(
 					state.firstToken = false
 					state.firstTokenAtMs = time.Now().UnixMilli()
 					oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
-					state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID)
+					state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID, state.sourceEventID)
 					if state.initialEventID == "" {
 						log.Error().Msg("Failed to send initial streaming message")
 						return false, nil
@@ -1259,7 +1259,7 @@ func (oc *AIClient) streamChatCompletions(
 						state.firstToken = false
 						state.firstTokenAtMs = time.Now().UnixMilli()
 						oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
-						state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID)
+						state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID, state.sourceEventID)
 						if state.initialEventID == "" {
 							log.Error().Msg("Failed to send initial streaming message for tool call")
 							return false, nil
@@ -1522,16 +1522,26 @@ func hasMultimodalContent(messages []openai.ChatCompletionMessageParamUnion) boo
 }
 
 // sendInitialStreamMessage sends the first message in a streaming session and returns its event ID
-func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string, turnID string) id.EventID {
+func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string, turnID string, replyTo id.EventID) id.EventID {
 	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return ""
 	}
 
+	var relatesTo map[string]any
+	if replyTo != "" {
+		relatesTo = map[string]any{
+			"m.in_reply_to": map[string]any{
+				"event_id": replyTo.String(),
+			},
+		}
+	}
+
 	eventContent := &event.Content{
 		Raw: map[string]any{
-			"msgtype": event.MsgText,
-			"body":    content,
+			"msgtype":      event.MsgText,
+			"body":         content,
+			"m.relates_to": relatesTo,
 			BeeperAIKey: map[string]any{
 				"turn_id": turnID,
 				"status":  string(TurnStatusGenerating),
