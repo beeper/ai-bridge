@@ -1045,7 +1045,15 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		params.AgentList = agentList
 	}
 
-	return agents.BuildSystemPrompt(params)
+	base := agents.BuildSystemPrompt(params)
+	gravatarContext := oc.gravatarContext()
+	if gravatarContext == "" {
+		return base
+	}
+	if strings.TrimSpace(base) == "" {
+		return gravatarContext
+	}
+	return fmt.Sprintf("%s\n\n%s", base, gravatarContext)
 }
 
 // effectiveTemperature returns the temperature to use

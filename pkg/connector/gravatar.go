@@ -92,7 +92,7 @@ func formatGravatarMarkdown(profile *GravatarProfile, status string) string {
 	if profile == nil {
 		return ""
 	}
-	lines := []string{"## Gravatar Profile"}
+	lines := []string{"## Gravatar Profile", "hint: this is the user"}
 	if status != "" {
 		lines = append(lines, fmt.Sprintf("status: %s", status))
 	}
