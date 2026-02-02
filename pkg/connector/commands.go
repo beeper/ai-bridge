@@ -509,7 +509,7 @@ var CommandDesktop = &commands.FullHandler{
 	Help: commands.HelpMeta{
 		Section:     HelpSectionAI,
 		Description: "Manage connected Desktop devices",
-		Args:        "[list|prefer _device_id_]",
+		Args:        "[list|tools|init|prefer _device_id_]",
 	},
 	RequiresLogin: true,
 }
@@ -543,10 +543,78 @@ func fnDesktop(ce *commands.Event) {
 			}
 			toolCount := len(device.Tools)
 			sb.WriteString(fmt.Sprintf("• **%s** (`%s`)%s\n", device.DeviceName, device.DeviceID, preferred))
-			sb.WriteString(fmt.Sprintf("  Status: %s, Tools: %d\n", online, toolCount))
+			sb.WriteString(fmt.Sprintf("  Status: %s, Tools: %d, Room: %s\n", online, toolCount, device.RoomID))
 		}
-		sb.WriteString(fmt.Sprintf("\nUse `!ai desktop prefer <device_id>` to set the preferred device"))
+		sb.WriteString("\nCommands:\n• `!ai desktop tools` - List available MCP tools\n• `!ai desktop init` - Re-initialize MCP connection\n• `!ai desktop prefer <device_id>` - Set preferred device")
 		ce.Reply(sb.String())
+		return
+	}
+
+	if ce.Args[0] == "tools" {
+		// List MCP tools from connected desktop
+		if client.mcpClient == nil {
+			ce.Reply("MCP client not initialized")
+			return
+		}
+
+		tools := client.mcpClient.GetDesktopTools()
+		if len(tools) == 0 {
+			ce.Reply("No MCP tools available. Make sure Desktop is connected and has sent tools.")
+			return
+		}
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Available MCP tools (%d):\n\n", len(tools)))
+		for _, tool := range tools {
+			sb.WriteString(fmt.Sprintf("• **%s**\n", tool.Name))
+			if tool.Description != "" {
+				desc := tool.Description
+				if len(desc) > 100 {
+					desc = desc[:100] + "..."
+				}
+				sb.WriteString(fmt.Sprintf("  %s\n", desc))
+			}
+		}
+		ce.Reply(sb.String())
+		return
+	}
+
+	if ce.Args[0] == "init" {
+		// Force re-initialize MCP connection
+		if len(loginMeta.DesktopDevices) == 0 {
+			ce.Reply("No Desktop devices connected")
+			return
+		}
+
+		// Get preferred device
+		var device *DesktopDeviceInfo
+		if loginMeta.PreferredDesktopDeviceID != "" {
+			device = loginMeta.DesktopDevices[loginMeta.PreferredDesktopDeviceID]
+		}
+		if device == nil {
+			// Use first available
+			for _, d := range loginMeta.DesktopDevices {
+				device = d
+				break
+			}
+		}
+
+		if device == nil {
+			ce.Reply("No device available")
+			return
+		}
+
+		ce.Reply("Initializing MCP connection to %s...", device.DeviceName)
+
+		// Run async
+		go func() {
+			if err := client.initializeMCPConnection(ce.Ctx, device.DeviceID); err != nil {
+				client.sendSystemNotice(ce.Ctx, ce.Portal, fmt.Sprintf("MCP init failed: %v", err))
+			} else {
+				toolCount := len(device.Tools)
+				client.sendSystemNotice(ce.Ctx, ce.Portal, fmt.Sprintf("MCP initialized! %d tools available", toolCount))
+			}
+		}()
 		return
 	}
 
@@ -572,7 +640,7 @@ func fnDesktop(ce *commands.Event) {
 		return
 	}
 
-	ce.Reply("Usage: !ai desktop [list|prefer <device_id>]")
+	ce.Reply("Usage: !ai desktop [list|tools|init|prefer <device_id>]")
 }
 
 // registerCommands registers all AI commands with the command processor

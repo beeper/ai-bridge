@@ -291,6 +291,14 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, meta *PortalMet
 			params.Tools = append(params.Tools, ToOpenAITools(enabledTools)...)
 			log.Debug().Int("count", len(enabledTools)).Msg("Added builtin function tools")
 		}
+
+		// Add MCP tools from connected Desktop
+		if oc.mcpClient != nil && oc.mcpClient.HasDesktopTools() {
+			mcpTools := oc.mcpClient.GetDesktopTools()
+			mcpDefs := MCPToolsToDefinitions(mcpTools)
+			params.Tools = append(params.Tools, ToOpenAITools(mcpDefs)...)
+			log.Debug().Int("count", len(mcpDefs)).Msg("Added MCP tools from Desktop")
+		}
 	}
 
 	return params
@@ -1007,6 +1015,13 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 		})
 		if len(enabledTools) > 0 {
 			params.Tools = append(params.Tools, ToOpenAITools(enabledTools)...)
+		}
+
+		// Add MCP tools from connected Desktop
+		if oc.mcpClient != nil && oc.mcpClient.HasDesktopTools() {
+			mcpTools := oc.mcpClient.GetDesktopTools()
+			mcpDefs := MCPToolsToDefinitions(mcpTools)
+			params.Tools = append(params.Tools, ToOpenAITools(mcpDefs)...)
 		}
 	}
 
