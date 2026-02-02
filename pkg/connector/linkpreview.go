@@ -193,7 +193,7 @@ func (lp *LinkPreviewer) FetchPreviews(ctx context.Context, urls []string) []*ev
 
 	var wg sync.WaitGroup
 	results := make([]*event.BeeperLinkPreview, len(urls))
-	
+
 	for i, u := range urls {
 		wg.Add(1)
 		go func(idx int, urlStr string) {
@@ -271,7 +271,7 @@ func ParseExistingLinkPreviews(rawContent map[string]any) []*event.BeeperLinkPre
 		}
 
 		preview := &event.BeeperLinkPreview{}
-		
+
 		if v, ok := previewMap["matched_url"].(string); ok {
 			preview.MatchedURL = v
 		}

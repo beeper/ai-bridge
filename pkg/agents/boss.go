@@ -3,9 +3,9 @@ package agents
 // BossAgent is the special agent that manages other agents and rooms.
 // This is the "Meta Chatter" - uses Claude Opus with medium thinking.
 var BossAgent = &AgentDefinition{
-	ID:              "boss",
-	Name:            "Meta Chatter",
-	Description:     "Manages agents, rooms, and system configuration",
+	ID:          "boss",
+	Name:        "Meta Chatter",
+	Description: "Manages agents, rooms, and system configuration",
 	Model: ModelConfig{
 		Primary: ModelClaudeOpus,
 		Fallbacks: []string{

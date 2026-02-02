@@ -53,7 +53,7 @@ func executeAnalyzeImage(ctx context.Context, args map[string]any) (string, erro
 		// Infer mime type from URL or default to jpeg
 		mimeType = inferMimeTypeFromURL(imageURL)
 	} else {
-		return "", fmt.Errorf("unsupported URL scheme: must be http://, https://, mxc://, or data:")
+		return "", fmt.Errorf("unsupported URL scheme, must be http://, https://, mxc://, or data URL")
 	}
 
 	// Build vision request with image and prompt

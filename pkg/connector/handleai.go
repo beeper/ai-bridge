@@ -650,6 +650,27 @@ func (oc *AIClient) streamingResponse(
 				result = displayResult
 			}
 
+			// Check for image generation result (IMAGE: prefix)
+			if strings.HasPrefix(result, ImageResultPrefix) {
+				imageB64 := strings.TrimPrefix(result, ImageResultPrefix)
+				imageData, err := base64.StdEncoding.DecodeString(imageB64)
+				if err != nil {
+					log.Warn().Err(err).Msg("Failed to decode generated image")
+					displayResult = "Error: failed to decode generated image"
+					resultStatus = ResultStatusError
+				} else {
+					// Send image message
+					if _, err := oc.sendGeneratedImage(ctx, portal, imageData, "image/png", state.turnID); err != nil {
+						log.Warn().Err(err).Msg("Failed to send generated image")
+						displayResult = "Error: failed to send generated image"
+						resultStatus = ResultStatusError
+					} else {
+						displayResult = "Image generated and sent successfully"
+					}
+				}
+				result = displayResult
+			}
+
 			// Store result for API continuation
 			tool.result = result
 			args := strings.TrimSpace(tool.input.String())
@@ -1007,6 +1028,26 @@ func (oc *AIClient) streamingResponse(
 							resultStatus = ResultStatusError
 						} else {
 							displayResult = "Audio message sent successfully"
+						}
+					}
+					result = displayResult
+				}
+
+				// Check for image generation result (IMAGE: prefix)
+				if strings.HasPrefix(result, ImageResultPrefix) {
+					imageB64 := strings.TrimPrefix(result, ImageResultPrefix)
+					imageData, err := base64.StdEncoding.DecodeString(imageB64)
+					if err != nil {
+						log.Warn().Err(err).Msg("Failed to decode generated image (continuation)")
+						displayResult = "Error: failed to decode generated image"
+						resultStatus = ResultStatusError
+					} else {
+						if _, err := oc.sendGeneratedImage(ctx, portal, imageData, "image/png", state.turnID); err != nil {
+							log.Warn().Err(err).Msg("Failed to send generated image (continuation)")
+							displayResult = "Error: failed to send generated image"
+							resultStatus = ResultStatusError
+						} else {
+							displayResult = "Image generated and sent successfully"
 						}
 					}
 					result = displayResult
@@ -1383,6 +1424,25 @@ func (oc *AIClient) streamChatCompletions(
 						resultStatus = ResultStatusError
 					} else {
 						result = "Audio message sent successfully"
+					}
+				}
+			}
+
+			// Check for image generation result (IMAGE: prefix)
+			if strings.HasPrefix(result, ImageResultPrefix) {
+				imageB64 := strings.TrimPrefix(result, ImageResultPrefix)
+				imageData, decodeErr := base64.StdEncoding.DecodeString(imageB64)
+				if decodeErr != nil {
+					log.Warn().Err(decodeErr).Msg("Failed to decode generated image (Chat Completions)")
+					result = "Error: failed to decode generated image"
+					resultStatus = ResultStatusError
+				} else {
+					if _, sendErr := oc.sendGeneratedImage(ctx, portal, imageData, "image/png", state.turnID); sendErr != nil {
+						log.Warn().Err(sendErr).Msg("Failed to send generated image (Chat Completions)")
+						result = "Error: failed to send generated image"
+						resultStatus = ResultStatusError
+					} else {
+						result = "Image generated and sent successfully"
 					}
 				}
 			}

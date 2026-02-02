@@ -38,9 +38,9 @@ Use the message tool for channel actions:
 // BeeperAIAgent is the default agent for all new chats.
 // It provides a simple, clean AI experience with sensible defaults.
 var BeeperAIAgent = &AgentDefinition{
-	ID:              "beeper",
-	Name:            "Beeper AI",
-	Description:     "Your AI assistant",
+	ID:          "beeper",
+	Name:        "Beeper AI",
+	Description: "Your AI assistant",
 	Model: ModelConfig{
 		Primary: ModelClaudeOpus,
 		Fallbacks: []string{

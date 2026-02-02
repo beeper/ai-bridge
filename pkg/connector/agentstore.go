@@ -559,9 +559,52 @@ func (b *BossStoreAdapter) ListRooms(ctx context.Context) ([]tools.RoomData, err
 
 // GetRoomHistory returns message history for a room.
 func (b *BossStoreAdapter) GetRoomHistory(ctx context.Context, roomID string, limit int) ([]tools.MessageData, error) {
-	// For now, return empty history - full implementation would need Matrix message fetching
-	// This is a placeholder that can be enhanced later with actual Matrix /messages API calls
-	return []tools.MessageData{}, nil
+	// Parse room ID
+	roomIDParsed := id.RoomID(roomID)
+
+	// Find the portal for this room
+	allPortals, err := b.store.client.UserLogin.Bridge.DB.Portal.GetAll(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list portals: %w", err)
+	}
+
+	var portalKey networkid.PortalKey
+	found := false
+	for _, portal := range allPortals {
+		if portal.MXID == roomIDParsed {
+			portalKey = portal.PortalKey
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return nil, fmt.Errorf("room not found: %s", roomID)
+	}
+
+	// Get messages from database
+	messages, err := b.store.client.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portalKey, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get messages: %w", err)
+	}
+
+	// Convert to tools.MessageData
+	var result []tools.MessageData
+	for _, msg := range messages {
+		msgMeta, ok := msg.Metadata.(*MessageMetadata)
+		if !ok || msgMeta == nil {
+			continue
+		}
+
+		result = append(result, tools.MessageData{
+			ID:        msg.MXID.String(),
+			Role:      msgMeta.Role,
+			Content:   msgMeta.Body,
+			Timestamp: msg.Timestamp.Unix(),
+		})
+	}
+
+	return result, nil
 }
 
 // SendToRoom sends a message to a room.

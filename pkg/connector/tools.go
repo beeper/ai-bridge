@@ -697,7 +697,7 @@ func executeWebFetch(ctx context.Context, args map[string]any) (string, error) {
 	}
 
 	// Create request
-	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -888,7 +888,7 @@ func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model 
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -961,7 +961,7 @@ func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model 
 
 // fetchImageAsBase64 fetches an image URL and returns it as base64.
 func fetchImageAsBase64(ctx context.Context, imageURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", imageURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
 		return "", err
 	}
