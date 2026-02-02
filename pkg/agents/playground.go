@@ -13,8 +13,8 @@ var PlaygroundAgent = &AgentDefinition{
 			ModelZAIGLM47,
 		},
 	},
-	ToolProfile:  ProfileMinimal, // web search, calculator, chat info
-	PromptMode:   PromptModeNone, // no system prompt sections
+	ToolProfile:  ProfileMinimal,  // web search, calculator, chat info
+	PromptMode:   PromptModeNone,  // no system prompt sections
 	ResponseMode: ResponseModeRaw, // no directive processing
 	IsPreset:     true,
 	CreatedAt:    0,

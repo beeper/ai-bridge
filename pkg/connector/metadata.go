@@ -112,10 +112,10 @@ type PortalMetadata struct {
 	EmitToolArgs     bool   `json:"emit_tool_args,omitempty"`
 
 	// Agent-related metadata
-	DefaultAgentID  string `json:"default_agent_id,omitempty"`  // Agent assigned to this room (legacy name, same as AgentID)
-	AgentID         string `json:"agent_id,omitempty"`          // Which agent is the ghost for this room
-	IsBuilderRoom   bool   `json:"is_builder_room,omitempty"`   // True if this is the Manage AI Chats room (protected from overrides)
-	IsRawMode       bool   `json:"is_raw_mode,omitempty"`       // True if this is a playground/raw mode room (no directive processing)
+	DefaultAgentID  string `json:"default_agent_id,omitempty"`   // Agent assigned to this room (legacy name, same as AgentID)
+	AgentID         string `json:"agent_id,omitempty"`           // Which agent is the ghost for this room
+	IsBuilderRoom   bool   `json:"is_builder_room,omitempty"`    // True if this is the Manage AI Chats room (protected from overrides)
+	IsRawMode       bool   `json:"is_raw_mode,omitempty"`        // True if this is a playground/raw mode room (no directive processing)
 	IsAgentDataRoom bool   `json:"is_agent_data_room,omitempty"` // True if this is a hidden room for storing agent data
 
 	// Ack reaction config - similar to OpenClaw's ack reactions

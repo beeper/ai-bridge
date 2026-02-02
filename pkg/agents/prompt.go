@@ -487,8 +487,12 @@ Rules:
 
 ## Messaging
 Use the message tool for channel actions:
-- action=react: Add emoji reaction (requires emoji; message_id optional, defaults to triggering message)
-- action=send: Send a message to the current chat`
+- action=react: Add emoji reaction (requires emoji; message_id optional, defaults to triggering message; set remove:true to remove)
+- action=reactions: List all reactions on a message (requires message_id)
+- action=read: Send read receipt (message_id optional, defaults to triggering message)
+- action=send: Send a message to the current chat
+- action=channel-info: Get room info (name, topic, member count)
+- action=member-info: Get user profile (requires user_id, e.g., @user:server.com)`
 
 // BossSystemPrompt is the system prompt for the Boss agent.
 const BossSystemPrompt = `You are the Agent Builder, an AI that helps users manage their AI chats and create custom AI agents.

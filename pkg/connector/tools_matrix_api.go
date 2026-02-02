@@ -101,9 +101,9 @@ func removeMatrixReactions(ctx context.Context, btc *BridgeToolContext, eventID 
 
 	// Query relations API for reactions
 	resp, err := client.GetRelations(ctx, btc.Portal.MXID, eventID, &mautrix.ReqGetRelations{
-		RelType:   event.RelAnnotation,
-		EventType: event.EventReaction,
-		Limit:     200,
+		RelationType: event.RelAnnotation,
+		EventType:    event.EventReaction,
+		Limit:        200,
 	})
 	if err != nil {
 		return 0, err
@@ -178,7 +178,7 @@ func getMatrixUserProfile(ctx context.Context, btc *BridgeToolContext, userID id
 	return &MatrixUserProfile{
 		UserID:      userID.String(),
 		DisplayName: profile.DisplayName,
-		AvatarURL:   string(profile.AvatarURL),
+		AvatarURL:   profile.AvatarURL.String(),
 	}, nil
 }
 
