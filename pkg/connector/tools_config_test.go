@@ -13,7 +13,6 @@ func TestDefaultToolsConfigIncludesCoreTools(t *testing.T) {
 		toolspec.CalculatorName,
 		toolspec.WebSearchName,
 		toolspec.WebFetchName,
-		toolspec.SetChatInfoName,
 		toolspec.SessionStatusName,
 		toolspec.MemorySearchName,
 		toolspec.MemoryGetName,

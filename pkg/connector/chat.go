@@ -24,9 +24,8 @@ import (
 
 // Tool name constants
 const (
-	ToolNameCalculator  = toolspec.CalculatorName
-	ToolNameWebSearch   = toolspec.WebSearchName
-	ToolNameSetChatInfo = toolspec.SetChatInfoName
+	ToolNameCalculator = toolspec.CalculatorName
+	ToolNameWebSearch  = toolspec.WebSearchName
 )
 
 func hasAssignedAgent(meta *PortalMetadata) bool {
@@ -242,9 +241,6 @@ func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
 	switch toolName {
 	case ToolNameAnalyzeImage:
 		toolName = ToolNameImage
-	case ToolNameSetChatInfo:
-		// Treat legacy set_chat_info as message for policy purposes.
-		toolName = ToolNameMessage
 	}
 
 	if toolName == ToolNameMessage && !hasAssignedAgent(meta) {
@@ -326,8 +322,6 @@ func normalizeToolName(name string) string {
 		return ToolNameWebSearch
 	case "webfetch", "fetch":
 		return toolspec.WebFetchName
-	case "chatinfo", "chat_info", "setchatinfo":
-		return ToolNameSetChatInfo
 	case "session", "status", "sessionstatus":
 		return toolspec.SessionStatusName
 	case "memorysearch", "memsearch", "mem_search":

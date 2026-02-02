@@ -33,15 +33,6 @@ func defaultWebFetchTool() mcp.Tool {
 	}
 }
 
-func defaultChatInfoTool() mcp.Tool {
-	return mcp.Tool{
-		Name:        ToolNameSetChatInfo,
-		Description: toolspec.SetChatInfoDescription,
-		Annotations: &mcp.ToolAnnotations{Title: "Set Chat Info"},
-		InputSchema: toolspec.SetChatInfoSchema(),
-	}
-}
-
 func defaultMessageTool() mcp.Tool {
 	return mcp.Tool{
 		Name:        ToolNameMessage,

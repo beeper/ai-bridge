@@ -29,7 +29,6 @@ var ToolGroups = map[string][]string{
 	tools.GroupSearch:    {"web_search"},
 	tools.GroupCalc:      {"calculator"},
 	tools.GroupBuilder:   {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "create_room", "modify_room", "list_rooms", "sessions_list", "sessions_history", "sessions_send"},
-	tools.GroupChat:      {"set_chat_info"},
 	tools.GroupMessaging: {"message"},
 	tools.GroupSessions:  {"sessions_list", "sessions_history", "sessions_send"},
 	tools.GroupMemory:    {"memory_search", "memory_get", "memory_store", "memory_forget"},
@@ -41,10 +40,10 @@ var ToolGroups = map[string][]string{
 // ProfileAllowlists define which tool groups each profile allows.
 // Matches OpenClaw's TOOL_PROFILES pattern.
 var ProfileAllowlists = map[ToolProfile][]string{
-	ProfileMinimal:   {tools.GroupSearch, tools.GroupChat, tools.GroupMessaging, tools.GroupStatus},
-	ProfileCoding:    {tools.GroupCalc, tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupMedia, tools.GroupStatus, tools.GroupMemory},
-	ProfileMessaging: {tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupSessions, tools.GroupStatus, tools.GroupMemory},
-	ProfileFull:      {tools.GroupCalc, tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupMedia, tools.GroupStatus, tools.GroupMemory},
+	ProfileMinimal:   {tools.GroupSearch, tools.GroupMessaging, tools.GroupStatus},
+	ProfileCoding:    {tools.GroupCalc, tools.GroupWeb, tools.GroupMessaging, tools.GroupMedia, tools.GroupStatus, tools.GroupMemory},
+	ProfileMessaging: {tools.GroupWeb, tools.GroupMessaging, tools.GroupSessions, tools.GroupStatus, tools.GroupMemory},
+	ProfileFull:      {tools.GroupCalc, tools.GroupWeb, tools.GroupMessaging, tools.GroupMedia, tools.GroupStatus, tools.GroupMemory},
 	ProfileBoss:      {tools.GroupBuilder, tools.GroupMessaging, tools.GroupStatus, tools.GroupMemory},
 }
 

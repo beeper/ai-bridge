@@ -12,9 +12,6 @@ const (
 	WebFetchName        = "web_fetch"
 	WebFetchDescription = "Fetch a web page and extract its readable content as text or markdown."
 
-	SetChatInfoName        = "set_chat_info"
-	SetChatInfoDescription = "Patch the chat title and/or description (omit fields to keep them unchanged)."
-
 	MessageName        = "message"
 	MessageDescription = "Send messages and perform channel actions in the current chat. Supports: send, sendWithEffect, broadcast, react, reactions, edit, delete/unsend, reply, pin, unpin, list-pins, thread-reply, search, read, member-info, channel-info, channel-edit."
 
@@ -102,25 +99,6 @@ func WebFetchSchema() map[string]any {
 			},
 		},
 		"required": []string{"url"},
-	}
-}
-
-// SetChatInfoSchema returns the JSON schema for the set_chat_info tool.
-func SetChatInfoSchema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"title": map[string]any{
-				"type":        "string",
-				"description": "Optional. The new title for the chat",
-			},
-			"description": map[string]any{
-				"type":        "string",
-				"description": "Optional. The new description/topic for the chat (empty string clears it)",
-			},
-		},
-		"minProperties":        1,
-		"additionalProperties": false,
 	}
 }
 

@@ -65,8 +65,6 @@ func toolDisplayTitle(toolName string) string {
 		return "Image Generation"
 	case ToolNameImageGenerate:
 		return "Image Generation"
-	case ToolNameSetChatInfo:
-		return "Set Chat Info"
 	default:
 		return toolName
 	}
@@ -266,12 +264,8 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 	}
 
 	// Normalize deprecated tool aliases
-	switch toolName {
-	case ToolNameAnalyzeImage:
+	if toolName == ToolNameAnalyzeImage {
 		toolName = ToolNameImage
-	case ToolNameSetChatInfo:
-		// Keep backward compatibility for set_chat_info
-		return executeSetChatInfo(ctx, args)
 	}
 
 	// Check if this is the Builder room - use boss tool executor for boss tools
