@@ -375,10 +375,45 @@ func (oc *AIClient) savePortalQuiet(ctx context.Context, portal *bridgev2.Portal
 
 // Ack reaction tracking for removal after reply
 // Maps room ID -> source message ID -> ack reaction event ID
+const (
+	ackReactionTTL             = 5 * time.Minute
+	ackReactionCleanupInterval = time.Minute
+)
+
+type ackReactionEntry struct {
+	reactionEventID id.EventID
+	storedAt        time.Time
+}
+
 var (
-	ackReactionStore   = make(map[id.RoomID]map[id.EventID]id.EventID)
+	ackReactionStore   = make(map[id.RoomID]map[id.EventID]ackReactionEntry)
 	ackReactionStoreMu sync.Mutex
 )
+
+func init() {
+	go cleanupAckReactionStore()
+}
+
+func cleanupAckReactionStore() {
+	ticker := time.NewTicker(ackReactionCleanupInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		cutoff := time.Now().Add(-ackReactionTTL)
+		ackReactionStoreMu.Lock()
+		for roomID, roomReactions := range ackReactionStore {
+			for sourceEventID, entry := range roomReactions {
+				if entry.storedAt.Before(cutoff) {
+					delete(roomReactions, sourceEventID)
+				}
+			}
+			if len(roomReactions) == 0 {
+				delete(ackReactionStore, roomID)
+			}
+		}
+		ackReactionStoreMu.Unlock()
+	}
+}
 
 // sendAckReaction sends an acknowledgement reaction to a message.
 // Returns the event ID of the reaction for potential removal.
@@ -424,9 +459,12 @@ func (oc *AIClient) storeAckReaction(roomID id.RoomID, sourceEventID, reactionEv
 	defer ackReactionStoreMu.Unlock()
 
 	if ackReactionStore[roomID] == nil {
-		ackReactionStore[roomID] = make(map[id.EventID]id.EventID)
+		ackReactionStore[roomID] = make(map[id.EventID]ackReactionEntry)
 	}
-	ackReactionStore[roomID][sourceEventID] = reactionEventID
+	ackReactionStore[roomID][sourceEventID] = ackReactionEntry{
+		reactionEventID: reactionEventID,
+		storedAt:        time.Now(),
+	}
 }
 
 // removeAckReaction removes a previously sent ack reaction.
@@ -437,7 +475,7 @@ func (oc *AIClient) removeAckReaction(ctx context.Context, portal *bridgev2.Port
 		ackReactionStoreMu.Unlock()
 		return
 	}
-	reactionEventID, ok := roomReactions[sourceEventID]
+	entry, ok := roomReactions[sourceEventID]
 	if !ok {
 		ackReactionStoreMu.Unlock()
 		return
@@ -445,6 +483,7 @@ func (oc *AIClient) removeAckReaction(ctx context.Context, portal *bridgev2.Port
 	delete(roomReactions, sourceEventID)
 	ackReactionStoreMu.Unlock()
 
+	reactionEventID := entry.reactionEventID
 	if reactionEventID == "" {
 		return
 	}

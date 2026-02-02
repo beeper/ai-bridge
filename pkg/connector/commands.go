@@ -17,6 +17,12 @@ var HelpSectionAI = commands.HelpSection{
 	Order: 30,
 }
 
+var reservedAgentIDs = map[string]struct{}{
+	"none":  {},
+	"clear": {},
+	"boss":  {},
+}
+
 // getAIClient retrieves the AIClient from the command event's user login
 func getAIClient(ce *commands.Event) *AIClient {
 	login := ce.User.GetDefaultLogin()
@@ -36,6 +42,19 @@ func getPortalMeta(ce *commands.Event) *PortalMetadata {
 		return nil
 	}
 	return portalMeta(ce.Portal)
+}
+
+func isValidAgentID(agentID string) bool {
+	if agentID == "" {
+		return false
+	}
+	for i := 0; i < len(agentID); i++ {
+		ch := agentID[i]
+		if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 // CommandModel handles the !ai model command
@@ -728,6 +747,15 @@ func fnCreateAgent(ce *commands.Event) {
 
 	agentID := ce.Args[0]
 	agentName := ce.Args[1]
+
+	if _, reserved := reservedAgentIDs[agentID]; reserved {
+		ce.Reply("Agent ID '%s' is reserved. Choose a different ID.", agentID)
+		return
+	}
+	if !isValidAgentID(agentID) {
+		ce.Reply("Invalid agent ID '%s'. Use only lowercase letters, numbers, and hyphens.", agentID)
+		return
+	}
 
 	// Parse optional model and system prompt
 	var model, systemPrompt string

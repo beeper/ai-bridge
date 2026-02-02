@@ -142,9 +142,10 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	// Get agent policy ONCE before the loop to avoid redundant lookups
 	var agentPolicy *tools.Policy
 	var agent *agents.AgentDefinition
+	var err error
 	store := NewAgentStoreAdapter(oc)
 	if hasAssignedAgent(meta) {
-		agent, err := store.GetAgentForRoom(context.Background(), meta)
+		agent, err = store.GetAgentForRoom(context.Background(), meta)
 		if err == nil && agent != nil {
 			agentPolicy = agents.CreatePolicyFromProfile(agent, tools.DefaultRegistry())
 		}

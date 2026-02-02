@@ -111,13 +111,13 @@ func BuiltinTools() []ToolDefinition {
 		},
 		{
 			Name:        ToolNameMessage,
-			Description: "Send messages and perform channel actions in the current chat. Supports: send, react, edit, delete, reply, pin, unpin, list-pins, thread-reply, search.",
+			Description: "Send messages and perform channel actions in the current chat. Supports: send, react, reactions, edit, delete, reply, pin, unpin, list-pins, thread-reply, search, read, member-info, channel-info.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"enum":        []string{"send", "react", "edit", "delete", "reply", "pin", "unpin", "list-pins", "thread-reply", "search"},
+						"enum":        []string{"send", "react", "reactions", "edit", "delete", "reply", "pin", "unpin", "list-pins", "thread-reply", "search", "read", "member-info", "channel-info"},
 						"description": "The action to perform",
 					},
 					"message": map[string]any{
@@ -126,11 +126,19 @@ func BuiltinTools() []ToolDefinition {
 					},
 					"message_id": map[string]any{
 						"type":        "string",
-						"description": "Target message ID for react/edit/delete/reply/pin/unpin/thread-reply",
+						"description": "Target message ID for react/reactions/edit/delete/reply/pin/unpin/thread-reply/read",
 					},
 					"emoji": map[string]any{
 						"type":        "string",
-						"description": "For action=react: the emoji to react with",
+						"description": "For action=react: the emoji to react with (empty to remove all reactions)",
+					},
+					"remove": map[string]any{
+						"type":        "boolean",
+						"description": "For action=react: set true to remove the reaction instead of adding",
+					},
+					"user_id": map[string]any{
+						"type":        "string",
+						"description": "For action=member-info: the Matrix user ID to look up (e.g., @user:server.com)",
 					},
 					"thread_id": map[string]any{
 						"type":        "string",
@@ -288,6 +296,8 @@ func executeMessage(ctx context.Context, args map[string]any) (string, error) {
 		return executeMessageSend(ctx, args, btc)
 	case "react":
 		return executeMessageReact(ctx, args, btc)
+	case "reactions":
+		return executeMessageReactions(ctx, args, btc)
 	case "edit":
 		return executeMessageEdit(ctx, args, btc)
 	case "delete":
@@ -304,16 +314,26 @@ func executeMessage(ctx context.Context, args map[string]any) (string, error) {
 		return executeMessageThreadReply(ctx, args, btc)
 	case "search":
 		return executeMessageSearch(ctx, args, btc)
+	case "read":
+		return executeMessageRead(ctx, args, btc)
+	case "member-info":
+		return executeMessageMemberInfo(ctx, args, btc)
+	case "channel-info":
+		return executeMessageChannelInfo(ctx, args, btc)
 	default:
 		return "", fmt.Errorf("unknown action: %s", action)
 	}
 }
 
 // executeMessageReact handles the react action of the message tool.
+// Supports adding reactions (with emoji) and removing reactions (with remove:true or empty emoji).
 func executeMessageReact(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
-	emoji, ok := args["emoji"].(string)
-	if !ok || emoji == "" {
-		return "", fmt.Errorf("action=react requires 'emoji' parameter")
+	emoji, _ := args["emoji"].(string)
+	remove, _ := args["remove"].(bool)
+
+	// Check if this is a removal request (remove:true or empty emoji)
+	if remove || emoji == "" {
+		return executeMessageReactRemove(ctx, args, btc)
 	}
 
 	// Get target message ID (optional - defaults to triggering message)
