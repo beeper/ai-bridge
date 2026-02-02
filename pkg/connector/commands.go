@@ -504,8 +504,7 @@ func fnTitle(ce *commands.Event) {
 	if !ok {
 		return
 	}
-	if ce.Portal == nil {
-		ce.Reply("Failed to access AI configuration")
+	if _, ok := requirePortal(ce); !ok {
 		return
 	}
 

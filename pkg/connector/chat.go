@@ -13,6 +13,7 @@ import (
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -23,9 +24,9 @@ import (
 
 // Tool name constants
 const (
-	ToolNameCalculator  = "calculator"
-	ToolNameWebSearch   = "web_search"
-	ToolNameSetChatInfo = "set_chat_info"
+	ToolNameCalculator  = toolspec.CalculatorName
+	ToolNameWebSearch   = toolspec.WebSearchName
+	ToolNameSetChatInfo = toolspec.SetChatInfoName
 )
 
 func hasAssignedAgent(meta *PortalMetadata) bool {
@@ -42,25 +43,13 @@ func getDefaultToolsConfig(_ string) ToolsConfig {
 	}
 
 	// Calculator - arithmetic and math
-	registerTool(&config, mcp.Tool{
-		Name:        ToolNameCalculator,
-		Description: "Perform arithmetic calculations",
-		Annotations: &mcp.ToolAnnotations{Title: "Calculator"},
-	}, "builtin")
+	registerTool(&config, defaultCalculatorTool(), "builtin")
 
 	// Web search - uses DuckDuckGo
-	registerTool(&config, mcp.Tool{
-		Name:        ToolNameWebSearch,
-		Description: "Search the web for information",
-		Annotations: &mcp.ToolAnnotations{Title: "Web Search"},
-	}, "builtin")
+	registerTool(&config, defaultWebSearchTool(), "builtin")
 
 	// Chat info tool (title/description)
-	registerTool(&config, mcp.Tool{
-		Name:        ToolNameSetChatInfo,
-		Description: "Set the chat title and/or description (patches existing values)",
-		Annotations: &mcp.ToolAnnotations{Title: "Set Chat Info"},
-	}, "builtin")
+	registerTool(&config, defaultChatInfoTool(), "builtin")
 
 	return config
 }
@@ -91,32 +80,20 @@ func ensureToolsConfig(meta *PortalMetadata, provider string) bool {
 
 	// Ensure web search tool exists (enabled by default unless explicitly disabled)
 	if _, ok := meta.ToolsConfig.Tools[ToolNameWebSearch]; !ok {
-		registerTool(&meta.ToolsConfig, mcp.Tool{
-			Name:        ToolNameWebSearch,
-			Description: "Search the web for information",
-			Annotations: &mcp.ToolAnnotations{Title: "Web Search"},
-		}, "builtin")
+		registerTool(&meta.ToolsConfig, defaultWebSearchTool(), "builtin")
 		changed = true
 	}
 
 	// Ensure chat info tool exists
 	if _, ok := meta.ToolsConfig.Tools[ToolNameSetChatInfo]; !ok {
-		registerTool(&meta.ToolsConfig, mcp.Tool{
-			Name:        ToolNameSetChatInfo,
-			Description: "Set the chat title and/or description (patches existing values)",
-			Annotations: &mcp.ToolAnnotations{Title: "Set Chat Info"},
-		}, "builtin")
+		registerTool(&meta.ToolsConfig, defaultChatInfoTool(), "builtin")
 		changed = true
 	}
 
 	// Only expose message tool when an agent is assigned to the room.
 	if hasAssignedAgent(meta) {
 		if _, ok := meta.ToolsConfig.Tools[ToolNameMessage]; !ok {
-			registerTool(&meta.ToolsConfig, mcp.Tool{
-				Name:        ToolNameMessage,
-				Description: "Send messages and perform channel actions in the current chat",
-				Annotations: &mcp.ToolAnnotations{Title: "Message"},
-			}, "builtin")
+			registerTool(&meta.ToolsConfig, defaultMessageTool(), "builtin")
 			changed = true
 		}
 	} else if _, ok := meta.ToolsConfig.Tools[ToolNameMessage]; ok {

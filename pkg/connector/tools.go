@@ -20,7 +20,6 @@ import (
 	"github.com/beeper/ai-bridge/pkg/shared/websearch"
 
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/matrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/format"
 	"maunium.net/go/mautrix/id"
@@ -544,19 +543,7 @@ func executeMessagePin(ctx context.Context, args map[string]any, btc *BridgeTool
 	targetEventID := id.EventID(messageID)
 	bot := btc.Client.UserLogin.Bridge.Bot
 
-	// Get current pinned events using the matrix connection
-	var pinnedEvents []string
-	matrixConn, ok := btc.Client.UserLogin.Bridge.Matrix.(*matrix.Connector)
-	if ok {
-		stateEvent, err := matrixConn.GetStateEvent(ctx, btc.Portal.MXID, event.StatePinnedEvents, "")
-		if err == nil && stateEvent != nil {
-			if content, ok := stateEvent.Content.Parsed.(*event.PinnedEventsEventContent); ok {
-				for _, evtID := range content.Pinned {
-					pinnedEvents = append(pinnedEvents, evtID.String())
-				}
-			}
-		}
-	}
+	pinnedEvents := getPinnedEventIDs(ctx, btc)
 
 	// Modify pinned events
 	if pin {
@@ -611,19 +598,7 @@ func executeMessagePin(ctx context.Context, args map[string]any, btc *BridgeTool
 
 // executeMessageListPins handles list-pins action - returns currently pinned messages.
 func executeMessageListPins(ctx context.Context, btc *BridgeToolContext) (string, error) {
-	// Get current pinned events using the matrix connection
-	var pinnedEvents []string
-	matrixConn, ok := btc.Client.UserLogin.Bridge.Matrix.(*matrix.Connector)
-	if ok {
-		stateEvent, err := matrixConn.GetStateEvent(ctx, btc.Portal.MXID, event.StatePinnedEvents, "")
-		if err == nil && stateEvent != nil {
-			if content, ok := stateEvent.Content.Parsed.(*event.PinnedEventsEventContent); ok {
-				for _, evtID := range content.Pinned {
-					pinnedEvents = append(pinnedEvents, evtID.String())
-				}
-			}
-		}
-	}
+	pinnedEvents := getPinnedEventIDs(ctx, btc)
 
 	// Build JSON response
 	pinnedJSON, _ := json.Marshal(pinnedEvents)
@@ -1218,21 +1193,7 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 
 	result, err := websearch.DuckDuckGoSearch(ctx, query)
 	if err != nil {
-		msg := err.Error()
-		switch {
-		case strings.HasPrefix(msg, "failed to create request:"):
-			return "", err
-		case strings.HasPrefix(msg, "failed to parse results:"):
-			trimmed := strings.TrimPrefix(msg, "failed to parse results: ")
-			return "", fmt.Errorf("failed to parse search results: %s", trimmed)
-		case strings.HasPrefix(msg, "status "):
-			return "", fmt.Errorf("web search failed: %s", msg)
-		case strings.HasPrefix(msg, "request failed:"):
-			trimmed := strings.TrimPrefix(msg, "request failed: ")
-			return "", fmt.Errorf("web search failed: %s", trimmed)
-		default:
-			return "", fmt.Errorf("web search failed: %s", msg)
-		}
+		return "", websearch.ConnectorError(err)
 	}
 
 	// Build response from available data
