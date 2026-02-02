@@ -18,7 +18,7 @@ In group conversations:
 - Keep responses appropriately brief for the group context
 - Use NO_REPLY liberally when you're not the right one to respond
 
-` + CommonSystemPromptGuidance
+`
 
 // BeeperAIAgent is the default agent for all new chats.
 // It provides a simple, clean AI experience with sensible defaults.

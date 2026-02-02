@@ -961,8 +961,9 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 	// Add room context if available
 	if portal != nil {
 		params.RoomInfo = &agents.RoomInfo{
-			Title: portal.Name,
-			Topic: portal.Topic,
+			Title:   portal.Name,
+			Topic:   portal.Topic,
+			Channel: "matrix",
 		}
 	}
 
@@ -1001,6 +1002,8 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 	params.RuntimeInfo = &agents.RuntimeInfo{
 		AgentID:      agent.ID,
 		Model:        oc.effectiveModel(meta),
+		DefaultModel: oc.defaultModelForProvider(),
+		Channel:      "matrix",
 		Capabilities: caps,
 	}
 
@@ -1022,6 +1025,12 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 
 	// Heartbeat prompt from agent config (clawdbot parity)
 	params.HeartbeatPrompt = agent.HeartbeatPrompt
+
+	// Messaging hints (OpenClaw parity - use defaults for now)
+	params.MessageChannels = ""
+	params.InlineButtons = false
+	params.SupportsSubagent = false
+	params.DefaultThink = "off"
 
 	// Check if session_status tool is available for time hints
 	for _, tool := range availableTools {
