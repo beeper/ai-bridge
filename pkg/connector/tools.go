@@ -1579,60 +1579,95 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 		ignoredOptions = append(ignoredOptions, "freshness")
 	}
 
+	start := time.Now()
 	result, err := websearch.DuckDuckGoSearch(ctx, query)
 	if err != nil {
 		return "", websearch.ConnectorError(err)
 	}
+	tookMs := time.Since(start).Milliseconds()
 
-	// Build response from available data
-	var text strings.Builder
-	header := fmt.Sprintf("Search results for: %s (count: %d)\n\n", query, count)
-	text.WriteString(header)
-	if len(ignoredOptions) > 0 {
-		text.WriteString(fmt.Sprintf("Note: options %s are not supported by this provider and were ignored.\n\n", strings.Join(ignoredOptions, ", ")))
+	type webSearchResult struct {
+		Title       string `json:"title,omitempty"`
+		URL         string `json:"url,omitempty"`
+		Description string `json:"description,omitempty"`
+		Published   string `json:"published,omitempty"`
+		SiteName    string `json:"siteName,omitempty"`
+	}
+	type webSearchPayload struct {
+		Query      string            `json:"query"`
+		Provider   string            `json:"provider"`
+		Count      int               `json:"count"`
+		TookMs     int64             `json:"tookMs"`
+		Results    []webSearchResult `json:"results,omitempty"`
+		Answer     string            `json:"answer,omitempty"`
+		Summary    string            `json:"summary,omitempty"`
+		Definition string            `json:"definition,omitempty"`
+		Warning    string            `json:"warning,omitempty"`
+		NoResults  bool              `json:"noResults,omitempty"`
 	}
 
+	limit := count
+	if limit > len(result.Results) {
+		limit = len(result.Results)
+	}
+	mapped := make([]webSearchResult, 0, limit)
+	for _, topic := range result.Results[:limit] {
+		title := strings.TrimSpace(topic.Title)
+		description := strings.TrimSpace(topic.Snippet)
+		if title == "" && description != "" {
+			title = description
+			description = ""
+		}
+		if title == "" {
+			continue
+		}
+		mapped = append(mapped, webSearchResult{
+			Title:       title,
+			URL:         topic.URL,
+			Description: description,
+			SiteName:    resolveSiteName(topic.URL),
+		})
+	}
+
+	payload := webSearchPayload{
+		Query:    query,
+		Provider: "duckduckgo",
+		Count:    len(mapped),
+		TookMs:   tookMs,
+		Results:  mapped,
+	}
 	if result.Answer != "" {
-		text.WriteString(fmt.Sprintf("Answer: %s\n", result.Answer))
+		payload.Answer = result.Answer
 	}
 	if result.Summary != "" {
-		text.WriteString(fmt.Sprintf("Summary: %s\n", result.Summary))
+		payload.Summary = result.Summary
 	}
 	if result.Definition != "" {
-		text.WriteString(fmt.Sprintf("Definition: %s\n", result.Definition))
+		payload.Definition = result.Definition
+	}
+	if result.NoResults {
+		payload.NoResults = true
+	}
+	if len(ignoredOptions) > 0 {
+		payload.Warning = fmt.Sprintf("Unsupported options ignored: %s", strings.Join(ignoredOptions, ", "))
 	}
 
-	if len(result.Results) > 0 {
-		text.WriteString("\nResults:\n")
-		limit := count
-		if limit > len(result.Results) {
-			limit = len(result.Results)
-		}
-		for _, topic := range result.Results[:limit] {
-			title := topic.Title
-			if title == "" {
-				title = topic.Snippet
-			}
-			if title == "" {
-				continue
-			}
-			line := fmt.Sprintf("- %s", title)
-			if topic.URL != "" {
-				line = fmt.Sprintf("%s (%s)", line, topic.URL)
-			}
-			text.WriteString(line + "\n")
-			if topic.Snippet != "" && topic.Snippet != title {
-				text.WriteString(fmt.Sprintf("  %s\n", topic.Snippet))
-			}
-		}
-		text.WriteString("\nTip: use web_fetch with a result URL for full text.\n")
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode web_search response: %w", err)
 	}
+	return string(raw), nil
+}
 
-	if text.Len() == len(header) {
-		return fmt.Sprintf("No direct results found for '%s'. Try rephrasing your query.", query), nil
+func resolveSiteName(rawURL string) string {
+	if strings.TrimSpace(rawURL) == "" {
+		return ""
 	}
-
-	return text.String(), nil
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
 }
 
 // executeSessionStatus returns current session status including time, model, and usage info.
