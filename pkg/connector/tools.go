@@ -482,11 +482,26 @@ func executeMessageSend(ctx context.Context, args map[string]any, btc *BridgeToo
 	bufferInput = strings.TrimSpace(bufferInput)
 	mediaInput := firstNonEmptyString(args["media"], args["path"])
 
+	var relatesTo map[string]any
+	if replyID, ok := args["message_id"].(string); ok && strings.TrimSpace(replyID) != "" {
+		relatesTo = map[string]any{
+			"m.in_reply_to": map[string]any{
+				"event_id": strings.TrimSpace(replyID),
+			},
+		}
+	}
+	if threadID, ok := args["thread_id"].(string); ok && strings.TrimSpace(threadID) != "" {
+		relatesTo = map[string]any{
+			"rel_type": "m.thread",
+			"event_id": strings.TrimSpace(threadID),
+		}
+	}
+
 	if bufferInput == "" && mediaInput == "" {
 		if message == "" {
 			return "", fmt.Errorf("action=send requires 'message' parameter")
 		}
-		respID, err := sendFormattedMessage(ctx, btc, message, nil, "failed to send message")
+		respID, err := sendFormattedMessage(ctx, btc, message, relatesTo, "failed to send message")
 		if err != nil {
 			return "", err
 		}
@@ -548,6 +563,9 @@ func executeMessageSend(ctx context.Context, args map[string]any, btc *BridgeToo
 		"msgtype": msgType,
 		"body":    caption,
 		"info":    info,
+	}
+	if relatesTo != nil {
+		rawContent["m.relates_to"] = relatesTo
 	}
 	if fileName != "" {
 		rawContent["filename"] = fileName
