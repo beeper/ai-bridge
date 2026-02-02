@@ -16,7 +16,7 @@ const (
 	SetChatInfoDescription = "Patch the chat title and/or description (omit fields to keep them unchanged)."
 
 	MessageName        = "message"
-	MessageDescription = "Send messages and perform channel actions in the current chat. Supports: send, react, reactions, edit, delete, reply, pin, unpin, list-pins, thread-reply, search, read, member-info, channel-info."
+	MessageDescription = "Send messages and perform channel actions in the current chat. Supports: send, sendWithEffect, broadcast, react, reactions, edit, delete/unsend, reply, pin, unpin, list-pins, thread-reply, search, read, member-info, channel-info, channel-edit."
 
 	SessionStatusName        = "session_status"
 	SessionStatusDescription = "Get current session status including time, date, model info, and context usage. Use this tool when asked about current time, date, day of week, or what model is being used."

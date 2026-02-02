@@ -114,6 +114,8 @@ func summarizeMessageAction(obj map[string]any) string {
 		return "Member info retrieved"
 	case "channel-info":
 		return "Channel info retrieved"
+	case "channel-edit":
+		return "Channel updated"
 	default:
 		return ""
 	}

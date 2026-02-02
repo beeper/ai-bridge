@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/beeper/ai-bridge/pkg/shared/calc"
+	"github.com/beeper/ai-bridge/pkg/shared/media"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 	"github.com/beeper/ai-bridge/pkg/shared/websearch"
 
@@ -818,6 +819,7 @@ func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model 
 				"content": prompt,
 			},
 		},
+		"modalities": []string{"image", "text"},
 		"max_tokens": 1,
 	}
 
@@ -857,6 +859,14 @@ func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model 
 		Choices []struct {
 			Message struct {
 				Content string `json:"content"`
+				Images  []struct {
+					ImageURL struct {
+						URL string `json:"url"`
+					} `json:"image_url"`
+					ImageURLAlt struct {
+						URL string `json:"url"`
+					} `json:"imageUrl"`
+				} `json:"images"`
 			} `json:"message"`
 		} `json:"choices"`
 		Data []struct {
@@ -880,12 +890,33 @@ func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model 
 		}
 	}
 
+	// Check for chat completion response with images array
+	if len(result.Choices) > 0 && len(result.Choices[0].Message.Images) > 0 {
+		img := result.Choices[0].Message.Images[0]
+		imageURL := img.ImageURL.URL
+		if imageURL == "" {
+			imageURL = img.ImageURLAlt.URL
+		}
+		if imageURL != "" {
+			if strings.HasPrefix(imageURL, "data:") {
+				return extractBase64FromDataURL(imageURL)
+			}
+			if strings.HasPrefix(imageURL, "http") {
+				return fetchImageAsBase64(ctx, imageURL)
+			}
+			return "", fmt.Errorf("unexpected image URL format: %s", imageURL)
+		}
+	}
+
 	// Check for chat completion response with image URL
 	if len(result.Choices) > 0 && result.Choices[0].Message.Content != "" {
 		content := result.Choices[0].Message.Content
 		// If content looks like a URL, fetch it
 		if strings.HasPrefix(content, "http") {
 			return fetchImageAsBase64(ctx, content)
+		}
+		if strings.HasPrefix(content, "data:") {
+			return extractBase64FromDataURL(content)
 		}
 		// If it's already base64, return it
 		if _, err := base64.StdEncoding.DecodeString(content); err == nil {
@@ -895,6 +926,19 @@ func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model 
 	}
 
 	return "", fmt.Errorf("no image data in response")
+}
+
+// extractBase64FromDataURL parses a data URL and returns raw base64 data.
+func extractBase64FromDataURL(dataURL string) (string, error) {
+	b64Data, _, err := media.ParseDataURI(dataURL)
+	if err == nil {
+		return b64Data, nil
+	}
+	data, _, err := media.DecodeBase64(dataURL)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 // fetchImageAsBase64 fetches an image URL and returns it as base64.

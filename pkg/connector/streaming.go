@@ -482,14 +482,14 @@ func (oc *AIClient) streamingResponse(
 			// Check for image generation result (IMAGE: prefix)
 			if strings.HasPrefix(result, ImageResultPrefix) {
 				imageB64 := strings.TrimPrefix(result, ImageResultPrefix)
-				imageData, err := base64.StdEncoding.DecodeString(imageB64)
+				imageData, mimeType, err := decodeBase64Image(imageB64)
 				if err != nil {
 					log.Warn().Err(err).Msg("Failed to decode generated image")
 					displayResult = "Error: failed to decode generated image"
 					resultStatus = ResultStatusError
 				} else {
 					// Send image message
-					if _, err := oc.sendGeneratedImage(ctx, portal, imageData, "image/png", state.turnID); err != nil {
+					if _, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); err != nil {
 						log.Warn().Err(err).Msg("Failed to send generated image")
 						displayResult = "Error: failed to send generated image"
 						resultStatus = ResultStatusError
@@ -871,13 +871,13 @@ func (oc *AIClient) streamingResponse(
 				// Check for image generation result (IMAGE: prefix)
 				if strings.HasPrefix(result, ImageResultPrefix) {
 					imageB64 := strings.TrimPrefix(result, ImageResultPrefix)
-					imageData, err := base64.StdEncoding.DecodeString(imageB64)
+					imageData, mimeType, err := decodeBase64Image(imageB64)
 					if err != nil {
 						log.Warn().Err(err).Msg("Failed to decode generated image (continuation)")
 						displayResult = "Error: failed to decode generated image"
 						resultStatus = ResultStatusError
 					} else {
-						if _, err := oc.sendGeneratedImage(ctx, portal, imageData, "image/png", state.turnID); err != nil {
+						if _, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); err != nil {
 							log.Warn().Err(err).Msg("Failed to send generated image (continuation)")
 							displayResult = "Error: failed to send generated image"
 							resultStatus = ResultStatusError
@@ -1270,13 +1270,13 @@ func (oc *AIClient) streamChatCompletions(
 			// Check for image generation result (IMAGE: prefix)
 			if strings.HasPrefix(result, ImageResultPrefix) {
 				imageB64 := strings.TrimPrefix(result, ImageResultPrefix)
-				imageData, decodeErr := base64.StdEncoding.DecodeString(imageB64)
+				imageData, mimeType, decodeErr := decodeBase64Image(imageB64)
 				if decodeErr != nil {
 					log.Warn().Err(decodeErr).Msg("Failed to decode generated image (Chat Completions)")
 					result = "Error: failed to decode generated image"
 					resultStatus = ResultStatusError
 				} else {
-					if _, sendErr := oc.sendGeneratedImage(ctx, portal, imageData, "image/png", state.turnID); sendErr != nil {
+					if _, sendErr := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); sendErr != nil {
 						log.Warn().Err(sendErr).Msg("Failed to send generated image (Chat Completions)")
 						result = "Error: failed to send generated image"
 						resultStatus = ResultStatusError

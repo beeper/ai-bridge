@@ -34,7 +34,7 @@ var ToolGroups = map[string][]string{
 	tools.GroupSessions:  {"sessions_list", "sessions_history", "sessions_send"},
 	tools.GroupMemory:    {"memory_search", "memory_get", "memory_store", "memory_forget"},
 	tools.GroupWeb:       {"web_search", "web_fetch"},
-	tools.GroupMedia:     {"image", "tts", "analyze_image"},
+	tools.GroupMedia:     {"image", "image_generate", "tts"},
 	tools.GroupStatus:    {"session_status"},
 }
 
