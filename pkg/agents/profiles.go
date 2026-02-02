@@ -32,7 +32,7 @@ var ToolGroups = map[string][]string{
 	tools.GroupChat:      {"set_chat_info"},
 	tools.GroupMessaging: {"message"},
 	tools.GroupSessions:  {"sessions_list", "sessions_history", "sessions_send"},
-	tools.GroupMemory:    {"memory_search", "memory_get"},
+	tools.GroupMemory:    {"memory_search", "memory_get", "memory_store", "memory_forget"},
 	tools.GroupWeb:       {"web_search", "web_fetch"},
 	tools.GroupMedia:     {"image", "tts", "analyze_image"},
 	tools.GroupStatus:    {"session_status"},
@@ -42,10 +42,10 @@ var ToolGroups = map[string][]string{
 // Matches OpenClaw's TOOL_PROFILES pattern.
 var ProfileAllowlists = map[ToolProfile][]string{
 	ProfileMinimal:   {tools.GroupSearch, tools.GroupChat, tools.GroupMessaging, tools.GroupStatus},
-	ProfileCoding:    {tools.GroupCalc, tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupMedia, tools.GroupStatus},
-	ProfileMessaging: {tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupSessions, tools.GroupStatus},
-	ProfileFull:      {tools.GroupCalc, tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupMedia, tools.GroupStatus},
-	ProfileBoss:      {tools.GroupBuilder, tools.GroupMessaging, tools.GroupStatus},
+	ProfileCoding:    {tools.GroupCalc, tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupMedia, tools.GroupStatus, tools.GroupMemory},
+	ProfileMessaging: {tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupSessions, tools.GroupStatus, tools.GroupMemory},
+	ProfileFull:      {tools.GroupCalc, tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupMedia, tools.GroupStatus, tools.GroupMemory},
+	ProfileBoss:      {tools.GroupBuilder, tools.GroupMessaging, tools.GroupStatus, tools.GroupMemory},
 }
 
 // ResolveTools returns allowed tool names for an agent based on its profile and overrides.

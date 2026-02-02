@@ -18,61 +18,26 @@ func (oc *AIClient) sendGeneratedAudio(
 	mimeType string,
 	turnID string,
 ) (id.EventID, error) {
-	intent := oc.getModelIntent(ctx, portal)
-	if intent == nil {
-		return "", fmt.Errorf("failed to get model intent")
-	}
-
 	// Determine file extension based on MIME type
-	ext := "mp3"
-	switch mimeType {
-	case "audio/wav", "audio/x-wav":
-		ext = "wav"
-	case "audio/ogg":
-		ext = "ogg"
-	case "audio/opus":
-		ext = "opus"
-	case "audio/flac":
-		ext = "flac"
-	case "audio/mp4", "audio/m4a", "audio/x-m4a":
-		ext = "m4a"
-	}
+	ext := extensionForMIME(mimeType, "mp3", map[string]string{
+		"audio/wav":   "wav",
+		"audio/x-wav": "wav",
+		"audio/ogg":   "ogg",
+		"audio/opus":  "opus",
+		"audio/flac":  "flac",
+		"audio/mp4":   "m4a",
+		"audio/m4a":   "m4a",
+		"audio/x-m4a": "m4a",
+	})
 	fileName := fmt.Sprintf("tts-%d.%s", time.Now().UnixMilli(), ext)
-
-	// Upload to Matrix
-	uri, file, err := intent.UploadMedia(ctx, portal.MXID, audioData, fileName, mimeType)
-	if err != nil {
-		return "", fmt.Errorf("upload failed: %w", err)
-	}
-
-	// Build audio message content
-	rawContent := map[string]any{
-		"msgtype": event.MsgAudio,
-		"body":    fileName,
-		"info": map[string]any{
-			"mimetype": mimeType,
-			"size":     len(audioData),
-		},
-	}
-
-	if file != nil {
-		rawContent["file"] = file
-	} else {
-		rawContent["url"] = string(uri)
-	}
-
-	// Add TTS metadata
-	if turnID != "" {
-		rawContent["com.beeper.ai.tts"] = map[string]any{
-			"turn_id": turnID,
-		}
-	}
-
-	// Send message
-	eventContent := &event.Content{Raw: rawContent}
-	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
-	if err != nil {
-		return "", fmt.Errorf("send failed: %w", err)
-	}
-	return resp.EventID, nil
+	return oc.sendGeneratedMedia(
+		ctx,
+		portal,
+		audioData,
+		mimeType,
+		turnID,
+		event.MsgAudio,
+		fileName,
+		"com.beeper.ai.tts",
+	)
 }

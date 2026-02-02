@@ -125,10 +125,8 @@ var CommandModel = &commands.FullHandler{
 }
 
 func fnModel(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -137,9 +135,7 @@ func fnModel(ce *commands.Event) {
 		return
 	}
 
-	// Protect rooms with Boss agent from overrides
-	if agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID) {
-		ce.Reply("Cannot change model in a room managed by the Boss agent")
+	if rejectBossOverrides(ce, meta, "Cannot change model in a room managed by the Boss agent") {
 		return
 	}
 
@@ -172,10 +168,8 @@ var CommandTemp = &commands.FullHandler{
 }
 
 func fnTemp(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -184,9 +178,7 @@ func fnTemp(ce *commands.Event) {
 		return
 	}
 
-	// Protect rooms with Boss agent from overrides
-	if agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID) {
-		ce.Reply("Cannot change temperature in a room managed by the Boss agent")
+	if rejectBossOverrides(ce, meta, "Cannot change temperature in a room managed by the Boss agent") {
 		return
 	}
 
@@ -216,10 +208,8 @@ var CommandSystemPrompt = &commands.FullHandler{
 }
 
 func fnSystemPrompt(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -241,9 +231,7 @@ func fnSystemPrompt(ce *commands.Event) {
 		return
 	}
 
-	// Protect rooms with Boss agent from overrides
-	if agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID) {
-		ce.Reply("Cannot change system prompt in a room managed by the Boss agent")
+	if rejectBossOverrides(ce, meta, "Cannot change system prompt in a room managed by the Boss agent") {
 		return
 	}
 
@@ -266,10 +254,8 @@ var CommandContext = &commands.FullHandler{
 }
 
 func fnContext(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -304,10 +290,8 @@ var CommandTokens = &commands.FullHandler{
 }
 
 func fnTokens(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -340,10 +324,8 @@ var CommandConfig = &commands.FullHandler{
 }
 
 func fnConfig(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -373,10 +355,8 @@ var CommandTools = &commands.FullHandler{
 }
 
 func fnTools(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -398,10 +378,8 @@ var CommandMode = &commands.FullHandler{
 }
 
 func fnMode(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -444,10 +422,8 @@ var CommandNew = &commands.FullHandler{
 }
 
 func fnNew(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -474,10 +450,8 @@ var CommandFork = &commands.FullHandler{
 }
 
 func fnFork(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -503,10 +477,8 @@ var CommandRegenerate = &commands.FullHandler{
 }
 
 func fnRegenerate(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -528,8 +500,11 @@ var CommandTitle = &commands.FullHandler{
 }
 
 func fnTitle(ce *commands.Event) {
-	client := getAIClient(ce)
-	if client == nil || ce.Portal == nil {
+	client, ok := requireClient(ce)
+	if !ok {
+		return
+	}
+	if ce.Portal == nil {
 		ce.Reply("Failed to access AI configuration")
 		return
 	}
@@ -550,9 +525,8 @@ var CommandModels = &commands.FullHandler{
 }
 
 func fnModels(ce *commands.Event) {
-	client := getAIClient(ce)
-	if client == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, ok := requireClient(ce)
+	if !ok {
 		return
 	}
 
@@ -647,10 +621,8 @@ var CommandAgent = &commands.FullHandler{
 }
 
 func fnAgent(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -675,9 +647,7 @@ func fnAgent(ce *commands.Event) {
 		return
 	}
 
-	// Protect rooms with Boss agent from overrides
-	if agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID) {
-		ce.Reply("Cannot change agent in a room managed by the Boss agent")
+	if rejectBossOverrides(ce, meta, "Cannot change agent in a room managed by the Boss agent") {
 		return
 	}
 
@@ -724,9 +694,8 @@ var CommandAgents = &commands.FullHandler{
 }
 
 func fnAgents(ce *commands.Event) {
-	client := getAIClient(ce)
-	if client == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, ok := requireClient(ce)
+	if !ok {
 		return
 	}
 
@@ -787,9 +756,8 @@ var CommandCreateAgent = &commands.FullHandler{
 }
 
 func fnCreateAgent(ce *commands.Event) {
-	client := getAIClient(ce)
-	if client == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, ok := requireClient(ce)
+	if !ok {
 		return
 	}
 
@@ -869,9 +837,8 @@ var CommandDeleteAgent = &commands.FullHandler{
 }
 
 func fnDeleteAgent(ce *commands.Event) {
-	client := getAIClient(ce)
-	if client == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, ok := requireClient(ce)
+	if !ok {
 		return
 	}
 

@@ -60,57 +60,21 @@ func (oc *AIClient) sendGeneratedImage(
 	mimeType string,
 	turnID string,
 ) (id.EventID, error) {
-	intent := oc.getModelIntent(ctx, portal)
-	if intent == nil {
-		return "", fmt.Errorf("failed to get model intent")
-	}
-
 	// Generate filename based on timestamp and mime type
-	ext := "png"
-	switch mimeType {
-	case "image/jpeg":
-		ext = "jpg"
-	case "image/webp":
-		ext = "webp"
-	case "image/gif":
-		ext = "gif"
-	}
+	ext := extensionForMIME(mimeType, "png", map[string]string{
+		"image/jpeg": "jpg",
+		"image/webp": "webp",
+		"image/gif":  "gif",
+	})
 	fileName := fmt.Sprintf("generated-%d.%s", time.Now().UnixMilli(), ext)
-
-	// Upload to Matrix
-	uri, file, err := intent.UploadMedia(ctx, portal.MXID, imageData, fileName, mimeType)
-	if err != nil {
-		return "", fmt.Errorf("upload failed: %w", err)
-	}
-
-	// Build image message content with AI metadata
-	rawContent := map[string]any{
-		"msgtype": event.MsgImage,
-		"body":    fileName,
-		"info": map[string]any{
-			"mimetype": mimeType,
-			"size":     len(imageData),
-		},
-	}
-
-	if file != nil {
-		rawContent["file"] = file
-	} else {
-		rawContent["url"] = string(uri)
-	}
-
-	// Add image generation metadata
-	if turnID != "" {
-		rawContent["com.beeper.ai.image_generation"] = map[string]any{
-			"turn_id": turnID,
-		}
-	}
-
-	// Send message
-	eventContent := &event.Content{Raw: rawContent}
-	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
-	if err != nil {
-		return "", fmt.Errorf("send failed: %w", err)
-	}
-	return resp.EventID, nil
+	return oc.sendGeneratedMedia(
+		ctx,
+		portal,
+		imageData,
+		mimeType,
+		turnID,
+		event.MsgImage,
+		fileName,
+		"com.beeper.ai.image_generation",
+	)
 }

@@ -165,8 +165,9 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		if toolsSection := buildToolsSectionFromList(params.Tools); toolsSection != "" {
 			sections = append(sections, toolsSection)
 		}
-		// TODO(memory): Add buildMemorySection(params.Tools) from clawdbot
-		// When memory_search or memory_get tools are available, add memory recall guidance
+		if memorySection := buildMemorySection(params.Tools); memorySection != "" {
+			sections = append(sections, memorySection)
+		}
 		sections = append(sections, buildToolCallStyleSection())
 		if runtime := buildRuntimeSection(params.RuntimeInfo); runtime != "" {
 			sections = append(sections, runtime)
@@ -435,6 +436,64 @@ func buildAgentListSection(agents []*AgentDefinition) string {
 		sb.WriteString(fmt.Sprintf("- %s (%s): %s [%s]\n",
 			agent.Name, agent.ID, agent.Description, status))
 	}
+	return sb.String()
+}
+
+// buildMemorySection creates memory guidance when memory tools are available.
+func buildMemorySection(toolList []tools.ToolInfo) string {
+	hasMemorySearch := false
+	hasMemoryStore := false
+	for _, tool := range toolList {
+		if tool.Enabled {
+			switch tool.Name {
+			case "memory_search", "memory_get":
+				hasMemorySearch = true
+			case "memory_store":
+				hasMemoryStore = true
+			}
+		}
+	}
+
+	if !hasMemorySearch && !hasMemoryStore {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Memory\n")
+
+	if hasMemorySearch {
+		sb.WriteString(`You have access to a persistent memory system.
+
+**When to search memory:**
+- At conversation start when context might be relevant
+- When user references past discussions ("remember when...", "we talked about...")
+- When encountering names, projects, or entities that might have stored context
+- Before making assumptions about user preferences
+
+`)
+	}
+
+	if hasMemoryStore {
+		sb.WriteString(`**When to store memories:**
+- User states preferences ("I prefer...", "I always...", "I like...")
+- Important decisions are made that should persist
+- Key facts about entities (people, projects, systems) are shared
+- Context valuable in future conversations
+
+**Categories:** preference, decision, entity, fact, other
+
+**Importance (0.0-1.0):**
+- 0.8-1.0: Critical preferences, key decisions
+- 0.5-0.7: Useful facts, moderate preferences
+- 0.2-0.4: Nice-to-have details
+- Don't store: Trivial details, redundant information
+
+**Scope:** "agent" (default, this agent only) or "global" (all agents)
+
+`)
+	}
+
+	sb.WriteString("Store memories proactively but judiciously. Quality over quantity.")
 	return sb.String()
 }
 

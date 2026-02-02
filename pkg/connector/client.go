@@ -1324,14 +1324,11 @@ func (oc *AIClient) buildPromptWithMedia(
 	switch mediaType {
 	case pendingTypeImage:
 		// Always download+base64 for images (consistent across cloud/self-hosted)
-		b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, encryptedFile, 20) // 20MB limit for images
+		b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, mediaURL, encryptedFile, 20, mimeType) // 20MB limit for images
 		if err != nil {
 			return nil, fmt.Errorf("failed to download image: %w", err)
 		}
-		if actualMimeType == "" || actualMimeType == "application/octet-stream" {
-			actualMimeType = mimeType
-		}
-		dataURL := fmt.Sprintf("data:%s;base64,%s", actualMimeType, b64Data)
+		dataURL := buildDataURL(actualMimeType, b64Data)
 		mediaContent = openai.ChatCompletionContentPartUnionParam{
 			OfImageURL: &openai.ChatCompletionContentPartImageParam{
 				ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
@@ -1343,17 +1340,14 @@ func (oc *AIClient) buildPromptWithMedia(
 
 	case pendingTypePDF:
 		// Download and base64 encode the PDF (always need to encode, encrypted or not)
-		b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, encryptedFile, 50) // 50MB limit
+		b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, mediaURL, encryptedFile, 50, mimeType) // 50MB limit
 		if err != nil {
 			return nil, fmt.Errorf("failed to download PDF: %w", err)
-		}
-		if actualMimeType == "" || actualMimeType == "application/octet-stream" {
-			actualMimeType = mimeType
 		}
 		if actualMimeType == "" {
 			actualMimeType = "application/pdf"
 		}
-		dataURL := fmt.Sprintf("data:%s;base64,%s", actualMimeType, b64Data)
+		dataURL := buildDataURL(actualMimeType, b64Data)
 		mediaContent = openai.ChatCompletionContentPartUnionParam{
 			OfFile: &openai.ChatCompletionContentPartFileParam{
 				File: openai.ChatCompletionContentPartFileFileParam{
@@ -1364,12 +1358,9 @@ func (oc *AIClient) buildPromptWithMedia(
 
 	case pendingTypeAudio:
 		// Download and base64 encode the audio (always need to encode)
-		b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, encryptedFile, 25) // 25MB limit
+		b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, mediaURL, encryptedFile, 25, mimeType) // 25MB limit
 		if err != nil {
 			return nil, fmt.Errorf("failed to download audio: %w", err)
-		}
-		if actualMimeType == "" || actualMimeType == "application/octet-stream" {
-			actualMimeType = mimeType
 		}
 		audioFormat := getAudioFormat(actualMimeType)
 		mediaContent = openai.ChatCompletionContentPartUnionParam{
@@ -1383,14 +1374,11 @@ func (oc *AIClient) buildPromptWithMedia(
 
 	case pendingTypeVideo:
 		// Always download+base64 for video (consistent across cloud/self-hosted)
-		b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, encryptedFile, 100) // 100MB limit for video
+		b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, mediaURL, encryptedFile, 100, mimeType) // 100MB limit for video
 		if err != nil {
 			return nil, fmt.Errorf("failed to download video: %w", err)
 		}
-		if actualMimeType == "" || actualMimeType == "application/octet-stream" {
-			actualMimeType = mimeType
-		}
-		dataURL := fmt.Sprintf("data:%s;base64,%s", actualMimeType, b64Data)
+		dataURL := buildDataURL(actualMimeType, b64Data)
 		videoPrompt := fmt.Sprintf("%s\n\nVideo data URL: %s", caption, dataURL)
 		userMsg := openai.ChatCompletionMessageParamUnion{
 			OfUser: &openai.ChatCompletionUserMessageParam{

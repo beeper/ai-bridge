@@ -4,29 +4,17 @@ import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 )
 
 // ChatInfo patches the chat title and/or description.
 var ChatInfo = &Tool{
 	Tool: mcp.Tool{
-		Name:        "set_chat_info",
-		Description: "Patch the chat title and/or description (omit fields to keep them unchanged).",
+		Name:        toolspec.SetChatInfoName,
+		Description: toolspec.SetChatInfoDescription,
 		Annotations: &mcp.ToolAnnotations{Title: "Set Chat Info"},
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"title": map[string]any{
-					"type":        "string",
-					"description": "Optional. The new title for the chat",
-				},
-				"description": map[string]any{
-					"type":        "string",
-					"description": "Optional. The new description/topic for the chat (empty string clears it)",
-				},
-			},
-			"minProperties":        1,
-			"additionalProperties": false,
-		},
+		InputSchema: toolspec.SetChatInfoSchema(),
 	},
 	Type:  ToolTypeBuiltin,
 	Group: GroupChat,

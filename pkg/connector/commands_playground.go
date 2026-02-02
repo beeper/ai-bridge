@@ -24,9 +24,8 @@ var CommandPlayground = &commands.FullHandler{
 }
 
 func fnPlayground(ce *commands.Event) {
-	client := getAIClient(ce)
-	if client == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, ok := requireClient(ce)
+	if !ok {
 		return
 	}
 

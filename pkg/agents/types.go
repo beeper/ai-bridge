@@ -33,6 +33,9 @@ type AgentDefinition struct {
 	ResponseMode    ResponseMode `json:"response_mode,omitempty"`    // natural (OpenClaw-style), raw (pass-through)
 	Identity        *Identity    `json:"identity,omitempty"`         // custom identity for prompt
 
+	// Memory configuration (optional, uses defaults if nil)
+	Memory *MemoryConfig `json:"memory,omitempty"`
+
 	// Metadata
 	IsPreset  bool  `json:"is_preset,omitempty"`
 	CreatedAt int64 `json:"created_at"`
@@ -73,6 +76,15 @@ const (
 type Identity struct {
 	Name    string `json:"name,omitempty"`
 	Persona string `json:"persona,omitempty"`
+}
+
+// MemoryConfig configures memory behavior for an agent (matches OpenClaw memorySearch config).
+type MemoryConfig struct {
+	Enabled      *bool    `json:"enabled,omitempty"`       // nil = true (enabled by default)
+	Sources      []string `json:"sources,omitempty"`       // ["memory", "sessions"]
+	EnableGlobal *bool    `json:"enable_global,omitempty"` // nil = true (access global memory)
+	MaxResults   int      `json:"max_results,omitempty"`   // default: 6
+	MinScore     float64  `json:"min_score,omitempty"`     // default: 0.35
 }
 
 // ModelInfo provides metadata about an available model.

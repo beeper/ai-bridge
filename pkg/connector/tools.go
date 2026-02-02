@@ -7,15 +7,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/beeper/ai-bridge/pkg/shared/calc"
+	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
+	"github.com/beeper/ai-bridge/pkg/shared/websearch"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/matrix"
@@ -60,54 +62,22 @@ func GetBridgeToolContext(ctx context.Context) *BridgeToolContext {
 func BuiltinTools() []ToolDefinition {
 	return []ToolDefinition{
 		{
-			Name:        "calculator",
-			Description: "Perform basic arithmetic calculations. Supports addition, subtraction, multiplication, division, and modulo operations.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"expression": map[string]any{
-						"type":        "string",
-						"description": "A mathematical expression to evaluate, e.g. '2 + 3 * 4' or '100 / 5'",
-					},
-				},
-				"required": []string{"expression"},
-			},
-			Execute: executeCalculator,
+			Name:        toolspec.CalculatorName,
+			Description: toolspec.CalculatorDescription,
+			Parameters:  toolspec.CalculatorSchema(),
+			Execute:     executeCalculator,
 		},
 		{
-			Name:        "web_search",
-			Description: "Search the web for information. Returns a summary of search results.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query": map[string]any{
-						"type":        "string",
-						"description": "The search query",
-					},
-				},
-				"required": []string{"query"},
-			},
-			Execute: executeWebSearch,
+			Name:        toolspec.WebSearchName,
+			Description: toolspec.WebSearchDescription,
+			Parameters:  toolspec.WebSearchSchema(),
+			Execute:     executeWebSearch,
 		},
 		{
 			Name:        ToolNameSetChatInfo,
-			Description: "Patch the current chat's title and/or description (omit fields to keep them unchanged).",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"title": map[string]any{
-						"type":        "string",
-						"description": "Optional. The new title for the chat",
-					},
-					"description": map[string]any{
-						"type":        "string",
-						"description": "Optional. The new description/topic for the chat (empty string clears it)",
-					},
-				},
-				"minProperties":        1,
-				"additionalProperties": false,
-			},
-			Execute: executeSetChatInfo,
+			Description: toolspec.SetChatInfoDescription,
+			Parameters:  toolspec.SetChatInfoSchema(),
+			Execute:     executeSetChatInfo,
 		},
 		{
 			Name:        ToolNameMessage,
@@ -454,29 +424,12 @@ func executeMessageSend(ctx context.Context, args map[string]any, btc *BridgeToo
 		return "", fmt.Errorf("action=send requires 'message' parameter")
 	}
 
-	// Get the model intent for sending
-	intent := btc.Client.getModelIntent(ctx, btc.Portal)
-	if intent == nil {
-		return "", fmt.Errorf("failed to get model intent")
-	}
-
-	// Send the message
-	rendered := format.RenderMarkdown(message, true, true)
-	eventContent := &event.Content{
-		Raw: map[string]any{
-			"msgtype":        event.MsgText,
-			"body":           rendered.Body,
-			"format":         rendered.Format,
-			"formatted_body": rendered.FormattedBody,
-		},
-	}
-
-	resp, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventMessage, eventContent, nil)
+	respID, err := sendFormattedMessage(ctx, btc, message, nil, "failed to send message")
 	if err != nil {
-		return "", fmt.Errorf("failed to send message: %w", err)
+		return "", err
 	}
 
-	return fmt.Sprintf(`{"action":"send","event_id":%q,"status":"sent"}`, resp.EventID), nil
+	return fmt.Sprintf(`{"action":"send","event_id":%q,"status":"sent"}`, respID), nil
 }
 
 // executeMessageEdit handles the edit action - edits an existing message.
@@ -564,35 +517,17 @@ func executeMessageReply(ctx context.Context, args map[string]any, btc *BridgeTo
 		return "", fmt.Errorf("action=reply requires 'message' parameter")
 	}
 
-	intent := btc.Client.getModelIntent(ctx, btc.Portal)
-	if intent == nil {
-		return "", fmt.Errorf("failed to get model intent")
-	}
-
 	targetEventID := id.EventID(messageID)
-	rendered := format.RenderMarkdown(message, true, true)
-
-	// Send message with m.in_reply_to relation
-	eventContent := &event.Content{
-		Raw: map[string]any{
-			"msgtype":        event.MsgText,
-			"body":           rendered.Body,
-			"format":         rendered.Format,
-			"formatted_body": rendered.FormattedBody,
-			"m.relates_to": map[string]any{
-				"m.in_reply_to": map[string]any{
-					"event_id": targetEventID.String(),
-				},
-			},
+	respID, err := sendFormattedMessage(ctx, btc, message, map[string]any{
+		"m.in_reply_to": map[string]any{
+			"event_id": targetEventID.String(),
 		},
-	}
-
-	resp, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventMessage, eventContent, nil)
+	}, "failed to send reply")
 	if err != nil {
-		return "", fmt.Errorf("failed to send reply: %w", err)
+		return "", err
 	}
 
-	return fmt.Sprintf(`{"action":"reply","event_id":%q,"reply_to":%q,"status":"sent"}`, resp.EventID, targetEventID), nil
+	return fmt.Sprintf(`{"action":"reply","event_id":%q,"reply_to":%q,"status":"sent"}`, respID, targetEventID), nil
 }
 
 // executeMessagePin handles pin/unpin actions - updates room pinned events.
@@ -711,34 +646,16 @@ func executeMessageThreadReply(ctx context.Context, args map[string]any, btc *Br
 		return "", fmt.Errorf("action=thread-reply requires 'message' parameter")
 	}
 
-	intent := btc.Client.getModelIntent(ctx, btc.Portal)
-	if intent == nil {
-		return "", fmt.Errorf("failed to get model intent")
-	}
-
 	threadRootID := id.EventID(threadID)
-	rendered := format.RenderMarkdown(message, true, true)
-
-	// Send message with m.thread relation
-	eventContent := &event.Content{
-		Raw: map[string]any{
-			"msgtype":        event.MsgText,
-			"body":           rendered.Body,
-			"format":         rendered.Format,
-			"formatted_body": rendered.FormattedBody,
-			"m.relates_to": map[string]any{
-				"rel_type": "m.thread",
-				"event_id": threadRootID.String(),
-			},
-		},
-	}
-
-	resp, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventMessage, eventContent, nil)
+	respID, err := sendFormattedMessage(ctx, btc, message, map[string]any{
+		"rel_type": "m.thread",
+		"event_id": threadRootID.String(),
+	}, "failed to send thread reply")
 	if err != nil {
-		return "", fmt.Errorf("failed to send thread reply: %w", err)
+		return "", err
 	}
 
-	return fmt.Sprintf(`{"action":"thread-reply","event_id":%q,"thread_id":%q,"status":"sent"}`, resp.EventID, threadRootID), nil
+	return fmt.Sprintf(`{"action":"thread-reply","event_id":%q,"thread_id":%q,"status":"sent"}`, respID, threadRootID), nil
 }
 
 // executeMessageSearch searches messages in the current chat.
@@ -1284,135 +1201,12 @@ func executeCalculator(ctx context.Context, args map[string]any) (string, error)
 		return "", fmt.Errorf("missing or invalid 'expression' argument")
 	}
 
-	result, err := evalExpression(expr)
+	result, err := calc.EvalExpression(expr)
 	if err != nil {
 		return "", fmt.Errorf("calculation error: %w", err)
 	}
 
 	return fmt.Sprintf("%.6g", result), nil
-}
-
-// evalExpression evaluates a simple arithmetic expression
-// Supports: +, -, *, /, %, and parentheses
-func evalExpression(expr string) (float64, error) {
-	expr = strings.ReplaceAll(expr, " ", "")
-	if expr == "" {
-		return 0, fmt.Errorf("empty expression")
-	}
-
-	// Simple recursive descent parser for basic arithmetic
-	pos := 0
-	return parseExpression(expr, &pos)
-}
-
-func parseExpression(expr string, pos *int) (float64, error) {
-	result, err := parseTerm(expr, pos)
-	if err != nil {
-		return 0, err
-	}
-
-	for *pos < len(expr) {
-		op := expr[*pos]
-		if op != '+' && op != '-' {
-			break
-		}
-		*pos++
-		right, err := parseTerm(expr, pos)
-		if err != nil {
-			return 0, err
-		}
-		if op == '+' {
-			result += right
-		} else {
-			result -= right
-		}
-	}
-	return result, nil
-}
-
-func parseTerm(expr string, pos *int) (float64, error) {
-	result, err := parseFactor(expr, pos)
-	if err != nil {
-		return 0, err
-	}
-
-	for *pos < len(expr) {
-		op := expr[*pos]
-		if op != '*' && op != '/' && op != '%' {
-			break
-		}
-		*pos++
-		right, err := parseFactor(expr, pos)
-		if err != nil {
-			return 0, err
-		}
-		switch op {
-		case '*':
-			result *= right
-		case '/':
-			if right == 0 {
-				return 0, fmt.Errorf("division by zero")
-			}
-			result /= right
-		case '%':
-			if right == 0 {
-				return 0, fmt.Errorf("modulo by zero")
-			}
-			result = math.Mod(result, right)
-		}
-	}
-	return result, nil
-}
-
-func parseFactor(expr string, pos *int) (float64, error) {
-	if *pos >= len(expr) {
-		return 0, fmt.Errorf("unexpected end of expression")
-	}
-
-	// Handle parentheses
-	if expr[*pos] == '(' {
-		*pos++
-		result, err := parseExpression(expr, pos)
-		if err != nil {
-			return 0, err
-		}
-		if *pos >= len(expr) || expr[*pos] != ')' {
-			return 0, fmt.Errorf("missing closing parenthesis")
-		}
-		*pos++
-		return result, nil
-	}
-
-	// Handle negative numbers
-	negative := false
-	if expr[*pos] == '-' {
-		negative = true
-		*pos++
-	}
-
-	// Parse number
-	start := *pos
-	for *pos < len(expr) && (isDigit(expr[*pos]) || expr[*pos] == '.') {
-		*pos++
-	}
-
-	if start == *pos {
-		return 0, fmt.Errorf("expected number at position %d", start)
-	}
-
-	num, err := strconv.ParseFloat(expr[start:*pos], 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid number: %s", expr[start:*pos])
-	}
-
-	if negative {
-		num = -num
-	}
-	return num, nil
-}
-
-func isDigit(c byte) bool {
-	return c >= '0' && c <= '9'
 }
 
 // executeWebSearch performs a web search (placeholder implementation)
@@ -1422,78 +1216,56 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 		return "", fmt.Errorf("missing or invalid 'query' argument")
 	}
 
-	// Use DuckDuckGo instant answer API (no API key required)
-	apiURL := fmt.Sprintf("https://api.duckduckgo.com/?q=%s&format=json&no_html=1&skip_disambig=1",
-		url.QueryEscape(query))
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	result, err := websearch.DuckDuckGoSearch(ctx, query)
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("web search failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("web search failed: status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var result struct {
-		Abstract      string `json:"Abstract"`
-		AbstractText  string `json:"AbstractText"`
-		Answer        string `json:"Answer"`
-		AnswerType    string `json:"AnswerType"`
-		Definition    string `json:"Definition"`
-		Heading       string `json:"Heading"`
-		RelatedTopics []struct {
-			Text string `json:"Text"`
-		} `json:"RelatedTopics"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to parse search results: %w", err)
-	}
-
-	// Build response from available data
-	var response strings.Builder
-	response.WriteString(fmt.Sprintf("Search results for: %s\n\n", query))
-
-	if result.Answer != "" {
-		response.WriteString(fmt.Sprintf("Answer: %s\n", result.Answer))
-	}
-	if result.AbstractText != "" {
-		response.WriteString(fmt.Sprintf("Summary: %s\n", result.AbstractText))
-	}
-	if result.Definition != "" {
-		response.WriteString(fmt.Sprintf("Definition: %s\n", result.Definition))
-	}
-
-	// Add related topics if no direct answer
-	if result.Answer == "" && result.AbstractText == "" && len(result.RelatedTopics) > 0 {
-		response.WriteString("Related information:\n")
-		count := 0
-		for _, topic := range result.RelatedTopics {
-			if topic.Text == "" {
-				continue
-			}
-			response.WriteString(fmt.Sprintf("- %s\n", topic.Text))
-			count++
-			if count >= 3 {
-				break
-			}
+		msg := err.Error()
+		switch {
+		case strings.HasPrefix(msg, "failed to create request:"):
+			return "", err
+		case strings.HasPrefix(msg, "failed to parse results:"):
+			trimmed := strings.TrimPrefix(msg, "failed to parse results: ")
+			return "", fmt.Errorf("failed to parse search results: %s", trimmed)
+		case strings.HasPrefix(msg, "status "):
+			return "", fmt.Errorf("web search failed: %s", msg)
+		case strings.HasPrefix(msg, "request failed:"):
+			trimmed := strings.TrimPrefix(msg, "request failed: ")
+			return "", fmt.Errorf("web search failed: %s", trimmed)
+		default:
+			return "", fmt.Errorf("web search failed: %s", msg)
 		}
 	}
 
-	if response.Len() == len(fmt.Sprintf("Search results for: %s\n\n", query)) {
+	// Build response from available data
+	var text strings.Builder
+	header := fmt.Sprintf("Search results for: %s\n\n", query)
+	text.WriteString(header)
+
+	if result.Answer != "" {
+		text.WriteString(fmt.Sprintf("Answer: %s\n", result.Answer))
+	}
+	if result.Summary != "" {
+		text.WriteString(fmt.Sprintf("Summary: %s\n", result.Summary))
+	}
+	if result.Definition != "" {
+		text.WriteString(fmt.Sprintf("Definition: %s\n", result.Definition))
+	}
+
+	// Add related topics if no direct answer
+	if result.Answer == "" && result.Summary == "" && len(result.Results) > 0 {
+		text.WriteString("Related information:\n")
+		for _, topic := range result.Results {
+			if topic.Snippet == "" {
+				continue
+			}
+			text.WriteString(fmt.Sprintf("- %s\n", topic.Snippet))
+		}
+	}
+
+	if text.Len() == len(header) {
 		return fmt.Sprintf("No direct results found for '%s'. Try rephrasing your query.", query), nil
 	}
 
-	return response.String(), nil
+	return text.String(), nil
 }
 
 // executeSetChatInfo patches the room title and/or description using bridge context.

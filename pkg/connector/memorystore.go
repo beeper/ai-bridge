@@ -499,6 +499,10 @@ func (m *MemoryStore) getAgentDataRoom(ctx context.Context, agentID string) (*br
 }
 
 func (m *MemoryStore) getOrCreateAgentDataRoom(ctx context.Context, agentID string) (*bridgev2.Portal, error) {
+	if agentID == "" {
+		return nil, nil
+	}
+
 	// First try to get existing room
 	portal, err := m.getAgentDataRoom(ctx, agentID)
 	if err != nil {
@@ -508,9 +512,40 @@ func (m *MemoryStore) getOrCreateAgentDataRoom(ctx context.Context, agentID stri
 		return portal, nil
 	}
 
-	// For now, just return nil - agent data rooms are created when agents are created
-	// The memory will be stored in the global room instead
-	return nil, nil
+	// Create agent memory room on demand
+	loginID := m.client.UserLogin.ID
+	portalKey := agentDataPortalKey(loginID, agentID)
+
+	portal, err = m.client.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get portal: %w", err)
+	}
+
+	if portal.MXID == "" {
+		// Need to create the Matrix room
+		roomName := fmt.Sprintf("Agent Memory: %s", agentID)
+		chatInfo := &bridgev2.ChatInfo{
+			Name:  &roomName,
+			Topic: strPtr(fmt.Sprintf("Memory storage for agent %s", agentID)),
+		}
+
+		err = portal.CreateMatrixRoom(ctx, m.client.UserLogin, chatInfo)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create agent memory room: %w", err)
+		}
+
+		// Set metadata
+		meta := portalMeta(portal)
+		meta.IsAgentDataRoom = true
+		meta.AgentID = agentID
+		if err := portal.Save(ctx); err != nil {
+			m.client.log.Warn().Err(err).Str("agent_id", agentID).Msg("Failed to save agent memory room metadata")
+		}
+
+		m.client.log.Info().Str("agent_id", agentID).Msg("Created agent memory room on demand")
+	}
+
+	return portal, nil
 }
 
 func (m *MemoryStore) getGlobalMemoryRoom(ctx context.Context) (*bridgev2.Portal, error) {
