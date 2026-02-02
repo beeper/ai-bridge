@@ -122,6 +122,7 @@ type PortalMetadata struct {
 	ConversationMode string `json:"conversation_mode,omitempty"`
 	LastResponseID   string `json:"last_response_id,omitempty"`
 	DefaultAgentID   string `json:"default_agent_id,omitempty"`
+	IsMCPRelay       bool   `json:"is_mcp_relay,omitempty"` // True if this is an MCP relay room for Desktop IPC
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild

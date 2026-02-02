@@ -42,14 +42,16 @@ func NewMCPMatrixClient(client *AIClient) *MCPMatrixClient {
 func (c *MCPMatrixClient) Call(ctx context.Context, roomID id.RoomID, deviceID string, method string, params map[string]any) (*MCPJSONRPCBase, error) {
 	requestID := NewCallID()
 
-	request := &MCPRequestContent{
-		DeviceID: deviceID,
-		MCP: MCPJSONRPCBase{
-			JSONRPC: "2.0",
-			ID:      requestID,
-			Method:  method,
-			Params:  params,
-		},
+	mcpPayload := MCPPayload{
+		JSONRPC: "2.0",
+		ID:      requestID,
+		Method:  method,
+		Params:  params,
+	}
+
+	payloadBytes, err := json.Marshal(mcpPayload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal MCP payload: %w", err)
 	}
 
 	// Create response channel
@@ -65,12 +67,8 @@ func (c *MCPMatrixClient) Call(ctx context.Context, roomID id.RoomID, deviceID s
 		c.mu.Unlock()
 	}()
 
-	// Send request via Matrix
-	bot := c.client.UserLogin.Bridge.Bot
-	_, err := bot.SendMessage(ctx, roomID, MCPRequestEventType, &event.Content{
-		Parsed: request,
-	}, nil)
-	if err != nil {
+	// Send request via Matrix as m.room.message with custom msgtype
+	if err := c.sendIPC(ctx, roomID, deviceID, IPCMCPRequest, payloadBytes); err != nil {
 		return nil, fmt.Errorf("failed to send MCP request: %w", err)
 	}
 
@@ -101,20 +99,18 @@ func (c *MCPMatrixClient) Call(ctx context.Context, roomID id.RoomID, deviceID s
 
 // SendNotification sends an MCP notification (no response expected)
 func (c *MCPMatrixClient) SendNotification(ctx context.Context, roomID id.RoomID, deviceID string, method string, params map[string]any) error {
-	notification := &MCPNotificationContent{
-		DeviceID: deviceID,
-		MCP: MCPJSONRPCBase{
-			JSONRPC: "2.0",
-			Method:  method,
-			Params:  params,
-		},
+	mcpPayload := MCPPayload{
+		JSONRPC: "2.0",
+		Method:  method,
+		Params:  params,
 	}
 
-	bot := c.client.UserLogin.Bridge.Bot
-	_, err := bot.SendMessage(ctx, roomID, MCPNotificationEventType, &event.Content{
-		Parsed: notification,
-	}, nil)
+	payloadBytes, err := json.Marshal(mcpPayload)
 	if err != nil {
+		return fmt.Errorf("failed to marshal MCP notification payload: %w", err)
+	}
+
+	if err := c.sendIPC(ctx, roomID, deviceID, IPCMCPNotification, payloadBytes); err != nil {
 		return fmt.Errorf("failed to send MCP notification: %w", err)
 	}
 
@@ -126,20 +122,42 @@ func (c *MCPMatrixClient) SendNotification(ctx context.Context, roomID id.RoomID
 	return nil
 }
 
+// sendIPC sends an IPC message using m.room.message with custom msgtype
+func (c *MCPMatrixClient) sendIPC(ctx context.Context, roomID id.RoomID, deviceID string, messageType IPCMessageType, payload json.RawMessage) error {
+	// Build the m.room.message content with IPC data in custom field
+	content := &event.Content{
+		Parsed: &event.MessageEventContent{
+			MsgType: IPCMsgType,
+			Body:    "[AI Bridge IPC]",
+		},
+		Raw: map[string]any{
+			IPCMsgType: map[string]any{
+				"device_id":    deviceID,
+				"message_type": messageType,
+				"payload":      payload,
+			},
+		},
+	}
+
+	bot := c.client.UserLogin.Bridge.Bot
+	_, err := bot.SendMessage(ctx, roomID, event.EventMessage, content, nil)
+	return err
+}
+
 // HandleResponse processes an MCP response received from Matrix
-func (c *MCPMatrixClient) HandleResponse(content *MCPResponseContent) {
-	if content == nil || content.MCP.ID == nil {
+func (c *MCPMatrixClient) HandleResponse(ipc *IPCContent, payload *MCPPayload) {
+	if ipc == nil || payload == nil || payload.ID == nil {
 		c.log.Warn().Msg("Received MCP response with nil ID")
 		return
 	}
 
-	requestID, ok := content.MCP.ID.(string)
+	requestID, ok := payload.ID.(string)
 	if !ok {
 		// Try to convert from float64 (JSON numbers)
-		if num, ok := content.MCP.ID.(float64); ok {
+		if num, ok := payload.ID.(float64); ok {
 			requestID = fmt.Sprintf("%v", num)
 		} else {
-			c.log.Warn().Interface("id", content.MCP.ID).Msg("Invalid MCP response ID type")
+			c.log.Warn().Interface("id", payload.ID).Msg("Invalid MCP response ID type")
 			return
 		}
 	}
@@ -153,9 +171,19 @@ func (c *MCPMatrixClient) HandleResponse(content *MCPResponseContent) {
 		return
 	}
 
+	// Convert MCPPayload to MCPJSONRPCBase for the response channel
+	resp := &MCPJSONRPCBase{
+		JSONRPC: payload.JSONRPC,
+		ID:      payload.ID,
+		Method:  payload.Method,
+		Params:  payload.Params,
+		Result:  payload.Result,
+		Error:   payload.Error,
+	}
+
 	// Non-blocking send
 	select {
-	case respChan <- &content.MCP:
+	case respChan <- resp:
 	default:
 		c.log.Warn().Str("request_id", requestID).Msg("Response channel full, dropping response")
 	}
@@ -321,29 +349,29 @@ func (c *MCPMatrixClient) GetDesktopTools() []MCPTool {
 	return device.Tools
 }
 
-// ParseMCPResponse parses a raw JSON event content into MCPResponseContent
-func ParseMCPResponse(raw json.RawMessage) (*MCPResponseContent, error) {
-	var content MCPResponseContent
+// ParseIPCContent parses a raw JSON event content into IPCContent
+func ParseIPCContent(raw json.RawMessage) (*IPCContent, error) {
+	var content IPCContent
 	if err := json.Unmarshal(raw, &content); err != nil {
-		return nil, fmt.Errorf("failed to parse MCP response: %w", err)
+		return nil, fmt.Errorf("failed to parse IPC content: %w", err)
 	}
 	return &content, nil
 }
 
-// ParseMCPNotification parses a raw JSON event content into MCPNotificationContent
-func ParseMCPNotification(raw json.RawMessage) (*MCPNotificationContent, error) {
-	var content MCPNotificationContent
-	if err := json.Unmarshal(raw, &content); err != nil {
-		return nil, fmt.Errorf("failed to parse MCP notification: %w", err)
+// ParseDesktopHelloPayload parses the payload of a desktop_hello IPC message
+func ParseDesktopHelloPayload(payload json.RawMessage) (*DesktopHelloPayload, error) {
+	var content DesktopHelloPayload
+	if err := json.Unmarshal(payload, &content); err != nil {
+		return nil, fmt.Errorf("failed to parse desktop hello payload: %w", err)
 	}
 	return &content, nil
 }
 
-// ParseDesktopHello parses a raw JSON event content into DesktopHelloContent
-func ParseDesktopHello(raw json.RawMessage) (*DesktopHelloContent, error) {
-	var content DesktopHelloContent
-	if err := json.Unmarshal(raw, &content); err != nil {
-		return nil, fmt.Errorf("failed to parse desktop hello: %w", err)
+// ParseMCPPayload parses the payload of an MCP request/response/notification IPC message
+func ParseMCPPayload(payload json.RawMessage) (*MCPPayload, error) {
+	var content MCPPayload
+	if err := json.Unmarshal(payload, &content); err != nil {
+		return nil, fmt.Errorf("failed to parse MCP payload: %w", err)
 	}
 	return &content, nil
 }

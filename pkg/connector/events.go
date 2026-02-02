@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"encoding/json"
 	"reflect"
 
 	"maunium.net/go/mautrix/event"
@@ -710,56 +711,44 @@ type AttachmentMetadata struct {
 }
 
 // =============================================================================
-// MCP over Matrix Transport Events
+// MCP over Matrix Transport Events (IPC via m.room.message)
 // =============================================================================
 
-// DesktopHelloEventType is sent by Desktop to Bridge on IPC room creation and every launch
-var DesktopHelloEventType = event.Type{
-	Type:  "com.beeper.ai.desktop_hello",
-	Class: event.MessageEventType,
+// IPCMsgType is the msgtype used for IPC messages within m.room.message events
+// This allows IPC to use standard Matrix message infrastructure without custom event types
+const IPCMsgType = "com.beeper.ai.ipc"
+
+// IPCMessageType identifies the type of IPC message
+type IPCMessageType string
+
+const (
+	IPCDesktopHello    IPCMessageType = "desktop_hello"
+	IPCMCPRequest      IPCMessageType = "mcp_request"
+	IPCMCPResponse     IPCMessageType = "mcp_response"
+	IPCMCPNotification IPCMessageType = "mcp_notification"
+)
+
+// IPCContent is the content structure for IPC data within the custom field
+type IPCContent struct {
+	DeviceID    string          `json:"device_id"`
+	MessageType IPCMessageType  `json:"message_type"`
+	Payload     json.RawMessage `json:"payload"`
 }
 
-// MCPRequestEventType is used by Bridge to send MCP JSON-RPC requests to Desktop
-var MCPRequestEventType = event.Type{
-	Type:  "com.beeper.ai.mcp.request",
-	Class: event.MessageEventType,
-}
-
-// MCPResponseEventType is used by Desktop to send MCP JSON-RPC responses to Bridge
-var MCPResponseEventType = event.Type{
-	Type:  "com.beeper.ai.mcp.response",
-	Class: event.MessageEventType,
-}
-
-// MCPNotificationEventType is used for MCP notifications (either direction, no response expected)
-var MCPNotificationEventType = event.Type{
-	Type:  "com.beeper.ai.mcp.notification",
-	Class: event.MessageEventType,
-}
-
-// DesktopHelloContent is the content of a desktop_hello event
-type DesktopHelloContent struct {
-	DeviceID   string `json:"device_id"`
+// DesktopHelloPayload is the payload for desktop_hello IPC messages
+type DesktopHelloPayload struct {
 	DeviceName string `json:"device_name,omitempty"`
 	AppVersion string `json:"app_version,omitempty"`
 }
 
-// MCPRequestContent wraps an MCP JSON-RPC request for Matrix transport
-type MCPRequestContent struct {
-	DeviceID string         `json:"device_id"`
-	MCP      MCPJSONRPCBase `json:"mcp"`
-}
-
-// MCPResponseContent wraps an MCP JSON-RPC response for Matrix transport
-type MCPResponseContent struct {
-	DeviceID string         `json:"device_id"`
-	MCP      MCPJSONRPCBase `json:"mcp"`
-}
-
-// MCPNotificationContent wraps an MCP notification for Matrix transport
-type MCPNotificationContent struct {
-	DeviceID string         `json:"device_id"`
-	MCP      MCPJSONRPCBase `json:"mcp"`
+// MCPPayload is the payload for MCP request/response/notification IPC messages
+type MCPPayload struct {
+	JSONRPC string         `json:"jsonrpc"`
+	ID      any            `json:"id,omitempty"` // string, number, or null
+	Method  string         `json:"method,omitempty"`
+	Params  map[string]any `json:"params,omitempty"`
+	Result  any            `json:"result,omitempty"`
+	Error   *MCPRPCError   `json:"error,omitempty"`
 }
 
 // MCPJSONRPCBase represents a generic JSON-RPC 2.0 message

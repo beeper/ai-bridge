@@ -576,6 +576,15 @@ func (oc *AIClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*
 func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	ghostID := string(ghost.ID)
 
+	// Handle MCP relay ghost
+	if ghostID == string(mcpRelayUserID()) {
+		return &bridgev2.UserInfo{
+			Name:        ptr.Ptr("MCP Relay"),
+			IsBot:       ptr.Ptr(true),
+			Identifiers: []string{MCPRelayIdentifier},
+		}, nil
+	}
+
 	// Parse model from ghost ID (format: "model-{escaped-model-id}")
 	if modelID := parseModelFromGhostID(ghostID); modelID != "" {
 		return &bridgev2.UserInfo{

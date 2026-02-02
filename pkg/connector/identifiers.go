@@ -45,6 +45,29 @@ func modelUserID(modelID string) networkid.UserID {
 	return networkid.UserID(fmt.Sprintf("model-%s", url.PathEscape(modelID)))
 }
 
+// MCPRelayIdentifier is the special identifier used to create MCP relay rooms
+// Desktop clients use this to establish an IPC channel with the AI bridge
+const MCPRelayIdentifier = "mcp-relay"
+
+// mcpRelayUserID returns the user ID for the MCP relay ghost
+func mcpRelayUserID() networkid.UserID {
+	return networkid.UserID("mcp-relay")
+}
+
+// isMCPRelayIdentifier checks if an identifier is for MCP relay
+func isMCPRelayIdentifier(identifier string) bool {
+	return identifier == MCPRelayIdentifier
+}
+
+// portalKeyForMCPRelay creates a portal key for the MCP relay room
+// Each login gets exactly one MCP relay room (deterministic key)
+func portalKeyForMCPRelay(loginID networkid.UserLoginID) networkid.PortalKey {
+	return networkid.PortalKey{
+		ID:       networkid.PortalID(fmt.Sprintf("mcp-relay:%s", loginID)),
+		Receiver: loginID,
+	}
+}
+
 // parseModelFromGhostID extracts the model ID from a ghost ID (format: "model-{escaped-model-id}")
 // Returns empty string if the ghost ID doesn't match the expected format.
 func parseModelFromGhostID(ghostID string) string {
