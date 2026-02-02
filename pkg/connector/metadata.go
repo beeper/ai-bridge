@@ -87,6 +87,9 @@ type UserLoginMetadata struct {
 	BuilderRoomID networkid.PortalID `json:"builder_room_id,omitempty"`
 	// Note: Custom agents are now stored in Matrix state events (CustomAgentsEventType)
 	// in the Builder room, not in UserLoginMetadata
+
+	// Global Memory room for shared agent memories
+	GlobalMemoryRoomID networkid.PortalID `json:"global_memory_room_id,omitempty"`
 }
 
 // PortalMetadata stores per-room tuning knobs for the assistant.
@@ -115,9 +118,10 @@ type PortalMetadata struct {
 	DefaultAgentID  string `json:"default_agent_id,omitempty"`   // Agent assigned to this room (legacy name, same as AgentID)
 	AgentID         string `json:"agent_id,omitempty"`           // Which agent is the ghost for this room
 	AgentPrompt     string `json:"agent_prompt,omitempty"`       // Cached prompt for the assigned agent
-	IsBuilderRoom   bool   `json:"is_builder_room,omitempty"`    // True if this is the Manage AI Chats room (protected from overrides)
-	IsRawMode       bool   `json:"is_raw_mode,omitempty"`        // True if this is a playground/raw mode room (no directive processing)
-	IsAgentDataRoom bool   `json:"is_agent_data_room,omitempty"` // True if this is a hidden room for storing agent data
+	IsBuilderRoom      bool `json:"is_builder_room,omitempty"`       // True if this is the Manage AI Chats room (protected from overrides)
+	IsRawMode          bool `json:"is_raw_mode,omitempty"`           // True if this is a playground/raw mode room (no directive processing)
+	IsAgentDataRoom    bool `json:"is_agent_data_room,omitempty"`    // True if this is a hidden room for storing agent data
+	IsGlobalMemoryRoom bool `json:"is_global_memory_room,omitempty"` // True if this is the global memory room
 
 	// Ack reaction config - similar to OpenClaw's ack reactions
 	AckReactionEmoji       string `json:"ack_reaction_emoji,omitempty"`        // Emoji to react with when message received (e.g., "👀", "🤔"). Empty = disabled.

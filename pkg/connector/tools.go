@@ -248,6 +248,89 @@ func BuiltinTools() []ToolDefinition {
 			},
 			Execute: executeSessionStatus,
 		},
+		// Memory tools (matching OpenClaw interface)
+		{
+			Name:        ToolNameMemorySearch,
+			Description: "Search your memory for relevant information. Use this to recall facts, preferences, decisions, or context from previous conversations.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type":        "string",
+						"description": "Search query to find relevant memories",
+					},
+					"maxResults": map[string]any{
+						"type":        "number",
+						"description": "Maximum number of results to return (default: 6)",
+					},
+					"minScore": map[string]any{
+						"type":        "number",
+						"description": "Minimum relevance score threshold (0-1, default: 0.35)",
+					},
+				},
+				"required": []string{"query"},
+			},
+			Execute: executeMemorySearch,
+		},
+		{
+			Name:        ToolNameMemoryGet,
+			Description: "Retrieve the full content of a specific memory by its path.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path": map[string]any{
+						"type":        "string",
+						"description": "The memory path (e.g., 'agent:myagent/fact:abc123' or 'global/fact:xyz789')",
+					},
+				},
+				"required": []string{"path"},
+			},
+			Execute: executeMemoryGet,
+		},
+		{
+			Name:        ToolNameMemoryStore,
+			Description: "Store a new memory for later recall. Use this to remember important facts, user preferences, decisions, or context that should persist across conversations.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"content": map[string]any{
+						"type":        "string",
+						"description": "The content to store in memory",
+					},
+					"importance": map[string]any{
+						"type":        "number",
+						"description": "Importance score from 0 to 1 (default: 0.5). Higher values make the memory more likely to surface in searches.",
+					},
+					"category": map[string]any{
+						"type":        "string",
+						"enum":        []string{"preference", "decision", "entity", "fact", "other"},
+						"description": "Category of memory (default: 'other')",
+					},
+					"scope": map[string]any{
+						"type":        "string",
+						"enum":        []string{"agent", "global"},
+						"description": "Where to store the memory: 'agent' for this agent only, 'global' for all agents (default: 'agent')",
+					},
+				},
+				"required": []string{"content"},
+			},
+			Execute: executeMemoryStore,
+		},
+		{
+			Name:        ToolNameMemoryForget,
+			Description: "Remove a memory by its ID/path. Use this to delete outdated or incorrect information.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "The memory ID or path to forget",
+					},
+				},
+				"required": []string{"id"},
+			},
+			Execute: executeMemoryForget,
+		},
 	}
 }
 
@@ -268,6 +351,14 @@ const ToolNameAnalyzeImage = "analyze_image"
 
 // ToolNameSessionStatus is the name of the session status tool.
 const ToolNameSessionStatus = "session_status"
+
+// Memory tool names (matching OpenClaw interface)
+const (
+	ToolNameMemorySearch = "memory_search"
+	ToolNameMemoryGet    = "memory_get"
+	ToolNameMemoryStore  = "memory_store"
+	ToolNameMemoryForget = "memory_forget"
+)
 
 // ImageResultPrefix is the prefix used to identify image results that need media sending.
 const ImageResultPrefix = "IMAGE:"
@@ -1594,4 +1685,140 @@ func GetEnabledBuiltinTools(isToolEnabled func(string) bool) []ToolDefinition {
 		}
 	}
 	return enabled
+}
+
+// executeMemorySearch handles the memory_search tool
+func executeMemorySearch(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("memory_search requires bridge context")
+	}
+
+	query, ok := args["query"].(string)
+	if !ok || query == "" {
+		return "", fmt.Errorf("missing or invalid 'query' argument")
+	}
+
+	var input MemorySearchInput
+	input.Query = query
+
+	if maxResults, ok := args["maxResults"].(float64); ok {
+		max := int(maxResults)
+		input.MaxResults = &max
+	}
+	if minScore, ok := args["minScore"].(float64); ok {
+		input.MinScore = &minScore
+	}
+
+	memStore := NewMemoryStore(btc.Client)
+	results, err := memStore.Search(ctx, btc.Portal, input)
+	if err != nil {
+		return "", fmt.Errorf("memory search failed: %w", err)
+	}
+
+	// Format as JSON
+	output, err := json.Marshal(results)
+	if err != nil {
+		return "", fmt.Errorf("failed to format results: %w", err)
+	}
+
+	return string(output), nil
+}
+
+// executeMemoryGet handles the memory_get tool
+func executeMemoryGet(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("memory_get requires bridge context")
+	}
+
+	path, ok := args["path"].(string)
+	if !ok || path == "" {
+		return "", fmt.Errorf("missing or invalid 'path' argument")
+	}
+
+	input := MemoryGetInput{Path: path}
+
+	memStore := NewMemoryStore(btc.Client)
+	result, err := memStore.Get(ctx, btc.Portal, input)
+	if err != nil {
+		return "", fmt.Errorf("memory get failed: %w", err)
+	}
+
+	// Format as JSON
+	output, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to format result: %w", err)
+	}
+
+	return string(output), nil
+}
+
+// executeMemoryStore handles the memory_store tool
+func executeMemoryStore(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("memory_store requires bridge context")
+	}
+
+	content, ok := args["content"].(string)
+	if !ok || content == "" {
+		return "", fmt.Errorf("missing or invalid 'content' argument")
+	}
+
+	var input MemoryStoreInput
+	input.Content = content
+
+	if importance, ok := args["importance"].(float64); ok {
+		input.Importance = &importance
+	}
+	if category, ok := args["category"].(string); ok {
+		input.Category = &category
+	}
+	if scope, ok := args["scope"].(string); ok {
+		input.Scope = &scope
+	}
+
+	memStore := NewMemoryStore(btc.Client)
+	result, err := memStore.Store(ctx, btc.Portal, input)
+	if err != nil {
+		return "", fmt.Errorf("memory store failed: %w", err)
+	}
+
+	// Format as JSON
+	output, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to format result: %w", err)
+	}
+
+	return string(output), nil
+}
+
+// executeMemoryForget handles the memory_forget tool
+func executeMemoryForget(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("memory_forget requires bridge context")
+	}
+
+	id, ok := args["id"].(string)
+	if !ok || id == "" {
+		return "", fmt.Errorf("missing or invalid 'id' argument")
+	}
+
+	input := MemoryForgetInput{ID: id}
+
+	memStore := NewMemoryStore(btc.Client)
+	result, err := memStore.Forget(ctx, btc.Portal, input)
+	if err != nil {
+		return "", fmt.Errorf("memory forget failed: %w", err)
+	}
+
+	// Format as JSON
+	output, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to format result: %w", err)
+	}
+
+	return string(output), nil
 }

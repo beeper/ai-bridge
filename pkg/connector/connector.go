@@ -279,6 +279,9 @@ func (oc *OpenAIConnector) FillPortalBridgeInfo(portal *bridgev2.Portal, content
 	if meta.IsAgentDataRoom {
 		// Unknown room type = auto-hidden by clients
 		content.BeeperRoomTypeV2 = "agent_data"
+	} else if meta.IsGlobalMemoryRoom {
+		// Global memory room = auto-hidden by clients
+		content.BeeperRoomTypeV2 = "global_memory"
 	} else {
 		content.BeeperRoomTypeV2 = "ai"
 	}

@@ -159,3 +159,78 @@ func parseAgentIDFromDataRoom(portalID networkid.PortalID) (string, bool) {
 	}
 	return agentID, true
 }
+
+// globalMemoryPortalKey creates a deterministic portal key for the global memory room.
+// Format: "openai:{loginID}:global-memory"
+func globalMemoryPortalKey(loginID networkid.UserLoginID) networkid.PortalKey {
+	return networkid.PortalKey{
+		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:global-memory", loginID)),
+		Receiver: loginID,
+	}
+}
+
+// isGlobalMemoryRoom checks if a portal ID represents a global memory room.
+func isGlobalMemoryRoom(portalID networkid.PortalID) bool {
+	return strings.HasSuffix(string(portalID), ":global-memory")
+}
+
+// MemoryScope represents where a memory is stored
+type MemoryScope string
+
+const (
+	MemoryScopeAgent  MemoryScope = "agent"
+	MemoryScopeGlobal MemoryScope = "global"
+)
+
+// parseMemoryPath parses a memory path into scope and fact ID.
+// Supported formats:
+//   - "agent:{agentID}/fact:{factID}" → (MemoryScopeAgent, factID, agentID)
+//   - "global/fact:{factID}" → (MemoryScopeGlobal, factID, "")
+//   - "{factID}" (legacy) → (MemoryScopeAgent, factID, "")
+//
+// Returns scope, factID, agentID (for agent scope), and ok.
+func parseMemoryPath(path string) (scope MemoryScope, factID string, agentID string, ok bool) {
+	if path == "" {
+		return "", "", "", false
+	}
+
+	// Format: "global/fact:{factID}"
+	if factID, ok := strings.CutPrefix(path, "global/fact:"); ok {
+		if factID == "" {
+			return "", "", "", false
+		}
+		return MemoryScopeGlobal, factID, "", true
+	}
+
+	// Format: "agent:{agentID}/fact:{factID}"
+	if remainder, ok := strings.CutPrefix(path, "agent:"); ok {
+		parts := strings.SplitN(remainder, "/fact:", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return "", "", "", false
+		}
+		agentID, err := url.PathUnescape(parts[0])
+		if err != nil {
+			return "", "", "", false
+		}
+		return MemoryScopeAgent, parts[1], agentID, true
+	}
+
+	// Legacy format: just a fact ID (assume agent scope)
+	return MemoryScopeAgent, path, "", true
+}
+
+// formatMemoryPath creates a memory path from scope, factID, and optional agentID.
+func formatMemoryPath(scope MemoryScope, factID string, agentID string) string {
+	switch scope {
+	case MemoryScopeGlobal:
+		return "global/fact:" + factID
+	case MemoryScopeAgent:
+		if agentID != "" {
+			return "agent:" + url.PathEscape(agentID) + "/fact:" + factID
+		}
+		// Default agent scope without explicit agent ID
+		return "agent/fact:" + factID
+	default:
+		return factID
+	}
+}

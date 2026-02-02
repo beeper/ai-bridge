@@ -15,6 +15,8 @@ func init() {
 	event.TypeMap[AgentsEventType] = reflect.TypeOf(AgentsEventContent{})
 	event.TypeMap[CustomAgentsEventType] = reflect.TypeOf(CustomAgentsEventContent{})
 	event.TypeMap[AgentDataEventType] = reflect.TypeOf(AgentDataEventContent{})
+	event.TypeMap[MemoryFactEventType] = reflect.TypeOf(MemoryFactContent{})
+	event.TypeMap[MemoryIndexEventType] = reflect.TypeOf(MemoryIndexContent{})
 }
 
 // AssistantTurnEventType is the container event for an assistant's response
@@ -124,6 +126,18 @@ var CustomAgentsEventType = event.Type{
 // AgentDataEventType stores agent configuration in the agent's hidden room
 var AgentDataEventType = event.Type{
 	Type:  "com.beeper.ai.agent_data",
+	Class: event.StateEventType,
+}
+
+// MemoryFactEventType stores individual memory facts in timeline events
+var MemoryFactEventType = event.Type{
+	Type:  "com.beeper.ai.memory_fact",
+	Class: event.MessageEventType,
+}
+
+// MemoryIndexEventType stores the memory search index as state events
+var MemoryIndexEventType = event.Type{
+	Type:  "com.beeper.ai.memory_index",
 	Class: event.StateEventType,
 }
 
@@ -743,24 +757,25 @@ type AgentMemberContent struct {
 // AgentDefinitionContent stores agent configuration in Matrix state events.
 // This is the serialized form of agents.AgentDefinition for Matrix storage.
 type AgentDefinitionContent struct {
-	ID              string          `json:"id"`
-	Name            string          `json:"name"`
-	Description     string          `json:"description,omitempty"`
-	AvatarURL       string          `json:"avatar_url,omitempty"`
-	Model           string          `json:"model,omitempty"`
-	ModelFallback   []string        `json:"model_fallback,omitempty"`
-	SystemPrompt    string          `json:"system_prompt,omitempty"`
-	PromptMode      string          `json:"prompt_mode,omitempty"`
-	ToolProfile     string          `json:"tool_profile,omitempty"`
-	ToolOverrides   map[string]bool `json:"tool_overrides,omitempty"`
-	ToolAlsoAllow   []string        `json:"tool_also_allow,omitempty"`
-	Temperature     float64         `json:"temperature,omitempty"`
-	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
-	IdentityName    string          `json:"identity_name,omitempty"`
-	IdentityPersona string          `json:"identity_persona,omitempty"`
-	IsPreset        bool            `json:"is_preset,omitempty"`
-	CreatedAt       int64           `json:"created_at"`
-	UpdatedAt       int64           `json:"updated_at"`
+	ID              string             `json:"id"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description,omitempty"`
+	AvatarURL       string             `json:"avatar_url,omitempty"`
+	Model           string             `json:"model,omitempty"`
+	ModelFallback   []string           `json:"model_fallback,omitempty"`
+	SystemPrompt    string             `json:"system_prompt,omitempty"`
+	PromptMode      string             `json:"prompt_mode,omitempty"`
+	ToolProfile     string             `json:"tool_profile,omitempty"`
+	ToolOverrides   map[string]bool    `json:"tool_overrides,omitempty"`
+	ToolAlsoAllow   []string           `json:"tool_also_allow,omitempty"`
+	Temperature     float64            `json:"temperature,omitempty"`
+	ReasoningEffort string             `json:"reasoning_effort,omitempty"`
+	IdentityName    string             `json:"identity_name,omitempty"`
+	IdentityPersona string             `json:"identity_persona,omitempty"`
+	IsPreset        bool               `json:"is_preset,omitempty"`
+	MemoryConfig    *AgentMemoryConfig `json:"memory_config,omitempty"` // Memory configuration (matches OpenClaw)
+	CreatedAt       int64              `json:"created_at"`
+	UpdatedAt       int64              `json:"updated_at"`
 }
 
 // CustomAgentsEventContent stores user-created agent definitions in the Builder room.
@@ -777,4 +792,45 @@ type AgentDataEventContent struct {
 	// Memory      map[string]any         `json:"memory,omitempty"`      // Persistent agent memory
 	// Preferences map[string]any         `json:"preferences,omitempty"` // Learned preferences
 	// SessionRefs []string               `json:"session_refs,omitempty"` // Refs to conversations
+}
+
+// AgentMemoryConfig configures memory behavior for an agent (matches OpenClaw memorySearch config)
+type AgentMemoryConfig struct {
+	Enabled      *bool    `json:"enabled,omitempty"`       // nil = true (enabled by default)
+	Sources      []string `json:"sources,omitempty"`       // ["memory", "sessions"]
+	EnableGlobal *bool    `json:"enable_global,omitempty"` // nil = true (access global memory)
+	MaxResults   int      `json:"max_results,omitempty"`   // default: 6
+	MinScore     float64  `json:"min_score,omitempty"`     // default: 0.35
+}
+
+// MemoryFactContent stores a memory fact in a timeline event
+type MemoryFactContent struct {
+	FactID     string   `json:"fact_id"`
+	Content    string   `json:"content"`
+	Keywords   []string `json:"keywords,omitempty"`
+	Category   string   `json:"category,omitempty"`    // preference, decision, entity, fact, other
+	Importance float64  `json:"importance,omitempty"`  // 0-1, default 0.5
+	Source     string   `json:"source,omitempty"`      // user, assistant, system
+	SourceRoom string   `json:"source_room,omitempty"` // Room where the memory was created
+	CreatedAt  int64    `json:"created_at"`
+	UpdatedAt  int64    `json:"updated_at,omitempty"`
+}
+
+// MemoryIndexContent stores a chunk of the memory search index as a state event
+type MemoryIndexContent struct {
+	ChunkID     int                `json:"chunk_id"`
+	TotalChunks int                `json:"total_chunks"`
+	Entries     []MemoryIndexEntry `json:"entries"`
+	UpdatedAt   int64              `json:"updated_at"`
+}
+
+// MemoryIndexEntry represents a single entry in the memory index
+type MemoryIndexEntry struct {
+	FactID     string   `json:"fact_id"`
+	EventID    string   `json:"event_id"`
+	Keywords   []string `json:"keywords"`
+	Category   string   `json:"category,omitempty"`
+	Importance float64  `json:"importance"`
+	Preview    string   `json:"preview"` // First 100 chars
+	CreatedAt  int64    `json:"created_at"`
 }
