@@ -156,6 +156,30 @@ func visionFileFeatures() *event.FileFeatures {
 	}
 }
 
+func gifFileFeatures() *event.FileFeatures {
+	return &event.FileFeatures{
+		MimeTypes: map[string]event.CapabilitySupportLevel{
+			"image/gif": event.CapLevelFullySupported,
+			"video/mp4": event.CapLevelFullySupported,
+		},
+		Caption:          event.CapLevelFullySupported,
+		MaxCaptionLength: AIMaxTextLength,
+		MaxSize:          20 * 1024 * 1024, // 20MB
+	}
+}
+
+func stickerFileFeatures() *event.FileFeatures {
+	return &event.FileFeatures{
+		MimeTypes: map[string]event.CapabilitySupportLevel{
+			"image/webp": event.CapLevelFullySupported,
+			"image/png":  event.CapLevelFullySupported,
+			"image/gif":  event.CapLevelFullySupported,
+		},
+		Caption: event.CapLevelDropped,
+		MaxSize: 20 * 1024 * 1024, // 20MB
+	}
+}
+
 // pdfFileFeatures returns FileFeatures for PDF-capable models
 func pdfFileFeatures() *event.FileFeatures {
 	return &event.FileFeatures{
@@ -165,6 +189,16 @@ func pdfFileFeatures() *event.FileFeatures {
 		Caption:          event.CapLevelFullySupported,
 		MaxCaptionLength: AIMaxTextLength,
 		MaxSize:          50 * 1024 * 1024, // 50MB for PDFs
+	}
+}
+
+func textFileFeatures() *event.FileFeatures {
+	return &event.FileFeatures{
+		MimeTypes:          textFileMimeTypes(),
+		Caption:           event.CapLevelFullySupported,
+		MaxCaptionLength:  AIMaxTextLength,
+		MaxSize:           50 * 1024 * 1024, // Shared cap with PDFs
+		MaxFileNameLength: AIMaxTextLength,
 	}
 }
 
@@ -671,6 +705,7 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 	// Always recompute effective room capabilities to ensure they're up-to-date
 	// (includes image-understanding union for agent rooms)
 	modelCaps := oc.getRoomCapabilities(ctx, meta)
+	allowTextFiles := oc.canUseMediaUnderstanding(meta)
 
 	// Clone base capabilities
 	caps := ptr.Clone(aiBaseCaps)
@@ -681,16 +716,39 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 	// Apply file capabilities based on modalities
 	if modelCaps.SupportsVision {
 		caps.File[event.MsgImage] = visionFileFeatures()
+		caps.File[event.CapMsgGIF] = gifFileFeatures()
+		caps.File[event.CapMsgSticker] = stickerFileFeatures()
 	}
+
+	fileFeatures := cloneRejectAllMediaFeatures()
+	fileEnabled := false
 
 	// OpenRouter/Beeper: all models support PDF via file-parser plugin
 	// For other providers, check model's native PDF support
 	if modelCaps.SupportsPDF || oc.isOpenRouterProvider() {
-		caps.File[event.MsgFile] = pdfFileFeatures()
+		for mime := range pdfFileFeatures().MimeTypes {
+			fileFeatures.MimeTypes[mime] = event.CapLevelFullySupported
+		}
+		fileEnabled = true
+	}
+	if allowTextFiles {
+		for mime := range textFileFeatures().MimeTypes {
+			fileFeatures.MimeTypes[mime] = event.CapLevelFullySupported
+		}
+		fileEnabled = true
+	}
+	if fileEnabled {
+		fileFeatures.Caption = event.CapLevelFullySupported
+		fileFeatures.MaxCaptionLength = AIMaxTextLength
+		fileFeatures.MaxSize = 50 * 1024 * 1024
+		fileFeatures.MaxFileNameLength = AIMaxTextLength
+		caps.File[event.MsgFile] = fileFeatures
 	}
 
 	if modelCaps.SupportsAudio {
 		caps.File[event.MsgAudio] = audioFileFeatures()
+		// Allow voice notes when audio understanding is available.
+		caps.File[event.CapMsgVoice] = audioFileFeatures()
 	}
 	if modelCaps.SupportsVideo {
 		caps.File[event.MsgVideo] = videoFileFeatures()

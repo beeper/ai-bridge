@@ -128,7 +128,76 @@ func (oc *AIClient) resolveAudioUnderstandingModel(ctx context.Context, meta *Po
 		}
 	}
 
+	loginMeta := loginMetadata(oc.UserLogin)
+	provider := loginMeta.Provider
+
+	// Prefer cached/provider-listed models first.
+	if modelID := oc.pickAudioModelFromList(loginMeta.ModelCache, provider); modelID != "" {
+		return modelID
+	}
+	models, err := oc.listAvailableModels(ctx, false)
+	if err == nil {
+		if modelID := pickAudioModelFromList(models, provider); modelID != "" {
+			return modelID
+		}
+	}
+
+	// Fallback to manifest-only lookup.
+	if modelID := pickAudioModelFromManifest(provider); modelID != "" {
+		return modelID
+	}
+
 	return ""
+}
+
+func (oc *AIClient) pickAudioModelFromList(cache *ModelCache, provider string) string {
+	if cache == nil || len(cache.Models) == 0 {
+		return ""
+	}
+	return pickAudioModelFromList(cache.Models, provider)
+}
+
+func pickAudioModelFromList(models []ModelInfo, provider string) string {
+	for _, info := range models {
+		if !info.SupportsAudio {
+			continue
+		}
+		if !providerMatches(info, provider) {
+			continue
+		}
+		return info.ID
+	}
+	return ""
+}
+
+func pickAudioModelFromManifest(provider string) string {
+	for _, info := range ModelManifest.Models {
+		if !info.SupportsAudio {
+			continue
+		}
+		if !providerMatches(info, provider) {
+			continue
+		}
+		return info.ID
+	}
+	return ""
+}
+
+func providerMatches(info ModelInfo, provider string) bool {
+	switch provider {
+	case ProviderOpenRouter, ProviderBeeper:
+		if info.Provider != "" {
+			return info.Provider == "openrouter"
+		}
+		return strings.HasPrefix(info.ID, "openrouter/")
+	case ProviderOpenAI:
+		if info.Provider != "" {
+			return info.Provider == "openai"
+		}
+		return strings.HasPrefix(info.ID, "openai/")
+	default:
+		return true
+	}
 }
 
 // resolveAudioModelForInput returns the model to use for audio analysis.

@@ -49,19 +49,28 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		oc.storeAckReaction(portal.MXID, msg.Event.ID, ackReactionEventID)
 	}
 
+	// Normalize sticker events to image handling
+	msgType := msg.Content.MsgType
+	if msg.Event != nil && msg.Event.Type == event.EventSticker {
+		msgType = event.MsgImage
+	}
+	if msgType == event.MessageType(event.EventSticker.Type) {
+		msgType = event.MsgImage
+	}
+
 	// Handle media messages based on type (media is never debounced)
-	switch msg.Content.MsgType {
+	switch msgType {
 	case event.MsgImage, event.MsgVideo, event.MsgAudio, event.MsgFile:
 		// Flush any pending debounced messages for this room+sender before processing media
 		if oc.inboundDebouncer != nil {
 			debounceKey := BuildDebounceKey(portal.MXID, msg.Event.Sender)
 			oc.inboundDebouncer.FlushKey(debounceKey)
 		}
-		return oc.handleMediaMessage(ctx, msg, portal, meta, msg.Content.MsgType)
+		return oc.handleMediaMessage(ctx, msg, portal, meta, msgType)
 	case event.MsgText, event.MsgNotice, event.MsgEmote:
 		// Continue to text handling below
 	default:
-		return nil, fmt.Errorf("%s messages are not supported", msg.Content.MsgType)
+		return nil, fmt.Errorf("%s messages are not supported", msgType)
 	}
 	body := strings.TrimSpace(msg.Content.Body)
 	if body == "" {
