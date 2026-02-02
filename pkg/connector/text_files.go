@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf16"
@@ -220,32 +221,58 @@ func (oc *AIClient) downloadTextFile(ctx context.Context, mediaURL string, encry
 }
 
 func buildTextFileMessage(caption string, hasUserCaption bool, filename string, mimeType string, content string, truncated bool) string {
+	_ = truncated
+	if !hasUserCaption {
+		caption = ""
+	}
+	caption = strings.TrimSpace(caption)
+	filename = strings.TrimSpace(filename)
+	mimeType = strings.TrimSpace(mimeType)
+	if filename == "" {
+		filename = "file"
+	}
+	if mimeType == "" {
+		mimeType = "text/plain"
+	}
+
+	block := fmt.Sprintf(
+		"<file name=\"%s\" mime=\"%s\">\n%s\n</file>",
+		xmlEscapeAttr(filename),
+		xmlEscapeAttr(mimeType),
+		escapeFileBlockContent(content),
+	)
+
+	if caption == "" {
+		return block
+	}
+	return strings.TrimSpace(caption + "\n\n" + block)
+}
+
+var xmlEscapeMap = map[rune]string{
+	'<': "&lt;",
+	'>': "&gt;",
+	'&': "&amp;",
+	'"': "&quot;",
+	'\'': "&apos;",
+}
+
+func xmlEscapeAttr(value string) string {
 	var b strings.Builder
-	if hasUserCaption {
-		caption = strings.TrimSpace(caption)
-		if caption != "" {
-			b.WriteString(caption)
-			b.WriteString("\n\n")
+	b.Grow(len(value))
+	for _, r := range value {
+		if repl, ok := xmlEscapeMap[r]; ok {
+			b.WriteString(repl)
+		} else {
+			b.WriteRune(r)
 		}
 	}
-	if filename != "" {
-		b.WriteString("File: ")
-		b.WriteString(filename)
-		b.WriteString("\n")
-	}
-	if mimeType != "" {
-		b.WriteString("MIME: ")
-		b.WriteString(mimeType)
-		b.WriteString("\n")
-	}
-	if b.Len() > 0 {
-		b.WriteString("\n")
-	}
-	if truncated {
-		b.WriteString("Content (truncated):\n")
-	} else {
-		b.WriteString("Content:\n")
-	}
-	b.WriteString(content)
-	return strings.TrimSpace(b.String())
+	return b.String()
+}
+
+func escapeFileBlockContent(value string) string {
+	closeTag := regexp.MustCompile(`(?i)<\s*/\s*file\s*>`)
+	openTag := regexp.MustCompile(`(?i)<\s*file\b`)
+	value = closeTag.ReplaceAllString(value, "&lt;/file&gt;")
+	value = openTag.ReplaceAllString(value, "&lt;file")
+	return value
 }

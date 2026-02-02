@@ -353,13 +353,17 @@ func buildImageUnderstandingMessage(caption string, hasUserCaption bool, descrip
 		return ""
 	}
 
-	if hasUserCaption {
-		caption = strings.TrimSpace(caption)
-		if caption != "" {
-			return fmt.Sprintf("%s [image]\nImage description: %s", caption, description)
-		}
+	if !hasUserCaption {
+		caption = ""
 	}
-	return fmt.Sprintf("[image]\nImage description: %s", description)
+	caption = strings.TrimSpace(caption)
+
+	lines := []string{"[Image]"}
+	if caption != "" {
+		lines = append(lines, "User text:\n"+caption)
+	}
+	lines = append(lines, "Description:\n"+description)
+	return strings.Join(lines, "\n")
 }
 
 func buildAudioUnderstandingMessage(caption string, hasUserCaption bool, transcript string) string {
@@ -368,11 +372,15 @@ func buildAudioUnderstandingMessage(caption string, hasUserCaption bool, transcr
 		return ""
 	}
 
-	if hasUserCaption {
-		caption = strings.TrimSpace(caption)
-		if caption != "" {
-			return fmt.Sprintf("%s [audio]\nAudio transcription: %s", caption, transcript)
-		}
+	if !hasUserCaption {
+		caption = ""
 	}
-	return fmt.Sprintf("[audio]\nAudio transcription: %s", transcript)
+	caption = strings.TrimSpace(caption)
+
+	lines := []string{"[Audio]"}
+	if caption != "" {
+		lines = append(lines, "User text:\n"+caption)
+	}
+	lines = append(lines, "Transcript:\n"+transcript)
+	return strings.Join(lines, "\n")
 }
