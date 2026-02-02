@@ -864,6 +864,23 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		Model:   oc.effectiveModel(meta),
 	}
 
+	// clawdbot-parity: populate context flags
+	// TODO: IsGroupChat should be determined from room member count
+	// For now, default to false (1:1 chat assumption)
+	params.IsGroupChat = false
+	params.IsSubagent = false // Set by caller when spawning subagents
+
+	// Reaction guidance - default to minimal
+	if portal != nil && params.RoomInfo != nil {
+		params.ReactionGuidance = &agents.ReactionGuidance{
+			Level:   "minimal",
+			Channel: params.RoomInfo.Channel,
+		}
+	}
+
+	// Reasoning hints for models that support it
+	params.ReasoningTagHint = meta.Capabilities.SupportsReasoning && meta.EmitThinking
+
 	// For boss agent, include agent list
 	if agent.ID == "boss" {
 		agentsMap, _ := store.LoadAgents(ctx)

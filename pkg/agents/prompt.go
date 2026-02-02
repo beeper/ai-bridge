@@ -146,8 +146,13 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		if base := buildBaseSection(params.Agent); base != "" {
 			sections = append(sections, base)
 		}
-		if params.ExtraPrompt != "" {
-			sections = append(sections, params.ExtraPrompt)
+		// Group chat awareness section
+		if groupChat := buildGroupChatSection(params.IsGroupChat); groupChat != "" {
+			sections = append(sections, groupChat)
+		}
+		// Extra prompt with contextual header
+		if extra := buildExtraPromptSection(params.ExtraPrompt, params.IsSubagent, params.IsGroupChat); extra != "" {
+			sections = append(sections, extra)
 		}
 		if roomCtx := buildRoomContextSection(params.RoomInfo); roomCtx != "" {
 			sections = append(sections, roomCtx)
@@ -155,17 +160,23 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		sections = append(sections,
 			buildReplyTagsSection(),
 			buildSilentRepliesSection(),
-			buildReactionsSection(),
+			buildReactionsSectionWithGuidance(params.ReactionGuidance),
 		)
 		if toolsSection := buildToolsSectionFromList(params.Tools); toolsSection != "" {
 			sections = append(sections, toolsSection)
 		}
+		// TODO(memory): Add buildMemorySection(params.Tools) from clawdbot
+		// When memory_search or memory_get tools are available, add memory recall guidance
 		sections = append(sections, buildToolCallStyleSection())
 		if runtime := buildRuntimeSection(params.RuntimeInfo); runtime != "" {
 			sections = append(sections, runtime)
 		}
 		if dateSection := buildDateSectionFromParams(params.Date, params.Timezone); dateSection != "" {
 			sections = append(sections, dateSection)
+		}
+		// Reasoning format hints for thinking models
+		if params.ReasoningTagHint {
+			sections = append(sections, buildReasoningHintSection())
 		}
 		// Boss agent: append agent list
 		if len(params.AgentList) > 0 {
@@ -177,8 +188,9 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		if base := buildBaseSection(params.Agent); base != "" {
 			sections = append(sections, base)
 		}
-		if params.ExtraPrompt != "" {
-			sections = append(sections, params.ExtraPrompt)
+		// Extra prompt with subagent header in minimal mode
+		if extra := buildExtraPromptSection(params.ExtraPrompt, params.IsSubagent, params.IsGroupChat); extra != "" {
+			sections = append(sections, extra)
 		}
 		if roomCtx := buildRoomContextSection(params.RoomInfo); roomCtx != "" {
 			sections = append(sections, roomCtx)
@@ -327,6 +339,63 @@ Use the message tool with action=react to add emoji reactions.
 - Without message_id: reacts to the triggering message
 - With message_id: reacts to a specific message (IDs shown as [message_id: $...] in history)
 React sparingly - only when truly relevant to acknowledge or express sentiment.`
+}
+
+// buildReactionsSectionWithGuidance creates the reactions section with level-based guidance.
+// Matches clawdbot's reactionGuidance with minimal/extensive levels.
+func buildReactionsSectionWithGuidance(guidance *ReactionGuidance) string {
+	if guidance != nil && guidance.Level == "extensive" {
+		channel := guidance.Channel
+		if channel == "" {
+			channel = "this channel"
+		}
+		return `## Reactions
+Reactions are enabled in EXTENSIVE mode for ` + channel + `.
+Feel free to react liberally to acknowledge, show emotion, or engage.
+Use the message tool with action=react.
+- Without message_id: reacts to the triggering message
+- With message_id: reacts to a specific message (IDs shown as [message_id: $...] in history)`
+	}
+	// Default minimal
+	return buildReactionsSection()
+}
+
+// buildExtraPromptSection wraps the extra prompt with a contextual header.
+// Matches clawdbot's conditional headers based on context.
+func buildExtraPromptSection(extra string, isSubagent, isGroupChat bool) string {
+	if extra == "" {
+		return ""
+	}
+	var header string
+	if isSubagent {
+		header = "## Subagent Context"
+	} else if isGroupChat {
+		header = "## Group Chat Context"
+	} else {
+		header = "## Additional Context"
+	}
+	return header + "\n" + extra
+}
+
+// buildGroupChatSection creates the group chat awareness section.
+// Matches clawdbot's group chat guidance.
+func buildGroupChatSection(isGroupChat bool) string {
+	if !isGroupChat {
+		return ""
+	}
+	return `## Group Chat
+This is a group conversation with multiple participants.
+- Address users by name when responding to specific people
+- Be aware that not all messages may be directed at you`
+}
+
+// buildReasoningHintSection creates the reasoning format hints section.
+// Matches clawdbot's reasoningTagHint for thinking models.
+func buildReasoningHintSection() string {
+	return `## Reasoning Format
+ALL internal reasoning MUST be inside <think>...</think>.
+Format every reply as <think>...</think> then your response.
+Do not output any analysis outside <think>.`
 }
 
 // buildToolCallStyleSection returns guidance on when to narrate tool calls.
