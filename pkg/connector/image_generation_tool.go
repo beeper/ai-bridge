@@ -11,6 +11,9 @@ import (
 	_ "image/png"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,6 +27,8 @@ const (
 	imageGenProviderOpenAI     imageGenProvider = "openai"
 	imageGenProviderGemini     imageGenProvider = "gemini"
 	imageGenProviderOpenRouter imageGenProvider = "openrouter"
+
+	imageInputMaxSizeMB = 20
 )
 
 type imageGenRequest struct {
@@ -50,6 +55,8 @@ type openAIImageParams struct {
 	Background   string
 	OutputFormat string
 }
+
+var imageGenHTTPClient = &http.Client{Timeout: 120 * time.Second}
 
 func parseImageGenArgs(args map[string]any) (imageGenRequest, error) {
 	prompt, ok := args["prompt"].(string)
@@ -97,6 +104,7 @@ func parseImageGenArgs(args map[string]any) (imageGenRequest, error) {
 	req.InputImages = append(req.InputImages, readStringSlice(args, "input_images")...)
 	req.InputImages = append(req.InputImages, readStringSlice(args, "inputImages")...)
 	req.InputImages = append(req.InputImages, readStringSlice(args, "input_image")...)
+	req.InputImages = dedupeStrings(req.InputImages)
 
 	return req, nil
 }
@@ -122,6 +130,25 @@ func readStringSlice(args map[string]any, key string) []string {
 		return []string{strings.TrimSpace(s)}
 	}
 	return nil
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func resolveImageGenProvider(req imageGenRequest, btc *BridgeToolContext) (imageGenProvider, error) {
@@ -162,25 +189,68 @@ func resolveImageGenProvider(req imageGenRequest, btc *BridgeToolContext) (image
 		return imageGenProviderOpenRouter, nil
 	case ProviderBeeper:
 		// Beeper: prefer OpenRouter when the request is simple; otherwise use direct adapters.
+		openAISupported := supportsOpenAIImageGen(btc)
+		geminiSupported := supportsGeminiImageGen(btc)
+		openRouterSupported := supportsOpenRouterImageGen(btc)
+
 		if usesGeminiParams(req) {
+			if !geminiSupported {
+				return "", fmt.Errorf("gemini image generation is not available for this login")
+			}
 			return imageGenProviderGemini, nil
 		}
 		if usesOpenAIParams(req) {
+			if !openAISupported {
+				return "", fmt.Errorf("openai image generation is not available for this login")
+			}
 			return imageGenProviderOpenAI, nil
 		}
 		switch inferProviderFromModel(req.Model) {
 		case imageGenProviderOpenAI:
-			return imageGenProviderOpenAI, nil
-		case imageGenProviderGemini:
-			// If no gemini-specific params, OpenRouter is sufficient.
-			if !usesGeminiParams(req) && req.Count <= 1 {
+			if openAISupported {
+				return imageGenProviderOpenAI, nil
+			}
+			if openRouterSupported {
 				return imageGenProviderOpenRouter, nil
 			}
-			return imageGenProviderGemini, nil
+			if geminiSupported {
+				return imageGenProviderGemini, nil
+			}
+			return "", fmt.Errorf("openai image generation is not available for this login")
+		case imageGenProviderGemini:
+			// If no gemini-specific params, OpenRouter is sufficient.
+			if openRouterSupported && req.Count <= 1 {
+				return imageGenProviderOpenRouter, nil
+			}
+			if geminiSupported {
+				return imageGenProviderGemini, nil
+			}
+			if openAISupported {
+				return imageGenProviderOpenAI, nil
+			}
+			return "", fmt.Errorf("gemini image generation is not available for this login")
 		case imageGenProviderOpenRouter:
+			if openRouterSupported {
+				return imageGenProviderOpenRouter, nil
+			}
+			if openAISupported {
+				return imageGenProviderOpenAI, nil
+			}
+			if geminiSupported {
+				return imageGenProviderGemini, nil
+			}
+			return "", fmt.Errorf("openrouter image generation is not available for this login")
+		}
+		if openRouterSupported {
 			return imageGenProviderOpenRouter, nil
 		}
-		return imageGenProviderOpenRouter, nil
+		if openAISupported {
+			return imageGenProviderOpenAI, nil
+		}
+		if geminiSupported {
+			return imageGenProviderGemini, nil
+		}
+		return "", fmt.Errorf("image generation is not available for this login")
 	default:
 		return "", fmt.Errorf("unsupported provider for image generation")
 	}
@@ -343,7 +413,7 @@ func normalizeOpenAIImageParams(req imageGenRequest) (openAIImageParams, error) 
 			return openAIImageParams{}, fmt.Errorf("unsupported style for %s: %s", model, style)
 		}
 		if count > 1 {
-			count = 1
+			return openAIImageParams{}, fmt.Errorf("count must be 1 for %s", model)
 		}
 	case "dall-e-2":
 		if size == "" {
@@ -527,8 +597,7 @@ func callOpenAIImageGen(ctx context.Context, apiKey, baseURL string, params open
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := imageGenHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
@@ -641,8 +710,7 @@ func callGeminiImageGen(ctx context.Context, btc *BridgeToolContext, baseURL, mo
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+btc.Client.apiKey)
 
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Do(httpReq)
+	resp, err := imageGenHTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
@@ -753,20 +821,35 @@ func loadInputImageBase64(ctx context.Context, btc *BridgeToolContext, ref strin
 	}
 
 	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
-		b64Data, err := fetchImageAsBase64(ctx, ref)
+		b64Data, headerMime, err := fetchImageAsBase64WithType(ctx, ref)
 		if err != nil {
 			return "", "", err
 		}
-		_, mimeType, err := media.DecodeBase64(b64Data)
+		mimeType := normalizeMimeString(headerMime)
+		if mimeType == "" || !strings.HasPrefix(mimeType, "image/") {
+			_, detectedMime, err := media.DecodeBase64(b64Data)
+			if err != nil {
+				return "", "", err
+			}
+			mimeType = detectedMime
+		}
+		return b64Data, mimeType, nil
+	}
+
+	if strings.HasPrefix(ref, "mxc://") {
+		b64Data, mimeType, err := btc.Client.downloadAndEncodeMedia(ctx, ref, nil, imageInputMaxSizeMB)
 		if err != nil {
 			return "", "", err
 		}
 		return b64Data, mimeType, nil
 	}
 
-	if strings.HasPrefix(ref, "mxc://") || strings.HasPrefix(ref, "file://") || strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "~") || strings.HasPrefix(ref, ".") {
-		resolved := expandUserPath(ref)
-		b64Data, mimeType, err := btc.Client.downloadAndEncodeMedia(ctx, resolved, nil, 20)
+	if isLocalImageRef(ref) {
+		resolved, err := resolveLocalImagePath(ref)
+		if err != nil {
+			return "", "", err
+		}
+		b64Data, mimeType, err := btc.Client.downloadAndEncodeMedia(ctx, resolved, nil, imageInputMaxSizeMB)
 		if err != nil {
 			return "", "", err
 		}
@@ -774,4 +857,127 @@ func loadInputImageBase64(ctx context.Context, btc *BridgeToolContext, ref strin
 	}
 
 	return "", "", fmt.Errorf("unsupported image reference: %s", ref)
+}
+
+func isLocalImageRef(ref string) bool {
+	return strings.HasPrefix(ref, "file://") || strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "~") || strings.HasPrefix(ref, ".")
+}
+
+func resolveLocalImagePath(ref string) (string, error) {
+	pathValue := strings.TrimSpace(ref)
+	if strings.HasPrefix(pathValue, "file://") {
+		parsedPath, err := fileURLToPath(pathValue)
+		if err != nil {
+			return "", err
+		}
+		pathValue = parsedPath
+	}
+
+	pathValue = expandUserPath(pathValue)
+	cleaned := filepath.Clean(pathValue)
+	absPath, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve local image path: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve local image path: %w", err)
+	}
+
+	allowedDirs, err := resolvePermittedImageInputDirs()
+	if err != nil {
+		return "", err
+	}
+	if !pathWithinAllowedDirs(resolved, allowedDirs) {
+		return "", fmt.Errorf("local image path is not within allowed directories")
+	}
+
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("failed to stat local image path: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("local image path is not a regular file")
+	}
+	if info.Mode().Perm()&0o444 == 0 {
+		return "", fmt.Errorf("local image path is not readable")
+	}
+
+	return resolved, nil
+}
+
+func fileURLToPath(ref string) (string, error) {
+	parsed, err := url.Parse(ref)
+	if err != nil {
+		return "", fmt.Errorf("invalid file URL: %w", err)
+	}
+	if parsed.Scheme != "file" {
+		return "", fmt.Errorf("invalid file URL scheme: %s", parsed.Scheme)
+	}
+	if parsed.Host != "" && parsed.Host != "localhost" {
+		return "", fmt.Errorf("unsupported file URL host: %s", parsed.Host)
+	}
+	pathValue := parsed.Path
+	if pathValue == "" {
+		pathValue = parsed.Opaque
+	}
+	if unescaped, err := url.PathUnescape(pathValue); err == nil {
+		pathValue = unescaped
+	}
+	if pathValue == "" {
+		return "", fmt.Errorf("file URL missing path")
+	}
+	return pathValue, nil
+}
+
+func resolvePermittedImageInputDirs() ([]string, error) {
+	rawDirs := permittedImageInputDirs()
+	if len(rawDirs) == 0 {
+		return nil, fmt.Errorf("no permitted directories available for local image access")
+	}
+	dirs := make([]string, 0, len(rawDirs))
+	for _, dir := range rawDirs {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			continue
+		}
+		cleaned := filepath.Clean(dir)
+		absDir, err := filepath.Abs(cleaned)
+		if err != nil {
+			continue
+		}
+		resolved, err := filepath.EvalSymlinks(absDir)
+		if err != nil {
+			continue
+		}
+		dirs = append(dirs, resolved)
+	}
+	if len(dirs) == 0 {
+		return nil, fmt.Errorf("no permitted directories available for local image access")
+	}
+	return dirs, nil
+}
+
+func permittedImageInputDirs() []string {
+	dirs := []string{}
+	if tempDir := os.TempDir(); strings.TrimSpace(tempDir) != "" {
+		dirs = append(dirs, tempDir)
+	}
+	if homeDir, err := os.UserHomeDir(); err == nil && strings.TrimSpace(homeDir) != "" {
+		dirs = append(dirs, homeDir)
+	}
+	return dirs
+}
+
+func pathWithinAllowedDirs(path string, allowedDirs []string) bool {
+	for _, dir := range allowedDirs {
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			continue
+		}
+		if rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..") {
+			return true
+		}
+	}
+	return false
 }

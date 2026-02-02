@@ -581,6 +581,10 @@ func (oc *AIClient) handleTextFileMessage(
 	mediaURL string,
 	mimeType string,
 ) (*bridgev2.MatrixMessageResponse, error) {
+	if msg == nil || msg.Event == nil {
+		return nil, fmt.Errorf("missing matrix event for text file message")
+	}
+
 	rawCaption := strings.TrimSpace(msg.Content.Body)
 	fileName := strings.TrimSpace(msg.Content.FileName)
 	hasUserCaption := rawCaption != ""
@@ -828,7 +832,7 @@ func (oc *AIClient) handleToolsCommand(
 	case "on", "enable", "true", "1":
 		if toolName == "" {
 			// Enable all tools
-			oc.setAllTools(runCtx, portal, meta, true, isOpenRouter)
+			oc.setAllTools(runCtx, portal, meta, true)
 		} else {
 			// Enable specific tool
 			oc.setToolEnabled(runCtx, portal, meta, toolName, true, isOpenRouter)
@@ -836,7 +840,7 @@ func (oc *AIClient) handleToolsCommand(
 	case "off", "disable", "false", "0":
 		if toolName == "" {
 			// Disable all tools
-			oc.setAllTools(runCtx, portal, meta, false, isOpenRouter)
+			oc.setAllTools(runCtx, portal, meta, false)
 		} else {
 			// Disable specific tool
 			oc.setToolEnabled(runCtx, portal, meta, toolName, false, isOpenRouter)
@@ -887,7 +891,7 @@ func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal
 }
 
 // setAllTools enables or disables all tools
-func (oc *AIClient) setAllTools(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, enabled bool, _ bool) {
+func (oc *AIClient) setAllTools(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, enabled bool) {
 	loginMeta := loginMetadata(oc.UserLogin)
 	ensureToolsConfig(meta, loginMeta.Provider)
 

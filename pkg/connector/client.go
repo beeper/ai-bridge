@@ -194,10 +194,10 @@ func pdfFileFeatures() *event.FileFeatures {
 
 func textFileFeatures() *event.FileFeatures {
 	return &event.FileFeatures{
-		MimeTypes:          textFileMimeTypes(),
-		Caption:           event.CapLevelFullySupported,
-		MaxCaptionLength:  AIMaxTextLength,
-		MaxSize:           50 * 1024 * 1024, // Shared cap with PDFs
+		MimeTypes:        textFileMimeTypes(),
+		Caption:          event.CapLevelFullySupported,
+		MaxCaptionLength: AIMaxTextLength,
+		MaxSize:          50 * 1024 * 1024, // Shared cap with PDFs
 	}
 }
 
@@ -205,16 +205,16 @@ func textFileFeatures() *event.FileFeatures {
 func audioFileFeatures() *event.FileFeatures {
 	return &event.FileFeatures{
 		MimeTypes: map[string]event.CapabilitySupportLevel{
-			"audio/wav":   event.CapLevelFullySupported,
-			"audio/x-wav": event.CapLevelFullySupported,
-			"audio/mpeg":  event.CapLevelFullySupported, // mp3
-			"audio/mp3":   event.CapLevelFullySupported,
-			"audio/webm":  event.CapLevelFullySupported,
-			"audio/ogg":   event.CapLevelFullySupported,
+			"audio/wav":              event.CapLevelFullySupported,
+			"audio/x-wav":            event.CapLevelFullySupported,
+			"audio/mpeg":             event.CapLevelFullySupported, // mp3
+			"audio/mp3":              event.CapLevelFullySupported,
+			"audio/webm":             event.CapLevelFullySupported,
+			"audio/ogg":              event.CapLevelFullySupported,
 			"audio/ogg; codecs=opus": event.CapLevelFullySupported,
-			"audio/flac":  event.CapLevelFullySupported,
-			"audio/mp4":   event.CapLevelFullySupported, // m4a
-			"audio/x-m4a": event.CapLevelFullySupported,
+			"audio/flac":             event.CapLevelFullySupported,
+			"audio/mp4":              event.CapLevelFullySupported, // m4a
+			"audio/x-m4a":            event.CapLevelFullySupported,
 		},
 		Caption:          event.CapLevelFullySupported,
 		MaxCaptionLength: AIMaxTextLength,
@@ -770,10 +770,7 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 	// Check if an agent is assigned
 	if meta != nil {
-		agentID := meta.AgentID
-		if agentID == "" {
-			agentID = meta.DefaultAgentID
-		}
+		agentID := resolveAgentID(meta)
 		if agentID != "" {
 			// Load the agent to get its model
 			store := NewAgentStoreAdapter(oc)
@@ -940,10 +937,7 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		return ""
 	}
 
-	agentID := meta.AgentID
-	if agentID == "" {
-		agentID = meta.DefaultAgentID
-	}
+	agentID := resolveAgentID(meta)
 	if agentID == "" {
 		return ""
 	}
@@ -1888,10 +1882,7 @@ func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal)
 	meta := portalMeta(portal)
 
 	// Check if an agent is configured for this room
-	agentID := meta.AgentID
-	if agentID == "" {
-		agentID = meta.DefaultAgentID
-	}
+	agentID := resolveAgentID(meta)
 
 	// Use agent+model ghost if an agent is configured
 	if agentID != "" {

@@ -336,10 +336,7 @@ func (s *AgentStoreAdapter) GetAgentByID(ctx context.Context, agentID string) (*
 // GetAgentForRoom returns the agent assigned to a room.
 // Falls back to the Quick Chatter if no specific agent is set.
 func (s *AgentStoreAdapter) GetAgentForRoom(ctx context.Context, meta *PortalMetadata) (*agents.AgentDefinition, error) {
-	agentID := meta.AgentID
-	if agentID == "" {
-		agentID = meta.DefaultAgentID
-	}
+	agentID := resolveAgentID(meta)
 	if agentID == "" {
 		agentID = agents.DefaultAgentID // Default to Beeper AI
 	}

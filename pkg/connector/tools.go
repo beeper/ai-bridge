@@ -38,6 +38,8 @@ type ToolDefinition struct {
 	Execute     func(ctx context.Context, args map[string]any) (string, error)
 }
 
+var imageFetchHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 // BridgeToolContext provides bridge-specific context for tool execution
 type BridgeToolContext struct {
 	Client        *AIClient
@@ -1366,29 +1368,38 @@ func extractBase64FromDataURL(dataURL string) (string, error) {
 
 // fetchImageAsBase64 fetches an image URL and returns it as base64.
 func fetchImageAsBase64(ctx context.Context, imageURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	b64Data, _, err := fetchImageAsBase64WithType(ctx, imageURL)
 	if err != nil {
 		return "", err
 	}
+	return b64Data, nil
+}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+func fetchImageAsBase64WithType(ctx context.Context, imageURL string) (string, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
-		return "", err
+		return "", "", fmt.Errorf("failed to create image request for %s: %w", imageURL, err)
+	}
+
+	resp, err := imageFetchHTTPClient.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to fetch image %s: %w", imageURL, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to fetch image: %d", resp.StatusCode)
+		return "", "", fmt.Errorf("failed to fetch image %s: status %d", imageURL, resp.StatusCode)
 	}
+
+	mimeType := normalizeMimeString(resp.Header.Get("Content-Type"))
 
 	// Limit to 10MB
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return "", err
+		return "", "", fmt.Errorf("failed to read image %s: %w", imageURL, err)
 	}
 
-	return base64.StdEncoding.EncodeToString(data), nil
+	return base64.StdEncoding.EncodeToString(data), mimeType, nil
 }
 
 // executeTTS converts text to speech.
@@ -1576,36 +1587,7 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 		return "", fmt.Errorf("missing or invalid 'query' argument")
 	}
 
-	count := 5
-	if rawCount, ok := args["count"]; ok {
-		switch v := rawCount.(type) {
-		case float64:
-			count = int(v)
-		case int:
-			count = v
-		case int64:
-			count = int(v)
-		}
-	}
-	if count < 1 {
-		count = 1
-	} else if count > 10 {
-		count = 10
-	}
-
-	var ignoredOptions []string
-	if v, _ := args["country"].(string); strings.TrimSpace(v) != "" {
-		ignoredOptions = append(ignoredOptions, "country")
-	}
-	if v, _ := args["search_lang"].(string); strings.TrimSpace(v) != "" {
-		ignoredOptions = append(ignoredOptions, "search_lang")
-	}
-	if v, _ := args["ui_lang"].(string); strings.TrimSpace(v) != "" {
-		ignoredOptions = append(ignoredOptions, "ui_lang")
-	}
-	if v, _ := args["freshness"].(string); strings.TrimSpace(v) != "" {
-		ignoredOptions = append(ignoredOptions, "freshness")
-	}
+	count, ignoredOptions := websearch.ParseCountAndIgnoredOptions(args)
 
 	start := time.Now()
 	result, err := websearch.DuckDuckGoSearch(ctx, query)
@@ -1614,88 +1596,12 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 	}
 	tookMs := time.Since(start).Milliseconds()
 
-	type webSearchResult struct {
-		Title       string `json:"title,omitempty"`
-		URL         string `json:"url,omitempty"`
-		Description string `json:"description,omitempty"`
-		Published   string `json:"published,omitempty"`
-		SiteName    string `json:"siteName,omitempty"`
-	}
-	type webSearchPayload struct {
-		Query      string            `json:"query"`
-		Provider   string            `json:"provider"`
-		Count      int               `json:"count"`
-		TookMs     int64             `json:"tookMs"`
-		Results    []webSearchResult `json:"results,omitempty"`
-		Answer     string            `json:"answer,omitempty"`
-		Summary    string            `json:"summary,omitempty"`
-		Definition string            `json:"definition,omitempty"`
-		Warning    string            `json:"warning,omitempty"`
-		NoResults  bool              `json:"noResults,omitempty"`
-	}
-
-	limit := count
-	if limit > len(result.Results) {
-		limit = len(result.Results)
-	}
-	mapped := make([]webSearchResult, 0, limit)
-	for _, topic := range result.Results[:limit] {
-		title := strings.TrimSpace(topic.Title)
-		description := strings.TrimSpace(topic.Snippet)
-		if title == "" && description != "" {
-			title = description
-			description = ""
-		}
-		if title == "" {
-			continue
-		}
-		mapped = append(mapped, webSearchResult{
-			Title:       title,
-			URL:         topic.URL,
-			Description: description,
-			SiteName:    resolveSiteName(topic.URL),
-		})
-	}
-
-	payload := webSearchPayload{
-		Query:    query,
-		Provider: "duckduckgo",
-		Count:    len(mapped),
-		TookMs:   tookMs,
-		Results:  mapped,
-	}
-	if result.Answer != "" {
-		payload.Answer = result.Answer
-	}
-	if result.Summary != "" {
-		payload.Summary = result.Summary
-	}
-	if result.Definition != "" {
-		payload.Definition = result.Definition
-	}
-	if result.NoResults {
-		payload.NoResults = true
-	}
-	if len(ignoredOptions) > 0 {
-		payload.Warning = fmt.Sprintf("Unsupported options ignored: %s", strings.Join(ignoredOptions, ", "))
-	}
-
+	payload := websearch.BuildPayload(query, count, tookMs, result, ignoredOptions)
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("failed to encode web_search response: %w", err)
 	}
 	return string(raw), nil
-}
-
-func resolveSiteName(rawURL string) string {
-	if strings.TrimSpace(rawURL) == "" {
-		return ""
-	}
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		return ""
-	}
-	return parsed.Hostname()
 }
 
 // executeSessionStatus returns current session status including time, model, and usage info.

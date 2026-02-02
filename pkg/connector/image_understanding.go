@@ -21,16 +21,35 @@ func (oc *AIClient) canUseMediaUnderstanding(meta *PortalMetadata) bool {
 	return hasAssignedAgent(meta)
 }
 
-// resolveImageUnderstandingModel returns a vision-capable model from the agent's model chain.
-func (oc *AIClient) resolveImageUnderstandingModel(ctx context.Context, meta *PortalMetadata) string {
+type modelCapsFilter func(ModelCapabilities) bool
+type modelInfoFilter func(ModelInfo) bool
+
+func collectModelCandidates(primary string, fallbacks []string) []string {
+	var candidates []string
+	if strings.TrimSpace(primary) != "" {
+		candidates = append(candidates, primary)
+	}
+	for _, fb := range fallbacks {
+		if strings.TrimSpace(fb) == "" {
+			continue
+		}
+		candidates = append(candidates, fb)
+	}
+	return candidates
+}
+
+func (oc *AIClient) resolveUnderstandingModel(
+	ctx context.Context,
+	meta *PortalMetadata,
+	supportsCaps modelCapsFilter,
+	supportsInfo modelInfoFilter,
+	logLabel string,
+) string {
 	if !oc.canUseMediaUnderstanding(meta) {
 		return ""
 	}
 
-	agentID := meta.AgentID
-	if agentID == "" {
-		agentID = meta.DefaultAgentID
-	}
+	agentID := resolveAgentID(meta)
 	if agentID == "" {
 		return ""
 	}
@@ -38,31 +57,21 @@ func (oc *AIClient) resolveImageUnderstandingModel(ctx context.Context, meta *Po
 	store := NewAgentStoreAdapter(oc)
 	agent, err := store.GetAgentByID(ctx, agentID)
 	if err != nil {
-		oc.log.Warn().Err(err).Str("agent_id", agentID).Msg("Failed to load agent for image understanding")
+		oc.log.Warn().Err(err).Str("agent_id", agentID).Msg(fmt.Sprintf("Failed to load agent for %s understanding", logLabel))
 		return ""
 	}
 	if agent == nil {
 		return ""
 	}
 
-	var candidates []string
-	if strings.TrimSpace(agent.Model.Primary) != "" {
-		candidates = append(candidates, agent.Model.Primary)
-	}
-	for _, fb := range agent.Model.Fallbacks {
-		if strings.TrimSpace(fb) == "" {
-			continue
-		}
-		candidates = append(candidates, fb)
-	}
-
+	candidates := collectModelCandidates(agent.Model.Primary, agent.Model.Fallbacks)
 	for _, candidate := range candidates {
 		resolved := ResolveAlias(candidate)
 		if resolved == "" {
 			continue
 		}
 		caps := getModelCapabilities(resolved, oc.findModelInfo(resolved))
-		if caps.SupportsVision {
+		if supportsCaps(caps) {
 			return resolved
 		}
 	}
@@ -71,30 +80,33 @@ func (oc *AIClient) resolveImageUnderstandingModel(ctx context.Context, meta *Po
 	provider := loginMeta.Provider
 
 	// Prefer cached/provider-listed models first.
-	if modelID := oc.pickVisionModelFromList(loginMeta.ModelCache, provider); modelID != "" {
+	if modelID := oc.pickModelFromCache(loginMeta.ModelCache, provider, supportsInfo); modelID != "" {
 		return modelID
 	}
 	models, err := oc.listAvailableModels(ctx, false)
 	if err == nil {
-		if modelID := pickVisionModelFromList(models, provider); modelID != "" {
+		if modelID := pickModelFromList(models, provider, supportsInfo); modelID != "" {
 			return modelID
 		}
 	}
 
 	// Fallback to manifest-only lookup.
-	if modelID := pickVisionModelFromManifest(provider); modelID != "" {
+	if modelID := pickModelFromManifest(provider, supportsInfo); modelID != "" {
 		return modelID
 	}
 
 	return ""
 }
 
-// resolveVisionModelForImage returns the model to use for image analysis.
-// The second return value is true when a fallback model (not the effective model) is used.
-func (oc *AIClient) resolveVisionModelForImage(ctx context.Context, meta *PortalMetadata) (string, bool) {
+func (oc *AIClient) resolveModelForCapability(
+	ctx context.Context,
+	meta *PortalMetadata,
+	supportsCaps modelCapsFilter,
+	fallback func(context.Context, *PortalMetadata) string,
+) (string, bool) {
 	modelID := oc.effectiveModel(meta)
 	caps := getModelCapabilities(modelID, oc.findModelInfo(modelID))
-	if caps.SupportsVision {
+	if supportsCaps(caps) {
 		return modelID, false
 	}
 
@@ -102,98 +114,56 @@ func (oc *AIClient) resolveVisionModelForImage(ctx context.Context, meta *Portal
 		return "", false
 	}
 
-	fallback := oc.resolveImageUnderstandingModel(ctx, meta)
-	if fallback == "" {
+	fallbackID := fallback(ctx, meta)
+	if fallbackID == "" {
 		return "", false
 	}
-	return fallback, true
+	return fallbackID, true
+}
+
+// resolveImageUnderstandingModel returns a vision-capable model from the agent's model chain.
+func (oc *AIClient) resolveImageUnderstandingModel(ctx context.Context, meta *PortalMetadata) string {
+	return oc.resolveUnderstandingModel(
+		ctx,
+		meta,
+		func(caps ModelCapabilities) bool { return caps.SupportsVision },
+		func(info ModelInfo) bool { return info.SupportsVision },
+		"image",
+	)
+}
+
+// resolveVisionModelForImage returns the model to use for image analysis.
+// The second return value is true when a fallback model (not the effective model) is used.
+func (oc *AIClient) resolveVisionModelForImage(ctx context.Context, meta *PortalMetadata) (string, bool) {
+	return oc.resolveModelForCapability(
+		ctx,
+		meta,
+		func(caps ModelCapabilities) bool { return caps.SupportsVision },
+		oc.resolveImageUnderstandingModel,
+	)
 }
 
 // resolveAudioUnderstandingModel returns an audio-capable model from the agent's model chain.
 func (oc *AIClient) resolveAudioUnderstandingModel(ctx context.Context, meta *PortalMetadata) string {
-	if !oc.canUseMediaUnderstanding(meta) {
-		return ""
-	}
-
-	agentID := meta.AgentID
-	if agentID == "" {
-		agentID = meta.DefaultAgentID
-	}
-	if agentID == "" {
-		return ""
-	}
-
-	store := NewAgentStoreAdapter(oc)
-	agent, err := store.GetAgentByID(ctx, agentID)
-	if err != nil {
-		oc.log.Warn().Err(err).Str("agent_id", agentID).Msg("Failed to load agent for audio understanding")
-		return ""
-	}
-	if agent == nil {
-		return ""
-	}
-
-	var candidates []string
-	if strings.TrimSpace(agent.Model.Primary) != "" {
-		candidates = append(candidates, agent.Model.Primary)
-	}
-	for _, fb := range agent.Model.Fallbacks {
-		if strings.TrimSpace(fb) == "" {
-			continue
-		}
-		candidates = append(candidates, fb)
-	}
-
-	for _, candidate := range candidates {
-		resolved := ResolveAlias(candidate)
-		if resolved == "" {
-			continue
-		}
-		caps := getModelCapabilities(resolved, oc.findModelInfo(resolved))
-		if caps.SupportsAudio {
-			return resolved
-		}
-	}
-
-	loginMeta := loginMetadata(oc.UserLogin)
-	provider := loginMeta.Provider
-
-	// Prefer cached/provider-listed models first.
-	if modelID := oc.pickAudioModelFromList(loginMeta.ModelCache, provider); modelID != "" {
-		return modelID
-	}
-	models, err := oc.listAvailableModels(ctx, false)
-	if err == nil {
-		if modelID := pickAudioModelFromList(models, provider); modelID != "" {
-			return modelID
-		}
-	}
-
-	// Fallback to manifest-only lookup.
-	if modelID := pickAudioModelFromManifest(provider); modelID != "" {
-		return modelID
-	}
-
-	return ""
+	return oc.resolveUnderstandingModel(
+		ctx,
+		meta,
+		func(caps ModelCapabilities) bool { return caps.SupportsAudio },
+		func(info ModelInfo) bool { return info.SupportsAudio },
+		"audio",
+	)
 }
 
-func (oc *AIClient) pickAudioModelFromList(cache *ModelCache, provider string) string {
+func (oc *AIClient) pickModelFromCache(cache *ModelCache, provider string, supports modelInfoFilter) string {
 	if cache == nil || len(cache.Models) == 0 {
 		return ""
 	}
-	return pickAudioModelFromList(cache.Models, provider)
+	return pickModelFromList(cache.Models, provider, supports)
 }
 
-func (oc *AIClient) pickVisionModelFromList(cache *ModelCache, provider string) string {
-	if cache == nil || len(cache.Models) == 0 {
-		return ""
-	}
-	return pickVisionModelFromList(cache.Models, provider)
-}
-
-func pickAudioModelFromList(models []ModelInfo, provider string) string {
+func pickModelFromList(models []ModelInfo, provider string, supports modelInfoFilter) string {
 	for _, info := range models {
-		if !info.SupportsAudio {
+		if !supports(info) {
 			continue
 		}
 		if !providerMatches(info, provider) {
@@ -204,35 +174,9 @@ func pickAudioModelFromList(models []ModelInfo, provider string) string {
 	return ""
 }
 
-func pickVisionModelFromList(models []ModelInfo, provider string) string {
-	for _, info := range models {
-		if !info.SupportsVision {
-			continue
-		}
-		if !providerMatches(info, provider) {
-			continue
-		}
-		return info.ID
-	}
-	return ""
-}
-
-func pickAudioModelFromManifest(provider string) string {
+func pickModelFromManifest(provider string, supports modelInfoFilter) string {
 	for _, info := range ModelManifest.Models {
-		if !info.SupportsAudio {
-			continue
-		}
-		if !providerMatches(info, provider) {
-			continue
-		}
-		return info.ID
-	}
-	return ""
-}
-
-func pickVisionModelFromManifest(provider string) string {
-	for _, info := range ModelManifest.Models {
-		if !info.SupportsVision {
+		if !supports(info) {
 			continue
 		}
 		if !providerMatches(info, provider) {
@@ -263,21 +207,12 @@ func providerMatches(info ModelInfo, provider string) bool {
 // resolveAudioModelForInput returns the model to use for audio analysis.
 // The second return value is true when a fallback model (not the effective model) is used.
 func (oc *AIClient) resolveAudioModelForInput(ctx context.Context, meta *PortalMetadata) (string, bool) {
-	modelID := oc.effectiveModel(meta)
-	caps := getModelCapabilities(modelID, oc.findModelInfo(modelID))
-	if caps.SupportsAudio {
-		return modelID, false
-	}
-
-	if !oc.canUseMediaUnderstanding(meta) {
-		return "", false
-	}
-
-	fallback := oc.resolveAudioUnderstandingModel(ctx, meta)
-	if fallback == "" {
-		return "", false
-	}
-	return fallback, true
+	return oc.resolveModelForCapability(
+		ctx,
+		meta,
+		func(caps ModelCapabilities) bool { return caps.SupportsAudio },
+		oc.resolveAudioUnderstandingModel,
+	)
 }
 
 func (oc *AIClient) analyzeImageWithModel(
@@ -295,9 +230,15 @@ func (oc *AIClient) analyzeImageWithModel(
 		prompt = defaultImageUnderstandingPrompt
 	}
 
+	modelIDForAPI := oc.modelIDForAPI(modelID)
+	imageRef := mediaSourceLabel(imageURL, encryptedFile)
 	b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, imageURL, encryptedFile, 20, mimeType)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to download image %s for model %s: %w", imageRef, modelIDForAPI, err)
+	}
+	actualMimeType = strings.TrimSpace(actualMimeType)
+	if actualMimeType == "" {
+		actualMimeType = strings.TrimSpace(mimeType)
 	}
 	if actualMimeType == "" {
 		actualMimeType = "image/jpeg"
@@ -323,12 +264,12 @@ func (oc *AIClient) analyzeImageWithModel(
 	}
 
 	resp, err := oc.provider.Generate(ctx, GenerateParams{
-		Model:               oc.modelIDForAPI(modelID),
+		Model:               modelIDForAPI,
 		Messages:            messages,
 		MaxCompletionTokens: imageUnderstandingMaxTokens,
 	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("image analysis failed for model %s (image %s): %w", modelIDForAPI, imageRef, err)
 	}
 
 	return strings.TrimSpace(resp.Content), nil
@@ -349,9 +290,15 @@ func (oc *AIClient) analyzeAudioWithModel(
 		prompt = defaultAudioUnderstandingPrompt
 	}
 
+	modelIDForAPI := oc.modelIDForAPI(modelID)
+	audioRef := mediaSourceLabel(audioURL, encryptedFile)
 	b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, audioURL, encryptedFile, 25, mimeType)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to download audio %s for model %s: %w", audioRef, modelIDForAPI, err)
+	}
+	actualMimeType = strings.TrimSpace(actualMimeType)
+	if actualMimeType == "" {
+		actualMimeType = strings.TrimSpace(mimeType)
 	}
 	format := getAudioFormat(actualMimeType)
 	if format == "" {
@@ -376,15 +323,32 @@ func (oc *AIClient) analyzeAudioWithModel(
 	}
 
 	resp, err := oc.provider.Generate(ctx, GenerateParams{
-		Model:               oc.modelIDForAPI(modelID),
+		Model:               modelIDForAPI,
 		Messages:            messages,
 		MaxCompletionTokens: imageUnderstandingMaxTokens,
 	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("audio analysis failed for model %s (audio %s): %w", modelIDForAPI, audioRef, err)
 	}
 
 	return strings.TrimSpace(resp.Content), nil
+}
+
+func mediaSourceLabel(mediaURL string, encryptedFile *event.EncryptedFileInfo) string {
+	source := strings.TrimSpace(mediaURL)
+	if encryptedFile != nil && encryptedFile.URL != "" {
+		encryptedURL := strings.TrimSpace(string(encryptedFile.URL))
+		if source == "" {
+			return encryptedURL
+		}
+		if encryptedURL != "" && encryptedURL != source {
+			return fmt.Sprintf("%s (encrypted %s)", source, encryptedURL)
+		}
+	}
+	if source == "" {
+		return "unknown media"
+	}
+	return source
 }
 
 func buildImageUnderstandingPrompt(caption string, hasUserCaption bool) string {

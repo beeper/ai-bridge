@@ -1201,10 +1201,7 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 	}
 
 	// Add boss tools for Boss agent rooms (needed for multi-turn tool use)
-	agentID := meta.AgentID
-	if agentID == "" {
-		agentID = meta.DefaultAgentID
-	}
+	agentID := resolveAgentID(meta)
 	if agents.IsBossAgent(agentID) {
 		bossTools := tools.BossTools()
 		strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())

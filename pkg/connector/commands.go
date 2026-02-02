@@ -766,10 +766,7 @@ func fnAgent(ce *commands.Event) {
 
 	if len(ce.Args) == 0 {
 		// Show current agent
-		agentID := meta.AgentID
-		if agentID == "" {
-			agentID = meta.DefaultAgentID
-		}
+		agentID := resolveAgentID(meta)
 		if agentID == "" {
 			ce.Reply("No agent configured. Using default model: %s", client.effectiveModel(meta))
 			return

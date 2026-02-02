@@ -112,10 +112,7 @@ func (oc *AIClient) reactionSenderID(ctx context.Context, portal *bridgev2.Porta
 		return ""
 	}
 	meta := portalMeta(portal)
-	agentID := meta.AgentID
-	if agentID == "" {
-		agentID = meta.DefaultAgentID
-	}
+	agentID := resolveAgentID(meta)
 	modelID := oc.effectiveModel(meta)
 	if agentID != "" {
 		if ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, agentModelUserID(agentID, modelID)); err == nil && ghost != nil {

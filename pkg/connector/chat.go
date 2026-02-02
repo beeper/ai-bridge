@@ -960,10 +960,7 @@ func (oc *AIClient) handleNewChat(
 			oc.sendSystemNotice(runCtx, portal, "Failed to read current room settings.")
 			return
 		}
-		agentID := meta.AgentID
-		if agentID == "" {
-			agentID = meta.DefaultAgentID
-		}
+		agentID := resolveAgentID(meta)
 		if agentID != "" {
 			store := NewAgentStoreAdapter(oc)
 			agent, err := store.GetAgentByID(runCtx, agentID)
@@ -1220,10 +1217,7 @@ func (oc *AIClient) chatInfoFromPortal(ctx context.Context, portal *bridgev2.Por
 	}
 	chatInfo := oc.composeChatInfo(title, modelID)
 
-	agentID := meta.AgentID
-	if agentID == "" {
-		agentID = meta.DefaultAgentID
-	}
+	agentID := resolveAgentID(meta)
 	if agentID == "" {
 		return chatInfo
 	}
@@ -1426,10 +1420,7 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 	}
 
 	meta := portalMeta(portal)
-	agentID := meta.AgentID
-	if agentID == "" {
-		agentID = meta.DefaultAgentID
-	}
+	agentID := resolveAgentID(meta)
 
 	// Check if this is an agent room - use agent+model ghosts for swap
 	if agentID != "" {
@@ -1625,10 +1616,7 @@ func (oc *AIClient) ensureSingleAIGhost(ctx context.Context, portal *bridgev2.Po
 
 	// Determine which ghost SHOULD be in the room
 	var expectedGhostID networkid.UserID
-	agentID := meta.AgentID
-	if agentID == "" {
-		agentID = meta.DefaultAgentID
-	}
+	agentID := resolveAgentID(meta)
 
 	modelID := oc.effectiveModel(meta)
 	if agentID != "" {

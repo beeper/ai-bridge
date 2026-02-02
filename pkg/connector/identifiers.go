@@ -93,6 +93,17 @@ func portalMeta(portal *bridgev2.Portal) *PortalMetadata {
 	return portal.Metadata.(*PortalMetadata)
 }
 
+// resolveAgentID returns the configured agent ID, falling back to DefaultAgentID.
+func resolveAgentID(meta *PortalMetadata) string {
+	if meta == nil {
+		return ""
+	}
+	if meta.AgentID != "" {
+		return meta.AgentID
+	}
+	return meta.DefaultAgentID
+}
+
 func messageMeta(msg *database.Message) *MessageMetadata {
 	if msg == nil || msg.Metadata == nil {
 		return nil

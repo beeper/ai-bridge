@@ -156,10 +156,7 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 	senderID := portal.OtherUserID
 	var displayName string
 
-	agentID := meta.AgentID
-	if agentID == "" {
-		agentID = meta.DefaultAgentID
-	}
+	agentID := resolveAgentID(meta)
 
 	// Fallback: compute sender if portal.OtherUserID is not set
 	if senderID == "" {

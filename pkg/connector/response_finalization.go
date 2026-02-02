@@ -306,10 +306,7 @@ func (oc *AIClient) getAgentResponseMode(meta *PortalMetadata) agents.ResponseMo
 		return agents.ResponseModeRaw
 	}
 
-	agentID := meta.AgentID
-	if agentID == "" {
-		agentID = meta.DefaultAgentID
-	}
+	agentID := resolveAgentID(meta)
 
 	if agentID != "" {
 		store := NewAgentStoreAdapter(oc)
