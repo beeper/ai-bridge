@@ -354,7 +354,9 @@ func (s *AgentStoreAdapter) CreateExecutorForAgent(agent *agents.AgentDefinition
 	// Register boss tools if this is the boss agent
 	if agent.ID == "boss" {
 		for _, tool := range tools.BossTools() {
-			registry.Register(tool)
+			if !registry.Has(tool.Name) {
+				registry.Register(tool)
+			}
 		}
 	}
 
@@ -510,6 +512,12 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 
 	// Apply custom name and system prompt if provided
 	pm := portalMeta(portal)
+	originalName := portal.Name
+	originalNameSet := portal.NameSet
+	originalTitle := pm.Title
+	originalTitleGenerated := pm.TitleGenerated
+	originalSystemPrompt := pm.SystemPrompt
+
 	if room.Name != "" {
 		pm.Title = room.Name
 		portal.Name = room.Name
@@ -524,12 +532,9 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 		// Topic is for display only, SystemPrompt is for LLM context
 	}
 
-	if err := portal.Save(ctx); err != nil {
-		b.store.client.log.Warn().Err(err).Msg("Failed to save room overrides")
-	}
-
 	// Create the Matrix room
 	if err := portal.CreateMatrixRoom(ctx, b.store.client.UserLogin, resp.PortalInfo); err != nil {
+		cleanupPortal(ctx, b.store.client, portal, "failed to create Matrix room")
 		return "", fmt.Errorf("failed to create Matrix room: %w", err)
 	}
 
@@ -537,14 +542,23 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 	b.store.client.sendWelcomeMessage(ctx, portal)
 
 	if room.Name != "" {
-		if err := b.store.client.setRoomName(ctx, portal, room.Name); err != nil {
+		if err := b.store.client.setRoomNameNoSave(ctx, portal, room.Name); err != nil {
 			b.store.client.log.Warn().Err(err).Msg("Failed to set Matrix room name")
+			portal.Name = originalName
+			portal.NameSet = originalNameSet
+			pm.Title = originalTitle
+			pm.TitleGenerated = originalTitleGenerated
 		}
 	}
 	if room.SystemPrompt != "" {
-		if err := b.store.client.setRoomSystemPrompt(ctx, portal, room.SystemPrompt); err != nil {
+		if err := b.store.client.setRoomSystemPromptNoSave(ctx, portal, room.SystemPrompt); err != nil {
 			b.store.client.log.Warn().Err(err).Msg("Failed to set room system prompt")
+			pm.SystemPrompt = originalSystemPrompt
 		}
+	}
+
+	if err := portal.Save(ctx); err != nil {
+		return "", fmt.Errorf("failed to save room overrides: %w", err)
 	}
 
 	return string(portal.PortalKey.ID), nil

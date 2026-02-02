@@ -114,6 +114,7 @@ type PortalMetadata struct {
 	// Agent-related metadata
 	DefaultAgentID  string `json:"default_agent_id,omitempty"`   // Agent assigned to this room (legacy name, same as AgentID)
 	AgentID         string `json:"agent_id,omitempty"`           // Which agent is the ghost for this room
+	AgentPrompt     string `json:"agent_prompt,omitempty"`       // Cached prompt for the assigned agent
 	IsBuilderRoom   bool   `json:"is_builder_room,omitempty"`    // True if this is the Manage AI Chats room (protected from overrides)
 	IsRawMode       bool   `json:"is_raw_mode,omitempty"`        // True if this is a playground/raw mode room (no directive processing)
 	IsAgentDataRoom bool   `json:"is_agent_data_room,omitempty"` // True if this is a hidden room for storing agent data

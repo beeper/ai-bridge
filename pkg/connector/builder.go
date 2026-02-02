@@ -48,6 +48,7 @@ func (oc *AIClient) ensureBuilderRoom(ctx context.Context) error {
 
 	// Create Matrix room
 	if err := portal.CreateMatrixRoom(ctx, oc.UserLogin, chatInfo); err != nil {
+		cleanupPortal(ctx, oc, portal, "failed to create builder Matrix room")
 		return fmt.Errorf("failed to create matrix room for builder: %w", err)
 	}
 
@@ -57,7 +58,9 @@ func (oc *AIClient) ensureBuilderRoom(ctx context.Context) error {
 	// Store the Builder room ID
 	meta.BuilderRoomID = portal.PortalKey.ID
 	if err := oc.UserLogin.Save(ctx); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to save BuilderRoomID")
+		meta.BuilderRoomID = ""
+		cleanupPortal(ctx, oc, portal, "failed to save BuilderRoomID")
+		return fmt.Errorf("failed to save BuilderRoomID: %w", err)
 	}
 
 	oc.log.Info().

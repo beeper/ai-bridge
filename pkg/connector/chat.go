@@ -724,6 +724,7 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 			ToolsConfig:         opts.CopyFrom.ToolsConfig,
 			ConversationMode:    opts.CopyFrom.ConversationMode,
 			DefaultAgentID:      opts.CopyFrom.DefaultAgentID,
+			AgentPrompt:         opts.CopyFrom.AgentPrompt,
 		}
 		modelID = opts.CopyFrom.Model
 	} else {

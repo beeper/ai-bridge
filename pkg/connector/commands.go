@@ -57,6 +57,60 @@ func isValidAgentID(agentID string) bool {
 	return true
 }
 
+func splitQuotedArgs(input string) ([]string, error) {
+	var args []string
+	var current strings.Builder
+	var quote rune
+	escaped := false
+
+	flush := func() {
+		if current.Len() > 0 {
+			args = append(args, current.String())
+			current.Reset()
+		}
+	}
+
+	for _, r := range input {
+		if escaped {
+			current.WriteRune(r)
+			escaped = false
+			continue
+		}
+
+		if r == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+				continue
+			}
+			current.WriteRune(r)
+			continue
+		}
+
+		switch r {
+		case '\'', '"':
+			quote = r
+		case ' ', '\t', '\n', '\r':
+			flush()
+		default:
+			current.WriteRune(r)
+		}
+	}
+
+	if quote != 0 {
+		return nil, fmt.Errorf("unterminated quote")
+	}
+	if escaped {
+		current.WriteRune('\\')
+	}
+	flush()
+	return args, nil
+}
+
 // CommandModel handles the !ai model command
 var CommandModel = &commands.FullHandler{
 	Func: fnModel,
@@ -634,6 +688,7 @@ func fnAgent(ce *commands.Event) {
 	if agentID == "none" || agentID == "clear" {
 		meta.AgentID = ""
 		meta.DefaultAgentID = ""
+		meta.AgentPrompt = ""
 		modelID := client.effectiveModel(meta)
 		ce.Portal.OtherUserID = modelUserID(modelID)
 		client.savePortalQuiet(ce.Ctx, ce.Portal, "agent cleared")
@@ -649,9 +704,7 @@ func fnAgent(ce *commands.Event) {
 
 	meta.AgentID = agent.ID
 	meta.DefaultAgentID = agent.ID
-	if agent.SystemPrompt != "" {
-		meta.SystemPrompt = agent.SystemPrompt
-	}
+	meta.AgentPrompt = agent.SystemPrompt
 	modelID := client.effectiveModel(meta)
 	ce.Portal.OtherUserID = agentModelUserID(agent.ID, modelID)
 	client.savePortalQuiet(ce.Ctx, ce.Portal, "agent change")
@@ -740,13 +793,20 @@ func fnCreateAgent(ce *commands.Event) {
 		return
 	}
 
-	if len(ce.Args) < 2 {
+	args := ce.Args
+	if raw := strings.TrimSpace(ce.RawArgs); raw != "" {
+		if parsed, err := splitQuotedArgs(raw); err == nil && len(parsed) > 0 {
+			args = parsed
+		}
+	}
+
+	if len(args) < 2 {
 		ce.Reply("Usage: !ai create-agent <id> <name> [model] [system prompt...]\nExample: !ai create-agent my-helper \"My Helper\" gpt-4o You are a helpful assistant.")
 		return
 	}
 
-	agentID := ce.Args[0]
-	agentName := ce.Args[1]
+	agentID := args[0]
+	agentName := args[1]
 
 	if _, reserved := reservedAgentIDs[agentID]; reserved {
 		ce.Reply("Agent ID '%s' is reserved. Choose a different ID.", agentID)
@@ -759,11 +819,11 @@ func fnCreateAgent(ce *commands.Event) {
 
 	// Parse optional model and system prompt
 	var model, systemPrompt string
-	if len(ce.Args) > 2 {
-		model = ce.Args[2]
+	if len(args) > 2 {
+		model = args[2]
 	}
-	if len(ce.Args) > 3 {
-		systemPrompt = strings.Join(ce.Args[3:], " ")
+	if len(args) > 3 {
+		systemPrompt = strings.Join(args[3:], " ")
 	}
 
 	store := NewAgentStoreAdapter(client)
