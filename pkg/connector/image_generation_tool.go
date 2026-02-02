@@ -10,6 +10,8 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -75,10 +77,20 @@ func parseImageGenArgs(args map[string]any) (imageGenRequest, error) {
 	if v, ok := args["model"].(string); ok {
 		req.Model = strings.TrimSpace(v)
 	}
-	if v, ok := args["count"].(float64); ok {
-		req.Count = int(v)
-	} else if v, ok := args["count"].(int); ok {
-		req.Count = v
+	if rawCount, ok := args["count"]; ok {
+		if v, ok := rawCount.(float64); ok {
+			if v < 1 || math.Mod(v, 1) != 0 {
+				return imageGenRequest{}, fmt.Errorf("invalid 'count' argument")
+			}
+			req.Count = int(v)
+		} else if v, ok := rawCount.(int); ok {
+			if v < 1 {
+				return imageGenRequest{}, fmt.Errorf("invalid 'count' argument")
+			}
+			req.Count = v
+		} else {
+			return imageGenRequest{}, fmt.Errorf("invalid 'count' argument")
+		}
 	}
 	if v, ok := args["size"].(string); ok {
 		req.Size = strings.TrimSpace(v)
@@ -821,6 +833,9 @@ func loadInputImageBase64(ctx context.Context, btc *BridgeToolContext, ref strin
 	}
 
 	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
+		if err := validateExternalImageURL(ctx, ref); err != nil {
+			return "", "", err
+		}
 		b64Data, headerMime, err := fetchImageAsBase64WithType(ctx, ref)
 		if err != nil {
 			return "", "", err
@@ -857,6 +872,86 @@ func loadInputImageBase64(ctx context.Context, btc *BridgeToolContext, ref strin
 	}
 
 	return "", "", fmt.Errorf("unsupported image reference: %s", ref)
+}
+
+var imageFetchBlockedCIDRs = []*net.IPNet{
+	mustParseCIDR("127.0.0.0/8"),
+	mustParseCIDR("10.0.0.0/8"),
+	mustParseCIDR("172.16.0.0/12"),
+	mustParseCIDR("192.168.0.0/16"),
+	mustParseCIDR("169.254.0.0/16"),
+	mustParseCIDR("::1/128"),
+}
+
+var imageFetchMetadataIP = net.ParseIP("169.254.169.254")
+
+func validateExternalImageURL(ctx context.Context, rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid image URL: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("unsupported image URL scheme: %s", parsed.Scheme)
+	}
+
+	host := strings.ToLower(parsed.Hostname())
+	if host == "" {
+		return fmt.Errorf("image URL missing host")
+	}
+	if host == "localhost" {
+		return fmt.Errorf("image URL host is not allowed")
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		if isDisallowedImageIP(ip) {
+			return fmt.Errorf("image URL host is not allowed")
+		}
+		return nil
+	}
+
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return fmt.Errorf("failed to resolve image URL host: %w", err)
+	}
+	if len(ips) == 0 {
+		return fmt.Errorf("failed to resolve image URL host")
+	}
+	for _, ip := range ips {
+		if isDisallowedImageIP(ip.IP) {
+			return fmt.Errorf("image URL host is not allowed")
+		}
+	}
+
+	return nil
+}
+
+func isDisallowedImageIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		ip = ip4
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+	if imageFetchMetadataIP != nil && ip.Equal(imageFetchMetadataIP) {
+		return true
+	}
+	for _, cidr := range imageFetchBlockedCIDRs {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func mustParseCIDR(value string) *net.IPNet {
+	_, parsed, err := net.ParseCIDR(value)
+	if err != nil {
+		panic(fmt.Sprintf("invalid CIDR %q: %v", value, err))
+	}
+	return parsed
 }
 
 func isLocalImageRef(ref string) bool {
