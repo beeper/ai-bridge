@@ -12,23 +12,163 @@ beeper:
 # These are used when a room doesn't have a specific model configured.
 providers:
   beeper:
-    default_model: "google/gemini-2.5-flash"
+    default_model: "anthropic/claude-opus-4.5"
     # PDF processing engine for OpenRouter's file-parser plugin.
     # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
     default_pdf_engine: "mistral-ocr"
   openai:
-    default_model: "openai/gpt-4o-mini"
+    default_model: "openai/gpt-5.2"
   openrouter:
-    default_model: "google/gemini-2.5-flash"
+    default_model: "anthropic/claude-opus-4.5"
     # PDF processing engine for OpenRouter's file-parser plugin.
     # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
     default_pdf_engine: "mistral-ocr"
-    # Optional OpenRouter app attribution headers.
-    # Defaults: https://beeper.com / Beeper
-    # app_referer: "https://example.com"
-    # app_title: "My Matrix AI Bridge"
 
 # Global settings
 default_system_prompt: |
-  You are a helpful assistant.
+  You are a helpful, concise assistant.
+  Ask clarifying questions when needed.
+  Follow the user's intent and be accurate.
 model_cache_duration: 6h
+
+# External tool providers (search + fetch). Proxy is recommended.
+tools:
+  search:
+    provider: "proxy"
+    fallbacks: ["exa", "brave", "perplexity", "openrouter", "ddg"]
+    proxy:
+      base_url: "https://hungryserv.yourdomain"
+      api_key: ""
+      search_path: "/search"
+      timeout_seconds: 30
+    exa:
+      api_key: ""
+      base_url: "https://api.exa.ai"
+      type: "auto"
+      num_results: 5
+      include_text: false
+      text_max_chars: 500
+    brave:
+      api_key: ""
+      base_url: "https://api.search.brave.com/res/v1/web/search"
+    perplexity:
+      api_key: ""
+      base_url: "https://openrouter.ai/api/v1"
+      model: "perplexity/sonar-pro"
+    openrouter:
+      api_key: ""
+      base_url: "https://openrouter.ai/api/v1"
+      model: "openai/gpt-5.2"
+    ddg:
+      enabled: true
+
+  fetch:
+    provider: "proxy"
+    fallbacks: ["exa", "direct"]
+    proxy:
+      base_url: "https://hungryserv.yourdomain"
+      api_key: ""
+      contents_path: "/contents"
+      timeout_seconds: 30
+    exa:
+      api_key: ""
+      base_url: "https://api.exa.ai"
+      include_text: true
+      text_max_chars: 5000
+    direct:
+      enabled: true
+      timeout_seconds: 30
+      max_chars: 50000
+      max_redirects: 3
+
+# Context pruning configuration (OpenClaw-style).
+# Reduces token usage by intelligently truncating old tool results.
+# Disabled by default - opt-in feature.
+pruning:
+  # Enable proactive context pruning
+  enabled: false
+
+  # Ratio of context window usage that triggers soft trimming (0.0-1.0)
+  # At 30% usage, large tool results start getting truncated
+  soft_trim_ratio: 0.3
+
+  # Ratio of context window usage that triggers hard clearing (0.0-1.0)
+  # At 50% usage, old tool results are replaced with placeholder
+  hard_clear_ratio: 0.5
+
+  # Number of recent assistant messages to protect from pruning
+  keep_last_assistants: 3
+
+  # Minimum total chars in prunable tool results before hard clear kicks in
+  min_prunable_chars: 50000
+
+  # Tool results larger than this are candidates for soft trimming
+  soft_trim_max_chars: 4000
+
+  # When soft trimming, keep this many chars from the start
+  soft_trim_head_chars: 1500
+
+  # When soft trimming, keep this many chars from the end
+  soft_trim_tail_chars: 1500
+
+  # Enable/disable hard clear phase
+  hard_clear_enabled: true
+
+  # Placeholder text for hard-cleared tool results
+  hard_clear_placeholder: "[Old tool result content cleared]"
+
+  # Tool patterns to allow/deny pruning (supports wildcards: exec*, *_search)
+  # Empty means all tools are prunable unless denied
+  # tools_allow: []
+  # tools_deny: []
+
+  # --- LLM-based summarization (compaction) ---
+  # When enabled, uses an LLM to generate intelligent summaries of compacted
+  # content instead of just using placeholder text. This preserves context better.
+
+  # Enable LLM summarization (default: true when pruning is enabled)
+  summarization_enabled: true
+
+  # Model to use for generating summaries (default: fast model)
+  summarization_model: "anthropic/claude-opus-4.5"
+
+  # Maximum tokens for generated summaries
+  max_summary_tokens: 500
+
+  # Maximum ratio of context that history can consume (0.0-1.0)
+  # When exceeded, oldest messages are summarized to fit budget
+  max_history_share: 0.5
+
+  # Token budget reserved for compaction output
+  reserve_tokens: 2000
+
+  # Additional instructions for the summarization model
+  # custom_instructions: "Focus on preserving code decisions and TODOs"
+
+# Link preview configuration.
+# Automatically fetches metadata for URLs in messages to provide context to the AI
+# and generate rich previews in outgoing AI responses.
+link_previews:
+  # Enable link preview functionality (default: true)
+  enabled: true
+
+  # Maximum number of URLs to fetch from user messages for AI context (default: 3)
+  max_urls_inbound: 3
+
+  # Maximum number of URLs to preview in AI responses (default: 5)
+  max_urls_outbound: 5
+
+  # Timeout for fetching each URL (default: 10s)
+  fetch_timeout: 10s
+
+  # Maximum characters from description to include in context (default: 500)
+  max_content_chars: 500
+
+  # Maximum page size to download in bytes (default: 10MB)
+  max_page_bytes: 10485760
+
+  # Maximum image size to download in bytes (default: 5MB)
+  max_image_bytes: 5242880
+
+  # How long to cache URL previews (default: 1h)
+  cache_ttl: 1h

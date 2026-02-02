@@ -8,7 +8,6 @@ import (
 	"go.mau.fi/util/exhttp"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/matrix"
 )
 
 // ProvisioningAPI handles the provisioning endpoints for user defaults
@@ -20,7 +19,7 @@ type ProvisioningAPI struct {
 
 // initProvisioning sets up the provisioning API endpoints
 func (oc *OpenAIConnector) initProvisioning() {
-	c, ok := oc.br.Matrix.(*matrix.Connector)
+	c, ok := oc.br.Matrix.(bridgev2.MatrixConnectorWithProvisioning)
 	if !ok {
 		return
 	}

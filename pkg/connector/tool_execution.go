@@ -1,0 +1,343 @@
+package connector
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
+
+	"github.com/beeper/ai-bridge/pkg/agents/tools"
+)
+
+// activeToolCall tracks a tool call that's in progress
+type activeToolCall struct {
+	callID      string
+	toolName    string
+	toolType    ToolType
+	input       strings.Builder
+	startedAtMs int64
+	eventID     id.EventID // Event ID of the tool call timeline event
+	result      string     // Result from tool execution (for continuation)
+	itemID      string     // Item ID from the stream event (used as call_id for continuation)
+}
+
+// emitToolProgress sends a tool progress update event
+func (oc *AIClient) emitToolProgress(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall, status ToolStatus, message string, percent int) {
+	if portal == nil || portal.MXID == "" {
+		return
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return
+	}
+
+	content := map[string]any{
+		"call_id":   tool.callID,
+		"turn_id":   state.turnID,
+		"tool_name": tool.toolName,
+		"status":    string(status),
+		"progress": map[string]any{
+			"message": message,
+			"percent": percent,
+		},
+	}
+
+	if state.agentID != "" {
+		content["agent_id"] = state.agentID
+	}
+
+	eventContent := &event.Content{Raw: content}
+
+	if _, err := intent.SendMessage(ctx, portal.MXID, ToolProgressEventType, eventContent, nil); err != nil {
+		oc.log.Debug().Err(err).Str("tool", tool.toolName).Msg("Failed to emit tool progress")
+	}
+}
+
+func toolDisplayTitle(toolName string) string {
+	switch toolName {
+	case "web_search":
+		return "Web Search"
+	case "web_search_openrouter":
+		return "Web Search (OpenRouter)"
+	case "image_generation":
+		return "Image Generation"
+	case ToolNameImageGenerate:
+		return "Image Generation"
+	default:
+		return toolName
+	}
+}
+
+func summarizeMessageAction(obj map[string]any) string {
+	action, _ := obj["action"].(string)
+	switch action {
+	case "react":
+		emoji, _ := obj["emoji"].(string)
+		status, _ := obj["status"].(string)
+		if status == "removed" {
+			if emoji != "" {
+				return fmt.Sprintf("Removed reaction %s", emoji)
+			}
+			return "Removed reaction"
+		}
+		if emoji != "" {
+			return fmt.Sprintf("Reacted with %s", emoji)
+		}
+		return "Reaction sent"
+	case "send":
+		return "Message sent"
+	case "edit":
+		return "Message edited"
+	case "delete":
+		return "Message deleted"
+	case "reply":
+		return "Reply sent"
+	case "thread-reply":
+		return "Thread reply sent"
+	case "read":
+		return "Read receipt sent"
+	case "pin":
+		return "Message pinned"
+	case "unpin":
+		return "Message unpinned"
+	case "list-pins":
+		return "Pins retrieved"
+	case "reactions":
+		return "Reactions retrieved"
+	case "search":
+		return "Search completed"
+	case "member-info":
+		return "Member info retrieved"
+	case "channel-info":
+		return "Channel info retrieved"
+	case "channel-edit":
+		return "Channel updated"
+	default:
+		return ""
+	}
+}
+
+// sendToolCallEvent sends a tool call as a timeline event
+func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall) id.EventID {
+	if portal == nil || portal.MXID == "" {
+		return ""
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return ""
+	}
+
+	// Build display info
+	displayTitle := toolDisplayTitle(tool.toolName)
+
+	toolCallData := map[string]any{
+		"call_id":   tool.callID,
+		"turn_id":   state.turnID,
+		"tool_name": tool.toolName,
+		"tool_type": string(tool.toolType),
+		"status":    string(ToolStatusRunning),
+		"display": map[string]any{
+			"title":     displayTitle,
+			"collapsed": false,
+		},
+		"timing": map[string]any{
+			"started_at": tool.startedAtMs,
+		},
+	}
+
+	if state.agentID != "" {
+		toolCallData["agent_id"] = state.agentID
+	}
+
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"body":              fmt.Sprintf("Calling %s...", displayTitle),
+			"msgtype":           event.MsgNotice,
+			BeeperAIToolCallKey: toolCallData,
+			"m.relates_to": map[string]any{
+				"rel_type": RelReference,
+				"event_id": state.initialEventID.String(),
+			},
+		},
+	}
+
+	resp, err := intent.SendMessage(ctx, portal.MXID, ToolCallEventType, eventContent, nil)
+	if err != nil {
+		oc.log.Warn().Err(err).Str("tool", tool.toolName).Msg("Failed to send tool call event")
+		return ""
+	}
+
+	oc.log.Debug().
+		Stringer("event_id", resp.EventID).
+		Str("call_id", tool.callID).
+		Str("tool", tool.toolName).
+		Msg("Sent tool call timeline event")
+
+	return resp.EventID
+}
+
+// sendToolResultEvent sends a tool result as a timeline event
+func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall, result string, resultStatus ResultStatus) id.EventID {
+	if portal == nil || portal.MXID == "" {
+		return ""
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return ""
+	}
+
+	// Truncate result for body if too long
+	bodyText := result
+	var parsedResult any
+	if err := json.Unmarshal([]byte(result), &parsedResult); err == nil {
+		if obj, ok := parsedResult.(map[string]any); ok {
+			if msg, ok := obj["message"].(string); ok && msg != "" {
+				bodyText = msg
+			} else if tool.toolName == ToolNameMessage {
+				bodyText = summarizeMessageAction(obj)
+			}
+		}
+	}
+	if len(bodyText) > 200 {
+		bodyText = bodyText[:200] + "..."
+	}
+	if bodyText == "" {
+		bodyText = fmt.Sprintf("%s completed", toolDisplayTitle(tool.toolName))
+	}
+
+	toolResultData := map[string]any{
+		"call_id":   tool.callID,
+		"turn_id":   state.turnID,
+		"tool_name": tool.toolName,
+		"status":    string(resultStatus),
+		"display": map[string]any{
+			"expandable":       len(result) > 200,
+			"default_expanded": len(result) <= 500,
+		},
+	}
+
+	if state.agentID != "" {
+		toolResultData["agent_id"] = state.agentID
+	}
+
+	if result != "" {
+		// Keep the output shape stable: { output: { result: "<string payload>" } }
+		toolResultData["output"] = map[string]any{"result": result}
+	}
+
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"body":                bodyText,
+			"msgtype":             event.MsgNotice,
+			BeeperAIToolResultKey: toolResultData,
+			"m.relates_to": map[string]any{
+				"rel_type": RelReference,
+				"event_id": tool.eventID.String(),
+			},
+		},
+	}
+
+	resp, err := intent.SendMessage(ctx, portal.MXID, ToolResultEventType, eventContent, nil)
+	if err != nil {
+		oc.log.Warn().Err(err).Str("tool", tool.toolName).Msg("Failed to send tool result event")
+		return ""
+	}
+
+	oc.log.Debug().
+		Stringer("event_id", resp.EventID).
+		Str("call_id", tool.callID).
+		Str("tool", tool.toolName).
+		Str("status", string(resultStatus)).
+		Msg("Sent tool result timeline event")
+
+	return resp.EventID
+}
+
+// executeBuiltinTool finds and executes a builtin tool by name.
+// For Builder room, this also handles boss agent tools.
+func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Portal, toolName string, argsJSON string) (string, error) {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return "", fmt.Errorf("invalid tool arguments: %w", err)
+	}
+
+	// Normalize deprecated tool aliases
+	if toolName == ToolNameAnalyzeImage {
+		toolName = ToolNameImage
+	}
+
+	// Check if this is the Builder room - use boss tool executor for boss tools
+	if oc.isBuilderRoom(portal) {
+		if result := oc.executeBossTool(ctx, toolName, args); result != nil {
+			return result.Content, result.Error
+		}
+	}
+
+	// Standard builtin tools
+	for _, tool := range BuiltinTools() {
+		if tool.Name == toolName {
+			return tool.Execute(ctx, args)
+		}
+	}
+	return "", fmt.Errorf("unknown tool: %s", toolName)
+}
+
+// bossToolResult holds the result from a boss tool execution.
+type bossToolResult struct {
+	Content string
+	Error   error
+}
+
+// executeBossTool attempts to execute a boss agent tool.
+// Returns nil if the tool is not a boss tool.
+func (oc *AIClient) executeBossTool(ctx context.Context, toolName string, args map[string]any) *bossToolResult {
+	// Create boss tool executor with store adapter
+	store := NewBossStoreAdapter(oc)
+	executor := tools.NewBossToolExecutor(store)
+
+	var result *tools.Result
+	var err error
+
+	switch toolName {
+	case "create_agent":
+		result, err = executor.ExecuteCreateAgent(ctx, args)
+	case "fork_agent":
+		result, err = executor.ExecuteForkAgent(ctx, args)
+	case "edit_agent":
+		result, err = executor.ExecuteEditAgent(ctx, args)
+	case "delete_agent":
+		result, err = executor.ExecuteDeleteAgent(ctx, args)
+	case "list_agents":
+		result, err = executor.ExecuteListAgents(ctx, args)
+	case "list_models":
+		result, err = executor.ExecuteListModels(ctx, args)
+	case "list_tools":
+		result, err = executor.ExecuteListTools(ctx, args)
+	case "create_room":
+		result, err = executor.ExecuteCreateRoom(ctx, args)
+	case "modify_room":
+		result, err = executor.ExecuteModifyRoom(ctx, args)
+	case "list_rooms":
+		result, err = executor.ExecuteListRooms(ctx, args)
+	default:
+		return nil // Not a boss tool
+	}
+
+	if err != nil {
+		return &bossToolResult{Error: err}
+	}
+	if result == nil {
+		return &bossToolResult{Content: ""}
+	}
+
+	// Extract content from result
+	content := result.Text()
+	if result.Status == tools.ResultError {
+		return &bossToolResult{Error: fmt.Errorf("%s", content)}
+	}
+	return &bossToolResult{Content: content}
+}

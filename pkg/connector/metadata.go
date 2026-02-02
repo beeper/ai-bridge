@@ -5,6 +5,7 @@ import (
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/random"
 	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 )
 
 // ModelCache stores available models (cached in UserLoginMetadata)
@@ -65,15 +66,16 @@ type UserDefaults struct {
 
 // UserLoginMetadata is stored on each login row to keep per-user settings.
 type UserLoginMetadata struct {
-	Persona              string      `json:"persona,omitempty"`
-	Provider             string      `json:"provider,omitempty"` // Selected provider (beeper, openai, openrouter, custom)
-	APIKey               string      `json:"api_key,omitempty"`
-	BaseURL              string      `json:"base_url,omitempty"`               // Per-user API endpoint
-	TitleGenerationModel string      `json:"title_generation_model,omitempty"` // Model to use for generating chat titles
-	NextChatIndex        int         `json:"next_chat_index,omitempty"`
-	DefaultChatPortalID  string      `json:"default_chat_portal_id,omitempty"`
-	ModelCache           *ModelCache `json:"model_cache,omitempty"`
-	ChatsSynced          bool        `json:"chats_synced,omitempty"` // True after initial bootstrap completed successfully
+	Persona              string         `json:"persona,omitempty"`
+	Provider             string         `json:"provider,omitempty"` // Selected provider (beeper, openai, openrouter, custom)
+	APIKey               string         `json:"api_key,omitempty"`
+	BaseURL              string         `json:"base_url,omitempty"`               // Per-user API endpoint
+	TitleGenerationModel string         `json:"title_generation_model,omitempty"` // Model to use for generating chat titles
+	NextChatIndex        int            `json:"next_chat_index,omitempty"`
+	DefaultChatPortalID  string         `json:"default_chat_portal_id,omitempty"`
+	ModelCache           *ModelCache    `json:"model_cache,omitempty"`
+	ChatsSynced          bool           `json:"chats_synced,omitempty"` // True after initial bootstrap completed successfully
+	Gravatar             *GravatarState `json:"gravatar,omitempty"`
 
 	// FileAnnotationCache stores parsed PDF content from OpenRouter's file-parser plugin
 	// Key is the file hash (SHA256), pruned after 7 days
@@ -81,6 +83,27 @@ type UserLoginMetadata struct {
 
 	// User-level defaults for new chats (set via provisioning API)
 	Defaults *UserDefaults `json:"defaults,omitempty"`
+
+	// Agent Builder room for managing agents
+	BuilderRoomID networkid.PortalID `json:"builder_room_id,omitempty"`
+	// Note: Custom agents are now stored in Matrix state events (CustomAgentsEventType)
+	// in the Builder room, not in UserLoginMetadata
+
+	// Global Memory room for shared agent memories
+	GlobalMemoryRoomID networkid.PortalID `json:"global_memory_room_id,omitempty"`
+}
+
+// GravatarProfile stores the selected Gravatar profile for a login.
+type GravatarProfile struct {
+	Email     string         `json:"email,omitempty"`
+	Hash      string         `json:"hash,omitempty"`
+	Profile   map[string]any `json:"profile,omitempty"` // Full profile payload
+	FetchedAt int64          `json:"fetched_at,omitempty"`
+}
+
+// GravatarState stores Gravatar profile state for a login.
+type GravatarState struct {
+	Primary *GravatarProfile `json:"primary,omitempty"`
 }
 
 // PortalMetadata stores per-room tuning knobs for the assistant.
@@ -102,7 +125,24 @@ type PortalMetadata struct {
 
 	ConversationMode string `json:"conversation_mode,omitempty"`
 	LastResponseID   string `json:"last_response_id,omitempty"`
-	DefaultAgentID   string `json:"default_agent_id,omitempty"`
+	EmitThinking     bool   `json:"emit_thinking,omitempty"`
+	EmitToolArgs     bool   `json:"emit_tool_args,omitempty"`
+
+	// Agent-related metadata
+	DefaultAgentID     string `json:"default_agent_id,omitempty"`      // Agent assigned to this room (legacy name, same as AgentID)
+	AgentID            string `json:"agent_id,omitempty"`              // Which agent is the ghost for this room
+	AgentPrompt        string `json:"agent_prompt,omitempty"`          // Cached prompt for the assigned agent
+	IsBuilderRoom      bool   `json:"is_builder_room,omitempty"`       // True if this is the Manage AI Chats room (protected from overrides)
+	IsRawMode          bool   `json:"is_raw_mode,omitempty"`           // True if this is a playground/raw mode room (no directive processing)
+	IsAgentDataRoom    bool   `json:"is_agent_data_room,omitempty"`    // True if this is a hidden room for storing agent data
+	IsGlobalMemoryRoom bool   `json:"is_global_memory_room,omitempty"` // True if this is the global memory room
+
+	// Ack reaction config - similar to OpenClaw's ack reactions
+	AckReactionEmoji       string `json:"ack_reaction_emoji,omitempty"`        // Emoji to react with when message received (e.g., "👀", "🤔"). Empty = disabled.
+	AckReactionRemoveAfter bool   `json:"ack_reaction_remove_after,omitempty"` // Remove the ack reaction after replying
+
+	// Debounce configuration (0 = use default, -1 = disabled)
+	DebounceMs int `json:"debounce_ms,omitempty"`
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild
@@ -133,6 +173,9 @@ type MessageMetadata struct {
 	// Thinking/reasoning content (embedded, not separate)
 	ThinkingContent    string `json:"thinking_content,omitempty"`     // Full thinking text
 	ThinkingTokenCount int    `json:"thinking_token_count,omitempty"` // Number of thinking tokens
+
+	// History exclusion
+	ExcludeFromHistory bool `json:"exclude_from_history,omitempty"` // Exclude from LLM context (e.g., welcome messages)
 }
 
 // ToolCallMetadata tracks a tool call within a message
