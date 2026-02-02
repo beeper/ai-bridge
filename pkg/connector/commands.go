@@ -798,6 +798,7 @@ func fnAgent(ce *commands.Event) {
 		modelID := client.effectiveModel(meta)
 		ce.Portal.OtherUserID = modelUserID(modelID)
 		client.savePortalQuiet(ce.Ctx, ce.Portal, "agent cleared")
+		_ = client.BroadcastRoomState(ce.Ctx, ce.Portal)
 		ce.Reply("Agent cleared. Using default model.")
 		return
 	}
@@ -815,6 +816,7 @@ func fnAgent(ce *commands.Event) {
 	ce.Portal.OtherUserID = agentModelUserID(agent.ID, modelID)
 	client.savePortalQuiet(ce.Ctx, ce.Portal, "agent change")
 	client.ensureAgentModelGhostDisplayName(ce.Ctx, agent.ID, modelID, agent.Name)
+	_ = client.BroadcastRoomState(ce.Ctx, ce.Portal)
 	ce.Reply("Agent set to: **%s** (`%s`)", agent.Name, agent.ID)
 }
 
