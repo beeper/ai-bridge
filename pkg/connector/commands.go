@@ -641,6 +641,7 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 		CommandContext,
 		CommandTokens,
 		CommandConfig,
+		CommandTimezone,
 		CommandDebounce,
 		CommandTools,
 		CommandMode,
@@ -660,7 +661,68 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 	oc.br.Log.Info().
 		Str("section", HelpSectionAI.Name).
 		Int("section_order", HelpSectionAI.Order).
-		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, debounce, tools, mode, new, fork, regenerate, title, models, gravatar, agent, agents, create-agent, delete-agent, manage, playground")
+		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, timezone, debounce, tools, mode, new, fork, regenerate, title, models, gravatar, agent, agents, create-agent, delete-agent, manage, playground")
+}
+
+// CommandTimezone handles the !ai timezone command
+var CommandTimezone = &commands.FullHandler{
+	Func:    fnTimezone,
+	Name:    "timezone",
+	Aliases: []string{"tz"},
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Get or set your timezone for all chats (IANA name)",
+		Args:        "[_timezone_|reset]",
+	},
+	RequiresPortal: true,
+	RequiresLogin:  true,
+}
+
+func fnTimezone(ce *commands.Event) {
+	client, _, ok := requireClientMeta(ce)
+	if !ok {
+		return
+	}
+
+	loginMeta := loginMetadata(client.UserLogin)
+	if loginMeta == nil {
+		ce.Reply("Failed to load login metadata")
+		return
+	}
+
+	if len(ce.Args) == 0 {
+		tz := strings.TrimSpace(loginMeta.Timezone)
+		if tz == "" {
+			ce.Reply("No timezone set. Use `!ai timezone <IANA>` (example: `America/Los_Angeles`).")
+			return
+		}
+		ce.Reply("Timezone: %s", tz)
+		return
+	}
+
+	arg := strings.TrimSpace(ce.Args[0])
+	switch strings.ToLower(arg) {
+	case "reset", "default", "clear":
+		loginMeta.Timezone = ""
+		if err := client.UserLogin.Save(ce.Ctx); err != nil {
+			ce.Reply("Failed to clear timezone: %s", err.Error())
+			return
+		}
+		ce.Reply("Timezone cleared. Falling back to UTC unless TZ is set.")
+		return
+	default:
+		tz, _, err := normalizeTimezone(arg)
+		if err != nil {
+			ce.Reply("Invalid timezone. Use an IANA name like `America/Los_Angeles` or `Europe/London`.")
+			return
+		}
+		loginMeta.Timezone = tz
+		if err := client.UserLogin.Save(ce.Ctx); err != nil {
+			ce.Reply("Failed to save timezone: %s", err.Error())
+			return
+		}
+		ce.Reply("Timezone set to: %s", tz)
+	}
 }
 
 // CommandGravatar handles the !ai gravatar command

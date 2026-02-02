@@ -76,6 +76,7 @@ type UserLoginMetadata struct {
 	ModelCache           *ModelCache    `json:"model_cache,omitempty"`
 	ChatsSynced          bool           `json:"chats_synced,omitempty"` // True after initial bootstrap completed successfully
 	Gravatar             *GravatarState `json:"gravatar,omitempty"`
+	Timezone             string         `json:"timezone,omitempty"`
 
 	// FileAnnotationCache stores parsed PDF content from OpenRouter's file-parser plugin
 	// Key is the file hash (SHA256), pruned after 7 days
