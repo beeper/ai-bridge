@@ -3,7 +3,9 @@ package tools
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -31,54 +33,120 @@ func executeWebSearch(ctx context.Context, args map[string]any) (*Result, error)
 		return ErrorResult("web_search", err.Error()), nil
 	}
 
+	count := 5
+	if rawCount, ok := args["count"]; ok {
+		switch v := rawCount.(type) {
+		case float64:
+			count = int(v)
+		case int:
+			count = v
+		case int64:
+			count = int(v)
+		}
+	}
+	if count < 1 {
+		count = 1
+	} else if count > 10 {
+		count = 10
+	}
+
+	var ignoredOptions []string
+	if v, _ := args["country"].(string); strings.TrimSpace(v) != "" {
+		ignoredOptions = append(ignoredOptions, "country")
+	}
+	if v, _ := args["search_lang"].(string); strings.TrimSpace(v) != "" {
+		ignoredOptions = append(ignoredOptions, "search_lang")
+	}
+	if v, _ := args["ui_lang"].(string); strings.TrimSpace(v) != "" {
+		ignoredOptions = append(ignoredOptions, "ui_lang")
+	}
+	if v, _ := args["freshness"].(string); strings.TrimSpace(v) != "" {
+		ignoredOptions = append(ignoredOptions, "freshness")
+	}
+
+	start := time.Now()
 	response, err := websearch.DuckDuckGoSearch(ctx, query)
 	if err != nil {
 		return ErrorResult("web_search", fmt.Sprintf("search failed: %v", err)), nil
 	}
+	tookMs := time.Since(start).Milliseconds()
 
-	// Build text summary for the model
-	var text strings.Builder
-	text.WriteString(fmt.Sprintf("Search results for: %s\n\n", query))
+	type webSearchResult struct {
+		Title       string `json:"title,omitempty"`
+		URL         string `json:"url,omitempty"`
+		Description string `json:"description,omitempty"`
+		Published   string `json:"published,omitempty"`
+		SiteName    string `json:"siteName,omitempty"`
+	}
+	type webSearchPayload struct {
+		Query      string            `json:"query"`
+		Provider   string            `json:"provider"`
+		Count      int               `json:"count"`
+		TookMs     int64             `json:"tookMs"`
+		Results    []webSearchResult `json:"results,omitempty"`
+		Answer     string            `json:"answer,omitempty"`
+		Summary    string            `json:"summary,omitempty"`
+		Definition string            `json:"definition,omitempty"`
+		Warning    string            `json:"warning,omitempty"`
+		NoResults  bool              `json:"noResults,omitempty"`
+	}
 
+	limit := count
+	if limit > len(response.Results) {
+		limit = len(response.Results)
+	}
+	mapped := make([]webSearchResult, 0, limit)
+	for _, result := range response.Results[:limit] {
+		title := strings.TrimSpace(result.Title)
+		description := strings.TrimSpace(result.Snippet)
+		if title == "" && description != "" {
+			title = description
+			description = ""
+		}
+		if title == "" {
+			continue
+		}
+		mapped = append(mapped, webSearchResult{
+			Title:       title,
+			URL:         result.URL,
+			Description: description,
+			SiteName:    resolveSiteName(result.URL),
+		})
+	}
+
+	payload := webSearchPayload{
+		Query:    query,
+		Provider: "duckduckgo",
+		Count:    len(mapped),
+		TookMs:   tookMs,
+		Results:  mapped,
+	}
 	if response.Answer != "" {
-		text.WriteString(fmt.Sprintf("Answer: %s\n", response.Answer))
+		payload.Answer = response.Answer
 	}
 	if response.Summary != "" {
-		text.WriteString(fmt.Sprintf("Summary: %s\n", response.Summary))
+		payload.Summary = response.Summary
 	}
 	if response.Definition != "" {
-		text.WriteString(fmt.Sprintf("Definition: %s\n", response.Definition))
+		payload.Definition = response.Definition
 	}
-
-	if len(response.Results) > 0 {
-		text.WriteString("\nResults:\n")
-		for _, result := range response.Results {
-			title := result.Title
-			if title == "" {
-				title = result.Snippet
-			}
-			if title == "" {
-				continue
-			}
-			line := fmt.Sprintf("- %s", title)
-			if result.URL != "" {
-				line = fmt.Sprintf("%s (%s)", line, result.URL)
-			}
-			text.WriteString(line + "\n")
-			if result.Snippet != "" && result.Snippet != title {
-				text.WriteString(fmt.Sprintf("  %s\n", result.Snippet))
-			}
-		}
-		text.WriteString("\nTip: use web_fetch with a result URL for full text.\n")
-	}
-
 	if response.NoResults {
-		text.WriteString(fmt.Sprintf("No direct results found for '%s'. Try rephrasing your query.", query))
+		payload.NoResults = true
+	}
+	if len(ignoredOptions) > 0 {
+		payload.Warning = fmt.Sprintf("Unsupported options ignored: %s", strings.Join(ignoredOptions, ", "))
 	}
 
-	return &Result{
-		Status:  ResultSuccess,
-		Content: []ContentBlock{{Type: "text", Text: text.String()}},
-		Details: toMap(response),
-	}, nil
+	return JSONResult(payload), nil
+}
+
+func resolveSiteName(rawURL string) string {
+	if strings.TrimSpace(rawURL) == "" {
+		return ""
+	}
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
 }
