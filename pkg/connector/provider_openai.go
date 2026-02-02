@@ -11,6 +11,7 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared/constant"
 	"github.com/rs/zerolog"
@@ -163,7 +164,8 @@ func (o *OpenAIProvider) buildResponsesParams(params GenerateParams) responses.R
 
 	// Set tools
 	if len(params.Tools) > 0 {
-		responsesParams.Tools = ToOpenAITools(params.Tools)
+		strictMode := resolveToolStrictMode(isOpenRouterBaseURL(o.baseURL))
+		responsesParams.Tools = ToOpenAITools(params.Tools, strictMode)
 	}
 
 	// Handle reasoning effort for o1/o3 models
@@ -567,7 +569,7 @@ func MakePDFPluginMiddleware(defaultEngine string) option.Middleware {
 }
 
 // ToOpenAITools converts tool definitions to OpenAI Responses API format
-func ToOpenAITools(tools []ToolDefinition) []responses.ToolUnionParam {
+func ToOpenAITools(tools []ToolDefinition, strictMode ToolStrictMode) []responses.ToolUnionParam {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -578,8 +580,15 @@ func ToOpenAITools(tools []ToolDefinition) []responses.ToolUnionParam {
 		if schema != nil {
 			schema = sanitizeToolSchema(schema)
 		}
-		// Use SDK helper which properly sets all required fields including Type
-		toolParam := responses.ToolParamOfFunction(tool.Name, schema, true)
+		strict := shouldUseStrictMode(strictMode, schema)
+		toolParam := responses.ToolUnionParam{
+			OfFunction: &responses.FunctionToolParam{
+				Name:       tool.Name,
+				Parameters: schema,
+				Strict:     param.NewOpt(strict),
+				Type:       constant.ValueOf[constant.Function](),
+			},
+		}
 
 		// Add description if available (SDK helper doesn't support this directly)
 		if tool.Description != "" && toolParam.OfFunction != nil {
@@ -668,4 +677,12 @@ func dedupeChatToolParams(tools []openai.ChatCompletionToolUnionParam) []openai.
 		result = append(result, t)
 	}
 	return result
+}
+
+func isOpenRouterBaseURL(baseURL string) bool {
+	if baseURL == "" {
+		return false
+	}
+	lowered := strings.ToLower(baseURL)
+	return strings.Contains(lowered, "openrouter") || strings.Contains(lowered, "/openrouter/")
 }

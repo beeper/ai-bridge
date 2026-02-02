@@ -57,6 +57,7 @@ func (tc *TypingController) Start() {
 
 	// Start refresh ticker
 	tc.ticker = time.NewTicker(typingRefreshInterval)
+	tickerChan := tc.ticker.C // Capture before goroutine starts to avoid race
 
 	// Start TTL timer
 	tc.ttlTimer = time.AfterFunc(typingTTL, func() {
@@ -64,17 +65,18 @@ func (tc *TypingController) Start() {
 		tc.Stop()
 	})
 
-	// Start refresh loop
-	go tc.refreshLoop()
+	// Start refresh loop with captured channel
+	go tc.refreshLoop(tickerChan)
 }
 
 // refreshLoop sends typing indicators at regular intervals.
-func (tc *TypingController) refreshLoop() {
+// tickerChan is passed as a parameter to avoid race condition with Stop() setting tc.ticker to nil.
+func (tc *TypingController) refreshLoop(tickerChan <-chan time.Time) {
 	for {
 		select {
 		case <-tc.stopChan:
 			return
-		case <-tc.ticker.C:
+		case <-tickerChan:
 			tc.mu.Lock()
 			if tc.sealed || !tc.active {
 				tc.mu.Unlock()

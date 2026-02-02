@@ -74,8 +74,13 @@ func (oc *AIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev
 	// Use FormatUserFacingError for consistent, user-friendly error messages
 	errorMessage := FormatUserFacingError(err)
 
+	status := event.MessageStatusRetriable
+	if IsPreDeltaError(err) {
+		status = event.MessageStatusFail
+	}
+
 	msgStatus := bridgev2.WrapErrorInStatus(err).
-		WithStatus(event.MessageStatusRetriable).
+		WithStatus(status).
 		WithMessage(errorMessage).
 		WithIsCertain(true).
 		WithSendNotice(true)
@@ -275,7 +280,7 @@ func (oc *AIClient) getTitleGenerationModel() string {
 	// Provider-specific defaults for title generation
 	switch meta.Provider {
 	case ProviderOpenRouter, ProviderBeeper:
-		return "anthropic/claude-opus-4.5"
+		return "google/gemini-2.5-flash"
 	default:
 		// For non-OpenRouter providers, title generation is disabled.
 		return ""

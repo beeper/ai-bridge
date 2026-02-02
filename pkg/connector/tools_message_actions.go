@@ -52,7 +52,7 @@ func executeMessageChannelInfo(ctx context.Context, _ map[string]any, btc *Bridg
 	})
 }
 
-// executeMessageChannelEdit handles channel-edit by mapping to set_chat_info.
+// executeMessageChannelEdit handles channel-edit by mapping to room title/topic updates.
 func executeMessageChannelEdit(ctx context.Context, args map[string]any, _ *BridgeToolContext) (string, error) {
 	var title string
 	if raw, ok := args["name"]; ok {

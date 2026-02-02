@@ -160,9 +160,17 @@ func MessageSchema() map[string]any {
 				"type":        "string",
 				"description": "For action=channel-edit: new channel/room name",
 			},
+			"title": map[string]any{
+				"type":        "string",
+				"description": "For action=channel-edit: alias for name",
+			},
 			"topic": map[string]any{
 				"type":        "string",
 				"description": "For action=channel-edit: new channel/room topic",
+			},
+			"description": map[string]any{
+				"type":        "string",
+				"description": "For action=channel-edit: alias for topic",
 			},
 		},
 		"required": []string{"action"},

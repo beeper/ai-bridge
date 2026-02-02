@@ -262,6 +262,7 @@ type pendingMessage struct {
 	MimeType      string                   // MIME type of the media
 	EncryptedFile *event.EncryptedFileInfo // For encrypted Matrix media (E2EE rooms)
 	TargetMsgID   networkid.MessageID      // For edit_regenerate
+	StatusEvents  []*event.Event           // Extra events to mark sent when processing starts
 }
 
 func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey string) (*AIClient, error) {
@@ -431,6 +432,11 @@ func (oc *AIClient) dispatchOrQueue(
 	promptMessages []openai.ChatCompletionMessageParamUnion,
 ) (dbMessage *database.Message, isPending bool) {
 	if oc.acquireRoom(portal.MXID) {
+		// Message accepted for processing - mark sent immediately.
+		oc.sendSuccessStatus(ctx, portal, evt)
+		for _, extra := range pending.StatusEvents {
+			oc.sendSuccessStatus(ctx, portal, extra)
+		}
 		go func() {
 			defer func() {
 				// Remove ack reaction after response is complete (if configured)
@@ -529,6 +535,9 @@ func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 
 	// Send SUCCESS status synchronously - message is now being processed
 	oc.sendSuccessStatus(ctx, pending.Portal, pending.Event)
+	for _, extra := range pending.StatusEvents {
+		oc.sendSuccessStatus(ctx, pending.Portal, extra)
+	}
 
 	// Process in background, will release room when done
 	go func() {
@@ -1936,13 +1945,22 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 
 	// Dispatch using existing flow (handles room lock + status)
 	// Pass nil for userMessage since we already saved it above
+	extraStatusEvents := make([]*event.Event, 0, len(entries)-1)
+	if len(entries) > 1 {
+		for _, entry := range entries[:len(entries)-1] {
+			if entry.Event != nil {
+				extraStatusEvents = append(extraStatusEvents, entry.Event)
+			}
+		}
+	}
 	_, _ = oc.dispatchOrQueue(ctx, last.Event, last.Portal, last.Meta, nil,
 		pendingMessage{
-			Event:       last.Event,
-			Portal:      last.Portal,
-			Meta:        last.Meta,
-			Type:        pendingTypeText,
-			MessageBody: combinedBody,
+			Event:        last.Event,
+			Portal:       last.Portal,
+			Meta:         last.Meta,
+			Type:         pendingTypeText,
+			MessageBody:  combinedBody,
+			StatusEvents: extraStatusEvents,
 		}, promptMessages)
 
 	// Remove ack reaction from first entry if configured

@@ -104,6 +104,30 @@ func (e *ContextLengthError) Error() string {
 	return e.OriginalError.Error()
 }
 
+// PreDeltaError indicates a failure before any assistant output was streamed.
+type PreDeltaError struct {
+	Err error
+}
+
+func (e *PreDeltaError) Error() string {
+	if e == nil || e.Err == nil {
+		return "pre-delta error"
+	}
+	return e.Err.Error()
+}
+
+func (e *PreDeltaError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func IsPreDeltaError(err error) bool {
+	var pde *PreDeltaError
+	return errors.As(err, &pde)
+}
+
 // ParseContextLengthError checks if err is a context length exceeded error
 // and extracts the token counts from the error message
 func ParseContextLengthError(err error) *ContextLengthError {
@@ -197,6 +221,12 @@ func IsToolSchemaError(err error) bool {
 		}
 		if strings.Contains(apiErr.Message, "Invalid schema for function") {
 			return true
+		}
+		raw := apiErr.RawJSON()
+		if raw != "" {
+			if strings.Contains(raw, "invalid_function_parameters") || strings.Contains(raw, "Invalid schema for function") {
+				return true
+			}
 		}
 	}
 	return false

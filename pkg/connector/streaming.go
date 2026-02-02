@@ -191,7 +191,8 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 			return oc.isToolEnabled(meta, name)
 		})
 		if len(enabledTools) > 0 {
-			params.Tools = append(params.Tools, ToOpenAITools(enabledTools)...)
+			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
+			params.Tools = append(params.Tools, ToOpenAITools(enabledTools, strictMode)...)
 			log.Debug().Int("count", len(enabledTools)).Msg("Added builtin function tools")
 		}
 	}
@@ -199,7 +200,8 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 	// Add boss tools if this is the Builder room
 	if oc.isBuilderRoom(portal) {
 		bossTools := tools.BossTools()
-		params.Tools = append(params.Tools, bossToolsToOpenAI(bossTools)...)
+		strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
+		params.Tools = append(params.Tools, bossToolsToOpenAI(bossTools, strictMode)...)
 		log.Debug().Int("count", len(bossTools)).Msg("Added boss agent tools")
 	}
 
@@ -207,7 +209,7 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 }
 
 // bossToolsToOpenAI converts boss tools to OpenAI Responses API format.
-func bossToolsToOpenAI(bossTools []*tools.Tool) []responses.ToolUnionParam {
+func bossToolsToOpenAI(bossTools []*tools.Tool, strictMode ToolStrictMode) []responses.ToolUnionParam {
 	var result []responses.ToolUnionParam
 	for _, t := range bossTools {
 		var schema map[string]any
@@ -227,8 +229,15 @@ func bossToolsToOpenAI(bossTools []*tools.Tool) []responses.ToolUnionParam {
 		if schema != nil {
 			schema = sanitizeToolSchema(schema)
 		}
-		// Use SDK helper which properly sets Type field (required by OpenRouter)
-		toolParam := responses.ToolParamOfFunction(t.Name, schema, true)
+		strict := shouldUseStrictMode(strictMode, schema)
+		toolParam := responses.ToolUnionParam{
+			OfFunction: &responses.FunctionToolParam{
+				Name:       t.Name,
+				Parameters: schema,
+				Strict:     param.NewOpt(strict),
+				Type:       constant.ValueOf[constant.Function](),
+			},
+		}
 		if t.Description != "" && toolParam.OfFunction != nil {
 			toolParam.OfFunction.Description = openai.String(t.Description)
 		}
@@ -290,7 +299,20 @@ func (oc *AIClient) streamingResponseWithToolSchemaFallback(
 	}
 	if IsToolSchemaError(err) {
 		oc.log.Warn().Err(err).Msg("Responses tool schema rejected; falling back to chat completions")
-		return oc.streamChatCompletions(ctx, evt, portal, meta, messages)
+		success, cle, chatErr := oc.streamChatCompletions(ctx, evt, portal, meta, messages)
+		if success || cle != nil || chatErr == nil {
+			return success, cle, chatErr
+		}
+		if IsToolSchemaError(chatErr) {
+			oc.log.Warn().Err(chatErr).Msg("Chat completions tool schema rejected; retrying without tools")
+			if meta != nil {
+				metaCopy := *meta
+				metaCopy.Capabilities = meta.Capabilities
+				metaCopy.Capabilities.SupportsToolCalling = false
+				return oc.streamChatCompletions(ctx, evt, portal, &metaCopy, messages)
+			}
+		}
+		return success, cle, chatErr
 	}
 	return success, cle, err
 }
@@ -334,7 +356,7 @@ func (oc *AIClient) streamingResponse(
 	stream := oc.api.Responses.NewStreaming(ctx, params)
 	if stream == nil {
 		log.Error().Msg("Failed to create Responses API streaming request")
-		return false, nil, fmt.Errorf("responses streaming not available")
+		return false, nil, &PreDeltaError{Err: fmt.Errorf("responses streaming not available")}
 	}
 
 	// Initialize streaming state with turn tracking
@@ -388,7 +410,7 @@ func (oc *AIClient) streamingResponse(
 				state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID, state.sourceEventID)
 				if state.initialEventID == "" {
 					log.Error().Msg("Failed to send initial streaming message")
-					return false, nil, fmt.Errorf("failed to send initial streaming message")
+					return false, nil, &PreDeltaError{Err: fmt.Errorf("failed to send initial streaming message")}
 				}
 				// Initial message already includes this delta
 				state.skipNextTextDelta = true
@@ -418,7 +440,7 @@ func (oc *AIClient) streamingResponse(
 				state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID, state.sourceEventID)
 				if state.initialEventID == "" {
 					log.Error().Msg("Failed to send initial streaming message")
-					return false, nil, fmt.Errorf("failed to send initial streaming message")
+					return false, nil, &PreDeltaError{Err: fmt.Errorf("failed to send initial streaming message")}
 				}
 				// Update status to thinking
 				oc.emitGenerationStatus(ctx, portal, state, "thinking", "Thinking...", nil)
@@ -435,7 +457,7 @@ func (oc *AIClient) streamingResponse(
 			tool, exists := activeTools[streamEvent.ItemID]
 			if !exists {
 				if !ensureInitialEvent() {
-					return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
+					return false, nil, &PreDeltaError{Err: fmt.Errorf("failed to send initial streaming message for tool call")}
 				}
 				tool = &activeToolCall{
 					callID:      NewCallID(),
@@ -473,7 +495,7 @@ func (oc *AIClient) streamingResponse(
 			if !exists {
 				// Create tool if we missed the delta events
 				if !ensureInitialEvent() {
-					return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
+					return false, nil, &PreDeltaError{Err: fmt.Errorf("failed to send initial streaming message for tool call")}
 				}
 				tool = &activeToolCall{
 					callID:      NewCallID(),
@@ -494,7 +516,7 @@ func (oc *AIClient) streamingResponse(
 			tool.itemID = streamEvent.ItemID
 
 			if !ensureInitialEvent() {
-				return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
+				return false, nil, &PreDeltaError{Err: fmt.Errorf("failed to send initial streaming message for tool call")}
 			}
 
 			resultStatus := ResultStatusSuccess
@@ -503,7 +525,7 @@ func (oc *AIClient) streamingResponse(
 				resultStatus = ResultStatusError
 				result = fmt.Sprintf("Error: tool %s is disabled", streamEvent.Name)
 			} else {
-				// Wrap context with bridge info for tools that need it (e.g., set_chat_info, react)
+				// Wrap context with bridge info for tools that need it (e.g., channel-edit, react)
 				toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
 					Client:        oc,
 					Portal:        portal,
@@ -766,7 +788,7 @@ func (oc *AIClient) streamingResponse(
 			if state.initialEventID != "" {
 				return false, nil, &NonFallbackError{Err: apiErr}
 			}
-			return false, nil, apiErr
+			return false, nil, &PreDeltaError{Err: apiErr}
 		}
 	}
 
@@ -780,7 +802,7 @@ func (oc *AIClient) streamingResponse(
 		if state.initialEventID != "" {
 			return false, nil, &NonFallbackError{Err: err}
 		}
-		return false, nil, err
+		return false, nil, &PreDeltaError{Err: err}
 	}
 
 	// If there are pending function outputs, send them back to the API for continuation
@@ -844,7 +866,7 @@ func (oc *AIClient) streamingResponse(
 				tool, exists := activeTools[streamEvent.ItemID]
 				if !exists {
 					if !ensureInitialEvent() {
-						return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
+						return false, nil, &PreDeltaError{Err: fmt.Errorf("failed to send initial streaming message for tool call")}
 					}
 					tool = &activeToolCall{
 						callID:      NewCallID(),
@@ -865,7 +887,7 @@ func (oc *AIClient) streamingResponse(
 				tool, exists := activeTools[streamEvent.ItemID]
 				if !exists {
 					if !ensureInitialEvent() {
-						return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
+						return false, nil, &PreDeltaError{Err: fmt.Errorf("failed to send initial streaming message for tool call")}
 					}
 					tool = &activeToolCall{
 						callID:      NewCallID(),
@@ -885,7 +907,7 @@ func (oc *AIClient) streamingResponse(
 				tool.itemID = streamEvent.ItemID
 
 				if !ensureInitialEvent() {
-					return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
+					return false, nil, &PreDeltaError{Err: fmt.Errorf("failed to send initial streaming message for tool call")}
 				}
 
 				resultStatus := ResultStatusSuccess
@@ -1105,7 +1127,8 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 			return oc.isToolEnabled(meta, name)
 		})
 		if len(enabledTools) > 0 {
-			params.Tools = append(params.Tools, ToOpenAITools(enabledTools)...)
+			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
+			params.Tools = append(params.Tools, ToOpenAITools(enabledTools, strictMode)...)
 		}
 	}
 
@@ -1116,7 +1139,8 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 	}
 	if agents.IsBossAgent(agentID) {
 		bossTools := tools.BossTools()
-		params.Tools = append(params.Tools, bossToolsToOpenAI(bossTools)...)
+		strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
+		params.Tools = append(params.Tools, bossToolsToOpenAI(bossTools, strictMode)...)
 	}
 
 	// Prevent duplicate tool names (Anthropic rejects duplicates)
@@ -1181,7 +1205,7 @@ func (oc *AIClient) streamChatCompletions(
 	stream := oc.api.Chat.Completions.NewStreaming(ctx, params)
 	if stream == nil {
 		log.Error().Msg("Failed to create Chat Completions streaming request")
-		return false, nil, fmt.Errorf("chat completions streaming not available")
+		return false, nil, &PreDeltaError{Err: fmt.Errorf("chat completions streaming not available")}
 	}
 
 	// Initialize streaming state with source event ID for [[reply_to_current]] support
@@ -1210,7 +1234,7 @@ func (oc *AIClient) streamChatCompletions(
 					state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID, state.sourceEventID)
 					if state.initialEventID == "" {
 						log.Error().Msg("Failed to send initial streaming message")
-						return false, nil, fmt.Errorf("failed to send initial streaming message")
+						return false, nil, &PreDeltaError{Err: fmt.Errorf("failed to send initial streaming message")}
 					}
 					// Initial message already includes this delta
 					state.skipNextTextDelta = true
@@ -1257,7 +1281,7 @@ func (oc *AIClient) streamChatCompletions(
 						state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID, state.sourceEventID)
 						if state.initialEventID == "" {
 							log.Error().Msg("Failed to send initial streaming message for tool call")
-							return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
+							return false, nil, &PreDeltaError{Err: fmt.Errorf("failed to send initial streaming message for tool call")}
 						}
 					}
 
@@ -1302,13 +1326,13 @@ func (oc *AIClient) streamChatCompletions(
 		if state.initialEventID != "" {
 			return false, nil, &NonFallbackError{Err: err}
 		}
-		return false, nil, err
+		return false, nil, &PreDeltaError{Err: err}
 	}
 
 	// Execute any accumulated tool calls
 	for _, tool := range activeTools {
 		if tool.input.Len() > 0 && tool.toolName != "" && oc.isToolEnabled(meta, tool.toolName) {
-			// Wrap context with bridge info for tools that need it (e.g., set_chat_info, react)
+			// Wrap context with bridge info for tools that need it (e.g., channel-edit, react)
 			toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
 				Client:        oc,
 				Portal:        portal,
