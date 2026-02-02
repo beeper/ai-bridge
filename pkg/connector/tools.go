@@ -359,3 +359,16 @@ func GetEnabledBuiltinTools(isToolEnabled func(string) bool) []ToolDefinition {
 	}
 	return enabled
 }
+
+// MCPToolsToDefinitions converts MCP tools to ToolDefinition format for the AI request
+func MCPToolsToDefinitions(mcpTools []MCPTool) []ToolDefinition {
+	var tools []ToolDefinition
+	for _, mcp := range mcpTools {
+		tools = append(tools, ToolDefinition{
+			Name:        mcp.Name,
+			Description: mcp.Description,
+			Parameters:  mcp.InputSchema,
+		})
+	}
+	return tools
+}
