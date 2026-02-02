@@ -28,9 +28,10 @@ type AgentDefinition struct {
 	ToolAlsoAllow []string        `json:"tool_also_allow,omitempty"` // additive allows (supports wildcards)
 
 	// Agent behavior
-	Temperature     float64   `json:"temperature,omitempty"`
-	ReasoningEffort string    `json:"reasoning_effort,omitempty"` // none, low, medium, high
-	Identity        *Identity `json:"identity,omitempty"`         // custom identity for prompt
+	Temperature     float64      `json:"temperature,omitempty"`
+	ReasoningEffort string       `json:"reasoning_effort,omitempty"` // none, low, medium, high
+	ResponseMode    ResponseMode `json:"response_mode,omitempty"`    // natural (OpenClaw-style), raw (pass-through)
+	Identity        *Identity    `json:"identity,omitempty"`         // custom identity for prompt
 
 	// Metadata
 	IsPreset  bool  `json:"is_preset,omitempty"`
@@ -54,6 +55,18 @@ const (
 	PromptModeMinimal PromptMode = "minimal"
 	// PromptModeNone includes just identity, no additional sections.
 	PromptModeNone PromptMode = "none"
+)
+
+// ResponseMode controls how LLM output is processed before delivery.
+// Matches OpenClaw's behavior patterns.
+type ResponseMode string
+
+const (
+	// ResponseModeNatural processes directives (reply tags, silent replies).
+	// Reactions require the message tool. Matches OpenClaw behavior.
+	ResponseModeNatural ResponseMode = "natural"
+	// ResponseModeRaw passes LLM output directly to user without processing.
+	ResponseModeRaw ResponseMode = "raw"
 )
 
 // Identity represents a custom agent persona.

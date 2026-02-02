@@ -10,6 +10,7 @@ const (
 	GroupSessions  = "group:sessions"
 	GroupMemory    = "group:memory"
 	GroupWeb       = "group:web"
+	GroupMedia     = "group:media"
 )
 
 // BuiltinTools returns all locally-executable builtin tools.

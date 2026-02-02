@@ -11,6 +11,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2/matrix"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/format"
+	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
@@ -553,6 +555,36 @@ func (b *BossStoreAdapter) ListRooms(ctx context.Context) ([]tools.RoomData, err
 	}
 
 	return rooms, nil
+}
+
+// GetRoomHistory returns message history for a room.
+func (b *BossStoreAdapter) GetRoomHistory(ctx context.Context, roomID string, limit int) ([]tools.MessageData, error) {
+	// For now, return empty history - full implementation would need Matrix message fetching
+	// This is a placeholder that can be enhanced later with actual Matrix /messages API calls
+	return []tools.MessageData{}, nil
+}
+
+// SendToRoom sends a message to a room.
+func (b *BossStoreAdapter) SendToRoom(ctx context.Context, roomID string, message string) error {
+	// Get the portal for this room
+	roomIDParsed := id.RoomID(roomID)
+
+	// Get the bot to send the message
+	bot := b.store.client.UserLogin.Bridge.Bot
+
+	// Send the message as the bot
+	rendered := format.RenderMarkdown(message, true, true)
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"msgtype":        event.MsgText,
+			"body":           rendered.Body,
+			"format":         rendered.Format,
+			"formatted_body": rendered.FormattedBody,
+		},
+	}
+
+	_, err := bot.SendMessage(ctx, roomIDParsed, event.EventMessage, eventContent, nil)
+	return err
 }
 
 // Verify interface compliance

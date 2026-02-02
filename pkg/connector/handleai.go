@@ -628,6 +628,28 @@ func (oc *AIClient) streamingResponse(
 				}
 			}
 
+			// Check for TTS audio result (AUDIO: prefix)
+			displayResult := result
+			if strings.HasPrefix(result, TTSResultPrefix) {
+				audioB64 := strings.TrimPrefix(result, TTSResultPrefix)
+				audioData, err := base64.StdEncoding.DecodeString(audioB64)
+				if err != nil {
+					log.Warn().Err(err).Msg("Failed to decode TTS audio")
+					displayResult = "Error: failed to decode TTS audio"
+					resultStatus = ResultStatusError
+				} else {
+					// Send audio message
+					if _, err := oc.sendGeneratedAudio(ctx, portal, audioData, "audio/mpeg", state.turnID); err != nil {
+						log.Warn().Err(err).Msg("Failed to send TTS audio")
+						displayResult = "Error: failed to send TTS audio"
+						resultStatus = ResultStatusError
+					} else {
+						displayResult = "Audio message sent successfully"
+					}
+				}
+				result = displayResult
+			}
+
 			// Store result for API continuation
 			tool.result = result
 			args := strings.TrimSpace(tool.input.String())
@@ -967,6 +989,27 @@ func (oc *AIClient) streamingResponse(
 						result = fmt.Sprintf("Error: %s", err.Error())
 						resultStatus = ResultStatusError
 					}
+				}
+
+				// Check for TTS audio result (AUDIO: prefix)
+				displayResult := result
+				if strings.HasPrefix(result, TTSResultPrefix) {
+					audioB64 := strings.TrimPrefix(result, TTSResultPrefix)
+					audioData, err := base64.StdEncoding.DecodeString(audioB64)
+					if err != nil {
+						log.Warn().Err(err).Msg("Failed to decode TTS audio (continuation)")
+						displayResult = "Error: failed to decode TTS audio"
+						resultStatus = ResultStatusError
+					} else {
+						if _, err := oc.sendGeneratedAudio(ctx, portal, audioData, "audio/mpeg", state.turnID); err != nil {
+							log.Warn().Err(err).Msg("Failed to send TTS audio (continuation)")
+							displayResult = "Error: failed to send TTS audio"
+							resultStatus = ResultStatusError
+						} else {
+							displayResult = "Audio message sent successfully"
+						}
+					}
+					result = displayResult
 				}
 
 				tool.result = result
@@ -1325,6 +1368,25 @@ func (oc *AIClient) streamChatCompletions(
 				resultStatus = ResultStatusError
 			}
 
+			// Check for TTS audio result (AUDIO: prefix)
+			if strings.HasPrefix(result, TTSResultPrefix) {
+				audioB64 := strings.TrimPrefix(result, TTSResultPrefix)
+				audioData, decodeErr := base64.StdEncoding.DecodeString(audioB64)
+				if decodeErr != nil {
+					log.Warn().Err(decodeErr).Msg("Failed to decode TTS audio (Chat Completions)")
+					result = "Error: failed to decode TTS audio"
+					resultStatus = ResultStatusError
+				} else {
+					if _, sendErr := oc.sendGeneratedAudio(ctx, portal, audioData, "audio/mpeg", state.turnID); sendErr != nil {
+						log.Warn().Err(sendErr).Msg("Failed to send TTS audio (Chat Completions)")
+						result = "Error: failed to send TTS audio"
+						resultStatus = ResultStatusError
+					} else {
+						result = "Audio message sent successfully"
+					}
+				}
+			}
+
 			// Parse input for storage
 			var inputMap map[string]any
 			_ = json.Unmarshal([]byte(tool.input.String()), &inputMap)
@@ -1558,7 +1620,8 @@ func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridge
 }
 
 // sendFinalAssistantTurn sends an edit event with the complete assistant turn data.
-// It processes response directives (reply tags, silent replies, reactions) before sending.
+// It processes response directives (reply tags, silent replies) before sending when in natural mode.
+// Matches OpenClaw's directive processing behavior.
 func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata) {
 	if portal == nil || portal.MXID == "" {
 		return
@@ -1568,21 +1631,19 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 		return
 	}
 
-	// Parse response directives from accumulated content
 	rawContent := state.accumulated.String()
-	directives := ParseResponseDirectives(rawContent, state.sourceEventID)
 
-	// Send reactions first (even for silent replies)
-	for _, reaction := range directives.Reactions {
-		targetEvent := reaction.EventID
-		if targetEvent == "" {
-			// Default to source event if no explicit target
-			targetEvent = state.sourceEventID
-		}
-		if targetEvent != "" {
-			oc.sendReaction(ctx, portal, targetEvent, reaction.Emoji)
-		}
+	// Check response mode - raw mode skips directive processing
+	responseMode := oc.getAgentResponseMode(meta)
+	if responseMode == agents.ResponseModeRaw {
+		// Raw mode: send content directly without directive processing
+		rendered := format.RenderMarkdown(rawContent, true, true)
+		oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, intent, rendered, nil)
+		return
 	}
+
+	// Natural mode: process directives (OpenClaw-style)
+	directives := ParseResponseDirectives(rawContent, state.sourceEventID)
 
 	// Handle silent replies - redact the streaming message
 	if directives.IsSilent {
@@ -1689,9 +1750,102 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 			Bool("has_thinking", state.reasoning.Len() > 0).
 			Int("tool_calls", len(state.toolCalls)).
 			Bool("has_reply", directives.ReplyToEventID != "").
-			Int("reactions", len(directives.Reactions)).
 			Msg("Sent final assistant turn with metadata")
 	}
+}
+
+// sendFinalAssistantTurnContent is a helper for raw mode that sends content without directive processing.
+func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata, intent bridgev2.MatrixAPI, rendered event.MessageEventContent, replyToEventID *id.EventID) {
+	// Build AI metadata
+	aiMetadata := map[string]any{
+		"turn_id":       state.turnID,
+		"model":         oc.effectiveModel(meta),
+		"status":        string(TurnStatusCompleted),
+		"finish_reason": state.finishReason,
+		"timing": map[string]any{
+			"started_at":     state.startedAtMs,
+			"first_token_at": state.firstTokenAtMs,
+			"completed_at":   state.completedAtMs,
+		},
+	}
+
+	if state.agentID != "" {
+		aiMetadata["agent_id"] = state.agentID
+	}
+
+	if state.reasoning.Len() > 0 {
+		aiMetadata["thinking"] = map[string]any{
+			"content":     state.reasoning.String(),
+			"token_count": len(strings.Fields(state.reasoning.String())),
+		}
+	}
+
+	if len(state.toolCalls) > 0 {
+		toolCallIDs := make([]string, 0, len(state.toolCalls))
+		for _, tc := range state.toolCalls {
+			if tc.CallEventID != "" {
+				toolCallIDs = append(toolCallIDs, tc.CallEventID)
+			}
+		}
+		if len(toolCallIDs) > 0 {
+			aiMetadata["tool_calls"] = toolCallIDs
+		}
+	}
+
+	relatesTo := map[string]any{
+		"rel_type": RelReplace,
+		"event_id": state.initialEventID.String(),
+	}
+
+	if replyToEventID != nil && *replyToEventID != "" {
+		relatesTo["m.in_reply_to"] = map[string]any{
+			"event_id": replyToEventID.String(),
+		}
+	}
+
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"msgtype":                       event.MsgText,
+			"body":                          "* " + rendered.Body,
+			"format":                        rendered.Format,
+			"formatted_body":                "* " + rendered.FormattedBody,
+			"m.new_content":                 map[string]any{"msgtype": event.MsgText, "body": rendered.Body, "format": rendered.Format, "formatted_body": rendered.FormattedBody},
+			"m.relates_to":                  relatesTo,
+			BeeperAIKey:                     aiMetadata,
+			"com.beeper.dont_render_edited": true,
+		},
+	}
+
+	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {
+		oc.log.Warn().Err(err).Stringer("initial_event_id", state.initialEventID).Msg("Failed to send final assistant turn (raw mode)")
+	} else {
+		oc.log.Debug().
+			Str("initial_event_id", state.initialEventID.String()).
+			Str("turn_id", state.turnID).
+			Str("mode", "raw").
+			Msg("Sent final assistant turn (raw mode)")
+	}
+}
+
+// getAgentResponseMode returns the response mode for the current agent.
+// Defaults to ResponseModeNatural if not set.
+func (oc *AIClient) getAgentResponseMode(meta *PortalMetadata) agents.ResponseMode {
+	agentID := meta.AgentID
+	if agentID == "" {
+		agentID = meta.DefaultAgentID
+	}
+
+	if agentID != "" {
+		store := NewAgentStoreAdapter(oc)
+		if agent, err := store.GetAgentByID(context.Background(), agentID); err == nil && agent != nil {
+			if agent.ResponseMode != "" {
+				return agent.ResponseMode
+			}
+		}
+	}
+
+	// Default to natural mode (OpenClaw-style)
+	return agents.ResponseModeNatural
 }
 
 // sendReaction sends a reaction emoji to a Matrix event.
@@ -2295,6 +2449,73 @@ func (oc *AIClient) sendGeneratedImage(
 	// Add image generation metadata
 	if turnID != "" {
 		rawContent["com.beeper.ai.image_generation"] = map[string]any{
+			"turn_id": turnID,
+		}
+	}
+
+	// Send message
+	eventContent := &event.Content{Raw: rawContent}
+	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
+	if err != nil {
+		return "", fmt.Errorf("send failed: %w", err)
+	}
+	return resp.EventID, nil
+}
+
+// sendGeneratedAudio uploads TTS-generated audio to Matrix and sends it as a voice message.
+func (oc *AIClient) sendGeneratedAudio(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	audioData []byte,
+	mimeType string,
+	turnID string,
+) (id.EventID, error) {
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return "", fmt.Errorf("failed to get model intent")
+	}
+
+	// Determine file extension based on MIME type
+	ext := "mp3"
+	switch mimeType {
+	case "audio/wav", "audio/x-wav":
+		ext = "wav"
+	case "audio/ogg":
+		ext = "ogg"
+	case "audio/opus":
+		ext = "opus"
+	case "audio/flac":
+		ext = "flac"
+	case "audio/mp4", "audio/m4a", "audio/x-m4a":
+		ext = "m4a"
+	}
+	fileName := fmt.Sprintf("tts-%d.%s", time.Now().UnixMilli(), ext)
+
+	// Upload to Matrix
+	uri, file, err := intent.UploadMedia(ctx, portal.MXID, audioData, fileName, mimeType)
+	if err != nil {
+		return "", fmt.Errorf("upload failed: %w", err)
+	}
+
+	// Build audio message content
+	rawContent := map[string]any{
+		"msgtype": event.MsgAudio,
+		"body":    fileName,
+		"info": map[string]any{
+			"mimetype": mimeType,
+			"size":     len(audioData),
+		},
+	}
+
+	if file != nil {
+		rawContent["file"] = file
+	} else {
+		rawContent["url"] = string(uri)
+	}
+
+	// Add TTS metadata
+	if turnID != "" {
+		rawContent["com.beeper.ai.tts"] = map[string]any{
 			"turn_id": turnID,
 		}
 	}

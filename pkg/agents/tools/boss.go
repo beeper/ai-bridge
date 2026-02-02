@@ -29,6 +29,9 @@ type AgentStoreInterface interface {
 	CreateRoom(ctx context.Context, room RoomData) (string, error)
 	ModifyRoom(ctx context.Context, roomID string, updates RoomData) error
 	ListRooms(ctx context.Context) ([]RoomData, error)
+	// Session management (rooms with messages)
+	GetRoomHistory(ctx context.Context, roomID string, limit int) ([]MessageData, error)
+	SendToRoom(ctx context.Context, roomID string, message string) error
 }
 
 // AgentData represents agent data for boss tools (avoids import cycle).
@@ -63,6 +66,14 @@ type RoomData struct {
 	DefaultAgentID string `json:"default_agent_id,omitempty"`
 	SystemPrompt   string `json:"system_prompt,omitempty"`
 	CreatedAt      int64  `json:"created_at"`
+}
+
+// MessageData represents a message for session history.
+type MessageData struct {
+	ID        string `json:"id"`
+	Role      string `json:"role"` // "user" or "assistant"
+	Content   string `json:"content"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 // NewBossToolExecutor creates a new boss tool executor.
@@ -328,6 +339,76 @@ var ListRoomsTool = &Tool{
 	Group: GroupBuilder,
 }
 
+// SessionsListTool tool definition.
+var SessionsListTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "sessions_list",
+		Description: "List all active chat sessions (rooms) with their agents and last activity",
+		Annotations: &mcp.ToolAnnotations{Title: "List Sessions"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"limit": map[string]any{
+					"type":        "number",
+					"description": "Maximum number of sessions to return (default: 50)",
+				},
+			},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
+// SessionsHistoryTool tool definition.
+var SessionsHistoryTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "sessions_history",
+		Description: "Get message history from a specific chat session",
+		Annotations: &mcp.ToolAnnotations{Title: "Session History"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"room_id": map[string]any{
+					"type":        "string",
+					"description": "ID of the room to get history from",
+				},
+				"limit": map[string]any{
+					"type":        "number",
+					"description": "Maximum number of messages to return (default: 50)",
+				},
+			},
+			"required": []string{"room_id"},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
+// SessionsSendTool tool definition.
+var SessionsSendTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "sessions_send",
+		Description: "Send a message to another chat session",
+		Annotations: &mcp.ToolAnnotations{Title: "Send to Session"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"room_id": map[string]any{
+					"type":        "string",
+					"description": "ID of the room to send the message to",
+				},
+				"message": map[string]any{
+					"type":        "string",
+					"description": "The message to send",
+				},
+			},
+			"required": []string{"room_id", "message"},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
 // BossTools returns all boss agent tools.
 func BossTools() []*Tool {
 	return []*Tool{
@@ -343,6 +424,10 @@ func BossTools() []*Tool {
 		CreateRoomTool,
 		ModifyRoomTool,
 		ListRoomsTool,
+		// Session management
+		SessionsListTool,
+		SessionsHistoryTool,
+		SessionsSendTool,
 	}
 }
 
@@ -698,5 +783,95 @@ func (e *BossToolExecutor) ExecuteListRooms(ctx context.Context, _ map[string]an
 	return JSONResult(map[string]any{
 		"rooms": roomList,
 		"count": len(roomList),
+	}), nil
+}
+
+// ExecuteSessionsList handles the sessions_list tool.
+func (e *BossToolExecutor) ExecuteSessionsList(ctx context.Context, input map[string]any) (*Result, error) {
+	limit := 50
+	if l, ok := input["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+
+	rooms, err := e.store.ListRooms(ctx)
+	if err != nil {
+		return ErrorResult("sessions_list", fmt.Sprintf("failed to list sessions: %v", err)), nil
+	}
+
+	// Limit results
+	if len(rooms) > limit {
+		rooms = rooms[:limit]
+	}
+
+	var sessionList []map[string]any
+	for _, room := range rooms {
+		sessionList = append(sessionList, map[string]any{
+			"room_id":    room.ID,
+			"name":       room.Name,
+			"agent_id":   room.AgentID,
+			"created_at": room.CreatedAt,
+		})
+	}
+
+	return JSONResult(map[string]any{
+		"sessions": sessionList,
+		"count":    len(sessionList),
+	}), nil
+}
+
+// ExecuteSessionsHistory handles the sessions_history tool.
+func (e *BossToolExecutor) ExecuteSessionsHistory(ctx context.Context, input map[string]any) (*Result, error) {
+	roomID, err := ReadString(input, "room_id", true)
+	if err != nil {
+		return ErrorResult("sessions_history", err.Error()), nil
+	}
+
+	limit := 50
+	if l, ok := input["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+
+	messages, err := e.store.GetRoomHistory(ctx, roomID, limit)
+	if err != nil {
+		return ErrorResult("sessions_history", fmt.Sprintf("failed to get history: %v", err)), nil
+	}
+
+	var messageList []map[string]any
+	for _, msg := range messages {
+		messageList = append(messageList, map[string]any{
+			"id":        msg.ID,
+			"role":      msg.Role,
+			"content":   msg.Content,
+			"timestamp": msg.Timestamp,
+		})
+	}
+
+	return JSONResult(map[string]any{
+		"room_id":  roomID,
+		"messages": messageList,
+		"count":    len(messageList),
+	}), nil
+}
+
+// ExecuteSessionsSend handles the sessions_send tool.
+func (e *BossToolExecutor) ExecuteSessionsSend(ctx context.Context, input map[string]any) (*Result, error) {
+	roomID, err := ReadString(input, "room_id", true)
+	if err != nil {
+		return ErrorResult("sessions_send", err.Error()), nil
+	}
+
+	message, err := ReadString(input, "message", true)
+	if err != nil {
+		return ErrorResult("sessions_send", err.Error()), nil
+	}
+
+	if err := e.store.SendToRoom(ctx, roomID, message); err != nil {
+		return ErrorResult("sessions_send", fmt.Sprintf("failed to send message: %v", err)), nil
+	}
+
+	return JSONResult(map[string]any{
+		"success": true,
+		"room_id": roomID,
+		"message": "Message sent successfully",
 	}), nil
 }

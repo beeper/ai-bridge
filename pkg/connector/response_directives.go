@@ -12,6 +12,7 @@ import (
 const SilentReplyToken = "NO_REPLY"
 
 // ResponseDirectives contains parsed directives from an LLM response.
+// Matches OpenClaw's directive parsing behavior.
 type ResponseDirectives struct {
 	// Text is the cleaned response text with directives stripped.
 	Text string
@@ -25,32 +26,22 @@ type ResponseDirectives struct {
 	// ReplyToCurrent indicates [[reply_to_current]] was used (reply to triggering message).
 	ReplyToCurrent bool
 
-	// Reactions contains emoji reactions to send (from [[react:<emoji>]] or [[react:<emoji>:<event_id>]]).
-	Reactions []ReactionDirective
-
 	// HasReplyTag indicates a reply tag was present in the original text.
 	HasReplyTag bool
-}
-
-// ReactionDirective represents a single reaction to send.
-type ReactionDirective struct {
-	Emoji   string     // The emoji to react with
-	EventID id.EventID // Target event (empty = react to current message)
 }
 
 var (
 	// replyTagRE matches [[reply_to_current]] or [[reply_to:<id>]]
 	// Allows whitespace inside brackets: [[ reply_to_current ]] or [[ reply_to: abc123 ]]
+	// Matches OpenClaw's REPLY_TAG_RE pattern.
 	replyTagRE = regexp.MustCompile(`\[\[\s*(?:reply_to_current|reply_to\s*:\s*([^\]\n]+))\s*\]\]`)
 
-	// reactTagRE matches [[react:<emoji>]] or [[react:<emoji>:<event_id>]]
-	// Examples: [[react:👍]], [[react:🎉:$abc123]]
-	reactTagRE = regexp.MustCompile(`\[\[\s*react\s*:\s*([^\]:\s]+)(?:\s*:\s*([^\]\s]+))?\s*\]\]`)
-
 	// silentPrefixRE matches NO_REPLY at the start (with optional whitespace)
+	// Matches OpenClaw's isSilentReplyText prefix check.
 	silentPrefixRE = regexp.MustCompile(`^\s*` + regexp.QuoteMeta(SilentReplyToken) + `(?:$|\W)`)
 
 	// silentSuffixRE matches NO_REPLY at the end (word boundary)
+	// Matches OpenClaw's isSilentReplyText suffix check.
 	silentSuffixRE = regexp.MustCompile(`\b` + regexp.QuoteMeta(SilentReplyToken) + `\b\W*$`)
 )
 
@@ -88,6 +79,7 @@ func ParseResponseDirectives(text string, currentEventID id.EventID) *ResponseDi
 	})
 
 	// Resolve reply target (explicit ID takes precedence)
+	// Matches OpenClaw's logic where explicit reply_to:<id> overrides reply_to_current.
 	if lastExplicitID != "" {
 		result.ReplyToEventID = id.EventID(lastExplicitID)
 	} else if sawCurrent && currentEventID != "" {
@@ -95,22 +87,8 @@ func ParseResponseDirectives(text string, currentEventID id.EventID) *ResponseDi
 		result.ReplyToCurrent = true
 	}
 
-	// Parse reaction tags
-	cleaned = reactTagRE.ReplaceAllStringFunc(cleaned, func(match string) string {
-		submatches := reactTagRE.FindStringSubmatch(match)
-		if len(submatches) >= 2 {
-			emoji := strings.TrimSpace(submatches[1])
-			var targetEvent id.EventID
-			if len(submatches) >= 3 && submatches[2] != "" {
-				targetEvent = id.EventID(strings.TrimSpace(submatches[2]))
-			}
-			result.Reactions = append(result.Reactions, ReactionDirective{
-				Emoji:   emoji,
-				EventID: targetEvent,
-			})
-		}
-		return " " // Replace with space
-	})
+	// Note: Reactions are handled via the message tool (action=react), not inline tags.
+	// This matches OpenClaw's approach.
 
 	// Normalize whitespace
 	cleaned = normalizeDirectiveWhitespace(cleaned)

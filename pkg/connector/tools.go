@@ -1,18 +1,27 @@
 package connector
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/matrix"
+	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/format"
+	"maunium.net/go/mautrix/id"
 )
 
 // ToolDefinition defines a tool that can be used by the AI
@@ -99,7 +108,949 @@ func BuiltinTools() []ToolDefinition {
 			},
 			Execute: executeSetChatInfo,
 		},
+		{
+			Name:        ToolNameMessage,
+			Description: "Send messages and perform channel actions in the current chat. Supports: send, react, edit, delete, reply, pin, unpin, list-pins, thread-reply.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"action": map[string]any{
+						"type":        "string",
+						"enum":        []string{"send", "react", "edit", "delete", "reply", "pin", "unpin", "list-pins", "thread-reply"},
+						"description": "The action to perform",
+					},
+					"message": map[string]any{
+						"type":        "string",
+						"description": "For send/edit/reply/thread-reply: the message text",
+					},
+					"message_id": map[string]any{
+						"type":        "string",
+						"description": "Target message ID for react/edit/delete/reply/pin/unpin/thread-reply",
+					},
+					"emoji": map[string]any{
+						"type":        "string",
+						"description": "For action=react: the emoji to react with",
+					},
+					"thread_id": map[string]any{
+						"type":        "string",
+						"description": "For action=thread-reply: the thread root message ID",
+					},
+				},
+				"required": []string{"action"},
+			},
+			Execute: executeMessage,
+		},
+		{
+			Name:        ToolNameTTS,
+			Description: "Convert text to speech audio. Returns audio that will be sent as a voice message. Only available on Beeper and OpenAI providers.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"text": map[string]any{
+						"type":        "string",
+						"description": "The text to convert to speech (max 4096 characters)",
+					},
+					"voice": map[string]any{
+						"type":        "string",
+						"enum":        []string{"alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"},
+						"description": "The voice to use for speech synthesis (default: alloy)",
+					},
+				},
+				"required": []string{"text"},
+			},
+			Execute: executeTTS,
+		},
+		{
+			Name:        ToolNameWebFetch,
+			Description: "Fetch a web page and extract its readable content as text or markdown.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"url": map[string]any{
+						"type":        "string",
+						"description": "The URL to fetch (must be http or https)",
+					},
+					"max_chars": map[string]any{
+						"type":        "number",
+						"description": "Maximum characters to return (default: 50000)",
+					},
+				},
+				"required": []string{"url"},
+			},
+			Execute: executeWebFetch,
+		},
+		{
+			Name:        ToolNameImage,
+			Description: "Generate an image from a text prompt using AI image generation.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"prompt": map[string]any{
+						"type":        "string",
+						"description": "The text prompt describing the image to generate",
+					},
+					"model": map[string]any{
+						"type":        "string",
+						"description": "Image model to use (default: google/gemini-3-pro-image-preview)",
+					},
+				},
+				"required": []string{"prompt"},
+			},
+			Execute: executeImageGeneration,
+		},
 	}
+}
+
+// ToolNameMessage is the name of the message tool.
+const ToolNameMessage = "message"
+
+// ToolNameTTS is the name of the text-to-speech tool.
+const ToolNameTTS = "tts"
+
+// ToolNameWebFetch is the name of the web fetch tool.
+const ToolNameWebFetch = "web_fetch"
+
+// ToolNameImage is the name of the image generation tool.
+const ToolNameImage = "image"
+
+// ImageResultPrefix is the prefix used to identify image results that need media sending.
+const ImageResultPrefix = "IMAGE:"
+
+// DefaultImageModel is the default model for image generation.
+const DefaultImageModel = "google/gemini-3-pro-image-preview"
+
+// TTSResultPrefix is the prefix used to identify TTS results that need audio sending.
+const TTSResultPrefix = "AUDIO:"
+
+// executeMessage handles the message tool for sending messages and channel actions.
+// Matches OpenClaw's message tool pattern with full action support.
+func executeMessage(ctx context.Context, args map[string]any) (string, error) {
+	action, ok := args["action"].(string)
+	if !ok || action == "" {
+		return "", fmt.Errorf("missing or invalid 'action' argument")
+	}
+
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("message tool requires bridge context")
+	}
+
+	switch action {
+	case "send":
+		return executeMessageSend(ctx, args, btc)
+	case "react":
+		return executeMessageReact(ctx, args, btc)
+	case "edit":
+		return executeMessageEdit(ctx, args, btc)
+	case "delete":
+		return executeMessageDelete(ctx, args, btc)
+	case "reply":
+		return executeMessageReply(ctx, args, btc)
+	case "pin":
+		return executeMessagePin(ctx, args, btc, true)
+	case "unpin":
+		return executeMessagePin(ctx, args, btc, false)
+	case "list-pins":
+		return executeMessageListPins(ctx, btc)
+	case "thread-reply":
+		return executeMessageThreadReply(ctx, args, btc)
+	default:
+		return "", fmt.Errorf("unknown action: %s", action)
+	}
+}
+
+// executeMessageReact handles the react action of the message tool.
+func executeMessageReact(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	emoji, ok := args["emoji"].(string)
+	if !ok || emoji == "" {
+		return "", fmt.Errorf("action=react requires 'emoji' parameter")
+	}
+
+	// Get target message ID (optional - defaults to source message if available)
+	var targetEventID id.EventID
+	if msgID, ok := args["message_id"].(string); ok && msgID != "" {
+		targetEventID = id.EventID(msgID)
+	}
+
+	// If no explicit target, we can't react (would need source event ID from context)
+	if targetEventID == "" {
+		return "", fmt.Errorf("action=react requires 'message_id' parameter (no default target available)")
+	}
+
+	// Send reaction
+	btc.Client.sendReaction(ctx, btc.Portal, targetEventID, emoji)
+
+	return fmt.Sprintf(`{"action":"react","emoji":%q,"message_id":%q,"status":"sent"}`, emoji, targetEventID), nil
+}
+
+// executeMessageSend handles the send action of the message tool.
+func executeMessageSend(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	message, ok := args["message"].(string)
+	if !ok || message == "" {
+		return "", fmt.Errorf("action=send requires 'message' parameter")
+	}
+
+	// Get the model intent for sending
+	intent := btc.Client.getModelIntent(ctx, btc.Portal)
+	if intent == nil {
+		return "", fmt.Errorf("failed to get model intent")
+	}
+
+	// Send the message
+	rendered := format.RenderMarkdown(message, true, true)
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"msgtype":        event.MsgText,
+			"body":           rendered.Body,
+			"format":         rendered.Format,
+			"formatted_body": rendered.FormattedBody,
+		},
+	}
+
+	resp, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventMessage, eventContent, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to send message: %w", err)
+	}
+
+	return fmt.Sprintf(`{"action":"send","event_id":%q,"status":"sent"}`, resp.EventID), nil
+}
+
+// executeMessageEdit handles the edit action - edits an existing message.
+func executeMessageEdit(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	messageID, ok := args["message_id"].(string)
+	if !ok || messageID == "" {
+		return "", fmt.Errorf("action=edit requires 'message_id' parameter")
+	}
+	message, ok := args["message"].(string)
+	if !ok || message == "" {
+		return "", fmt.Errorf("action=edit requires 'message' parameter")
+	}
+
+	intent := btc.Client.getModelIntent(ctx, btc.Portal)
+	if intent == nil {
+		return "", fmt.Errorf("failed to get model intent")
+	}
+
+	targetEventID := id.EventID(messageID)
+	rendered := format.RenderMarkdown(message, true, true)
+
+	// Send edit with m.replace relation
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"msgtype":        event.MsgText,
+			"body":           "* " + rendered.Body,
+			"format":         rendered.Format,
+			"formatted_body": "* " + rendered.FormattedBody,
+			"m.new_content": map[string]any{
+				"msgtype":        event.MsgText,
+				"body":           rendered.Body,
+				"format":         rendered.Format,
+				"formatted_body": rendered.FormattedBody,
+			},
+			"m.relates_to": map[string]any{
+				"rel_type": RelReplace,
+				"event_id": targetEventID.String(),
+			},
+		},
+	}
+
+	resp, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventMessage, eventContent, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to edit message: %w", err)
+	}
+
+	return fmt.Sprintf(`{"action":"edit","event_id":%q,"edited_id":%q,"status":"sent"}`, resp.EventID, targetEventID), nil
+}
+
+// executeMessageDelete handles the delete action - redacts a message.
+func executeMessageDelete(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	messageID, ok := args["message_id"].(string)
+	if !ok || messageID == "" {
+		return "", fmt.Errorf("action=delete requires 'message_id' parameter")
+	}
+
+	intent := btc.Client.getModelIntent(ctx, btc.Portal)
+	if intent == nil {
+		return "", fmt.Errorf("failed to get model intent")
+	}
+
+	targetEventID := id.EventID(messageID)
+
+	// Send redaction event
+	_, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventRedaction, &event.Content{
+		Parsed: &event.RedactionEventContent{
+			Redacts: targetEventID,
+		},
+	}, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to delete message: %w", err)
+	}
+
+	return fmt.Sprintf(`{"action":"delete","deleted_id":%q,"status":"deleted"}`, targetEventID), nil
+}
+
+// executeMessageReply handles the reply action - sends a message as a reply to another.
+func executeMessageReply(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	messageID, ok := args["message_id"].(string)
+	if !ok || messageID == "" {
+		return "", fmt.Errorf("action=reply requires 'message_id' parameter")
+	}
+	message, ok := args["message"].(string)
+	if !ok || message == "" {
+		return "", fmt.Errorf("action=reply requires 'message' parameter")
+	}
+
+	intent := btc.Client.getModelIntent(ctx, btc.Portal)
+	if intent == nil {
+		return "", fmt.Errorf("failed to get model intent")
+	}
+
+	targetEventID := id.EventID(messageID)
+	rendered := format.RenderMarkdown(message, true, true)
+
+	// Send message with m.in_reply_to relation
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"msgtype":        event.MsgText,
+			"body":           rendered.Body,
+			"format":         rendered.Format,
+			"formatted_body": rendered.FormattedBody,
+			"m.relates_to": map[string]any{
+				"m.in_reply_to": map[string]any{
+					"event_id": targetEventID.String(),
+				},
+			},
+		},
+	}
+
+	resp, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventMessage, eventContent, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to send reply: %w", err)
+	}
+
+	return fmt.Sprintf(`{"action":"reply","event_id":%q,"reply_to":%q,"status":"sent"}`, resp.EventID, targetEventID), nil
+}
+
+// executeMessagePin handles pin/unpin actions - updates room pinned events.
+func executeMessagePin(ctx context.Context, args map[string]any, btc *BridgeToolContext, pin bool) (string, error) {
+	messageID, ok := args["message_id"].(string)
+	if !ok || messageID == "" {
+		action := "pin"
+		if !pin {
+			action = "unpin"
+		}
+		return "", fmt.Errorf("action=%s requires 'message_id' parameter", action)
+	}
+
+	targetEventID := id.EventID(messageID)
+	bot := btc.Client.UserLogin.Bridge.Bot
+
+	// Get current pinned events using the matrix connection
+	var pinnedEvents []string
+	matrixConn, ok := btc.Client.UserLogin.Bridge.Matrix.(*matrix.Connector)
+	if ok {
+		stateEvent, err := matrixConn.GetStateEvent(ctx, btc.Portal.MXID, event.StatePinnedEvents, "")
+		if err == nil && stateEvent != nil {
+			if content, ok := stateEvent.Content.Parsed.(*event.PinnedEventsEventContent); ok {
+				for _, evtID := range content.Pinned {
+					pinnedEvents = append(pinnedEvents, evtID.String())
+				}
+			}
+		}
+	}
+
+	// Modify pinned events
+	if pin {
+		// Add to pinned if not already there
+		found := false
+		for _, evtID := range pinnedEvents {
+			if evtID == targetEventID.String() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			pinnedEvents = append(pinnedEvents, targetEventID.String())
+		}
+	} else {
+		// Remove from pinned
+		var newPinned []string
+		for _, evtID := range pinnedEvents {
+			if evtID != targetEventID.String() {
+				newPinned = append(newPinned, evtID)
+			}
+		}
+		pinnedEvents = newPinned
+	}
+
+	// Convert to id.EventID slice
+	pinnedIDs := make([]id.EventID, len(pinnedEvents))
+	for i, evtID := range pinnedEvents {
+		pinnedIDs[i] = id.EventID(evtID)
+	}
+
+	// Update pinned events state
+	_, err := bot.SendState(ctx, btc.Portal.MXID, event.StatePinnedEvents, "", &event.Content{
+		Parsed: &event.PinnedEventsEventContent{
+			Pinned: pinnedIDs,
+		},
+	}, time.Time{})
+	if err != nil {
+		action := "pin"
+		if !pin {
+			action = "unpin"
+		}
+		return "", fmt.Errorf("failed to %s message: %w", action, err)
+	}
+
+	action := "pin"
+	if !pin {
+		action = "unpin"
+	}
+	return fmt.Sprintf(`{"action":%q,"message_id":%q,"status":"ok","pinned_count":%d}`, action, targetEventID, len(pinnedEvents)), nil
+}
+
+// executeMessageListPins handles list-pins action - returns currently pinned messages.
+func executeMessageListPins(ctx context.Context, btc *BridgeToolContext) (string, error) {
+	// Get current pinned events using the matrix connection
+	var pinnedEvents []string
+	matrixConn, ok := btc.Client.UserLogin.Bridge.Matrix.(*matrix.Connector)
+	if ok {
+		stateEvent, err := matrixConn.GetStateEvent(ctx, btc.Portal.MXID, event.StatePinnedEvents, "")
+		if err == nil && stateEvent != nil {
+			if content, ok := stateEvent.Content.Parsed.(*event.PinnedEventsEventContent); ok {
+				for _, evtID := range content.Pinned {
+					pinnedEvents = append(pinnedEvents, evtID.String())
+				}
+			}
+		}
+	}
+
+	// Build JSON response
+	pinnedJSON, _ := json.Marshal(pinnedEvents)
+	return fmt.Sprintf(`{"action":"list-pins","pinned":%s,"count":%d}`, string(pinnedJSON), len(pinnedEvents)), nil
+}
+
+// executeMessageThreadReply handles thread-reply action - sends a message in a thread.
+func executeMessageThreadReply(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	// thread_id is the root message of the thread
+	threadID, ok := args["thread_id"].(string)
+	if !ok || threadID == "" {
+		// Fall back to message_id for thread root
+		threadID, ok = args["message_id"].(string)
+		if !ok || threadID == "" {
+			return "", fmt.Errorf("action=thread-reply requires 'thread_id' or 'message_id' parameter")
+		}
+	}
+	message, ok := args["message"].(string)
+	if !ok || message == "" {
+		return "", fmt.Errorf("action=thread-reply requires 'message' parameter")
+	}
+
+	intent := btc.Client.getModelIntent(ctx, btc.Portal)
+	if intent == nil {
+		return "", fmt.Errorf("failed to get model intent")
+	}
+
+	threadRootID := id.EventID(threadID)
+	rendered := format.RenderMarkdown(message, true, true)
+
+	// Send message with m.thread relation
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"msgtype":        event.MsgText,
+			"body":           rendered.Body,
+			"format":         rendered.Format,
+			"formatted_body": rendered.FormattedBody,
+			"m.relates_to": map[string]any{
+				"rel_type": "m.thread",
+				"event_id": threadRootID.String(),
+			},
+		},
+	}
+
+	resp, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventMessage, eventContent, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to send thread reply: %w", err)
+	}
+
+	return fmt.Sprintf(`{"action":"thread-reply","event_id":%q,"thread_id":%q,"status":"sent"}`, resp.EventID, threadRootID), nil
+}
+
+// executeWebFetch fetches a web page and extracts readable content.
+func executeWebFetch(ctx context.Context, args map[string]any) (string, error) {
+	urlStr, ok := args["url"].(string)
+	if !ok || urlStr == "" {
+		return "", fmt.Errorf("missing or invalid 'url' argument")
+	}
+
+	// Parse and validate URL
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return "", fmt.Errorf("invalid URL: %w", err)
+	}
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return "", fmt.Errorf("URL must use http or https scheme")
+	}
+
+	// Get max chars (default 50000)
+	maxChars := 50000
+	if mc, ok := args["max_chars"].(float64); ok && mc > 0 {
+		maxChars = int(mc)
+	}
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; BeeperAI/1.0)")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+
+	// Make request
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
+	}
+
+	// Read body with limit
+	limitedReader := io.LimitReader(resp.Body, int64(maxChars*2)) // Read extra for HTML overhead
+	bodyBytes, err := io.ReadAll(limitedReader)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Extract text content (simple approach - strip HTML tags)
+	content := extractTextFromHTML(string(bodyBytes))
+
+	// Truncate to max chars
+	if len(content) > maxChars {
+		content = content[:maxChars] + "...[truncated]"
+	}
+
+	return fmt.Sprintf(`{"url":%q,"content":%q,"length":%d}`, urlStr, content, len(content)), nil
+}
+
+// extractTextFromHTML does a simple extraction of text from HTML.
+// This is a basic implementation - a full readability parser would be better.
+func extractTextFromHTML(html string) string {
+	// Remove script and style elements
+	html = removeHTMLElement(html, "script")
+	html = removeHTMLElement(html, "style")
+	html = removeHTMLElement(html, "noscript")
+
+	// Remove all HTML tags
+	var result strings.Builder
+	inTag := false
+	lastWasSpace := false
+
+	for _, r := range html {
+		if r == '<' {
+			inTag = true
+			continue
+		}
+		if r == '>' {
+			inTag = false
+			// Add space after tags to separate words
+			if !lastWasSpace {
+				result.WriteRune(' ')
+				lastWasSpace = true
+			}
+			continue
+		}
+		if !inTag {
+			// Normalize whitespace
+			if r == '\n' || r == '\r' || r == '\t' || r == ' ' {
+				if !lastWasSpace {
+					result.WriteRune(' ')
+					lastWasSpace = true
+				}
+			} else {
+				result.WriteRune(r)
+				lastWasSpace = false
+			}
+		}
+	}
+
+	// Decode common HTML entities
+	text := result.String()
+	text = strings.ReplaceAll(text, "&nbsp;", " ")
+	text = strings.ReplaceAll(text, "&amp;", "&")
+	text = strings.ReplaceAll(text, "&lt;", "<")
+	text = strings.ReplaceAll(text, "&gt;", ">")
+	text = strings.ReplaceAll(text, "&quot;", "\"")
+	text = strings.ReplaceAll(text, "&#39;", "'")
+
+	// Collapse multiple spaces
+	for strings.Contains(text, "  ") {
+		text = strings.ReplaceAll(text, "  ", " ")
+	}
+
+	return strings.TrimSpace(text)
+}
+
+// removeHTMLElement removes all instances of an HTML element and its content.
+func removeHTMLElement(html, tag string) string {
+	result := html
+	lowerTag := strings.ToLower(tag)
+
+	for {
+		startIdx := strings.Index(strings.ToLower(result), "<"+lowerTag)
+		if startIdx == -1 {
+			break
+		}
+
+		// Find the end of this element
+		endTag := "</" + lowerTag + ">"
+		endIdx := strings.Index(strings.ToLower(result[startIdx:]), endTag)
+		if endIdx == -1 {
+			// Self-closing or malformed - just remove to next >
+			closeIdx := strings.Index(result[startIdx:], ">")
+			if closeIdx == -1 {
+				break
+			}
+			result = result[:startIdx] + result[startIdx+closeIdx+1:]
+		} else {
+			result = result[:startIdx] + result[startIdx+endIdx+len(endTag):]
+		}
+	}
+
+	return result
+}
+
+// executeImageGeneration generates an image using OpenRouter's image generation API.
+func executeImageGeneration(ctx context.Context, args map[string]any) (string, error) {
+	prompt, ok := args["prompt"].(string)
+	if !ok || prompt == "" {
+		return "", fmt.Errorf("missing or invalid 'prompt' argument")
+	}
+
+	// Get model (default to stable diffusion)
+	model := DefaultImageModel
+	if m, ok := args["model"].(string); ok && m != "" {
+		model = m
+	}
+
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("image generation requires bridge context")
+	}
+
+	// Get the provider to check if we can use OpenRouter
+	provider, ok := btc.Client.provider.(*OpenAIProvider)
+	if !ok {
+		return "", fmt.Errorf("image generation requires OpenAI-compatible provider")
+	}
+
+	// Check if using OpenRouter
+	baseURL := strings.ToLower(provider.baseURL)
+	if !strings.Contains(baseURL, "openrouter") {
+		return "", fmt.Errorf("image generation requires OpenRouter provider")
+	}
+
+	// Call OpenRouter image generation
+	imageData, err := callOpenRouterImageGen(ctx, btc.Client.apiKey, provider.baseURL, prompt, model)
+	if err != nil {
+		return "", fmt.Errorf("image generation failed: %w", err)
+	}
+
+	// Return image as base64 with IMAGE: prefix for connector to handle
+	return ImageResultPrefix + imageData, nil
+}
+
+// callOpenRouterImageGen calls OpenRouter's image generation endpoint.
+func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model string) (string, error) {
+	// OpenRouter uses chat completions with image models
+	// The response will contain a URL or base64 image
+
+	// Normalize base URL
+	if baseURL == "" {
+		baseURL = "https://openrouter.ai/api/v1"
+	}
+	baseURL = strings.TrimSuffix(baseURL, "/")
+
+	// Build request for image generation via chat completions
+	reqBody := map[string]any{
+		"model": model,
+		"messages": []map[string]any{
+			{
+				"role":    "user",
+				"content": prompt,
+			},
+		},
+		"max_tokens": 1,
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(jsonBody))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("HTTP-Referer", "https://beeper.com")
+	req.Header.Set("X-Title", "Beeper AI")
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API error (%d): %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response to extract image URL or data
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Data []struct {
+			URL     string `json:"url"`
+			B64JSON string `json:"b64_json"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Check for direct image data (DALL-E style response)
+	if len(result.Data) > 0 {
+		if result.Data[0].B64JSON != "" {
+			return result.Data[0].B64JSON, nil
+		}
+		if result.Data[0].URL != "" {
+			// Fetch the image from URL and convert to base64
+			return fetchImageAsBase64(ctx, result.Data[0].URL)
+		}
+	}
+
+	// Check for chat completion response with image URL
+	if len(result.Choices) > 0 && result.Choices[0].Message.Content != "" {
+		content := result.Choices[0].Message.Content
+		// If content looks like a URL, fetch it
+		if strings.HasPrefix(content, "http") {
+			return fetchImageAsBase64(ctx, content)
+		}
+		// If it's already base64, return it
+		if _, err := base64.StdEncoding.DecodeString(content); err == nil {
+			return content, nil
+		}
+		return "", fmt.Errorf("unexpected response format: %s", content[:min(100, len(content))])
+	}
+
+	return "", fmt.Errorf("no image data in response")
+}
+
+// fetchImageAsBase64 fetches an image URL and returns it as base64.
+func fetchImageAsBase64(ctx context.Context, imageURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", imageURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to fetch image: %d", resp.StatusCode)
+	}
+
+	// Limit to 10MB
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	if err != nil {
+		return "", err
+	}
+
+	return base64.StdEncoding.EncodeToString(data), nil
+}
+
+// executeTTS converts text to speech.
+// Supports: macOS 'say' command, Beeper provider, OpenAI provider.
+func executeTTS(ctx context.Context, args map[string]any) (string, error) {
+	text, ok := args["text"].(string)
+	if !ok || text == "" {
+		return "", fmt.Errorf("missing or invalid 'text' argument")
+	}
+
+	// Limit text length
+	const maxTextLen = 4096
+	if len(text) > maxTextLen {
+		return "", fmt.Errorf("text too long: %d characters (max %d)", len(text), maxTextLen)
+	}
+
+	// Get voice (default to "alloy" for OpenAI, "Samantha" for macOS)
+	voice := ""
+	if v, ok := args["voice"].(string); ok && v != "" {
+		voice = v
+	}
+
+	btc := GetBridgeToolContext(ctx)
+
+	// Try provider-based TTS first (Beeper/OpenAI)
+	if btc != nil {
+		if provider, ok := btc.Client.provider.(*OpenAIProvider); ok {
+			baseURL := strings.ToLower(provider.baseURL)
+			isBeeperProvider := strings.Contains(baseURL, "beeper")
+			isOpenAIProvider := baseURL == "" || strings.Contains(baseURL, "openai.com")
+
+			if isBeeperProvider || isOpenAIProvider {
+				// Use OpenAI voice if not specified
+				if voice == "" {
+					voice = "alloy"
+				}
+
+				// Validate OpenAI voice
+				validVoices := map[string]bool{
+					"alloy": true, "ash": true, "coral": true, "echo": true,
+					"fable": true, "onyx": true, "nova": true, "sage": true, "shimmer": true,
+				}
+				if !validVoices[voice] {
+					voice = "alloy" // Fall back to default
+				}
+
+				// Call OpenAI TTS API
+				audioData, err := callOpenAITTS(ctx, btc.Client.apiKey, provider.baseURL, text, voice)
+				if err == nil {
+					return TTSResultPrefix + audioData, nil
+				}
+				// Fall through to macOS say if API fails
+			}
+		}
+	}
+
+	// Try macOS 'say' command as fallback
+	if isTTSMacOSAvailable() {
+		if voice == "" {
+			voice = "Samantha" // Default macOS voice
+		}
+		audioData, err := callMacOSSay(ctx, text, voice)
+		if err != nil {
+			return "", fmt.Errorf("macOS TTS failed: %w", err)
+		}
+		return TTSResultPrefix + audioData, nil
+	}
+
+	return "", fmt.Errorf("TTS not available: requires Beeper/OpenAI provider or macOS")
+}
+
+// isTTSMacOSAvailable checks if macOS 'say' command is available.
+func isTTSMacOSAvailable() bool {
+	return runtime.GOOS == "darwin"
+}
+
+// callMacOSSay uses macOS 'say' command to generate speech.
+func callMacOSSay(ctx context.Context, text, voice string) (string, error) {
+	// Create temp file for output
+	tmpFile, err := os.CreateTemp("", "tts-*.aiff")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpPath)
+
+	// Run say command
+	args := []string{"-o", tmpPath}
+	if voice != "" {
+		args = append(args, "-v", voice)
+	}
+	args = append(args, text)
+
+	cmd := exec.CommandContext(ctx, "say", args...)
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("say command failed: %w", err)
+	}
+
+	// Read the generated audio file
+	audioData, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read audio file: %w", err)
+	}
+
+	// Return as base64
+	return base64.StdEncoding.EncodeToString(audioData), nil
+}
+
+// callOpenAITTS calls OpenAI's /v1/audio/speech endpoint
+func callOpenAITTS(ctx context.Context, apiKey, baseURL, text, voice string) (string, error) {
+	// Determine endpoint URL
+	endpoint := "https://api.openai.com/v1/audio/speech"
+	if baseURL != "" {
+		endpoint = strings.TrimSuffix(baseURL, "/") + "/audio/speech"
+	}
+
+	// Build request body
+	reqBody := map[string]any{
+		"model":           "tts-1",
+		"input":           text,
+		"voice":           voice,
+		"response_format": "mp3",
+	}
+	bodyJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Execute request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("TTS API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// Read audio data
+	audioBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read audio response: %w", err)
+	}
+
+	// Return base64 encoded audio
+	return base64.StdEncoding.EncodeToString(audioBytes), nil
 }
 
 // executeCalculator evaluates a simple arithmetic expression

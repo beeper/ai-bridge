@@ -28,21 +28,22 @@ const (
 var ToolGroups = map[string][]string{
 	tools.GroupSearch:    {"web_search"},
 	tools.GroupCalc:      {"calculator"},
-	tools.GroupBuilder:   {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "create_room", "modify_room", "list_rooms"},
+	tools.GroupBuilder:   {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "create_room", "modify_room", "list_rooms", "sessions_list", "sessions_history", "sessions_send"},
 	tools.GroupChat:      {"set_chat_info"},
 	tools.GroupMessaging: {"message"},
-	tools.GroupSessions:  {"sessions_list", "sessions_history", "sessions_send", "session_status"},
+	tools.GroupSessions:  {"sessions_list", "sessions_history", "sessions_send"},
 	tools.GroupMemory:    {"memory_search", "memory_get"},
 	tools.GroupWeb:       {"web_search", "web_fetch"},
+	tools.GroupMedia:     {"image", "tts"},
 }
 
 // ProfileAllowlists define which tool groups each profile allows.
 // Matches OpenClaw's TOOL_PROFILES pattern.
 var ProfileAllowlists = map[ToolProfile][]string{
 	ProfileMinimal:   {tools.GroupSearch, tools.GroupChat},
-	ProfileCoding:    {tools.GroupCalc, tools.GroupSearch, tools.GroupChat},
-	ProfileMessaging: {tools.GroupSearch, tools.GroupChat, tools.GroupMessaging, tools.GroupSessions},
-	ProfileFull:      {tools.GroupCalc, tools.GroupSearch, tools.GroupChat},
+	ProfileCoding:    {tools.GroupCalc, tools.GroupWeb, tools.GroupChat, tools.GroupMessaging},
+	ProfileMessaging: {tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupSessions},
+	ProfileFull:      {tools.GroupCalc, tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupMedia},
 	ProfileBoss:      {tools.GroupBuilder},
 }
 

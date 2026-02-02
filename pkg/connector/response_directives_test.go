@@ -101,59 +101,8 @@ func TestParseResponseDirectives_ReplyTags(t *testing.T) {
 	}
 }
 
-func TestParseResponseDirectives_Reactions(t *testing.T) {
-	tests := []struct {
-		name          string
-		input         string
-		wantReactions int
-		wantEmoji     string
-		wantEventID   id.EventID
-	}{
-		{
-			name:          "single reaction",
-			input:         "Great job! [[react:👍]]",
-			wantReactions: 1,
-			wantEmoji:     "👍",
-			wantEventID:   "",
-		},
-		{
-			name:          "reaction with event ID",
-			input:         "[[react:🎉:$event123]]",
-			wantReactions: 1,
-			wantEmoji:     "🎉",
-			wantEventID:   id.EventID("$event123"),
-		},
-		{
-			name:          "multiple reactions",
-			input:         "[[react:👍]] [[react:❤️]]",
-			wantReactions: 2,
-			wantEmoji:     "👍", // First reaction
-			wantEventID:   "",
-		},
-		{
-			name:          "no reactions",
-			input:         "Just text",
-			wantReactions: 0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := ParseResponseDirectives(tt.input, "")
-			if len(result.Reactions) != tt.wantReactions {
-				t.Errorf("len(Reactions) = %d, want %d", len(result.Reactions), tt.wantReactions)
-			}
-			if tt.wantReactions > 0 && len(result.Reactions) > 0 {
-				if result.Reactions[0].Emoji != tt.wantEmoji {
-					t.Errorf("Reactions[0].Emoji = %q, want %q", result.Reactions[0].Emoji, tt.wantEmoji)
-				}
-				if result.Reactions[0].EventID != tt.wantEventID {
-					t.Errorf("Reactions[0].EventID = %q, want %q", result.Reactions[0].EventID, tt.wantEventID)
-				}
-			}
-		})
-	}
-}
+// Note: Reaction tags are NOT supported - reactions are handled via the message tool.
+// This matches OpenClaw's approach where reactions require tool calls.
 
 func TestParseResponseDirectives_CleanedText(t *testing.T) {
 	tests := []struct {
@@ -167,19 +116,19 @@ func TestParseResponseDirectives_CleanedText(t *testing.T) {
 			wantCleaned: "Hello world",
 		},
 		{
-			name:        "strips reaction tag",
-			input:       "Great! [[react:👍]]",
-			wantCleaned: "Great!",
-		},
-		{
-			name:        "strips multiple tags",
-			input:       "[[reply_to_current]] Hello [[react:👍]] world [[react:❤️]]",
+			name:        "strips multiple reply tags",
+			input:       "[[reply_to_current]] Hello [[reply_to:$abc]] world",
 			wantCleaned: "Hello world",
 		},
 		{
 			name:        "normalizes whitespace",
 			input:       "Hello    world",
 			wantCleaned: "Hello world",
+		},
+		{
+			name:        "preserves reaction-like text (not a directive)",
+			input:       "Great! [[react:👍]]",
+			wantCleaned: "Great! [[react:👍]]",
 		},
 	}
 
