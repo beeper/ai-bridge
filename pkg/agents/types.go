@@ -87,6 +87,30 @@ type MemoryConfig struct {
 	MinScore     float64  `json:"min_score,omitempty"`     // default: 0.35
 }
 
+// Clone creates a deep copy of the memory config.
+func (m *MemoryConfig) Clone() *MemoryConfig {
+	if m == nil {
+		return nil
+	}
+	clone := &MemoryConfig{
+		MaxResults: m.MaxResults,
+		MinScore:   m.MinScore,
+	}
+	if m.Enabled != nil {
+		enabled := *m.Enabled
+		clone.Enabled = &enabled
+	}
+	if m.EnableGlobal != nil {
+		enableGlobal := *m.EnableGlobal
+		clone.EnableGlobal = &enableGlobal
+	}
+	if m.Sources != nil {
+		clone.Sources = make([]string, len(m.Sources))
+		copy(clone.Sources, m.Sources)
+	}
+	return clone
+}
+
 // ModelInfo provides metadata about an available model.
 type ModelInfo struct {
 	ID          string `json:"id"`
@@ -144,6 +168,10 @@ func (a *AgentDefinition) Clone() *AgentDefinition {
 			Name:    a.Identity.Name,
 			Persona: a.Identity.Persona,
 		}
+	}
+
+	if a.Memory != nil {
+		clone.Memory = a.Memory.Clone()
 	}
 
 	return clone

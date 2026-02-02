@@ -25,6 +25,7 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/bridgev2/matrix"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
@@ -865,9 +866,8 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 	}
 
 	// clawdbot-parity: populate context flags
-	// TODO: IsGroupChat should be determined from room member count
-	// For now, default to false (1:1 chat assumption)
-	params.IsGroupChat = false
+	// Determine IsGroupChat from room member count (group = more than 2 members: user + bot + others)
+	params.IsGroupChat = oc.isGroupChat(ctx, portal)
 	params.IsSubagent = false // Set by caller when spawning subagents
 
 	// Reaction guidance - default to minimal
@@ -944,6 +944,35 @@ func (oc *AIClient) effectiveMaxTokens(meta *PortalMetadata) int {
 func (oc *AIClient) isOpenRouterProvider() bool {
 	loginMeta := loginMetadata(oc.UserLogin)
 	return loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper
+}
+
+// isGroupChat determines if the portal is a group chat based on member count.
+// Returns true when there are more than 2 members (user + bot + others = group).
+func (oc *AIClient) isGroupChat(ctx context.Context, portal *bridgev2.Portal) bool {
+	if portal == nil || portal.MXID == "" {
+		return false
+	}
+
+	// Get the matrix client
+	matrixConn, ok := oc.UserLogin.Bridge.Matrix.(*matrix.Connector)
+	if !ok {
+		return false
+	}
+
+	client := matrixConn.AS.BotClient()
+	if client == nil {
+		return false
+	}
+
+	// Get member count
+	members, err := client.JoinedMembers(ctx, portal.MXID)
+	if err != nil {
+		oc.log.Debug().Err(err).Msg("Failed to get joined members for group chat detection")
+		return false
+	}
+
+	// Group chat = more than 2 members (user + bot = 1:1, user + bot + others = group)
+	return len(members.Joined) > 2
 }
 
 // effectivePDFEngine returns the PDF engine to use for the given portal.

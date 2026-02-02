@@ -99,8 +99,22 @@ func (m *MemoryStore) getEffectiveConfig(portal *bridgev2.Portal) *AgentMemoryCo
 		return defaultMemoryConfig()
 	}
 
-	// TODO: Get agent-specific config from agent definition
-	// For now, use default config
+	// Get agent-specific config from agent definition
+	if meta.AgentID != "" {
+		store := NewAgentStoreAdapter(m.client)
+		agent, err := store.GetAgentByID(context.Background(), meta.AgentID)
+		if err == nil && agent != nil && agent.Memory != nil {
+			// Convert agents.MemoryConfig to AgentMemoryConfig
+			return &AgentMemoryConfig{
+				Enabled:      agent.Memory.Enabled,
+				Sources:      agent.Memory.Sources,
+				EnableGlobal: agent.Memory.EnableGlobal,
+				MaxResults:   agent.Memory.MaxResults,
+				MinScore:     agent.Memory.MinScore,
+			}
+		}
+	}
+
 	return defaultMemoryConfig()
 }
 
