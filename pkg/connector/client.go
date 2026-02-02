@@ -206,10 +206,12 @@ func audioFileFeatures() *event.FileFeatures {
 	return &event.FileFeatures{
 		MimeTypes: map[string]event.CapabilitySupportLevel{
 			"audio/wav":   event.CapLevelFullySupported,
+			"audio/x-wav": event.CapLevelFullySupported,
 			"audio/mpeg":  event.CapLevelFullySupported, // mp3
 			"audio/mp3":   event.CapLevelFullySupported,
 			"audio/webm":  event.CapLevelFullySupported,
 			"audio/ogg":   event.CapLevelFullySupported,
+			"audio/ogg; codecs=opus": event.CapLevelFullySupported,
 			"audio/flac":  event.CapLevelFullySupported,
 			"audio/mp4":   event.CapLevelFullySupported, // m4a
 			"audio/x-m4a": event.CapLevelFullySupported,
