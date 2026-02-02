@@ -310,10 +310,8 @@ Right: NO_REPLY`
 
 func buildReactionsSection() string {
 	return `## Reactions
-To react to a message with an emoji, include a tag in your reply:
-- [[react:👍]] reacts to the triggering message with 👍
-- [[react:🎉:$eventid]] reacts to a specific message with 🎉
-You can include multiple reaction tags. Tags are stripped before sending.`
+Use the message tool with action=react to add emoji reactions to messages.
+React sparingly - only when truly relevant to acknowledge or express sentiment.`
 }
 
 // buildToolCallStyleSection returns guidance on when to narrate tool calls.
