@@ -50,17 +50,19 @@ func DuckDuckGoSearch(ctx context.Context, query string) (*SearchResponse, error
 		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
 	}
 
+	type ddgTopic struct {
+		Text     string    `json:"Text"`
+		FirstURL string    `json:"FirstURL"`
+		Topics   []ddgTopic `json:"Topics"`
+	}
 	var ddgResult struct {
-		Abstract      string `json:"Abstract"`
-		AbstractText  string `json:"AbstractText"`
-		Answer        string `json:"Answer"`
-		AnswerType    string `json:"AnswerType"`
-		Definition    string `json:"Definition"`
-		Heading       string `json:"Heading"`
-		RelatedTopics []struct {
-			Text     string `json:"Text"`
-			FirstURL string `json:"FirstURL"`
-		} `json:"RelatedTopics"`
+		Abstract      string    `json:"Abstract"`
+		AbstractText  string    `json:"AbstractText"`
+		Answer        string    `json:"Answer"`
+		AnswerType    string    `json:"AnswerType"`
+		Definition    string    `json:"Definition"`
+		Heading       string    `json:"Heading"`
+		RelatedTopics []ddgTopic `json:"RelatedTopics"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&ddgResult); err != nil {
@@ -75,19 +77,22 @@ func DuckDuckGoSearch(ctx context.Context, query string) (*SearchResponse, error
 	}
 
 	// Convert related topics to results.
-	for i, topic := range ddgResult.RelatedTopics {
-		if topic.Text == "" {
-			continue
+	var appendTopic func(topic ddgTopic)
+	appendTopic = func(topic ddgTopic) {
+		if topic.Text != "" {
+			title, snippet := splitTopicText(topic.Text)
+			response.Results = append(response.Results, SearchResult{
+				Title:   title,
+				Snippet: snippet,
+				URL:     topic.FirstURL,
+			})
 		}
-		title, snippet := splitTopicText(topic.Text)
-		response.Results = append(response.Results, SearchResult{
-			Title:   title,
-			Snippet: snippet,
-			URL:     topic.FirstURL,
-		})
-		if i >= 2 { // Limit to 3 results.
-			break
+		for _, child := range topic.Topics {
+			appendTopic(child)
 		}
+	}
+	for _, topic := range ddgResult.RelatedTopics {
+		appendTopic(topic)
 	}
 
 	// Check if we got any meaningful results.
