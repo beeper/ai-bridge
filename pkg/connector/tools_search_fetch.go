@@ -12,28 +12,9 @@ import (
 )
 
 func executeWebSearchWithProviders(ctx context.Context, args map[string]any) (string, error) {
-	query, ok := args["query"].(string)
-	if !ok {
-		return "", fmt.Errorf("missing or invalid 'query' argument")
-	}
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return "", fmt.Errorf("missing or invalid 'query' argument")
-	}
-
-	count, _ := websearch.ParseCountAndIgnoredOptions(args)
-	country, _ := args["country"].(string)
-	searchLang, _ := args["search_lang"].(string)
-	uiLang, _ := args["ui_lang"].(string)
-	freshness, _ := args["freshness"].(string)
-
-	req := search.Request{
-		Query:      query,
-		Count:      count,
-		Country:    strings.TrimSpace(country),
-		SearchLang: strings.TrimSpace(searchLang),
-		UILang:     strings.TrimSpace(uiLang),
-		Freshness:  strings.TrimSpace(freshness),
+	req, err := searchRequestFromArgs(args)
+	if err != nil {
+		return "", err
 	}
 
 	cfg := resolveSearchConfig(ctx)
@@ -42,37 +23,7 @@ func executeWebSearchWithProviders(ctx context.Context, args map[string]any) (st
 		return "", err
 	}
 
-	payload := map[string]any{
-		"query":      resp.Query,
-		"provider":   resp.Provider,
-		"count":      resp.Count,
-		"tookMs":     resp.TookMs,
-		"answer":     resp.Answer,
-		"summary":    resp.Summary,
-		"definition": resp.Definition,
-		"warning":    resp.Warning,
-		"noResults":  resp.NoResults,
-		"cached":     resp.Cached,
-	}
-
-	if len(resp.Results) > 0 {
-		results := make([]map[string]any, 0, len(resp.Results))
-		for _, r := range resp.Results {
-			results = append(results, map[string]any{
-				"title":       r.Title,
-				"url":         r.URL,
-				"description": r.Description,
-				"published":   r.Published,
-				"siteName":    r.SiteName,
-			})
-		}
-		payload["results"] = results
-	}
-
-	if resp.Extras != nil {
-		payload["extras"] = resp.Extras
-	}
-
+	payload := buildSearchPayload(resp)
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("failed to encode web_search response: %w", err)
@@ -142,6 +93,65 @@ func executeWebFetchWithProviders(ctx context.Context, args map[string]any) (str
 		return "", fmt.Errorf("failed to encode web_fetch response: %w", err)
 	}
 	return string(raw), nil
+}
+
+func searchRequestFromArgs(args map[string]any) (search.Request, error) {
+	query, ok := args["query"].(string)
+	if !ok {
+		return search.Request{}, fmt.Errorf("missing or invalid 'query' argument")
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return search.Request{}, fmt.Errorf("missing or invalid 'query' argument")
+	}
+	count, _ := websearch.ParseCountAndIgnoredOptions(args)
+	country, _ := args["country"].(string)
+	searchLang, _ := args["search_lang"].(string)
+	uiLang, _ := args["ui_lang"].(string)
+	freshness, _ := args["freshness"].(string)
+
+	return search.Request{
+		Query:      query,
+		Count:      count,
+		Country:    strings.TrimSpace(country),
+		SearchLang: strings.TrimSpace(searchLang),
+		UILang:     strings.TrimSpace(uiLang),
+		Freshness:  strings.TrimSpace(freshness),
+	}, nil
+}
+
+func buildSearchPayload(resp *search.Response) map[string]any {
+	payload := map[string]any{
+		"query":      resp.Query,
+		"provider":   resp.Provider,
+		"count":      resp.Count,
+		"tookMs":     resp.TookMs,
+		"answer":     resp.Answer,
+		"summary":    resp.Summary,
+		"definition": resp.Definition,
+		"warning":    resp.Warning,
+		"noResults":  resp.NoResults,
+		"cached":     resp.Cached,
+	}
+
+	if len(resp.Results) > 0 {
+		results := make([]map[string]any, 0, len(resp.Results))
+		for _, r := range resp.Results {
+			results = append(results, map[string]any{
+				"title":       r.Title,
+				"url":         r.URL,
+				"description": r.Description,
+				"published":   r.Published,
+				"siteName":    r.SiteName,
+			})
+		}
+		payload["results"] = results
+	}
+
+	if resp.Extras != nil {
+		payload["extras"] = resp.Extras
+	}
+	return payload
 }
 
 func resolveSearchConfig(ctx context.Context) *search.Config {
