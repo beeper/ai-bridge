@@ -66,6 +66,56 @@ network:
     Follow the user's intent and be accurate.
   model_cache_duration: 6h
 
+  # External tool providers (search + fetch). Proxy is recommended.
+  tools:
+    search:
+      provider: "proxy"
+      fallbacks: ["exa", "brave", "perplexity", "openrouter", "ddg"]
+      proxy:
+        base_url: "https://hungryserv.yourdomain"
+        api_key: ""
+        search_path: "/search"
+        timeout_seconds: 30
+      exa:
+        api_key: ""
+        base_url: "https://api.exa.ai"
+        type: "auto"
+        num_results: 5
+        include_text: false
+        text_max_chars: 500
+      brave:
+        api_key: ""
+        base_url: "https://api.search.brave.com/res/v1/web/search"
+      perplexity:
+        api_key: ""
+        base_url: "https://openrouter.ai/api/v1"
+        model: "perplexity/sonar-pro"
+      openrouter:
+        api_key: ""
+        base_url: "https://openrouter.ai/api/v1"
+        model: "openai/gpt-5.2"
+      ddg:
+        enabled: true
+
+    fetch:
+      provider: "proxy"
+      fallbacks: ["exa", "direct"]
+      proxy:
+        base_url: "https://hungryserv.yourdomain"
+        api_key: ""
+        contents_path: "/contents"
+        timeout_seconds: 30
+      exa:
+        api_key: ""
+        base_url: "https://api.exa.ai"
+        include_text: true
+        text_max_chars: 5000
+      direct:
+        enabled: true
+        timeout_seconds: 30
+        max_chars: 50000
+        max_redirects: 3
+
   # Context pruning configuration (OpenClaw-style).
   # Reduces token usage by intelligently truncating old tool results.
   # Disabled by default - opt-in feature.

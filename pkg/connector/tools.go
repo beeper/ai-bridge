@@ -22,7 +22,6 @@ import (
 	"github.com/beeper/ai-bridge/pkg/shared/calc"
 	"github.com/beeper/ai-bridge/pkg/shared/media"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
-	"github.com/beeper/ai-bridge/pkg/shared/websearch"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
@@ -889,127 +888,7 @@ func truncateString(s string, maxLen int) string {
 
 // executeWebFetch fetches a web page and extracts readable content.
 func executeWebFetch(ctx context.Context, args map[string]any) (string, error) {
-	urlStr, ok := args["url"].(string)
-	if !ok || urlStr == "" {
-		return "", fmt.Errorf("missing or invalid 'url' argument")
-	}
-	urlStr = strings.TrimSpace(urlStr)
-	if urlStr == "" {
-		return "", fmt.Errorf("missing or invalid 'url' argument")
-	}
-
-	extractMode := "markdown"
-	if mode, ok := args["extractMode"].(string); ok && strings.EqualFold(strings.TrimSpace(mode), "text") {
-		extractMode = "text"
-	}
-
-	// Parse and validate URL
-	parsedURL, err := url.Parse(urlStr)
-	if err != nil {
-		return "", fmt.Errorf("invalid URL: %w", err)
-	}
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return "", fmt.Errorf("URL must use http or https scheme")
-	}
-
-	// Get max chars (default 50000)
-	maxChars := 50000
-	if mc, ok := args["max_chars"].(float64); ok && mc > 0 {
-		maxChars = int(mc)
-	} else if mc, ok := args["maxChars"].(float64); ok && mc > 0 {
-		maxChars = int(mc)
-	}
-	if maxChars < 100 {
-		maxChars = 100
-	}
-
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; BeeperAI/1.0)")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-
-	// Make request
-	start := time.Now()
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch URL: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
-	}
-
-	// Read body with limit
-	limitedReader := io.LimitReader(resp.Body, int64(maxChars*2)) // Read extra for HTML overhead
-	bodyBytes, err := io.ReadAll(limitedReader)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	contentType := normalizeContentType(resp.Header.Get("Content-Type"))
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-
-	extractor := "basic"
-	content := string(bodyBytes)
-	if strings.Contains(contentType, "text/html") {
-		if extractMode == "markdown" {
-			content = htmlToMarkdownBasic(content)
-			extractor = "basic-markdown"
-		} else {
-			content = extractTextFromHTML(content)
-			extractor = "basic-text"
-		}
-	} else if strings.Contains(contentType, "application/json") {
-		var decoded any
-		if err := json.Unmarshal(bodyBytes, &decoded); err == nil {
-			pretty, _ := json.MarshalIndent(decoded, "", "  ")
-			content = string(pretty)
-			extractor = "json"
-		}
-	}
-
-	// Truncate to max chars
-	rawLength := len(content)
-	truncated := false
-	if len(content) > maxChars {
-		content = content[:maxChars] + "...[truncated]"
-		truncated = true
-	}
-	wrappedLength := len(content)
-
-	finalURL := urlStr
-	if resp.Request != nil && resp.Request.URL != nil {
-		finalURL = resp.Request.URL.String()
-	}
-	result := map[string]any{
-		"url":           urlStr,
-		"finalUrl":      finalURL,
-		"status":        resp.StatusCode,
-		"contentType":   contentType,
-		"extractMode":   extractMode,
-		"extractor":     extractor,
-		"truncated":     truncated,
-		"length":        len(content),
-		"rawLength":     rawLength,
-		"wrappedLength": wrappedLength,
-		"fetchedAt":     time.Now().Format(time.RFC3339),
-		"tookMs":        time.Since(start).Milliseconds(),
-		"text":          content,
-		"content":       content, // Backwards compatibility
-	}
-	resultJSON, _ := json.Marshal(result)
-	return string(resultJSON), nil
+	return executeWebFetchWithProviders(ctx, args)
 }
 
 // extractTextFromHTML does a simple extraction of text from HTML.
@@ -1578,30 +1457,7 @@ func executeCalculator(ctx context.Context, args map[string]any) (string, error)
 
 // executeWebSearch performs a web search (placeholder implementation)
 func executeWebSearch(ctx context.Context, args map[string]any) (string, error) {
-	query, ok := args["query"].(string)
-	if !ok {
-		return "", fmt.Errorf("missing or invalid 'query' argument")
-	}
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return "", fmt.Errorf("missing or invalid 'query' argument")
-	}
-
-	count, ignoredOptions := websearch.ParseCountAndIgnoredOptions(args)
-
-	start := time.Now()
-	result, err := websearch.DuckDuckGoSearch(ctx, query)
-	if err != nil {
-		return "", websearch.ConnectorError(err)
-	}
-	tookMs := time.Since(start).Milliseconds()
-
-	payload := websearch.BuildPayload(query, count, tookMs, result, ignoredOptions)
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("failed to encode web_search response: %w", err)
-	}
-	return string(raw), nil
+	return executeWebSearchWithProviders(ctx, args)
 }
 
 // executeSessionStatus returns current session status including time, model, and usage info.

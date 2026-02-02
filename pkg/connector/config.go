@@ -16,6 +16,7 @@ type Config struct {
 	Beeper    BeeperConfig    `yaml:"beeper"`
 	Providers ProvidersConfig `yaml:"providers"`
 	Bridge    BridgeConfig    `yaml:"bridge"`
+	Tools     ToolsConfig     `yaml:"tools"`
 
 	// Global settings
 	DefaultSystemPrompt string        `yaml:"default_system_prompt"`
@@ -29,6 +30,101 @@ type Config struct {
 
 	// Inbound message processing configuration
 	Inbound *InboundConfig `yaml:"inbound"`
+}
+
+// ToolsConfig configures external tool providers like search and fetch.
+type ToolsConfig struct {
+	Search *SearchConfig `yaml:"search"`
+	Fetch  *FetchConfig  `yaml:"fetch"`
+}
+
+type SearchConfig struct {
+	Provider  string   `yaml:"provider"`
+	Fallbacks []string `yaml:"fallbacks"`
+
+	Proxy      ProviderProxyConfig      `yaml:"proxy"`
+	Exa        ProviderExaConfig        `yaml:"exa"`
+	Brave      ProviderBraveConfig      `yaml:"brave"`
+	Perplexity ProviderPerplexityConfig `yaml:"perplexity"`
+	OpenRouter ProviderOpenRouterConfig `yaml:"openrouter"`
+	DDG        ProviderDDGConfig        `yaml:"ddg"`
+}
+
+type FetchConfig struct {
+	Provider  string   `yaml:"provider"`
+	Fallbacks []string `yaml:"fallbacks"`
+
+	Proxy  ProviderProxyConfig  `yaml:"proxy"`
+	Exa    ProviderExaConfig    `yaml:"exa"`
+	Direct ProviderDirectConfig `yaml:"direct"`
+}
+
+type ProviderProxyConfig struct {
+	Enabled       *bool  `yaml:"enabled"`
+	BaseURL       string `yaml:"base_url"`
+	APIKey        string `yaml:"api_key"`
+	SearchPath    string `yaml:"search_path"`
+	ContentsPath  string `yaml:"contents_path"`
+	TimeoutSecs   int    `yaml:"timeout_seconds"`
+	CacheTtlSecs  int    `yaml:"cache_ttl_seconds"`
+	ForwardHeader bool   `yaml:"forward_header"`
+}
+
+type ProviderExaConfig struct {
+	Enabled           *bool  `yaml:"enabled"`
+	BaseURL           string `yaml:"base_url"`
+	APIKey            string `yaml:"api_key"`
+	Type              string `yaml:"type"`
+	Category          string `yaml:"category"`
+	NumResults        int    `yaml:"num_results"`
+	IncludeText       bool   `yaml:"include_text"`
+	TextMaxCharacters int    `yaml:"text_max_chars"`
+	Highlights        bool   `yaml:"highlights"`
+}
+
+type ProviderBraveConfig struct {
+	Enabled          *bool  `yaml:"enabled"`
+	BaseURL          string `yaml:"base_url"`
+	APIKey           string `yaml:"api_key"`
+	TimeoutSecs      int    `yaml:"timeout_seconds"`
+	CacheTtlSecs     int    `yaml:"cache_ttl_seconds"`
+	SearchLang       string `yaml:"search_lang"`
+	UILang           string `yaml:"ui_lang"`
+	DefaultCountry   string `yaml:"default_country"`
+	DefaultFreshness string `yaml:"default_freshness"`
+}
+
+type ProviderPerplexityConfig struct {
+	Enabled      *bool  `yaml:"enabled"`
+	APIKey       string `yaml:"api_key"`
+	BaseURL      string `yaml:"base_url"`
+	Model        string `yaml:"model"`
+	TimeoutSecs  int    `yaml:"timeout_seconds"`
+	CacheTtlSecs int    `yaml:"cache_ttl_seconds"`
+}
+
+type ProviderOpenRouterConfig struct {
+	Enabled      *bool  `yaml:"enabled"`
+	APIKey       string `yaml:"api_key"`
+	BaseURL      string `yaml:"base_url"`
+	Model        string `yaml:"model"`
+	TimeoutSecs  int    `yaml:"timeout_seconds"`
+	CacheTtlSecs int    `yaml:"cache_ttl_seconds"`
+}
+
+type ProviderDDGConfig struct {
+	Enabled     *bool `yaml:"enabled"`
+	TimeoutSecs int   `yaml:"timeout_seconds"`
+}
+
+type ProviderDirectConfig struct {
+	Enabled      *bool  `yaml:"enabled"`
+	TimeoutSecs  int    `yaml:"timeout_seconds"`
+	UserAgent    string `yaml:"user_agent"`
+	Readability  bool   `yaml:"readability"`
+	MaxChars     int    `yaml:"max_chars"`
+	MaxRedirects int    `yaml:"max_redirects"`
+	CacheTtlSecs int    `yaml:"cache_ttl_seconds"`
 }
 
 // InboundConfig contains settings for inbound message processing
@@ -137,4 +233,66 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Str, "inbound", "dedupe_ttl")
 	helper.Copy(configupgrade.Int, "inbound", "dedupe_max_size")
 	helper.Copy(configupgrade.Int, "inbound", "default_debounce_ms")
+
+	// Tools (search + fetch)
+	helper.Copy(configupgrade.Str, "tools", "search", "provider")
+	helper.Copy(configupgrade.List, "tools", "search", "fallbacks")
+	helper.Copy(configupgrade.Bool, "tools", "search", "proxy", "enabled")
+	helper.Copy(configupgrade.Str, "tools", "search", "proxy", "base_url")
+	helper.Copy(configupgrade.Str, "tools", "search", "proxy", "api_key")
+	helper.Copy(configupgrade.Str, "tools", "search", "proxy", "search_path")
+	helper.Copy(configupgrade.Int, "tools", "search", "proxy", "timeout_seconds")
+	helper.Copy(configupgrade.Int, "tools", "search", "proxy", "cache_ttl_seconds")
+	helper.Copy(configupgrade.Bool, "tools", "search", "exa", "enabled")
+	helper.Copy(configupgrade.Str, "tools", "search", "exa", "base_url")
+	helper.Copy(configupgrade.Str, "tools", "search", "exa", "api_key")
+	helper.Copy(configupgrade.Str, "tools", "search", "exa", "type")
+	helper.Copy(configupgrade.Str, "tools", "search", "exa", "category")
+	helper.Copy(configupgrade.Int, "tools", "search", "exa", "num_results")
+	helper.Copy(configupgrade.Bool, "tools", "search", "exa", "include_text")
+	helper.Copy(configupgrade.Int, "tools", "search", "exa", "text_max_chars")
+	helper.Copy(configupgrade.Bool, "tools", "search", "exa", "highlights")
+	helper.Copy(configupgrade.Bool, "tools", "search", "brave", "enabled")
+	helper.Copy(configupgrade.Str, "tools", "search", "brave", "base_url")
+	helper.Copy(configupgrade.Str, "tools", "search", "brave", "api_key")
+	helper.Copy(configupgrade.Int, "tools", "search", "brave", "timeout_seconds")
+	helper.Copy(configupgrade.Int, "tools", "search", "brave", "cache_ttl_seconds")
+	helper.Copy(configupgrade.Str, "tools", "search", "brave", "search_lang")
+	helper.Copy(configupgrade.Str, "tools", "search", "brave", "ui_lang")
+	helper.Copy(configupgrade.Str, "tools", "search", "brave", "default_country")
+	helper.Copy(configupgrade.Str, "tools", "search", "brave", "default_freshness")
+	helper.Copy(configupgrade.Bool, "tools", "search", "perplexity", "enabled")
+	helper.Copy(configupgrade.Str, "tools", "search", "perplexity", "api_key")
+	helper.Copy(configupgrade.Str, "tools", "search", "perplexity", "base_url")
+	helper.Copy(configupgrade.Str, "tools", "search", "perplexity", "model")
+	helper.Copy(configupgrade.Int, "tools", "search", "perplexity", "timeout_seconds")
+	helper.Copy(configupgrade.Int, "tools", "search", "perplexity", "cache_ttl_seconds")
+	helper.Copy(configupgrade.Bool, "tools", "search", "openrouter", "enabled")
+	helper.Copy(configupgrade.Str, "tools", "search", "openrouter", "api_key")
+	helper.Copy(configupgrade.Str, "tools", "search", "openrouter", "base_url")
+	helper.Copy(configupgrade.Str, "tools", "search", "openrouter", "model")
+	helper.Copy(configupgrade.Int, "tools", "search", "openrouter", "timeout_seconds")
+	helper.Copy(configupgrade.Int, "tools", "search", "openrouter", "cache_ttl_seconds")
+	helper.Copy(configupgrade.Bool, "tools", "search", "ddg", "enabled")
+	helper.Copy(configupgrade.Int, "tools", "search", "ddg", "timeout_seconds")
+
+	helper.Copy(configupgrade.Str, "tools", "fetch", "provider")
+	helper.Copy(configupgrade.List, "tools", "fetch", "fallbacks")
+	helper.Copy(configupgrade.Bool, "tools", "fetch", "proxy", "enabled")
+	helper.Copy(configupgrade.Str, "tools", "fetch", "proxy", "base_url")
+	helper.Copy(configupgrade.Str, "tools", "fetch", "proxy", "api_key")
+	helper.Copy(configupgrade.Str, "tools", "fetch", "proxy", "contents_path")
+	helper.Copy(configupgrade.Int, "tools", "fetch", "proxy", "timeout_seconds")
+	helper.Copy(configupgrade.Bool, "tools", "fetch", "exa", "enabled")
+	helper.Copy(configupgrade.Str, "tools", "fetch", "exa", "base_url")
+	helper.Copy(configupgrade.Str, "tools", "fetch", "exa", "api_key")
+	helper.Copy(configupgrade.Bool, "tools", "fetch", "exa", "include_text")
+	helper.Copy(configupgrade.Int, "tools", "fetch", "exa", "text_max_chars")
+	helper.Copy(configupgrade.Bool, "tools", "fetch", "direct", "enabled")
+	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "timeout_seconds")
+	helper.Copy(configupgrade.Str, "tools", "fetch", "direct", "user_agent")
+	helper.Copy(configupgrade.Bool, "tools", "fetch", "direct", "readability")
+	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "max_chars")
+	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "max_redirects")
+	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "cache_ttl_seconds")
 }

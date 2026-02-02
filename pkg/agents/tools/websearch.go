@@ -3,10 +3,11 @@ package tools
 import (
 	"context"
 	"fmt"
-	"time"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/beeper/ai-bridge/pkg/search"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 	"github.com/beeper/ai-bridge/pkg/shared/websearch"
 )
@@ -30,16 +31,55 @@ func executeWebSearch(ctx context.Context, args map[string]any) (*Result, error)
 	if err != nil {
 		return ErrorResult("web_search", err.Error()), nil
 	}
+	count, _ := websearch.ParseCountAndIgnoredOptions(args)
+	country, _ := args["country"].(string)
+	searchLang, _ := args["search_lang"].(string)
+	uiLang, _ := args["ui_lang"].(string)
+	freshness, _ := args["freshness"].(string)
 
-	count, ignoredOptions := websearch.ParseCountAndIgnoredOptions(args)
+	req := search.Request{
+		Query:      query,
+		Count:      count,
+		Country:    strings.TrimSpace(country),
+		SearchLang: strings.TrimSpace(searchLang),
+		UILang:     strings.TrimSpace(uiLang),
+		Freshness:  strings.TrimSpace(freshness),
+	}
 
-	start := time.Now()
-	response, err := websearch.DuckDuckGoSearch(ctx, query)
+	cfg := search.ApplyEnvDefaults(nil)
+	resp, err := search.Search(ctx, req, cfg)
 	if err != nil {
 		return ErrorResult("web_search", fmt.Sprintf("search failed: %v", err)), nil
 	}
-	tookMs := time.Since(start).Milliseconds()
 
-	payload := websearch.BuildPayload(query, count, tookMs, response, ignoredOptions)
+	payload := map[string]any{
+		"query":      resp.Query,
+		"provider":   resp.Provider,
+		"count":      resp.Count,
+		"tookMs":     resp.TookMs,
+		"answer":     resp.Answer,
+		"summary":    resp.Summary,
+		"definition": resp.Definition,
+		"warning":    resp.Warning,
+		"noResults":  resp.NoResults,
+		"cached":     resp.Cached,
+	}
+	if len(resp.Results) > 0 {
+		results := make([]map[string]any, 0, len(resp.Results))
+		for _, r := range resp.Results {
+			results = append(results, map[string]any{
+				"title":       r.Title,
+				"url":         r.URL,
+				"description": r.Description,
+				"published":   r.Published,
+				"siteName":    r.SiteName,
+			})
+		}
+		payload["results"] = results
+	}
+	if resp.Extras != nil {
+		payload["extras"] = resp.Extras
+	}
+
 	return JSONResult(payload), nil
 }
