@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"maunium.net/go/mautrix/id"
@@ -27,7 +26,10 @@ func executeMessageRead(ctx context.Context, args map[string]any, btc *BridgeToo
 		return "", fmt.Errorf("failed to send read receipt: %w", err)
 	}
 
-	return fmt.Sprintf(`{"action":"read","message_id":%q,"status":"sent"}`, targetEventID), nil
+	return jsonActionResult("read", map[string]any{
+		"message_id": targetEventID,
+		"status":     "sent",
+	})
 }
 
 // executeMessageChannelInfo handles the channel-info action - gets room information.
@@ -41,14 +43,12 @@ func executeMessageChannelInfo(ctx context.Context, _ map[string]any, btc *Bridg
 		return "", fmt.Errorf("room info not available")
 	}
 
-	result, _ := json.Marshal(map[string]any{
-		"action":       "channel-info",
+	return jsonActionResult("channel-info", map[string]any{
 		"room_id":      info.RoomID,
 		"name":         info.Name,
 		"topic":        info.Topic,
 		"member_count": info.MemberCount,
 	})
-	return string(result), nil
 }
 
 // executeMessageMemberInfo handles the member-info action - gets user profile.
@@ -68,13 +68,11 @@ func executeMessageMemberInfo(ctx context.Context, args map[string]any, btc *Bri
 		return "", fmt.Errorf("user profile not available")
 	}
 
-	result, _ := json.Marshal(map[string]any{
-		"action":       "member-info",
+	return jsonActionResult("member-info", map[string]any{
 		"user_id":      profile.UserID,
 		"display_name": profile.DisplayName,
 		"avatar_url":   profile.AvatarURL,
 	})
-	return string(result), nil
 }
 
 // executeMessageReactions handles the reactions action - lists reactions on a message.
@@ -91,13 +89,11 @@ func executeMessageReactions(ctx context.Context, args map[string]any, btc *Brid
 		return "", fmt.Errorf("failed to list reactions: %w", err)
 	}
 
-	result, _ := json.Marshal(map[string]any{
-		"action":     "reactions",
+	return jsonActionResult("reactions", map[string]any{
 		"message_id": msgID,
 		"reactions":  reactions,
 		"count":      len(reactions),
 	})
-	return string(result), nil
 }
 
 // executeMessageReactRemove handles reaction removal - removes the bot's reactions.
@@ -122,5 +118,10 @@ func executeMessageReactRemove(ctx context.Context, args map[string]any, btc *Br
 		return "", fmt.Errorf("failed to remove reactions: %w", err)
 	}
 
-	return fmt.Sprintf(`{"action":"react","emoji":%q,"message_id":%q,"removed":%d,"status":"removed"}`, emoji, targetEventID, removed), nil
+	return jsonActionResult("react", map[string]any{
+		"emoji":      emoji,
+		"message_id": targetEventID,
+		"removed":    removed,
+		"status":     "removed",
+	})
 }

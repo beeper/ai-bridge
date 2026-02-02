@@ -80,51 +80,9 @@ func BuiltinTools() []ToolDefinition {
 		},
 		{
 			Name:        ToolNameMessage,
-			Description: "Send messages and perform channel actions in the current chat. Supports: send, react, reactions, edit, delete, reply, pin, unpin, list-pins, thread-reply, search, read, member-info, channel-info.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"action": map[string]any{
-						"type":        "string",
-						"enum":        []string{"send", "react", "reactions", "edit", "delete", "reply", "pin", "unpin", "list-pins", "thread-reply", "search", "read", "member-info", "channel-info"},
-						"description": "The action to perform",
-					},
-					"message": map[string]any{
-						"type":        "string",
-						"description": "For send/edit/reply/thread-reply: the message text",
-					},
-					"message_id": map[string]any{
-						"type":        "string",
-						"description": "Target message ID for react/reactions/edit/delete/reply/pin/unpin/thread-reply/read",
-					},
-					"emoji": map[string]any{
-						"type":        "string",
-						"description": "For action=react: the emoji to react with (empty to remove all reactions)",
-					},
-					"remove": map[string]any{
-						"type":        "boolean",
-						"description": "For action=react: set true to remove the reaction instead of adding",
-					},
-					"user_id": map[string]any{
-						"type":        "string",
-						"description": "For action=member-info: the Matrix user ID to look up (e.g., @user:server.com)",
-					},
-					"thread_id": map[string]any{
-						"type":        "string",
-						"description": "For action=thread-reply: the thread root message ID",
-					},
-					"query": map[string]any{
-						"type":        "string",
-						"description": "For action=search: search query to find messages",
-					},
-					"limit": map[string]any{
-						"type":        "number",
-						"description": "For action=search: max results to return (default: 20)",
-					},
-				},
-				"required": []string{"action"},
-			},
-			Execute: executeMessage,
+			Description: toolspec.MessageDescription,
+			Parameters:  toolspec.MessageSchema(),
+			Execute:     executeMessage,
 		},
 		{
 			Name:        ToolNameTTS,
@@ -304,7 +262,7 @@ func BuiltinTools() []ToolDefinition {
 }
 
 // ToolNameMessage is the name of the message tool.
-const ToolNameMessage = "message"
+const ToolNameMessage = toolspec.MessageName
 
 // ToolNameTTS is the name of the text-to-speech tool.
 const ToolNameTTS = "tts"
@@ -413,7 +371,11 @@ func executeMessageReact(ctx context.Context, args map[string]any, btc *BridgeTo
 	// Send reaction
 	btc.Client.sendReaction(ctx, btc.Portal, targetEventID, emoji)
 
-	return fmt.Sprintf(`{"action":"react","emoji":%q,"message_id":%q,"status":"sent"}`, emoji, targetEventID), nil
+	return jsonActionResult("react", map[string]any{
+		"emoji":      emoji,
+		"message_id": targetEventID,
+		"status":     "sent",
+	})
 }
 
 // executeMessageSend handles the send action of the message tool.
@@ -428,7 +390,10 @@ func executeMessageSend(ctx context.Context, args map[string]any, btc *BridgeToo
 		return "", err
 	}
 
-	return fmt.Sprintf(`{"action":"send","event_id":%q,"status":"sent"}`, respID), nil
+	return jsonActionResult("send", map[string]any{
+		"event_id": respID,
+		"status":   "sent",
+	})
 }
 
 // executeMessageEdit handles the edit action - edits an existing message.
@@ -475,7 +440,11 @@ func executeMessageEdit(ctx context.Context, args map[string]any, btc *BridgeToo
 		return "", fmt.Errorf("failed to edit message: %w", err)
 	}
 
-	return fmt.Sprintf(`{"action":"edit","event_id":%q,"edited_id":%q,"status":"sent"}`, resp.EventID, targetEventID), nil
+	return jsonActionResult("edit", map[string]any{
+		"event_id":  resp.EventID,
+		"edited_id": targetEventID,
+		"status":    "sent",
+	})
 }
 
 // executeMessageDelete handles the delete action - redacts a message.
@@ -502,7 +471,10 @@ func executeMessageDelete(ctx context.Context, args map[string]any, btc *BridgeT
 		return "", fmt.Errorf("failed to delete message: %w", err)
 	}
 
-	return fmt.Sprintf(`{"action":"delete","deleted_id":%q,"status":"deleted"}`, targetEventID), nil
+	return jsonActionResult("delete", map[string]any{
+		"deleted_id": targetEventID,
+		"status":     "deleted",
+	})
 }
 
 // executeMessageReply handles the reply action - sends a message as a reply to another.
@@ -526,7 +498,11 @@ func executeMessageReply(ctx context.Context, args map[string]any, btc *BridgeTo
 		return "", err
 	}
 
-	return fmt.Sprintf(`{"action":"reply","event_id":%q,"reply_to":%q,"status":"sent"}`, respID, targetEventID), nil
+	return jsonActionResult("reply", map[string]any{
+		"event_id": respID,
+		"reply_to": targetEventID,
+		"status":   "sent",
+	})
 }
 
 // executeMessagePin handles pin/unpin actions - updates room pinned events.
@@ -593,7 +569,11 @@ func executeMessagePin(ctx context.Context, args map[string]any, btc *BridgeTool
 	if !pin {
 		action = "unpin"
 	}
-	return fmt.Sprintf(`{"action":%q,"message_id":%q,"status":"ok","pinned_count":%d}`, action, targetEventID, len(pinnedEvents)), nil
+	return jsonActionResult(action, map[string]any{
+		"message_id":   targetEventID,
+		"status":       "ok",
+		"pinned_count": len(pinnedEvents),
+	})
 }
 
 // executeMessageListPins handles list-pins action - returns currently pinned messages.
@@ -601,8 +581,10 @@ func executeMessageListPins(ctx context.Context, btc *BridgeToolContext) (string
 	pinnedEvents := getPinnedEventIDs(ctx, btc)
 
 	// Build JSON response
-	pinnedJSON, _ := json.Marshal(pinnedEvents)
-	return fmt.Sprintf(`{"action":"list-pins","pinned":%s,"count":%d}`, string(pinnedJSON), len(pinnedEvents)), nil
+	return jsonActionResult("list-pins", map[string]any{
+		"pinned": pinnedEvents,
+		"count":  len(pinnedEvents),
+	})
 }
 
 // executeMessageThreadReply handles thread-reply action - sends a message in a thread.
@@ -630,7 +612,11 @@ func executeMessageThreadReply(ctx context.Context, args map[string]any, btc *Br
 		return "", err
 	}
 
-	return fmt.Sprintf(`{"action":"thread-reply","event_id":%q,"thread_id":%q,"status":"sent"}`, respID, threadRootID), nil
+	return jsonActionResult("thread-reply", map[string]any{
+		"event_id":  respID,
+		"thread_id": threadRootID,
+		"status":    "sent",
+	})
 }
 
 // executeMessageSearch searches messages in the current chat.

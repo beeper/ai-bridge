@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/beeper/ai-bridge/pkg/shared/media"
 )
 
 // executeAnalyzeImage analyzes an image with a custom prompt using vision capabilities.
@@ -34,7 +36,7 @@ func executeAnalyzeImage(ctx context.Context, args map[string]any) (string, erro
 
 	if strings.HasPrefix(imageURL, "data:") {
 		// Parse data URI (data:image/png;base64,...)
-		imageB64, mimeType, err = parseDataURI(imageURL)
+		imageB64, mimeType, err = media.ParseDataURI(imageURL)
 		if err != nil {
 			return "", fmt.Errorf("failed to parse data URI: %w", err)
 		}
@@ -86,39 +88,6 @@ func executeAnalyzeImage(ctx context.Context, args map[string]any) (string, erro
 
 	// Return the analysis result
 	return fmt.Sprintf(`{"analysis":%q,"image_url":%q}`, resp.Content, imageURL), nil
-}
-
-// parseDataURI parses a data URI and returns base64 data and mime type.
-func parseDataURI(dataURI string) (string, string, error) {
-	// Format: data:[<mediatype>][;base64],<data>
-	if !strings.HasPrefix(dataURI, "data:") {
-		return "", "", fmt.Errorf("not a data URI")
-	}
-
-	// Remove "data:" prefix
-	rest := dataURI[5:]
-
-	// Find the comma separator
-	commaIdx := strings.Index(rest, ",")
-	if commaIdx == -1 {
-		return "", "", fmt.Errorf("invalid data URI: no comma separator")
-	}
-
-	metadata := rest[:commaIdx]
-	data := rest[commaIdx+1:]
-
-	// Check if base64 encoded
-	if !strings.Contains(metadata, ";base64") {
-		return "", "", fmt.Errorf("only base64 data URIs are supported")
-	}
-
-	// Extract mime type
-	mimeType := strings.Split(metadata, ";")[0]
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-
-	return data, mimeType, nil
 }
 
 // inferMimeTypeFromURL guesses the mime type from a URL's file extension.

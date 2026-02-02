@@ -6,8 +6,6 @@ import (
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 )
 
-const messageToolDescription = "Send messages and perform channel actions in the current chat"
-
 func defaultCalculatorTool() mcp.Tool {
 	return mcp.Tool{
 		Name:        ToolNameCalculator,
@@ -35,7 +33,7 @@ func defaultChatInfoTool() mcp.Tool {
 func defaultMessageTool() mcp.Tool {
 	return mcp.Tool{
 		Name:        ToolNameMessage,
-		Description: messageToolDescription,
+		Description: toolspec.MessageDescription,
 		Annotations: &mcp.ToolAnnotations{Title: "Message"},
 	}
 }
