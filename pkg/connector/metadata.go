@@ -75,6 +75,7 @@ type UserLoginMetadata struct {
 	DefaultChatPortalID  string      `json:"default_chat_portal_id,omitempty"`
 	ModelCache           *ModelCache `json:"model_cache,omitempty"`
 	ChatsSynced          bool        `json:"chats_synced,omitempty"` // True after initial bootstrap completed successfully
+	Gravatar             *GravatarState `json:"gravatar,omitempty"`
 
 	// FileAnnotationCache stores parsed PDF content from OpenRouter's file-parser plugin
 	// Key is the file hash (SHA256), pruned after 7 days
@@ -90,6 +91,19 @@ type UserLoginMetadata struct {
 
 	// Global Memory room for shared agent memories
 	GlobalMemoryRoomID networkid.PortalID `json:"global_memory_room_id,omitempty"`
+}
+
+// GravatarProfile stores the selected Gravatar profile for a login.
+type GravatarProfile struct {
+	Email     string         `json:"email,omitempty"`
+	Hash      string         `json:"hash,omitempty"`
+	Profile   map[string]any `json:"profile,omitempty"` // Full profile payload
+	FetchedAt int64          `json:"fetched_at,omitempty"`
+}
+
+// GravatarState stores Gravatar profile state for a login.
+type GravatarState struct {
+	Primary *GravatarProfile `json:"primary,omitempty"`
 }
 
 // PortalMetadata stores per-room tuning knobs for the assistant.

@@ -861,14 +861,32 @@ func (oc *AIClient) defaultModelForProvider() string {
 // Priority: Room ? User ? Bridge Config
 func (oc *AIClient) effectivePrompt(meta *PortalMetadata) string {
 	// Room-level override takes priority
+	var base string
 	if meta != nil && meta.SystemPrompt != "" {
-		return meta.SystemPrompt
+		base = meta.SystemPrompt
+	} else {
+		loginMeta := loginMetadata(oc.UserLogin)
+		if loginMeta.Defaults != nil && loginMeta.Defaults.SystemPrompt != "" {
+			base = loginMeta.Defaults.SystemPrompt
+		} else {
+			base = oc.connector.Config.DefaultSystemPrompt
+		}
 	}
-	loginMeta := loginMetadata(oc.UserLogin)
-	if loginMeta.Defaults != nil && loginMeta.Defaults.SystemPrompt != "" {
-		return loginMeta.Defaults.SystemPrompt
+	gravatarContext := oc.gravatarContext()
+	if gravatarContext == "" {
+		return base
 	}
-	return oc.connector.Config.DefaultSystemPrompt
+	if strings.TrimSpace(base) == "" {
+		return gravatarContext
+	}
+	return fmt.Sprintf("%s\n\n%s", base, gravatarContext)
+}
+
+func (oc *AIClient) isBossRoom(meta *PortalMetadata) bool {
+	if meta == nil {
+		return false
+	}
+	return agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID)
 }
 
 // getLinkPreviewConfig returns the link preview configuration, with defaults filled in.
