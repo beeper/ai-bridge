@@ -166,6 +166,46 @@ func MessageSchema() map[string]any {
 				"type":        "string",
 				"description": "For send/edit/reply/thread-reply: the message text",
 			},
+			"effectId": map[string]any{
+				"type":        "string",
+				"description": "Optional: message effect name/id for sendWithEffect (ignored by bridge).",
+			},
+			"effect": map[string]any{
+				"type":        "string",
+				"description": "OpenClaw-style alias for effectId (ignored by bridge).",
+			},
+			"media": map[string]any{
+				"type":        "string",
+				"description": "Optional: media URL/path/data URL to send (image/audio/video/file).",
+			},
+			"filename": map[string]any{
+				"type":        "string",
+				"description": "Optional: filename for media uploads.",
+			},
+			"buffer": map[string]any{
+				"type":        "string",
+				"description": "Optional: base64 payload for attachments (optionally a data: URL).",
+			},
+			"contentType": map[string]any{
+				"type":        "string",
+				"description": "Optional: content type override for attachments (alias for mimeType).",
+			},
+			"mimeType": map[string]any{
+				"type":        "string",
+				"description": "Optional: content type override for attachments.",
+			},
+			"caption": map[string]any{
+				"type":        "string",
+				"description": "Optional: caption for media uploads.",
+			},
+			"path": map[string]any{
+				"type":        "string",
+				"description": "Optional: file path to upload (alias for media).",
+			},
+			"filePath": map[string]any{
+				"type":        "string",
+				"description": "OpenClaw-style alias for path.",
+			},
 			"message_id": map[string]any{
 				"type":        "string",
 				"description": "Target message ID for react/reactions/edit/delete/reply/pin/unpin/thread-reply/read",
@@ -198,6 +238,34 @@ func MessageSchema() map[string]any {
 				"type":        "string",
 				"description": "OpenClaw-style alias for message_id when replying",
 			},
+			"asVoice": map[string]any{
+				"type":        "boolean",
+				"description": "Optional: send audio as a voice message (when media is audio).",
+			},
+			"silent": map[string]any{
+				"type":        "boolean",
+				"description": "Optional: send silently (ignored by bridge).",
+			},
+			"quoteText": map[string]any{
+				"type":        "string",
+				"description": "Optional: quote text for replies (ignored by bridge).",
+			},
+			"bestEffort": map[string]any{
+				"type":        "boolean",
+				"description": "Optional: best-effort delivery flag (ignored by bridge).",
+			},
+			"gifPlayback": map[string]any{
+				"type":        "boolean",
+				"description": "Optional: treat video media as GIF playback (sets MauGIF flag).",
+			},
+			"buttons": map[string]any{
+				"type":        "array",
+				"description": "Optional: inline keyboard buttons (ignored by bridge).",
+			},
+			"card": map[string]any{
+				"type":        "object",
+				"description": "Optional: adaptive card payload (ignored by bridge).",
+			},
 			"query": map[string]any{
 				"type":        "string",
 				"description": "For action=search: search query to find messages",
@@ -221,6 +289,26 @@ func MessageSchema() map[string]any {
 			"description": map[string]any{
 				"type":        "string",
 				"description": "For action=channel-edit: alias for topic",
+			},
+			"channel": map[string]any{
+				"type":        "string",
+				"description": "Optional: channel override (ignored by bridge; current room only).",
+			},
+			"target": map[string]any{
+				"type":        "string",
+				"description": "Optional: target override (ignored by bridge; current room only).",
+			},
+			"targets": map[string]any{
+				"type":        "array",
+				"description": "Optional: multi-target override (ignored by bridge; current room only).",
+			},
+			"accountId": map[string]any{
+				"type":        "string",
+				"description": "Optional: account override (ignored by bridge).",
+			},
+			"dryRun": map[string]any{
+				"type":        "boolean",
+				"description": "Optional: dry run (ignored by bridge).",
 			},
 		},
 		"required": []string{"action"},

@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -231,6 +234,149 @@ func normalizeMessageArgs(args map[string]any) {
 			args["thread_id"] = v
 		}
 	}
+	if _, ok := args["path"]; !ok {
+		if v, ok := args["filePath"]; ok {
+			args["path"] = v
+		}
+	}
+	if _, ok := args["filename"]; !ok {
+		if v, ok := args["fileName"]; ok {
+			args["filename"] = v
+		}
+	}
+	if _, ok := args["mimeType"]; !ok {
+		if v, ok := args["contentType"]; ok {
+			args["mimeType"] = v
+		}
+	}
+}
+
+func firstNonEmptyString(values ...any) string {
+	for _, raw := range values {
+		switch v := raw.(type) {
+		case string:
+			if s := strings.TrimSpace(v); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func normalizeMimeString(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if semi := strings.IndexByte(value, ';'); semi >= 0 {
+		value = value[:semi]
+	}
+	return strings.TrimSpace(value)
+}
+
+func messageTypeForMIME(mimeType string) event.MessageType {
+	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
+	switch {
+	case strings.HasPrefix(mimeType, "image/"):
+		return event.MsgImage
+	case strings.HasPrefix(mimeType, "audio/"):
+		return event.MsgAudio
+	case strings.HasPrefix(mimeType, "video/"):
+		return event.MsgVideo
+	default:
+		return event.MsgFile
+	}
+}
+
+func resolveMessageMedia(ctx context.Context, btc *BridgeToolContext, bufferInput, mediaInput string) ([]byte, string, error) {
+	if bufferInput != "" {
+		return media.DecodeBase64(bufferInput)
+	}
+	if mediaInput == "" {
+		return nil, "", fmt.Errorf("missing media input")
+	}
+	if strings.HasPrefix(mediaInput, "data:") {
+		return media.DecodeBase64(mediaInput)
+	}
+
+	resolved := expandUserPath(mediaInput)
+	b64Data, mimeType, err := btc.Client.downloadAndEncodeMedia(ctx, resolved, nil, 50)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to load media: %w", err)
+	}
+	data, err := base64.StdEncoding.DecodeString(b64Data)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to decode media: %w", err)
+	}
+	return data, mimeType, nil
+}
+
+func resolveMessageFilename(args map[string]any, mediaInput, mimeType string) string {
+	if v, ok := args["filename"].(string); ok && strings.TrimSpace(v) != "" {
+		return ensureFilenameExtension(strings.TrimSpace(v), mimeType)
+	}
+
+	if mediaInput != "" && !strings.HasPrefix(mediaInput, "data:") {
+		if parsed, err := url.Parse(mediaInput); err == nil && parsed.Path != "" {
+			base := path.Base(parsed.Path)
+			if base != "" && base != "." && base != "/" {
+				return ensureFilenameExtension(base, mimeType)
+			}
+		}
+		base := filepath.Base(mediaInput)
+		if base != "" && base != "." && base != string(filepath.Separator) {
+			return ensureFilenameExtension(base, mimeType)
+		}
+	}
+
+	ext := extensionFromMIME(mimeType)
+	if ext == "" {
+		ext = ".bin"
+	}
+	return "file" + ext
+}
+
+func ensureFilenameExtension(fileName, mimeType string) string {
+	if strings.TrimSpace(fileName) == "" {
+		return fileName
+	}
+	if filepath.Ext(fileName) != "" {
+		return fileName
+	}
+	ext := extensionFromMIME(mimeType)
+	if ext == "" {
+		return fileName
+	}
+	return fileName + ext
+}
+
+func extensionFromMIME(mimeType string) string {
+	if mimeType == "" {
+		return ""
+	}
+	exts, err := mime.ExtensionsByType(mimeType)
+	if err != nil || len(exts) == 0 {
+		return ""
+	}
+	return exts[0]
+}
+
+func expandUserPath(value string) string {
+	if strings.HasPrefix(value, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return value
+		}
+		trimmed := strings.TrimPrefix(value, "~")
+		if trimmed == "" {
+			return home
+		}
+		if strings.HasPrefix(trimmed, string(filepath.Separator)) {
+			return filepath.Join(home, trimmed[1:])
+		}
+		return filepath.Join(home, trimmed)
+	}
+	return value
 }
 
 // executeMessage handles the message tool for sending messages and channel actions.
@@ -322,19 +468,110 @@ func executeMessageReact(ctx context.Context, args map[string]any, btc *BridgeTo
 
 // executeMessageSend handles the send action of the message tool.
 func executeMessageSend(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
-	message, ok := args["message"].(string)
-	if !ok || message == "" {
-		return "", fmt.Errorf("action=send requires 'message' parameter")
+	message, _ := args["message"].(string)
+	message = strings.TrimSpace(message)
+	caption, _ := args["caption"].(string)
+	caption = strings.TrimSpace(caption)
+	if caption != "" && message != "" && caption != message {
+		caption = message + "\n\n" + caption
+	} else if caption == "" {
+		caption = message
 	}
 
-	respID, err := sendFormattedMessage(ctx, btc, message, nil, "failed to send message")
+	bufferInput, _ := args["buffer"].(string)
+	bufferInput = strings.TrimSpace(bufferInput)
+	mediaInput := firstNonEmptyString(args["media"], args["path"])
+
+	if bufferInput == "" && mediaInput == "" {
+		if message == "" {
+			return "", fmt.Errorf("action=send requires 'message' parameter")
+		}
+		respID, err := sendFormattedMessage(ctx, btc, message, nil, "failed to send message")
+		if err != nil {
+			return "", err
+		}
+		return jsonActionResult("send", map[string]any{
+			"event_id": respID,
+			"status":   "sent",
+		})
+	}
+
+	dryRun, _ := args["dryRun"].(bool)
+	if dryRun {
+		return jsonActionResult("send", map[string]any{
+			"status": "dry_run",
+		})
+	}
+
+	data, detectedMime, err := resolveMessageMedia(ctx, btc, bufferInput, mediaInput)
 	if err != nil {
 		return "", err
 	}
 
+	mimeType := normalizeMimeString(firstNonEmptyString(args["mimeType"], detectedMime))
+	if mimeType == "" {
+		mimeType = http.DetectContentType(data)
+	}
+
+	fileName := resolveMessageFilename(args, mediaInput, mimeType)
+	if caption == "" {
+		caption = fileName
+	}
+
+	msgType := messageTypeForMIME(mimeType)
+	asVoice, _ := args["asVoice"].(bool)
+	gifPlayback, _ := args["gifPlayback"].(bool)
+
+	intent := btc.Client.getModelIntent(ctx, btc.Portal)
+	if intent == nil {
+		return "", fmt.Errorf("failed to get model intent")
+	}
+
+	uri, file, err := intent.UploadMedia(ctx, btc.Portal.MXID, data, fileName, mimeType)
+	if err != nil {
+		return "", fmt.Errorf("upload failed: %w", err)
+	}
+
+	info := map[string]any{
+		"mimetype": mimeType,
+		"size":     len(data),
+	}
+	if gifPlayback && msgType == event.MsgVideo {
+		info["fi.mau.gif"] = true
+		info["is_animated"] = true
+	}
+	if mimeType == "image/gif" {
+		info["is_animated"] = true
+	}
+
+	rawContent := map[string]any{
+		"msgtype": msgType,
+		"body":    caption,
+		"info":    info,
+	}
+	if fileName != "" {
+		rawContent["filename"] = fileName
+	}
+	if file != nil {
+		rawContent["file"] = file
+	} else {
+		rawContent["url"] = string(uri)
+	}
+	if msgType == event.MsgAudio && asVoice {
+		rawContent["org.matrix.msc3245.voice"] = map[string]any{}
+	}
+
+	eventContent := &event.Content{Raw: rawContent}
+	resp, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventMessage, eventContent, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to send media message: %w", err)
+	}
+
 	return jsonActionResult("send", map[string]any{
-		"event_id": respID,
-		"status":   "sent",
+		"event_id":  resp.EventID,
+		"status":    "sent",
+		"mime_type": mimeType,
+		"msgtype":   msgType,
 	})
 }
 
