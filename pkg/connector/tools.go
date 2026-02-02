@@ -975,6 +975,7 @@ func executeWebFetch(ctx context.Context, args map[string]any) (string, error) {
 		content = content[:maxChars] + "...[truncated]"
 		truncated = true
 	}
+	wrappedLength := len(content)
 
 	finalURL := urlStr
 	if resp.Request != nil && resp.Request.URL != nil {
@@ -988,8 +989,9 @@ func executeWebFetch(ctx context.Context, args map[string]any) (string, error) {
 		"extractMode": extractMode,
 		"extractor":   extractor,
 		"truncated":   truncated,
-		"length":      len(content),
-		"rawLength":   rawLength,
+		"length":        len(content),
+		"rawLength":     rawLength,
+		"wrappedLength": wrappedLength,
 		"fetchedAt":   time.Now().Format(time.RFC3339),
 		"tookMs":      time.Since(start).Milliseconds(),
 		"text":        content,
