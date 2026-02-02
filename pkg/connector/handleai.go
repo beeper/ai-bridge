@@ -291,6 +291,14 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, meta *PortalMet
 			params.Tools = append(params.Tools, ToOpenAITools(enabledTools)...)
 			log.Debug().Int("count", len(enabledTools)).Msg("Added builtin function tools")
 		}
+
+		// Add MCP tools from connected Desktop
+		if oc.mcpClient != nil && oc.mcpClient.HasDesktopTools() {
+			mcpTools := oc.mcpClient.GetDesktopTools()
+			mcpDefs := MCPToolsToDefinitions(mcpTools)
+			params.Tools = append(params.Tools, ToOpenAITools(mcpDefs)...)
+			log.Debug().Int("count", len(mcpDefs)).Msg("Added MCP tools from Desktop")
+		}
 	}
 
 	return params
@@ -1007,6 +1015,13 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 		})
 		if len(enabledTools) > 0 {
 			params.Tools = append(params.Tools, ToOpenAITools(enabledTools)...)
+		}
+
+		// Add MCP tools from connected Desktop
+		if oc.mcpClient != nil && oc.mcpClient.HasDesktopTools() {
+			mcpTools := oc.mcpClient.GetDesktopTools()
+			mcpDefs := MCPToolsToDefinitions(mcpTools)
+			params.Tools = append(params.Tools, ToOpenAITools(mcpDefs)...)
 		}
 	}
 
@@ -1756,12 +1771,27 @@ func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Po
 }
 
 // executeBuiltinTool finds and executes a builtin tool by name
+// It first checks for Desktop MCP tools, then falls back to builtin tools
 func (oc *AIClient) executeBuiltinTool(ctx context.Context, toolName string, argsJSON string) (string, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("invalid tool arguments: %w", err)
 	}
 
+	// Check if this is a Desktop MCP tool
+	if oc.mcpClient != nil {
+		device := oc.mcpClient.GetPreferredDevice()
+		if device != nil && len(device.Tools) > 0 {
+			for _, mcpTool := range device.Tools {
+				if mcpTool.Name == toolName {
+					oc.log.Debug().Str("tool_name", toolName).Msg("Executing tool via Desktop MCP")
+					return oc.callDesktopTool(ctx, toolName, args)
+				}
+			}
+		}
+	}
+
+	// Fall back to builtin tools
 	for _, tool := range BuiltinTools() {
 		if tool.Name == toolName {
 			return tool.Execute(ctx, args)

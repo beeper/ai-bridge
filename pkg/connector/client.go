@@ -220,6 +220,9 @@ type AIClient struct {
 	// Pending message queue per room (for turn-based behavior)
 	pendingMessages   map[id.RoomID][]pendingMessage
 	pendingMessagesMu sync.Mutex
+
+	// MCP over Matrix client for Desktop IPC
+	mcpClient *MCPMatrixClient
 }
 
 // pendingMessageType indicates what kind of pending message this is
@@ -268,6 +271,9 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		activeRooms:     make(map[id.RoomID]bool),
 		pendingMessages: make(map[id.RoomID][]pendingMessage),
 	}
+
+	// Initialize MCP Matrix client for Desktop IPC
+	oc.mcpClient = NewMCPMatrixClient(oc)
 
 	// Use per-user base_url if provided
 	baseURL := strings.TrimSpace(meta.BaseURL)
@@ -569,6 +575,15 @@ func (oc *AIClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*
 
 func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	ghostID := string(ghost.ID)
+
+	// Handle MCP relay ghost
+	if ghostID == string(mcpRelayUserID()) {
+		return &bridgev2.UserInfo{
+			Name:        ptr.Ptr("MCP Relay"),
+			IsBot:       ptr.Ptr(true),
+			Identifiers: []string{MCPRelayIdentifier},
+		}, nil
+	}
 
 	// Parse model from ghost ID (format: "model-{escaped-model-id}")
 	if modelID := parseModelFromGhostID(ghostID); modelID != "" {
@@ -1466,4 +1481,89 @@ type AgentState struct {
 	Model       string
 	ToolCalls   []string // Event IDs of tool calls
 	ImageEvents []string // Event IDs of generated images
+}
+
+// =============================================================================
+// MCP over Matrix Methods
+// =============================================================================
+
+// initializeMCPConnection initializes the MCP connection with a Desktop device
+func (oc *AIClient) initializeMCPConnection(ctx context.Context, deviceID string) error {
+	meta := loginMetadata(oc.UserLogin)
+	device, ok := meta.DesktopDevices[deviceID]
+	if !ok {
+		return fmt.Errorf("device %s not found", deviceID)
+	}
+
+	oc.log.Info().
+		Str("device_id", deviceID).
+		Stringer("room_id", device.RoomID).
+		Msg("Initializing MCP connection with Desktop")
+
+	// Send initialize request
+	resp, err := oc.mcpClient.Initialize(ctx, device.RoomID, deviceID)
+	if err != nil {
+		return fmt.Errorf("MCP initialize failed: %w", err)
+	}
+
+	oc.log.Info().Interface("response", resp).Msg("MCP initialize successful")
+
+	// Request tools list
+	if err := oc.refreshMCPTools(ctx, deviceID); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to get initial tools list")
+	}
+
+	return nil
+}
+
+// refreshMCPTools refreshes the cached tools from a Desktop device
+func (oc *AIClient) refreshMCPTools(ctx context.Context, deviceID string) error {
+	meta := loginMetadata(oc.UserLogin)
+	device, ok := meta.DesktopDevices[deviceID]
+	if !ok {
+		return fmt.Errorf("device %s not found", deviceID)
+	}
+
+	oc.log.Debug().Str("device_id", deviceID).Msg("Refreshing MCP tools")
+
+	tools, err := oc.mcpClient.ListTools(ctx, device.RoomID, deviceID)
+	if err != nil {
+		return fmt.Errorf("failed to list tools: %w", err)
+	}
+
+	// Update cached tools
+	device.Tools = tools
+	device.LastSeen = time.Now().Unix()
+
+	// Save updated metadata
+	if err := oc.UserLogin.Save(ctx); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to save login metadata after tools refresh")
+	}
+
+	oc.log.Info().
+		Str("device_id", deviceID).
+		Int("tool_count", len(tools)).
+		Msg("Refreshed MCP tools from Desktop")
+
+	return nil
+}
+
+// callDesktopTool executes a tool on the preferred Desktop device
+func (oc *AIClient) callDesktopTool(ctx context.Context, toolName string, arguments map[string]any) (string, error) {
+	device := oc.mcpClient.GetPreferredDevice()
+	if device == nil {
+		return "", fmt.Errorf("no desktop device connected")
+	}
+
+	oc.log.Debug().
+		Str("tool_name", toolName).
+		Str("device_id", device.DeviceID).
+		Msg("Calling Desktop tool via MCP")
+
+	resp, err := oc.mcpClient.CallTool(ctx, device.RoomID, device.DeviceID, toolName, arguments)
+	if err != nil {
+		return "", err
+	}
+
+	return ParseToolResult(resp)
 }

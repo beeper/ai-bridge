@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"encoding/json"
 	"reflect"
 
 	"maunium.net/go/mautrix/event"
@@ -600,14 +601,15 @@ type ToolToggle struct {
 
 // ToolInfo describes a tool and its status for room state broadcasting
 type ToolInfo struct {
-	Name        string        `json:"name"`
-	DisplayName string        `json:"display_name"` // Human-readable name for UI
-	Type        string        `json:"type"`         // "builtin", "provider", "plugin", "mcp"
-	Description string        `json:"description,omitempty"`
-	Enabled     bool          `json:"enabled"`
-	Available   bool          `json:"available"`        // Based on model capabilities and provider
-	Source      SettingSource `json:"source,omitempty"` // Where enabled state came from
-	Reason      string        `json:"reason,omitempty"` // Only when limited/unavailable
+	Name        string         `json:"name"`
+	DisplayName string         `json:"display_name"` // Human-readable name for UI
+	Type        string         `json:"type"`         // "builtin", "provider", "plugin", "mcp"
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema,omitempty"` // JSON Schema for tool parameters
+	Enabled     bool           `json:"enabled"`
+	Available   bool           `json:"available"`        // Based on model capabilities and provider
+	Source      SettingSource  `json:"source,omitempty"` // Where enabled state came from
+	Reason      string         `json:"reason,omitempty"` // Only when limited/unavailable
 }
 
 // StreamingConfig contains streaming behavior settings
@@ -706,4 +708,69 @@ type AttachmentMetadata struct {
 	Size     int    `json:"size,omitempty"`
 	Width    int    `json:"width,omitempty"`  // For images
 	Height   int    `json:"height,omitempty"` // For images
+}
+
+// =============================================================================
+// MCP over Matrix Transport Events (IPC via m.room.message)
+// =============================================================================
+
+// IPCMsgType is the msgtype used for IPC messages within m.room.message events
+// This allows IPC to use standard Matrix message infrastructure without custom event types
+const IPCMsgType = "com.beeper.ai.ipc"
+
+// IPCMessageType identifies the type of IPC message
+type IPCMessageType string
+
+const (
+	IPCDesktopHello    IPCMessageType = "desktop_hello"
+	IPCMCPRequest      IPCMessageType = "mcp_request"
+	IPCMCPResponse     IPCMessageType = "mcp_response"
+	IPCMCPNotification IPCMessageType = "mcp_notification"
+)
+
+// IPCContent is the content structure for IPC data within the custom field
+type IPCContent struct {
+	DeviceID    string          `json:"device_id"`
+	MessageType IPCMessageType  `json:"message_type"`
+	Payload     json.RawMessage `json:"payload"`
+}
+
+// DesktopHelloPayload is the payload for desktop_hello IPC messages
+type DesktopHelloPayload struct {
+	DeviceName string `json:"device_name,omitempty"`
+	AppVersion string `json:"app_version,omitempty"`
+}
+
+// MCPPayload is the payload for MCP request/response/notification IPC messages
+type MCPPayload struct {
+	JSONRPC string         `json:"jsonrpc"`
+	ID      any            `json:"id,omitempty"` // string, number, or null
+	Method  string         `json:"method,omitempty"`
+	Params  map[string]any `json:"params,omitempty"`
+	Result  any            `json:"result,omitempty"`
+	Error   *MCPRPCError   `json:"error,omitempty"`
+}
+
+// MCPJSONRPCBase represents a generic JSON-RPC 2.0 message
+type MCPJSONRPCBase struct {
+	JSONRPC string         `json:"jsonrpc"`
+	ID      any            `json:"id,omitempty"` // string, number, or null
+	Method  string         `json:"method,omitempty"`
+	Params  map[string]any `json:"params,omitempty"`
+	Result  any            `json:"result,omitempty"`
+	Error   *MCPRPCError   `json:"error,omitempty"`
+}
+
+// MCPRPCError represents a JSON-RPC 2.0 error
+type MCPRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
+}
+
+// MCPTool represents an MCP tool definition received from Desktop
+type MCPTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"inputSchema,omitempty"`
 }

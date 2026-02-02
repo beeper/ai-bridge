@@ -84,10 +84,14 @@ func (oc *OpenAIConnector) registerCustomEventHandlers() {
 	// Register handler for BeeperSendState wrapper events (desktop E2EE state updates)
 	matrixConnector.EventProcessor.On(event.BeeperSendState, oc.handleBeeperSendStateEvent)
 
+	// Register handler for m.room.message to catch IPC messages with msgtype=com.beeper.ai.ipc
+	matrixConnector.EventProcessor.On(event.EventMessage, oc.handleMessageEvent)
+
 	oc.br.Log.Info().
 		Str("beeper_send_state_type", event.BeeperSendState.Type).
 		Str("beeper_send_state_class", event.BeeperSendState.Class.Name()).
 		Msg("Registered room settings event handlers (direct and BeeperSendState)")
+	oc.br.Log.Info().Msg("Registered IPC handler via m.room.message events")
 }
 
 // handleRoomSettingsEvent processes Matrix room settings state events from users
@@ -392,4 +396,225 @@ func (oc *OpenAIConnector) getLoginForPortal(ctx context.Context, user *bridgev2
 	}
 
 	return login
+}
+
+// =============================================================================
+// IPC Handler (MCP over m.room.message)
+// =============================================================================
+
+// handleMessageEvent processes m.room.message events and routes IPC messages
+// IPC messages use msgtype=com.beeper.ai.ipc with IPC data in a custom field
+func (oc *OpenAIConnector) handleMessageEvent(ctx context.Context, evt *event.Event) {
+	// Check if this is an IPC message by examining msgtype
+	msg := evt.Content.AsMessage()
+	if msg == nil || event.MessageType(msg.MsgType) != event.MessageType(IPCMsgType) {
+		return // Not an IPC message, ignore
+	}
+
+	log := oc.br.Log.With().
+		Str("component", "ipc_handler").
+		Str("room_id", evt.RoomID.String()).
+		Str("sender", evt.Sender.String()).
+		Logger()
+
+	// Extract IPC content from the custom field
+	ipcRaw, ok := evt.Content.Raw[IPCMsgType]
+	if !ok {
+		log.Warn().Msg("IPC message missing custom field")
+		return
+	}
+
+	// Marshal back to JSON to parse into IPCContent
+	ipcBytes, err := json.Marshal(ipcRaw)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to marshal IPC content")
+		return
+	}
+
+	var ipc IPCContent
+	if err := json.Unmarshal(ipcBytes, &ipc); err != nil {
+		log.Warn().Err(err).Msg("Failed to parse IPC content")
+		return
+	}
+
+	if ipc.DeviceID == "" {
+		log.Warn().Msg("IPC message missing device_id")
+		return
+	}
+
+	log = log.With().
+		Str("device_id", ipc.DeviceID).
+		Str("message_type", string(ipc.MessageType)).
+		Logger()
+
+	// Route based on message type
+	switch ipc.MessageType {
+	case IPCDesktopHello:
+		oc.handleDesktopHello(ctx, evt, &ipc, log)
+	case IPCMCPResponse:
+		oc.handleMCPResponse(ctx, evt, &ipc, log)
+	case IPCMCPNotification:
+		oc.handleMCPNotification(ctx, evt, &ipc, log)
+	case IPCMCPRequest:
+		// Bridge doesn't receive requests from desktop (desktop is the server)
+		log.Debug().Msg("Ignoring MCP request from desktop")
+	default:
+		log.Warn().Msg("Unknown IPC message type")
+	}
+}
+
+// handleDesktopHello processes desktop_hello IPC messages
+func (oc *OpenAIConnector) handleDesktopHello(ctx context.Context, evt *event.Event, ipc *IPCContent, log zerolog.Logger) {
+	// Parse the hello payload
+	payload, err := ParseDesktopHelloPayload(ipc.Payload)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to parse desktop hello payload")
+		return
+	}
+
+	log = log.With().
+		Str("device_name", payload.DeviceName).
+		Str("app_version", payload.AppVersion).
+		Logger()
+
+	log.Info().Msg("Received desktop hello")
+
+	// Find the user login for the sender
+	user, err := oc.br.GetUserByMXID(ctx, evt.Sender)
+	if err != nil || user == nil {
+		log.Warn().Err(err).Msg("Failed to get user for desktop hello")
+		return
+	}
+
+	login := user.GetDefaultLogin()
+	if login == nil {
+		log.Warn().Msg("User has no active login")
+		return
+	}
+
+	client, ok := login.Client.(*AIClient)
+	if !ok || client == nil {
+		log.Warn().Msg("Invalid client type for user login")
+		return
+	}
+
+	// Store the device info
+	meta := loginMetadata(login)
+	if meta.DesktopDevices == nil {
+		meta.DesktopDevices = make(map[string]*DesktopDeviceInfo)
+	}
+
+	meta.DesktopDevices[ipc.DeviceID] = &DesktopDeviceInfo{
+		DeviceID:   ipc.DeviceID,
+		DeviceName: payload.DeviceName,
+		RoomID:     evt.RoomID,
+		LastSeen:   time.Now().Unix(),
+		AppVersion: payload.AppVersion,
+		Online:     true,
+	}
+
+	// Set as preferred if no preference exists
+	if meta.PreferredDesktopDeviceID == "" {
+		meta.PreferredDesktopDeviceID = ipc.DeviceID
+	}
+
+	// Save the updated metadata
+	if err := login.Save(ctx); err != nil {
+		log.Err(err).Msg("Failed to save login metadata")
+		return
+	}
+
+	log.Info().Msg("Stored desktop device mapping")
+
+	// Initialize MCP connection asynchronously
+	go func() {
+		initCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		if err := client.initializeMCPConnection(initCtx, ipc.DeviceID); err != nil {
+			log.Err(err).Msg("Failed to initialize MCP connection")
+		}
+	}()
+}
+
+// handleMCPResponse processes MCP response IPC messages
+func (oc *OpenAIConnector) handleMCPResponse(ctx context.Context, evt *event.Event, ipc *IPCContent, log zerolog.Logger) {
+	// Parse the MCP payload
+	payload, err := ParseMCPPayload(ipc.Payload)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to parse MCP response payload")
+		return
+	}
+
+	log.Debug().
+		Interface("request_id", payload.ID).
+		Msg("Received MCP response")
+
+	// Find the user login for the sender
+	user, err := oc.br.GetUserByMXID(ctx, evt.Sender)
+	if err != nil || user == nil {
+		log.Warn().Err(err).Msg("Failed to get user for MCP response")
+		return
+	}
+
+	login := user.GetDefaultLogin()
+	if login == nil {
+		log.Warn().Msg("User has no active login")
+		return
+	}
+
+	client, ok := login.Client.(*AIClient)
+	if !ok || client == nil {
+		log.Warn().Msg("Invalid client type for user login")
+		return
+	}
+
+	// Route to MCP client
+	if client.mcpClient != nil {
+		client.mcpClient.HandleResponse(ipc, payload)
+	}
+}
+
+// handleMCPNotification processes MCP notification IPC messages
+func (oc *OpenAIConnector) handleMCPNotification(ctx context.Context, evt *event.Event, ipc *IPCContent, log zerolog.Logger) {
+	// Parse the MCP payload
+	payload, err := ParseMCPPayload(ipc.Payload)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to parse MCP notification payload")
+		return
+	}
+
+	log.Debug().
+		Str("method", payload.Method).
+		Msg("Received MCP notification")
+
+	// Handle tools/list_changed notification
+	if payload.Method == "notifications/tools/list_changed" {
+		// Find the user login and refresh tools
+		user, err := oc.br.GetUserByMXID(ctx, evt.Sender)
+		if err != nil || user == nil {
+			log.Warn().Err(err).Msg("Failed to get user for MCP notification")
+			return
+		}
+
+		login := user.GetDefaultLogin()
+		if login == nil {
+			return
+		}
+
+		client, ok := login.Client.(*AIClient)
+		if !ok || client == nil {
+			return
+		}
+
+		// Refresh tools asynchronously
+		go func() {
+			refreshCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			if err := client.refreshMCPTools(refreshCtx, ipc.DeviceID); err != nil {
+				log.Err(err).Msg("Failed to refresh MCP tools")
+			}
+		}()
+	}
 }

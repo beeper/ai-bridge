@@ -5,6 +5,7 @@ import (
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/random"
 	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/id"
 )
 
 // ModelCache stores available models (cached in UserLoginMetadata)
@@ -81,6 +82,24 @@ type UserLoginMetadata struct {
 
 	// User-level defaults for new chats (set via provisioning API)
 	Defaults *UserDefaults `json:"defaults,omitempty"`
+
+	// Desktop IPC devices - maps device_id to device info
+	// Each device has its own IPC room for MCP communication
+	DesktopDevices map[string]*DesktopDeviceInfo `json:"desktop_devices,omitempty"`
+
+	// Preferred desktop device for MCP tool calls
+	PreferredDesktopDeviceID string `json:"preferred_desktop_device_id,omitempty"`
+}
+
+// DesktopDeviceInfo stores information about a connected Beeper Desktop device
+type DesktopDeviceInfo struct {
+	DeviceID   string     `json:"device_id"`
+	DeviceName string     `json:"device_name,omitempty"`
+	RoomID     id.RoomID  `json:"room_id"`
+	LastSeen   int64      `json:"last_seen"`              // Unix timestamp
+	AppVersion string     `json:"app_version,omitempty"`
+	Tools      []MCPTool  `json:"tools,omitempty"`        // Cached tools from this device
+	Online     bool       `json:"online,omitempty"`       // Whether device appears to be online
 }
 
 // PortalMetadata stores per-room tuning knobs for the assistant.
@@ -103,6 +122,7 @@ type PortalMetadata struct {
 	ConversationMode string `json:"conversation_mode,omitempty"`
 	LastResponseID   string `json:"last_response_id,omitempty"`
 	DefaultAgentID   string `json:"default_agent_id,omitempty"`
+	IsMCPRelay       bool   `json:"is_mcp_relay,omitempty"` // True if this is an MCP relay room for Desktop IPC
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild
