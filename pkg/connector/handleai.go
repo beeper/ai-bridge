@@ -2665,8 +2665,9 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 		return // Don't send if we can't persist state
 	}
 
-	// Determine sender and display name based on whether this is an agent room
-	var senderID networkid.UserID
+	// Use portal.OtherUserID as authoritative source for sender
+	// This ensures welcome message sender always matches the room's configured ghost
+	senderID := portal.OtherUserID
 	var displayName string
 
 	agentID := meta.AgentID
@@ -2674,10 +2675,20 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 		agentID = meta.DefaultAgentID
 	}
 
-	if agentID != "" {
-		// Agent room - use agent ghost
+	// Fallback: compute sender if portal.OtherUserID is not set
+	if senderID == "" {
 		modelID := oc.effectiveModel(meta)
-		senderID = agentModelUserID(agentID, modelID)
+		if agentID != "" {
+			senderID = agentModelUserID(agentID, modelID)
+		} else {
+			senderID = modelUserID(modelID)
+		}
+	}
+
+	// Determine display name based on whether this is an agent room
+	if agentID != "" {
+		// Agent room - get agent display name
+		modelID := oc.effectiveModel(meta)
 		store := NewAgentStoreAdapter(oc)
 		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil {
 			displayName = oc.agentModelDisplayName(agent.Name, modelID)
@@ -2686,9 +2697,8 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 			displayName = agentID // Fallback to agent ID
 		}
 	} else {
-		// Model room - use model ghost
+		// Model room - get model display name
 		modelID := oc.effectiveModel(meta)
-		senderID = modelUserID(modelID)
 		displayName = modelContactName(modelID, oc.findModelInfo(modelID))
 		oc.ensureGhostDisplayName(ctx, modelID)
 	}

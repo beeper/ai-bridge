@@ -8,6 +8,13 @@ import (
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
 )
 
+// ReactionGuidance controls reaction behavior in prompts.
+// Matches clawdbot's reactionGuidance with level and channel.
+type ReactionGuidance struct {
+	Level   string // "minimal" or "extensive"
+	Channel string // e.g., "matrix", "signal"
+}
+
 // SystemPromptParams contains all inputs for building a system prompt.
 // This follows the clawdbot/openclaw flat params pattern.
 type SystemPromptParams struct {
@@ -20,6 +27,12 @@ type SystemPromptParams struct {
 	Date        time.Time          // Current date
 	PromptMode  PromptMode         // full/minimal/none (overrides agent's mode if set)
 	AgentList   []*AgentDefinition // For Boss agent: list of available agents
+
+	// clawdbot-parity fields
+	ReactionGuidance *ReactionGuidance // Reaction level (minimal/extensive) per channel
+	IsSubagent       bool              // True if this is a spawned subagent
+	IsGroupChat      bool              // True if this is a group chat (multiple users)
+	ReasoningTagHint bool              // Add <think>...</think> format hints
 }
 
 // RoomInfo contains room display information visible to the LLM.

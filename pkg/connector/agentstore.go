@@ -30,7 +30,7 @@ func NewAgentStoreAdapter(client *AIClient) *AgentStoreAdapter {
 }
 
 // LoadAgents implements agents.AgentStore.
-// It loads agents from the Builder room's Matrix state events.
+// It loads agents from preset definitions and per-agent hidden data rooms.
 func (s *AgentStoreAdapter) LoadAgents(ctx context.Context) (map[string]*agents.AgentDefinition, error) {
 	// Start with preset agents
 	result := make(map[string]*agents.AgentDefinition)
@@ -43,11 +43,11 @@ func (s *AgentStoreAdapter) LoadAgents(ctx context.Context) (map[string]*agents.
 	// Add boss agent
 	result[agents.BossAgent.ID] = agents.BossAgent.Clone()
 
-	// Load custom agents from Matrix state event in Builder room
-	customAgents, err := s.loadCustomAgentsFromState(ctx)
+	// Load custom agents from their individual hidden data rooms
+	customAgents, err := s.loadAllCustomAgents(ctx)
 	if err != nil {
-		s.client.log.Warn().Err(err).Msg("Failed to load custom agents from Matrix state")
-		// Continue with just presets if state load fails
+		s.client.log.Warn().Err(err).Msg("Failed to load custom agents from data rooms")
+		// Continue with just presets if load fails
 	}
 	for id, content := range customAgents {
 		result[id] = FromAgentDefinitionContent(content)
@@ -56,12 +56,104 @@ func (s *AgentStoreAdapter) LoadAgents(ctx context.Context) (map[string]*agents.
 	return result, nil
 }
 
-// loadCustomAgentsFromState loads custom agents from the Builder room's Matrix state event.
-func (s *AgentStoreAdapter) loadCustomAgentsFromState(ctx context.Context) (map[string]*AgentDefinitionContent, error) {
-	// Get Builder room
-	portal, err := s.getBuilderPortal(ctx)
-	if err != nil || portal == nil || portal.MXID == "" {
-		return nil, nil // No Builder room yet, return empty
+// loadAllCustomAgents scans for agent data rooms and loads their contents.
+// Each custom agent has its own hidden room with a deterministic ID.
+func (s *AgentStoreAdapter) loadAllCustomAgents(ctx context.Context) (map[string]*AgentDefinitionContent, error) {
+	result := make(map[string]*AgentDefinitionContent)
+
+	// Get all portals owned by this user login
+	allDBPortals, err := s.client.UserLogin.Bridge.DB.Portal.GetAll(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list portals: %w", err)
+	}
+
+	for _, dbPortal := range allDBPortals {
+		// Filter to only portals owned by this user login
+		if dbPortal.Receiver != s.client.UserLogin.ID {
+			continue
+		}
+
+		// Check if this is an agent data room
+		agentID, ok := parseAgentIDFromDataRoom(dbPortal.ID)
+		if !ok {
+			continue
+		}
+
+		// Load agent data from this room
+		content, err := s.loadAgentFromDataRoom(ctx, agentID)
+		if err != nil {
+			s.client.log.Warn().Err(err).Str("agent_id", agentID).Msg("Failed to load agent from data room")
+			continue
+		}
+		if content != nil {
+			result[agentID] = content
+		}
+	}
+
+	return result, nil
+}
+
+// getOrCreateAgentDataRoom returns or creates the hidden data room for an agent.
+func (s *AgentStoreAdapter) getOrCreateAgentDataRoom(ctx context.Context, agentID string) (*bridgev2.Portal, error) {
+	portalKey := agentDataPortalKey(s.client.UserLogin.ID, agentID)
+
+	portal, err := s.client.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get portal: %w", err)
+	}
+
+	// Check if portal already exists with a Matrix room
+	if portal.MXID != "" {
+		return portal, nil
+	}
+
+	// Create the portal and Matrix room
+	return s.createAgentDataRoom(ctx, agentID)
+}
+
+// createAgentDataRoom creates a hidden room for storing agent data.
+func (s *AgentStoreAdapter) createAgentDataRoom(ctx context.Context, agentID string) (*bridgev2.Portal, error) {
+	portalKey := agentDataPortalKey(s.client.UserLogin.ID, agentID)
+
+	portal, err := s.client.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get portal: %w", err)
+	}
+
+	// Set up portal metadata for hidden agent data room
+	portal.Metadata = &PortalMetadata{
+		IsAgentDataRoom: true,
+		AgentID:         agentID,
+	}
+	portal.Name = fmt.Sprintf("Agent Data: %s", agentID)
+	portal.NameSet = true
+
+	if err := portal.Save(ctx); err != nil {
+		return nil, fmt.Errorf("failed to save portal: %w", err)
+	}
+
+	// Create the Matrix room (hidden from clients via BeeperRoomTypeV2)
+	chatInfo := &bridgev2.ChatInfo{
+		Name: &portal.Name,
+	}
+	if err := portal.CreateMatrixRoom(ctx, s.client.UserLogin, chatInfo); err != nil {
+		return nil, fmt.Errorf("failed to create Matrix room: %w", err)
+	}
+
+	s.client.log.Info().Str("agent_id", agentID).Stringer("portal", portal.PortalKey).Msg("Created agent data room")
+	return portal, nil
+}
+
+// loadAgentFromDataRoom loads agent definition from its hidden room.
+func (s *AgentStoreAdapter) loadAgentFromDataRoom(ctx context.Context, agentID string) (*AgentDefinitionContent, error) {
+	portalKey := agentDataPortalKey(s.client.UserLogin.ID, agentID)
+
+	portal, err := s.client.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get portal: %w", err)
+	}
+	if portal.MXID == "" {
+		return nil, nil // Room doesn't exist yet
 	}
 
 	// Get the Matrix connector to read state events
@@ -70,61 +162,83 @@ func (s *AgentStoreAdapter) loadCustomAgentsFromState(ctx context.Context) (map[
 		return nil, fmt.Errorf("matrix connector not available")
 	}
 
-	// Read the custom agents state event
-	evt, err := matrixConn.GetStateEvent(ctx, portal.MXID, CustomAgentsEventType, "")
+	// Read the agent data state event
+	evt, err := matrixConn.GetStateEvent(ctx, portal.MXID, AgentDataEventType, "")
 	if err != nil {
-		// State event doesn't exist yet - this is normal for new users
+		// State event doesn't exist yet - this is normal for newly created rooms
 		return nil, nil
 	}
 
 	// Parse the content
-	var content CustomAgentsEventContent
+	var content AgentDataEventContent
 	if err := json.Unmarshal(evt.Content.VeryRaw, &content); err != nil {
-		return nil, fmt.Errorf("failed to parse custom agents event: %w", err)
+		return nil, fmt.Errorf("failed to parse agent data event: %w", err)
 	}
 
-	if content.Agents == nil {
-		return make(map[string]*AgentDefinitionContent), nil
-	}
-	return content.Agents, nil
+	return content.Agent, nil
 }
 
-// saveCustomAgentsToState saves custom agents to the Builder room's Matrix state event.
-// If the Builder room doesn't exist, it creates one automatically.
-func (s *AgentStoreAdapter) saveCustomAgentsToState(ctx context.Context, agentsMap map[string]*AgentDefinitionContent) error {
-	// Get Builder room
-	portal, err := s.getBuilderPortal(ctx)
+// saveAgentToDataRoom saves agent definition to its hidden room.
+func (s *AgentStoreAdapter) saveAgentToDataRoom(ctx context.Context, agent *AgentDefinitionContent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Get or create the agent's data room
+	portal, err := s.getOrCreateAgentDataRoom(ctx, agent.ID)
 	if err != nil {
-		return fmt.Errorf("failed to get builder portal: %w", err)
-	}
-	if portal == nil || portal.MXID == "" {
-		// Auto-create Builder room when saving first custom agent
-		if err := s.client.ensureBuilderRoom(ctx); err != nil {
-			return fmt.Errorf("failed to create builder room: %w", err)
-		}
-		portal, err = s.getBuilderPortal(ctx)
-		if err != nil || portal == nil || portal.MXID == "" {
-			return fmt.Errorf("builder room not available after creation")
-		}
+		return fmt.Errorf("failed to get/create agent data room: %w", err)
 	}
 
-	// Send the custom agents state event
-	content := &CustomAgentsEventContent{
-		Agents: agentsMap,
+	// Send the agent data state event
+	content := &AgentDataEventContent{
+		Agent: agent,
 	}
 
 	bot := s.client.UserLogin.Bridge.Bot
-	_, err = bot.SendState(ctx, portal.MXID, CustomAgentsEventType, "", &event.Content{
+	_, err = bot.SendState(ctx, portal.MXID, AgentDataEventType, "", &event.Content{
 		Parsed: content,
 	}, time.Time{})
 	if err != nil {
-		return fmt.Errorf("failed to send state event: %w", err)
+		return fmt.Errorf("failed to send agent data state event: %w", err)
 	}
 
 	return nil
 }
 
+// deleteAgentDataRoom deletes the hidden data room for an agent.
+func (s *AgentStoreAdapter) deleteAgentDataRoom(ctx context.Context, agentID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	portalKey := agentDataPortalKey(s.client.UserLogin.ID, agentID)
+
+	portal, err := s.client.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		return fmt.Errorf("failed to get portal: %w", err)
+	}
+	if portal == nil {
+		return nil // Already doesn't exist
+	}
+
+	// Delete the Matrix room if it exists
+	if portal.MXID != "" {
+		if err := portal.Delete(ctx); err != nil {
+			s.client.log.Warn().Err(err).Str("agent_id", agentID).Msg("Failed to delete agent data room")
+			// Continue to delete the portal from database even if Matrix delete fails
+		}
+	}
+
+	// Delete the portal from database
+	if err := s.client.UserLogin.Bridge.DB.Portal.Delete(ctx, portalKey); err != nil {
+		return fmt.Errorf("failed to delete portal from database: %w", err)
+	}
+
+	s.client.log.Info().Str("agent_id", agentID).Msg("Deleted agent data room")
+	return nil
+}
+
 // getBuilderPortal returns the Builder room portal if it exists.
+// Note: This is kept for backwards compatibility but is no longer the primary storage.
 func (s *AgentStoreAdapter) getBuilderPortal(ctx context.Context) (*bridgev2.Portal, error) {
 	meta := loginMetadata(s.client.UserLogin)
 	if meta.BuilderRoomID == "" {
@@ -137,33 +251,8 @@ func (s *AgentStoreAdapter) getBuilderPortal(ctx context.Context) (*bridgev2.Por
 	})
 }
 
-// modifyCustomAgents handles the common load-modify-save pattern for custom agents.
-// The operation function receives the current agents map and can modify it.
-func (s *AgentStoreAdapter) modifyCustomAgents(ctx context.Context, operation func(map[string]*AgentDefinitionContent) error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	customAgents, err := s.loadCustomAgentsFromState(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to load existing agents: %w", err)
-	}
-	if customAgents == nil {
-		customAgents = make(map[string]*AgentDefinitionContent)
-	}
-
-	if err := operation(customAgents); err != nil {
-		return err
-	}
-
-	if err := s.saveCustomAgentsToState(ctx, customAgents); err != nil {
-		return fmt.Errorf("failed to save agents: %w", err)
-	}
-
-	return nil
-}
-
 // SaveAgent implements agents.AgentStore.
-// It saves an agent to the Builder room's Matrix state event.
+// It saves an agent to its own hidden data room.
 func (s *AgentStoreAdapter) SaveAgent(ctx context.Context, agent *agents.AgentDefinition) error {
 	if err := agent.Validate(); err != nil {
 		return err
@@ -172,36 +261,36 @@ func (s *AgentStoreAdapter) SaveAgent(ctx context.Context, agent *agents.AgentDe
 		return agents.ErrAgentIsPreset
 	}
 
-	err := s.modifyCustomAgents(ctx, func(customAgents map[string]*AgentDefinitionContent) error {
-		customAgents[agent.ID] = ToAgentDefinitionContent(agent)
-		return nil
-	})
-	if err != nil {
+	if err := s.saveAgentToDataRoom(ctx, ToAgentDefinitionContent(agent)); err != nil {
 		return err
 	}
 
-	s.client.log.Info().Str("agent_id", agent.ID).Str("name", agent.Name).Msg("Saved custom agent to Matrix state")
+	s.client.log.Info().Str("agent_id", agent.ID).Str("name", agent.Name).Msg("Saved custom agent to data room")
 	return nil
 }
 
 // DeleteAgent implements agents.AgentStore.
+// It deletes an agent and its hidden data room.
 func (s *AgentStoreAdapter) DeleteAgent(ctx context.Context, agentID string) error {
 	if agents.IsPreset(agentID) || agents.IsBossAgent(agentID) {
 		return agents.ErrAgentIsPreset
 	}
 
-	err := s.modifyCustomAgents(ctx, func(customAgents map[string]*AgentDefinitionContent) error {
-		if customAgents[agentID] == nil {
-			return agents.ErrAgentNotFound
-		}
-		delete(customAgents, agentID)
-		return nil
-	})
+	// Check if agent exists first
+	content, err := s.loadAgentFromDataRoom(ctx, agentID)
 	if err != nil {
+		return fmt.Errorf("failed to check agent existence: %w", err)
+	}
+	if content == nil {
+		return agents.ErrAgentNotFound
+	}
+
+	// Delete the agent's hidden data room
+	if err := s.deleteAgentDataRoom(ctx, agentID); err != nil {
 		return err
 	}
 
-	s.client.log.Info().Str("agent_id", agentID).Msg("Deleted custom agent from Matrix state")
+	s.client.log.Info().Str("agent_id", agentID).Msg("Deleted custom agent and data room")
 	return nil
 }
 

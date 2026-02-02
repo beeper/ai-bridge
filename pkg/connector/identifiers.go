@@ -136,3 +136,31 @@ func parseChatSlug(slug string) (int, bool) {
 func MakeMessageID(eventID id.EventID) networkid.MessageID {
 	return networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID)))
 }
+
+// agentDataPortalKey creates a deterministic portal key for an agent's hidden data room.
+// Format: "openai:{loginID}:agent-data:{agentID}"
+func agentDataPortalKey(loginID networkid.UserLoginID, agentID string) networkid.PortalKey {
+	return networkid.PortalKey{
+		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:agent-data:%s", loginID, url.PathEscape(agentID))),
+		Receiver: loginID,
+	}
+}
+
+// parseAgentIDFromDataRoom extracts the agent ID from an agent data room portal ID.
+// Returns the agent ID and true if successful, empty string and false otherwise.
+func parseAgentIDFromDataRoom(portalID networkid.PortalID) (string, bool) {
+	parts := strings.Split(string(portalID), ":agent-data:")
+	if len(parts) != 2 {
+		return "", false
+	}
+	agentID, err := url.PathUnescape(parts[1])
+	if err != nil {
+		return "", false
+	}
+	return agentID, true
+}
+
+// isAgentDataRoom checks if a portal ID is for an agent data room.
+func isAgentDataRoom(portalID networkid.PortalID) bool {
+	return strings.Contains(string(portalID), ":agent-data:")
+}

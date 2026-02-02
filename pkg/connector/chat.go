@@ -1211,6 +1211,11 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 	// This ensures the client knows what features the new model supports (vision, audio, etc.)
 	portal.UpdateBridgeInfo(ctx)
 	portal.UpdateCapabilities(ctx, oc.UserLogin, true)
+
+	// Ensure only 1 AI ghost in room
+	if err := oc.ensureSingleAIGhost(ctx, portal); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to ensure single AI ghost after model switch")
+	}
 }
 
 // handleAgentModelSwitch handles model switching for agent rooms.
@@ -1297,6 +1302,43 @@ func (oc *AIClient) handleAgentModelSwitch(ctx context.Context, portal *bridgev2
 	// Update bridge info and capabilities
 	portal.UpdateBridgeInfo(ctx)
 	portal.UpdateCapabilities(ctx, oc.UserLogin, true)
+
+	// Ensure only 1 AI ghost in room
+	if err := oc.ensureSingleAIGhost(ctx, portal); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to ensure single AI ghost after agent model switch")
+	}
+}
+
+// ensureSingleAIGhost ensures only 1 model/agent ghost is in the room at a time.
+// Updates portal.OtherUserID if it doesn't match the expected ghost.
+func (oc *AIClient) ensureSingleAIGhost(ctx context.Context, portal *bridgev2.Portal) error {
+	meta := portalMeta(portal)
+
+	// Determine which ghost SHOULD be in the room
+	var expectedGhostID networkid.UserID
+	agentID := meta.AgentID
+	if agentID == "" {
+		agentID = meta.DefaultAgentID
+	}
+
+	modelID := oc.effectiveModel(meta)
+	if agentID != "" {
+		expectedGhostID = agentModelUserID(agentID, modelID)
+	} else {
+		expectedGhostID = modelUserID(modelID)
+	}
+
+	// Update portal.OtherUserID if mismatched
+	if portal.OtherUserID != expectedGhostID {
+		oc.log.Debug().
+			Str("old_ghost", string(portal.OtherUserID)).
+			Str("new_ghost", string(expectedGhostID)).
+			Stringer("portal", portal.PortalKey).
+			Msg("Updating portal OtherUserID to match expected ghost")
+		portal.OtherUserID = expectedGhostID
+		return portal.Save(ctx)
+	}
+	return nil
 }
 
 // BroadcastRoomState sends current room capabilities and settings to Matrix room state

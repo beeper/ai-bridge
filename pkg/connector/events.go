@@ -14,6 +14,7 @@ func init() {
 	event.TypeMap[ModelCapabilitiesEventType] = reflect.TypeOf(ModelCapabilitiesEventContent{})
 	event.TypeMap[AgentsEventType] = reflect.TypeOf(AgentsEventContent{})
 	event.TypeMap[CustomAgentsEventType] = reflect.TypeOf(CustomAgentsEventContent{})
+	event.TypeMap[AgentDataEventType] = reflect.TypeOf(AgentDataEventContent{})
 }
 
 // AssistantTurnEventType is the container event for an assistant's response
@@ -117,6 +118,12 @@ var AgentsEventType = event.Type{
 // CustomAgentsEventType stores user-created agent definitions in the Builder room
 var CustomAgentsEventType = event.Type{
 	Type:  "com.beeper.ai.custom_agents",
+	Class: event.StateEventType,
+}
+
+// AgentDataEventType stores agent configuration in the agent's hidden room
+var AgentDataEventType = event.Type{
+	Type:  "com.beeper.ai.agent_data",
 	Class: event.StateEventType,
 }
 
@@ -760,4 +767,14 @@ type AgentDefinitionContent struct {
 // This is a single state event that contains all custom (non-preset) agents.
 type CustomAgentsEventContent struct {
 	Agents map[string]*AgentDefinitionContent `json:"agents"`
+}
+
+// AgentDataEventContent stores agent configuration in the agent's hidden room.
+// Each custom agent has its own hidden room that contains this state event.
+type AgentDataEventContent struct {
+	Agent *AgentDefinitionContent `json:"agent"`
+	// Extensible for future use:
+	// Memory      map[string]any         `json:"memory,omitempty"`      // Persistent agent memory
+	// Preferences map[string]any         `json:"preferences,omitempty"` // Learned preferences
+	// SessionRefs []string               `json:"session_refs,omitempty"` // Refs to conversations
 }
