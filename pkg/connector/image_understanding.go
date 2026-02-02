@@ -63,6 +63,25 @@ func (oc *AIClient) resolveImageUnderstandingModel(ctx context.Context, meta *Po
 		}
 	}
 
+	loginMeta := loginMetadata(oc.UserLogin)
+	provider := loginMeta.Provider
+
+	// Prefer cached/provider-listed models first.
+	if modelID := oc.pickVisionModelFromList(loginMeta.ModelCache, provider); modelID != "" {
+		return modelID
+	}
+	models, err := oc.listAvailableModels(ctx, false)
+	if err == nil {
+		if modelID := pickVisionModelFromList(models, provider); modelID != "" {
+			return modelID
+		}
+	}
+
+	// Fallback to manifest-only lookup.
+	if modelID := pickVisionModelFromManifest(provider); modelID != "" {
+		return modelID
+	}
+
 	return ""
 }
 
@@ -157,6 +176,13 @@ func (oc *AIClient) pickAudioModelFromList(cache *ModelCache, provider string) s
 	return pickAudioModelFromList(cache.Models, provider)
 }
 
+func (oc *AIClient) pickVisionModelFromList(cache *ModelCache, provider string) string {
+	if cache == nil || len(cache.Models) == 0 {
+		return ""
+	}
+	return pickVisionModelFromList(cache.Models, provider)
+}
+
 func pickAudioModelFromList(models []ModelInfo, provider string) string {
 	for _, info := range models {
 		if !info.SupportsAudio {
@@ -170,9 +196,35 @@ func pickAudioModelFromList(models []ModelInfo, provider string) string {
 	return ""
 }
 
+func pickVisionModelFromList(models []ModelInfo, provider string) string {
+	for _, info := range models {
+		if !info.SupportsVision {
+			continue
+		}
+		if !providerMatches(info, provider) {
+			continue
+		}
+		return info.ID
+	}
+	return ""
+}
+
 func pickAudioModelFromManifest(provider string) string {
 	for _, info := range ModelManifest.Models {
 		if !info.SupportsAudio {
+			continue
+		}
+		if !providerMatches(info, provider) {
+			continue
+		}
+		return info.ID
+	}
+	return ""
+}
+
+func pickVisionModelFromManifest(provider string) string {
+	for _, info := range ModelManifest.Models {
+		if !info.SupportsVision {
 			continue
 		}
 		if !providerMatches(info, provider) {
