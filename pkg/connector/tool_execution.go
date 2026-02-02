@@ -57,6 +57,68 @@ func (oc *AIClient) emitToolProgress(ctx context.Context, portal *bridgev2.Porta
 	}
 }
 
+func toolDisplayTitle(toolName string) string {
+	switch toolName {
+	case "web_search":
+		return "Web Search"
+	case "image_generation":
+		return "Image Generation"
+	case ToolNameImageGenerate:
+		return "Image Generation"
+	case ToolNameSetChatInfo:
+		return "Set Chat Info"
+	default:
+		return toolName
+	}
+}
+
+func summarizeMessageAction(obj map[string]any) string {
+	action, _ := obj["action"].(string)
+	switch action {
+	case "react":
+		emoji, _ := obj["emoji"].(string)
+		status, _ := obj["status"].(string)
+		if status == "removed" {
+			if emoji != "" {
+				return fmt.Sprintf("Removed reaction %s", emoji)
+			}
+			return "Removed reaction"
+		}
+		if emoji != "" {
+			return fmt.Sprintf("Reacted with %s", emoji)
+		}
+		return "Reaction sent"
+	case "send":
+		return "Message sent"
+	case "edit":
+		return "Message edited"
+	case "delete":
+		return "Message deleted"
+	case "reply":
+		return "Reply sent"
+	case "thread-reply":
+		return "Thread reply sent"
+	case "read":
+		return "Read receipt sent"
+	case "pin":
+		return "Message pinned"
+	case "unpin":
+		return "Message unpinned"
+	case "list-pins":
+		return "Pins retrieved"
+	case "reactions":
+		return "Reactions retrieved"
+	case "search":
+		return "Search completed"
+	case "member-info":
+		return "Member info retrieved"
+	case "channel-info":
+		return "Channel info retrieved"
+	default:
+		return ""
+	}
+}
+
 // sendToolCallEvent sends a tool call as a timeline event
 func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall) id.EventID {
 	if portal == nil || portal.MXID == "" {
@@ -68,15 +130,7 @@ func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Port
 	}
 
 	// Build display info
-	displayTitle := tool.toolName
-	switch tool.toolName {
-	case "web_search":
-		displayTitle = "Web Search"
-	case "image_generation":
-		displayTitle = "Image Generation"
-	case ToolNameSetChatInfo:
-		displayTitle = "Set Chat Info"
-	}
+	displayTitle := toolDisplayTitle(tool.toolName)
 
 	toolCallData := map[string]any{
 		"call_id":   tool.callID,
@@ -141,6 +195,8 @@ func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Po
 		if obj, ok := parsedResult.(map[string]any); ok {
 			if msg, ok := obj["message"].(string); ok && msg != "" {
 				bodyText = msg
+			} else if tool.toolName == ToolNameMessage {
+				bodyText = summarizeMessageAction(obj)
 			}
 		}
 	}
@@ -148,7 +204,7 @@ func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Po
 		bodyText = bodyText[:200] + "..."
 	}
 	if bodyText == "" {
-		bodyText = fmt.Sprintf("%s completed", tool.toolName)
+		bodyText = fmt.Sprintf("%s completed", toolDisplayTitle(tool.toolName))
 	}
 
 	toolResultData := map[string]any{
@@ -205,6 +261,15 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 	var args map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("invalid tool arguments: %w", err)
+	}
+
+	// Normalize deprecated tool aliases
+	switch toolName {
+	case ToolNameAnalyzeImage:
+		toolName = ToolNameImage
+	case ToolNameSetChatInfo:
+		// Keep backward compatibility for set_chat_info
+		return executeSetChatInfo(ctx, args)
 	}
 
 	// Check if this is the Builder room - use boss tool executor for boss tools

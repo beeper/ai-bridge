@@ -10,19 +10,29 @@ import (
 
 // executeAnalyzeImage analyzes an image with a custom prompt using vision capabilities.
 func executeAnalyzeImage(ctx context.Context, args map[string]any) (string, error) {
-	imageURL, ok := args["image_url"].(string)
-	if !ok || imageURL == "" {
-		return "", fmt.Errorf("missing or invalid 'image_url' argument")
+	imageURL := ""
+	if v, ok := args["image"].(string); ok && strings.TrimSpace(v) != "" {
+		imageURL = strings.TrimSpace(v)
+	} else if v, ok := args["image_url"].(string); ok && strings.TrimSpace(v) != "" {
+		imageURL = strings.TrimSpace(v)
+	} else if v, ok := args["imageUrl"].(string); ok && strings.TrimSpace(v) != "" {
+		imageURL = strings.TrimSpace(v)
+	}
+	if imageURL == "" {
+		return "", fmt.Errorf("missing or invalid 'image' argument")
 	}
 
-	prompt, ok := args["prompt"].(string)
-	if !ok || prompt == "" {
-		return "", fmt.Errorf("missing or invalid 'prompt' argument")
+	prompt := ""
+	if v, ok := args["prompt"].(string); ok && strings.TrimSpace(v) != "" {
+		prompt = strings.TrimSpace(v)
+	}
+	if prompt == "" {
+		prompt = "Describe the image."
 	}
 
 	btc := GetBridgeToolContext(ctx)
 	if btc == nil {
-		return "", fmt.Errorf("analyze_image requires bridge context")
+		return "", fmt.Errorf("image requires bridge context")
 	}
 
 	// Check if the current model supports vision
@@ -87,7 +97,7 @@ func executeAnalyzeImage(ctx context.Context, args map[string]any) (string, erro
 	}
 
 	// Return the analysis result
-	return fmt.Sprintf(`{"analysis":%q,"image_url":%q}`, resp.Content, imageURL), nil
+	return fmt.Sprintf(`{"analysis":%q,"image":%q}`, resp.Content, imageURL), nil
 }
 
 // inferMimeTypeFromURL guesses the mime type from a URL's file extension.

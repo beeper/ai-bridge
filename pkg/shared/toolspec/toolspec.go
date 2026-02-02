@@ -21,14 +21,20 @@ const (
 	SessionStatusName        = "session_status"
 	SessionStatusDescription = "Get current session status including time, date, model info, and context usage. Use this tool when asked about current time, date, day of week, or what model is being used."
 
+	// ImageName matches OpenClaw's image analysis tool (vision).
 	ImageName        = "image"
-	ImageDescription = "Generate an image from a text prompt using AI image generation."
+	ImageDescription = "Analyze an image with a custom prompt. Use this to examine image details, read text from images (OCR), identify objects, or get specific information about visual content."
+
+	// ImageGenerateName is an AI image generation tool (not in OpenClaw).
+	ImageGenerateName        = "image_generate"
+	ImageGenerateDescription = "Generate an image from a text prompt using AI image generation."
 
 	TTSName        = "tts"
 	TTSDescription = "Convert text to speech audio. Returns audio that will be sent as a voice message. Only available on Beeper and OpenAI providers."
 
+	// AnalyzeImageName is a deprecated alias for ImageName.
 	AnalyzeImageName        = "analyze_image"
-	AnalyzeImageDescription = "Analyze an image with a custom prompt. Use this to examine image details, read text from images (OCR), identify objects, or get specific information about visual content."
+	AnalyzeImageDescription = "Deprecated alias for image (vision analysis)."
 
 	MemorySearchName        = "memory_search"
 	MemorySearchDescription = "Search your memory for relevant information. Use this to recall facts, preferences, decisions, or context from previous conversations."
@@ -63,6 +69,10 @@ func WebSearchSchema() map[string]any {
 				"type":        "string",
 				"description": "The search query",
 			},
+			"count": map[string]any{
+				"type":        "number",
+				"description": "Optional: max results to return (OpenClaw uses count)",
+			},
 		},
 		"required": []string{"query"},
 	}
@@ -80,6 +90,15 @@ func WebFetchSchema() map[string]any {
 			"max_chars": map[string]any{
 				"type":        "number",
 				"description": "Maximum characters to return (default: 50000)",
+			},
+			"maxChars": map[string]any{
+				"type":        "number",
+				"description": "OpenClaw-style alias for max_chars",
+			},
+			"extractMode": map[string]any{
+				"type":        "string",
+				"enum":        []string{"markdown", "text"},
+				"description": "Preferred extraction mode (alias only; markdown default)",
 			},
 		},
 		"required": []string{"url"},
@@ -112,7 +131,7 @@ func MessageSchema() map[string]any {
 		"properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"enum":        []string{"send", "react", "reactions", "edit", "delete", "reply", "pin", "unpin", "list-pins", "thread-reply", "search", "read", "member-info", "channel-info"},
+				"enum":        []string{"send", "sendWithEffect", "broadcast", "react", "reactions", "edit", "delete", "unsend", "reply", "pin", "unpin", "list-pins", "thread-reply", "search", "read", "member-info", "channel-info", "channel-edit"},
 				"description": "The action to perform",
 			},
 			"message": map[string]any{
@@ -122,6 +141,10 @@ func MessageSchema() map[string]any {
 			"message_id": map[string]any{
 				"type":        "string",
 				"description": "Target message ID for react/reactions/edit/delete/reply/pin/unpin/thread-reply/read",
+			},
+			"messageId": map[string]any{
+				"type":        "string",
+				"description": "OpenClaw-style alias for message_id",
 			},
 			"emoji": map[string]any{
 				"type":        "string",
@@ -139,6 +162,14 @@ func MessageSchema() map[string]any {
 				"type":        "string",
 				"description": "For action=thread-reply: the thread root message ID",
 			},
+			"threadId": map[string]any{
+				"type":        "string",
+				"description": "OpenClaw-style alias for thread_id",
+			},
+			"replyTo": map[string]any{
+				"type":        "string",
+				"description": "OpenClaw-style alias for message_id when replying",
+			},
 			"query": map[string]any{
 				"type":        "string",
 				"description": "For action=search: search query to find messages",
@@ -146,6 +177,14 @@ func MessageSchema() map[string]any {
 			"limit": map[string]any{
 				"type":        "number",
 				"description": "For action=search: max results to return (default: 20)",
+			},
+			"name": map[string]any{
+				"type":        "string",
+				"description": "For action=channel-edit: new channel/room name",
+			},
+			"topic": map[string]any{
+				"type":        "string",
+				"description": "For action=channel-edit: new channel/room topic",
 			},
 		},
 		"required": []string{"action"},
@@ -161,12 +200,50 @@ func SessionStatusSchema() map[string]any {
 				"type":        "string",
 				"description": "Optional: change the model for this session (e.g., 'gpt-4o', 'claude-sonnet-4-20250514')",
 			},
+			"model": map[string]any{
+				"type":        "string",
+				"description": "OpenClaw-style alias for set_model (use 'default' to reset override)",
+			},
+			"sessionKey": map[string]any{
+				"type":        "string",
+				"description": "OpenClaw-style session key (ignored; current room only)",
+			},
 		},
 	}
 }
 
-// ImageSchema returns the JSON schema for the image tool.
+// ImageSchema returns the JSON schema for the OpenClaw image (vision) tool.
 func ImageSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"prompt": map[string]any{
+				"type":        "string",
+				"description": "Optional: what to analyze or look for in the image",
+			},
+			"image": map[string]any{
+				"type":        "string",
+				"description": "Image URL or data URI (http/https, mxc://, or data:)",
+			},
+			"image_url": map[string]any{
+				"type":        "string",
+				"description": "Deprecated alias for image",
+			},
+			"model": map[string]any{
+				"type":        "string",
+				"description": "Optional: model override (ignored in bridge)",
+			},
+			"maxBytesMb": map[string]any{
+				"type":        "number",
+				"description": "Optional: max image size in MB (ignored in bridge)",
+			},
+		},
+		"required": []string{"image"},
+	}
+}
+
+// ImageGenerateSchema returns the JSON schema for the image generation tool.
+func ImageGenerateSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -204,20 +281,7 @@ func TTSSchema() map[string]any {
 
 // AnalyzeImageSchema returns the JSON schema for the analyze_image tool.
 func AnalyzeImageSchema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"image_url": map[string]any{
-				"type":        "string",
-				"description": "URL of the image to analyze (http/https URL, mxc:// Matrix URL, or data: URI with base64)",
-			},
-			"prompt": map[string]any{
-				"type":        "string",
-				"description": "What to analyze or look for in the image (e.g., 'describe this image', 'read the text', 'what objects are visible')",
-			},
-		},
-		"required": []string{"image_url", "prompt"},
-	}
+	return ImageSchema()
 }
 
 // MemorySearchSchema returns the JSON schema for the memory_search tool.

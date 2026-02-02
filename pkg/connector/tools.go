@@ -73,12 +73,6 @@ func BuiltinTools() []ToolDefinition {
 			Execute:     executeWebSearch,
 		},
 		{
-			Name:        ToolNameSetChatInfo,
-			Description: toolspec.SetChatInfoDescription,
-			Parameters:  toolspec.SetChatInfoSchema(),
-			Execute:     executeSetChatInfo,
-		},
-		{
 			Name:        ToolNameMessage,
 			Description: toolspec.MessageDescription,
 			Parameters:  toolspec.MessageSchema(),
@@ -100,13 +94,13 @@ func BuiltinTools() []ToolDefinition {
 			Name:        ToolNameImage,
 			Description: toolspec.ImageDescription,
 			Parameters:  toolspec.ImageSchema(),
-			Execute:     executeImageGeneration,
+			Execute:     executeAnalyzeImage,
 		},
 		{
-			Name:        ToolNameAnalyzeImage,
-			Description: toolspec.AnalyzeImageDescription,
-			Parameters:  toolspec.AnalyzeImageSchema(),
-			Execute:     executeAnalyzeImage,
+			Name:        ToolNameImageGenerate,
+			Description: toolspec.ImageGenerateDescription,
+			Parameters:  toolspec.ImageGenerateSchema(),
+			Execute:     executeImageGeneration,
 		},
 		{
 			Name:        ToolNameSessionStatus,
@@ -151,10 +145,13 @@ const ToolNameTTS = toolspec.TTSName
 // ToolNameWebFetch is the name of the web fetch tool.
 const ToolNameWebFetch = toolspec.WebFetchName
 
-// ToolNameImage is the name of the image generation tool.
+// ToolNameImage is the OpenClaw-compatible image analysis tool.
 const ToolNameImage = toolspec.ImageName
 
-// ToolNameAnalyzeImage is the name of the image analysis tool.
+// ToolNameImageGenerate is the image generation tool (non-OpenClaw).
+const ToolNameImageGenerate = toolspec.ImageGenerateName
+
+// ToolNameAnalyzeImage is a deprecated alias for ToolNameImage.
 const ToolNameAnalyzeImage = toolspec.AnalyzeImageName
 
 // ToolNameSessionStatus is the name of the session status tool.
@@ -177,6 +174,49 @@ const DefaultImageModel = "google/gemini-3-pro-image-preview"
 // TTSResultPrefix is the prefix used to identify TTS results that need audio sending.
 const TTSResultPrefix = "AUDIO:"
 
+// normalizeMessageAction maps OpenClaw aliases to supported actions.
+func normalizeMessageAction(action string) string {
+	switch action {
+	case "unsend":
+		return "delete"
+	case "sendWithEffect", "broadcast":
+		return "send"
+	default:
+		return action
+	}
+}
+
+// normalizeMessageArgs maps OpenClaw-style argument names to bridge equivalents.
+func normalizeMessageArgs(args map[string]any) {
+	if args == nil {
+		return
+	}
+	hasMessageID := false
+	if raw, ok := args["message_id"]; ok {
+		if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
+			hasMessageID = true
+		}
+	}
+	if !hasMessageID {
+		if v, ok := args["messageId"]; ok {
+			args["message_id"] = v
+		} else if v, ok := args["replyTo"]; ok {
+			args["message_id"] = v
+		}
+	}
+	hasThreadID := false
+	if raw, ok := args["thread_id"]; ok {
+		if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
+			hasThreadID = true
+		}
+	}
+	if !hasThreadID {
+		if v, ok := args["threadId"]; ok {
+			args["thread_id"] = v
+		}
+	}
+}
+
 // executeMessage handles the message tool for sending messages and channel actions.
 // Matches OpenClaw's message tool pattern with full action support.
 func executeMessage(ctx context.Context, args map[string]any) (string, error) {
@@ -189,6 +229,9 @@ func executeMessage(ctx context.Context, args map[string]any) (string, error) {
 	if btc == nil {
 		return "", fmt.Errorf("message tool requires bridge context")
 	}
+
+	action = normalizeMessageAction(action)
+	normalizeMessageArgs(args)
 
 	switch action {
 	case "send":
@@ -219,6 +262,8 @@ func executeMessage(ctx context.Context, args map[string]any) (string, error) {
 		return executeMessageMemberInfo(ctx, args, btc)
 	case "channel-info":
 		return executeMessageChannelInfo(ctx, args, btc)
+	case "channel-edit":
+		return executeMessageChannelEdit(ctx, args, btc)
 	default:
 		return "", fmt.Errorf("unknown action: %s", action)
 	}
@@ -579,6 +624,8 @@ func executeWebFetch(ctx context.Context, args map[string]any) (string, error) {
 	// Get max chars (default 50000)
 	maxChars := 50000
 	if mc, ok := args["max_chars"].(float64); ok && mc > 0 {
+		maxChars = int(mc)
+	} else if mc, ok := args["maxChars"].(float64); ok && mc > 0 {
 		maxChars = int(mc)
 	}
 
@@ -1221,25 +1268,52 @@ func executeSessionStatus(ctx context.Context, args map[string]any) (string, err
 		title = "Untitled"
 	}
 
-	// Handle model change if requested
+	// Handle model change if requested (OpenClaw-style "model" alias supported)
 	var modelChanged string
-	if newModel, ok := args["set_model"].(string); ok && newModel != "" {
-		// Update the model in metadata
-		meta.Model = newModel
-		meta.Capabilities = getModelCapabilities(newModel, btc.Client.findModelInfo(newModel))
-		// Save portal metadata
-		if err := btc.Portal.Save(ctx); err != nil {
-			return "", fmt.Errorf("failed to save model change: %w", err)
-		}
-		btc.Portal.UpdateBridgeInfo(ctx)
-		btc.Client.ensureGhostDisplayName(ctx, newModel)
-		modelChanged = fmt.Sprintf("\n\nModel changed to: %s", newModel)
-		model = newModel
-		if parts := strings.SplitN(newModel, "/", 2); len(parts) == 2 {
-			provider = parts[0]
-			modelName = parts[1]
+	newModel := ""
+	if raw, ok := args["set_model"].(string); ok && strings.TrimSpace(raw) != "" {
+		newModel = strings.TrimSpace(raw)
+	} else if raw, ok := args["model"].(string); ok && strings.TrimSpace(raw) != "" {
+		newModel = strings.TrimSpace(raw)
+	}
+
+	if newModel != "" {
+		if strings.EqualFold(newModel, "default") || strings.EqualFold(newModel, "reset") {
+			// Clear override and recompute capabilities from effective model
+			meta.Model = ""
+			effective := btc.Client.effectiveModel(meta)
+			meta.Capabilities = getModelCapabilities(effective, btc.Client.findModelInfo(effective))
+			if err := btc.Portal.Save(ctx); err != nil {
+				return "", fmt.Errorf("failed to save model reset: %w", err)
+			}
+			btc.Portal.UpdateBridgeInfo(ctx)
+			btc.Client.ensureGhostDisplayName(ctx, effective)
+			modelChanged = fmt.Sprintf("\n\nModel reset to default: %s", effective)
+			model = effective
+			if parts := strings.SplitN(effective, "/", 2); len(parts) == 2 {
+				provider = parts[0]
+				modelName = parts[1]
+			} else {
+				modelName = effective
+			}
 		} else {
-			modelName = newModel
+			// Update the model in metadata
+			meta.Model = newModel
+			meta.Capabilities = getModelCapabilities(newModel, btc.Client.findModelInfo(newModel))
+			// Save portal metadata
+			if err := btc.Portal.Save(ctx); err != nil {
+				return "", fmt.Errorf("failed to save model change: %w", err)
+			}
+			btc.Portal.UpdateBridgeInfo(ctx)
+			btc.Client.ensureGhostDisplayName(ctx, newModel)
+			modelChanged = fmt.Sprintf("\n\nModel changed to: %s", newModel)
+			model = newModel
+			if parts := strings.SplitN(newModel, "/", 2); len(parts) == 2 {
+				provider = parts[0]
+				modelName = parts[1]
+			} else {
+				modelName = newModel
+			}
 		}
 	}
 

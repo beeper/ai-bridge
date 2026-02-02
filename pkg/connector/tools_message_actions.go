@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"maunium.net/go/mautrix/id"
 )
@@ -49,6 +50,59 @@ func executeMessageChannelInfo(ctx context.Context, _ map[string]any, btc *Bridg
 		"topic":        info.Topic,
 		"member_count": info.MemberCount,
 	})
+}
+
+// executeMessageChannelEdit handles channel-edit by mapping to set_chat_info.
+func executeMessageChannelEdit(ctx context.Context, args map[string]any, _ *BridgeToolContext) (string, error) {
+	var title string
+	if raw, ok := args["name"]; ok {
+		if s, ok := raw.(string); ok {
+			title = strings.TrimSpace(s)
+		} else {
+			return "", fmt.Errorf("action=channel-edit requires 'name' to be a string")
+		}
+	}
+	if title == "" {
+		if raw, ok := args["title"]; ok {
+			if s, ok := raw.(string); ok {
+				title = strings.TrimSpace(s)
+			} else {
+				return "", fmt.Errorf("action=channel-edit requires 'title' to be a string")
+			}
+		}
+	}
+
+	descProvided := false
+	description := ""
+	if raw, ok := args["topic"]; ok {
+		descProvided = true
+		if s, ok := raw.(string); ok {
+			description = strings.TrimSpace(s)
+		} else {
+			return "", fmt.Errorf("action=channel-edit requires 'topic' to be a string")
+		}
+	} else if raw, ok := args["description"]; ok {
+		descProvided = true
+		if s, ok := raw.(string); ok {
+			description = strings.TrimSpace(s)
+		} else {
+			return "", fmt.Errorf("action=channel-edit requires 'description' to be a string")
+		}
+	}
+
+	if title == "" && !descProvided {
+		return "", fmt.Errorf("action=channel-edit requires 'name' or 'topic'")
+	}
+
+	mapped := map[string]any{}
+	if title != "" {
+		mapped["title"] = title
+	}
+	if descProvided {
+		mapped["description"] = description
+	}
+
+	return executeSetChatInfo(ctx, mapped)
 }
 
 // executeMessageMemberInfo handles the member-info action - gets user profile.

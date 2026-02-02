@@ -2,6 +2,8 @@ package connector
 
 import (
 	"context"
+	"errors"
+	"net/http"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2/matrix"
@@ -43,7 +45,7 @@ func listMatrixReactions(ctx context.Context, btc *BridgeToolContext, eventID id
 	}
 
 	// Query relations API for reactions (m.annotation)
-	resp, err := client.GetRelations(ctx, btc.Portal.MXID, eventID, &mautrix.ReqGetRelations{
+	resp, err := getRelationsWithFallback(ctx, client, btc.Portal.MXID, eventID, &mautrix.ReqGetRelations{
 		RelationType: event.RelAnnotation,
 		EventType:    event.EventReaction,
 		Limit:        100,
@@ -99,18 +101,38 @@ func removeMatrixReactions(ctx context.Context, btc *BridgeToolContext, eventID 
 		return 0, nil
 	}
 
+	removed := 0
+	var locallyTracked []id.EventID
+	if btc.Portal != nil {
+		locallyTracked = takeSentReactions(btc.Portal.MXID, eventID, emoji)
+		if len(locallyTracked) > 0 {
+			removed += redactReactionEvents(ctx, client, btc.Portal.MXID, locallyTracked)
+		}
+	}
+
 	// Query relations API for reactions
-	resp, err := client.GetRelations(ctx, btc.Portal.MXID, eventID, &mautrix.ReqGetRelations{
+	resp, err := getRelationsWithFallback(ctx, client, btc.Portal.MXID, eventID, &mautrix.ReqGetRelations{
 		RelationType: event.RelAnnotation,
 		EventType:    event.EventReaction,
 		Limit:        200,
 	})
 	if err != nil {
+		if isRelationsUnsupported(err) {
+			return removed, nil
+		}
+		if removed > 0 {
+			return removed, nil
+		}
 		return 0, err
 	}
 
 	// Get bot's user ID
 	botMXID := client.UserID
+
+	alreadyRemoved := make(map[id.EventID]struct{}, len(locallyTracked))
+	for _, evtID := range locallyTracked {
+		alreadyRemoved[evtID] = struct{}{}
+	}
 
 	// Find reaction events from the bot that match
 	var toRemove []id.EventID
@@ -132,19 +154,68 @@ func removeMatrixReactions(ctx context.Context, btc *BridgeToolContext, eventID 
 			}
 		}
 
+		if _, seen := alreadyRemoved[evt.ID]; seen {
+			continue
+		}
 		toRemove = append(toRemove, evt.ID)
 	}
 
 	// Redact each reaction event
+	removed += redactReactionEvents(ctx, client, btc.Portal.MXID, toRemove)
+
+	return removed, nil
+}
+
+func redactReactionEvents(ctx context.Context, client *mautrix.Client, roomID id.RoomID, eventIDs []id.EventID) int {
 	removed := 0
-	for _, evtID := range toRemove {
-		_, err := client.RedactEvent(ctx, btc.Portal.MXID, evtID)
+	for _, evtID := range eventIDs {
+		_, err := client.RedactEvent(ctx, roomID, evtID)
 		if err == nil {
 			removed++
 		}
 	}
+	return removed
+}
 
-	return removed, nil
+func getRelationsWithFallback(
+	ctx context.Context,
+	client *mautrix.Client,
+	roomID id.RoomID,
+	eventID id.EventID,
+	req *mautrix.ReqGetRelations,
+) (*mautrix.RespGetRelations, error) {
+	resp, err := client.GetRelations(ctx, roomID, eventID, req)
+	if err == nil || !isRelationsUnsupported(err) {
+		return resp, err
+	}
+	return getRelationsV3(ctx, client, roomID, eventID, req)
+}
+
+func getRelationsV3(
+	ctx context.Context,
+	client *mautrix.Client,
+	roomID id.RoomID,
+	eventID id.EventID,
+	req *mautrix.ReqGetRelations,
+) (*mautrix.RespGetRelations, error) {
+	if req == nil {
+		req = &mautrix.ReqGetRelations{}
+	}
+
+	var resp mautrix.RespGetRelations
+	urlPath := client.BuildURLWithQuery(
+		append(mautrix.ClientURLPath{"v3", "rooms", roomID, "relations", eventID}, req.PathSuffix()...),
+		req.Query(),
+	)
+	_, err := client.MakeRequest(ctx, http.MethodGet, urlPath, nil, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func isRelationsUnsupported(err error) bool {
+	return errors.Is(err, mautrix.MUnrecognized)
 }
 
 // sendMatrixReadReceipt sends a read receipt for a message.

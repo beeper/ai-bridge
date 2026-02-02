@@ -248,6 +248,14 @@ func (oc *AIClient) getToolStateWithSource(meta *PortalMetadata, toolName string
 // isToolEnabled checks if a specific tool is enabled
 // Priority: Agent Policy → Room → User → Provider/Model defaults
 func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
+	switch toolName {
+	case ToolNameAnalyzeImage:
+		toolName = ToolNameImage
+	case ToolNameSetChatInfo:
+		// Treat legacy set_chat_info as message for policy purposes.
+		toolName = ToolNameMessage
+	}
+
 	if toolName == ToolNameMessage && !hasAssignedAgent(meta) {
 		return false
 	}
