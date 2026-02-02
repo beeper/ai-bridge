@@ -159,8 +159,3 @@ func parseAgentIDFromDataRoom(portalID networkid.PortalID) (string, bool) {
 	}
 	return agentID, true
 }
-
-// isAgentDataRoom checks if a portal ID is for an agent data room.
-func isAgentDataRoom(portalID networkid.PortalID) bool {
-	return strings.Contains(string(portalID), ":agent-data:")
-}

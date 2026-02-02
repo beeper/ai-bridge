@@ -237,20 +237,6 @@ func (s *AgentStoreAdapter) deleteAgentDataRoom(ctx context.Context, agentID str
 	return nil
 }
 
-// getBuilderPortal returns the Builder room portal if it exists.
-// Note: This is kept for backwards compatibility but is no longer the primary storage.
-func (s *AgentStoreAdapter) getBuilderPortal(ctx context.Context) (*bridgev2.Portal, error) {
-	meta := loginMetadata(s.client.UserLogin)
-	if meta.BuilderRoomID == "" {
-		return nil, nil
-	}
-
-	return s.client.UserLogin.Bridge.GetPortalByKey(ctx, networkid.PortalKey{
-		ID:       meta.BuilderRoomID,
-		Receiver: s.client.UserLogin.ID,
-	})
-}
-
 // SaveAgent implements agents.AgentStore.
 // It saves an agent to its own hidden data room.
 func (s *AgentStoreAdapter) SaveAgent(ctx context.Context, agent *agents.AgentDefinition) error {
