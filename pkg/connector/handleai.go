@@ -74,17 +74,21 @@ func (oc *AIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev
 	// Use FormatUserFacingError for consistent, user-friendly error messages
 	errorMessage := FormatUserFacingError(err)
 
-	status := event.MessageStatusRetriable
-	if IsPreDeltaError(err) {
-		status = event.MessageStatusFail
-	}
+	status := messageStatusForError(err)
+	reason := messageStatusReasonForError(err)
 
 	msgStatus := bridgev2.WrapErrorInStatus(err).
 		WithStatus(status).
+		WithErrorReason(reason).
 		WithMessage(errorMessage).
 		WithIsCertain(true).
 		WithSendNotice(true)
 	portal.Bridge.Matrix.SendMessageStatus(ctx, &msgStatus, bridgev2.StatusEventInfoFromEvent(evt))
+	for _, extra := range statusEventsFromContext(ctx) {
+		if extra != nil {
+			portal.Bridge.Matrix.SendMessageStatus(ctx, &msgStatus, bridgev2.StatusEventInfoFromEvent(extra))
+		}
+	}
 }
 
 // setModelTyping sets the typing indicator for the current model's ghost user

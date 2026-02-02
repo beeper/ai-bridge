@@ -86,6 +86,11 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		debounceKey := BuildDebounceKey(portal.MXID, msg.Event.Sender)
 		oc.inboundDebouncer.EnqueueWithDelay(debounceKey, entry, true, meta.DebounceMs)
 
+		// Let the client know the message is pending due to debounce.
+		if meta.DebounceMs >= 0 {
+			oc.sendPendingStatus(ctx, portal, msg.Event, "Combining messages...")
+		}
+
 		// Return Pending=true since we're handling this asynchronously
 		return &bridgev2.MatrixMessageResponse{
 			Pending: true,
@@ -332,8 +337,25 @@ func (oc *AIClient) handleMediaMessage(
 		return nil, fmt.Errorf("unsupported media type: %s", msgType)
 	}
 
+	var visionModel string
+	var visionFallback bool
+	if msgType == event.MsgImage {
+		visionModel, visionFallback = oc.resolveVisionModelForImage(ctx, meta)
+	}
+	var audioModel string
+	var audioFallback bool
+	if msgType == event.MsgAudio {
+		audioModel, audioFallback = oc.resolveAudioModelForInput(ctx, meta)
+	}
+
 	// Check capability (PDF has special OpenRouter handling via file-parser plugin)
-	capabilityOK := config.capabilityCheck(&meta.Capabilities)
+	modelCaps := oc.getModelCapabilitiesForMeta(meta)
+	capabilityOK := config.capabilityCheck(&modelCaps)
+	if msgType == event.MsgImage {
+		capabilityOK = visionModel != ""
+	} else if msgType == event.MsgAudio {
+		capabilityOK = audioModel != ""
+	}
 	if isPDF && !capabilityOK && oc.isOpenRouterProvider() {
 		capabilityOK = true // OpenRouter supports PDF via file-parser plugin
 	}
@@ -361,8 +383,13 @@ func (oc *AIClient) handleMediaMessage(
 	}
 
 	// Get caption (body is usually the filename or caption)
-	caption := strings.TrimSpace(msg.Content.Body)
-	if caption == "" || (msg.Content.Info != nil && caption == msg.Content.Info.MimeType) {
+	rawCaption := strings.TrimSpace(msg.Content.Body)
+	hasUserCaption := rawCaption != ""
+	if msg.Content.Info != nil && rawCaption == msg.Content.Info.MimeType {
+		hasUserCaption = false
+	}
+	caption := rawCaption
+	if !hasUserCaption {
 		caption = config.defaultCaption
 	}
 
@@ -370,6 +397,98 @@ func (oc *AIClient) handleMediaMessage(
 	var encryptedFile *event.EncryptedFileInfo
 	if msg.Content.File != nil {
 		encryptedFile = msg.Content.File
+	}
+
+	// If model lacks vision but agent supports image understanding, analyze image first.
+	if msgType == event.MsgImage && visionFallback {
+		analysisPrompt := buildImageUnderstandingPrompt(caption, hasUserCaption)
+		description, err := oc.analyzeImageWithModel(ctx, visionModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
+		if err != nil {
+			oc.log.Warn().Err(err).Msg("Image understanding failed")
+			oc.sendSystemNotice(ctx, portal, "Image understanding failed. Please try again or switch to a vision-capable model using /model.")
+			return &bridgev2.MatrixMessageResponse{}, nil
+		}
+
+		combined := buildImageUnderstandingMessage(caption, hasUserCaption, description)
+		if combined == "" {
+			oc.sendSystemNotice(ctx, portal, "Image understanding failed. Please try again or switch to a vision-capable model using /model.")
+			return &bridgev2.MatrixMessageResponse{}, nil
+		}
+
+		promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined)
+		if err != nil {
+			return nil, err
+		}
+
+		userMessage := &database.Message{
+			ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+			Room:     portal.PortalKey,
+			SenderID: humanUserID(oc.UserLogin.ID),
+			Metadata: &MessageMetadata{
+				Role: "user",
+				Body: combined,
+			},
+			Timestamp: time.Now(),
+		}
+
+		dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
+			Event:       msg.Event,
+			Portal:      portal,
+			Meta:        meta,
+			Type:        pendingTypeText,
+			MessageBody: combined,
+		}, promptMessages)
+
+		return &bridgev2.MatrixMessageResponse{
+			DB:      dbMsg,
+			Pending: isPending,
+		}, nil
+	}
+
+	// If model lacks audio but agent supports audio understanding, analyze audio first.
+	if msgType == event.MsgAudio && audioFallback {
+		analysisPrompt := buildAudioUnderstandingPrompt(caption, hasUserCaption)
+		transcript, err := oc.analyzeAudioWithModel(ctx, audioModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
+		if err != nil {
+			oc.log.Warn().Err(err).Msg("Audio understanding failed")
+			oc.sendSystemNotice(ctx, portal, "Audio understanding failed. Please try again or switch to an audio-capable model using /model.")
+			return &bridgev2.MatrixMessageResponse{}, nil
+		}
+
+		combined := buildAudioUnderstandingMessage(caption, hasUserCaption, transcript)
+		if combined == "" {
+			oc.sendSystemNotice(ctx, portal, "Audio understanding failed. Please try again or switch to an audio-capable model using /model.")
+			return &bridgev2.MatrixMessageResponse{}, nil
+		}
+
+		promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined)
+		if err != nil {
+			return nil, err
+		}
+
+		userMessage := &database.Message{
+			ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+			Room:     portal.PortalKey,
+			SenderID: humanUserID(oc.UserLogin.ID),
+			Metadata: &MessageMetadata{
+				Role: "user",
+				Body: combined,
+			},
+			Timestamp: time.Now(),
+		}
+
+		dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
+			Event:       msg.Event,
+			Portal:      portal,
+			Meta:        meta,
+			Type:        pendingTypeText,
+			MessageBody: combined,
+		}, promptMessages)
+
+		return &bridgev2.MatrixMessageResponse{
+			DB:      dbMsg,
+			Pending: isPending,
+		}, nil
 	}
 
 	// Build prompt with media

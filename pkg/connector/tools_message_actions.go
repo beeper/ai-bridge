@@ -53,7 +53,7 @@ func executeMessageChannelInfo(ctx context.Context, _ map[string]any, btc *Bridg
 }
 
 // executeMessageChannelEdit handles channel-edit by mapping to room title/topic updates.
-func executeMessageChannelEdit(ctx context.Context, args map[string]any, _ *BridgeToolContext) (string, error) {
+func executeMessageChannelEdit(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
 	var title string
 	if raw, ok := args["name"]; ok {
 		if s, ok := raw.(string); ok {
@@ -94,15 +94,46 @@ func executeMessageChannelEdit(ctx context.Context, args map[string]any, _ *Brid
 		return "", fmt.Errorf("action=channel-edit requires 'name' or 'topic'")
 	}
 
-	mapped := map[string]any{}
-	if title != "" {
-		mapped["title"] = title
+	if btc == nil {
+		btc = GetBridgeToolContext(ctx)
 	}
-	if descProvided {
-		mapped["description"] = description
+	if btc == nil {
+		return "", fmt.Errorf("bridge context not available")
+	}
+	if btc.Portal == nil {
+		return "", fmt.Errorf("portal not available")
 	}
 
-	return executeSetChatInfo(ctx, mapped)
+	updates := make([]string, 0, 2)
+	if title != "" {
+		if err := btc.Client.setRoomName(ctx, btc.Portal, title); err != nil {
+			return "", fmt.Errorf("failed to set room title: %w", err)
+		}
+		updates = append(updates, fmt.Sprintf("title=%s", title))
+	}
+	if descProvided {
+		if err := btc.Client.setRoomTopic(ctx, btc.Portal, description); err != nil {
+			return "", fmt.Errorf("failed to set room description: %w", err)
+		}
+		if description == "" {
+			updates = append(updates, "description=cleared")
+		} else {
+			updates = append(updates, fmt.Sprintf("description=%s", description))
+		}
+	}
+
+	result := map[string]any{
+		"status":  "updated",
+		"updates": updates,
+	}
+	if title != "" {
+		result["title"] = title
+	}
+	if descProvided {
+		result["description"] = description
+	}
+
+	return jsonActionResult("channel-edit", result)
 }
 
 // executeMessageMemberInfo handles the member-info action - gets user profile.

@@ -1661,6 +1661,17 @@ func (oc *AIClient) broadcastCapabilities(ctx context.Context, portal *bridgev2.
 	meta := portalMeta(portal)
 	loginMeta := loginMetadata(oc.UserLogin)
 
+	// Refresh stored model capabilities (room capabilities may add image-understanding union separately)
+	modelCaps := oc.getModelCapabilitiesForMeta(meta)
+	if meta.Capabilities != modelCaps {
+		meta.Capabilities = modelCaps
+		if err := portal.Save(ctx); err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to save portal after capability refresh")
+		}
+	}
+
+	roomCaps := oc.getRoomCapabilities(ctx, meta)
+
 	// Ensure tools config is initialized
 	if ensureToolsConfig(meta, loginMeta.Provider) {
 		if err := portal.Save(ctx); err != nil {
@@ -1670,7 +1681,7 @@ func (oc *AIClient) broadcastCapabilities(ctx context.Context, portal *bridgev2.
 
 	// Build reasoning effort options if model supports reasoning
 	var reasoningEfforts []ReasoningEffortOption
-	if meta.Capabilities.SupportsReasoning {
+	if roomCaps.SupportsReasoning {
 		reasoningEfforts = []ReasoningEffortOption{
 			{Value: "low", Label: "Low"},
 			{Value: "medium", Label: "Medium"},
@@ -1679,7 +1690,7 @@ func (oc *AIClient) broadcastCapabilities(ctx context.Context, portal *bridgev2.
 	}
 
 	content := &RoomCapabilitiesEventContent{
-		Capabilities:           &meta.Capabilities,
+		Capabilities:           &roomCaps,
 		AvailableTools:         oc.buildAvailableTools(meta),
 		ReasoningEffortOptions: reasoningEfforts,
 		Provider:               loginMeta.Provider,
@@ -1695,6 +1706,9 @@ func (oc *AIClient) broadcastCapabilities(ctx context.Context, portal *bridgev2.
 		oc.log.Warn().Err(err).Msg("Failed to broadcast room capabilities")
 		return err
 	}
+
+	// Also update standard room features for clients
+	portal.UpdateCapabilities(ctx, oc.UserLogin, true)
 
 	oc.log.Debug().Str("model", meta.Model).Msg("Broadcasted room capabilities")
 	return nil

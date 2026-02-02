@@ -437,6 +437,7 @@ func (oc *AIClient) dispatchOrQueue(
 		for _, extra := range pending.StatusEvents {
 			oc.sendSuccessStatus(ctx, portal, extra)
 		}
+		runCtx := withStatusEvents(ctx, pending.StatusEvents)
 		go func() {
 			defer func() {
 				// Remove ack reaction after response is complete (if configured)
@@ -446,7 +447,7 @@ func (oc *AIClient) dispatchOrQueue(
 				oc.releaseRoom(portal.MXID)
 				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
 			}()
-			oc.dispatchCompletionInternal(ctx, evt, portal, meta, promptMessages)
+			oc.dispatchCompletionInternal(runCtx, evt, portal, meta, promptMessages)
 		}()
 		return userMessage, false
 	}
@@ -476,12 +477,16 @@ func (oc *AIClient) dispatchOrQueueWithStatus(
 ) {
 	if oc.acquireRoom(portal.MXID) {
 		oc.sendSuccessStatus(ctx, portal, evt)
+		for _, extra := range pending.StatusEvents {
+			oc.sendSuccessStatus(ctx, portal, extra)
+		}
+		runCtx := withStatusEvents(ctx, pending.StatusEvents)
 		go func() {
 			defer func() {
 				oc.releaseRoom(portal.MXID)
 				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
 			}()
-			oc.dispatchCompletionInternal(ctx, evt, portal, meta, promptMessages)
+			oc.dispatchCompletionInternal(runCtx, evt, portal, meta, promptMessages)
 		}()
 		return
 	}
@@ -540,13 +545,14 @@ func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 	}
 
 	// Process in background, will release room when done
+	runCtx := withStatusEvents(ctx, pending.StatusEvents)
 	go func() {
 		defer func() {
 			oc.releaseRoom(roomID)
 			// Check for more pending messages
 			oc.processNextPending(oc.backgroundContext(ctx), roomID)
 		}()
-		oc.dispatchCompletionInternal(ctx, pending.Event, pending.Portal, pending.Meta, promptMessages)
+		oc.dispatchCompletionInternal(runCtx, pending.Event, pending.Portal, pending.Meta, promptMessages)
 	}()
 }
 
@@ -662,10 +668,9 @@ func updateGhostLastSync(_ context.Context, ghost *bridgev2.Ghost) bool {
 func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
 	meta := portalMeta(portal)
 
-	// Always recompute capabilities from the current model to ensure they're up-to-date
-	// This handles cases where stored metadata might be stale
-	modelID := oc.effectiveModel(meta)
-	modelCaps := getModelCapabilities(modelID, oc.findModelInfo(modelID))
+	// Always recompute effective room capabilities to ensure they're up-to-date
+	// (includes image-understanding union for agent rooms)
+	modelCaps := oc.getRoomCapabilities(ctx, meta)
 
 	// Clone base capabilities
 	caps := ptr.Clone(aiBaseCaps)
@@ -754,6 +759,18 @@ func (oc *AIClient) effectiveModelForAPI(meta *PortalMetadata) string {
 	}
 
 	// Direct OpenAI provider needs the prefix stripped
+	_, actualModel := ParseModelPrefix(modelID)
+	return actualModel
+}
+
+// modelIDForAPI converts a full model ID to the provider-specific API model name.
+// For OpenRouter/Beeper, returns the full model ID.
+// For direct providers, strips the prefix (e.g., "openai/gpt-5.2" → "gpt-5.2").
+func (oc *AIClient) modelIDForAPI(modelID string) string {
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper {
+		return modelID
+	}
 	_, actualModel := ParseModelPrefix(modelID)
 	return actualModel
 }
@@ -1215,12 +1232,19 @@ func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) 
 func (oc *AIClient) findModelInfo(modelID string) *ModelInfo {
 	meta := loginMetadata(oc.UserLogin)
 	if meta.ModelCache == nil {
-		return nil
+		goto fallback
 	}
 	for i := range meta.ModelCache.Models {
 		if meta.ModelCache.Models[i].ID == modelID {
 			return &meta.ModelCache.Models[i]
 		}
+	}
+
+fallback:
+	resolved := ResolveAlias(modelID)
+	if info, ok := ModelManifest.Models[resolved]; ok {
+		infoCopy := info
+		return &infoCopy
 	}
 	return nil
 }

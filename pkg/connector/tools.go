@@ -1198,64 +1198,6 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 	return text.String(), nil
 }
 
-// executeSetChatInfo patches the room title and/or description using bridge context.
-func executeSetChatInfo(ctx context.Context, args map[string]any) (string, error) {
-	rawTitle, hasTitle := args["title"]
-	rawDesc, hasDesc := args["description"]
-	if !hasTitle && !hasDesc {
-		return "", fmt.Errorf("missing 'title' or 'description' argument")
-	}
-
-	var title string
-	if hasTitle {
-		if s, ok := rawTitle.(string); ok {
-			title = strings.TrimSpace(s)
-		} else {
-			return "", fmt.Errorf("invalid 'title' argument")
-		}
-		if title == "" {
-			return "", fmt.Errorf("title cannot be empty")
-		}
-	}
-
-	var description string
-	if hasDesc {
-		if s, ok := rawDesc.(string); ok {
-			description = strings.TrimSpace(s)
-		} else {
-			return "", fmt.Errorf("invalid 'description' argument")
-		}
-	}
-
-	btc := GetBridgeToolContext(ctx)
-	if btc == nil {
-		return "", fmt.Errorf("bridge context not available")
-	}
-	if btc.Portal == nil {
-		return "", fmt.Errorf("portal not available")
-	}
-
-	var updates []string
-	if hasTitle {
-		if err := btc.Client.setRoomName(ctx, btc.Portal, title); err != nil {
-			return "", fmt.Errorf("failed to set room title: %w", err)
-		}
-		updates = append(updates, fmt.Sprintf("title=%s", title))
-	}
-	if hasDesc {
-		if err := btc.Client.setRoomTopic(ctx, btc.Portal, description); err != nil {
-			return "", fmt.Errorf("failed to set room description: %w", err)
-		}
-		if description == "" {
-			updates = append(updates, "description=cleared")
-		} else {
-			updates = append(updates, fmt.Sprintf("description=%s", description))
-		}
-	}
-
-	return fmt.Sprintf("Chat info updated: %s", strings.Join(updates, ", ")), nil
-}
-
 // executeSessionStatus returns current session status including time, model, and usage info.
 // Similar to OpenClaw's session_status tool.
 func executeSessionStatus(ctx context.Context, args map[string]any) (string, error) {

@@ -192,7 +192,7 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 		})
 		if len(enabledTools) > 0 {
 			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
-			params.Tools = append(params.Tools, ToOpenAITools(enabledTools, strictMode)...)
+			params.Tools = append(params.Tools, ToOpenAITools(enabledTools, strictMode, &oc.log)...)
 			log.Debug().Int("count", len(enabledTools)).Msg("Added builtin function tools")
 		}
 	}
@@ -201,7 +201,7 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 	if oc.isBuilderRoom(portal) {
 		bossTools := tools.BossTools()
 		strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
-		params.Tools = append(params.Tools, bossToolsToOpenAI(bossTools, strictMode)...)
+		params.Tools = append(params.Tools, bossToolsToOpenAI(bossTools, strictMode, &oc.log)...)
 		log.Debug().Int("count", len(bossTools)).Msg("Added boss agent tools")
 	}
 
@@ -209,7 +209,7 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 }
 
 // bossToolsToOpenAI converts boss tools to OpenAI Responses API format.
-func bossToolsToOpenAI(bossTools []*tools.Tool, strictMode ToolStrictMode) []responses.ToolUnionParam {
+func bossToolsToOpenAI(bossTools []*tools.Tool, strictMode ToolStrictMode, log *zerolog.Logger) []responses.ToolUnionParam {
 	var result []responses.ToolUnionParam
 	for _, t := range bossTools {
 		var schema map[string]any
@@ -227,7 +227,9 @@ func bossToolsToOpenAI(bossTools []*tools.Tool, strictMode ToolStrictMode) []res
 			}
 		}
 		if schema != nil {
-			schema = sanitizeToolSchema(schema)
+			var stripped []string
+			schema, stripped = sanitizeToolSchemaWithReport(schema)
+			logSchemaSanitization(log, t.Name, stripped)
 		}
 		strict := shouldUseStrictMode(strictMode, schema)
 		toolParam := responses.ToolUnionParam{
@@ -247,7 +249,7 @@ func bossToolsToOpenAI(bossTools []*tools.Tool, strictMode ToolStrictMode) []res
 }
 
 // bossToolsToChatTools converts boss tools to OpenAI Chat Completions tool format.
-func bossToolsToChatTools(bossTools []*tools.Tool) []openai.ChatCompletionToolUnionParam {
+func bossToolsToChatTools(bossTools []*tools.Tool, log *zerolog.Logger) []openai.ChatCompletionToolUnionParam {
 	var result []openai.ChatCompletionToolUnionParam
 	for _, t := range bossTools {
 		var schema map[string]any
@@ -265,7 +267,9 @@ func bossToolsToChatTools(bossTools []*tools.Tool) []openai.ChatCompletionToolUn
 			}
 		}
 		if schema != nil {
-			schema = sanitizeToolSchema(schema)
+			var stripped []string
+			schema, stripped = sanitizeToolSchemaWithReport(schema)
+			logSchemaSanitization(log, t.Name, stripped)
 		}
 		function := openai.FunctionDefinitionParam{
 			Name:       t.Name,
@@ -1128,7 +1132,7 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 		})
 		if len(enabledTools) > 0 {
 			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
-			params.Tools = append(params.Tools, ToOpenAITools(enabledTools, strictMode)...)
+			params.Tools = append(params.Tools, ToOpenAITools(enabledTools, strictMode, &oc.log)...)
 		}
 	}
 
@@ -1140,7 +1144,7 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 	if agents.IsBossAgent(agentID) {
 		bossTools := tools.BossTools()
 		strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
-		params.Tools = append(params.Tools, bossToolsToOpenAI(bossTools, strictMode)...)
+		params.Tools = append(params.Tools, bossToolsToOpenAI(bossTools, strictMode, &oc.log)...)
 	}
 
 	// Prevent duplicate tool names (Anthropic rejects duplicates)
@@ -1193,11 +1197,11 @@ func (oc *AIClient) streamChatCompletions(
 			return oc.isToolEnabled(meta, name)
 		})
 		if len(enabledTools) > 0 {
-			params.Tools = append(params.Tools, ToOpenAIChatTools(enabledTools)...)
+			params.Tools = append(params.Tools, ToOpenAIChatTools(enabledTools, &oc.log)...)
 		}
 		if oc.isBuilderRoom(portal) {
 			bossTools := tools.BossTools()
-			params.Tools = append(params.Tools, bossToolsToChatTools(bossTools)...)
+			params.Tools = append(params.Tools, bossToolsToChatTools(bossTools, &oc.log)...)
 		}
 		params.Tools = dedupeChatToolParams(params.Tools)
 	}

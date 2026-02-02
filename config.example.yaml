@@ -34,6 +34,8 @@ metrics:
 encryption:
   allow: true
   default: false
+  delete_keys:
+    ratchet_on_decrypt: false
 
 # Connector-specific options (identical to pkg/connector/example-config.yaml)
 network:

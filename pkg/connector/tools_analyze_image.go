@@ -35,9 +35,12 @@ func executeAnalyzeImage(ctx context.Context, args map[string]any) (string, erro
 		return "", fmt.Errorf("image requires bridge context")
 	}
 
-	// Check if the current model supports vision
-	if btc.Meta == nil || !btc.Meta.Capabilities.SupportsVision {
-		return "", fmt.Errorf("current model does not support vision/image analysis")
+	if btc.Meta == nil {
+		return "", fmt.Errorf("missing room metadata for image analysis")
+	}
+	modelID, _ := btc.Client.resolveVisionModelForImage(ctx, btc.Meta)
+	if modelID == "" {
+		return "", fmt.Errorf("no vision-capable model available for image analysis")
 	}
 
 	// Get image data based on URL type
@@ -88,7 +91,7 @@ func executeAnalyzeImage(ctx context.Context, args map[string]any) (string, erro
 
 	// Call the AI provider for vision analysis
 	resp, err := btc.Client.provider.Generate(ctx, GenerateParams{
-		Model:               btc.Meta.Model,
+		Model:               btc.Client.modelIDForAPI(modelID),
 		Messages:            messages,
 		MaxCompletionTokens: 4096,
 	})

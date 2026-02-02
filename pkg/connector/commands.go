@@ -334,10 +334,11 @@ func fnConfig(ce *commands.Event) {
 		mode = "messages"
 	}
 
+	roomCaps := client.getRoomCapabilities(ce.Ctx, meta)
 	config := fmt.Sprintf(
 		"Current configuration:\n• Model: %s\n• Temperature: %.2f\n• Context: %d messages\n• Max tokens: %d\n• Vision: %v\n• Mode: %s",
 		client.effectiveModel(meta), client.effectiveTemperature(meta), client.historyLimit(meta),
-		client.effectiveMaxTokens(meta), meta.Capabilities.SupportsVision, mode)
+		client.effectiveMaxTokens(meta), roomCaps.SupportsVision, mode)
 	ce.Reply(config)
 }
 

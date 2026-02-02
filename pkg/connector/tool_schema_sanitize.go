@@ -2,7 +2,10 @@ package connector
 
 import (
 	"reflect"
+	"sort"
 	"strings"
+
+	"github.com/rs/zerolog"
 )
 
 // Based on OpenClaw's tool schema cleaning to keep providers happy.
@@ -39,6 +42,42 @@ const (
 	ToolStrictOn
 )
 
+type schemaSanitizeReport struct {
+	stripped map[string]struct{}
+}
+
+func (r *schemaSanitizeReport) add(key string) {
+	if r == nil {
+		return
+	}
+	if r.stripped == nil {
+		r.stripped = make(map[string]struct{})
+	}
+	r.stripped[key] = struct{}{}
+}
+
+func (r *schemaSanitizeReport) list() []string {
+	if r == nil || len(r.stripped) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(r.stripped))
+	for key := range r.stripped {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func logSchemaSanitization(log *zerolog.Logger, toolName string, stripped []string) {
+	if log == nil || len(stripped) == 0 {
+		return
+	}
+	log.Debug().
+		Str("tool_name", toolName).
+		Strs("stripped_keywords", stripped).
+		Msg("Sanitized tool schema for provider compatibility")
+}
+
 func resolveToolStrictMode(isOpenRouter bool) ToolStrictMode {
 	if isOpenRouter {
 		return ToolStrictOff
@@ -58,11 +97,21 @@ func shouldUseStrictMode(mode ToolStrictMode, schema map[string]any) bool {
 }
 
 func sanitizeToolSchema(schema map[string]any) map[string]any {
+	cleaned, _ := sanitizeToolSchemaWithReport(schema)
+	return cleaned
+}
+
+func sanitizeToolSchemaWithReport(schema map[string]any) (map[string]any, []string) {
+	if schema == nil {
+		return nil, nil
+	}
+
 	normalized := normalizeToolSchema(schema)
-	cleaned := cleanSchemaForProvider(normalized)
+	report := &schemaSanitizeReport{}
+	cleaned := cleanSchemaForProviderWithReport(normalized, report)
 	cleanedMap, ok := cleaned.(map[string]any)
 	if !ok || cleanedMap == nil {
-		return normalized
+		return normalized, report.list()
 	}
 
 	// Ensure top-level object type when properties/required are present.
@@ -72,7 +121,7 @@ func sanitizeToolSchema(schema map[string]any) map[string]any {
 		}
 	}
 
-	return cleanedMap
+	return cleanedMap, report.list()
 }
 
 func normalizeToolSchema(schema map[string]any) map[string]any {
@@ -383,13 +432,17 @@ func hasUnsupportedKeywords(schema any) bool {
 }
 
 func cleanSchemaForProvider(schema any) any {
+	return cleanSchemaForProviderWithReport(schema, nil)
+}
+
+func cleanSchemaForProviderWithReport(schema any, report *schemaSanitizeReport) any {
 	if schema == nil {
 		return schema
 	}
 	if arr, ok := schema.([]any); ok {
 		out := make([]any, 0, len(arr))
 		for _, item := range arr {
-			out = append(out, cleanSchemaForProvider(item))
+			out = append(out, cleanSchemaForProviderWithReport(item, report))
 		}
 		return out
 	}
@@ -398,7 +451,7 @@ func cleanSchemaForProvider(schema any) any {
 		return schema
 	}
 	defs := extendSchemaDefs(nil, obj)
-	return cleanSchemaWithDefs(obj, defs, nil)
+	return cleanSchemaWithDefs(obj, defs, nil, report)
 }
 
 func extendSchemaDefs(defs schemaDefs, schema map[string]any) schemaDefs {
@@ -528,10 +581,11 @@ func copySchemaMeta(src map[string]any, dst map[string]any) {
 	}
 }
 
-func cleanSchemaWithDefs(schema map[string]any, defs schemaDefs, refStack map[string]struct{}) any {
+func cleanSchemaWithDefs(schema map[string]any, defs schemaDefs, refStack map[string]struct{}, report *schemaSanitizeReport) any {
 	nextDefs := extendSchemaDefs(defs, schema)
 
 	if ref, ok := schema["$ref"].(string); ok && ref != "" {
+		report.add("$ref")
 		if refStack != nil {
 			if _, seen := refStack[ref]; seen {
 				return map[string]any{}
@@ -543,7 +597,7 @@ func cleanSchemaWithDefs(schema map[string]any, defs schemaDefs, refStack map[st
 				nextStack[k] = struct{}{}
 			}
 			nextStack[ref] = struct{}{}
-			cleaned := cleanSchemaForProviderWithDefs(resolved, nextDefs, nextStack)
+			cleaned := cleanSchemaForProviderWithDefs(resolved, nextDefs, nextStack, report)
 			if obj, ok := cleaned.(map[string]any); ok {
 				result := make(map[string]any, len(obj)+3)
 				for k, v := range obj {
@@ -574,14 +628,14 @@ func cleanSchemaWithDefs(schema map[string]any, defs schemaDefs, refStack map[st
 		raw := schema["anyOf"].([]any)
 		cleanedAnyOf = make([]any, 0, len(raw))
 		for _, variant := range raw {
-			cleanedAnyOf = append(cleanedAnyOf, cleanSchemaForProviderWithDefs(variant, nextDefs, refStack))
+			cleanedAnyOf = append(cleanedAnyOf, cleanSchemaForProviderWithDefs(variant, nextDefs, refStack, report))
 		}
 	}
 	if hasOneOf {
 		raw := schema["oneOf"].([]any)
 		cleanedOneOf = make([]any, 0, len(raw))
 		for _, variant := range raw {
-			cleanedOneOf = append(cleanedOneOf, cleanSchemaForProviderWithDefs(variant, nextDefs, refStack))
+			cleanedOneOf = append(cleanedOneOf, cleanSchemaForProviderWithDefs(variant, nextDefs, refStack, report))
 		}
 	}
 
@@ -632,6 +686,7 @@ func cleanSchemaWithDefs(schema map[string]any, defs schemaDefs, refStack map[st
 	cleaned := make(map[string]any, len(schema))
 	for key, value := range schema {
 		if _, blocked := unsupportedSchemaKeywords[key]; blocked {
+			report.add(key)
 			continue
 		}
 
@@ -672,7 +727,7 @@ func cleanSchemaWithDefs(schema map[string]any, defs schemaDefs, refStack map[st
 			if props, ok := value.(map[string]any); ok {
 				nextProps := make(map[string]any, len(props))
 				for k, v := range props {
-					nextProps[k] = cleanSchemaForProviderWithDefs(v, nextDefs, refStack)
+					nextProps[k] = cleanSchemaForProviderWithDefs(v, nextDefs, refStack, report)
 				}
 				cleaned[key] = nextProps
 			} else {
@@ -683,11 +738,11 @@ func cleanSchemaWithDefs(schema map[string]any, defs schemaDefs, refStack map[st
 			case []any:
 				nextItems := make([]any, 0, len(items))
 				for _, entry := range items {
-					nextItems = append(nextItems, cleanSchemaForProviderWithDefs(entry, nextDefs, refStack))
+					nextItems = append(nextItems, cleanSchemaForProviderWithDefs(entry, nextDefs, refStack, report))
 				}
 				cleaned[key] = nextItems
 			case map[string]any:
-				cleaned[key] = cleanSchemaForProviderWithDefs(items, nextDefs, refStack)
+				cleaned[key] = cleanSchemaForProviderWithDefs(items, nextDefs, refStack, report)
 			default:
 				cleaned[key] = value
 			}
@@ -698,7 +753,7 @@ func cleanSchemaWithDefs(schema map[string]any, defs schemaDefs, refStack map[st
 				} else {
 					nextItems := make([]any, 0, len(arr))
 					for _, entry := range arr {
-						nextItems = append(nextItems, cleanSchemaForProviderWithDefs(entry, nextDefs, refStack))
+						nextItems = append(nextItems, cleanSchemaForProviderWithDefs(entry, nextDefs, refStack, report))
 					}
 					cleaned[key] = nextItems
 				}
@@ -710,7 +765,7 @@ func cleanSchemaWithDefs(schema map[string]any, defs schemaDefs, refStack map[st
 				} else {
 					nextItems := make([]any, 0, len(arr))
 					for _, entry := range arr {
-						nextItems = append(nextItems, cleanSchemaForProviderWithDefs(entry, nextDefs, refStack))
+						nextItems = append(nextItems, cleanSchemaForProviderWithDefs(entry, nextDefs, refStack, report))
 					}
 					cleaned[key] = nextItems
 				}
@@ -719,7 +774,7 @@ func cleanSchemaWithDefs(schema map[string]any, defs schemaDefs, refStack map[st
 			if arr, ok := value.([]any); ok {
 				nextItems := make([]any, 0, len(arr))
 				for _, entry := range arr {
-					nextItems = append(nextItems, cleanSchemaForProviderWithDefs(entry, nextDefs, refStack))
+					nextItems = append(nextItems, cleanSchemaForProviderWithDefs(entry, nextDefs, refStack, report))
 				}
 				cleaned[key] = nextItems
 			}
@@ -731,19 +786,19 @@ func cleanSchemaWithDefs(schema map[string]any, defs schemaDefs, refStack map[st
 	return cleaned
 }
 
-func cleanSchemaForProviderWithDefs(schema any, defs schemaDefs, refStack map[string]struct{}) any {
+func cleanSchemaForProviderWithDefs(schema any, defs schemaDefs, refStack map[string]struct{}, report *schemaSanitizeReport) any {
 	if schema == nil {
 		return schema
 	}
 	if arr, ok := schema.([]any); ok {
 		out := make([]any, 0, len(arr))
 		for _, item := range arr {
-			out = append(out, cleanSchemaForProviderWithDefs(item, defs, refStack))
+			out = append(out, cleanSchemaForProviderWithDefs(item, defs, refStack, report))
 		}
 		return out
 	}
 	if obj, ok := schema.(map[string]any); ok {
-		return cleanSchemaWithDefs(obj, defs, refStack)
+		return cleanSchemaWithDefs(obj, defs, refStack, report)
 	}
 	return schema
 }
