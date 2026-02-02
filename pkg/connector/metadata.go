@@ -115,6 +115,7 @@ type PortalMetadata struct {
 	DefaultAgentID string `json:"default_agent_id,omitempty"` // Agent assigned to this room (legacy name, same as AgentID)
 	AgentID        string `json:"agent_id,omitempty"`         // Which agent is the ghost for this room
 	IsBuilderRoom  bool   `json:"is_builder_room,omitempty"`  // True if this is the Manage AI Chats room (protected from overrides)
+	IsRawMode      bool   `json:"is_raw_mode,omitempty"`      // True if this is a playground/raw mode room (no directive processing)
 
 	// Ack reaction config - similar to OpenClaw's ack reactions
 	AckReactionEmoji       string `json:"ack_reaction_emoji,omitempty"`        // Emoji to react with when message received (e.g., "👀", "🤔"). Empty = disabled.

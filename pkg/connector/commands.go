@@ -545,11 +545,12 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 		CommandDeleteAgent,
 		CommandManage,
 		CommandModelRoom,
+		CommandPlayground,
 	)
 	oc.br.Log.Info().
 		Str("section", HelpSectionAI.Name).
 		Int("section_order", HelpSectionAI.Order).
-		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, tools, mode, new, fork, regenerate, title, models, agent, agents, create-agent, delete-agent, manage, model-room")
+		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, tools, mode, new, fork, regenerate, title, models, agent, agents, create-agent, delete-agent, manage, model-room, playground")
 }
 
 // CommandAgent handles the !ai agent command

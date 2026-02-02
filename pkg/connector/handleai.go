@@ -1941,7 +1941,13 @@ func (oc *AIClient) generateOutboundLinkPreviews(ctx context.Context, text strin
 
 // getAgentResponseMode returns the response mode for the current agent.
 // Defaults to ResponseModeNatural if not set.
+// IsRawMode on the portal overrides all other settings (for playground rooms).
 func (oc *AIClient) getAgentResponseMode(meta *PortalMetadata) agents.ResponseMode {
+	// IsRawMode flag takes priority (set by playground command)
+	if meta.IsRawMode {
+		return agents.ResponseModeRaw
+	}
+
 	agentID := meta.AgentID
 	if agentID == "" {
 		agentID = meta.DefaultAgentID

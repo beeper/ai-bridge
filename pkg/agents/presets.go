@@ -17,9 +17,10 @@ const (
 )
 
 // PresetAgents contains the default agent definitions.
-// Only Beeper AI is included - custom agents are created by users.
+// Includes Beeper AI (default), Playground (sandbox), and Boss (meta).
 var PresetAgents = []*AgentDefinition{
 	BeeperAIAgent,
+	PlaygroundAgent,
 }
 
 // GetPresetByID returns a preset agent by ID.
