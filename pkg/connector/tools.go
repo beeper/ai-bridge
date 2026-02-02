@@ -34,9 +34,10 @@ type ToolDefinition struct {
 
 // BridgeToolContext provides bridge-specific context for tool execution
 type BridgeToolContext struct {
-	Client *AIClient
-	Portal *bridgev2.Portal
-	Meta   *PortalMetadata
+	Client        *AIClient
+	Portal        *bridgev2.Portal
+	Meta          *PortalMetadata
+	SourceEventID id.EventID // The triggering message's event ID (for reactions/replies)
 }
 
 // bridgeToolContextKey is the context key for BridgeToolContext
@@ -315,15 +316,18 @@ func executeMessageReact(ctx context.Context, args map[string]any, btc *BridgeTo
 		return "", fmt.Errorf("action=react requires 'emoji' parameter")
 	}
 
-	// Get target message ID (optional - defaults to source message if available)
+	// Get target message ID (optional - defaults to triggering message)
 	var targetEventID id.EventID
 	if msgID, ok := args["message_id"].(string); ok && msgID != "" {
 		targetEventID = id.EventID(msgID)
+	} else if btc.SourceEventID != "" {
+		// Default to the triggering message (like clawdbot's currentMessageId)
+		targetEventID = btc.SourceEventID
 	}
 
-	// If no explicit target, we can't react (would need source event ID from context)
+	// If no target available, return error
 	if targetEventID == "" {
-		return "", fmt.Errorf("action=react requires 'message_id' parameter (no default target available)")
+		return "", fmt.Errorf("action=react requires 'message_id' parameter (no triggering message available)")
 	}
 
 	// Send reaction

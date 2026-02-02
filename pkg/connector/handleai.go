@@ -617,11 +617,12 @@ func (oc *AIClient) streamingResponse(
 				resultStatus = ResultStatusError
 				result = fmt.Sprintf("Error: tool %s is disabled", streamEvent.Name)
 			} else {
-				// Wrap context with bridge info for tools that need it (e.g., set_chat_info)
+				// Wrap context with bridge info for tools that need it (e.g., set_chat_info, react)
 				toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
-					Client: oc,
-					Portal: portal,
-					Meta:   meta,
+					Client:        oc,
+					Portal:        portal,
+					Meta:          meta,
+					SourceEventID: state.sourceEventID,
 				})
 				var err error
 				result, err = oc.executeBuiltinTool(toolCtx, portal, streamEvent.Name, streamEvent.Arguments)
@@ -1008,9 +1009,10 @@ func (oc *AIClient) streamingResponse(
 					result = fmt.Sprintf("Error: tool %s is disabled", streamEvent.Name)
 				} else {
 					toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
-						Client: oc,
-						Portal: portal,
-						Meta:   meta,
+						Client:        oc,
+						Portal:        portal,
+						Meta:          meta,
+						SourceEventID: state.sourceEventID,
 					})
 					var err error
 					result, err = oc.executeBuiltinTool(toolCtx, portal, streamEvent.Name, streamEvent.Arguments)
@@ -1407,11 +1409,12 @@ func (oc *AIClient) streamChatCompletions(
 	// Execute any accumulated tool calls
 	for _, tool := range activeTools {
 		if tool.input.Len() > 0 && tool.toolName != "" && oc.isToolEnabled(meta, tool.toolName) {
-			// Wrap context with bridge info for tools that need it (e.g., set_chat_info)
+			// Wrap context with bridge info for tools that need it (e.g., set_chat_info, react)
 			toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
-				Client: oc,
-				Portal: portal,
-				Meta:   meta,
+				Client:        oc,
+				Portal:        portal,
+				Meta:          meta,
+				SourceEventID: state.sourceEventID,
 			})
 			result, err := oc.executeBuiltinTool(toolCtx, portal, tool.toolName, tool.input.String())
 			resultStatus := ResultStatusSuccess

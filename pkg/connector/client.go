@@ -1158,11 +1158,17 @@ func (oc *AIClient) buildBasePrompt(
 			if !shouldIncludeInHistory(msgMeta) {
 				continue
 			}
+			// Include message ID so the AI can reference specific messages for reactions/replies
+			// Format: "message body [message_id: $eventId]" (matches clawdbot pattern)
+			body := msgMeta.Body
+			if history[i].MXID != "" {
+				body = fmt.Sprintf("%s [message_id: %s]", msgMeta.Body, history[i].MXID)
+			}
 			switch msgMeta.Role {
 			case "assistant":
-				prompt = append(prompt, openai.AssistantMessage(msgMeta.Body))
+				prompt = append(prompt, openai.AssistantMessage(body))
 			default:
-				prompt = append(prompt, openai.UserMessage(msgMeta.Body))
+				prompt = append(prompt, openai.UserMessage(body))
 			}
 		}
 	}

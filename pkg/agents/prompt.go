@@ -310,7 +310,9 @@ Right: NO_REPLY`
 
 func buildReactionsSection() string {
 	return `## Reactions
-Use the message tool with action=react to add emoji reactions to messages.
+Use the message tool with action=react to add emoji reactions.
+- Without message_id: reacts to the triggering message
+- With message_id: reacts to a specific message (IDs shown as [message_id: $...] in history)
 React sparingly - only when truly relevant to acknowledge or express sentiment.`
 }
 
@@ -403,7 +405,7 @@ Rules:
 
 ## Messaging
 Use the message tool for channel actions:
-- action=react: Add emoji reaction to a message (requires emoji and message_id)
+- action=react: Add emoji reaction (requires emoji; message_id optional, defaults to triggering message)
 - action=send: Send a message to the current chat`
 
 // BossSystemPrompt is the system prompt for the Boss agent.

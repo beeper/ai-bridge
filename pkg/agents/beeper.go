@@ -46,7 +46,7 @@ Rules:
 
 ## Messaging
 Use the message tool for channel actions:
-- action=react: Add emoji reaction to a message (requires emoji and message_id)
+- action=react: Add emoji reaction (requires emoji; message_id optional, defaults to triggering message)
 - action=send: Send a message to the current chat`
 
 // BeeperAIAgent is the default agent for all new chats.
