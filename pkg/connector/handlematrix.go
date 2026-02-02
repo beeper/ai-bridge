@@ -57,6 +57,11 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 	if msgType == event.MessageType(event.EventSticker.Type) {
 		msgType = event.MsgImage
 	}
+	if msgType == event.MsgVideo && msg.Content.Info != nil && msg.Content.Info.MauGIF {
+		if mimeType := normalizeMimeType(msg.Content.Info.MimeType); strings.HasPrefix(mimeType, "image/") {
+			msgType = event.MsgImage
+		}
+	}
 
 	// Handle media messages based on type (media is never debounced)
 	switch msgType {
@@ -329,21 +334,43 @@ func (oc *AIClient) handleMediaMessage(
 	config, ok := mediaConfigs[msgType]
 	isPDF := false
 
-	// Handle PDF files (MsgFile with application/pdf MIME type)
+	// Get the media URL
+	mediaURL := msg.Content.URL
+	if mediaURL == "" && msg.Content.File != nil {
+		mediaURL = msg.Content.File.URL
+	}
+	if mediaURL == "" {
+		return nil, fmt.Errorf("%s message has no URL", msgType)
+	}
+
+	// Get MIME type
+	mimeType := ""
+	if msg.Content.Info != nil && msg.Content.Info.MimeType != "" {
+		mimeType = normalizeMimeType(msg.Content.Info.MimeType)
+	}
+
+	// Handle PDF or text files (MsgFile)
 	if msgType == event.MsgFile {
-		mimeType := ""
-		if msg.Content.Info != nil {
-			mimeType = msg.Content.Info.MimeType
-		}
-		if mimeType == "application/pdf" {
+		switch {
+		case mimeType == "application/pdf":
 			config = pdfConfig
 			isPDF = true
 			ok = true
+		case isTextFileMime(mimeType):
+			if !oc.canUseMediaUnderstanding(meta) {
+				oc.sendSystemNotice(ctx, portal, "Text file understanding is only available when an agent is assigned and raw mode is off.")
+				return &bridgev2.MatrixMessageResponse{}, nil
+			}
+			return oc.handleTextFileMessage(ctx, msg, portal, meta, string(mediaURL), mimeType)
 		}
 	}
 
 	if !ok {
 		return nil, fmt.Errorf("unsupported media type: %s", msgType)
+	}
+
+	if mimeType == "" {
+		mimeType = config.defaultMimeType
 	}
 
 	var visionModel string
@@ -374,21 +401,6 @@ func (oc *AIClient) handleMediaMessage(
 			oc.effectiveModel(meta), config.capabilityName,
 		))
 		return &bridgev2.MatrixMessageResponse{}, nil
-	}
-
-	// Get the media URL
-	mediaURL := msg.Content.URL
-	if mediaURL == "" && msg.Content.File != nil {
-		mediaURL = msg.Content.File.URL
-	}
-	if mediaURL == "" {
-		return nil, fmt.Errorf("%s message has no URL", msgType)
-	}
-
-	// Get MIME type
-	mimeType := config.defaultMimeType
-	if msg.Content.Info != nil && msg.Content.Info.MimeType != "" {
-		mimeType = msg.Content.Info.MimeType
 	}
 
 	// Get caption (body is usually the filename or caption)
@@ -526,6 +538,77 @@ func (oc *AIClient) handleMediaMessage(
 		MediaURL:      string(mediaURL),
 		MimeType:      mimeType,
 		EncryptedFile: encryptedFile,
+	}, promptMessages)
+
+	return &bridgev2.MatrixMessageResponse{
+		DB:      dbMsg,
+		Pending: isPending,
+	}, nil
+}
+
+func (oc *AIClient) handleTextFileMessage(
+	ctx context.Context,
+	msg *bridgev2.MatrixMessage,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	mediaURL string,
+	mimeType string,
+) (*bridgev2.MatrixMessageResponse, error) {
+	rawCaption := strings.TrimSpace(msg.Content.Body)
+	fileName := strings.TrimSpace(msg.Content.FileName)
+	hasUserCaption := rawCaption != ""
+	if fileName == "" {
+		fileName = rawCaption
+		hasUserCaption = false
+	}
+	if rawCaption == fileName {
+		hasUserCaption = false
+	}
+	caption := rawCaption
+	if !hasUserCaption {
+		caption = "Please analyze this text file."
+	}
+
+	var encryptedFile *event.EncryptedFileInfo
+	if msg.Content.File != nil {
+		encryptedFile = msg.Content.File
+	}
+
+	content, truncated, err := oc.downloadTextFile(ctx, mediaURL, encryptedFile, mimeType)
+	if err != nil {
+		oc.log.Warn().Err(err).Msg("Text file understanding failed")
+		oc.sendSystemNotice(ctx, portal, "Text file understanding failed. Please upload a UTF-8 text file under 5 MB.")
+		return &bridgev2.MatrixMessageResponse{}, nil
+	}
+
+	combined := buildTextFileMessage(caption, hasUserCaption, fileName, mimeType, content, truncated)
+	if combined == "" {
+		oc.sendSystemNotice(ctx, portal, "Text file understanding failed. Please upload a UTF-8 text file under 5 MB.")
+		return &bridgev2.MatrixMessageResponse{}, nil
+	}
+
+	promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined)
+	if err != nil {
+		return nil, err
+	}
+
+	userMessage := &database.Message{
+		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+		Room:     portal.PortalKey,
+		SenderID: humanUserID(oc.UserLogin.ID),
+		Metadata: &MessageMetadata{
+			Role: "user",
+			Body: combined,
+		},
+		Timestamp: time.Now(),
+	}
+
+	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
+		Event:       msg.Event,
+		Portal:      portal,
+		Meta:        meta,
+		Type:        pendingTypeText,
+		MessageBody: combined,
 	}, promptMessages)
 
 	return &bridgev2.MatrixMessageResponse{

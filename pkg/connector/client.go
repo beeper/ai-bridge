@@ -198,7 +198,6 @@ func textFileFeatures() *event.FileFeatures {
 		Caption:           event.CapLevelFullySupported,
 		MaxCaptionLength:  AIMaxTextLength,
 		MaxSize:           50 * 1024 * 1024, // Shared cap with PDFs
-		MaxFileNameLength: AIMaxTextLength,
 	}
 }
 
@@ -741,7 +740,6 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 		fileFeatures.Caption = event.CapLevelFullySupported
 		fileFeatures.MaxCaptionLength = AIMaxTextLength
 		fileFeatures.MaxSize = 50 * 1024 * 1024
-		fileFeatures.MaxFileNameLength = AIMaxTextLength
 		caps.File[event.MsgFile] = fileFeatures
 	}
 

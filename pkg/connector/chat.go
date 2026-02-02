@@ -1058,9 +1058,15 @@ func (oc *AIClient) createForkedChat(
 		portal.OtherUserID = agentModelUserID(agentID, modelID)
 
 		agentName := agentID
-		store := NewAgentStoreAdapter(oc)
-		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil && agent.Name != "" {
-			agentName = agent.Name
+		// Try preset first - guaranteed to work for built-in agents (like "beeper")
+		if preset := agents.GetPresetByID(agentID); preset != nil {
+			agentName = preset.Name
+		} else {
+			// Custom agent - need Matrix state lookup
+			store := NewAgentStoreAdapter(oc)
+			if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil && agent.Name != "" {
+				agentName = agent.Name
+			}
 		}
 		oc.applyAgentChatInfo(chatInfo, agentID, agentName, modelID)
 
@@ -1164,7 +1170,11 @@ func (oc *AIClient) chatInfoFromPortal(ctx context.Context, portal *bridgev2.Por
 	}
 
 	agentName := agentID
-	if ctx != nil {
+	// Try preset first - guaranteed to work for built-in agents (like "beeper")
+	if preset := agents.GetPresetByID(agentID); preset != nil {
+		agentName = preset.Name
+	} else if ctx != nil {
+		// Custom agent - need Matrix state lookup
 		store := NewAgentStoreAdapter(oc)
 		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil && agent.Name != "" {
 			agentName = agent.Name
@@ -1804,8 +1814,8 @@ func (oc *AIClient) bootstrap(ctx context.Context) {
 	oc.log.Info().Msg("Starting bootstrap for new login")
 
 	if err := oc.syncChatCounter(logCtx); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to sync chat counter")
-		return
+		oc.log.Warn().Err(err).Msg("Failed to sync chat counter, continuing with default chat creation")
+		// Don't return - still create the default chat (matches other bridge patterns)
 	}
 
 	// Create default chat room with Beeper AI agent
