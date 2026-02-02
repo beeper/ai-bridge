@@ -409,11 +409,18 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 
 // ResolveIdentifier resolves a model ID to a ghost and optionally creates a chat
 func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	// Identifier is the model ID (e.g., "gpt-4o", "gpt-4-turbo")
-	modelID := strings.TrimSpace(identifier)
-	if modelID == "" {
-		return nil, fmt.Errorf("model identifier is required")
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return nil, fmt.Errorf("identifier is required")
 	}
+
+	// Handle MCP relay special identifier
+	if isMCPRelayIdentifier(identifier) {
+		return oc.resolveMCPRelay(ctx, createChat)
+	}
+
+	// Regular model identifier handling
+	modelID := identifier
 
 	// Validate model exists (check cache first)
 	models, _ := oc.listAvailableModels(ctx, false)
@@ -459,6 +466,120 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 		Ghost: ghost,
 		Chat:  chatResp,
 	}, nil
+}
+
+// resolveMCPRelay handles the special mcp-relay identifier for Desktop IPC
+func (oc *AIClient) resolveMCPRelay(ctx context.Context, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
+	oc.log.Info().Bool("create_chat", createChat).Msg("Resolving MCP relay identifier")
+
+	userID := mcpRelayUserID()
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get MCP relay ghost: %w", err)
+	}
+
+	var chatResp *bridgev2.CreateChatResponse
+	if createChat {
+		chatResp, err = oc.createMCPRelayRoom(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create MCP relay room: %w", err)
+		}
+	}
+
+	return &bridgev2.ResolveIdentifierResponse{
+		UserID: userID,
+		UserInfo: &bridgev2.UserInfo{
+			Name:        ptr.Ptr("MCP Relay"),
+			IsBot:       ptr.Ptr(true),
+			Identifiers: []string{MCPRelayIdentifier},
+		},
+		Ghost: ghost,
+		Chat:  chatResp,
+	}, nil
+}
+
+// createMCPRelayRoom creates or retrieves the MCP relay room for Desktop IPC
+func (oc *AIClient) createMCPRelayRoom(ctx context.Context) (*bridgev2.CreateChatResponse, error) {
+	portalKey := portalKeyForMCPRelay(oc.UserLogin.ID)
+
+	// Check if portal already exists
+	existingPortal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
+	if err == nil && existingPortal != nil && existingPortal.MXID != "" {
+		oc.log.Info().
+			Stringer("portal_key", portalKey).
+			Stringer("room_id", existingPortal.MXID).
+			Msg("MCP relay room already exists")
+		return &bridgev2.CreateChatResponse{
+			Portal:     existingPortal,
+			PortalKey:  portalKey,
+			PortalInfo: oc.buildMCPRelayChatInfo(),
+		}, nil
+	}
+
+	// Create new MCP relay portal
+	oc.log.Info().Stringer("portal_key", portalKey).Msg("Creating new MCP relay room")
+
+	portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get/create portal: %w", err)
+	}
+
+	chatInfo := oc.buildMCPRelayChatInfo()
+
+	// Configure portal as hidden DM
+	portal.RoomType = database.RoomTypeDM
+	portal.OtherUserID = mcpRelayUserID()
+	portal.Name = "MCP Relay"
+	portal.NameSet = true
+
+	return &bridgev2.CreateChatResponse{
+		Portal:     portal,
+		PortalKey:  portalKey,
+		PortalInfo: chatInfo,
+	}, nil
+}
+
+// buildMCPRelayChatInfo creates the chat info for MCP relay rooms
+func (oc *AIClient) buildMCPRelayChatInfo() *bridgev2.ChatInfo {
+	userID := mcpRelayUserID()
+	members := bridgev2.ChatMemberMap{
+		humanUserID(oc.UserLogin.ID): {
+			EventSender: bridgev2.EventSender{
+				Sender:      humanUserID(oc.UserLogin.ID),
+				SenderLogin: oc.UserLogin.ID,
+				IsFromMe:    true,
+			},
+			Membership: event.MembershipJoin,
+		},
+		userID: {
+			EventSender: bridgev2.EventSender{
+				Sender:      userID,
+				SenderLogin: oc.UserLogin.ID,
+			},
+			Membership: event.MembershipJoin,
+			UserInfo: &bridgev2.UserInfo{
+				Name:  ptr.Ptr("MCP Relay"),
+				IsBot: ptr.Ptr(true),
+			},
+		},
+	}
+
+	return &bridgev2.ChatInfo{
+		Name:  ptr.Ptr("MCP Relay"),
+		Topic: ptr.Ptr("Desktop MCP IPC channel"),
+		Members: &bridgev2.ChatMemberList{
+			IsFull:      true,
+			OtherUserID: userID,
+			MemberMap:   members,
+		},
+		// Mark as hidden from chat list
+		ExtraUpdates: func(ctx context.Context, portal *bridgev2.Portal) bool {
+			// Set metadata to mark this as MCP relay
+			meta := portalMeta(portal)
+			meta.IsMCPRelay = true
+			return true
+		},
+	}
 }
 
 // createNewChat creates a new portal for a specific model
