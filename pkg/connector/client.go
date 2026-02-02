@@ -228,6 +228,12 @@ type AIClient struct {
 	// Compactor handles intelligent context compaction with LLM summarization
 	compactor     *Compactor
 	compactorOnce sync.Once
+
+	// Message deduplication cache
+	inboundDedupeCache *DedupeCache
+
+	// Message debouncer for combining rapid messages
+	inboundDebouncer *Debouncer
 }
 
 // pendingMessageType indicates what kind of pending message this is
@@ -269,13 +275,19 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 
 	// Create base client struct
 	oc := &AIClient{
-		UserLogin:       login,
-		connector:       connector,
-		apiKey:          key,
-		log:             log,
-		activeRooms:     make(map[id.RoomID]bool),
-		pendingMessages: make(map[id.RoomID][]pendingMessage),
+		UserLogin:          login,
+		connector:          connector,
+		apiKey:             key,
+		log:                log,
+		activeRooms:        make(map[id.RoomID]bool),
+		pendingMessages:    make(map[id.RoomID][]pendingMessage),
+		inboundDedupeCache: NewDedupeCache(DefaultDedupeTTL, DefaultDedupeMaxSize),
 	}
+
+	// Initialize debouncer - the flush handler will be set up when needed
+	oc.inboundDebouncer = NewDebouncer(DefaultDebounceMs, oc.handleDebouncedMessages, func(err error, entries []DebounceEntry) {
+		log.Warn().Err(err).Int("entries", len(entries)).Msg("Debounce flush failed")
+	})
 
 	// Use per-user base_url if provided
 	baseURL := strings.TrimSpace(meta.BaseURL)
@@ -1872,4 +1884,89 @@ type AgentState struct {
 	Model       string
 	ToolCalls   []string // Event IDs of tool calls
 	ImageEvents []string // Event IDs of generated images
+}
+
+// buildDedupeKey creates a unique key for inbound message deduplication.
+// Format: matrix|{loginID}|{roomID}|{eventID}
+func (oc *AIClient) buildDedupeKey(roomID id.RoomID, eventID id.EventID) string {
+	return fmt.Sprintf("matrix|%s|%s|%s", oc.UserLogin.ID, roomID, eventID)
+}
+
+// handleDebouncedMessages processes flushed debounce buffer entries.
+// This combines multiple rapid messages into a single AI request.
+func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
+	if len(entries) == 0 {
+		return
+	}
+
+	last := entries[len(entries)-1]
+	ctx := oc.backgroundContext(context.Background())
+
+	// Combine message bodies if multiple
+	combinedBody, count := CombineDebounceEntries(entries)
+	if count > 1 {
+		oc.log.Info().Int("count", count).Msg("Combined debounced messages")
+	}
+
+	// Build prompt with combined body
+	promptMessages, err := oc.buildPromptWithLinkContext(ctx, last.Portal, last.Meta, combinedBody, nil)
+	if err != nil {
+		oc.log.Err(err).Msg("Failed to build prompt for debounced messages")
+		return
+	}
+
+	// Create user message for database
+	userMessage := &database.Message{
+		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(last.Event.ID))),
+		Room:     last.Portal.PortalKey,
+		SenderID: humanUserID(oc.UserLogin.ID),
+		Metadata: &MessageMetadata{
+			Role: "user",
+			Body: combinedBody,
+		},
+		Timestamp: time.Now(),
+	}
+
+	// Dispatch using existing flow (handles room lock + status)
+	_, _ = oc.dispatchOrQueue(ctx, last.Event, last.Portal, last.Meta, userMessage,
+		pendingMessage{
+			Event:       last.Event,
+			Portal:      last.Portal,
+			Meta:        last.Meta,
+			Type:        pendingTypeText,
+			MessageBody: combinedBody,
+		}, promptMessages)
+
+	// Remove ack reaction from first entry if configured
+	if last.Meta.AckReactionRemoveAfter && entries[0].AckEventID != "" {
+		oc.removeAckReactionByID(ctx, last.Portal, entries[0].AckEventID)
+	}
+}
+
+// removeAckReactionByID removes an ack reaction by its event ID.
+func (oc *AIClient) removeAckReactionByID(ctx context.Context, portal *bridgev2.Portal, reactionEventID id.EventID) {
+	if portal == nil || portal.MXID == "" || reactionEventID == "" {
+		return
+	}
+
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return
+	}
+
+	// Redact the ack reaction
+	_, err := intent.SendMessage(ctx, portal.MXID, event.EventRedaction, &event.Content{
+		Parsed: &event.RedactionEventContent{
+			Redacts: reactionEventID,
+		},
+	}, nil)
+	if err != nil {
+		oc.log.Warn().Err(err).
+			Stringer("reaction_event", reactionEventID).
+			Msg("Failed to remove ack reaction by ID")
+	} else {
+		oc.log.Debug().
+			Stringer("reaction_event", reactionEventID).
+			Msg("Removed ack reaction by ID")
+	}
 }

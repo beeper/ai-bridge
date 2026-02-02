@@ -28,6 +28,15 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 	}
 	meta := portalMeta(portal)
 
+	// Check deduplication - skip if we've already processed this event
+	if msg.Event != nil && oc.inboundDedupeCache != nil {
+		dedupeKey := oc.buildDedupeKey(portal.MXID, msg.Event.ID)
+		if oc.inboundDedupeCache.Check(dedupeKey) {
+			oc.log.Debug().Str("event_id", msg.Event.ID.String()).Msg("Skipping duplicate message")
+			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+		}
+	}
+
 	// Send ack reaction if configured (like OpenClaw's ack reactions)
 	// This provides immediate visual feedback before AI processes the message
 	var ackReactionEventID id.EventID
@@ -40,9 +49,14 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		oc.storeAckReaction(portal.MXID, msg.Event.ID, ackReactionEventID)
 	}
 
-	// Handle media messages based on type
+	// Handle media messages based on type (media is never debounced)
 	switch msg.Content.MsgType {
 	case event.MsgImage, event.MsgVideo, event.MsgAudio, event.MsgFile:
+		// Flush any pending debounced messages for this room+sender before processing media
+		if oc.inboundDebouncer != nil {
+			debounceKey := BuildDebounceKey(portal.MXID, msg.Event.Sender)
+			oc.inboundDebouncer.FlushKey(debounceKey)
+		}
 		return oc.handleMediaMessage(ctx, msg, portal, meta, msg.Content.MsgType)
 	case event.MsgText, event.MsgNotice, event.MsgEmote:
 		// Continue to text handling below
@@ -54,6 +68,30 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		return nil, fmt.Errorf("empty messages are not supported")
 	}
 
+	// Check if this message should be debounced
+	shouldDebounce := oc.inboundDebouncer != nil && ShouldDebounce(msg.Event, body)
+
+	if shouldDebounce {
+		// Build debounce entry
+		entry := DebounceEntry{
+			Event:      msg.Event,
+			Portal:     portal,
+			Meta:       meta,
+			Body:       body,
+			AckEventID: ackReactionEventID,
+		}
+
+		// Enqueue to debouncer - processing happens after delay
+		debounceKey := BuildDebounceKey(portal.MXID, msg.Event.Sender)
+		oc.inboundDebouncer.Enqueue(debounceKey, entry, true)
+
+		// Return Pending=true since we're handling this asynchronously
+		return &bridgev2.MatrixMessageResponse{
+			Pending: true,
+		}, nil
+	}
+
+	// Not debouncing - process immediately
 	// Get raw event content for link previews
 	var rawEventContent map[string]any
 	if msg.Event != nil && msg.Event.Content.Raw != nil {

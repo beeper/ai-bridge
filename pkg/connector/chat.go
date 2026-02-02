@@ -51,9 +51,6 @@ func getDefaultToolsConfig(_ string) ToolsConfig {
 	// Web fetch - fetch and extract page content
 	registerTool(&config, defaultWebFetchTool(), "builtin")
 
-	// Chat info tool (title/description)
-	registerTool(&config, defaultChatInfoTool(), "builtin")
-
 	// Session status tool
 	registerTool(&config, defaultSessionStatusTool(), "builtin")
 
@@ -99,12 +96,6 @@ func ensureToolsConfig(meta *PortalMetadata, provider string) bool {
 	// Ensure web fetch tool exists
 	if _, ok := meta.ToolsConfig.Tools[toolspec.WebFetchName]; !ok {
 		registerTool(&meta.ToolsConfig, defaultWebFetchTool(), "builtin")
-		changed = true
-	}
-
-	// Ensure chat info tool exists
-	if _, ok := meta.ToolsConfig.Tools[ToolNameSetChatInfo]; !ok {
-		registerTool(&meta.ToolsConfig, defaultChatInfoTool(), "builtin")
 		changed = true
 	}
 
