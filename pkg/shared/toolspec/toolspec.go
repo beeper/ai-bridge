@@ -353,6 +353,10 @@ func ImageSchema() map[string]any {
 				"type":        "string",
 				"description": "Deprecated alias for image",
 			},
+			"imageUrl": map[string]any{
+				"type":        "string",
+				"description": "OpenClaw-style alias for image",
+			},
 			"model": map[string]any{
 				"type":        "string",
 				"description": "Optional: model override (ignored in bridge)",
