@@ -187,3 +187,17 @@ func IsModelNotFound(err error) bool {
 	}
 	return false
 }
+
+// IsToolSchemaError checks if the error indicates a tool schema validation failure.
+func IsToolSchemaError(err error) bool {
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		if strings.EqualFold(apiErr.Code, "invalid_function_parameters") {
+			return true
+		}
+		if strings.Contains(apiErr.Message, "Invalid schema for function") {
+			return true
+		}
+	}
+	return false
+}

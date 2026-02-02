@@ -12,6 +12,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
+	"github.com/openai/openai-go/v3/shared/constant"
 	"github.com/rs/zerolog"
 )
 
@@ -573,8 +574,12 @@ func ToOpenAITools(tools []ToolDefinition) []responses.ToolUnionParam {
 
 	var result []responses.ToolUnionParam
 	for _, tool := range tools {
+		schema := tool.Parameters
+		if schema != nil {
+			schema = sanitizeToolSchema(schema)
+		}
 		// Use SDK helper which properly sets all required fields including Type
-		toolParam := responses.ToolParamOfFunction(tool.Name, tool.Parameters, true)
+		toolParam := responses.ToolParamOfFunction(tool.Name, schema, true)
 
 		// Add description if available (SDK helper doesn't support this directly)
 		if tool.Description != "" && toolParam.OfFunction != nil {
@@ -582,6 +587,37 @@ func ToOpenAITools(tools []ToolDefinition) []responses.ToolUnionParam {
 		}
 
 		result = append(result, toolParam)
+	}
+
+	return result
+}
+
+// ToOpenAIChatTools converts tool definitions to OpenAI Chat Completions tool format.
+func ToOpenAIChatTools(tools []ToolDefinition) []openai.ChatCompletionToolUnionParam {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	var result []openai.ChatCompletionToolUnionParam
+	for _, tool := range tools {
+		schema := tool.Parameters
+		if schema != nil {
+			schema = sanitizeToolSchema(schema)
+		}
+		function := openai.FunctionDefinitionParam{
+			Name:       tool.Name,
+			Parameters: schema,
+		}
+		if tool.Description != "" {
+			function.Description = openai.String(tool.Description)
+		}
+
+		result = append(result, openai.ChatCompletionToolUnionParam{
+			OfFunction: &openai.ChatCompletionFunctionToolParam{
+				Function: function,
+				Type:     constant.ValueOf[constant.Function](),
+			},
+		})
 	}
 
 	return result
@@ -601,6 +637,29 @@ func dedupeToolParams(tools []responses.ToolUnionParam) []responses.ToolUnionPar
 			key = "web_search"
 		default:
 			key = fmt.Sprintf("%v", t) // fallback, should rarely hit
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, t)
+	}
+	return result
+}
+
+// dedupeChatToolParams removes tools with duplicate identifiers in Chat Completions.
+func dedupeChatToolParams(tools []openai.ChatCompletionToolUnionParam) []openai.ChatCompletionToolUnionParam {
+	seen := make(map[string]struct{}, len(tools))
+	var result []openai.ChatCompletionToolUnionParam
+	for _, t := range tools {
+		key := ""
+		switch {
+		case t.OfFunction != nil:
+			key = "function:" + t.OfFunction.Function.Name
+		case t.OfCustom != nil:
+			key = "custom:" + t.OfCustom.Custom.Name
+		default:
+			key = fmt.Sprintf("%v", t)
 		}
 		if _, ok := seen[key]; ok {
 			continue

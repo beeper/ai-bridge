@@ -339,3 +339,89 @@ func TestCombineDebounceEntries_SkipsEmpty(t *testing.T) {
 		t.Errorf("Expected count 3 (includes empty), got %d", count)
 	}
 }
+
+func TestDebouncer_EnqueueWithDelay_CustomDelay(t *testing.T) {
+	var flushed [][]DebounceEntry
+	var mu sync.Mutex
+
+	debouncer := NewDebouncer(1000, func(entries []DebounceEntry) { // Default 1s
+		mu.Lock()
+		flushed = append(flushed, entries)
+		mu.Unlock()
+	}, nil)
+
+	entry := DebounceEntry{Body: "test"}
+
+	// Use custom 50ms delay instead of default 1s
+	debouncer.EnqueueWithDelay("key1", entry, true, 50)
+
+	// Should not be flushed immediately
+	mu.Lock()
+	if len(flushed) != 0 {
+		t.Error("Should not flush immediately")
+	}
+	mu.Unlock()
+
+	// Wait for custom delay (less than default)
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	if len(flushed) != 1 {
+		t.Errorf("Expected 1 flush after custom delay, got %d", len(flushed))
+	}
+	mu.Unlock()
+}
+
+func TestDebouncer_EnqueueWithDelay_DisabledDelay(t *testing.T) {
+	var flushed [][]DebounceEntry
+	var mu sync.Mutex
+
+	debouncer := NewDebouncer(1000, func(entries []DebounceEntry) {
+		mu.Lock()
+		flushed = append(flushed, entries)
+		mu.Unlock()
+	}, nil)
+
+	entry := DebounceEntry{Body: "test"}
+
+	// Negative delay = immediate (disabled)
+	debouncer.EnqueueWithDelay("key1", entry, true, -1)
+
+	mu.Lock()
+	if len(flushed) != 1 {
+		t.Errorf("Expected 1 immediate flush for disabled debounce, got %d", len(flushed))
+	}
+	mu.Unlock()
+}
+
+func TestDebouncer_EnqueueWithDelay_ZeroUsesDefault(t *testing.T) {
+	var flushed [][]DebounceEntry
+	var mu sync.Mutex
+
+	debouncer := NewDebouncer(50, func(entries []DebounceEntry) { // Default 50ms
+		mu.Lock()
+		flushed = append(flushed, entries)
+		mu.Unlock()
+	}, nil)
+
+	entry := DebounceEntry{Body: "test"}
+
+	// Zero delay = use default
+	debouncer.EnqueueWithDelay("key1", entry, true, 0)
+
+	// Should not be flushed immediately
+	mu.Lock()
+	if len(flushed) != 0 {
+		t.Error("Should not flush immediately")
+	}
+	mu.Unlock()
+
+	// Wait for default delay
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	if len(flushed) != 1 {
+		t.Errorf("Expected 1 flush after default delay, got %d", len(flushed))
+	}
+	mu.Unlock()
+}

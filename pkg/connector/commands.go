@@ -341,6 +341,65 @@ func fnConfig(ce *commands.Event) {
 	ce.Reply(config)
 }
 
+// CommandDebounce handles the !ai debounce command
+var CommandDebounce = &commands.FullHandler{
+	Func: fnDebounce,
+	Name: "debounce",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Get or set message debounce delay (ms), 'off' to disable, 'default' to reset",
+		Args:        "[_delay_|off|default]",
+	},
+	RequiresPortal: true,
+	RequiresLogin:  true,
+}
+
+func fnDebounce(ce *commands.Event) {
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
+		return
+	}
+
+	if len(ce.Args) == 0 {
+		// Show current setting
+		switch {
+		case meta.DebounceMs < 0:
+			ce.Reply("Message debouncing is **disabled** for this room")
+		case meta.DebounceMs == 0:
+			ce.Reply("Message debounce: **%d ms** (default)", DefaultDebounceMs)
+		default:
+			ce.Reply("Message debounce: **%d ms**", meta.DebounceMs)
+		}
+		return
+	}
+
+	arg := strings.ToLower(ce.Args[0])
+	switch arg {
+	case "off", "disable", "disabled":
+		meta.DebounceMs = -1
+		client.savePortalQuiet(ce.Ctx, ce.Portal, "debounce disabled")
+		ce.Reply("Message debouncing disabled for this room")
+	case "default", "reset":
+		meta.DebounceMs = 0
+		client.savePortalQuiet(ce.Ctx, ce.Portal, "debounce reset")
+		ce.Reply("Message debounce reset to default (%d ms)", DefaultDebounceMs)
+	default:
+		// Parse as integer
+		delay, err := strconv.Atoi(arg)
+		if err != nil || delay < 0 || delay > 10000 {
+			ce.Reply("Invalid debounce delay. Use a number 0-10000 (ms), 'off', or 'default'.")
+			return
+		}
+		meta.DebounceMs = delay
+		client.savePortalQuiet(ce.Ctx, ce.Portal, "debounce change")
+		if delay == 0 {
+			ce.Reply("Message debounce reset to default (%d ms)", DefaultDebounceMs)
+		} else {
+			ce.Reply("Message debounce set to: %d ms", delay)
+		}
+	}
+}
+
 // CommandTools handles the !ai tools command
 var CommandTools = &commands.FullHandler{
 	Func: fnTools,
@@ -586,6 +645,7 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 		CommandContext,
 		CommandTokens,
 		CommandConfig,
+		CommandDebounce,
 		CommandTools,
 		CommandMode,
 		CommandNew,
@@ -603,7 +663,7 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 	oc.br.Log.Info().
 		Str("section", HelpSectionAI.Name).
 		Int("section_order", HelpSectionAI.Order).
-		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, tools, mode, new, fork, regenerate, title, models, agent, agents, create-agent, delete-agent, manage, playground")
+		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, debounce, tools, mode, new, fork, regenerate, title, models, agent, agents, create-agent, delete-agent, manage, playground")
 }
 
 // CommandAgent handles the !ai agent command

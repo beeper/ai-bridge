@@ -12,6 +12,7 @@ import (
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
+	"github.com/openai/openai-go/v3/shared/constant"
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -223,6 +224,9 @@ func bossToolsToOpenAI(bossTools []*tools.Tool) []responses.ToolUnionParam {
 				}
 			}
 		}
+		if schema != nil {
+			schema = sanitizeToolSchema(schema)
+		}
 		// Use SDK helper which properly sets Type field (required by OpenRouter)
 		toolParam := responses.ToolParamOfFunction(t.Name, schema, true)
 		if t.Description != "" && toolParam.OfFunction != nil {
@@ -231,6 +235,64 @@ func bossToolsToOpenAI(bossTools []*tools.Tool) []responses.ToolUnionParam {
 		result = append(result, toolParam)
 	}
 	return result
+}
+
+// bossToolsToChatTools converts boss tools to OpenAI Chat Completions tool format.
+func bossToolsToChatTools(bossTools []*tools.Tool) []openai.ChatCompletionToolUnionParam {
+	var result []openai.ChatCompletionToolUnionParam
+	for _, t := range bossTools {
+		var schema map[string]any
+		switch v := t.InputSchema.(type) {
+		case nil:
+			schema = nil
+		case map[string]any:
+			schema = v
+		default:
+			encoded, err := json.Marshal(v)
+			if err == nil {
+				if err := json.Unmarshal(encoded, &schema); err != nil {
+					schema = nil
+				}
+			}
+		}
+		if schema != nil {
+			schema = sanitizeToolSchema(schema)
+		}
+		function := openai.FunctionDefinitionParam{
+			Name:       t.Name,
+			Parameters: schema,
+		}
+		if t.Description != "" {
+			function.Description = openai.String(t.Description)
+		}
+		result = append(result, openai.ChatCompletionToolUnionParam{
+			OfFunction: &openai.ChatCompletionFunctionToolParam{
+				Function: function,
+				Type:     constant.ValueOf[constant.Function](),
+			},
+		})
+	}
+	return result
+}
+
+// streamingResponseWithToolSchemaFallback retries via Chat Completions when the provider
+// rejects tool schemas in the Responses API.
+func (oc *AIClient) streamingResponseWithToolSchemaFallback(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	messages []openai.ChatCompletionMessageParamUnion,
+) (bool, *ContextLengthError, error) {
+	success, cle, err := oc.streamingResponse(ctx, evt, portal, meta, messages)
+	if success || cle != nil || err == nil {
+		return success, cle, err
+	}
+	if IsToolSchemaError(err) {
+		oc.log.Warn().Err(err).Msg("Responses tool schema rejected; falling back to chat completions")
+		return oc.streamChatCompletions(ctx, evt, portal, meta, messages)
+	}
+	return success, cle, err
 }
 
 // streamingResponse handles streaming using the Responses API
@@ -1101,6 +1163,19 @@ func (oc *AIClient) streamChatCompletions(
 	}
 	if temp := oc.effectiveTemperature(meta); temp > 0 {
 		params.Temperature = openai.Float(temp)
+	}
+	if meta.Capabilities.SupportsToolCalling {
+		enabledTools := GetEnabledBuiltinTools(func(name string) bool {
+			return oc.isToolEnabled(meta, name)
+		})
+		if len(enabledTools) > 0 {
+			params.Tools = append(params.Tools, ToOpenAIChatTools(enabledTools)...)
+		}
+		if oc.isBuilderRoom(portal) {
+			bossTools := tools.BossTools()
+			params.Tools = append(params.Tools, bossToolsToChatTools(bossTools)...)
+		}
+		params.Tools = dedupeChatToolParams(params.Tools)
 	}
 
 	stream := oc.api.Chat.Completions.NewStreaming(ctx, params)

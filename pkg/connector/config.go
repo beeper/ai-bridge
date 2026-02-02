@@ -26,6 +26,37 @@ type Config struct {
 
 	// Link preview configuration
 	LinkPreviews *LinkPreviewConfig `yaml:"link_previews"`
+
+	// Inbound message processing configuration
+	Inbound *InboundConfig `yaml:"inbound"`
+}
+
+// InboundConfig contains settings for inbound message processing
+// including deduplication and debouncing.
+type InboundConfig struct {
+	// Deduplication settings
+	DedupeTTL     time.Duration `yaml:"dedupe_ttl"`      // Time-to-live for dedupe entries (default: 20m)
+	DedupeMaxSize int           `yaml:"dedupe_max_size"` // Max entries in dedupe cache (default: 5000)
+
+	// Debounce settings
+	DefaultDebounceMs int `yaml:"default_debounce_ms"` // Default debounce delay in ms (default: 500)
+}
+
+// WithDefaults returns the InboundConfig with default values applied.
+func (c *InboundConfig) WithDefaults() *InboundConfig {
+	if c == nil {
+		c = &InboundConfig{}
+	}
+	if c.DedupeTTL <= 0 {
+		c.DedupeTTL = DefaultDedupeTTL
+	}
+	if c.DedupeMaxSize <= 0 {
+		c.DedupeMaxSize = DefaultDedupeMaxSize
+	}
+	if c.DefaultDebounceMs <= 0 {
+		c.DefaultDebounceMs = DefaultDebounceMs
+	}
+	return c
 }
 
 // BeeperConfig contains Beeper AI proxy credentials for automatic login.
@@ -101,4 +132,9 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Int, "link_previews", "max_page_bytes")
 	helper.Copy(configupgrade.Int, "link_previews", "max_image_bytes")
 	helper.Copy(configupgrade.Str, "link_previews", "cache_ttl")
+
+	// Inbound message processing configuration
+	helper.Copy(configupgrade.Str, "inbound", "dedupe_ttl")
+	helper.Copy(configupgrade.Int, "inbound", "dedupe_max_size")
+	helper.Copy(configupgrade.Int, "inbound", "default_debounce_ms")
 }

@@ -205,8 +205,8 @@ func getMatrixUserProfile(ctx context.Context, btc *BridgeToolContext, userID id
 
 	return &MatrixUserProfile{
 		UserID:      userID.String(),
-		DisplayName: profile.DisplayName,
-		AvatarURL:   profile.AvatarURL.String(),
+		DisplayName: profile.Displayname,
+		AvatarURL:   string(profile.AvatarURL),
 	}, nil
 }
 

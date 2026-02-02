@@ -126,6 +126,9 @@ type PortalMetadata struct {
 	// Ack reaction config - similar to OpenClaw's ack reactions
 	AckReactionEmoji       string `json:"ack_reaction_emoji,omitempty"`        // Emoji to react with when message received (e.g., "👀", "🤔"). Empty = disabled.
 	AckReactionRemoveAfter bool   `json:"ack_reaction_remove_after,omitempty"` // Remove the ack reaction after replying
+
+	// Debounce configuration (0 = use default, -1 = disabled)
+	DebounceMs int `json:"debounce_ms,omitempty"`
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild

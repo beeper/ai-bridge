@@ -7,8 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/matrix"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
@@ -202,6 +205,36 @@ func (oc *OpenAIConnector) handleReactionEvent(ctx context.Context, evt *event.E
 		return
 	}
 
+	normalizedEmoji := variationselector.Remove(content.RelatesTo.Key)
+
+	targetPart, err := oc.br.DB.Message.GetPartByMXID(ctx, targetEventID)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to load reaction target from database")
+		return
+	}
+	if targetPart == nil {
+		return
+	}
+	if targetPart.Room != portal.PortalKey {
+		log.Debug().Msg("Reaction target message is not in the portal")
+		return
+	}
+
+	dbReaction := &database.Reaction{
+		Room:          portal.PortalKey,
+		MessageID:     targetPart.ID,
+		MessagePartID: targetPart.PartID,
+		SenderID:      networkid.UserID("mxid:" + evt.Sender.String()),
+		SenderMXID:    evt.Sender,
+		EmojiID:       networkid.EmojiID(normalizedEmoji),
+		Emoji:         normalizedEmoji,
+		MXID:          evt.ID,
+		Timestamp:     time.UnixMilli(evt.Timestamp),
+	}
+	if err := oc.br.DB.Reaction.Upsert(ctx, dbReaction); err != nil {
+		log.Warn().Err(err).Msg("Failed to store reaction in database")
+	}
+
 	// Get sender display name - use localpart as fallback
 	senderName := evt.Sender.Localpart()
 
@@ -220,8 +253,8 @@ func (oc *OpenAIConnector) handleReactionEvent(ctx context.Context, evt *event.E
 	// We queue all reactions in AI rooms - the AI will naturally understand
 	// the context since it knows which messages it sent
 	feedback := ReactionFeedback{
-		Emoji:     content.RelatesTo.Key,
-		Timestamp: time.Now(),
+		Emoji:     normalizedEmoji,
+		Timestamp: time.UnixMilli(evt.Timestamp),
 		Sender:    senderName,
 		MessageID: targetEventID.String(),
 		RoomName:  roomName,
@@ -249,9 +282,80 @@ func (oc *OpenAIConnector) isBotUser(userID id.UserID) bool {
 
 // handleRedactionEvent processes redactions that might be reaction removals.
 func (oc *OpenAIConnector) handleRedactionEvent(ctx context.Context, evt *event.Event) {
-	// For now, we don't track reaction removals as it requires
-	// keeping track of which events were reactions.
-	// This could be enhanced later if needed.
+	log := oc.br.Log.With().
+		Str("component", "reaction_handler").
+		Str("room_id", evt.RoomID.String()).
+		Str("sender", evt.Sender.String()).
+		Logger()
+
+	if oc.isBotUser(evt.Sender) {
+		return
+	}
+
+	content, ok := evt.Content.Parsed.(*event.RedactionEventContent)
+	if !ok || content.Redacts == "" {
+		return
+	}
+
+	reaction, err := oc.br.DB.Reaction.GetByMXID(ctx, content.Redacts)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to load redacted reaction from database")
+		return
+	}
+	if reaction == nil {
+		return
+	}
+
+	if err := oc.br.DB.Reaction.Delete(ctx, reaction); err != nil {
+		log.Warn().Err(err).Msg("Failed to delete reaction from database")
+	}
+
+	portal, err := oc.getPortalByRoomID(ctx, evt.RoomID)
+	if err != nil || portal == nil {
+		return
+	}
+
+	senderName := evt.Sender.Localpart()
+	roomName := ""
+	if meta := portalMeta(portal); meta != nil {
+		if meta.Title != "" {
+			roomName = meta.Title
+		} else if meta.Slug != "" {
+			roomName = meta.Slug
+		}
+	}
+
+	emoji := reaction.Emoji
+	if emoji == "" {
+		emoji = string(reaction.EmojiID)
+	}
+
+	messageID := ""
+	receiver := portal.Receiver
+	if receiver != "" {
+		if targetPart, err := oc.br.DB.Message.GetPartByID(ctx, receiver, reaction.MessageID, reaction.MessagePartID); err == nil && targetPart != nil {
+			messageID = targetPart.MXID.String()
+		}
+	}
+	if messageID == "" {
+		messageID = string(reaction.MessageID)
+	}
+
+	feedback := ReactionFeedback{
+		Emoji:     emoji,
+		Timestamp: time.UnixMilli(evt.Timestamp),
+		Sender:    senderName,
+		MessageID: messageID,
+		RoomName:  roomName,
+		Action:    "removed",
+	}
+
+	EnqueueReactionFeedback(evt.RoomID, feedback)
+	log.Debug().
+		Str("emoji", feedback.Emoji).
+		Str("target", feedback.MessageID).
+		Str("room", roomName).
+		Msg("Enqueued reaction removal feedback")
 }
 
 // getPortalByRoomID gets a portal by its Matrix room ID.

@@ -82,8 +82,9 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		}
 
 		// Enqueue to debouncer - processing happens after delay
+		// Use per-room debounce delay if configured (0 = default, -1 = disabled)
 		debounceKey := BuildDebounceKey(portal.MXID, msg.Event.Sender)
-		oc.inboundDebouncer.Enqueue(debounceKey, entry, true)
+		oc.inboundDebouncer.EnqueueWithDelay(debounceKey, entry, true, meta.DebounceMs)
 
 		// Return Pending=true since we're handling this asynchronously
 		return &bridgev2.MatrixMessageResponse{

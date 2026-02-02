@@ -149,7 +149,7 @@ func (oc *AIClient) streamingResponseWithRetry(
 		return
 	}
 	// Use Responses API for other content (images, files, text)
-	oc.responseWithModelFallback(ctx, evt, portal, meta, prompt, oc.streamingResponse, "responses")
+	oc.responseWithModelFallback(ctx, evt, portal, meta, prompt, oc.streamingResponseWithToolSchemaFallback, "responses")
 }
 
 // notifyContextLengthExceeded sends a user-friendly notice about context overflow

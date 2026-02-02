@@ -60,10 +60,21 @@ func BuildDebounceKey(roomID id.RoomID, sender id.UserID) string {
 // Enqueue adds a message to the debounce buffer.
 // If shouldDebounce is false, the message is processed immediately.
 func (d *Debouncer) Enqueue(key string, entry DebounceEntry, shouldDebounce bool) {
-	if key == "" || !shouldDebounce {
+	d.EnqueueWithDelay(key, entry, shouldDebounce, 0)
+}
+
+// EnqueueWithDelay adds a message with a custom debounce delay.
+// delayMs: 0 = use default, -1 = immediate (no debounce), >0 = custom delay
+func (d *Debouncer) EnqueueWithDelay(key string, entry DebounceEntry, shouldDebounce bool, delayMs int) {
+	if key == "" || !shouldDebounce || delayMs < 0 {
 		// Process immediately
 		d.onFlush([]DebounceEntry{entry})
 		return
+	}
+
+	// Use default delay if not specified
+	if delayMs == 0 {
+		delayMs = d.delayMs
 	}
 
 	d.mu.Lock()
@@ -71,13 +82,13 @@ func (d *Debouncer) Enqueue(key string, entry DebounceEntry, shouldDebounce bool
 
 	buf, exists := d.buffers[key]
 	if exists {
-		// Add to existing buffer, reset timer
+		// Add to existing buffer, reset timer with the new delay
 		buf.entries = append(buf.entries, entry)
-		buf.timer.Reset(time.Duration(d.delayMs) * time.Millisecond)
+		buf.timer.Reset(time.Duration(delayMs) * time.Millisecond)
 	} else {
 		// Create new buffer with timer
 		buf = &DebounceBuffer{entries: []DebounceEntry{entry}}
-		buf.timer = time.AfterFunc(time.Duration(d.delayMs)*time.Millisecond, func() {
+		buf.timer = time.AfterFunc(time.Duration(delayMs)*time.Millisecond, func() {
 			d.flush(key)
 		})
 		d.buffers[key] = buf

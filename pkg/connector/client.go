@@ -274,17 +274,18 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 
 	// Create base client struct
 	oc := &AIClient{
-		UserLogin:          login,
-		connector:          connector,
-		apiKey:             key,
-		log:                log,
-		activeRooms:        make(map[id.RoomID]bool),
-		pendingMessages:    make(map[id.RoomID][]pendingMessage),
-		inboundDedupeCache: NewDedupeCache(DefaultDedupeTTL, DefaultDedupeMaxSize),
+		UserLogin:       login,
+		connector:       connector,
+		apiKey:          key,
+		log:             log,
+		activeRooms:     make(map[id.RoomID]bool),
+		pendingMessages: make(map[id.RoomID][]pendingMessage),
 	}
 
-	// Initialize debouncer - the flush handler will be set up when needed
-	oc.inboundDebouncer = NewDebouncer(DefaultDebounceMs, oc.handleDebouncedMessages, func(err error, entries []DebounceEntry) {
+	// Initialize inbound message processing with config values
+	inboundCfg := connector.Config.Inbound.WithDefaults()
+	oc.inboundDedupeCache = NewDedupeCache(inboundCfg.DedupeTTL, inboundCfg.DedupeMaxSize)
+	oc.inboundDebouncer = NewDebouncer(inboundCfg.DefaultDebounceMs, oc.handleDebouncedMessages, func(err error, entries []DebounceEntry) {
 		log.Warn().Err(err).Int("entries", len(entries)).Msg("Debounce flush failed")
 	})
 
@@ -549,6 +550,11 @@ func (oc *AIClient) Connect(ctx context.Context) {
 }
 
 func (oc *AIClient) Disconnect() {
+	// Flush pending debounced messages before disconnect (bridgev2 pattern)
+	if oc.inboundDebouncer != nil {
+		oc.log.Info().Msg("Flushing pending debounced messages on disconnect")
+		oc.inboundDebouncer.FlushAll()
+	}
 	oc.loggedIn.Store(false)
 }
 
