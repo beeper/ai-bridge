@@ -37,7 +37,11 @@ func (oc *AIClient) resolveImageUnderstandingModel(ctx context.Context, meta *Po
 
 	store := NewAgentStoreAdapter(oc)
 	agent, err := store.GetAgentByID(ctx, agentID)
-	if err != nil || agent == nil {
+	if err != nil {
+		oc.log.Warn().Err(err).Str("agent_id", agentID).Msg("Failed to load agent for image understanding")
+		return ""
+	}
+	if agent == nil {
 		return ""
 	}
 
@@ -121,7 +125,11 @@ func (oc *AIClient) resolveAudioUnderstandingModel(ctx context.Context, meta *Po
 
 	store := NewAgentStoreAdapter(oc)
 	agent, err := store.GetAgentByID(ctx, agentID)
-	if err != nil || agent == nil {
+	if err != nil {
+		oc.log.Warn().Err(err).Str("agent_id", agentID).Msg("Failed to load agent for audio understanding")
+		return ""
+	}
+	if agent == nil {
 		return ""
 	}
 

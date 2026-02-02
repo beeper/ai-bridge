@@ -27,6 +27,9 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		return nil, fmt.Errorf("portal is nil")
 	}
 	meta := portalMeta(portal)
+	if msg.Event == nil {
+		return nil, fmt.Errorf("missing message event")
+	}
 
 	// Check deduplication - skip if we've already processed this event
 	if msg.Event != nil && oc.inboundDedupeCache != nil {
@@ -128,8 +131,8 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		return nil, err
 	}
 	userMessage := &database.Message{
-		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
-		MXID:     msg.Event.ID,
+		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
+		MXID:     eventID,
 		Room:     portal.PortalKey,
 		SenderID: humanUserID(oc.UserLogin.ID),
 		Metadata: &MessageMetadata{
@@ -336,6 +339,10 @@ func (oc *AIClient) handleMediaMessage(
 	meta *PortalMetadata,
 	msgType event.MessageType,
 ) (*bridgev2.MatrixMessageResponse, error) {
+	if msg.Event == nil {
+		return nil, fmt.Errorf("missing message event")
+	}
+
 	// Get config for this media type
 	config, ok := mediaConfigs[msgType]
 	isPDF := false
@@ -459,8 +466,8 @@ func (oc *AIClient) handleMediaMessage(
 		}
 
 		userMessage := &database.Message{
-			ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
-			MXID:     msg.Event.ID,
+			ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
+			MXID:     eventID,
 			Room:     portal.PortalKey,
 			SenderID: humanUserID(oc.UserLogin.ID),
 			Metadata: &MessageMetadata{
@@ -506,8 +513,8 @@ func (oc *AIClient) handleMediaMessage(
 		}
 
 		userMessage := &database.Message{
-			ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
-			MXID:     msg.Event.ID,
+			ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
+			MXID:     eventID,
 			Room:     portal.PortalKey,
 			SenderID: humanUserID(oc.UserLogin.ID),
 			Metadata: &MessageMetadata{
@@ -538,8 +545,8 @@ func (oc *AIClient) handleMediaMessage(
 	}
 
 	userMessage := &database.Message{
-		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
-		MXID:     msg.Event.ID,
+		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
+		MXID:     eventID,
 		Room:     portal.PortalKey,
 		SenderID: humanUserID(oc.UserLogin.ID),
 		Metadata: &MessageMetadata{
@@ -618,8 +625,8 @@ func (oc *AIClient) handleTextFileMessage(
 	}
 
 	userMessage := &database.Message{
-		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
-		MXID:     msg.Event.ID,
+		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
+		MXID:     eventID,
 		Room:     portal.PortalKey,
 		SenderID: humanUserID(oc.UserLogin.ID),
 		Metadata: &MessageMetadata{
@@ -991,11 +998,11 @@ func (oc *AIClient) handleRegenerate(
 	}
 
 	oc.dispatchOrQueueWithStatus(runCtx, evt, portal, meta, pendingMessage{
-		Event:       evt,
-		Portal:      portal,
-		Meta:        meta,
-		Type:        pendingTypeRegenerate,
-		MessageBody: userMeta.Body,
+		Event:         evt,
+		Portal:        portal,
+		Meta:          meta,
+		Type:          pendingTypeRegenerate,
+		MessageBody:   userMeta.Body,
 		SourceEventID: lastUserMessage.MXID,
 	}, prompt)
 }

@@ -567,8 +567,40 @@ func (oc *AIClient) streamingResponse(
 				result = displayResult
 			}
 
-			// Check for image generation result (IMAGE: prefix)
-			if strings.HasPrefix(result, ImageResultPrefix) {
+			// Check for image generation result (IMAGE: / IMAGES: prefix)
+			if strings.HasPrefix(result, ImagesResultPrefix) {
+				payload := strings.TrimPrefix(result, ImagesResultPrefix)
+				var images []string
+				if err := json.Unmarshal([]byte(payload), &images); err != nil {
+					log.Warn().Err(err).Msg("Failed to parse generated images payload")
+					displayResult = "Error: failed to parse generated images"
+					resultStatus = ResultStatusError
+				} else {
+					success := 0
+					for _, imageB64 := range images {
+						imageData, mimeType, err := decodeBase64Image(imageB64)
+						if err != nil {
+							log.Warn().Err(err).Msg("Failed to decode generated image")
+							continue
+						}
+						if _, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); err != nil {
+							log.Warn().Err(err).Msg("Failed to send generated image")
+							continue
+						}
+						success++
+					}
+					if success == len(images) && success > 0 {
+						displayResult = fmt.Sprintf("Images generated and sent successfully (%d)", success)
+					} else if success > 0 {
+						displayResult = fmt.Sprintf("Images generated with %d/%d sent successfully", success, len(images))
+						resultStatus = ResultStatusError
+					} else {
+						displayResult = "Error: failed to send generated images"
+						resultStatus = ResultStatusError
+					}
+				}
+				result = displayResult
+			} else if strings.HasPrefix(result, ImageResultPrefix) {
 				imageB64 := strings.TrimPrefix(result, ImageResultPrefix)
 				imageData, mimeType, err := decodeBase64Image(imageB64)
 				if err != nil {
@@ -956,8 +988,40 @@ func (oc *AIClient) streamingResponse(
 					result = displayResult
 				}
 
-				// Check for image generation result (IMAGE: prefix)
-				if strings.HasPrefix(result, ImageResultPrefix) {
+				// Check for image generation result (IMAGE: / IMAGES: prefix)
+				if strings.HasPrefix(result, ImagesResultPrefix) {
+					payload := strings.TrimPrefix(result, ImagesResultPrefix)
+					var images []string
+					if err := json.Unmarshal([]byte(payload), &images); err != nil {
+						log.Warn().Err(err).Msg("Failed to parse generated images payload (continuation)")
+						displayResult = "Error: failed to parse generated images"
+						resultStatus = ResultStatusError
+					} else {
+						success := 0
+						for _, imageB64 := range images {
+							imageData, mimeType, err := decodeBase64Image(imageB64)
+							if err != nil {
+								log.Warn().Err(err).Msg("Failed to decode generated image (continuation)")
+								continue
+							}
+							if _, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); err != nil {
+								log.Warn().Err(err).Msg("Failed to send generated image (continuation)")
+								continue
+							}
+							success++
+						}
+						if success == len(images) && success > 0 {
+							displayResult = fmt.Sprintf("Images generated and sent successfully (%d)", success)
+						} else if success > 0 {
+							displayResult = fmt.Sprintf("Images generated with %d/%d sent successfully", success, len(images))
+							resultStatus = ResultStatusError
+						} else {
+							displayResult = "Error: failed to send generated images"
+							resultStatus = ResultStatusError
+						}
+					}
+					result = displayResult
+				} else if strings.HasPrefix(result, ImageResultPrefix) {
 					imageB64 := strings.TrimPrefix(result, ImageResultPrefix)
 					imageData, mimeType, err := decodeBase64Image(imageB64)
 					if err != nil {
@@ -1370,8 +1434,39 @@ func (oc *AIClient) streamChatCompletions(
 				}
 			}
 
-			// Check for image generation result (IMAGE: prefix)
-			if strings.HasPrefix(result, ImageResultPrefix) {
+			// Check for image generation result (IMAGE: / IMAGES: prefix)
+			if strings.HasPrefix(result, ImagesResultPrefix) {
+				payload := strings.TrimPrefix(result, ImagesResultPrefix)
+				var images []string
+				if err := json.Unmarshal([]byte(payload), &images); err != nil {
+					log.Warn().Err(err).Msg("Failed to parse generated images payload (Chat Completions)")
+					result = "Error: failed to parse generated images"
+					resultStatus = ResultStatusError
+				} else {
+					success := 0
+					for _, imageB64 := range images {
+						imageData, mimeType, decodeErr := decodeBase64Image(imageB64)
+						if decodeErr != nil {
+							log.Warn().Err(decodeErr).Msg("Failed to decode generated image (Chat Completions)")
+							continue
+						}
+						if _, sendErr := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); sendErr != nil {
+							log.Warn().Err(sendErr).Msg("Failed to send generated image (Chat Completions)")
+							continue
+						}
+						success++
+					}
+					if success == len(images) && success > 0 {
+						result = fmt.Sprintf("Images generated and sent successfully (%d)", success)
+					} else if success > 0 {
+						result = fmt.Sprintf("Images generated with %d/%d sent successfully", success, len(images))
+						resultStatus = ResultStatusError
+					} else {
+						result = "Error: failed to send generated images"
+						resultStatus = ResultStatusError
+					}
+				}
+			} else if strings.HasPrefix(result, ImageResultPrefix) {
 				imageB64 := strings.TrimPrefix(result, ImageResultPrefix)
 				imageData, mimeType, decodeErr := decodeBase64Image(imageB64)
 				if decodeErr != nil {

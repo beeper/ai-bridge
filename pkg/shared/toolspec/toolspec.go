@@ -24,7 +24,7 @@ const (
 
 	// ImageGenerateName is an AI image generation tool (not in OpenClaw).
 	ImageGenerateName        = "image_generate"
-	ImageGenerateDescription = "Generate an image from a text prompt using AI image generation."
+	ImageGenerateDescription = "Generate one or more images from a text prompt. Supports provider-specific controls such as size, quality, style, background, output format, resolution, and optional input images for editing/composition."
 
 	TTSName        = "tts"
 	TTSDescription = "Convert text to speech audio. Returns audio that will be sent as a voice message. Only available on Beeper and OpenAI providers."
@@ -375,13 +375,65 @@ func ImageGenerateSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
+			"provider": map[string]any{
+				"type":        "string",
+				"description": "Optional: provider override (openai, gemini, openrouter). Defaults to an available provider for this login.",
+			},
 			"prompt": map[string]any{
 				"type":        "string",
 				"description": "The text prompt describing the image to generate",
 			},
 			"model": map[string]any{
 				"type":        "string",
-				"description": "Image model to use (default: google/gemini-3-pro-image-preview)",
+				"description": "Optional: image model to use (provider-specific)",
+			},
+			"count": map[string]any{
+				"type":        "number",
+				"description": "Optional: number of images to generate (default: 1).",
+				"minimum":     1,
+				"maximum":     10,
+			},
+			"size": map[string]any{
+				"type":        "string",
+				"description": "Optional: image size (OpenAI). Examples: 1024x1024, 1536x1024, 1024x1536, 1792x1024.",
+			},
+			"quality": map[string]any{
+				"type":        "string",
+				"description": "Optional: image quality (OpenAI). Examples: high, medium, low, standard, hd.",
+			},
+			"style": map[string]any{
+				"type":        "string",
+				"description": "Optional: image style (OpenAI DALL·E 3). Examples: vivid, natural.",
+			},
+			"background": map[string]any{
+				"type":        "string",
+				"description": "Optional: background mode (OpenAI GPT image models). Examples: transparent, opaque, auto.",
+			},
+			"output_format": map[string]any{
+				"type":        "string",
+				"description": "Optional: output format (OpenAI GPT image models). Examples: png, jpeg, webp.",
+			},
+			"outputFormat": map[string]any{
+				"type":        "string",
+				"description": "Optional: alias for output_format.",
+			},
+			"resolution": map[string]any{
+				"type":        "string",
+				"description": "Optional: output resolution (Gemini). Examples: 1K, 2K, 4K.",
+			},
+			"input_images": map[string]any{
+				"type":        "array",
+				"description": "Optional: input image paths/URLs/data URIs for editing/composition (Gemini).",
+				"items": map[string]any{
+					"type": "string",
+				},
+			},
+			"inputImages": map[string]any{
+				"type":        "array",
+				"description": "Optional: alias for input_images.",
+				"items": map[string]any{
+					"type": "string",
+				},
 			},
 		},
 		"required": []string{"prompt"},

@@ -176,10 +176,10 @@ const ToolNameSessionStatus = toolspec.SessionStatusName
 
 // Memory tool names (matching OpenClaw interface)
 const (
-	ToolNameMemorySearch = toolspec.MemorySearchName
-	ToolNameMemoryGet    = toolspec.MemoryGetName
-	ToolNameMemoryStore  = toolspec.MemoryStoreName
-	ToolNameMemoryForget = toolspec.MemoryForgetName
+	ToolNameMemorySearch  = toolspec.MemorySearchName
+	ToolNameMemoryGet     = toolspec.MemoryGetName
+	ToolNameMemoryStore   = toolspec.MemoryStoreName
+	ToolNameMemoryForget  = toolspec.MemoryForgetName
 	ToolNameGravatarFetch = toolspec.GravatarFetchName
 	ToolNameGravatarSet   = toolspec.GravatarSetName
 )
@@ -187,8 +187,17 @@ const (
 // ImageResultPrefix is the prefix used to identify image results that need media sending.
 const ImageResultPrefix = "IMAGE:"
 
+// ImagesResultPrefix is the prefix used to identify multi-image results.
+const ImagesResultPrefix = "IMAGES:"
+
 // DefaultImageModel is the default model for image generation.
 const DefaultImageModel = "google/gemini-3-pro-image-preview"
+
+// DefaultOpenAIImageModel is the default direct OpenAI image model.
+const DefaultOpenAIImageModel = "gpt-image-1"
+
+// DefaultGeminiImageModel is the default direct Gemini image model.
+const DefaultGeminiImageModel = "gemini-3-pro-image-preview"
 
 // TTSResultPrefix is the prefix used to identify TTS results that need audio sending.
 const TTSResultPrefix = "AUDIO:"
@@ -982,20 +991,20 @@ func executeWebFetch(ctx context.Context, args map[string]any) (string, error) {
 		finalURL = resp.Request.URL.String()
 	}
 	result := map[string]any{
-		"url":         urlStr,
-		"finalUrl":    finalURL,
-		"status":      resp.StatusCode,
-		"contentType": contentType,
-		"extractMode": extractMode,
-		"extractor":   extractor,
-		"truncated":   truncated,
+		"url":           urlStr,
+		"finalUrl":      finalURL,
+		"status":        resp.StatusCode,
+		"contentType":   contentType,
+		"extractMode":   extractMode,
+		"extractor":     extractor,
+		"truncated":     truncated,
 		"length":        len(content),
 		"rawLength":     rawLength,
 		"wrappedLength": wrappedLength,
-		"fetchedAt":   time.Now().Format(time.RFC3339),
-		"tookMs":      time.Since(start).Milliseconds(),
-		"text":        content,
-		"content":     content, // Backwards compatibility
+		"fetchedAt":     time.Now().Format(time.RFC3339),
+		"tookMs":        time.Since(start).Milliseconds(),
+		"text":          content,
+		"content":       content, // Backwards compatibility
 	}
 	resultJSON, _ := json.Marshal(result)
 	return string(resultJSON), nil
@@ -1154,48 +1163,37 @@ func removeHTMLElement(html, tag string) string {
 	return result
 }
 
-// executeImageGeneration generates an image using OpenRouter's image generation API.
+// executeImageGeneration generates image(s) using provider-specific image generation APIs.
 func executeImageGeneration(ctx context.Context, args map[string]any) (string, error) {
-	prompt, ok := args["prompt"].(string)
-	if !ok || prompt == "" {
-		return "", fmt.Errorf("missing or invalid 'prompt' argument")
-	}
-
-	// Get model (default to stable diffusion)
-	model := DefaultImageModel
-	if m, ok := args["model"].(string); ok && m != "" {
-		model = m
-	}
-
 	btc := GetBridgeToolContext(ctx)
 	if btc == nil {
 		return "", fmt.Errorf("image generation requires bridge context")
 	}
 
-	// Get the provider to check if we can use OpenRouter
-	provider, ok := btc.Client.provider.(*OpenAIProvider)
-	if !ok {
-		return "", fmt.Errorf("image generation requires OpenAI-compatible provider")
+	req, err := parseImageGenArgs(args)
+	if err != nil {
+		return "", err
 	}
 
-	// Check if using OpenRouter
-	baseURL := strings.ToLower(provider.baseURL)
-	if !strings.Contains(baseURL, "openrouter") {
-		return "", fmt.Errorf("image generation requires OpenRouter provider")
-	}
-
-	// Call OpenRouter image generation
-	imageData, err := callOpenRouterImageGen(ctx, btc.Client.apiKey, provider.baseURL, prompt, model)
+	images, err := generateImagesForRequest(ctx, btc, req)
 	if err != nil {
 		return "", fmt.Errorf("image generation failed: %w", err)
 	}
 
-	// Return image as base64 with IMAGE: prefix for connector to handle
-	return ImageResultPrefix + imageData, nil
+	if len(images) == 1 {
+		return ImageResultPrefix + images[0], nil
+	}
+
+	payload, err := json.Marshal(images)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode image results: %w", err)
+	}
+
+	return ImagesResultPrefix + string(payload), nil
 }
 
 // callOpenRouterImageGen calls OpenRouter's image generation endpoint.
-func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model string) (string, error) {
+func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model string) ([]string, error) {
 	// OpenRouter uses chat completions with image models
 	// The response will contain a URL or base64 image
 
@@ -1274,53 +1272,83 @@ func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model 
 		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
+	var images []string
+
 	// Check for direct image data (DALL-E style response)
 	if len(result.Data) > 0 {
-		if result.Data[0].B64JSON != "" {
-			return result.Data[0].B64JSON, nil
-		}
-		if result.Data[0].URL != "" {
-			// Fetch the image from URL and convert to base64
-			return fetchImageAsBase64(ctx, result.Data[0].URL)
+		for _, item := range result.Data {
+			if item.B64JSON != "" {
+				images = append(images, item.B64JSON)
+				continue
+			}
+			if item.URL != "" {
+				imgB64, err := fetchImageAsBase64(ctx, item.URL)
+				if err != nil {
+					return nil, err
+				}
+				images = append(images, imgB64)
+			}
 		}
 	}
 
 	// Check for chat completion response with images array
-	if len(result.Choices) > 0 && len(result.Choices[0].Message.Images) > 0 {
-		img := result.Choices[0].Message.Images[0]
-		imageURL := img.ImageURL.URL
-		if imageURL == "" {
-			imageURL = img.ImageURLAlt.URL
-		}
-		if imageURL != "" {
+	if len(images) == 0 && len(result.Choices) > 0 && len(result.Choices[0].Message.Images) > 0 {
+		for _, img := range result.Choices[0].Message.Images {
+			imageURL := img.ImageURL.URL
+			if imageURL == "" {
+				imageURL = img.ImageURLAlt.URL
+			}
+			if imageURL == "" {
+				continue
+			}
 			if strings.HasPrefix(imageURL, "data:") {
-				return extractBase64FromDataURL(imageURL)
+				imgB64, err := extractBase64FromDataURL(imageURL)
+				if err != nil {
+					return nil, err
+				}
+				images = append(images, imgB64)
+				continue
 			}
 			if strings.HasPrefix(imageURL, "http") {
-				return fetchImageAsBase64(ctx, imageURL)
+				imgB64, err := fetchImageAsBase64(ctx, imageURL)
+				if err != nil {
+					return nil, err
+				}
+				images = append(images, imgB64)
+				continue
 			}
-			return "", fmt.Errorf("unexpected image URL format: %s", imageURL)
+			return nil, fmt.Errorf("unexpected image URL format: %s", imageURL)
 		}
 	}
 
 	// Check for chat completion response with image URL
-	if len(result.Choices) > 0 && result.Choices[0].Message.Content != "" {
+	if len(images) == 0 && len(result.Choices) > 0 && result.Choices[0].Message.Content != "" {
 		content := result.Choices[0].Message.Content
 		// If content looks like a URL, fetch it
 		if strings.HasPrefix(content, "http") {
-			return fetchImageAsBase64(ctx, content)
+			imgB64, err := fetchImageAsBase64(ctx, content)
+			if err != nil {
+				return nil, err
+			}
+			images = append(images, imgB64)
+		} else if strings.HasPrefix(content, "data:") {
+			imgB64, err := extractBase64FromDataURL(content)
+			if err != nil {
+				return nil, err
+			}
+			images = append(images, imgB64)
+		} else if _, err := base64.StdEncoding.DecodeString(content); err == nil {
+			images = append(images, content)
+		} else {
+			return nil, fmt.Errorf("unexpected response format: %s", content[:min(100, len(content))])
 		}
-		if strings.HasPrefix(content, "data:") {
-			return extractBase64FromDataURL(content)
-		}
-		// If it's already base64, return it
-		if _, err := base64.StdEncoding.DecodeString(content); err == nil {
-			return content, nil
-		}
-		return "", fmt.Errorf("unexpected response format: %s", content[:min(100, len(content))])
 	}
 
-	return "", fmt.Errorf("no image data in response")
+	if len(images) == 0 {
+		return nil, fmt.Errorf("no image data in response")
+	}
+
+	return images, nil
 }
 
 // extractBase64FromDataURL parses a data URL and returns raw base64 data.

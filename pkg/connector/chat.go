@@ -329,7 +329,26 @@ func (oc *AIClient) getDefaultToolState(meta *PortalMetadata, toolName string) b
 	if toolName == ToolNameWebSearch {
 		return true
 	}
+	if toolName == ToolNameImageGenerate {
+		return meta.Capabilities.SupportsToolCalling && oc.canUseImageGeneration()
+	}
 	return meta.Capabilities.SupportsToolCalling
+}
+
+func (oc *AIClient) canUseImageGeneration() bool {
+	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Metadata == nil {
+		return false
+	}
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta == nil || loginMeta.APIKey == "" {
+		return false
+	}
+	switch loginMeta.Provider {
+	case ProviderOpenAI, ProviderOpenRouter, ProviderBeeper, ProviderCustom:
+		return true
+	default:
+		return false
+	}
 }
 
 // applyToolToggle applies a tool toggle from client
