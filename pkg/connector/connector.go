@@ -64,9 +64,6 @@ func (oc *OpenAIConnector) Start(ctx context.Context) error {
 	// Register custom Matrix event handlers
 	oc.registerCustomEventHandlers()
 
-	// Register reaction feedback handler
-	oc.registerReactionHandler()
-
 	// Initialize provisioning API endpoints
 	oc.initProvisioning()
 

@@ -473,7 +473,7 @@ var CommandNew = &commands.FullHandler{
 	Name: "new",
 	Help: commands.HelpMeta{
 		Section:     HelpSectionAI,
-		Description: "Create a new chat (uses current model if none specified)",
+		Description: "Create a new chat with Beeper AI (optionally override model)",
 		Args:        "[_model_]",
 	},
 	RequiresPortal: true,

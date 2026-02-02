@@ -37,6 +37,7 @@ var (
 	_ bridgev2.ContactListingNetworkAPI         = (*AIClient)(nil)
 	_ bridgev2.UserSearchingNetworkAPI          = (*AIClient)(nil)
 	_ bridgev2.EditHandlingNetworkAPI           = (*AIClient)(nil)
+	_ bridgev2.ReactionHandlingNetworkAPI       = (*AIClient)(nil)
 	_ bridgev2.RedactionHandlingNetworkAPI      = (*AIClient)(nil)
 	_ bridgev2.DisappearTimerChangingNetworkAPI = (*AIClient)(nil)
 )
@@ -94,7 +95,8 @@ var aiBaseCaps = &event.RoomFeatures{
 	EditMaxAge:          ptr.Ptr(jsontime.S(AIEditMaxAge)),
 	Delete:              event.CapLevelPartialSupport,
 	DeleteMaxAge:        ptr.Ptr(jsontime.S(24 * time.Hour)),
-	Reaction:            event.CapLevelRejected,
+	Reaction:            event.CapLevelFullySupported,
+	ReactionCount:       1,
 	ReadReceipts:        true,
 	TypingNotifications: true,
 	Archive:             true,
@@ -1916,6 +1918,7 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 	// Create user message for database
 	userMessage := &database.Message{
 		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(last.Event.ID))),
+		MXID:     last.Event.ID,
 		Room:     last.Portal.PortalKey,
 		SenderID: humanUserID(oc.UserLogin.ID),
 		Metadata: &MessageMetadata{
@@ -1925,8 +1928,15 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 		Timestamp: time.Now(),
 	}
 
+	// Save user message to database - we must do this ourselves since we already
+	// returned Pending: true to the bridge framework when debouncing started
+	if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, userMessage); err != nil {
+		oc.log.Err(err).Msg("Failed to save debounced user message to database")
+	}
+
 	// Dispatch using existing flow (handles room lock + status)
-	_, _ = oc.dispatchOrQueue(ctx, last.Event, last.Portal, last.Meta, userMessage,
+	// Pass nil for userMessage since we already saved it above
+	_, _ = oc.dispatchOrQueue(ctx, last.Event, last.Portal, last.Meta, nil,
 		pendingMessage{
 			Event:       last.Event,
 			Portal:      last.Portal,

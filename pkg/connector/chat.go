@@ -605,7 +605,6 @@ func (oc *AIClient) createAgentChatWithModel(ctx context.Context, agent *agents.
 	}
 
 	agentGhostID := agentModelUserID(agent.ID, modelID)
-	agentDisplayName := oc.agentModelDisplayName(agent.Name, modelID)
 
 	// Update the OtherUserID to be the agent+model ghost
 	portal.OtherUserID = agentGhostID
@@ -614,44 +613,8 @@ func (oc *AIClient) createAgentChatWithModel(ctx context.Context, agent *agents.
 		return nil, fmt.Errorf("failed to save portal with agent config: %w", err)
 	}
 
-	// Update chat info members to use agent+model ghost
-	members := chatInfo.Members
-	if members == nil {
-		members = &bridgev2.ChatMemberList{}
-	}
-	if members.MemberMap == nil {
-		members.MemberMap = make(bridgev2.ChatMemberMap)
-	}
-	members.OtherUserID = agentGhostID
-
-	humanID := humanUserID(oc.UserLogin.ID)
-
-	humanMember := members.MemberMap[humanID]
-	humanMember.EventSender = bridgev2.EventSender{
-		IsFromMe:    true,
-		SenderLogin: oc.UserLogin.ID,
-	}
-
-	agentMember := members.MemberMap[agentGhostID]
-	agentMember.EventSender = bridgev2.EventSender{
-		Sender:      agentGhostID,
-		SenderLogin: oc.UserLogin.ID,
-	}
-	agentMember.UserInfo = &bridgev2.UserInfo{
-		Name:  ptr.Ptr(agentDisplayName),
-		IsBot: ptr.Ptr(true),
-	}
-	agentMember.MemberEventExtra = map[string]any{
-		"displayname":         agentDisplayName,
-		"com.beeper.ai.model": modelID,
-		"com.beeper.ai.agent": agent.ID,
-	}
-
-	members.MemberMap = bridgev2.ChatMemberMap{
-		humanID:      humanMember,
-		agentGhostID: agentMember,
-	}
-	chatInfo.Members = members
+	// Update chat info members to use agent+model ghost only
+	oc.applyAgentChatInfo(chatInfo, agent.ID, agent.Name, modelID)
 
 	return &bridgev2.CreateChatResponse{
 		PortalKey: portal.PortalKey,
@@ -866,30 +829,61 @@ func (oc *AIClient) handleNewChat(
 	ctx context.Context,
 	_ *event.Event,
 	portal *bridgev2.Portal,
-	meta *PortalMetadata,
+	_ *PortalMetadata,
 	arg string,
 ) {
 	runCtx := oc.backgroundContext(ctx)
 
-	// Determine model: use argument or current chat's model
-	modelID := arg
-	if modelID == "" {
-		modelID = oc.effectiveModel(meta)
+	beeperAgent := agents.GetBeeperAI()
+	if beeperAgent == nil {
+		oc.sendSystemNotice(runCtx, portal, "Default Beeper AI agent not found.")
+		return
 	}
 
-	// Validate model
+	// Determine model: use argument or Beeper AI agent's default
+	modelID := arg
+	if modelID == "" {
+		modelID = beeperAgent.Model.Primary
+	}
+	if modelID == "" {
+		modelID = oc.effectiveModel(nil)
+	}
+
+	// Validate model (fallback to provider default when using agent default)
 	valid, err := oc.validateModel(runCtx, modelID)
+	if (err != nil || !valid) && arg == "" {
+		fallbackModel := oc.effectiveModel(nil)
+		if fallbackModel != "" && fallbackModel != modelID {
+			if ok, _ := oc.validateModel(runCtx, fallbackModel); ok {
+				modelID = fallbackModel
+				valid = true
+				err = nil
+			}
+		}
+	}
 	if err != nil || !valid {
 		oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Invalid model: %s", modelID))
 		return
 	}
 
-	// Create new chat with default settings
-	newPortal, chatInfo, err := oc.createNewChatWithModel(runCtx, modelID)
+	// Create new chat with default Beeper AI agent
+	chatResp, err := oc.createAgentChatWithModel(runCtx, beeperAgent, modelID)
 	if err != nil {
 		oc.sendSystemNotice(runCtx, portal, "Failed to create chat: "+err.Error())
 		return
 	}
+
+	newPortal, err := oc.UserLogin.Bridge.GetPortalByKey(runCtx, chatResp.PortalKey)
+	if err != nil || newPortal == nil {
+		msg := "Failed to load new chat."
+		if err != nil {
+			msg = "Failed to load new chat: " + err.Error()
+		}
+		oc.sendSystemNotice(runCtx, portal, msg)
+		return
+	}
+
+	chatInfo := chatResp.PortalInfo
 
 	// Create Matrix room
 	if err := newPortal.CreateMatrixRoom(runCtx, oc.UserLogin, chatInfo); err != nil {
@@ -904,7 +898,7 @@ func (oc *AIClient) handleNewChat(
 	roomLink := fmt.Sprintf("https://matrix.to/#/%s", newPortal.MXID)
 	oc.sendSystemNotice(runCtx, portal, fmt.Sprintf(
 		"Created new %s chat.\nOpen: %s",
-		modelContactName(modelID, oc.findModelInfo(modelID)), roomLink,
+		oc.agentModelDisplayName(beeperAgent.Name, modelID), roomLink,
 	))
 }
 
@@ -920,10 +914,39 @@ func (oc *AIClient) createForkedChat(
 	}
 	title := fmt.Sprintf("%s (Fork)", sourceTitle)
 
-	return oc.initPortalForChat(ctx, PortalInitOpts{
+	portal, chatInfo, err := oc.initPortalForChat(ctx, PortalInitOpts{
 		Title:    title,
 		CopyFrom: sourceMeta,
 	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	agentID := sourceMeta.AgentID
+	if agentID == "" {
+		agentID = sourceMeta.DefaultAgentID
+	}
+	if agentID != "" {
+		pm := portalMeta(portal)
+		pm.AgentID = agentID
+		pm.DefaultAgentID = agentID
+
+		modelID := oc.effectiveModel(pm)
+		portal.OtherUserID = agentModelUserID(agentID, modelID)
+
+		agentName := agentID
+		store := NewAgentStoreAdapter(oc)
+		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil && agent.Name != "" {
+			agentName = agent.Name
+		}
+		oc.applyAgentChatInfo(chatInfo, agentID, agentName, modelID)
+
+		if err := portal.Save(ctx); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return portal, chatInfo, nil
 }
 
 // copyMessagesToChat queues messages to be bridged to the new chat
@@ -996,7 +1019,7 @@ func (oc *AIClient) createNewChatWithModel(ctx context.Context, modelID string) 
 }
 
 // chatInfoFromPortal builds ChatInfo from an existing portal
-func (oc *AIClient) chatInfoFromPortal(portal *bridgev2.Portal) *bridgev2.ChatInfo {
+func (oc *AIClient) chatInfoFromPortal(ctx context.Context, portal *bridgev2.Portal) *bridgev2.ChatInfo {
 	meta := portalMeta(portal)
 	modelID := oc.effectiveModel(meta)
 	title := meta.Title
@@ -1007,7 +1030,26 @@ func (oc *AIClient) chatInfoFromPortal(portal *bridgev2.Portal) *bridgev2.ChatIn
 			title = modelContactName(modelID, oc.findModelInfo(modelID))
 		}
 	}
-	return oc.composeChatInfo(title, modelID)
+	chatInfo := oc.composeChatInfo(title, modelID)
+
+	agentID := meta.AgentID
+	if agentID == "" {
+		agentID = meta.DefaultAgentID
+	}
+	if agentID == "" {
+		return chatInfo
+	}
+
+	agentName := agentID
+	if ctx != nil {
+		store := NewAgentStoreAdapter(oc)
+		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil && agent.Name != "" {
+			agentName = agent.Name
+		}
+	}
+
+	oc.applyAgentChatInfo(chatInfo, agentID, agentName, modelID)
+	return chatInfo
 }
 
 // composeChatInfo creates a ChatInfo struct for a chat
@@ -1073,6 +1115,55 @@ func (oc *AIClient) composeChatInfo(title, modelID string) *bridgev2.ChatInfo {
 			return false // no portal changes needed
 		},
 	}
+}
+
+func (oc *AIClient) applyAgentChatInfo(chatInfo *bridgev2.ChatInfo, agentID, agentName, modelID string) {
+	if chatInfo == nil || agentID == "" {
+		return
+	}
+	if modelID == "" {
+		modelID = oc.effectiveModel(nil)
+	}
+
+	agentGhostID := agentModelUserID(agentID, modelID)
+	agentDisplayName := oc.agentModelDisplayName(agentName, modelID)
+
+	members := chatInfo.Members
+	if members == nil {
+		members = &bridgev2.ChatMemberList{}
+	}
+	if members.MemberMap == nil {
+		members.MemberMap = make(bridgev2.ChatMemberMap)
+	}
+	members.OtherUserID = agentGhostID
+
+	humanID := humanUserID(oc.UserLogin.ID)
+	humanMember := members.MemberMap[humanID]
+	humanMember.EventSender = bridgev2.EventSender{
+		IsFromMe:    true,
+		SenderLogin: oc.UserLogin.ID,
+	}
+
+	agentMember := members.MemberMap[agentGhostID]
+	agentMember.EventSender = bridgev2.EventSender{
+		Sender:      agentGhostID,
+		SenderLogin: oc.UserLogin.ID,
+	}
+	agentMember.UserInfo = &bridgev2.UserInfo{
+		Name:  ptr.Ptr(agentDisplayName),
+		IsBot: ptr.Ptr(true),
+	}
+	agentMember.MemberEventExtra = map[string]any{
+		"displayname":         agentDisplayName,
+		"com.beeper.ai.model": modelID,
+		"com.beeper.ai.agent": agentID,
+	}
+
+	members.MemberMap = bridgev2.ChatMemberMap{
+		humanID:      humanMember,
+		agentGhostID: agentMember,
+	}
+	chatInfo.Members = members
 }
 
 // updatePortalConfig applies room settings to portal metadata
@@ -1652,7 +1743,7 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 				oc.log.Debug().Stringer("portal", portal.PortalKey).Msg("Existing default chat already has MXID")
 				return nil
 			}
-			info := oc.chatInfoFromPortal(portal)
+			info := oc.chatInfoFromPortal(ctx, portal)
 			oc.log.Info().Stringer("portal", portal.PortalKey).Msg("Default chat missing MXID; creating Matrix room")
 			err := portal.CreateMatrixRoom(ctx, oc.UserLogin, info)
 			if err != nil {
@@ -1692,7 +1783,7 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 			oc.log.Debug().Stringer("portal", defaultPortal.PortalKey).Msg("Existing chat already has MXID")
 			return nil
 		}
-		info := oc.chatInfoFromPortal(defaultPortal)
+		info := oc.chatInfoFromPortal(ctx, defaultPortal)
 		oc.log.Info().Stringer("portal", defaultPortal.PortalKey).Msg("Existing portal missing MXID; creating Matrix room")
 		err := defaultPortal.CreateMatrixRoom(ctx, oc.UserLogin, info)
 		if err != nil {
@@ -1742,29 +1833,8 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		return err
 	}
 
-	// Get display name for agent+model combination
-	agentDisplayName := oc.agentModelDisplayName(beeperAgent.Name, modelID)
-
-	// Update chat info members to use agent ghost
-	members := chatInfo.Members
-	if members == nil {
-		members = &bridgev2.ChatMemberList{}
-	}
-	if members.MemberMap == nil {
-		members.MemberMap = make(bridgev2.ChatMemberMap)
-	}
-	humanID := humanUserID(oc.UserLogin.ID)
-	humanMember := members.MemberMap[humanID]
-	humanMember.EventSender = bridgev2.EventSender{Sender: humanID}
-	members.MemberMap[humanID] = humanMember
-	agentMember := members.MemberMap[agentGhostID]
-	agentMember.EventSender = bridgev2.EventSender{Sender: agentGhostID}
-	agentMember.UserInfo = &bridgev2.UserInfo{
-		Name:  ptr.Ptr(agentDisplayName),
-		IsBot: ptr.Ptr(true),
-	}
-	members.MemberMap[agentGhostID] = agentMember
-	chatInfo.Members = members
+	// Update chat info members to use agent ghost only
+	oc.applyAgentChatInfo(chatInfo, beeperAgent.ID, beeperAgent.Name, modelID)
 
 	loginMeta.DefaultChatPortalID = string(portal.PortalKey.ID)
 	if err := oc.UserLogin.Save(ctx); err != nil {
