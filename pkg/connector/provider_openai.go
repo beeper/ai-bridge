@@ -11,7 +11,9 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
+	"github.com/openai/openai-go/v3/shared/constant"
 	"github.com/rs/zerolog"
 )
 
@@ -162,7 +164,8 @@ func (o *OpenAIProvider) buildResponsesParams(params GenerateParams) responses.R
 
 	// Set tools
 	if len(params.Tools) > 0 {
-		responsesParams.Tools = ToOpenAITools(params.Tools)
+		strictMode := resolveToolStrictMode(isOpenRouterBaseURL(o.baseURL))
+		responsesParams.Tools = ToOpenAITools(params.Tools, strictMode, &o.log)
 	}
 
 	// Handle reasoning effort for o1/o3 models
@@ -183,6 +186,9 @@ func (o *OpenAIProvider) buildResponsesParams(params GenerateParams) responses.R
 			OfWebSearch: &responses.WebSearchToolParam{},
 		})
 	}
+
+	// Ensure tool names are unique – Anthropic rejects duplicates
+	responsesParams.Tools = dedupeToolParams(responsesParams.Tools)
 
 	return responsesParams
 }
@@ -284,6 +290,11 @@ func (o *OpenAIProvider) GenerateStream(ctx context.Context, params GeneratePara
 
 // Generate performs a non-streaming generation using Responses API
 func (o *OpenAIProvider) Generate(ctx context.Context, params GenerateParams) (*GenerateResponse, error) {
+	// OpenRouter doesn't support multimodal inputs via Responses API.
+	if isOpenRouterBaseURL(o.baseURL) && hasMultimodalUnifiedMessages(params.Messages) {
+		return o.generateChatCompletions(ctx, params)
+	}
+
 	responsesParams := o.buildResponsesParams(params)
 
 	// Make request
@@ -342,6 +353,51 @@ func (o *OpenAIProvider) Generate(ctx context.Context, params GenerateParams) (*
 			CompletionTokens: int(resp.Usage.OutputTokens),
 			TotalTokens:      int(resp.Usage.TotalTokens),
 			ReasoningTokens:  int(resp.Usage.OutputTokensDetails.ReasoningTokens),
+		},
+	}, nil
+}
+
+func (o *OpenAIProvider) generateChatCompletions(ctx context.Context, params GenerateParams) (*GenerateResponse, error) {
+	chatMessages := toChatCompletionMessages(params.Messages)
+	if len(chatMessages) == 0 {
+		return nil, fmt.Errorf("no chat messages for completion")
+	}
+
+	req := openai.ChatCompletionNewParams{
+		Model:    params.Model,
+		Messages: chatMessages,
+	}
+	if params.MaxCompletionTokens > 0 {
+		req.MaxCompletionTokens = openai.Int(int64(params.MaxCompletionTokens))
+	}
+	if params.Temperature > 0 {
+		req.Temperature = openai.Float(params.Temperature)
+	}
+	if len(params.Tools) > 0 {
+		req.Tools = ToOpenAIChatTools(params.Tools, &o.log)
+		req.Tools = dedupeChatToolParams(req.Tools)
+	}
+
+	resp, err := o.client.Chat.Completions.New(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("OpenAI chat completion failed: %w", err)
+	}
+
+	var content string
+	var finishReason string
+	if len(resp.Choices) > 0 {
+		content = resp.Choices[0].Message.Content
+		finishReason = resp.Choices[0].FinishReason
+	}
+
+	return &GenerateResponse{
+		Content:      content,
+		FinishReason: finishReason,
+		Usage: UsageInfo{
+			PromptTokens:     int(resp.Usage.PromptTokens),
+			CompletionTokens: int(resp.Usage.CompletionTokens),
+			TotalTokens:      int(resp.Usage.TotalTokens),
+			ReasoningTokens:  int(resp.Usage.CompletionTokensDetails.ReasoningTokens),
 		},
 	}, nil
 }
@@ -563,15 +619,28 @@ func MakePDFPluginMiddleware(defaultEngine string) option.Middleware {
 }
 
 // ToOpenAITools converts tool definitions to OpenAI Responses API format
-func ToOpenAITools(tools []ToolDefinition) []responses.ToolUnionParam {
+func ToOpenAITools(tools []ToolDefinition, strictMode ToolStrictMode, log *zerolog.Logger) []responses.ToolUnionParam {
 	if len(tools) == 0 {
 		return nil
 	}
 
 	var result []responses.ToolUnionParam
 	for _, tool := range tools {
-		// Use SDK helper which properly sets all required fields including Type
-		toolParam := responses.ToolParamOfFunction(tool.Name, tool.Parameters, true)
+		schema := tool.Parameters
+		var stripped []string
+		if schema != nil {
+			schema, stripped = sanitizeToolSchemaWithReport(schema)
+			logSchemaSanitization(log, tool.Name, stripped)
+		}
+		strict := shouldUseStrictMode(strictMode, schema)
+		toolParam := responses.ToolUnionParam{
+			OfFunction: &responses.FunctionToolParam{
+				Name:       tool.Name,
+				Parameters: schema,
+				Strict:     param.NewOpt(strict),
+				Type:       constant.ValueOf[constant.Function](),
+			},
+		}
 
 		// Add description if available (SDK helper doesn't support this directly)
 		if tool.Description != "" && toolParam.OfFunction != nil {
@@ -582,4 +651,216 @@ func ToOpenAITools(tools []ToolDefinition) []responses.ToolUnionParam {
 	}
 
 	return result
+}
+
+// ToOpenAIChatTools converts tool definitions to OpenAI Chat Completions tool format.
+func ToOpenAIChatTools(tools []ToolDefinition, log *zerolog.Logger) []openai.ChatCompletionToolUnionParam {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	var result []openai.ChatCompletionToolUnionParam
+	for _, tool := range tools {
+		schema := tool.Parameters
+		var stripped []string
+		if schema != nil {
+			schema, stripped = sanitizeToolSchemaWithReport(schema)
+			logSchemaSanitization(log, tool.Name, stripped)
+		}
+		function := openai.FunctionDefinitionParam{
+			Name:       tool.Name,
+			Parameters: schema,
+		}
+		if tool.Description != "" {
+			function.Description = openai.String(tool.Description)
+		}
+
+		result = append(result, openai.ChatCompletionToolUnionParam{
+			OfFunction: &openai.ChatCompletionFunctionToolParam{
+				Function: function,
+				Type:     constant.ValueOf[constant.Function](),
+			},
+		})
+	}
+
+	return result
+}
+
+func hasMultimodalUnifiedMessages(messages []UnifiedMessage) bool {
+	for _, msg := range messages {
+		if msg.HasMultimodalContent() {
+			return true
+		}
+	}
+	return false
+}
+
+func toChatCompletionMessages(messages []UnifiedMessage) []openai.ChatCompletionMessageParamUnion {
+	result := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
+	for _, msg := range messages {
+		switch msg.Role {
+		case RoleSystem:
+			result = append(result, openai.SystemMessage(msg.Text()))
+		case RoleUser:
+			if msg.HasMultimodalContent() {
+				parts := toChatCompletionContentParts(msg.Content)
+				result = append(result, openai.ChatCompletionMessageParamUnion{
+					OfUser: &openai.ChatCompletionUserMessageParam{
+						Content: openai.ChatCompletionUserMessageParamContentUnion{
+							OfArrayOfContentParts: parts,
+						},
+					},
+				})
+			} else {
+				result = append(result, openai.UserMessage(msg.Text()))
+			}
+		case RoleAssistant:
+			result = append(result, openai.AssistantMessage(msg.Text()))
+		case RoleTool:
+			result = append(result, openai.ToolMessage(msg.Text(), msg.ToolCallID))
+		}
+	}
+	return result
+}
+
+func toChatCompletionContentParts(parts []ContentPart) []openai.ChatCompletionContentPartUnionParam {
+	result := make([]openai.ChatCompletionContentPartUnionParam, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case ContentTypeText:
+			if strings.TrimSpace(part.Text) == "" {
+				continue
+			}
+			result = append(result, openai.ChatCompletionContentPartUnionParam{
+				OfText: &openai.ChatCompletionContentPartTextParam{
+					Text: part.Text,
+				},
+			})
+		case ContentTypeImage:
+			imageURL := strings.TrimSpace(part.ImageURL)
+			if imageURL == "" && part.ImageB64 != "" {
+				mimeType := part.MimeType
+				if mimeType == "" {
+					mimeType = "image/jpeg"
+				}
+				imageURL = buildDataURL(mimeType, part.ImageB64)
+			}
+			if imageURL == "" {
+				continue
+			}
+			result = append(result, openai.ChatCompletionContentPartUnionParam{
+				OfImageURL: &openai.ChatCompletionContentPartImageParam{
+					ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
+						URL: imageURL,
+					},
+				},
+			})
+		case ContentTypePDF:
+			if part.PDFB64 != "" {
+				result = append(result, openai.ChatCompletionContentPartUnionParam{
+					OfFile: &openai.ChatCompletionContentPartFileParam{
+						File: openai.ChatCompletionContentPartFileFileParam{
+							FileData: param.NewOpt(part.PDFB64),
+							Filename: param.NewOpt("document.pdf"),
+						},
+					},
+				})
+			} else if part.PDFURL != "" {
+				result = append(result, openai.ChatCompletionContentPartUnionParam{
+					OfText: &openai.ChatCompletionContentPartTextParam{
+						Text: part.PDFURL,
+					},
+				})
+			}
+		case ContentTypeAudio:
+			if part.AudioB64 == "" {
+				continue
+			}
+			format := part.AudioFormat
+			if format == "" {
+				format = "mp3"
+			}
+			result = append(result, openai.ChatCompletionContentPartUnionParam{
+				OfInputAudio: &openai.ChatCompletionContentPartInputAudioParam{
+					InputAudio: openai.ChatCompletionContentPartInputAudioInputAudioParam{
+						Data:   part.AudioB64,
+						Format: format,
+					},
+				},
+			})
+		case ContentTypeVideo:
+			text := strings.TrimSpace(part.VideoURL)
+			if text == "" && part.VideoB64 != "" {
+				mimeType := part.MimeType
+				if mimeType == "" {
+					mimeType = "video/mp4"
+				}
+				text = "Video data URL: " + buildDataURL(mimeType, part.VideoB64)
+			}
+			if text == "" {
+				continue
+			}
+			result = append(result, openai.ChatCompletionContentPartUnionParam{
+				OfText: &openai.ChatCompletionContentPartTextParam{
+					Text: text,
+				},
+			})
+		}
+	}
+	return result
+}
+
+// dedupeToolParams removes tools with duplicate identifiers to satisfy providers
+// like Anthropic that reject duplicated tool names.
+func dedupeToolParams(tools []responses.ToolUnionParam) []responses.ToolUnionParam {
+	seen := make(map[string]struct{}, len(tools))
+	var result []responses.ToolUnionParam
+	for _, t := range tools {
+		key := ""
+		switch {
+		case t.OfFunction != nil:
+			key = "function:" + t.OfFunction.Name
+		case t.OfWebSearch != nil:
+			key = "web_search"
+		default:
+			key = fmt.Sprintf("%v", t) // fallback, should rarely hit
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, t)
+	}
+	return result
+}
+
+// dedupeChatToolParams removes tools with duplicate identifiers in Chat Completions.
+func dedupeChatToolParams(tools []openai.ChatCompletionToolUnionParam) []openai.ChatCompletionToolUnionParam {
+	seen := make(map[string]struct{}, len(tools))
+	var result []openai.ChatCompletionToolUnionParam
+	for _, t := range tools {
+		key := ""
+		switch {
+		case t.OfFunction != nil:
+			key = "function:" + t.OfFunction.Function.Name
+		case t.OfCustom != nil:
+			key = "custom:" + t.OfCustom.Custom.Name
+		default:
+			key = fmt.Sprintf("%v", t)
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, t)
+	}
+	return result
+}
+
+func isOpenRouterBaseURL(baseURL string) bool {
+	if baseURL == "" {
+		return false
+	}
+	lowered := strings.ToLower(baseURL)
+	return strings.Contains(lowered, "openrouter") || strings.Contains(lowered, "/openrouter/")
 }

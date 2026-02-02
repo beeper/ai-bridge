@@ -1,18 +1,32 @@
 package connector
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
+	"mime"
 	"net/http"
 	"net/url"
-	"strconv"
+	"os"
+	"os/exec"
+	"path"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/shared/calc"
+	"github.com/beeper/ai-bridge/pkg/shared/media"
+	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
+
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/format"
+	"maunium.net/go/mautrix/id"
 )
 
 // ToolDefinition defines a tool that can be used by the AI
@@ -23,11 +37,14 @@ type ToolDefinition struct {
 	Execute     func(ctx context.Context, args map[string]any) (string, error)
 }
 
+var imageFetchHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 // BridgeToolContext provides bridge-specific context for tool execution
 type BridgeToolContext struct {
-	Client *AIClient
-	Portal *bridgev2.Portal
-	Meta   *PortalMetadata
+	Client        *AIClient
+	Portal        *bridgev2.Portal
+	Meta          *PortalMetadata
+	SourceEventID id.EventID // The triggering message's event ID (for reactions/replies)
 }
 
 // bridgeToolContextKey is the context key for BridgeToolContext
@@ -50,51 +67,1383 @@ func GetBridgeToolContext(ctx context.Context) *BridgeToolContext {
 func BuiltinTools() []ToolDefinition {
 	return []ToolDefinition{
 		{
-			Name:        "calculator",
-			Description: "Perform basic arithmetic calculations. Supports addition, subtraction, multiplication, division, and modulo operations.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"expression": map[string]any{
-						"type":        "string",
-						"description": "A mathematical expression to evaluate, e.g. '2 + 3 * 4' or '100 / 5'",
-					},
-				},
-				"required": []string{"expression"},
-			},
-			Execute: executeCalculator,
+			Name:        toolspec.CalculatorName,
+			Description: toolspec.CalculatorDescription,
+			Parameters:  toolspec.CalculatorSchema(),
+			Execute:     executeCalculator,
 		},
 		{
-			Name:        "web_search",
-			Description: "Search the web for information. Returns a summary of search results.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query": map[string]any{
-						"type":        "string",
-						"description": "The search query",
-					},
-				},
-				"required": []string{"query"},
-			},
-			Execute: executeWebSearch,
+			Name:        toolspec.WebSearchName,
+			Description: toolspec.WebSearchDescription,
+			Parameters:  toolspec.WebSearchSchema(),
+			Execute:     executeWebSearch,
 		},
 		{
-			Name:        ToolNameSetRoomTitle,
-			Description: "Set the title/name of the current chat room. Use this when the user asks to rename the chat or set a title.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"title": map[string]any{
-						"type":        "string",
-						"description": "The new title for the room",
-					},
-				},
-				"required": []string{"title"},
-			},
-			Execute: executeSetRoomTitle,
+			Name:        toolspec.WebSearchOpenRouterName,
+			Description: toolspec.WebSearchOpenRouterDescription,
+			Parameters:  toolspec.WebSearchSchema(),
+			Execute:     executeWebSearchOpenRouter,
+		},
+		{
+			Name:        ToolNameMessage,
+			Description: toolspec.MessageDescription,
+			Parameters:  toolspec.MessageSchema(),
+			Execute:     executeMessage,
+		},
+		{
+			Name:        ToolNameTTS,
+			Description: toolspec.TTSDescription,
+			Parameters:  toolspec.TTSSchema(),
+			Execute:     executeTTS,
+		},
+		{
+			Name:        ToolNameWebFetch,
+			Description: toolspec.WebFetchDescription,
+			Parameters:  toolspec.WebFetchSchema(),
+			Execute:     executeWebFetch,
+		},
+		{
+			Name:        ToolNameImage,
+			Description: toolspec.ImageDescription,
+			Parameters:  toolspec.ImageSchema(),
+			Execute:     executeAnalyzeImage,
+		},
+		{
+			Name:        ToolNameImageGenerate,
+			Description: toolspec.ImageGenerateDescription,
+			Parameters:  toolspec.ImageGenerateSchema(),
+			Execute:     executeImageGeneration,
+		},
+		{
+			Name:        ToolNameSessionStatus,
+			Description: toolspec.SessionStatusDescription,
+			Parameters:  toolspec.SessionStatusSchema(),
+			Execute:     executeSessionStatus,
+		},
+		// Memory tools (matching OpenClaw interface)
+		{
+			Name:        ToolNameMemorySearch,
+			Description: toolspec.MemorySearchDescription,
+			Parameters:  toolspec.MemorySearchSchema(),
+			Execute:     executeMemorySearch,
+		},
+		{
+			Name:        ToolNameMemoryGet,
+			Description: toolspec.MemoryGetDescription,
+			Parameters:  toolspec.MemoryGetSchema(),
+			Execute:     executeMemoryGet,
+		},
+		{
+			Name:        ToolNameMemoryStore,
+			Description: toolspec.MemoryStoreDescription,
+			Parameters:  toolspec.MemoryStoreSchema(),
+			Execute:     executeMemoryStore,
+		},
+		{
+			Name:        ToolNameMemoryForget,
+			Description: toolspec.MemoryForgetDescription,
+			Parameters:  toolspec.MemoryForgetSchema(),
+			Execute:     executeMemoryForget,
+		},
+		{
+			Name:        ToolNameGravatarFetch,
+			Description: toolspec.GravatarFetchDescription,
+			Parameters:  toolspec.GravatarFetchSchema(),
+			Execute:     executeGravatarFetch,
+		},
+		{
+			Name:        ToolNameGravatarSet,
+			Description: toolspec.GravatarSetDescription,
+			Parameters:  toolspec.GravatarSetSchema(),
+			Execute:     executeGravatarSet,
 		},
 	}
+}
+
+// ToolNameMessage is the name of the message tool.
+const ToolNameMessage = toolspec.MessageName
+
+// ToolNameTTS is the name of the text-to-speech tool.
+const ToolNameTTS = toolspec.TTSName
+
+// ToolNameWebFetch is the name of the web fetch tool.
+const ToolNameWebFetch = toolspec.WebFetchName
+
+// ToolNameImage is the OpenClaw-compatible image analysis tool.
+const ToolNameImage = toolspec.ImageName
+
+// ToolNameImageGenerate is the image generation tool (non-OpenClaw).
+const ToolNameImageGenerate = toolspec.ImageGenerateName
+
+// ToolNameAnalyzeImage is a deprecated alias for ToolNameImage.
+const ToolNameAnalyzeImage = toolspec.AnalyzeImageName
+
+// ToolNameSessionStatus is the name of the session status tool.
+const ToolNameSessionStatus = toolspec.SessionStatusName
+
+// Memory tool names (matching OpenClaw interface)
+const (
+	ToolNameMemorySearch  = toolspec.MemorySearchName
+	ToolNameMemoryGet     = toolspec.MemoryGetName
+	ToolNameMemoryStore   = toolspec.MemoryStoreName
+	ToolNameMemoryForget  = toolspec.MemoryForgetName
+	ToolNameGravatarFetch = toolspec.GravatarFetchName
+	ToolNameGravatarSet   = toolspec.GravatarSetName
+)
+
+// ImageResultPrefix is the prefix used to identify image results that need media sending.
+const ImageResultPrefix = "IMAGE:"
+
+// ImagesResultPrefix is the prefix used to identify multi-image results.
+const ImagesResultPrefix = "IMAGES:"
+
+// DefaultImageModel is the default model for image generation.
+const DefaultImageModel = "google/gemini-3-pro-image-preview"
+
+// DefaultOpenAIImageModel is the default direct OpenAI image model.
+const DefaultOpenAIImageModel = "gpt-image-1"
+
+// DefaultGeminiImageModel is the default direct Gemini image model.
+const DefaultGeminiImageModel = "gemini-3-pro-image-preview"
+
+// TTSResultPrefix is the prefix used to identify TTS results that need audio sending.
+const TTSResultPrefix = "AUDIO:"
+
+// normalizeMessageAction maps OpenClaw aliases to supported actions.
+func normalizeMessageAction(action string) string {
+	switch action {
+	case "unsend":
+		return "delete"
+	case "sendWithEffect", "broadcast":
+		return "send"
+	default:
+		return action
+	}
+}
+
+// normalizeMessageArgs maps OpenClaw-style argument names to bridge equivalents.
+func normalizeMessageArgs(args map[string]any) {
+	if args == nil {
+		return
+	}
+	hasMessageID := false
+	if raw, ok := args["message_id"]; ok {
+		if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
+			hasMessageID = true
+		}
+	}
+	if !hasMessageID {
+		if v, ok := args["messageId"]; ok {
+			args["message_id"] = v
+		} else if v, ok := args["replyTo"]; ok {
+			args["message_id"] = v
+		}
+	}
+	hasThreadID := false
+	if raw, ok := args["thread_id"]; ok {
+		if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
+			hasThreadID = true
+		}
+	}
+	if !hasThreadID {
+		if v, ok := args["threadId"]; ok {
+			args["thread_id"] = v
+		}
+	}
+	if _, ok := args["path"]; !ok {
+		if v, ok := args["filePath"]; ok {
+			args["path"] = v
+		}
+	}
+	if _, ok := args["filename"]; !ok {
+		if v, ok := args["fileName"]; ok {
+			args["filename"] = v
+		}
+	}
+	if _, ok := args["mimeType"]; !ok {
+		if v, ok := args["contentType"]; ok {
+			args["mimeType"] = v
+		}
+	}
+}
+
+func firstNonEmptyString(values ...any) string {
+	for _, raw := range values {
+		switch v := raw.(type) {
+		case string:
+			if s := strings.TrimSpace(v); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func normalizeMimeString(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if semi := strings.IndexByte(value, ';'); semi >= 0 {
+		value = value[:semi]
+	}
+	return strings.TrimSpace(value)
+}
+
+func messageTypeForMIME(mimeType string) event.MessageType {
+	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
+	switch {
+	case strings.HasPrefix(mimeType, "image/"):
+		return event.MsgImage
+	case strings.HasPrefix(mimeType, "audio/"):
+		return event.MsgAudio
+	case strings.HasPrefix(mimeType, "video/"):
+		return event.MsgVideo
+	default:
+		return event.MsgFile
+	}
+}
+
+func resolveMessageMedia(ctx context.Context, btc *BridgeToolContext, bufferInput, mediaInput string) ([]byte, string, error) {
+	if bufferInput != "" {
+		return media.DecodeBase64(bufferInput)
+	}
+	if mediaInput == "" {
+		return nil, "", fmt.Errorf("missing media input")
+	}
+	if strings.HasPrefix(mediaInput, "data:") {
+		return media.DecodeBase64(mediaInput)
+	}
+
+	resolved := expandUserPath(mediaInput)
+	b64Data, mimeType, err := btc.Client.downloadAndEncodeMedia(ctx, resolved, nil, 50)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to load media: %w", err)
+	}
+	data, err := base64.StdEncoding.DecodeString(b64Data)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to decode media: %w", err)
+	}
+	return data, mimeType, nil
+}
+
+func resolveMessageFilename(args map[string]any, mediaInput, mimeType string) string {
+	if v, ok := args["filename"].(string); ok && strings.TrimSpace(v) != "" {
+		return ensureFilenameExtension(strings.TrimSpace(v), mimeType)
+	}
+
+	if mediaInput != "" && !strings.HasPrefix(mediaInput, "data:") {
+		if parsed, err := url.Parse(mediaInput); err == nil && parsed.Path != "" {
+			base := path.Base(parsed.Path)
+			if base != "" && base != "." && base != "/" {
+				return ensureFilenameExtension(base, mimeType)
+			}
+		}
+		base := filepath.Base(mediaInput)
+		if base != "" && base != "." && base != string(filepath.Separator) {
+			return ensureFilenameExtension(base, mimeType)
+		}
+	}
+
+	ext := extensionFromMIME(mimeType)
+	if ext == "" {
+		ext = ".bin"
+	}
+	return "file" + ext
+}
+
+func ensureFilenameExtension(fileName, mimeType string) string {
+	if strings.TrimSpace(fileName) == "" {
+		return fileName
+	}
+	if filepath.Ext(fileName) != "" {
+		return fileName
+	}
+	ext := extensionFromMIME(mimeType)
+	if ext == "" {
+		return fileName
+	}
+	return fileName + ext
+}
+
+func extensionFromMIME(mimeType string) string {
+	if mimeType == "" {
+		return ""
+	}
+	exts, err := mime.ExtensionsByType(mimeType)
+	if err != nil || len(exts) == 0 {
+		return ""
+	}
+	return exts[0]
+}
+
+func expandUserPath(value string) string {
+	if strings.HasPrefix(value, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return value
+		}
+		trimmed := strings.TrimPrefix(value, "~")
+		if trimmed == "" {
+			return home
+		}
+		if strings.HasPrefix(trimmed, string(filepath.Separator)) {
+			return filepath.Join(home, trimmed[1:])
+		}
+		return filepath.Join(home, trimmed)
+	}
+	return value
+}
+
+// executeMessage handles the message tool for sending messages and channel actions.
+// Matches OpenClaw's message tool pattern with full action support.
+func executeMessage(ctx context.Context, args map[string]any) (string, error) {
+	action, ok := args["action"].(string)
+	if !ok || action == "" {
+		return "", fmt.Errorf("missing or invalid 'action' argument")
+	}
+
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("message tool requires bridge context")
+	}
+
+	action = normalizeMessageAction(action)
+	normalizeMessageArgs(args)
+
+	switch action {
+	case "send":
+		return executeMessageSend(ctx, args, btc)
+	case "react":
+		return executeMessageReact(ctx, args, btc)
+	case "reactions":
+		return executeMessageReactions(ctx, args, btc)
+	case "edit":
+		return executeMessageEdit(ctx, args, btc)
+	case "delete":
+		return executeMessageDelete(ctx, args, btc)
+	case "reply":
+		return executeMessageReply(ctx, args, btc)
+	case "pin":
+		return executeMessagePin(ctx, args, btc, true)
+	case "unpin":
+		return executeMessagePin(ctx, args, btc, false)
+	case "list-pins":
+		return executeMessageListPins(ctx, btc)
+	case "thread-reply":
+		return executeMessageThreadReply(ctx, args, btc)
+	case "search":
+		return executeMessageSearch(ctx, args, btc)
+	case "read":
+		return executeMessageRead(ctx, args, btc)
+	case "member-info":
+		return executeMessageMemberInfo(ctx, args, btc)
+	case "channel-info":
+		return executeMessageChannelInfo(ctx, args, btc)
+	case "channel-edit":
+		return executeMessageChannelEdit(ctx, args, btc)
+	default:
+		return "", fmt.Errorf("unknown action: %s", action)
+	}
+}
+
+// executeMessageReact handles the react action of the message tool.
+// Supports adding reactions (with emoji) and removing reactions (with remove:true or empty emoji).
+func executeMessageReact(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	emoji, _ := args["emoji"].(string)
+	remove, _ := args["remove"].(bool)
+
+	// Check if this is a removal request (remove:true or empty emoji)
+	if remove || emoji == "" {
+		return executeMessageReactRemove(ctx, args, btc)
+	}
+
+	// Get target message ID (optional - defaults to triggering message)
+	var targetEventID id.EventID
+	if msgID, ok := args["message_id"].(string); ok && msgID != "" {
+		targetEventID = id.EventID(msgID)
+	} else if btc.SourceEventID != "" {
+		// Default to the triggering message (like clawdbot's currentMessageId)
+		targetEventID = btc.SourceEventID
+	}
+
+	// If no target available, return error
+	if targetEventID == "" {
+		return "", fmt.Errorf("action=react requires 'message_id' parameter (no triggering message available)")
+	}
+
+	// Send reaction
+	btc.Client.sendReaction(ctx, btc.Portal, targetEventID, emoji)
+
+	return jsonActionResult("react", map[string]any{
+		"emoji":      emoji,
+		"message_id": targetEventID,
+		"status":     "sent",
+	})
+}
+
+// executeMessageSend handles the send action of the message tool.
+func executeMessageSend(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	message, _ := args["message"].(string)
+	message = strings.TrimSpace(message)
+	caption, _ := args["caption"].(string)
+	caption = strings.TrimSpace(caption)
+	if caption != "" && message != "" && caption != message {
+		caption = message + "\n\n" + caption
+	} else if caption == "" {
+		caption = message
+	}
+
+	bufferInput, _ := args["buffer"].(string)
+	bufferInput = strings.TrimSpace(bufferInput)
+	mediaInput := firstNonEmptyString(args["media"], args["path"])
+
+	var relatesTo map[string]any
+	if replyID, ok := args["message_id"].(string); ok && strings.TrimSpace(replyID) != "" {
+		relatesTo = map[string]any{
+			"m.in_reply_to": map[string]any{
+				"event_id": strings.TrimSpace(replyID),
+			},
+		}
+	}
+	if threadID, ok := args["thread_id"].(string); ok && strings.TrimSpace(threadID) != "" {
+		relatesTo = map[string]any{
+			"rel_type": "m.thread",
+			"event_id": strings.TrimSpace(threadID),
+		}
+	}
+
+	if bufferInput == "" && mediaInput == "" {
+		if message == "" {
+			return "", fmt.Errorf("action=send requires 'message' parameter")
+		}
+		respID, err := sendFormattedMessage(ctx, btc, message, relatesTo, "failed to send message")
+		if err != nil {
+			return "", err
+		}
+		return jsonActionResult("send", map[string]any{
+			"event_id": respID,
+			"status":   "sent",
+		})
+	}
+
+	dryRun, _ := args["dryRun"].(bool)
+	if dryRun {
+		return jsonActionResult("send", map[string]any{
+			"status": "dry_run",
+		})
+	}
+
+	data, detectedMime, err := resolveMessageMedia(ctx, btc, bufferInput, mediaInput)
+	if err != nil {
+		return "", err
+	}
+
+	mimeType := normalizeMimeString(firstNonEmptyString(args["mimeType"], detectedMime))
+	if mimeType == "" {
+		mimeType = http.DetectContentType(data)
+	}
+
+	fileName := resolveMessageFilename(args, mediaInput, mimeType)
+	if caption == "" {
+		caption = fileName
+	}
+
+	msgType := messageTypeForMIME(mimeType)
+	asVoice, _ := args["asVoice"].(bool)
+	gifPlayback, _ := args["gifPlayback"].(bool)
+
+	intent := btc.Client.getModelIntent(ctx, btc.Portal)
+	if intent == nil {
+		return "", fmt.Errorf("failed to get model intent")
+	}
+
+	uri, file, err := intent.UploadMedia(ctx, btc.Portal.MXID, data, fileName, mimeType)
+	if err != nil {
+		return "", fmt.Errorf("upload failed: %w", err)
+	}
+
+	info := map[string]any{
+		"mimetype": mimeType,
+		"size":     len(data),
+	}
+	if gifPlayback && msgType == event.MsgVideo {
+		info["fi.mau.gif"] = true
+		info["is_animated"] = true
+	}
+	if mimeType == "image/gif" {
+		info["is_animated"] = true
+	}
+
+	rawContent := map[string]any{
+		"msgtype": msgType,
+		"body":    caption,
+		"info":    info,
+	}
+	if relatesTo != nil {
+		rawContent["m.relates_to"] = relatesTo
+	}
+	if fileName != "" {
+		rawContent["filename"] = fileName
+	}
+	if file != nil {
+		rawContent["file"] = file
+	} else {
+		rawContent["url"] = string(uri)
+	}
+	if msgType == event.MsgAudio && asVoice {
+		rawContent["org.matrix.msc3245.voice"] = map[string]any{}
+	}
+
+	eventContent := &event.Content{Raw: rawContent}
+	resp, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventMessage, eventContent, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to send media message: %w", err)
+	}
+
+	return jsonActionResult("send", map[string]any{
+		"event_id":  resp.EventID,
+		"status":    "sent",
+		"mime_type": mimeType,
+		"msgtype":   msgType,
+	})
+}
+
+// executeMessageEdit handles the edit action - edits an existing message.
+func executeMessageEdit(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	messageID, ok := args["message_id"].(string)
+	if !ok || messageID == "" {
+		return "", fmt.Errorf("action=edit requires 'message_id' parameter")
+	}
+	message, ok := args["message"].(string)
+	if !ok || message == "" {
+		return "", fmt.Errorf("action=edit requires 'message' parameter")
+	}
+
+	intent := btc.Client.getModelIntent(ctx, btc.Portal)
+	if intent == nil {
+		return "", fmt.Errorf("failed to get model intent")
+	}
+
+	targetEventID := id.EventID(messageID)
+	rendered := format.RenderMarkdown(message, true, true)
+
+	// Send edit with m.replace relation
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"msgtype":        event.MsgText,
+			"body":           "* " + rendered.Body,
+			"format":         rendered.Format,
+			"formatted_body": "* " + rendered.FormattedBody,
+			"m.new_content": map[string]any{
+				"msgtype":        event.MsgText,
+				"body":           rendered.Body,
+				"format":         rendered.Format,
+				"formatted_body": rendered.FormattedBody,
+			},
+			"m.relates_to": map[string]any{
+				"rel_type": RelReplace,
+				"event_id": targetEventID.String(),
+			},
+		},
+	}
+
+	resp, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventMessage, eventContent, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to edit message: %w", err)
+	}
+
+	return jsonActionResult("edit", map[string]any{
+		"event_id":  resp.EventID,
+		"edited_id": targetEventID,
+		"status":    "sent",
+	})
+}
+
+// executeMessageDelete handles the delete action - redacts a message.
+func executeMessageDelete(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	messageID, ok := args["message_id"].(string)
+	if !ok || messageID == "" {
+		return "", fmt.Errorf("action=delete requires 'message_id' parameter")
+	}
+
+	intent := btc.Client.getModelIntent(ctx, btc.Portal)
+	if intent == nil {
+		return "", fmt.Errorf("failed to get model intent")
+	}
+
+	targetEventID := id.EventID(messageID)
+
+	// Send redaction event
+	_, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventRedaction, &event.Content{
+		Parsed: &event.RedactionEventContent{
+			Redacts: targetEventID,
+		},
+	}, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to delete message: %w", err)
+	}
+
+	return jsonActionResult("delete", map[string]any{
+		"deleted_id": targetEventID,
+		"status":     "deleted",
+	})
+}
+
+// executeMessageReply handles the reply action - sends a message as a reply to another.
+func executeMessageReply(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	messageID, ok := args["message_id"].(string)
+	if !ok || messageID == "" {
+		return "", fmt.Errorf("action=reply requires 'message_id' parameter")
+	}
+	message, ok := args["message"].(string)
+	if !ok || message == "" {
+		return "", fmt.Errorf("action=reply requires 'message' parameter")
+	}
+
+	targetEventID := id.EventID(messageID)
+	respID, err := sendFormattedMessage(ctx, btc, message, map[string]any{
+		"m.in_reply_to": map[string]any{
+			"event_id": targetEventID.String(),
+		},
+	}, "failed to send reply")
+	if err != nil {
+		return "", err
+	}
+
+	return jsonActionResult("reply", map[string]any{
+		"event_id": respID,
+		"reply_to": targetEventID,
+		"status":   "sent",
+	})
+}
+
+// executeMessagePin handles pin/unpin actions - updates room pinned events.
+func executeMessagePin(ctx context.Context, args map[string]any, btc *BridgeToolContext, pin bool) (string, error) {
+	messageID, ok := args["message_id"].(string)
+	if !ok || messageID == "" {
+		action := "pin"
+		if !pin {
+			action = "unpin"
+		}
+		return "", fmt.Errorf("action=%s requires 'message_id' parameter", action)
+	}
+
+	targetEventID := id.EventID(messageID)
+	bot := btc.Client.UserLogin.Bridge.Bot
+
+	pinnedEvents := getPinnedEventIDs(ctx, btc)
+
+	// Modify pinned events
+	if pin {
+		// Add to pinned if not already there
+		found := false
+		for _, evtID := range pinnedEvents {
+			if evtID == targetEventID.String() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			pinnedEvents = append(pinnedEvents, targetEventID.String())
+		}
+	} else {
+		// Remove from pinned
+		var newPinned []string
+		for _, evtID := range pinnedEvents {
+			if evtID != targetEventID.String() {
+				newPinned = append(newPinned, evtID)
+			}
+		}
+		pinnedEvents = newPinned
+	}
+
+	// Convert to id.EventID slice
+	pinnedIDs := make([]id.EventID, len(pinnedEvents))
+	for i, evtID := range pinnedEvents {
+		pinnedIDs[i] = id.EventID(evtID)
+	}
+
+	// Update pinned events state
+	_, err := bot.SendState(ctx, btc.Portal.MXID, event.StatePinnedEvents, "", &event.Content{
+		Parsed: &event.PinnedEventsEventContent{
+			Pinned: pinnedIDs,
+		},
+	}, time.Time{})
+	if err != nil {
+		action := "pin"
+		if !pin {
+			action = "unpin"
+		}
+		return "", fmt.Errorf("failed to %s message: %w", action, err)
+	}
+
+	action := "pin"
+	if !pin {
+		action = "unpin"
+	}
+	return jsonActionResult(action, map[string]any{
+		"message_id":   targetEventID,
+		"status":       "ok",
+		"pinned_count": len(pinnedEvents),
+	})
+}
+
+// executeMessageListPins handles list-pins action - returns currently pinned messages.
+func executeMessageListPins(ctx context.Context, btc *BridgeToolContext) (string, error) {
+	pinnedEvents := getPinnedEventIDs(ctx, btc)
+
+	// Build JSON response
+	return jsonActionResult("list-pins", map[string]any{
+		"pinned": pinnedEvents,
+		"count":  len(pinnedEvents),
+	})
+}
+
+// executeMessageThreadReply handles thread-reply action - sends a message in a thread.
+func executeMessageThreadReply(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	// thread_id is the root message of the thread
+	threadID, ok := args["thread_id"].(string)
+	if !ok || threadID == "" {
+		// Fall back to message_id for thread root
+		threadID, ok = args["message_id"].(string)
+		if !ok || threadID == "" {
+			return "", fmt.Errorf("action=thread-reply requires 'thread_id' or 'message_id' parameter")
+		}
+	}
+	message, ok := args["message"].(string)
+	if !ok || message == "" {
+		return "", fmt.Errorf("action=thread-reply requires 'message' parameter")
+	}
+
+	threadRootID := id.EventID(threadID)
+	respID, err := sendFormattedMessage(ctx, btc, message, map[string]any{
+		"rel_type": "m.thread",
+		"event_id": threadRootID.String(),
+	}, "failed to send thread reply")
+	if err != nil {
+		return "", err
+	}
+
+	return jsonActionResult("thread-reply", map[string]any{
+		"event_id":  respID,
+		"thread_id": threadRootID,
+		"status":    "sent",
+	})
+}
+
+// executeMessageSearch searches messages in the current chat.
+func executeMessageSearch(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	query, ok := args["query"].(string)
+	if !ok || query == "" {
+		return "", fmt.Errorf("action=search requires 'query' parameter")
+	}
+
+	// Get limit (default 20)
+	limit := 20
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+		if limit > 100 {
+			limit = 100 // Cap at 100 results
+		}
+	}
+
+	// Get messages from database
+	// Fetch more than needed since we'll filter
+	messages, err := btc.Client.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, btc.Portal.PortalKey, 1000)
+	if err != nil {
+		return "", fmt.Errorf("failed to get messages: %w", err)
+	}
+
+	// Search through messages
+	queryLower := strings.ToLower(query)
+	var results []map[string]any
+
+	for _, msg := range messages {
+		if len(results) >= limit {
+			break
+		}
+
+		// Get message body from metadata
+		msgMeta, ok := msg.Metadata.(*MessageMetadata)
+		if ok && msgMeta != nil {
+			body := msgMeta.Body
+			if body != "" && strings.Contains(strings.ToLower(body), queryLower) {
+				results = append(results, map[string]any{
+					"message_id": msg.MXID.String(),
+					"role":       msgMeta.Role,
+					"content":    truncateString(body, 200),
+					"timestamp":  msg.Timestamp.Unix(),
+				})
+			}
+		}
+	}
+
+	// Build JSON response
+	resultsJSON, _ := json.Marshal(results)
+	return fmt.Sprintf(`{"action":"search","query":%q,"results":%s,"count":%d}`, query, string(resultsJSON), len(results)), nil
+}
+
+// truncateString truncates a string to maxLen characters, adding "..." if truncated.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// executeWebFetch fetches a web page and extracts readable content.
+func executeWebFetch(ctx context.Context, args map[string]any) (string, error) {
+	return executeWebFetchWithProviders(ctx, args)
+}
+
+// extractTextFromHTML does a simple extraction of text from HTML.
+// This is a basic implementation - a full readability parser would be better.
+func extractTextFromHTML(html string) string {
+	// Remove script and style elements
+	html = removeHTMLElement(html, "script")
+	html = removeHTMLElement(html, "style")
+	html = removeHTMLElement(html, "noscript")
+
+	// Remove all HTML tags
+	var result strings.Builder
+	inTag := false
+	lastWasSpace := false
+
+	for _, r := range html {
+		if r == '<' {
+			inTag = true
+			continue
+		}
+		if r == '>' {
+			inTag = false
+			// Add space after tags to separate words
+			if !lastWasSpace {
+				result.WriteRune(' ')
+				lastWasSpace = true
+			}
+			continue
+		}
+		if !inTag {
+			// Normalize whitespace
+			if r == '\n' || r == '\r' || r == '\t' || r == ' ' {
+				if !lastWasSpace {
+					result.WriteRune(' ')
+					lastWasSpace = true
+				}
+			} else {
+				result.WriteRune(r)
+				lastWasSpace = false
+			}
+		}
+	}
+
+	// Decode common HTML entities
+	text := result.String()
+	text = strings.ReplaceAll(text, "&nbsp;", " ")
+	text = strings.ReplaceAll(text, "&amp;", "&")
+	text = strings.ReplaceAll(text, "&lt;", "<")
+	text = strings.ReplaceAll(text, "&gt;", ">")
+	text = strings.ReplaceAll(text, "&quot;", "\"")
+	text = strings.ReplaceAll(text, "&#39;", "'")
+
+	// Collapse multiple spaces
+	for strings.Contains(text, "  ") {
+		text = strings.ReplaceAll(text, "  ", " ")
+	}
+
+	return strings.TrimSpace(text)
+}
+
+var (
+	htmlAnchorRegex = regexp.MustCompile(`(?is)<a\s+[^>]*href\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a>`)
+	htmlTagRegex    = regexp.MustCompile(`(?is)<[^>]+>`)
+)
+
+func htmlToMarkdownBasic(html string) string {
+	html = removeHTMLElement(html, "script")
+	html = removeHTMLElement(html, "style")
+	html = removeHTMLElement(html, "noscript")
+
+	for i := 1; i <= 6; i++ {
+		prefix := strings.Repeat("#", i)
+		re := regexp.MustCompile(fmt.Sprintf(`(?is)<h%d[^>]*>(.*?)</h%d>`, i, i))
+		html = re.ReplaceAllString(html, "\n"+prefix+" $1\n")
+	}
+
+	html = htmlAnchorRegex.ReplaceAllStringFunc(html, func(match string) string {
+		parts := htmlAnchorRegex.FindStringSubmatch(match)
+		if len(parts) < 3 {
+			return ""
+		}
+		url := strings.TrimSpace(parts[1])
+		text := strings.TrimSpace(htmlTagRegex.ReplaceAllString(parts[2], ""))
+		if text == "" {
+			text = url
+		}
+		return fmt.Sprintf("[%s](%s)", text, url)
+	})
+
+	html = regexp.MustCompile(`(?is)<br\s*/?>`).ReplaceAllString(html, "\n")
+	html = regexp.MustCompile(`(?is)<li[^>]*>`).ReplaceAllString(html, "\n- ")
+	html = regexp.MustCompile(`(?is)</li>`).ReplaceAllString(html, "\n")
+	html = regexp.MustCompile(`(?is)</p>`).ReplaceAllString(html, "\n")
+	html = regexp.MustCompile(`(?is)<p[^>]*>`).ReplaceAllString(html, "\n")
+	html = regexp.MustCompile(`(?is)</div>`).ReplaceAllString(html, "\n")
+	html = regexp.MustCompile(`(?is)<div[^>]*>`).ReplaceAllString(html, "\n")
+
+	html = htmlTagRegex.ReplaceAllString(html, "")
+
+	text := html
+	text = strings.ReplaceAll(text, "&nbsp;", " ")
+	text = strings.ReplaceAll(text, "&amp;", "&")
+	text = strings.ReplaceAll(text, "&lt;", "<")
+	text = strings.ReplaceAll(text, "&gt;", ">")
+	text = strings.ReplaceAll(text, "&quot;", "\"")
+	text = strings.ReplaceAll(text, "&#39;", "'")
+
+	lines := strings.Split(text, "\n")
+	var cleaned []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			cleaned = append(cleaned, trimmed)
+		}
+	}
+	return strings.Join(cleaned, "\n")
+}
+
+func normalizeContentType(value string) string {
+	if value == "" {
+		return ""
+	}
+	parts := strings.Split(value, ";")
+	return strings.TrimSpace(parts[0])
+}
+
+// removeHTMLElement removes all instances of an HTML element and its content.
+func removeHTMLElement(html, tag string) string {
+	result := html
+	lowerTag := strings.ToLower(tag)
+
+	for {
+		startIdx := strings.Index(strings.ToLower(result), "<"+lowerTag)
+		if startIdx == -1 {
+			break
+		}
+
+		// Find the end of this element
+		endTag := "</" + lowerTag + ">"
+		endIdx := strings.Index(strings.ToLower(result[startIdx:]), endTag)
+		if endIdx == -1 {
+			// Self-closing or malformed - just remove to next >
+			closeIdx := strings.Index(result[startIdx:], ">")
+			if closeIdx == -1 {
+				break
+			}
+			result = result[:startIdx] + result[startIdx+closeIdx+1:]
+		} else {
+			result = result[:startIdx] + result[startIdx+endIdx+len(endTag):]
+		}
+	}
+
+	return result
+}
+
+// executeImageGeneration generates image(s) using provider-specific image generation APIs.
+func executeImageGeneration(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("image generation requires bridge context")
+	}
+
+	req, err := parseImageGenArgs(args)
+	if err != nil {
+		return "", err
+	}
+
+	images, err := generateImagesForRequest(ctx, btc, req)
+	if err != nil {
+		return "", fmt.Errorf("image generation failed: %w", err)
+	}
+
+	if len(images) == 1 {
+		return ImageResultPrefix + images[0], nil
+	}
+
+	payload, err := json.Marshal(images)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode image results: %w", err)
+	}
+
+	return ImagesResultPrefix + string(payload), nil
+}
+
+// callOpenRouterImageGen calls OpenRouter's image generation endpoint.
+func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model string) ([]string, error) {
+	// OpenRouter uses chat completions with image models
+	// The response will contain a URL or base64 image
+
+	// Normalize base URL
+	if baseURL == "" {
+		baseURL = "https://openrouter.ai/api/v1"
+	}
+	baseURL = strings.TrimSuffix(baseURL, "/")
+
+	// Build request for image generation via chat completions
+	reqBody := map[string]any{
+		"model": model,
+		"messages": []map[string]any{
+			{
+				"role":    "user",
+				"content": prompt,
+			},
+		},
+		"modalities": []string{"image", "text"},
+		"max_tokens": 1,
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("HTTP-Referer", "https://beeper.com")
+	req.Header.Set("X-Title", "Beeper AI")
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response to extract image URL or data
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+				Images  []struct {
+					ImageURL struct {
+						URL string `json:"url"`
+					} `json:"image_url"`
+					ImageURLAlt struct {
+						URL string `json:"url"`
+					} `json:"imageUrl"`
+				} `json:"images"`
+			} `json:"message"`
+		} `json:"choices"`
+		Data []struct {
+			URL     string `json:"url"`
+			B64JSON string `json:"b64_json"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	var images []string
+
+	// Check for direct image data (DALL-E style response)
+	if len(result.Data) > 0 {
+		for _, item := range result.Data {
+			if item.B64JSON != "" {
+				images = append(images, item.B64JSON)
+				continue
+			}
+			if item.URL != "" {
+				imgB64, err := fetchImageAsBase64(ctx, item.URL)
+				if err != nil {
+					return nil, err
+				}
+				images = append(images, imgB64)
+			}
+		}
+	}
+
+	// Check for chat completion response with images array
+	if len(images) == 0 && len(result.Choices) > 0 && len(result.Choices[0].Message.Images) > 0 {
+		for _, img := range result.Choices[0].Message.Images {
+			imageURL := img.ImageURL.URL
+			if imageURL == "" {
+				imageURL = img.ImageURLAlt.URL
+			}
+			if imageURL == "" {
+				continue
+			}
+			if strings.HasPrefix(imageURL, "data:") {
+				imgB64, err := extractBase64FromDataURL(imageURL)
+				if err != nil {
+					return nil, err
+				}
+				images = append(images, imgB64)
+				continue
+			}
+			if strings.HasPrefix(imageURL, "http") {
+				imgB64, err := fetchImageAsBase64(ctx, imageURL)
+				if err != nil {
+					return nil, err
+				}
+				images = append(images, imgB64)
+				continue
+			}
+			return nil, fmt.Errorf("unexpected image URL format: %s", imageURL)
+		}
+	}
+
+	// Check for chat completion response with image URL
+	if len(images) == 0 && len(result.Choices) > 0 && result.Choices[0].Message.Content != "" {
+		content := result.Choices[0].Message.Content
+		// If content looks like a URL, fetch it
+		if strings.HasPrefix(content, "http") {
+			imgB64, err := fetchImageAsBase64(ctx, content)
+			if err != nil {
+				return nil, err
+			}
+			images = append(images, imgB64)
+		} else if strings.HasPrefix(content, "data:") {
+			imgB64, err := extractBase64FromDataURL(content)
+			if err != nil {
+				return nil, err
+			}
+			images = append(images, imgB64)
+		} else if _, err := base64.StdEncoding.DecodeString(content); err == nil {
+			images = append(images, content)
+		} else {
+			return nil, fmt.Errorf("unexpected response format: %s", content[:min(100, len(content))])
+		}
+	}
+
+	if len(images) == 0 {
+		return nil, fmt.Errorf("no image data in response")
+	}
+
+	return images, nil
+}
+
+// extractBase64FromDataURL parses a data URL and returns raw base64 data.
+func extractBase64FromDataURL(dataURL string) (string, error) {
+	b64Data, _, err := media.ParseDataURI(dataURL)
+	if err == nil {
+		return b64Data, nil
+	}
+	data, _, err := media.DecodeBase64(dataURL)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
+}
+
+// fetchImageAsBase64 fetches an image URL and returns it as base64.
+func fetchImageAsBase64(ctx context.Context, imageURL string) (string, error) {
+	b64Data, _, err := fetchImageAsBase64WithType(ctx, imageURL)
+	if err != nil {
+		return "", err
+	}
+	return b64Data, nil
+}
+
+func fetchImageAsBase64WithType(ctx context.Context, imageURL string) (string, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create image request for %s: %w", imageURL, err)
+	}
+
+	resp, err := imageFetchHTTPClient.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to fetch image %s: %w", imageURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("failed to fetch image %s: status %d", imageURL, resp.StatusCode)
+	}
+
+	mimeType := normalizeMimeString(resp.Header.Get("Content-Type"))
+
+	// Limit to 10MB
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read image %s: %w", imageURL, err)
+	}
+
+	return base64.StdEncoding.EncodeToString(data), mimeType, nil
+}
+
+// executeTTS converts text to speech.
+// Supports: macOS 'say' command, Beeper provider, OpenAI provider.
+func executeTTS(ctx context.Context, args map[string]any) (string, error) {
+	text, ok := args["text"].(string)
+	if !ok || text == "" {
+		return "", fmt.Errorf("missing or invalid 'text' argument")
+	}
+
+	// Limit text length
+	const maxTextLen = 4096
+	if len(text) > maxTextLen {
+		return "", fmt.Errorf("text too long: %d characters (max %d)", len(text), maxTextLen)
+	}
+
+	// Get voice (default to "alloy" for OpenAI, "Samantha" for macOS)
+	voice := ""
+	if v, ok := args["voice"].(string); ok && v != "" {
+		voice = v
+	}
+
+	btc := GetBridgeToolContext(ctx)
+
+	// Try provider-based TTS first (Beeper/OpenAI)
+	if btc != nil {
+		if provider, ok := btc.Client.provider.(*OpenAIProvider); ok {
+			baseURL := strings.ToLower(provider.baseURL)
+			isBeeperProvider := strings.Contains(baseURL, "beeper")
+			isOpenAIProvider := baseURL == "" || strings.Contains(baseURL, "openai.com")
+
+			if isBeeperProvider || isOpenAIProvider {
+				// Use OpenAI voice if not specified
+				if voice == "" {
+					voice = "alloy"
+				}
+
+				// Validate OpenAI voice
+				validVoices := map[string]bool{
+					"alloy": true, "ash": true, "coral": true, "echo": true,
+					"fable": true, "onyx": true, "nova": true, "sage": true, "shimmer": true,
+				}
+				if !validVoices[voice] {
+					voice = "alloy" // Fall back to default
+				}
+
+				// Call OpenAI TTS API
+				audioData, err := callOpenAITTS(ctx, btc.Client.apiKey, provider.baseURL, text, voice)
+				if err == nil {
+					return TTSResultPrefix + audioData, nil
+				}
+				// Fall through to macOS say if API fails
+			}
+		}
+	}
+
+	// Try macOS 'say' command as fallback
+	if isTTSMacOSAvailable() {
+		if voice == "" {
+			voice = "Samantha" // Default macOS voice
+		}
+		audioData, err := callMacOSSay(ctx, text, voice)
+		if err != nil {
+			return "", fmt.Errorf("macOS TTS failed: %w", err)
+		}
+		return TTSResultPrefix + audioData, nil
+	}
+
+	return "", fmt.Errorf("TTS not available: requires Beeper/OpenAI provider or macOS")
+}
+
+// isTTSMacOSAvailable checks if macOS 'say' command is available.
+func isTTSMacOSAvailable() bool {
+	return runtime.GOOS == "darwin"
+}
+
+// callMacOSSay uses macOS 'say' command to generate speech.
+func callMacOSSay(ctx context.Context, text, voice string) (string, error) {
+	// Create temp file for output
+	tmpFile, err := os.CreateTemp("", "tts-*.aiff")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpPath)
+
+	// Run say command
+	args := []string{"-o", tmpPath}
+	if voice != "" {
+		args = append(args, "-v", voice)
+	}
+	args = append(args, text)
+
+	cmd := exec.CommandContext(ctx, "say", args...)
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("say command failed: %w", err)
+	}
+
+	// Read the generated audio file
+	audioData, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read audio file: %w", err)
+	}
+
+	// Return as base64
+	return base64.StdEncoding.EncodeToString(audioData), nil
+}
+
+// callOpenAITTS calls OpenAI's /v1/audio/speech endpoint
+func callOpenAITTS(ctx context.Context, apiKey, baseURL, text, voice string) (string, error) {
+	// Determine endpoint URL
+	endpoint := "https://api.openai.com/v1/audio/speech"
+	if baseURL != "" {
+		endpoint = strings.TrimSuffix(baseURL, "/") + "/audio/speech"
+	}
+
+	// Build request body
+	reqBody := map[string]any{
+		"model":           "tts-1",
+		"input":           text,
+		"voice":           voice,
+		"response_format": "mp3",
+	}
+	bodyJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Execute request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("TTS API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// Read audio data
+	audioBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read audio response: %w", err)
+	}
+
+	// Return base64 encoded audio
+	return base64.StdEncoding.EncodeToString(audioBytes), nil
 }
 
 // executeCalculator evaluates a simple arithmetic expression
@@ -104,7 +1453,7 @@ func executeCalculator(ctx context.Context, args map[string]any) (string, error)
 		return "", fmt.Errorf("missing or invalid 'expression' argument")
 	}
 
-	result, err := evalExpression(expr)
+	result, err := calc.EvalExpression(expr)
 	if err != nil {
 		return "", fmt.Errorf("calculation error: %w", err)
 	}
@@ -112,231 +1461,148 @@ func executeCalculator(ctx context.Context, args map[string]any) (string, error)
 	return fmt.Sprintf("%.6g", result), nil
 }
 
-// evalExpression evaluates a simple arithmetic expression
-// Supports: +, -, *, /, %, and parentheses
-func evalExpression(expr string) (float64, error) {
-	expr = strings.ReplaceAll(expr, " ", "")
-	if expr == "" {
-		return 0, fmt.Errorf("empty expression")
-	}
-
-	// Simple recursive descent parser for basic arithmetic
-	pos := 0
-	return parseExpression(expr, &pos)
-}
-
-func parseExpression(expr string, pos *int) (float64, error) {
-	result, err := parseTerm(expr, pos)
-	if err != nil {
-		return 0, err
-	}
-
-	for *pos < len(expr) {
-		op := expr[*pos]
-		if op != '+' && op != '-' {
-			break
-		}
-		*pos++
-		right, err := parseTerm(expr, pos)
-		if err != nil {
-			return 0, err
-		}
-		if op == '+' {
-			result += right
-		} else {
-			result -= right
-		}
-	}
-	return result, nil
-}
-
-func parseTerm(expr string, pos *int) (float64, error) {
-	result, err := parseFactor(expr, pos)
-	if err != nil {
-		return 0, err
-	}
-
-	for *pos < len(expr) {
-		op := expr[*pos]
-		if op != '*' && op != '/' && op != '%' {
-			break
-		}
-		*pos++
-		right, err := parseFactor(expr, pos)
-		if err != nil {
-			return 0, err
-		}
-		switch op {
-		case '*':
-			result *= right
-		case '/':
-			if right == 0 {
-				return 0, fmt.Errorf("division by zero")
-			}
-			result /= right
-		case '%':
-			if right == 0 {
-				return 0, fmt.Errorf("modulo by zero")
-			}
-			result = math.Mod(result, right)
-		}
-	}
-	return result, nil
-}
-
-func parseFactor(expr string, pos *int) (float64, error) {
-	if *pos >= len(expr) {
-		return 0, fmt.Errorf("unexpected end of expression")
-	}
-
-	// Handle parentheses
-	if expr[*pos] == '(' {
-		*pos++
-		result, err := parseExpression(expr, pos)
-		if err != nil {
-			return 0, err
-		}
-		if *pos >= len(expr) || expr[*pos] != ')' {
-			return 0, fmt.Errorf("missing closing parenthesis")
-		}
-		*pos++
-		return result, nil
-	}
-
-	// Handle negative numbers
-	negative := false
-	if expr[*pos] == '-' {
-		negative = true
-		*pos++
-	}
-
-	// Parse number
-	start := *pos
-	for *pos < len(expr) && (isDigit(expr[*pos]) || expr[*pos] == '.') {
-		*pos++
-	}
-
-	if start == *pos {
-		return 0, fmt.Errorf("expected number at position %d", start)
-	}
-
-	num, err := strconv.ParseFloat(expr[start:*pos], 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid number: %s", expr[start:*pos])
-	}
-
-	if negative {
-		num = -num
-	}
-	return num, nil
-}
-
-func isDigit(c byte) bool {
-	return c >= '0' && c <= '9'
-}
-
 // executeWebSearch performs a web search (placeholder implementation)
 func executeWebSearch(ctx context.Context, args map[string]any) (string, error) {
-	query, ok := args["query"].(string)
-	if !ok {
-		return "", fmt.Errorf("missing or invalid 'query' argument")
+	return executeWebSearchWithProviders(ctx, args)
+}
+
+// executeSessionStatus returns current session status including time, model, and usage info.
+// Similar to OpenClaw's session_status tool.
+func executeSessionStatus(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("session_status tool requires bridge context")
 	}
 
-	// Use DuckDuckGo instant answer API (no API key required)
-	apiURL := fmt.Sprintf("https://api.duckduckgo.com/?q=%s&format=json&no_html=1&skip_disambig=1",
-		url.QueryEscape(query))
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+	meta := portalMeta(btc.Portal)
+	if meta == nil {
+		return "", fmt.Errorf("failed to get portal metadata")
 	}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("web search failed: %w", err)
+	// Get current time info
+	now := time.Now()
+	timezone := "UTC"
+	if tz := os.Getenv("TZ"); tz != "" {
+		timezone = tz
 	}
-	defer resp.Body.Close()
+	timeStr := now.Format("2006-01-02 15:04:05")
+	dayOfWeek := now.Weekday().String()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("web search failed: status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var result struct {
-		Abstract      string `json:"Abstract"`
-		AbstractText  string `json:"AbstractText"`
-		Answer        string `json:"Answer"`
-		AnswerType    string `json:"AnswerType"`
-		Definition    string `json:"Definition"`
-		Heading       string `json:"Heading"`
-		RelatedTopics []struct {
-			Text string `json:"Text"`
-		} `json:"RelatedTopics"`
+	// Get model info
+	model := meta.Model
+	if model == "" {
+		model = btc.Client.effectiveModel(meta)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to parse search results: %w", err)
+	// Parse provider from model string (format: "provider/model" or just "model")
+	provider := "unknown"
+	modelName := model
+	if parts := strings.SplitN(model, "/", 2); len(parts) == 2 {
+		provider = parts[0]
+		modelName = parts[1]
 	}
 
-	// Build response from available data
-	var response strings.Builder
-	response.WriteString(fmt.Sprintf("Search results for: %s\n\n", query))
-
-	if result.Answer != "" {
-		response.WriteString(fmt.Sprintf("Answer: %s\n", result.Answer))
+	// Get context/token info from metadata
+	maxContext := meta.MaxContextMessages
+	if maxContext == 0 {
+		maxContext = 12 // default
 	}
-	if result.AbstractText != "" {
-		response.WriteString(fmt.Sprintf("Summary: %s\n", result.AbstractText))
-	}
-	if result.Definition != "" {
-		response.WriteString(fmt.Sprintf("Definition: %s\n", result.Definition))
+	maxTokens := meta.MaxCompletionTokens
+	if maxTokens == 0 {
+		maxTokens = 512 // default
 	}
 
-	// Add related topics if no direct answer
-	if result.Answer == "" && result.AbstractText == "" && len(result.RelatedTopics) > 0 {
-		response.WriteString("Related information:\n")
-		count := 0
-		for _, topic := range result.RelatedTopics {
-			if topic.Text == "" {
-				continue
+	// Build session info
+	sessionID := string(btc.Portal.PortalKey.ID)
+	title := meta.Title
+	if title == "" {
+		title = meta.Slug
+	}
+	if title == "" {
+		title = "Untitled"
+	}
+
+	// Handle model change if requested (OpenClaw-style "model" alias supported)
+	var modelChanged string
+	newModel := ""
+	if raw, ok := args["set_model"].(string); ok && strings.TrimSpace(raw) != "" {
+		newModel = strings.TrimSpace(raw)
+	} else if raw, ok := args["model"].(string); ok && strings.TrimSpace(raw) != "" {
+		newModel = strings.TrimSpace(raw)
+	}
+
+	if newModel != "" {
+		if strings.EqualFold(newModel, "default") || strings.EqualFold(newModel, "reset") {
+			// Clear override and recompute capabilities from effective model
+			meta.Model = ""
+			effective := btc.Client.effectiveModel(meta)
+			meta.Capabilities = getModelCapabilities(effective, btc.Client.findModelInfo(effective))
+			if err := btc.Portal.Save(ctx); err != nil {
+				return "", fmt.Errorf("failed to save model reset: %w", err)
 			}
-			response.WriteString(fmt.Sprintf("- %s\n", topic.Text))
-			count++
-			if count >= 3 {
-				break
+			btc.Portal.UpdateBridgeInfo(ctx)
+			btc.Client.ensureGhostDisplayName(ctx, effective)
+			modelChanged = fmt.Sprintf("\n\nModel reset to default: %s", effective)
+			model = effective
+			if parts := strings.SplitN(effective, "/", 2); len(parts) == 2 {
+				provider = parts[0]
+				modelName = parts[1]
+			} else {
+				modelName = effective
+			}
+		} else {
+			// Update the model in metadata
+			meta.Model = newModel
+			meta.Capabilities = getModelCapabilities(newModel, btc.Client.findModelInfo(newModel))
+			// Save portal metadata
+			if err := btc.Portal.Save(ctx); err != nil {
+				return "", fmt.Errorf("failed to save model change: %w", err)
+			}
+			btc.Portal.UpdateBridgeInfo(ctx)
+			btc.Client.ensureGhostDisplayName(ctx, newModel)
+			modelChanged = fmt.Sprintf("\n\nModel changed to: %s", newModel)
+			model = newModel
+			if parts := strings.SplitN(newModel, "/", 2); len(parts) == 2 {
+				provider = parts[0]
+				modelName = parts[1]
+			} else {
+				modelName = newModel
 			}
 		}
 	}
 
-	if response.Len() == len(fmt.Sprintf("Search results for: %s\n\n", query)) {
-		return fmt.Sprintf("No direct results found for '%s'. Try rephrasing your query.", query), nil
+	// Get agent info if available
+	agentInfo := ""
+	if meta.AgentID != "" {
+		agentInfo = fmt.Sprintf("\nAgent: %s", meta.AgentID)
 	}
 
-	return response.String(), nil
-}
+	// Build status card similar to OpenClaw
+	status := fmt.Sprintf(`Session Status
+==============
+Time: %s %s (%s)
+Day: %s
 
-// executeSetRoomTitle sets the room name using bridge context
-func executeSetRoomTitle(ctx context.Context, args map[string]any) (string, error) {
-	title, ok := args["title"].(string)
-	if !ok || title == "" {
-		return "", fmt.Errorf("missing or invalid 'title' argument")
-	}
+Model: %s
+Provider: %s
+Max Context: %d messages
+Max Tokens: %d
 
-	btc := GetBridgeToolContext(ctx)
-	if btc == nil {
-		return "", fmt.Errorf("bridge context not available")
-	}
+Session: %s
+Chat: %s%s%s`,
+		timeStr, timezone, now.Format("MST"),
+		dayOfWeek,
+		modelName,
+		provider,
+		maxContext,
+		maxTokens,
+		sessionID,
+		title,
+		agentInfo,
+		modelChanged,
+	)
 
-	if btc.Portal == nil {
-		return "", fmt.Errorf("portal not available")
-	}
-
-	if err := btc.Client.setRoomName(ctx, btc.Portal, title); err != nil {
-		return "", fmt.Errorf("failed to set room title: %w", err)
-	}
-
-	return fmt.Sprintf("Room title set to: %s", title), nil
+	return status, nil
 }
 
 // GetBuiltinTool returns a builtin tool by name, or nil if not found
@@ -358,4 +1624,199 @@ func GetEnabledBuiltinTools(isToolEnabled func(string) bool) []ToolDefinition {
 		}
 	}
 	return enabled
+}
+
+// executeMemorySearch handles the memory_search tool
+func executeMemorySearch(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("memory_search requires bridge context")
+	}
+
+	query, ok := args["query"].(string)
+	if !ok || query == "" {
+		return "", fmt.Errorf("missing or invalid 'query' argument")
+	}
+
+	var input MemorySearchInput
+	input.Query = query
+
+	if maxResults, ok := args["maxResults"].(float64); ok {
+		max := int(maxResults)
+		input.MaxResults = &max
+	}
+	if minScore, ok := args["minScore"].(float64); ok {
+		input.MinScore = &minScore
+	}
+
+	memStore := NewMemoryStore(btc.Client)
+	results, err := memStore.Search(ctx, btc.Portal, input)
+	if err != nil {
+		return "", fmt.Errorf("memory search failed: %w", err)
+	}
+
+	// Format as JSON
+	output, err := json.Marshal(results)
+	if err != nil {
+		return "", fmt.Errorf("failed to format results: %w", err)
+	}
+
+	return string(output), nil
+}
+
+// executeMemoryGet handles the memory_get tool
+func executeMemoryGet(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("memory_get requires bridge context")
+	}
+
+	path, ok := args["path"].(string)
+	if !ok || path == "" {
+		return "", fmt.Errorf("missing or invalid 'path' argument")
+	}
+
+	input := MemoryGetInput{Path: path}
+
+	memStore := NewMemoryStore(btc.Client)
+	result, err := memStore.Get(ctx, btc.Portal, input)
+	if err != nil {
+		return "", fmt.Errorf("memory get failed: %w", err)
+	}
+
+	// Format as JSON
+	output, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to format result: %w", err)
+	}
+
+	return string(output), nil
+}
+
+// executeMemoryStore handles the memory_store tool
+func executeMemoryStore(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("memory_store requires bridge context")
+	}
+
+	content, ok := args["content"].(string)
+	if !ok || content == "" {
+		return "", fmt.Errorf("missing or invalid 'content' argument")
+	}
+
+	var input MemoryStoreInput
+	input.Content = content
+
+	if importance, ok := args["importance"].(float64); ok {
+		input.Importance = &importance
+	}
+	if category, ok := args["category"].(string); ok {
+		input.Category = &category
+	}
+	if scope, ok := args["scope"].(string); ok {
+		input.Scope = &scope
+	}
+
+	memStore := NewMemoryStore(btc.Client)
+	result, err := memStore.Store(ctx, btc.Portal, input)
+	if err != nil {
+		return "", fmt.Errorf("memory store failed: %w", err)
+	}
+
+	// Format as JSON
+	output, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to format result: %w", err)
+	}
+
+	return string(output), nil
+}
+
+// executeMemoryForget handles the memory_forget tool
+func executeMemoryForget(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("memory_forget requires bridge context")
+	}
+
+	id, ok := args["id"].(string)
+	if !ok || id == "" {
+		return "", fmt.Errorf("missing or invalid 'id' argument")
+	}
+
+	input := MemoryForgetInput{ID: id}
+
+	memStore := NewMemoryStore(btc.Client)
+	result, err := memStore.Forget(ctx, btc.Portal, input)
+	if err != nil {
+		return "", fmt.Errorf("memory forget failed: %w", err)
+	}
+
+	// Format as JSON
+	output, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to format result: %w", err)
+	}
+
+	return string(output), nil
+}
+
+func executeGravatarFetch(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil || btc.Client == nil || btc.Meta == nil {
+		return "", fmt.Errorf("bridge context not available")
+	}
+	if !btc.Client.isBossRoom(btc.Meta) {
+		return "", fmt.Errorf("gravatar tools are only available in rooms managed by the Boss agent")
+	}
+
+	email := ""
+	if raw, ok := args["email"].(string); ok {
+		email = strings.TrimSpace(raw)
+	}
+	if email == "" {
+		loginMeta := loginMetadata(btc.Client.UserLogin)
+		if loginMeta != nil && loginMeta.Gravatar != nil && loginMeta.Gravatar.Primary != nil {
+			email = loginMeta.Gravatar.Primary.Email
+		}
+	}
+	if email == "" {
+		return "", fmt.Errorf("email is required")
+	}
+
+	profile, err := fetchGravatarProfile(ctx, email)
+	if err != nil {
+		return "", err
+	}
+	return formatGravatarMarkdown(profile, "fetched"), nil
+}
+
+func executeGravatarSet(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil || btc.Client == nil || btc.Meta == nil {
+		return "", fmt.Errorf("bridge context not available")
+	}
+	if !btc.Client.isBossRoom(btc.Meta) {
+		return "", fmt.Errorf("gravatar tools are only available in rooms managed by the Boss agent")
+	}
+
+	email, ok := args["email"].(string)
+	if !ok || strings.TrimSpace(email) == "" {
+		return "", fmt.Errorf("email is required")
+	}
+
+	profile, err := fetchGravatarProfile(ctx, email)
+	if err != nil {
+		return "", err
+	}
+
+	loginMeta := loginMetadata(btc.Client.UserLogin)
+	state := ensureGravatarState(loginMeta)
+	state.Primary = profile
+	if err := btc.Client.UserLogin.Save(ctx); err != nil {
+		return "", fmt.Errorf("failed to save Gravatar profile: %w", err)
+	}
+
+	return formatGravatarMarkdown(profile, "primary set"), nil
 }

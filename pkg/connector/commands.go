@@ -2,15 +2,25 @@ package connector
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"maunium.net/go/mautrix/bridgev2/commands"
+
+	"github.com/beeper/ai-bridge/pkg/agents"
 )
 
 // HelpSectionAI is the help section for AI-related commands
 var HelpSectionAI = commands.HelpSection{
 	Name:  "AI Chat",
 	Order: 30,
+}
+
+var reservedAgentIDs = map[string]struct{}{
+	"none":  {},
+	"clear": {},
+	"boss":  {},
 }
 
 // getAIClient retrieves the AIClient from the command event's user login
@@ -34,6 +44,73 @@ func getPortalMeta(ce *commands.Event) *PortalMetadata {
 	return portalMeta(ce.Portal)
 }
 
+func isValidAgentID(agentID string) bool {
+	if agentID == "" {
+		return false
+	}
+	for i := 0; i < len(agentID); i++ {
+		ch := agentID[i]
+		if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func splitQuotedArgs(input string) ([]string, error) {
+	var args []string
+	var current strings.Builder
+	var quote rune
+	escaped := false
+
+	flush := func() {
+		if current.Len() > 0 {
+			args = append(args, current.String())
+			current.Reset()
+		}
+	}
+
+	for _, r := range input {
+		if escaped {
+			current.WriteRune(r)
+			escaped = false
+			continue
+		}
+
+		if r == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+				continue
+			}
+			current.WriteRune(r)
+			continue
+		}
+
+		switch r {
+		case '\'', '"':
+			quote = r
+		case ' ', '\t', '\n', '\r':
+			flush()
+		default:
+			current.WriteRune(r)
+		}
+	}
+
+	if quote != 0 {
+		return nil, fmt.Errorf("unterminated quote")
+	}
+	if escaped {
+		current.WriteRune('\\')
+	}
+	flush()
+	return args, nil
+}
+
 // CommandModel handles the !ai model command
 var CommandModel = &commands.FullHandler{
 	Func: fnModel,
@@ -48,15 +125,17 @@ var CommandModel = &commands.FullHandler{
 }
 
 func fnModel(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
 	if len(ce.Args) == 0 {
 		ce.Reply("Current model: %s", client.effectiveModel(meta))
+		return
+	}
+
+	if rejectBossOverrides(ce, meta, "Cannot change model in a room managed by the Boss agent") {
 		return
 	}
 
@@ -89,15 +168,17 @@ var CommandTemp = &commands.FullHandler{
 }
 
 func fnTemp(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
 	if len(ce.Args) == 0 {
 		ce.Reply("Current temperature: %.2f", client.effectiveTemperature(meta))
+		return
+	}
+
+	if rejectBossOverrides(ce, meta, "Cannot change temperature in a room managed by the Boss agent") {
 		return
 	}
 
@@ -112,41 +193,50 @@ func fnTemp(ce *commands.Event) {
 	ce.Reply("Temperature set to: %.2f", temp)
 }
 
-// CommandPrompt handles the !ai prompt command
-var CommandPrompt = &commands.FullHandler{
-	Func:    fnPrompt,
-	Name:    "prompt",
-	Aliases: []string{"system"},
+// CommandSystemPrompt handles the !ai system-prompt command
+var CommandSystemPrompt = &commands.FullHandler{
+	Func:    fnSystemPrompt,
+	Name:    "system-prompt",
+	Aliases: []string{"prompt", "system"}, // Backwards compatibility
 	Help: commands.HelpMeta{
 		Section:     HelpSectionAI,
-		Description: "Get or set the system prompt",
+		Description: "Get or set the system prompt (shows full constructed prompt)",
 		Args:        "[_text_]",
 	},
 	RequiresPortal: true,
 	RequiresLogin:  true,
 }
 
-func fnPrompt(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+func fnSystemPrompt(ce *commands.Event) {
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
 	if len(ce.Args) == 0 {
-		current := client.effectivePrompt(meta)
-		if current == "" {
-			current = "(none)"
-		} else if len(current) > 100 {
-			current = current[:100] + "..."
+		// Show full constructed prompt (agent + room levels merged)
+		fullPrompt := client.effectiveAgentPrompt(ce.Ctx, ce.Portal, meta)
+		if fullPrompt == "" {
+			fullPrompt = client.effectivePrompt(meta)
 		}
-		ce.Reply("Current system prompt: %s", current)
+		if fullPrompt == "" {
+			fullPrompt = "(none)"
+		}
+		// Truncate for display
+		totalLen := len(fullPrompt)
+		if totalLen > 500 {
+			fullPrompt = fullPrompt[:500] + "...\n\n(truncated, full prompt is " + strconv.Itoa(totalLen) + " chars)"
+		}
+		ce.Reply("Current system prompt:\n%s", fullPrompt)
+		return
+	}
+
+	if rejectBossOverrides(ce, meta, "Cannot change system prompt in a room managed by the Boss agent") {
 		return
 	}
 
 	meta.SystemPrompt = ce.RawArgs
-	client.savePortalQuiet(ce.Ctx, ce.Portal, "prompt change")
+	client.savePortalQuiet(ce.Ctx, ce.Portal, "system prompt change")
 	ce.Reply("System prompt updated.")
 }
 
@@ -164,10 +254,8 @@ var CommandContext = &commands.FullHandler{
 }
 
 func fnContext(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -202,10 +290,8 @@ var CommandTokens = &commands.FullHandler{
 }
 
 func fnTokens(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -238,10 +324,8 @@ var CommandConfig = &commands.FullHandler{
 }
 
 func fnConfig(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -250,11 +334,71 @@ func fnConfig(ce *commands.Event) {
 		mode = "messages"
 	}
 
+	roomCaps := client.getRoomCapabilities(ce.Ctx, meta)
 	config := fmt.Sprintf(
 		"Current configuration:\n• Model: %s\n• Temperature: %.2f\n• Context: %d messages\n• Max tokens: %d\n• Vision: %v\n• Mode: %s",
 		client.effectiveModel(meta), client.effectiveTemperature(meta), client.historyLimit(meta),
-		client.effectiveMaxTokens(meta), meta.Capabilities.SupportsVision, mode)
+		client.effectiveMaxTokens(meta), roomCaps.SupportsVision, mode)
 	ce.Reply(config)
+}
+
+// CommandDebounce handles the !ai debounce command
+var CommandDebounce = &commands.FullHandler{
+	Func: fnDebounce,
+	Name: "debounce",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Get or set message debounce delay (ms), 'off' to disable, 'default' to reset",
+		Args:        "[_delay_|off|default]",
+	},
+	RequiresPortal: true,
+	RequiresLogin:  true,
+}
+
+func fnDebounce(ce *commands.Event) {
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
+		return
+	}
+
+	if len(ce.Args) == 0 {
+		// Show current setting
+		switch {
+		case meta.DebounceMs < 0:
+			ce.Reply("Message debouncing is **disabled** for this room")
+		case meta.DebounceMs == 0:
+			ce.Reply("Message debounce: **%d ms** (default)", DefaultDebounceMs)
+		default:
+			ce.Reply("Message debounce: **%d ms**", meta.DebounceMs)
+		}
+		return
+	}
+
+	arg := strings.ToLower(ce.Args[0])
+	switch arg {
+	case "off", "disable", "disabled":
+		meta.DebounceMs = -1
+		client.savePortalQuiet(ce.Ctx, ce.Portal, "debounce disabled")
+		ce.Reply("Message debouncing disabled for this room")
+	case "default", "reset":
+		meta.DebounceMs = 0
+		client.savePortalQuiet(ce.Ctx, ce.Portal, "debounce reset")
+		ce.Reply("Message debounce reset to default (%d ms)", DefaultDebounceMs)
+	default:
+		// Parse as integer
+		delay, err := strconv.Atoi(arg)
+		if err != nil || delay < 0 || delay > 10000 {
+			ce.Reply("Invalid debounce delay. Use a number 0-10000 (ms), 'off', or 'default'.")
+			return
+		}
+		meta.DebounceMs = delay
+		client.savePortalQuiet(ce.Ctx, ce.Portal, "debounce change")
+		if delay == 0 {
+			ce.Reply("Message debounce reset to default (%d ms)", DefaultDebounceMs)
+		} else {
+			ce.Reply("Message debounce set to: %d ms", delay)
+		}
+	}
 }
 
 // CommandTools handles the !ai tools command
@@ -271,10 +415,8 @@ var CommandTools = &commands.FullHandler{
 }
 
 func fnTools(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -296,10 +438,8 @@ var CommandMode = &commands.FullHandler{
 }
 
 func fnMode(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -334,28 +474,21 @@ var CommandNew = &commands.FullHandler{
 	Name: "new",
 	Help: commands.HelpMeta{
 		Section:     HelpSectionAI,
-		Description: "Create a new chat (uses current model if none specified)",
-		Args:        "[_model_]",
+		Description: "Create a new chat using current agent/model (or specify agent/model)",
+		Args:        "[agent <agent_id> | model <model_id>]",
 	},
 	RequiresPortal: true,
 	RequiresLogin:  true,
 }
 
 func fnNew(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
-	var arg string
-	if len(ce.Args) > 0 {
-		arg = ce.Args[0]
-	}
-
 	// Run async
-	go client.handleNewChat(ce.Ctx, nil, ce.Portal, meta, arg)
+	go client.handleNewChat(ce.Ctx, nil, ce.Portal, meta, ce.Args)
 }
 
 // CommandFork handles the !ai fork command
@@ -372,10 +505,8 @@ var CommandFork = &commands.FullHandler{
 }
 
 func fnFork(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -401,10 +532,8 @@ var CommandRegenerate = &commands.FullHandler{
 }
 
 func fnRegenerate(ce *commands.Event) {
-	client := getAIClient(ce)
-	meta := getPortalMeta(ce)
-	if client == nil || meta == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
 		return
 	}
 
@@ -426,9 +555,11 @@ var CommandTitle = &commands.FullHandler{
 }
 
 func fnTitle(ce *commands.Event) {
-	client := getAIClient(ce)
-	if client == nil || ce.Portal == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, ok := requireClient(ce)
+	if !ok {
+		return
+	}
+	if _, ok := requirePortal(ce); !ok {
 		return
 	}
 
@@ -448,9 +579,8 @@ var CommandModels = &commands.FullHandler{
 }
 
 func fnModels(ce *commands.Event) {
-	client := getAIClient(ce)
-	if client == nil {
-		ce.Reply("Failed to access AI configuration")
+	client, ok := requireClient(ce)
+	if !ok {
 		return
 	}
 
@@ -507,10 +637,11 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 	proc.AddHandlers(
 		CommandModel,
 		CommandTemp,
-		CommandPrompt,
+		CommandSystemPrompt,
 		CommandContext,
 		CommandTokens,
 		CommandConfig,
+		CommandDebounce,
 		CommandTools,
 		CommandMode,
 		CommandNew,
@@ -518,9 +649,352 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 		CommandRegenerate,
 		CommandTitle,
 		CommandModels,
+		CommandGravatar,
+		CommandAgent,
+		CommandAgents,
+		CommandCreateAgent,
+		CommandDeleteAgent,
+		CommandManage,
+		CommandPlayground,
 	)
 	oc.br.Log.Info().
 		Str("section", HelpSectionAI.Name).
 		Int("section_order", HelpSectionAI.Order).
-		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, tools, mode, new, fork, regenerate, title, models")
+		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, debounce, tools, mode, new, fork, regenerate, title, models, gravatar, agent, agents, create-agent, delete-agent, manage, playground")
+}
+
+// CommandGravatar handles the !ai gravatar command
+var CommandGravatar = &commands.FullHandler{
+	Func: fnGravatar,
+	Name: "gravatar",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Fetch or set the Gravatar profile for this login",
+		Args:        "[fetch|set] [email]",
+	},
+	RequiresPortal: true,
+	RequiresLogin:  true,
+}
+
+func fnGravatar(ce *commands.Event) {
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
+		return
+	}
+	if !client.isBossRoom(meta) {
+		ce.Reply("Gravatar commands are only available in rooms managed by the Boss agent.")
+		return
+	}
+
+	if len(ce.Args) == 0 {
+		loginMeta := loginMetadata(client.UserLogin)
+		if loginMeta == nil || loginMeta.Gravatar == nil || loginMeta.Gravatar.Primary == nil {
+			ce.Reply("No Gravatar profile set. Use `!ai gravatar set <email>`.")
+			return
+		}
+		ce.Reply(formatGravatarMarkdown(loginMeta.Gravatar.Primary, "primary"))
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(ce.Args[0]))
+	switch action {
+	case "fetch":
+		email := ""
+		if len(ce.Args) > 1 {
+			email = ce.Args[1]
+		}
+		if strings.TrimSpace(email) == "" {
+			loginMeta := loginMetadata(client.UserLogin)
+			if loginMeta != nil && loginMeta.Gravatar != nil && loginMeta.Gravatar.Primary != nil {
+				email = loginMeta.Gravatar.Primary.Email
+			}
+		}
+		if strings.TrimSpace(email) == "" {
+			ce.Reply("Email is required. Usage: `!ai gravatar fetch <email>`.")
+			return
+		}
+		profile, err := fetchGravatarProfile(ce.Ctx, email)
+		if err != nil {
+			ce.Reply("Failed to fetch Gravatar profile: %s", err.Error())
+			return
+		}
+		ce.Reply(formatGravatarMarkdown(profile, "fetched"))
+		return
+	case "set":
+		if len(ce.Args) < 2 || strings.TrimSpace(ce.Args[1]) == "" {
+			ce.Reply("Email is required. Usage: `!ai gravatar set <email>`.")
+			return
+		}
+		profile, err := fetchGravatarProfile(ce.Ctx, ce.Args[1])
+		if err != nil {
+			ce.Reply("Failed to fetch Gravatar profile: %s", err.Error())
+			return
+		}
+		state := ensureGravatarState(loginMetadata(client.UserLogin))
+		state.Primary = profile
+		if err := client.UserLogin.Save(ce.Ctx); err != nil {
+			ce.Reply("Failed to save Gravatar profile: %s", err.Error())
+			return
+		}
+		ce.Reply(formatGravatarMarkdown(profile, "primary set"))
+		return
+	default:
+		ce.Reply("Usage: `!ai gravatar fetch <email>` or `!ai gravatar set <email>`.")
+	}
+}
+
+// CommandAgent handles the !ai agent command
+var CommandAgent = &commands.FullHandler{
+	Func: fnAgent,
+	Name: "agent",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Get or set the agent for this chat",
+		Args:        "[_agent id_]",
+	},
+	RequiresPortal: true,
+	RequiresLogin:  true,
+}
+
+func fnAgent(ce *commands.Event) {
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
+		return
+	}
+
+	store := NewAgentStoreAdapter(client)
+
+	if len(ce.Args) == 0 {
+		// Show current agent
+		agentID := resolveAgentID(meta)
+		if agentID == "" {
+			ce.Reply("No agent configured. Using default model: %s", client.effectiveModel(meta))
+			return
+		}
+		agent, err := store.GetAgentByID(ce.Ctx, agentID)
+		if err != nil {
+			ce.Reply("Current agent ID: %s (not found)", agentID)
+			return
+		}
+		ce.Reply("Current agent: **%s** (`%s`)\n%s", agent.Name, agent.ID, agent.Description)
+		return
+	}
+
+	if rejectBossOverrides(ce, meta, "Cannot change agent in a room managed by the Boss agent") {
+		return
+	}
+
+	// Set agent
+	agentID := ce.Args[0]
+
+	// Special case: "none" clears the agent
+	if agentID == "none" || agentID == "clear" {
+		meta.AgentID = ""
+		meta.DefaultAgentID = ""
+		meta.AgentPrompt = ""
+		modelID := client.effectiveModel(meta)
+		ce.Portal.OtherUserID = modelUserID(modelID)
+		client.savePortalQuiet(ce.Ctx, ce.Portal, "agent cleared")
+		_ = client.BroadcastRoomState(ce.Ctx, ce.Portal)
+		ce.Reply("Agent cleared. Using default model.")
+		return
+	}
+
+	agent, err := store.GetAgentByID(ce.Ctx, agentID)
+	if err != nil {
+		ce.Reply("Agent not found: %s", agentID)
+		return
+	}
+
+	meta.AgentID = agent.ID
+	meta.DefaultAgentID = agent.ID
+	meta.AgentPrompt = agent.SystemPrompt
+	modelID := client.effectiveModel(meta)
+	ce.Portal.OtherUserID = agentModelUserID(agent.ID, modelID)
+	client.savePortalQuiet(ce.Ctx, ce.Portal, "agent change")
+	client.ensureAgentModelGhostDisplayName(ce.Ctx, agent.ID, modelID, agent.Name)
+	_ = client.BroadcastRoomState(ce.Ctx, ce.Portal)
+	ce.Reply("Agent set to: **%s** (`%s`)", agent.Name, agent.ID)
+}
+
+// CommandAgents handles the !ai agents command
+var CommandAgents = &commands.FullHandler{
+	Func: fnAgents,
+	Name: "agents",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "List available agents",
+	},
+	RequiresLogin: true,
+}
+
+func fnAgents(ce *commands.Event) {
+	client, ok := requireClient(ce)
+	if !ok {
+		return
+	}
+
+	store := NewAgentStoreAdapter(client)
+	agentsMap, err := store.LoadAgents(ce.Ctx)
+	if err != nil {
+		ce.Reply("Failed to load agents: %v", err)
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Available Agents\n\n")
+
+	// Group by preset vs custom
+	var presets, custom []string
+	for id, agent := range agentsMap {
+		line := fmt.Sprintf("• **%s** (`%s`)", agent.Name, id)
+		if agent.Description != "" {
+			line += fmt.Sprintf(" - %s", agent.Description)
+		}
+		if agent.IsPreset {
+			presets = append(presets, line)
+		} else {
+			custom = append(custom, line)
+		}
+	}
+
+	if len(presets) > 0 {
+		sb.WriteString("**Presets:**\n")
+		for _, line := range presets {
+			sb.WriteString(line + "\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(custom) > 0 {
+		sb.WriteString("**Custom:**\n")
+		for _, line := range custom {
+			sb.WriteString(line + "\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("Use `!ai agent <id>` to switch agents")
+	ce.Reply(sb.String())
+}
+
+// CommandCreateAgent handles the !ai create-agent command
+var CommandCreateAgent = &commands.FullHandler{
+	Func: fnCreateAgent,
+	Name: "create-agent",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Create a new custom agent",
+		Args:        "<id> <name> [model] [system prompt...]",
+	},
+	RequiresLogin: true,
+}
+
+func fnCreateAgent(ce *commands.Event) {
+	client, ok := requireClient(ce)
+	if !ok {
+		return
+	}
+
+	args := ce.Args
+	if raw := strings.TrimSpace(ce.RawArgs); raw != "" {
+		if parsed, err := splitQuotedArgs(raw); err == nil && len(parsed) > 0 {
+			args = parsed
+		}
+	}
+
+	if len(args) < 2 {
+		ce.Reply("Usage: !ai create-agent <id> <name> [model] [system prompt...]\nExample: !ai create-agent my-helper \"My Helper\" gpt-4o You are a helpful assistant.")
+		return
+	}
+
+	agentID := args[0]
+	agentName := args[1]
+
+	if _, reserved := reservedAgentIDs[agentID]; reserved {
+		ce.Reply("Agent ID '%s' is reserved. Choose a different ID.", agentID)
+		return
+	}
+	if !isValidAgentID(agentID) {
+		ce.Reply("Invalid agent ID '%s'. Use only lowercase letters, numbers, and hyphens.", agentID)
+		return
+	}
+
+	// Parse optional model and system prompt
+	var model, systemPrompt string
+	if len(args) > 2 {
+		model = args[2]
+	}
+	if len(args) > 3 {
+		systemPrompt = strings.Join(args[3:], " ")
+	}
+
+	store := NewAgentStoreAdapter(client)
+
+	// Check if agent already exists
+	if _, err := store.GetAgentByID(ce.Ctx, agentID); err == nil {
+		ce.Reply("Agent with ID '%s' already exists", agentID)
+		return
+	}
+
+	// Create new agent
+	newAgent := &agents.AgentDefinition{
+		ID:           agentID,
+		Name:         agentName,
+		SystemPrompt: systemPrompt,
+		ToolProfile:  agents.ProfileFull,
+		IsPreset:     false,
+		CreatedAt:    time.Now().Unix(),
+		UpdatedAt:    time.Now().Unix(),
+	}
+	if model != "" {
+		newAgent.Model = agents.ModelConfig{Primary: model}
+	}
+
+	if err := store.SaveAgent(ce.Ctx, newAgent); err != nil {
+		ce.Reply("Failed to create agent: %v", err)
+		return
+	}
+
+	ce.Reply("Created agent: **%s** (`%s`)\nUse `!ai agent %s` to use it", agentName, agentID, agentID)
+}
+
+// CommandDeleteAgent handles the !ai delete-agent command
+var CommandDeleteAgent = &commands.FullHandler{
+	Func: fnDeleteAgent,
+	Name: "delete-agent",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Delete a custom agent",
+		Args:        "<id>",
+	},
+	RequiresLogin: true,
+}
+
+func fnDeleteAgent(ce *commands.Event) {
+	client, ok := requireClient(ce)
+	if !ok {
+		return
+	}
+
+	if len(ce.Args) < 1 {
+		ce.Reply("Usage: !ai delete-agent <id>")
+		return
+	}
+
+	agentID := ce.Args[0]
+	store := NewAgentStoreAdapter(client)
+
+	// Check if it's a preset
+	if agents.IsPreset(agentID) || agents.IsBossAgent(agentID) {
+		ce.Reply("Cannot delete preset agent: %s", agentID)
+		return
+	}
+
+	if err := store.DeleteAgent(ce.Ctx, agentID); err != nil {
+		ce.Reply("Failed to delete agent: %v", err)
+		return
+	}
+
+	ce.Reply("Deleted agent: %s", agentID)
 }

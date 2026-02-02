@@ -3,15 +3,17 @@ package connector
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openai/openai-go/v3"
-	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 )
 
 // HandleMatrixMessage processes incoming Matrix messages and dispatches them to the AI
@@ -25,27 +27,112 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		return nil, fmt.Errorf("portal is nil")
 	}
 	meta := portalMeta(portal)
+	if msg.Event == nil {
+		return nil, fmt.Errorf("missing message event")
+	}
 
-	// Handle media messages based on type
-	switch msg.Content.MsgType {
+	// Check deduplication - skip if we've already processed this event
+	if msg.Event != nil && oc.inboundDedupeCache != nil {
+		dedupeKey := oc.buildDedupeKey(portal.MXID, msg.Event.ID)
+		if oc.inboundDedupeCache.Check(dedupeKey) {
+			oc.log.Debug().Stringer("event_id", msg.Event.ID).Msg("Skipping duplicate message")
+			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+		}
+	}
+
+	// Send ack reaction if configured (like OpenClaw's ack reactions)
+	// This provides immediate visual feedback before AI processes the message
+	var ackReactionEventID id.EventID
+	if meta.AckReactionEmoji != "" && msg.Event != nil {
+		ackReactionEventID = oc.sendAckReaction(ctx, portal, msg.Event.ID, meta.AckReactionEmoji)
+	}
+
+	// Store ack reaction info for potential removal after reply
+	if ackReactionEventID != "" && meta.AckReactionRemoveAfter {
+		oc.storeAckReaction(portal.MXID, msg.Event.ID, ackReactionEventID)
+	}
+
+	// Normalize sticker events to image handling
+	msgType := msg.Content.MsgType
+	if msg.Event != nil && msg.Event.Type == event.EventSticker {
+		msgType = event.MsgImage
+	}
+	if msgType == event.MessageType(event.EventSticker.Type) {
+		msgType = event.MsgImage
+	}
+	if msgType == event.MsgVideo && msg.Content.Info != nil && msg.Content.Info.MauGIF {
+		if mimeType := normalizeMimeType(msg.Content.Info.MimeType); strings.HasPrefix(mimeType, "image/") {
+			msgType = event.MsgImage
+		}
+	}
+
+	// Handle media messages based on type (media is never debounced)
+	switch msgType {
 	case event.MsgImage, event.MsgVideo, event.MsgAudio, event.MsgFile:
-		return oc.handleMediaMessage(ctx, msg, portal, meta, msg.Content.MsgType)
+		// Flush any pending debounced messages for this room+sender before processing media
+		if oc.inboundDebouncer != nil {
+			debounceKey := BuildDebounceKey(portal.MXID, msg.Event.Sender)
+			oc.inboundDebouncer.FlushKey(debounceKey)
+		}
+		return oc.handleMediaMessage(ctx, msg, portal, meta, msgType)
 	case event.MsgText, event.MsgNotice, event.MsgEmote:
 		// Continue to text handling below
 	default:
-		return nil, fmt.Errorf("%s messages are not supported", msg.Content.MsgType)
+		return nil, fmt.Errorf("%s messages are not supported", msgType)
 	}
 	body := strings.TrimSpace(msg.Content.Body)
 	if body == "" {
 		return nil, fmt.Errorf("empty messages are not supported")
 	}
 
-	promptMessages, err := oc.buildPrompt(ctx, portal, meta, body)
+	// Check if this message should be debounced
+	shouldDebounce := oc.inboundDebouncer != nil && ShouldDebounce(msg.Event, body)
+
+	if shouldDebounce {
+		// Build debounce entry
+		entry := DebounceEntry{
+			Event:      msg.Event,
+			Portal:     portal,
+			Meta:       meta,
+			Body:       body,
+			AckEventID: ackReactionEventID,
+		}
+
+		// Enqueue to debouncer - processing happens after delay
+		// Use per-room debounce delay if configured (0 = default, -1 = disabled)
+		debounceKey := BuildDebounceKey(portal.MXID, msg.Event.Sender)
+		oc.inboundDebouncer.EnqueueWithDelay(debounceKey, entry, true, meta.DebounceMs)
+
+		// Let the client know the message is pending due to debounce.
+		if meta.DebounceMs >= 0 {
+			oc.sendPendingStatus(ctx, portal, msg.Event, "Combining messages...")
+		}
+
+		// Return Pending=true since we're handling this asynchronously
+		return &bridgev2.MatrixMessageResponse{
+			Pending: true,
+		}, nil
+	}
+
+	// Not debouncing - process immediately
+	// Get raw event content for link previews
+	var rawEventContent map[string]any
+	if msg.Event != nil && msg.Event.Content.Raw != nil {
+		rawEventContent = msg.Event.Content.Raw
+	}
+
+	eventID := id.EventID("")
+	if msg.Event != nil {
+		eventID = msg.Event.ID
+	}
+
+	promptMessages, err := oc.buildPromptWithLinkContext(ctx, portal, meta, body, rawEventContent, eventID)
 	if err != nil {
 		return nil, err
 	}
 	userMessage := &database.Message{
-		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
+		MXID:     eventID,
 		Room:     portal.PortalKey,
 		SenderID: humanUserID(oc.UserLogin.ID),
 		Metadata: &MessageMetadata{
@@ -252,39 +339,13 @@ func (oc *AIClient) handleMediaMessage(
 	meta *PortalMetadata,
 	msgType event.MessageType,
 ) (*bridgev2.MatrixMessageResponse, error) {
+	if msg.Event == nil {
+		return nil, fmt.Errorf("missing message event")
+	}
+
 	// Get config for this media type
 	config, ok := mediaConfigs[msgType]
 	isPDF := false
-
-	// Handle PDF files (MsgFile with application/pdf MIME type)
-	if msgType == event.MsgFile {
-		mimeType := ""
-		if msg.Content.Info != nil {
-			mimeType = msg.Content.Info.MimeType
-		}
-		if mimeType == "application/pdf" {
-			config = pdfConfig
-			isPDF = true
-			ok = true
-		}
-	}
-
-	if !ok {
-		return nil, fmt.Errorf("unsupported media type: %s", msgType)
-	}
-
-	// Check capability (PDF has special OpenRouter handling via file-parser plugin)
-	capabilityOK := config.capabilityCheck(&meta.Capabilities)
-	if isPDF && !capabilityOK && oc.isOpenRouterProvider() {
-		capabilityOK = true // OpenRouter supports PDF via file-parser plugin
-	}
-	if !capabilityOK {
-		oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
-			"The current model (%s) does not support %s. Please switch to a capable model using /model.",
-			oc.effectiveModel(meta), config.capabilityName,
-		))
-		return &bridgev2.MatrixMessageResponse{}, nil
-	}
 
 	// Get the media URL
 	mediaURL := msg.Content.URL
@@ -296,14 +357,84 @@ func (oc *AIClient) handleMediaMessage(
 	}
 
 	// Get MIME type
-	mimeType := config.defaultMimeType
+	mimeType := ""
 	if msg.Content.Info != nil && msg.Content.Info.MimeType != "" {
-		mimeType = msg.Content.Info.MimeType
+		mimeType = normalizeMimeType(msg.Content.Info.MimeType)
+	}
+
+	// Handle PDF or text files (MsgFile)
+	if msgType == event.MsgFile {
+		switch {
+		case mimeType == "application/pdf":
+			config = pdfConfig
+			isPDF = true
+			ok = true
+		case isTextFileMime(mimeType):
+			if !oc.canUseMediaUnderstanding(meta) {
+				oc.sendSystemNotice(ctx, portal, "Text file understanding is only available when an agent is assigned and raw mode is off.")
+				return &bridgev2.MatrixMessageResponse{}, nil
+			}
+			return oc.handleTextFileMessage(ctx, msg, portal, meta, string(mediaURL), mimeType)
+		case mimeType == "" || mimeType == "application/octet-stream":
+			if !oc.canUseMediaUnderstanding(meta) {
+				oc.sendSystemNotice(ctx, portal, "Text file understanding is only available when an agent is assigned and raw mode is off.")
+				return &bridgev2.MatrixMessageResponse{}, nil
+			}
+			return oc.handleTextFileMessage(ctx, msg, portal, meta, string(mediaURL), mimeType)
+		}
+	}
+
+	if !ok {
+		return nil, fmt.Errorf("unsupported media type: %s", msgType)
+	}
+
+	if mimeType == "" {
+		mimeType = config.defaultMimeType
+	}
+
+	eventID := id.EventID("")
+	if msg.Event != nil {
+		eventID = msg.Event.ID
+	}
+
+	var visionModel string
+	var visionFallback bool
+	if msgType == event.MsgImage {
+		visionModel, visionFallback = oc.resolveVisionModelForImage(ctx, meta)
+	}
+	var audioModel string
+	var audioFallback bool
+	if msgType == event.MsgAudio {
+		audioModel, audioFallback = oc.resolveAudioModelForInput(ctx, meta)
+	}
+
+	// Check capability (PDF has special OpenRouter handling via file-parser plugin)
+	modelCaps := oc.getModelCapabilitiesForMeta(meta)
+	capabilityOK := config.capabilityCheck(&modelCaps)
+	if msgType == event.MsgImage {
+		capabilityOK = visionModel != ""
+	} else if msgType == event.MsgAudio {
+		capabilityOK = audioModel != ""
+	}
+	if isPDF && !capabilityOK && oc.isOpenRouterProvider() {
+		capabilityOK = true // OpenRouter supports PDF via file-parser plugin
+	}
+	if !capabilityOK {
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
+			"The current model (%s) does not support %s. Please switch to a capable model using /model.",
+			oc.effectiveModel(meta), config.capabilityName,
+		))
+		return &bridgev2.MatrixMessageResponse{}, nil
 	}
 
 	// Get caption (body is usually the filename or caption)
-	caption := strings.TrimSpace(msg.Content.Body)
-	if caption == "" || (msg.Content.Info != nil && caption == msg.Content.Info.MimeType) {
+	rawCaption := strings.TrimSpace(msg.Content.Body)
+	hasUserCaption := rawCaption != ""
+	if msg.Content.Info != nil && rawCaption == msg.Content.Info.MimeType {
+		hasUserCaption = false
+	}
+	caption := rawCaption
+	if !hasUserCaption {
 		caption = config.defaultCaption
 	}
 
@@ -313,14 +444,109 @@ func (oc *AIClient) handleMediaMessage(
 		encryptedFile = msg.Content.File
 	}
 
+	// If model lacks vision but agent supports image understanding, analyze image first.
+	if msgType == event.MsgImage && visionFallback {
+		analysisPrompt := buildImageUnderstandingPrompt(caption, hasUserCaption)
+		description, err := oc.analyzeImageWithModel(ctx, visionModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
+		if err != nil {
+			oc.log.Warn().Err(err).Msg("Image understanding failed")
+			oc.sendSystemNotice(ctx, portal, "Image understanding failed. Please try again or switch to a vision-capable model using /model.")
+			return &bridgev2.MatrixMessageResponse{}, nil
+		}
+
+		combined := buildImageUnderstandingMessage(caption, hasUserCaption, description)
+		if combined == "" {
+			oc.sendSystemNotice(ctx, portal, "Image understanding failed. Please try again or switch to a vision-capable model using /model.")
+			return &bridgev2.MatrixMessageResponse{}, nil
+		}
+
+		promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined, eventID)
+		if err != nil {
+			return nil, err
+		}
+
+		userMessage := &database.Message{
+			ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
+			MXID:     eventID,
+			Room:     portal.PortalKey,
+			SenderID: humanUserID(oc.UserLogin.ID),
+			Metadata: &MessageMetadata{
+				Role: "user",
+				Body: combined,
+			},
+			Timestamp: time.Now(),
+		}
+
+		dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
+			Event:       msg.Event,
+			Portal:      portal,
+			Meta:        meta,
+			Type:        pendingTypeText,
+			MessageBody: combined,
+		}, promptMessages)
+
+		return &bridgev2.MatrixMessageResponse{
+			DB:      dbMsg,
+			Pending: isPending,
+		}, nil
+	}
+
+	// If model lacks audio but agent supports audio understanding, analyze audio first.
+	if msgType == event.MsgAudio && audioFallback {
+		analysisPrompt := buildAudioUnderstandingPrompt(caption, hasUserCaption)
+		transcript, err := oc.analyzeAudioWithModel(ctx, audioModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
+		if err != nil {
+			oc.log.Warn().Err(err).Msg("Audio understanding failed")
+			oc.sendSystemNotice(ctx, portal, "Audio understanding failed. Please try again or switch to an audio-capable model using /model.")
+			return &bridgev2.MatrixMessageResponse{}, nil
+		}
+
+		combined := buildAudioUnderstandingMessage(caption, hasUserCaption, transcript)
+		if combined == "" {
+			oc.sendSystemNotice(ctx, portal, "Audio understanding failed. Please try again or switch to an audio-capable model using /model.")
+			return &bridgev2.MatrixMessageResponse{}, nil
+		}
+
+		promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined, eventID)
+		if err != nil {
+			return nil, err
+		}
+
+		userMessage := &database.Message{
+			ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
+			MXID:     eventID,
+			Room:     portal.PortalKey,
+			SenderID: humanUserID(oc.UserLogin.ID),
+			Metadata: &MessageMetadata{
+				Role: "user",
+				Body: combined,
+			},
+			Timestamp: time.Now(),
+		}
+
+		dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
+			Event:       msg.Event,
+			Portal:      portal,
+			Meta:        meta,
+			Type:        pendingTypeText,
+			MessageBody: combined,
+		}, promptMessages)
+
+		return &bridgev2.MatrixMessageResponse{
+			DB:      dbMsg,
+			Pending: isPending,
+		}, nil
+	}
+
 	// Build prompt with media
-	promptMessages, err := oc.buildPromptWithMedia(ctx, portal, meta, caption, string(mediaURL), mimeType, encryptedFile, config.msgType)
+	promptMessages, err := oc.buildPromptWithMedia(ctx, portal, meta, caption, string(mediaURL), mimeType, encryptedFile, config.msgType, eventID)
 	if err != nil {
 		return nil, err
 	}
 
 	userMessage := &database.Message{
-		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
+		MXID:     eventID,
 		Room:     portal.PortalKey,
 		SenderID: humanUserID(oc.UserLogin.ID),
 		Metadata: &MessageMetadata{
@@ -347,10 +573,232 @@ func (oc *AIClient) handleMediaMessage(
 	}, nil
 }
 
+func (oc *AIClient) handleTextFileMessage(
+	ctx context.Context,
+	msg *bridgev2.MatrixMessage,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	mediaURL string,
+	mimeType string,
+) (*bridgev2.MatrixMessageResponse, error) {
+	if msg == nil || msg.Event == nil {
+		return nil, fmt.Errorf("missing matrix event for text file message")
+	}
+
+	rawCaption := strings.TrimSpace(msg.Content.Body)
+	fileName := strings.TrimSpace(msg.Content.FileName)
+	hasUserCaption := rawCaption != ""
+	if fileName == "" {
+		fileName = rawCaption
+		hasUserCaption = false
+	}
+	if rawCaption == fileName {
+		hasUserCaption = false
+	}
+	caption := rawCaption
+	if !hasUserCaption {
+		caption = "Please analyze this text file."
+	}
+
+	var encryptedFile *event.EncryptedFileInfo
+	if msg.Content.File != nil {
+		encryptedFile = msg.Content.File
+	}
+
+	content, truncated, err := oc.downloadTextFile(ctx, mediaURL, encryptedFile, mimeType)
+	if err != nil {
+		oc.log.Warn().Err(err).Msg("Text file understanding failed")
+		oc.sendSystemNotice(ctx, portal, "Text file understanding failed. Please upload a UTF-8 text file under 5 MB.")
+		return &bridgev2.MatrixMessageResponse{}, nil
+	}
+
+	combined := buildTextFileMessage(caption, hasUserCaption, fileName, mimeType, content, truncated)
+	if combined == "" {
+		oc.sendSystemNotice(ctx, portal, "Text file understanding failed. Please upload a UTF-8 text file under 5 MB.")
+		return &bridgev2.MatrixMessageResponse{}, nil
+	}
+
+	eventID := id.EventID("")
+	if msg.Event != nil {
+		eventID = msg.Event.ID
+	}
+
+	promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined, eventID)
+	if err != nil {
+		return nil, err
+	}
+
+	userMessage := &database.Message{
+		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
+		MXID:     eventID,
+		Room:     portal.PortalKey,
+		SenderID: humanUserID(oc.UserLogin.ID),
+		Metadata: &MessageMetadata{
+			Role: "user",
+			Body: combined,
+		},
+		Timestamp: time.Now(),
+	}
+
+	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
+		Event:       msg.Event,
+		Portal:      portal,
+		Meta:        meta,
+		Type:        pendingTypeText,
+		MessageBody: combined,
+	}, promptMessages)
+
+	return &bridgev2.MatrixMessageResponse{
+		DB:      dbMsg,
+		Pending: isPending,
+	}, nil
+}
+
 // savePortalQuiet saves portal and logs errors without failing
 func (oc *AIClient) savePortalQuiet(ctx context.Context, portal *bridgev2.Portal, action string) {
 	if err := portal.Save(ctx); err != nil {
 		oc.log.Warn().Err(err).Str("action", action).Msg("Failed to save portal")
+	}
+}
+
+// Ack reaction tracking for removal after reply
+// Maps room ID -> source message ID -> ack reaction event ID
+const (
+	ackReactionTTL             = 5 * time.Minute
+	ackReactionCleanupInterval = time.Minute
+)
+
+type ackReactionEntry struct {
+	reactionEventID id.EventID
+	storedAt        time.Time
+}
+
+var (
+	ackReactionStore   = make(map[id.RoomID]map[id.EventID]ackReactionEntry)
+	ackReactionStoreMu sync.Mutex
+)
+
+func init() {
+	go cleanupAckReactionStore()
+}
+
+func cleanupAckReactionStore() {
+	ticker := time.NewTicker(ackReactionCleanupInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		cutoff := time.Now().Add(-ackReactionTTL)
+		ackReactionStoreMu.Lock()
+		for roomID, roomReactions := range ackReactionStore {
+			for sourceEventID, entry := range roomReactions {
+				if entry.storedAt.Before(cutoff) {
+					delete(roomReactions, sourceEventID)
+				}
+			}
+			if len(roomReactions) == 0 {
+				delete(ackReactionStore, roomID)
+			}
+		}
+		ackReactionStoreMu.Unlock()
+	}
+}
+
+// sendAckReaction sends an acknowledgement reaction to a message.
+// Returns the event ID of the reaction for potential removal.
+func (oc *AIClient) sendAckReaction(ctx context.Context, portal *bridgev2.Portal, targetEventID id.EventID, emoji string) id.EventID {
+	if portal == nil || portal.MXID == "" || targetEventID == "" || emoji == "" {
+		return ""
+	}
+	if err := oc.ensureModelInRoom(ctx, portal); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to ensure ghost is in room for ack reaction")
+		return ""
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return ""
+	}
+
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"m.relates_to": map[string]any{
+				"rel_type": "m.annotation",
+				"event_id": targetEventID.String(),
+				"key":      emoji,
+			},
+		},
+	}
+
+	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventReaction, eventContent, nil)
+	if err != nil {
+		oc.log.Warn().Err(err).
+			Stringer("target_event", targetEventID).
+			Str("emoji", emoji).
+			Msg("Failed to send ack reaction")
+		return ""
+	}
+
+	oc.log.Debug().
+		Stringer("target_event", targetEventID).
+		Str("emoji", emoji).
+		Stringer("reaction_event", resp.EventID).
+		Msg("Sent ack reaction")
+	return resp.EventID
+}
+
+// storeAckReaction stores an ack reaction for later removal.
+func (oc *AIClient) storeAckReaction(roomID id.RoomID, sourceEventID, reactionEventID id.EventID) {
+	ackReactionStoreMu.Lock()
+	defer ackReactionStoreMu.Unlock()
+
+	if ackReactionStore[roomID] == nil {
+		ackReactionStore[roomID] = make(map[id.EventID]ackReactionEntry)
+	}
+	ackReactionStore[roomID][sourceEventID] = ackReactionEntry{
+		reactionEventID: reactionEventID,
+		storedAt:        time.Now(),
+	}
+}
+
+// removeAckReaction removes a previously sent ack reaction.
+func (oc *AIClient) removeAckReaction(ctx context.Context, portal *bridgev2.Portal, sourceEventID id.EventID) {
+	ackReactionStoreMu.Lock()
+	roomReactions := ackReactionStore[portal.MXID]
+	if roomReactions == nil {
+		ackReactionStoreMu.Unlock()
+		return
+	}
+	entry, ok := roomReactions[sourceEventID]
+	if !ok {
+		ackReactionStoreMu.Unlock()
+		return
+	}
+	delete(roomReactions, sourceEventID)
+	ackReactionStoreMu.Unlock()
+
+	reactionEventID := entry.reactionEventID
+	if reactionEventID == "" {
+		return
+	}
+
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return
+	}
+
+	// Redact the ack reaction
+	_, err := intent.SendMessage(ctx, portal.MXID, event.EventRedaction, &event.Content{
+		Parsed: &event.RedactionEventContent{
+			Redacts: reactionEventID,
+		},
+	}, nil)
+	if err != nil {
+		oc.log.Warn().Err(err).
+			Stringer("reaction_event", reactionEventID).
+			Msg("Failed to remove ack reaction")
+	} else {
+		oc.log.Debug().
+			Stringer("reaction_event", reactionEventID).
+			Msg("Removed ack reaction")
 	}
 }
 
@@ -384,7 +832,7 @@ func (oc *AIClient) handleToolsCommand(
 	case "on", "enable", "true", "1":
 		if toolName == "" {
 			// Enable all tools
-			oc.setAllTools(runCtx, portal, meta, true, isOpenRouter)
+			oc.setAllTools(runCtx, portal, meta, true)
 		} else {
 			// Enable specific tool
 			oc.setToolEnabled(runCtx, portal, meta, toolName, true, isOpenRouter)
@@ -392,7 +840,7 @@ func (oc *AIClient) handleToolsCommand(
 	case "off", "disable", "false", "0":
 		if toolName == "" {
 			// Disable all tools
-			oc.setAllTools(runCtx, portal, meta, false, isOpenRouter)
+			oc.setAllTools(runCtx, portal, meta, false)
 		} else {
 			// Disable specific tool
 			oc.setToolEnabled(runCtx, portal, meta, toolName, false, isOpenRouter)
@@ -420,6 +868,9 @@ func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal
 	// Builtin tools
 	sb.WriteString("Builtin Tools:\n")
 	for _, tool := range BuiltinTools() {
+		if tool.Name == ToolNameMessage && !hasAssignedAgent(meta) {
+			continue
+		}
 		enabled := oc.isToolEnabled(meta, tool.Name)
 		status := "✗"
 		if enabled {
@@ -432,31 +883,6 @@ func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal
 		sb.WriteString(fmt.Sprintf("  [%s] %s: %s%s\n", status, tool.Name, tool.Description, availability))
 	}
 
-	// OpenRouter plugin
-	if isOpenRouter {
-		sb.WriteString("\nPlugins:\n")
-		onlineEnabled := oc.isToolEnabled(meta, "online")
-		status := "✗"
-		if onlineEnabled {
-			status = "✓"
-		}
-		sb.WriteString(fmt.Sprintf("  [%s] online: OpenRouter web search plugin (:online suffix)\n", status))
-	}
-
-	// Provider tools
-	sb.WriteString("\nProvider Tools:\n")
-	wsStatus := "✗"
-	if oc.isToolEnabled(meta, ToolNameWebSearchProvider) {
-		wsStatus = "✓"
-	}
-	sb.WriteString(fmt.Sprintf("  [%s] web_search_provider: Native provider web search\n", wsStatus))
-
-	ciStatus := "✗"
-	if oc.isToolEnabled(meta, ToolNameCodeInterpreter) {
-		ciStatus = "✓"
-	}
-	sb.WriteString(fmt.Sprintf("  [%s] code_interpreter: Execute Python code\n", ciStatus))
-
 	if !supportsTools {
 		sb.WriteString(fmt.Sprintf("\nNote: Current model (%s) may not support tool calling.\n", oc.effectiveModel(meta)))
 	}
@@ -465,27 +891,16 @@ func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal
 }
 
 // setAllTools enables or disables all tools
-func (oc *AIClient) setAllTools(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, enabled bool, isOpenRouter bool) {
+func (oc *AIClient) setAllTools(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, enabled bool) {
 	loginMeta := loginMetadata(oc.UserLogin)
 	ensureToolsConfig(meta, loginMeta.Provider)
 
 	// Set all tools to the same state
-	for name, entry := range meta.ToolsConfig.Tools {
+	for _, entry := range meta.ToolsConfig.Tools {
 		if entry == nil {
 			continue
 		}
-		// Skip online plugin for non-OpenRouter
-		if name == ToolNameOnline && !isOpenRouter {
-			continue
-		}
 		entry.Enabled = &enabled
-	}
-
-	// If enabling online, disable builtin web_search (they overlap)
-	if isOpenRouter && enabled {
-		if wsEntry, ok := meta.ToolsConfig.Tools[ToolNameWebSearch]; ok && wsEntry != nil {
-			wsEntry.Enabled = ptr.Ptr(false)
-		}
 	}
 
 	if err := portal.Save(ctx); err != nil {
@@ -513,25 +928,17 @@ func (oc *AIClient) setToolEnabled(ctx context.Context, portal *bridgev2.Portal,
 	// Check if tool exists
 	entry, ok := meta.ToolsConfig.Tools[normalizedName]
 	if !ok || entry == nil {
-		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Unknown tool: %s. Available: calculator, web_search, online, web_search_provider, code_interpreter", toolName))
-		return
-	}
-
-	// Validate online plugin for non-OpenRouter
-	if normalizedName == ToolNameOnline && !isOpenRouter {
-		oc.sendSystemNotice(ctx, portal, "The 'online' plugin is only available with OpenRouter.")
+		available := make([]string, 0, len(meta.ToolsConfig.Tools))
+		for name := range meta.ToolsConfig.Tools {
+			available = append(available, name)
+		}
+		sort.Strings(available)
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Unknown tool: %s. Available: %s", toolName, strings.Join(available, ", ")))
 		return
 	}
 
 	// Apply the toggle
 	entry.Enabled = &enabled
-
-	// If enabling online, disable builtin web_search to avoid duplication
-	if normalizedName == ToolNameOnline && enabled {
-		if wsEntry, ok := meta.ToolsConfig.Tools[ToolNameWebSearch]; ok && wsEntry != nil {
-			wsEntry.Enabled = ptr.Ptr(false)
-		}
-	}
 
 	if err := portal.Save(ctx); err != nil {
 		oc.log.Warn().Err(err).Msg("Failed to save portal after tool change")
@@ -588,18 +995,19 @@ func (oc *AIClient) handleRegenerate(
 	oc.sendSystemNotice(runCtx, portal, "Regenerating response...")
 
 	// Build prompt excluding the old assistant response
-	prompt, err := oc.buildPromptForRegenerate(runCtx, portal, meta, userMeta.Body)
+	prompt, err := oc.buildPromptForRegenerate(runCtx, portal, meta, userMeta.Body, lastUserMessage.MXID)
 	if err != nil {
 		oc.sendSystemNotice(runCtx, portal, "Failed to regenerate: "+err.Error())
 		return
 	}
 
 	oc.dispatchOrQueueWithStatus(runCtx, evt, portal, meta, pendingMessage{
-		Event:       evt,
-		Portal:      portal,
-		Meta:        meta,
-		Type:        pendingTypeRegenerate,
-		MessageBody: userMeta.Body,
+		Event:         evt,
+		Portal:        portal,
+		Meta:          meta,
+		Type:          pendingTypeRegenerate,
+		MessageBody:   userMeta.Body,
+		SourceEventID: lastUserMessage.MXID,
 	}, prompt)
 }
 
@@ -682,6 +1090,7 @@ func (oc *AIClient) buildPromptForRegenerate(
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	latestUserBody string,
+	latestUserID id.EventID,
 ) ([]openai.ChatCompletionMessageParamUnion, error) {
 	var prompt []openai.ChatCompletionMessageParamUnion
 	systemPrompt := oc.effectivePrompt(meta)
@@ -716,11 +1125,15 @@ func (oc *AIClient) buildPromptForRegenerate(
 				continue
 			}
 
+			body := msgMeta.Body
+			if msg.MXID != "" {
+				body = appendMessageIDHint(msgMeta.Body, msg.MXID)
+			}
 			switch msgMeta.Role {
 			case "assistant":
-				prompt = append(prompt, openai.AssistantMessage(msgMeta.Body))
+				prompt = append(prompt, openai.AssistantMessage(body))
 			default:
-				prompt = append(prompt, openai.UserMessage(msgMeta.Body))
+				prompt = append(prompt, openai.UserMessage(body))
 			}
 		}
 
@@ -734,6 +1147,6 @@ func (oc *AIClient) buildPromptForRegenerate(
 		}
 	}
 
-	prompt = append(prompt, openai.UserMessage(latestUserBody))
+	prompt = append(prompt, openai.UserMessage(appendMessageIDHint(latestUserBody, latestUserID)))
 	return prompt, nil
 }

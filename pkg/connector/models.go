@@ -16,8 +16,8 @@ const (
 // Default models for each provider
 const (
 	DefaultModelOpenAI     = "openai/gpt-5.2"
-	DefaultModelOpenRouter = "google/gemini-2.5-flash"
-	DefaultModelBeeper     = "anthropic/claude-sonnet-4.5"
+	DefaultModelOpenRouter = "anthropic/claude-opus-4.5"
+	DefaultModelBeeper     = "anthropic/claude-opus-4.5"
 )
 
 // ParseModelPrefix extracts the backend and actual model ID from a prefixed model

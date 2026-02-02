@@ -22,6 +22,7 @@ const (
 	defaultTemperature        = 0.4
 	defaultMaxContextMessages = 12
 	defaultMaxTokens          = 512
+	defaultReasoningEffort    = "low"
 )
 
 var (
@@ -271,7 +272,16 @@ func (oc *OpenAIConnector) GetBridgeInfoVersion() (info, capabilities int) {
 
 // FillPortalBridgeInfo sets custom room type for AI rooms
 func (oc *OpenAIConnector) FillPortalBridgeInfo(portal *bridgev2.Portal, content *event.BridgeEventContent) {
-	content.BeeperRoomTypeV2 = "ai"
+	meta := portalMeta(portal)
+	if meta.IsAgentDataRoom {
+		// Unknown room type = auto-hidden by clients
+		content.BeeperRoomTypeV2 = "agent_data"
+	} else if meta.IsGlobalMemoryRoom {
+		// Global memory room = auto-hidden by clients
+		content.BeeperRoomTypeV2 = "global_memory"
+	} else {
+		content.BeeperRoomTypeV2 = "ai"
+	}
 }
 
 func (oc *OpenAIConnector) GetName() bridgev2.BridgeName {

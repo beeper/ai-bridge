@@ -7,6 +7,8 @@ toolchain go1.24.5
 tool go.mau.fi/util/cmd/maubuild
 
 require (
+	github.com/PuerkitoBio/goquery v1.11.0
+	github.com/dyatlov/go-opengraph/opengraph v0.0.0-20220524092352-606d7b1e5f8a
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.2.0
 	github.com/openai/openai-go/v3 v3.16.0
@@ -14,11 +16,13 @@ require (
 	github.com/rs/xid v1.6.0
 	github.com/rs/zerolog v1.34.0
 	go.mau.fi/util v0.9.5
+	golang.org/x/image v0.35.0
 	maunium.net/go/mautrix v0.26.3-0.20260129174719-d2364b382275
 )
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/coreos/go-systemd/v22 v22.6.0 // indirect
 	github.com/dlclark/regexp2 v1.10.0 // indirect
