@@ -24,6 +24,15 @@ func defaultWebSearchTool() mcp.Tool {
 	}
 }
 
+func defaultWebSearchOpenRouterTool() mcp.Tool {
+	return mcp.Tool{
+		Name:        toolspec.WebSearchOpenRouterName,
+		Description: toolspec.WebSearchOpenRouterDescription,
+		Annotations: &mcp.ToolAnnotations{Title: "Web Search (OpenRouter)"},
+		InputSchema: toolspec.WebSearchSchema(),
+	}
+}
+
 func defaultWebFetchTool() mcp.Tool {
 	return mcp.Tool{
 		Name:        toolspec.WebFetchName,

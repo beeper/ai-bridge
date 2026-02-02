@@ -9,6 +9,9 @@ const (
 	WebSearchName        = "web_search"
 	WebSearchDescription = "Search the web for information. Returns a summary of search results."
 
+	WebSearchOpenRouterName        = "web_search_openrouter"
+	WebSearchOpenRouterDescription = "Search the web using OpenRouter's web plugin for synthesized answers and citations."
+
 	WebFetchName        = "web_fetch"
 	WebFetchDescription = "Fetch a web page and extract its readable content as text or markdown."
 

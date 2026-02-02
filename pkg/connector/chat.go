@@ -57,6 +57,7 @@ func getDefaultToolsConfig(_ string) ToolsConfig {
 
 	// Web search - uses DuckDuckGo
 	registerTool(&config, defaultWebSearchTool(), "builtin")
+	registerTool(&config, defaultWebSearchOpenRouterTool(), "builtin")
 
 	// Web fetch - fetch and extract page content
 	registerTool(&config, defaultWebFetchTool(), "builtin")
@@ -102,6 +103,10 @@ func ensureToolsConfig(meta *PortalMetadata, provider string) bool {
 	// Ensure web search tool exists (enabled by default unless explicitly disabled)
 	if _, ok := meta.ToolsConfig.Tools[ToolNameWebSearch]; !ok {
 		registerTool(&meta.ToolsConfig, defaultWebSearchTool(), "builtin")
+		changed = true
+	}
+	if _, ok := meta.ToolsConfig.Tools[toolspec.WebSearchOpenRouterName]; !ok {
+		registerTool(&meta.ToolsConfig, defaultWebSearchOpenRouterTool(), "builtin")
 		changed = true
 	}
 

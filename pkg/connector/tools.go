@@ -79,6 +79,12 @@ func BuiltinTools() []ToolDefinition {
 			Execute:     executeWebSearch,
 		},
 		{
+			Name:        toolspec.WebSearchOpenRouterName,
+			Description: toolspec.WebSearchOpenRouterDescription,
+			Parameters:  toolspec.WebSearchSchema(),
+			Execute:     executeWebSearchOpenRouter,
+		},
+		{
 			Name:        ToolNameMessage,
 			Description: toolspec.MessageDescription,
 			Parameters:  toolspec.MessageSchema(),
