@@ -92,3 +92,25 @@ pruning:
 
   # Additional instructions for the summarization model
   # custom_instructions: "Focus on preserving code decisions and TODOs"
+
+# Link preview configuration.
+# Automatically fetches metadata for URLs in messages to provide context to the AI
+# and generate rich previews in outgoing AI responses.
+link_previews:
+  # Enable link preview functionality (default: true)
+  enabled: true
+
+  # Maximum number of URLs to fetch from user messages for AI context (default: 3)
+  max_urls_inbound: 3
+
+  # Maximum number of URLs to preview in AI responses (default: 5)
+  max_urls_outbound: 5
+
+  # Timeout for fetching each URL (default: 10s)
+  fetch_timeout: 10s
+
+  # Maximum characters from description to include in context (default: 500)
+  max_content_chars: 500
+
+  # Maximum page size to download in bytes (default: 10MB)
+  max_page_bytes: 10485760

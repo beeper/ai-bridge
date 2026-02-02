@@ -765,6 +765,36 @@ func (oc *AIClient) effectivePrompt(meta *PortalMetadata) string {
 	return oc.connector.Config.DefaultSystemPrompt
 }
 
+// getLinkPreviewConfig returns the link preview configuration, with defaults filled in.
+func (oc *AIClient) getLinkPreviewConfig() LinkPreviewConfig {
+	config := DefaultLinkPreviewConfig()
+	
+	if oc.connector.Config.LinkPreviews != nil {
+		cfg := oc.connector.Config.LinkPreviews
+		// Apply explicit settings only if they differ from zero values
+		if !cfg.Enabled {
+			config.Enabled = cfg.Enabled
+		}
+		if cfg.MaxURLsInbound > 0 {
+			config.MaxURLsInbound = cfg.MaxURLsInbound
+		}
+		if cfg.MaxURLsOutbound > 0 {
+			config.MaxURLsOutbound = cfg.MaxURLsOutbound
+		}
+		if cfg.FetchTimeout > 0 {
+			config.FetchTimeout = cfg.FetchTimeout
+		}
+		if cfg.MaxContentChars > 0 {
+			config.MaxContentChars = cfg.MaxContentChars
+		}
+		if cfg.MaxPageBytes > 0 {
+			config.MaxPageBytes = cfg.MaxPageBytes
+		}
+	}
+	
+	return config
+}
+
 // effectiveAgentPrompt returns the system prompt for the agent assigned to the room.
 // This uses BuildSystemPrompt to generate a full prompt with room context when an agent is configured.
 // Returns empty string if no agent is configured.
@@ -1126,12 +1156,91 @@ func (oc *AIClient) buildBasePrompt(
 
 // buildPrompt builds a prompt with the latest user message
 func (oc *AIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, latest string) ([]openai.ChatCompletionMessageParamUnion, error) {
+	return oc.buildPromptWithLinkContext(ctx, portal, meta, latest, nil)
+}
+
+// buildPromptWithLinkContext builds a prompt with the latest user message and optional link context.
+// If rawEventContent is provided, it will extract existing link previews from it.
+// URLs in the message will be auto-fetched if no preview exists.
+func (oc *AIClient) buildPromptWithLinkContext(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	latest string,
+	rawEventContent map[string]any,
+) ([]openai.ChatCompletionMessageParamUnion, error) {
 	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
 	if err != nil {
 		return nil, err
 	}
-	prompt = append(prompt, openai.UserMessage(latest))
+
+	// Build final message with link context
+	finalMessage := latest
+	linkContext := oc.buildLinkContext(ctx, latest, rawEventContent)
+	if linkContext != "" {
+		finalMessage = latest + linkContext
+	}
+
+	prompt = append(prompt, openai.UserMessage(finalMessage))
 	return prompt, nil
+}
+
+// buildLinkContext extracts URLs from the message, fetches previews, and returns formatted context.
+func (oc *AIClient) buildLinkContext(ctx context.Context, message string, rawEventContent map[string]any) string {
+	config := oc.getLinkPreviewConfig()
+	if !config.Enabled {
+		return ""
+	}
+
+	// Extract URLs from message
+	urls := ExtractURLs(message, config.MaxURLsInbound)
+	if len(urls) == 0 {
+		return ""
+	}
+
+	// Check for existing previews in the event
+	var existingPreviews []*event.BeeperLinkPreview
+	if rawEventContent != nil {
+		existingPreviews = ParseExistingLinkPreviews(rawEventContent)
+	}
+
+	// Build map of existing previews by URL
+	existingByURL := make(map[string]*event.BeeperLinkPreview)
+	for _, p := range existingPreviews {
+		if p.MatchedURL != "" {
+			existingByURL[p.MatchedURL] = p
+		}
+		if p.CanonicalURL != "" {
+			existingByURL[p.CanonicalURL] = p
+		}
+	}
+
+	// Find URLs that need fetching
+	var urlsToFetch []string
+	var allPreviews []*event.BeeperLinkPreview
+	for _, u := range urls {
+		if existing, ok := existingByURL[u]; ok {
+			allPreviews = append(allPreviews, existing)
+		} else {
+			urlsToFetch = append(urlsToFetch, u)
+		}
+	}
+
+	// Fetch missing previews
+	if len(urlsToFetch) > 0 {
+		previewer := NewLinkPreviewer(config)
+		fetchCtx, cancel := context.WithTimeout(ctx, config.FetchTimeout*time.Duration(len(urlsToFetch)))
+		defer cancel()
+		
+		fetched := previewer.FetchPreviews(fetchCtx, urlsToFetch)
+		allPreviews = append(allPreviews, fetched...)
+	}
+
+	if len(allPreviews) == 0 {
+		return ""
+	}
+
+	return FormatPreviewsForContext(allPreviews, config.MaxContentChars)
 }
 
 // buildPromptWithMedia builds a prompt with media content (image, PDF, audio, or video)

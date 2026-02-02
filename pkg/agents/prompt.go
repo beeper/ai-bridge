@@ -147,6 +147,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		if toolsSection := buildToolsSectionFromList(params.Tools); toolsSection != "" {
 			sections = append(sections, toolsSection)
 		}
+		sections = append(sections, buildToolCallStyleSection())
 		if runtime := buildRuntimeSection(params.RuntimeInfo); runtime != "" {
 			sections = append(sections, runtime)
 		}
@@ -214,12 +215,13 @@ func buildBaseSection(agent *AgentDefinition) string {
 }
 
 // buildRoomContextSection creates the room context section visible to LLM.
+// Uses markdown header format (no XML tags) to match clawdbot style.
 func buildRoomContextSection(info *RoomInfo) string {
 	if info == nil || (info.Title == "" && info.Topic == "") {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("<room_context>\n")
+	sb.WriteString("## Room Context\n")
 	if info.Title != "" {
 		sb.WriteString(fmt.Sprintf("Room: %s\n", info.Title))
 	}
@@ -227,9 +229,8 @@ func buildRoomContextSection(info *RoomInfo) string {
 		sb.WriteString(fmt.Sprintf("Topic: %s\n", info.Topic))
 	}
 	if info.Channel != "" {
-		sb.WriteString(fmt.Sprintf("Channel: %s\n", info.Channel))
+		sb.WriteString(fmt.Sprintf("Channel: %s", info.Channel))
 	}
-	sb.WriteString("</room_context>")
 	return sb.String()
 }
 
@@ -260,6 +261,8 @@ func buildToolsSectionFromList(toolList []tools.ToolInfo) string {
 			section.WriteString(fmt.Sprintf("- %s: %s\n", tool.Name, tool.Description))
 		}
 	}
+
+	section.WriteString("If a task is more complex or takes longer, spawn a sub-agent. It will do the work for you and ping you when it's done.")
 
 	return section.String()
 }
@@ -297,8 +300,12 @@ When you have nothing to say, respond with ONLY: NO_REPLY
 
 Rules:
 - It must be your ENTIRE message — nothing else
-- Never append it to an actual response
-- Never wrap it in markdown or code blocks`
+- Never append it to an actual response (never include "NO_REPLY" in real replies)
+- Never wrap it in markdown or code blocks
+
+Wrong: "Here's help... NO_REPLY"
+Wrong: "NO_REPLY"
+Right: NO_REPLY`
 }
 
 func buildReactionsSection() string {
@@ -309,7 +316,18 @@ To react to a message with an emoji, include a tag in your reply:
 You can include multiple reaction tags. Tags are stripped before sending.`
 }
 
+// buildToolCallStyleSection returns guidance on when to narrate tool calls.
+// Matches clawdbot/OpenClaw style.
+func buildToolCallStyleSection() string {
+	return `## Tool Call Style
+Default: do not narrate routine, low-risk tool calls (just call the tool).
+Narrate only when it helps: multi-step work, complex/challenging problems, sensitive actions (e.g., deletions), or when the user explicitly asks.
+Keep narration brief and value-dense; avoid repeating obvious steps.
+Use plain human language for narration unless in a technical context.`
+}
+
 // buildDateSectionFromParams creates the date/time section from params.
+// Uses clawdbot format with markdown header.
 func buildDateSectionFromParams(date time.Time, timezone string) string {
 	if date.IsZero() {
 		date = time.Now()
@@ -317,7 +335,7 @@ func buildDateSectionFromParams(date time.Time, timezone string) string {
 	if timezone == "" {
 		timezone = "UTC"
 	}
-	return fmt.Sprintf("Current date: %s (%s)", date.Format("January 2, 2006"), timezone)
+	return fmt.Sprintf("## Current Date & Time\nTime zone: %s\nCurrent date: %s", timezone, date.Format("January 2, 2006"))
 }
 
 // buildAgentListSection creates the agent list section for Boss agent.

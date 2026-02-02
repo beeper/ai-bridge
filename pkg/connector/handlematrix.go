@@ -39,7 +39,13 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		return nil, fmt.Errorf("empty messages are not supported")
 	}
 
-	promptMessages, err := oc.buildPrompt(ctx, portal, meta, body)
+	// Get raw event content for link previews
+	var rawEventContent map[string]any
+	if msg.Event != nil && msg.Event.Content.Raw != nil {
+		rawEventContent = msg.Event.Content.Raw
+	}
+
+	promptMessages, err := oc.buildPromptWithLinkContext(ctx, portal, meta, body, rawEventContent)
 	if err != nil {
 		return nil, err
 	}

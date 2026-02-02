@@ -41,7 +41,14 @@ var BeeperAIAgent = &AgentDefinition{
 	ID:              "beeper",
 	Name:            "Beeper AI",
 	Description:     "Your AI assistant",
-	Model:           ModelConfig{Primary: ModelClaudeSonnet},
+	Model: ModelConfig{
+		Primary: ModelClaudeOpus,
+		Fallbacks: []string{
+			ModelClaudeSonnet,
+			ModelOpenAIGPT52,
+			ModelZAIGLM47,
+		},
+	},
 	ToolProfile:     ProfileCoding,
 	ReasoningEffort: ReasoningMedium,
 	SystemPrompt:    BeeperAIPrompt,

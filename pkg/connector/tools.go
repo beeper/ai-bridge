@@ -110,13 +110,13 @@ func BuiltinTools() []ToolDefinition {
 		},
 		{
 			Name:        ToolNameMessage,
-			Description: "Send messages and perform channel actions in the current chat. Supports: send, react, edit, delete, reply, pin, unpin, list-pins, thread-reply.",
+			Description: "Send messages and perform channel actions in the current chat. Supports: send, react, edit, delete, reply, pin, unpin, list-pins, thread-reply, search.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"enum":        []string{"send", "react", "edit", "delete", "reply", "pin", "unpin", "list-pins", "thread-reply"},
+						"enum":        []string{"send", "react", "edit", "delete", "reply", "pin", "unpin", "list-pins", "thread-reply", "search"},
 						"description": "The action to perform",
 					},
 					"message": map[string]any{
@@ -134,6 +134,14 @@ func BuiltinTools() []ToolDefinition {
 					"thread_id": map[string]any{
 						"type":        "string",
 						"description": "For action=thread-reply: the thread root message ID",
+					},
+					"query": map[string]any{
+						"type":        "string",
+						"description": "For action=search: search query to find messages",
+					},
+					"limit": map[string]any{
+						"type":        "number",
+						"description": "For action=search: max results to return (default: 20)",
 					},
 				},
 				"required": []string{"action"},
@@ -198,6 +206,25 @@ func BuiltinTools() []ToolDefinition {
 			},
 			Execute: executeImageGeneration,
 		},
+		{
+			Name:        ToolNameAnalyzeImage,
+			Description: "Analyze an image with a custom prompt. Use this to examine image details, read text from images (OCR), identify objects, or get specific information about visual content.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"image_url": map[string]any{
+						"type":        "string",
+						"description": "URL of the image to analyze (http/https URL, mxc:// Matrix URL, or data: URI with base64)",
+					},
+					"prompt": map[string]any{
+						"type":        "string",
+						"description": "What to analyze or look for in the image (e.g., 'describe this image', 'read the text', 'what objects are visible')",
+					},
+				},
+				"required": []string{"image_url", "prompt"},
+			},
+			Execute: executeAnalyzeImage,
+		},
 	}
 }
 
@@ -212,6 +239,9 @@ const ToolNameWebFetch = "web_fetch"
 
 // ToolNameImage is the name of the image generation tool.
 const ToolNameImage = "image"
+
+// ToolNameAnalyzeImage is the name of the image analysis tool.
+const ToolNameAnalyzeImage = "analyze_image"
 
 // ImageResultPrefix is the prefix used to identify image results that need media sending.
 const ImageResultPrefix = "IMAGE:"
@@ -254,6 +284,8 @@ func executeMessage(ctx context.Context, args map[string]any) (string, error) {
 		return executeMessageListPins(ctx, btc)
 	case "thread-reply":
 		return executeMessageThreadReply(ctx, args, btc)
+	case "search":
+		return executeMessageSearch(ctx, args, btc)
 	default:
 		return "", fmt.Errorf("unknown action: %s", action)
 	}
@@ -575,6 +607,66 @@ func executeMessageThreadReply(ctx context.Context, args map[string]any, btc *Br
 	}
 
 	return fmt.Sprintf(`{"action":"thread-reply","event_id":%q,"thread_id":%q,"status":"sent"}`, resp.EventID, threadRootID), nil
+}
+
+// executeMessageSearch searches messages in the current chat.
+func executeMessageSearch(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	query, ok := args["query"].(string)
+	if !ok || query == "" {
+		return "", fmt.Errorf("action=search requires 'query' parameter")
+	}
+
+	// Get limit (default 20)
+	limit := 20
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+		if limit > 100 {
+			limit = 100 // Cap at 100 results
+		}
+	}
+
+	// Get messages from database
+	// Fetch more than needed since we'll filter
+	messages, err := btc.Client.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, btc.Portal.PortalKey, 1000)
+	if err != nil {
+		return "", fmt.Errorf("failed to get messages: %w", err)
+	}
+
+	// Search through messages
+	queryLower := strings.ToLower(query)
+	var results []map[string]any
+
+	for _, msg := range messages {
+		if len(results) >= limit {
+			break
+		}
+
+		// Get message body from metadata
+		msgMeta, ok := msg.Metadata.(*MessageMetadata)
+		if ok && msgMeta != nil {
+			body := msgMeta.Body
+			if body != "" && strings.Contains(strings.ToLower(body), queryLower) {
+				results = append(results, map[string]any{
+					"message_id": msg.MXID.String(),
+					"role":       msgMeta.Role,
+					"content":    truncateString(body, 200),
+					"timestamp":  msg.Timestamp.Unix(),
+				})
+			}
+		}
+	}
+
+	// Build JSON response
+	resultsJSON, _ := json.Marshal(results)
+	return fmt.Sprintf(`{"action":"search","query":%q,"results":%s,"count":%d}`, query, string(resultsJSON), len(results)), nil
+}
+
+// truncateString truncates a string to maxLen characters, adding "..." if truncated.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // executeWebFetch fetches a web page and extracts readable content.

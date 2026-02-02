@@ -6,7 +6,14 @@ var BossAgent = &AgentDefinition{
 	ID:              "boss",
 	Name:            "Meta Chatter",
 	Description:     "Manages agents, rooms, and system configuration",
-	Model:           ModelConfig{Primary: ModelClaudeOpus},
+	Model: ModelConfig{
+		Primary: ModelClaudeOpus,
+		Fallbacks: []string{
+			ModelClaudeSonnet,
+			ModelOpenAIGPT52,
+			ModelZAIGLM47,
+		},
+	},
 	ToolProfile:     ProfileBoss,
 	ReasoningEffort: ReasoningMedium,
 	SystemPrompt:    BossSystemPrompt,

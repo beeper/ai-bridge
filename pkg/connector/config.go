@@ -23,6 +23,9 @@ type Config struct {
 
 	// Context pruning configuration (OpenClaw-style)
 	Pruning *PruningConfig `yaml:"pruning"`
+
+	// Link preview configuration
+	LinkPreviews *LinkPreviewConfig `yaml:"link_previews"`
 }
 
 // BeeperConfig contains Beeper AI proxy credentials for automatic login.
@@ -88,4 +91,12 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Float, "pruning", "max_history_share")
 	helper.Copy(configupgrade.Int, "pruning", "reserve_tokens")
 	helper.Copy(configupgrade.Str, "pruning", "custom_instructions")
+
+	// Link preview configuration
+	helper.Copy(configupgrade.Bool, "link_previews", "enabled")
+	helper.Copy(configupgrade.Int, "link_previews", "max_urls_inbound")
+	helper.Copy(configupgrade.Int, "link_previews", "max_urls_outbound")
+	helper.Copy(configupgrade.Str, "link_previews", "fetch_timeout")
+	helper.Copy(configupgrade.Int, "link_previews", "max_content_chars")
+	helper.Copy(configupgrade.Int, "link_previews", "max_page_bytes")
 }

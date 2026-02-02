@@ -1722,24 +1722,32 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 		}
 	}
 
+	// Generate link previews for URLs in the response
+	linkPreviews := oc.generateOutboundLinkPreviews(ctx, cleanedContent)
+
 	// Send edit event with m.replace relation and m.new_content
-	eventContent := &event.Content{
-		Raw: map[string]any{
+	eventRawContent := map[string]any{
+		"msgtype":        event.MsgText,
+		"body":           "* " + rendered.Body, // Fallback with edit marker
+		"format":         rendered.Format,
+		"formatted_body": "* " + rendered.FormattedBody,
+		"m.new_content": map[string]any{
 			"msgtype":        event.MsgText,
-			"body":           "* " + rendered.Body, // Fallback with edit marker
+			"body":           rendered.Body,
 			"format":         rendered.Format,
-			"formatted_body": "* " + rendered.FormattedBody,
-			"m.new_content": map[string]any{
-				"msgtype":        event.MsgText,
-				"body":           rendered.Body,
-				"format":         rendered.Format,
-				"formatted_body": rendered.FormattedBody,
-			},
-			"m.relates_to":                  relatesTo,
-			BeeperAIKey:                     aiMetadata,
-			"com.beeper.dont_render_edited": true, // Don't show "edited" indicator for streaming updates
+			"formatted_body": rendered.FormattedBody,
 		},
+		"m.relates_to":                  relatesTo,
+		BeeperAIKey:                     aiMetadata,
+		"com.beeper.dont_render_edited": true, // Don't show "edited" indicator for streaming updates
 	}
+
+	// Attach link previews if any were generated
+	if len(linkPreviews) > 0 {
+		eventRawContent["com.beeper.linkpreviews"] = PreviewsToMapSlice(linkPreviews)
+	}
+
+	eventContent := &event.Content{Raw: eventRawContent}
 
 	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {
 		oc.log.Warn().Err(err).Stringer("initial_event_id", state.initialEventID).Msg("Failed to send final assistant turn")
@@ -1750,6 +1758,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 			Bool("has_thinking", state.reasoning.Len() > 0).
 			Int("tool_calls", len(state.toolCalls)).
 			Bool("has_reply", directives.ReplyToEventID != "").
+			Int("link_previews", len(linkPreviews)).
 			Msg("Sent final assistant turn with metadata")
 	}
 }
@@ -1803,18 +1812,26 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 		}
 	}
 
-	eventContent := &event.Content{
-		Raw: map[string]any{
-			"msgtype":                       event.MsgText,
-			"body":                          "* " + rendered.Body,
-			"format":                        rendered.Format,
-			"formatted_body":                "* " + rendered.FormattedBody,
-			"m.new_content":                 map[string]any{"msgtype": event.MsgText, "body": rendered.Body, "format": rendered.Format, "formatted_body": rendered.FormattedBody},
-			"m.relates_to":                  relatesTo,
-			BeeperAIKey:                     aiMetadata,
-			"com.beeper.dont_render_edited": true,
-		},
+	// Generate link previews for URLs in the response
+	linkPreviews := oc.generateOutboundLinkPreviews(ctx, rendered.Body)
+
+	rawContent := map[string]any{
+		"msgtype":                       event.MsgText,
+		"body":                          "* " + rendered.Body,
+		"format":                        rendered.Format,
+		"formatted_body":                "* " + rendered.FormattedBody,
+		"m.new_content":                 map[string]any{"msgtype": event.MsgText, "body": rendered.Body, "format": rendered.Format, "formatted_body": rendered.FormattedBody},
+		"m.relates_to":                  relatesTo,
+		BeeperAIKey:                     aiMetadata,
+		"com.beeper.dont_render_edited": true,
 	}
+
+	// Attach link previews if any were generated
+	if len(linkPreviews) > 0 {
+		rawContent["com.beeper.linkpreviews"] = PreviewsToMapSlice(linkPreviews)
+	}
+
+	eventContent := &event.Content{Raw: rawContent}
 
 	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {
 		oc.log.Warn().Err(err).Stringer("initial_event_id", state.initialEventID).Msg("Failed to send final assistant turn (raw mode)")
@@ -1823,8 +1840,28 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 			Str("initial_event_id", state.initialEventID.String()).
 			Str("turn_id", state.turnID).
 			Str("mode", "raw").
+			Int("link_previews", len(linkPreviews)).
 			Msg("Sent final assistant turn (raw mode)")
 	}
+}
+
+// generateOutboundLinkPreviews extracts URLs from AI response text and generates link previews.
+func (oc *AIClient) generateOutboundLinkPreviews(ctx context.Context, text string) []*event.BeeperLinkPreview {
+	config := oc.getLinkPreviewConfig()
+	if !config.Enabled {
+		return nil
+	}
+
+	urls := ExtractURLs(text, config.MaxURLsOutbound)
+	if len(urls) == 0 {
+		return nil
+	}
+
+	previewer := NewLinkPreviewer(config)
+	fetchCtx, cancel := context.WithTimeout(ctx, config.FetchTimeout*time.Duration(len(urls)))
+	defer cancel()
+
+	return previewer.FetchPreviews(fetchCtx, urls)
 }
 
 // getAgentResponseMode returns the response mode for the current agent.

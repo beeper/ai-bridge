@@ -1,9 +1,11 @@
 package agents
 
-// Model constants for preset agents
+// Model constants for preset agents (aligned with clawdbot recommended models).
 const (
 	ModelClaudeSonnet = "anthropic/claude-sonnet-4.5"
 	ModelClaudeOpus   = "anthropic/claude-opus-4.5"
+	ModelOpenAIGPT52  = "openai/gpt-5.2"
+	ModelZAIGLM47     = "z-ai/glm-4.7"
 )
 
 // Reasoning effort levels
