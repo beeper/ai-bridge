@@ -49,13 +49,12 @@ var BeeperAIAgent = &AgentDefinition{
 			ModelZAIGLM47,
 		},
 	},
-	ToolProfile:     ProfileCoding,
-	ReasoningEffort: ReasoningMedium,
-	SystemPrompt:    BeeperAIPrompt,
-	PromptMode:      PromptModeFull,
-	IsPreset:        true,
-	CreatedAt:       0,
-	UpdatedAt:       0,
+	ToolProfile:  ProfileCoding,
+	SystemPrompt: BeeperAIPrompt,
+	PromptMode:   PromptModeFull,
+	IsPreset:     true,
+	CreatedAt:    0,
+	UpdatedAt:    0,
 }
 
 // GetBeeperAI returns a copy of the default Beeper AI agent.

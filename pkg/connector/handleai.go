@@ -172,7 +172,7 @@ func (oc *AIClient) dispatchCompletionInternal(
 }
 
 // responseFunc is the signature for response handlers that can be retried on context length errors
-type responseFunc func(ctx context.Context, evt *event.Event, portal *bridgev2.Portal, meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (bool, *ContextLengthError)
+type responseFunc func(ctx context.Context, evt *event.Event, portal *bridgev2.Portal, meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (bool, *ContextLengthError, error)
 
 // responseWithRetry wraps a response function with context length retry logic
 // It first tries auto-compaction (LLM summarization) before falling back to reactive truncation
@@ -184,14 +184,17 @@ func (oc *AIClient) responseWithRetry(
 	prompt []openai.ChatCompletionMessageParamUnion,
 	responseFn responseFunc,
 	logLabel string,
-) {
+) (bool, error) {
 	currentPrompt := prompt
 	autoCompactionAttempted := false
 
 	for attempt := range maxRetryAttempts {
-		success, cle := responseFn(ctx, evt, portal, meta, currentPrompt)
+		success, cle, err := responseFn(ctx, evt, portal, meta, currentPrompt)
 		if success {
-			return
+			return true, nil
+		}
+		if err != nil {
+			return false, err
 		}
 
 		// If we got a context length error, try auto-compaction first, then truncation
@@ -262,7 +265,7 @@ func (oc *AIClient) responseWithRetry(
 			truncated := oc.truncatePrompt(currentPrompt)
 			if len(truncated) <= 2 {
 				oc.notifyContextLengthExceeded(ctx, portal, cle, false)
-				return
+				return false, nil
 			}
 
 			oc.notifyContextLengthExceeded(ctx, portal, cle, true)
@@ -277,11 +280,12 @@ func (oc *AIClient) responseWithRetry(
 		}
 
 		// Non-context error, already handled in responseFn
-		return
+		return false, nil
 	}
 
 	oc.notifyMatrixSendFailure(ctx, portal, evt,
 		fmt.Errorf("exceeded retry attempts for context length"))
+	return false, nil
 }
 
 func (oc *AIClient) streamingResponseWithRetry(
@@ -293,17 +297,17 @@ func (oc *AIClient) streamingResponseWithRetry(
 ) {
 	// OpenRouter multimodal inputs are handled via Chat Completions.
 	if oc.isOpenRouterProvider() && hasMultimodalContent(prompt) {
-		oc.responseWithRetryAndReasoningFallback(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
+		oc.responseWithModelFallback(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
 		return
 	}
 	// Use Chat Completions API for audio (native support)
 	// SDK v3.16.0 has ResponseInputAudioParam but it's not wired into the union
 	if hasAudioContent(prompt) {
-		oc.responseWithRetryAndReasoningFallback(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
+		oc.responseWithModelFallback(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
 		return
 	}
 	// Use Responses API for other content (images, files, text)
-	oc.responseWithRetryAndReasoningFallback(ctx, evt, portal, meta, prompt, oc.streamingResponse, "responses")
+	oc.responseWithModelFallback(ctx, evt, portal, meta, prompt, oc.streamingResponse, "responses")
 }
 
 // buildResponsesAPIParams creates common Responses API parameters for both streaming and non-streaming paths
@@ -414,7 +418,7 @@ func (oc *AIClient) streamingResponse(
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	messages []openai.ChatCompletionMessageParamUnion,
-) (bool, *ContextLengthError) {
+) (bool, *ContextLengthError, error) {
 	log := zerolog.Ctx(ctx).With().
 		Str("portal_id", string(portal.ID)).
 		Logger()
@@ -425,9 +429,10 @@ func (oc *AIClient) streamingResponse(
 		// Continue anyway - typing will fail gracefully
 	}
 
-	// Set typing indicator when streaming starts
-	oc.setModelTyping(ctx, portal, true)
-	defer oc.setModelTyping(ctx, portal, false)
+	// Create typing controller with TTL and automatic refresh
+	typingCtrl := NewTypingController(oc, ctx, portal)
+	typingCtrl.Start()
+	defer typingCtrl.Stop()
 
 	// Apply proactive context pruning if enabled
 	messages = oc.applyProactivePruning(ctx, messages, meta)
@@ -443,8 +448,7 @@ func (oc *AIClient) streamingResponse(
 	stream := oc.api.Responses.NewStreaming(ctx, params)
 	if stream == nil {
 		log.Error().Msg("Failed to create Responses API streaming request")
-		oc.notifyMatrixSendFailure(ctx, portal, evt, fmt.Errorf("responses streaming not available"))
-		return false, nil
+		return false, nil, fmt.Errorf("responses streaming not available")
 	}
 
 	// Initialize streaming state with turn tracking
@@ -498,7 +502,7 @@ func (oc *AIClient) streamingResponse(
 				state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID, state.sourceEventID)
 				if state.initialEventID == "" {
 					log.Error().Msg("Failed to send initial streaming message")
-					return false, nil
+					return false, nil, fmt.Errorf("failed to send initial streaming message")
 				}
 				// Initial message already includes this delta
 				state.skipNextTextDelta = true
@@ -528,7 +532,7 @@ func (oc *AIClient) streamingResponse(
 				state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID, state.sourceEventID)
 				if state.initialEventID == "" {
 					log.Error().Msg("Failed to send initial streaming message")
-					return false, nil
+					return false, nil, fmt.Errorf("failed to send initial streaming message")
 				}
 				// Update status to thinking
 				oc.emitGenerationStatus(ctx, portal, state, "thinking", "Thinking...", nil)
@@ -545,7 +549,7 @@ func (oc *AIClient) streamingResponse(
 			tool, exists := activeTools[streamEvent.ItemID]
 			if !exists {
 				if !ensureInitialEvent() {
-					return false, nil
+					return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
 				}
 				tool = &activeToolCall{
 					callID:      NewCallID(),
@@ -583,7 +587,7 @@ func (oc *AIClient) streamingResponse(
 			if !exists {
 				// Create tool if we missed the delta events
 				if !ensureInitialEvent() {
-					return false, nil
+					return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
 				}
 				tool = &activeToolCall{
 					callID:      NewCallID(),
@@ -604,7 +608,7 @@ func (oc *AIClient) streamingResponse(
 			tool.itemID = streamEvent.ItemID
 
 			if !ensureInitialEvent() {
-				return false, nil
+				return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
 			}
 
 			resultStatus := ResultStatusSuccess
@@ -869,10 +873,13 @@ func (oc *AIClient) streamingResponse(
 			if strings.Contains(streamEvent.Message, "context_length") || strings.Contains(streamEvent.Message, "token") {
 				return false, &ContextLengthError{
 					OriginalError: fmt.Errorf("%s", streamEvent.Message),
-				}
+				}, nil
 			}
-			oc.notifyMatrixSendFailure(ctx, portal, evt, fmt.Errorf("API error: %s", streamEvent.Message))
-			return false, nil
+			apiErr := fmt.Errorf("API error: %s", streamEvent.Message)
+			if state.initialEventID != "" {
+				return false, nil, &NonFallbackError{Err: apiErr}
+			}
+			return false, nil, apiErr
 		}
 	}
 
@@ -881,10 +888,12 @@ func (oc *AIClient) streamingResponse(
 		log.Error().Err(err).Msg("Responses API streaming error")
 		cle := ParseContextLengthError(err)
 		if cle != nil {
-			return false, cle
+			return false, cle, nil
 		}
-		oc.notifyMatrixSendFailure(ctx, portal, evt, err)
-		return false, nil
+		if state.initialEventID != "" {
+			return false, nil, &NonFallbackError{Err: err}
+		}
+		return false, nil, err
 	}
 
 	// If there are pending function outputs, send them back to the API for continuation
@@ -948,7 +957,7 @@ func (oc *AIClient) streamingResponse(
 				tool, exists := activeTools[streamEvent.ItemID]
 				if !exists {
 					if !ensureInitialEvent() {
-						return false, nil
+						return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
 					}
 					tool = &activeToolCall{
 						callID:      NewCallID(),
@@ -969,7 +978,7 @@ func (oc *AIClient) streamingResponse(
 				tool, exists := activeTools[streamEvent.ItemID]
 				if !exists {
 					if !ensureInitialEvent() {
-						return false, nil
+						return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
 					}
 					tool = &activeToolCall{
 						callID:      NewCallID(),
@@ -989,7 +998,7 @@ func (oc *AIClient) streamingResponse(
 				tool.itemID = streamEvent.ItemID
 
 				if !ensureInitialEvent() {
-					return false, nil
+					return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
 				}
 
 				resultStatus := ResultStatusSuccess
@@ -1156,7 +1165,7 @@ func (oc *AIClient) streamingResponse(
 	// Generate room title after first response
 	oc.maybeGenerateTitle(ctx, portal, state.accumulated.String())
 
-	return true, nil
+	return true, nil, nil
 }
 
 // buildContinuationParams builds params for continuing a response after tool execution
@@ -1237,7 +1246,7 @@ func (oc *AIClient) streamChatCompletions(
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	messages []openai.ChatCompletionMessageParamUnion,
-) (bool, *ContextLengthError) {
+) (bool, *ContextLengthError, error) {
 	log := zerolog.Ctx(ctx).With().
 		Str("action", "stream_chat_completions").
 		Str("portal", string(portal.ID)).
@@ -1249,8 +1258,10 @@ func (oc *AIClient) streamChatCompletions(
 		// Continue anyway - typing will fail gracefully
 	}
 
-	oc.setModelTyping(ctx, portal, true)
-	defer oc.setModelTyping(ctx, portal, false)
+	// Create typing controller with TTL and automatic refresh
+	typingCtrl := NewTypingController(oc, ctx, portal)
+	typingCtrl.Start()
+	defer typingCtrl.Stop()
 
 	// Apply proactive context pruning if enabled
 	messages = oc.applyProactivePruning(ctx, messages, meta)
@@ -1269,8 +1280,7 @@ func (oc *AIClient) streamChatCompletions(
 	stream := oc.api.Chat.Completions.NewStreaming(ctx, params)
 	if stream == nil {
 		log.Error().Msg("Failed to create Chat Completions streaming request")
-		oc.notifyMatrixSendFailure(ctx, portal, evt, fmt.Errorf("chat completions streaming not available"))
-		return false, nil
+		return false, nil, fmt.Errorf("chat completions streaming not available")
 	}
 
 	// Initialize streaming state with source event ID for [[reply_to_current]] support
@@ -1299,7 +1309,7 @@ func (oc *AIClient) streamChatCompletions(
 					state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID, state.sourceEventID)
 					if state.initialEventID == "" {
 						log.Error().Msg("Failed to send initial streaming message")
-						return false, nil
+						return false, nil, fmt.Errorf("failed to send initial streaming message")
 					}
 					// Initial message already includes this delta
 					state.skipNextTextDelta = true
@@ -1346,7 +1356,7 @@ func (oc *AIClient) streamChatCompletions(
 						state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID, state.sourceEventID)
 						if state.initialEventID == "" {
 							log.Error().Msg("Failed to send initial streaming message for tool call")
-							return false, nil
+							return false, nil, fmt.Errorf("failed to send initial streaming message for tool call")
 						}
 					}
 
@@ -1385,11 +1395,13 @@ func (oc *AIClient) streamChatCompletions(
 
 	if err := stream.Err(); err != nil {
 		if cle := ParseContextLengthError(err); cle != nil {
-			return false, cle
+			return false, cle, nil
 		}
 		log.Error().Err(err).Msg("Chat Completions stream error")
-		oc.notifyMatrixSendFailure(ctx, portal, evt, err)
-		return false, nil
+		if state.initialEventID != "" {
+			return false, nil, &NonFallbackError{Err: err}
+		}
+		return false, nil, err
 	}
 
 	// Execute any accumulated tool calls
@@ -1501,7 +1513,7 @@ func (oc *AIClient) streamChatCompletions(
 		Msg("Chat Completions streaming finished")
 
 	oc.maybeGenerateTitle(ctx, portal, state.accumulated.String())
-	return true, nil
+	return true, nil, nil
 }
 
 // convertToResponsesInput converts Chat Completion messages to Responses API input items

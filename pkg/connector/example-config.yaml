@@ -26,7 +26,9 @@ providers:
 
 # Global settings
 default_system_prompt: |
-  You are a helpful assistant.
+  You are a helpful, concise assistant.
+  Ask clarifying questions when needed.
+  Follow the user's intent and be accurate.
 model_cache_duration: 6h
 
 # Context pruning configuration (OpenClaw-style).

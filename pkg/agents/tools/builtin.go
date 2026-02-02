@@ -11,6 +11,7 @@ const (
 	GroupMemory    = "group:memory"
 	GroupWeb       = "group:web"
 	GroupMedia     = "group:media"
+	GroupStatus    = "group:status"
 )
 
 // BuiltinTools returns all locally-executable builtin tools.

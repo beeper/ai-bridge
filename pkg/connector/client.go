@@ -418,6 +418,10 @@ func (oc *AIClient) dispatchOrQueue(
 	if oc.acquireRoom(portal.MXID) {
 		go func() {
 			defer func() {
+				// Remove ack reaction after response is complete (if configured)
+				if meta.AckReactionRemoveAfter && evt != nil {
+					oc.removeAckReaction(oc.backgroundContext(ctx), portal, evt.ID)
+				}
 				oc.releaseRoom(portal.MXID)
 				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
 			}()
@@ -680,14 +684,14 @@ func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 			if err == nil && agent != nil {
 				// Boss agent rooms always use the Boss model - no overrides allowed
 				if agents.IsBossAgent(agentID) && agent.Model.Primary != "" {
-					return agent.Model.Primary
+					return ResolveAlias(agent.Model.Primary)
 				}
 				// For other agents, room override takes priority, then agent model
 				if meta.Model != "" {
-					return meta.Model
+					return ResolveAlias(meta.Model)
 				}
 				if agent.Model.Primary != "" {
-					return agent.Model.Primary
+					return ResolveAlias(agent.Model.Primary)
 				}
 			}
 		}
@@ -695,13 +699,13 @@ func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 
 	// Room-level model override (for rooms without an agent)
 	if meta != nil && meta.Model != "" {
-		return meta.Model
+		return ResolveAlias(meta.Model)
 	}
 
 	// User-level default
 	loginMeta := loginMetadata(oc.UserLogin)
 	if loginMeta.Defaults != nil && loginMeta.Defaults.Model != "" {
-		return loginMeta.Defaults.Model
+		return ResolveAlias(loginMeta.Defaults.Model)
 	}
 
 	// Provider default from config
@@ -889,12 +893,18 @@ func (oc *AIClient) effectiveTemperature(meta *PortalMetadata) float64 {
 // effectiveReasoningEffort returns the reasoning effort to use
 // Priority: Room ? User ? "" (none)
 func (oc *AIClient) effectiveReasoningEffort(meta *PortalMetadata) string {
+	if meta != nil && !meta.Capabilities.SupportsReasoning {
+		return ""
+	}
 	if meta != nil && meta.ReasoningEffort != "" {
 		return meta.ReasoningEffort
 	}
 	loginMeta := loginMetadata(oc.UserLogin)
 	if loginMeta.Defaults != nil && loginMeta.Defaults.ReasoningEffort != "" {
 		return loginMeta.Defaults.ReasoningEffort
+	}
+	if meta != nil && meta.Capabilities.SupportsReasoning {
+		return defaultReasoningEffort
 	}
 	return ""
 }

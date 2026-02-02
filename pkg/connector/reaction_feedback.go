@@ -20,7 +20,8 @@ type ReactionFeedback struct {
 	Emoji     string    // The emoji used (e.g., "👍", "👎")
 	Timestamp time.Time // When the reaction was added
 	Sender    string    // Who sent the reaction (display name or user ID)
-	MessageID string    // Which message was reacted to
+	MessageID string    // Which message was reacted to (event ID or timestamp)
+	RoomName  string    // Room/channel name for context
 	Action    string    // "added" or "removed"
 }
 
@@ -125,7 +126,7 @@ func DrainReactionFeedback(roomID id.RoomID) []ReactionFeedback {
 }
 
 // FormatReactionFeedback formats reaction feedback as context for the AI.
-// Matches OpenClaw's system event format: "System: [timestamp] Matrix reaction added: :emoji: by user"
+// Matches OpenClaw's system event format: "System: [timestamp] Beeper/Matrix reaction added: :emoji: by user in #room msg ts"
 func FormatReactionFeedback(feedback []ReactionFeedback) string {
 	if len(feedback) == 0 {
 		return ""
@@ -134,10 +135,14 @@ func FormatReactionFeedback(feedback []ReactionFeedback) string {
 	var lines []string
 	for _, f := range feedback {
 		ts := f.Timestamp.Format("2006-01-02 15:04:05")
+		roomLabel := f.RoomName
+		if roomLabel == "" {
+			roomLabel = "chat"
+		}
 		if f.Action == "removed" {
-			lines = append(lines, fmt.Sprintf("System: [%s] Matrix reaction removed: %s by %s", ts, f.Emoji, f.Sender))
+			lines = append(lines, fmt.Sprintf("System: [%s] Beeper/Matrix reaction removed: %s by %s in %s msg %s", ts, f.Emoji, f.Sender, roomLabel, f.MessageID))
 		} else {
-			lines = append(lines, fmt.Sprintf("System: [%s] Matrix reaction added: %s by %s", ts, f.Emoji, f.Sender))
+			lines = append(lines, fmt.Sprintf("System: [%s] Beeper/Matrix reaction added: %s by %s in %s msg %s", ts, f.Emoji, f.Sender, roomLabel, f.MessageID))
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -200,6 +205,17 @@ func (oc *OpenAIConnector) handleReactionEvent(ctx context.Context, evt *event.E
 	// Get sender display name - use localpart as fallback
 	senderName := evt.Sender.Localpart()
 
+	// Get room name from portal metadata
+	roomName := ""
+	if portal != nil {
+		meta := portalMeta(portal)
+		if meta != nil && meta.Title != "" {
+			roomName = meta.Title
+		} else if meta != nil && meta.Slug != "" {
+			roomName = meta.Slug
+		}
+	}
+
 	// Enqueue the reaction feedback
 	// We queue all reactions in AI rooms - the AI will naturally understand
 	// the context since it knows which messages it sent
@@ -208,6 +224,7 @@ func (oc *OpenAIConnector) handleReactionEvent(ctx context.Context, evt *event.E
 		Timestamp: time.Now(),
 		Sender:    senderName,
 		MessageID: targetEventID.String(),
+		RoomName:  roomName,
 		Action:    "added",
 	}
 
@@ -215,6 +232,7 @@ func (oc *OpenAIConnector) handleReactionEvent(ctx context.Context, evt *event.E
 	log.Debug().
 		Str("emoji", feedback.Emoji).
 		Str("target", feedback.MessageID).
+		Str("room", roomName).
 		Msg("Enqueued reaction feedback")
 }
 

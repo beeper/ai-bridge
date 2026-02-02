@@ -225,6 +225,20 @@ func BuiltinTools() []ToolDefinition {
 			},
 			Execute: executeAnalyzeImage,
 		},
+		{
+			Name:        ToolNameSessionStatus,
+			Description: "Get current session status including time, date, model info, and context usage. Use this tool when asked about current time, date, day of week, or what model is being used.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"set_model": map[string]any{
+						"type":        "string",
+						"description": "Optional: change the model for this session (e.g., 'gpt-4o', 'claude-sonnet-4-20250514')",
+					},
+				},
+			},
+			Execute: executeSessionStatus,
+		},
 	}
 }
 
@@ -242,6 +256,9 @@ const ToolNameImage = "image"
 
 // ToolNameAnalyzeImage is the name of the image analysis tool.
 const ToolNameAnalyzeImage = "analyze_image"
+
+// ToolNameSessionStatus is the name of the session status tool.
+const ToolNameSessionStatus = "session_status"
 
 // ImageResultPrefix is the prefix used to identify image results that need media sending.
 const ImageResultPrefix = "IMAGE:"
@@ -1420,6 +1437,118 @@ func executeSetChatInfo(ctx context.Context, args map[string]any) (string, error
 	}
 
 	return fmt.Sprintf("Chat info updated: %s", strings.Join(updates, ", ")), nil
+}
+
+// executeSessionStatus returns current session status including time, model, and usage info.
+// Similar to OpenClaw's session_status tool.
+func executeSessionStatus(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return "", fmt.Errorf("session_status tool requires bridge context")
+	}
+
+	meta := portalMeta(btc.Portal)
+	if meta == nil {
+		return "", fmt.Errorf("failed to get portal metadata")
+	}
+
+	// Get current time info
+	now := time.Now()
+	timezone := "UTC"
+	if tz := os.Getenv("TZ"); tz != "" {
+		timezone = tz
+	}
+	timeStr := now.Format("2006-01-02 15:04:05")
+	dayOfWeek := now.Weekday().String()
+
+	// Get model info
+	model := meta.Model
+	if model == "" {
+		model = btc.Client.effectiveModel(meta)
+	}
+
+	// Parse provider from model string (format: "provider/model" or just "model")
+	provider := "unknown"
+	modelName := model
+	if parts := strings.SplitN(model, "/", 2); len(parts) == 2 {
+		provider = parts[0]
+		modelName = parts[1]
+	}
+
+	// Get context/token info from metadata
+	maxContext := meta.MaxContextMessages
+	if maxContext == 0 {
+		maxContext = 12 // default
+	}
+	maxTokens := meta.MaxCompletionTokens
+	if maxTokens == 0 {
+		maxTokens = 512 // default
+	}
+
+	// Build session info
+	sessionID := string(btc.Portal.PortalKey.ID)
+	title := meta.Title
+	if title == "" {
+		title = meta.Slug
+	}
+	if title == "" {
+		title = "Untitled"
+	}
+
+	// Handle model change if requested
+	var modelChanged string
+	if newModel, ok := args["set_model"].(string); ok && newModel != "" {
+		// Update the model in metadata
+		meta.Model = newModel
+		meta.Capabilities = getModelCapabilities(newModel, btc.Client.findModelInfo(newModel))
+		// Save portal metadata
+		if err := btc.Portal.Save(ctx); err != nil {
+			return "", fmt.Errorf("failed to save model change: %w", err)
+		}
+		btc.Portal.UpdateBridgeInfo(ctx)
+		btc.Client.ensureGhostDisplayName(ctx, newModel)
+		modelChanged = fmt.Sprintf("\n\nModel changed to: %s", newModel)
+		model = newModel
+		if parts := strings.SplitN(newModel, "/", 2); len(parts) == 2 {
+			provider = parts[0]
+			modelName = parts[1]
+		} else {
+			modelName = newModel
+		}
+	}
+
+	// Get agent info if available
+	agentInfo := ""
+	if meta.AgentID != "" {
+		agentInfo = fmt.Sprintf("\nAgent: %s", meta.AgentID)
+	}
+
+	// Build status card similar to OpenClaw
+	status := fmt.Sprintf(`Session Status
+==============
+Time: %s %s (%s)
+Day: %s
+
+Model: %s
+Provider: %s
+Max Context: %d messages
+Max Tokens: %d
+
+Session: %s
+Chat: %s%s%s`,
+		timeStr, timezone, now.Format("MST"),
+		dayOfWeek,
+		modelName,
+		provider,
+		maxContext,
+		maxTokens,
+		sessionID,
+		title,
+		agentInfo,
+		modelChanged,
+	)
+
+	return status, nil
 }
 
 // GetBuiltinTool returns a builtin tool by name, or nil if not found

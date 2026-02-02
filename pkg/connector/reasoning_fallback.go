@@ -18,19 +18,20 @@ func (oc *AIClient) responseWithRetryAndReasoningFallback(
 	prompt []openai.ChatCompletionMessageParamUnion,
 	responseFn responseFunc,
 	logLabel string,
-) {
+) (bool, error) {
 	// Track attempted reasoning levels to avoid infinite loops
 	attemptedLevels := make(map[string]bool)
 	originalLevel := oc.effectiveReasoningEffort(meta)
 	currentLevel := originalLevel
 	maxReasoningFallbacks := 3
+	var lastErr error
 
 	for i := 0; i < maxReasoningFallbacks; i++ {
 		attemptedLevels[currentLevel] = true
 
 		// Create a modified meta with the current reasoning level if different from original
 		effectiveMeta := meta
-		if currentLevel != originalLevel {
+		if meta != nil && currentLevel != originalLevel {
 			// Clone meta and override reasoning effort
 			metaCopy := *meta
 			metaCopy.ReasoningEffort = currentLevel
@@ -42,37 +43,32 @@ func (oc *AIClient) responseWithRetryAndReasoningFallback(
 		}
 
 		// Try the request with current reasoning level
-		// We use a wrapper that can detect reasoning errors
-		success := oc.tryResponseWithReasoningDetection(ctx, evt, portal, effectiveMeta, prompt, responseFn, logLabel)
+		success, err := oc.responseWithRetry(ctx, evt, portal, effectiveMeta, prompt, responseFn, logLabel)
 		if success {
-			return
+			return true, nil
+		}
+		if err == nil {
+			return false, nil
+		}
+		lastErr = err
+		if !IsReasoningError(err) {
+			return false, err
 		}
 
 		// Check if we should try a lower reasoning level
 		fallbackLevel := FallbackReasoningLevel(currentLevel)
 		if fallbackLevel == "" || attemptedLevels[fallbackLevel] {
 			// No more fallbacks available or already tried
-			return
+			return false, lastErr
 		}
 
 		currentLevel = fallbackLevel
 	}
+
+	if lastErr != nil {
+		return false, lastErr
+	}
+	return false, nil
 }
 
-// tryResponseWithReasoningDetection wraps responseWithRetry and returns true if successful,
-// false if it failed due to a reasoning-related error (allowing retry with lower level).
-func (oc *AIClient) tryResponseWithReasoningDetection(
-	ctx context.Context,
-	evt *event.Event,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-	prompt []openai.ChatCompletionMessageParamUnion,
-	responseFn responseFunc,
-	logLabel string,
-) bool {
-	// For now, we'll use responseWithRetry directly.
-	// The reasoning error detection is done within streamingResponse.
-	// This returns true if the request completed (success or non-reasoning error).
-	oc.responseWithRetry(ctx, evt, portal, meta, prompt, responseFn, logLabel)
-	return true // For now, always return true - reasoning fallback will be refined
-}
+// Note: Reasoning error detection uses IsReasoningError on response errors.

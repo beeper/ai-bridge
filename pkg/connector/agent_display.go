@@ -29,7 +29,7 @@ func (oc *AIClient) agentDefaultModel(agent *agents.AgentDefinition) string {
 		return oc.effectiveModel(nil)
 	}
 	if agent.Model.Primary != "" {
-		return agent.Model.Primary
+		return ResolveAlias(agent.Model.Primary)
 	}
 	return oc.effectiveModel(nil)
 }

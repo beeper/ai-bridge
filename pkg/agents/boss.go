@@ -14,13 +14,12 @@ var BossAgent = &AgentDefinition{
 			ModelZAIGLM47,
 		},
 	},
-	ToolProfile:     ProfileBoss,
-	ReasoningEffort: ReasoningMedium,
-	SystemPrompt:    BossSystemPrompt,
-	PromptMode:      PromptModeFull,
-	IsPreset:        true,
-	CreatedAt:       0, // Preset agents have no creation time
-	UpdatedAt:       0,
+	ToolProfile:  ProfileBoss,
+	SystemPrompt: BossSystemPrompt,
+	PromptMode:   PromptModeFull,
+	IsPreset:     true,
+	CreatedAt:    0, // Preset agents have no creation time
+	UpdatedAt:    0,
 }
 
 // GetBossAgent returns a copy of the Boss agent definition.

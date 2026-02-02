@@ -22,6 +22,7 @@ const (
 	defaultTemperature        = 0.4
 	defaultMaxContextMessages = 12
 	defaultMaxTokens          = 512
+	defaultReasoningEffort    = "low"
 )
 
 var (

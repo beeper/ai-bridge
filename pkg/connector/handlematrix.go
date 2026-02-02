@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -11,6 +12,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 )
 
 // HandleMatrixMessage processes incoming Matrix messages and dispatches them to the AI
@@ -24,6 +26,18 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		return nil, fmt.Errorf("portal is nil")
 	}
 	meta := portalMeta(portal)
+
+	// Send ack reaction if configured (like OpenClaw's ack reactions)
+	// This provides immediate visual feedback before AI processes the message
+	var ackReactionEventID id.EventID
+	if meta.AckReactionEmoji != "" && msg.Event != nil {
+		ackReactionEventID = oc.sendAckReaction(ctx, portal, msg.Event.ID, meta.AckReactionEmoji)
+	}
+
+	// Store ack reaction info for potential removal after reply
+	if ackReactionEventID != "" && meta.AckReactionRemoveAfter {
+		oc.storeAckReaction(portal.MXID, msg.Event.ID, ackReactionEventID)
+	}
 
 	// Handle media messages based on type
 	switch msg.Content.MsgType {
@@ -356,6 +370,104 @@ func (oc *AIClient) handleMediaMessage(
 func (oc *AIClient) savePortalQuiet(ctx context.Context, portal *bridgev2.Portal, action string) {
 	if err := portal.Save(ctx); err != nil {
 		oc.log.Warn().Err(err).Str("action", action).Msg("Failed to save portal")
+	}
+}
+
+// Ack reaction tracking for removal after reply
+// Maps room ID -> source message ID -> ack reaction event ID
+var (
+	ackReactionStore   = make(map[id.RoomID]map[id.EventID]id.EventID)
+	ackReactionStoreMu sync.Mutex
+)
+
+// sendAckReaction sends an acknowledgement reaction to a message.
+// Returns the event ID of the reaction for potential removal.
+func (oc *AIClient) sendAckReaction(ctx context.Context, portal *bridgev2.Portal, targetEventID id.EventID, emoji string) id.EventID {
+	if portal == nil || portal.MXID == "" || targetEventID == "" || emoji == "" {
+		return ""
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return ""
+	}
+
+	eventContent := &event.Content{
+		Raw: map[string]any{
+			"m.relates_to": map[string]any{
+				"rel_type": "m.annotation",
+				"event_id": targetEventID.String(),
+				"key":      emoji,
+			},
+		},
+	}
+
+	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventReaction, eventContent, nil)
+	if err != nil {
+		oc.log.Warn().Err(err).
+			Stringer("target_event", targetEventID).
+			Str("emoji", emoji).
+			Msg("Failed to send ack reaction")
+		return ""
+	}
+
+	oc.log.Debug().
+		Stringer("target_event", targetEventID).
+		Str("emoji", emoji).
+		Stringer("reaction_event", resp.EventID).
+		Msg("Sent ack reaction")
+	return resp.EventID
+}
+
+// storeAckReaction stores an ack reaction for later removal.
+func (oc *AIClient) storeAckReaction(roomID id.RoomID, sourceEventID, reactionEventID id.EventID) {
+	ackReactionStoreMu.Lock()
+	defer ackReactionStoreMu.Unlock()
+
+	if ackReactionStore[roomID] == nil {
+		ackReactionStore[roomID] = make(map[id.EventID]id.EventID)
+	}
+	ackReactionStore[roomID][sourceEventID] = reactionEventID
+}
+
+// removeAckReaction removes a previously sent ack reaction.
+func (oc *AIClient) removeAckReaction(ctx context.Context, portal *bridgev2.Portal, sourceEventID id.EventID) {
+	ackReactionStoreMu.Lock()
+	roomReactions := ackReactionStore[portal.MXID]
+	if roomReactions == nil {
+		ackReactionStoreMu.Unlock()
+		return
+	}
+	reactionEventID, ok := roomReactions[sourceEventID]
+	if !ok {
+		ackReactionStoreMu.Unlock()
+		return
+	}
+	delete(roomReactions, sourceEventID)
+	ackReactionStoreMu.Unlock()
+
+	if reactionEventID == "" {
+		return
+	}
+
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return
+	}
+
+	// Redact the ack reaction
+	_, err := intent.SendMessage(ctx, portal.MXID, event.EventRedaction, &event.Content{
+		Parsed: &event.RedactionEventContent{
+			Redacts: reactionEventID,
+		},
+	}, nil)
+	if err != nil {
+		oc.log.Warn().Err(err).
+			Stringer("reaction_event", reactionEventID).
+			Msg("Failed to remove ack reaction")
+	} else {
+		oc.log.Debug().
+			Stringer("reaction_event", reactionEventID).
+			Msg("Removed ack reaction")
 	}
 }
 

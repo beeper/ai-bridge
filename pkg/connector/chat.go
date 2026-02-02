@@ -542,6 +542,9 @@ func (oc *AIClient) createAgentChatWithModel(ctx context.Context, agent *agents.
 	if agent.SystemPrompt != "" {
 		pm.SystemPrompt = agent.SystemPrompt
 	}
+	if agent.ReasoningEffort != "" {
+		pm.ReasoningEffort = agent.ReasoningEffort
+	}
 
 	agentGhostID := agentModelUserID(agent.ID, modelID)
 	agentDisplayName := oc.agentModelDisplayName(agent.Name, modelID)
@@ -1326,6 +1329,9 @@ func (oc *AIClient) getReasoningWithSource(meta *PortalMetadata, loginMeta *User
 	}
 	if loginMeta.Defaults != nil && loginMeta.Defaults.ReasoningEffort != "" {
 		return SettingExplanation{Value: loginMeta.Defaults.ReasoningEffort, Source: SourceUserDefault}
+	}
+	if meta != nil && meta.Capabilities.SupportsReasoning {
+		return SettingExplanation{Value: defaultReasoningEffort, Source: SourceGlobalDefault}
 	}
 	return SettingExplanation{Value: "", Source: SourceGlobalDefault}
 }

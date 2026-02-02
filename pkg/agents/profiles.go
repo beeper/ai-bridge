@@ -35,16 +35,17 @@ var ToolGroups = map[string][]string{
 	tools.GroupMemory:    {"memory_search", "memory_get"},
 	tools.GroupWeb:       {"web_search", "web_fetch"},
 	tools.GroupMedia:     {"image", "tts"},
+	tools.GroupStatus:    {"session_status"},
 }
 
 // ProfileAllowlists define which tool groups each profile allows.
 // Matches OpenClaw's TOOL_PROFILES pattern.
 var ProfileAllowlists = map[ToolProfile][]string{
-	ProfileMinimal:   {tools.GroupSearch, tools.GroupChat},
-	ProfileCoding:    {tools.GroupCalc, tools.GroupWeb, tools.GroupChat, tools.GroupMessaging},
-	ProfileMessaging: {tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupSessions},
-	ProfileFull:      {tools.GroupCalc, tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupMedia},
-	ProfileBoss:      {tools.GroupBuilder},
+	ProfileMinimal:   {tools.GroupSearch, tools.GroupChat, tools.GroupStatus},
+	ProfileCoding:    {tools.GroupCalc, tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupStatus},
+	ProfileMessaging: {tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupSessions, tools.GroupStatus},
+	ProfileFull:      {tools.GroupCalc, tools.GroupWeb, tools.GroupChat, tools.GroupMessaging, tools.GroupMedia, tools.GroupStatus},
+	ProfileBoss:      {tools.GroupBuilder, tools.GroupStatus},
 }
 
 // ResolveTools returns allowed tool names for an agent based on its profile and overrides.
