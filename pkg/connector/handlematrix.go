@@ -368,6 +368,12 @@ func (oc *AIClient) handleMediaMessage(
 				return &bridgev2.MatrixMessageResponse{}, nil
 			}
 			return oc.handleTextFileMessage(ctx, msg, portal, meta, string(mediaURL), mimeType)
+		case mimeType == "" || mimeType == "application/octet-stream":
+			if !oc.canUseMediaUnderstanding(meta) {
+				oc.sendSystemNotice(ctx, portal, "Text file understanding is only available when an agent is assigned and raw mode is off.")
+				return &bridgev2.MatrixMessageResponse{}, nil
+			}
+			return oc.handleTextFileMessage(ctx, msg, portal, meta, string(mediaURL), mimeType)
 		}
 	}
 
