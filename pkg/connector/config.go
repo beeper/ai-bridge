@@ -13,10 +13,10 @@ var exampleNetworkConfig string
 // Config represents the connector-specific configuration that is nested under
 // the `network:` block in the main bridge config.
 type Config struct {
-	Beeper    BeeperConfig    `yaml:"beeper"`
-	Providers ProvidersConfig `yaml:"providers"`
-	Bridge    BridgeConfig    `yaml:"bridge"`
-	Tools     ToolsConfig     `yaml:"tools"`
+	Beeper    BeeperConfig        `yaml:"beeper"`
+	Providers ProvidersConfig     `yaml:"providers"`
+	Bridge    BridgeConfig        `yaml:"bridge"`
+	Tools     ToolProvidersConfig `yaml:"tools"`
 
 	// Global settings
 	DefaultSystemPrompt string        `yaml:"default_system_prompt"`
@@ -32,8 +32,8 @@ type Config struct {
 	Inbound *InboundConfig `yaml:"inbound"`
 }
 
-// ToolsConfig configures external tool providers like search and fetch.
-type ToolsConfig struct {
+// ToolProvidersConfig configures external tool providers like search and fetch.
+type ToolProvidersConfig struct {
 	Search *SearchConfig `yaml:"search"`
 	Fetch  *FetchConfig  `yaml:"fetch"`
 }
