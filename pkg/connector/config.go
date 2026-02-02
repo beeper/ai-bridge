@@ -99,4 +99,6 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Str, "link_previews", "fetch_timeout")
 	helper.Copy(configupgrade.Int, "link_previews", "max_content_chars")
 	helper.Copy(configupgrade.Int, "link_previews", "max_page_bytes")
+	helper.Copy(configupgrade.Int, "link_previews", "max_image_bytes")
+	helper.Copy(configupgrade.Str, "link_previews", "cache_ttl")
 }

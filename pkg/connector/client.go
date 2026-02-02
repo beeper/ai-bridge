@@ -768,7 +768,7 @@ func (oc *AIClient) effectivePrompt(meta *PortalMetadata) string {
 // getLinkPreviewConfig returns the link preview configuration, with defaults filled in.
 func (oc *AIClient) getLinkPreviewConfig() LinkPreviewConfig {
 	config := DefaultLinkPreviewConfig()
-
+	
 	if oc.connector.Config.LinkPreviews != nil {
 		cfg := oc.connector.Config.LinkPreviews
 		// Apply explicit settings only if they differ from zero values
@@ -790,8 +790,14 @@ func (oc *AIClient) getLinkPreviewConfig() LinkPreviewConfig {
 		if cfg.MaxPageBytes > 0 {
 			config.MaxPageBytes = cfg.MaxPageBytes
 		}
+		if cfg.MaxImageBytes > 0 {
+			config.MaxImageBytes = cfg.MaxImageBytes
+		}
+		if cfg.CacheTTL > 0 {
+			config.CacheTTL = cfg.CacheTTL
+		}
 	}
-
+	
 	return config
 }
 
@@ -1181,6 +1187,19 @@ func (oc *AIClient) buildPromptWithLinkContext(
 		finalMessage = latest + linkContext
 	}
 
+	// Include reaction feedback from users (like OpenClaw's system events)
+	// This lets the AI know when users react to its messages
+	if portal != nil && portal.MXID != "" {
+		reactionFeedback := DrainReactionFeedback(portal.MXID)
+		if len(reactionFeedback) > 0 {
+			feedbackText := FormatReactionFeedback(reactionFeedback)
+			if feedbackText != "" {
+				// Prepend feedback to user message so AI sees recent reactions
+				finalMessage = feedbackText + "\n" + finalMessage
+			}
+		}
+	}
+
 	prompt = append(prompt, openai.UserMessage(finalMessage))
 	return prompt, nil
 }
@@ -1232,7 +1251,9 @@ func (oc *AIClient) buildLinkContext(ctx context.Context, message string, rawEve
 		fetchCtx, cancel := context.WithTimeout(ctx, config.FetchTimeout*time.Duration(len(urlsToFetch)))
 		defer cancel()
 
-		fetched := previewer.FetchPreviews(fetchCtx, urlsToFetch)
+		// For inbound context, we don't need to upload images - just extract the text data
+		fetchedWithImages := previewer.FetchPreviews(fetchCtx, urlsToFetch)
+		fetched := ExtractBeeperPreviews(fetchedWithImages)
 		allPreviews = append(allPreviews, fetched...)
 	}
 

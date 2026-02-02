@@ -74,7 +74,6 @@ var modelConfig = struct {
 		"openai/gpt-5-mini":        "GPT-5 Mini",
 		"openai/gpt-5-nano":        "GPT-5 Nano",
 		"openai/o1":                "O1",
-		"openai/o1-mini":           "O1 Mini",
 		"openai/o3-mini":           "O3 Mini",
 		"openai/gpt-4o":            "GPT-4o",
 		"openai/gpt-4o-mini":       "GPT-4o Mini",
@@ -82,7 +81,7 @@ var modelConfig = struct {
 	},
 	Aliases: map[string]string{
 		// Default alias
-		"beeper/default": "anthropic/claude-sonnet-4.5",
+		"beeper/default": "anthropic/claude-opus-4.5",
 
 		// Stable aliases that can be remapped
 		"beeper/fast":      "openai/gpt-5-mini",

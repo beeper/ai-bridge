@@ -1783,7 +1783,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	}
 
 	// Generate link previews for URLs in the response
-	linkPreviews := oc.generateOutboundLinkPreviews(ctx, cleanedContent)
+	linkPreviews := oc.generateOutboundLinkPreviews(ctx, cleanedContent, intent, portal)
 
 	// Send edit event with m.replace relation and m.new_content
 	eventRawContent := map[string]any{
@@ -1873,9 +1873,9 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 	}
 
 	// Generate link previews for URLs in the response
-	linkPreviews := oc.generateOutboundLinkPreviews(ctx, rendered.Body)
+	linkPreviews := oc.generateOutboundLinkPreviews(ctx, rendered.Body, intent, portal)
 
-	rawContent := map[string]any{
+	rawContent2 := map[string]any{
 		"msgtype":                       event.MsgText,
 		"body":                          "* " + rendered.Body,
 		"format":                        rendered.Format,
@@ -1888,10 +1888,10 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 
 	// Attach link previews if any were generated
 	if len(linkPreviews) > 0 {
-		rawContent["com.beeper.linkpreviews"] = PreviewsToMapSlice(linkPreviews)
+		rawContent2["com.beeper.linkpreviews"] = PreviewsToMapSlice(linkPreviews)
 	}
 
-	eventContent := &event.Content{Raw: rawContent}
+	eventContent := &event.Content{Raw: rawContent2}
 
 	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {
 		oc.log.Warn().Err(err).Stringer("initial_event_id", state.initialEventID).Msg("Failed to send final assistant turn (raw mode)")
@@ -1905,8 +1905,8 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 	}
 }
 
-// generateOutboundLinkPreviews extracts URLs from AI response text and generates link previews.
-func (oc *AIClient) generateOutboundLinkPreviews(ctx context.Context, text string) []*event.BeeperLinkPreview {
+// generateOutboundLinkPreviews extracts URLs from AI response text, generates link previews, and uploads images to Matrix.
+func (oc *AIClient) generateOutboundLinkPreviews(ctx context.Context, text string, intent bridgev2.MatrixAPI, portal *bridgev2.Portal) []*event.BeeperLinkPreview {
 	config := oc.getLinkPreviewConfig()
 	if !config.Enabled {
 		return nil
@@ -1921,7 +1921,10 @@ func (oc *AIClient) generateOutboundLinkPreviews(ctx context.Context, text strin
 	fetchCtx, cancel := context.WithTimeout(ctx, config.FetchTimeout*time.Duration(len(urls)))
 	defer cancel()
 
-	return previewer.FetchPreviews(fetchCtx, urls)
+	previewsWithImages := previewer.FetchPreviews(fetchCtx, urls)
+	
+	// Upload images to Matrix and get final previews
+	return UploadPreviewImages(ctx, previewsWithImages, intent, portal.MXID)
 }
 
 // getAgentResponseMode returns the response mode for the current agent.
@@ -2764,7 +2767,7 @@ func (oc *AIClient) getTitleGenerationModel() string {
 	// Provider-specific defaults for title generation
 	switch meta.Provider {
 	case ProviderOpenRouter, ProviderBeeper:
-		return "google/gemini-2.5-flash"
+		return "anthropic/claude-opus-4.5"
 	default:
 		// For non-OpenRouter providers, title generation is disabled.
 		return ""
@@ -3009,7 +3012,7 @@ func (oc *AIClient) getCompactor() *Compactor {
 
 		// Use a fast model for summarization
 		if oc.isOpenRouterProvider() {
-			oc.compactor.SetSummarizationModel("google/gemini-2.5-flash")
+			oc.compactor.SetSummarizationModel("anthropic/claude-opus-4.5")
 		}
 	})
 	return oc.compactor

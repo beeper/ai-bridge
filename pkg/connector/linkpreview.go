@@ -3,6 +3,10 @@ package connector
 import (
 	"context"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,6 +17,8 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/dyatlov/go-opengraph/opengraph"
+	_ "golang.org/x/image/webp"
+	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
@@ -25,6 +31,8 @@ type LinkPreviewConfig struct {
 	FetchTimeout    time.Duration `yaml:"fetch_timeout"`     // Timeout for fetching each URL
 	MaxContentChars int           `yaml:"max_content_chars"` // Max chars for description in context
 	MaxPageBytes    int64         `yaml:"max_page_bytes"`    // Max page size to download
+	MaxImageBytes   int64         `yaml:"max_image_bytes"`   // Max image size to download
+	CacheTTL        time.Duration `yaml:"cache_ttl"`         // How long to cache previews
 }
 
 // DefaultLinkPreviewConfig returns sensible defaults.
@@ -36,6 +44,62 @@ func DefaultLinkPreviewConfig() LinkPreviewConfig {
 		FetchTimeout:    10 * time.Second,
 		MaxContentChars: 500,
 		MaxPageBytes:    10 * 1024 * 1024, // 10MB
+		MaxImageBytes:   5 * 1024 * 1024,  // 5MB
+		CacheTTL:        1 * time.Hour,
+	}
+}
+
+// PreviewWithImage holds a preview along with its downloaded image data.
+type PreviewWithImage struct {
+	Preview   *event.BeeperLinkPreview
+	ImageData []byte
+	ImageURL  string // Original image URL for reference
+}
+
+// previewCacheEntry holds a cached preview with expiration.
+type previewCacheEntry struct {
+	preview   *PreviewWithImage
+	expiresAt time.Time
+}
+
+// previewCache is a simple in-memory cache for URL previews.
+type previewCache struct {
+	mu      sync.RWMutex
+	entries map[string]*previewCacheEntry
+}
+
+var globalPreviewCache = &previewCache{
+	entries: make(map[string]*previewCacheEntry),
+}
+
+func (c *previewCache) get(url string) *PreviewWithImage {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	
+	entry, ok := c.entries[url]
+	if !ok || time.Now().After(entry.expiresAt) {
+		return nil
+	}
+	return entry.preview
+}
+
+func (c *previewCache) set(url string, preview *PreviewWithImage, ttl time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	c.entries[url] = &previewCacheEntry{
+		preview:   preview,
+		expiresAt: time.Now().Add(ttl),
+	}
+	
+	// Simple cleanup: remove expired entries if cache is getting large
+	if len(c.entries) > 1000 {
+		now := time.Now()
+		for k, v := range c.entries {
+			if now.After(v.expiresAt) {
+				delete(c.entries, k)
+			}
+		}
 	}
 }
 
@@ -64,24 +128,34 @@ func NewLinkPreviewer(config LinkPreviewConfig) *LinkPreviewer {
 // URL matching regex - matches http/https URLs
 var urlRegex = regexp.MustCompile(`https?://[^\s<>\[\]()'"]+[^\s<>\[\]()'",.:;!?]`)
 
+// Markdown link regex to strip [text](url) before extracting bare URLs
+var markdownLinkRegex = regexp.MustCompile(`\[[^\]]*]\((https?://\S+?)\)`)
+
 // ExtractURLs extracts URLs from text, returning up to maxURLs unique URLs.
+// It strips markdown link syntax to avoid detecting the same URL twice.
 func ExtractURLs(text string, maxURLs int) []string {
 	if maxURLs <= 0 {
 		return nil
 	}
 
-	matches := urlRegex.FindAllString(text, -1)
+	// Strip markdown links so only bare URLs are considered
+	sanitized := markdownLinkRegex.ReplaceAllString(text, " ")
+
+	matches := urlRegex.FindAllString(sanitized, -1)
 	if len(matches) == 0 {
 		return nil
 	}
 
-	// Deduplicate and limit
+	// Deduplicate, filter, and limit
 	seen := make(map[string]bool)
 	var urls []string
 	for _, match := range matches {
 		// Clean up trailing punctuation that might have been captured
 		cleaned := strings.TrimRight(match, ".,;:!?")
 		if seen[cleaned] {
+			continue
+		}
+		if !isAllowedURL(cleaned) {
 			continue
 		}
 		seen[cleaned] = true
@@ -93,8 +167,34 @@ func ExtractURLs(text string, maxURLs int) []string {
 	return urls
 }
 
-// FetchPreview fetches and generates a link preview for a URL.
-func (lp *LinkPreviewer) FetchPreview(ctx context.Context, urlStr string) (*event.BeeperLinkPreview, error) {
+// isAllowedURL checks if a URL is safe to fetch.
+func isAllowedURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return false
+	}
+	// Block localhost and local IPs
+	host := strings.ToLower(parsed.Hostname())
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return false
+	}
+	// Block private IP ranges (basic check)
+	if strings.HasPrefix(host, "192.168.") || strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "172.") {
+		return false
+	}
+	return true
+}
+
+// FetchPreview fetches and generates a link preview for a URL, including the image data.
+func (lp *LinkPreviewer) FetchPreview(ctx context.Context, urlStr string) (*PreviewWithImage, error) {
+	// Check cache first
+	if cached := globalPreviewCache.get(urlStr); cached != nil {
+		return cached, nil
+	}
+
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid URL: %w", err)
@@ -175,25 +275,100 @@ func (lp *LinkPreviewer) FetchPreview(ctx context.Context, urlStr string) (*even
 		preview.CanonicalURL = urlStr
 	}
 
-	// Handle image (we don't upload it, just note its URL for context)
-	// In a full implementation, we'd upload to Matrix and set ImageURL
-	if len(og.Images) > 0 && og.Images[0].URL != "" {
-		// For now, we skip image uploading - just use the preview data
-		// Image handling would require Matrix media upload
+	result := &PreviewWithImage{
+		Preview: preview,
 	}
 
-	return preview, nil
+	// Download og:image if available
+	if len(og.Images) > 0 && og.Images[0].URL != "" {
+		imageURL := og.Images[0].URL
+		// Resolve relative URLs
+		if !strings.HasPrefix(imageURL, "http") {
+			if base, err := url.Parse(urlStr); err == nil {
+				if rel, err := url.Parse(imageURL); err == nil {
+					imageURL = base.ResolveReference(rel).String()
+				}
+			}
+		}
+		
+		imageData, mimeType, width, height := lp.downloadImage(ctx, imageURL)
+		if imageData != nil {
+			result.ImageData = imageData
+			result.ImageURL = imageURL
+			preview.ImageType = mimeType
+			preview.ImageSize = event.IntOrString(len(imageData))
+			preview.ImageWidth = event.IntOrString(width)
+			preview.ImageHeight = event.IntOrString(height)
+		}
+	}
+
+	// Cache the result
+	globalPreviewCache.set(urlStr, result, lp.config.CacheTTL)
+
+	return result, nil
+}
+
+// downloadImage downloads an image from a URL and returns its data, mime type, and dimensions.
+func (lp *LinkPreviewer) downloadImage(ctx context.Context, imageURL string) ([]byte, string, int, int) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return nil, "", 0, 0
+	}
+	
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+	req.Header.Set("Accept", "image/*")
+	
+	resp, err := lp.httpClient.Do(req)
+	if err != nil {
+		return nil, "", 0, 0
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", 0, 0
+	}
+	
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "image/") {
+		return nil, "", 0, 0
+	}
+	
+	// Read with size limit
+	maxBytes := lp.config.MaxImageBytes
+	if maxBytes <= 0 {
+		maxBytes = 5 * 1024 * 1024 // 5MB default
+	}
+	limitedReader := io.LimitReader(resp.Body, maxBytes)
+	data, err := io.ReadAll(limitedReader)
+	if err != nil || len(data) == 0 {
+		return nil, "", 0, 0
+	}
+	
+	// Detect actual mime type
+	mimeType := http.DetectContentType(data)
+	if !strings.HasPrefix(mimeType, "image/") {
+		return nil, "", 0, 0
+	}
+	
+	// Get dimensions
+	width, height := 0, 0
+	if img, _, err := image.DecodeConfig(strings.NewReader(string(data))); err == nil {
+		width = img.Width
+		height = img.Height
+	}
+	
+	return data, mimeType, width, height
 }
 
 // FetchPreviews fetches previews for multiple URLs in parallel.
-func (lp *LinkPreviewer) FetchPreviews(ctx context.Context, urls []string) []*event.BeeperLinkPreview {
+func (lp *LinkPreviewer) FetchPreviews(ctx context.Context, urls []string) []*PreviewWithImage {
 	if len(urls) == 0 {
 		return nil
 	}
 
 	var wg sync.WaitGroup
-	results := make([]*event.BeeperLinkPreview, len(urls))
-
+	results := make([]*PreviewWithImage, len(urls))
+	
 	for i, u := range urls {
 		wg.Add(1)
 		go func(idx int, urlStr string) {
@@ -208,13 +383,57 @@ func (lp *LinkPreviewer) FetchPreviews(ctx context.Context, urls []string) []*ev
 	wg.Wait()
 
 	// Filter out nil results
-	var previews []*event.BeeperLinkPreview
+	var previews []*PreviewWithImage
 	for _, p := range results {
 		if p != nil {
 			previews = append(previews, p)
 		}
 	}
 	return previews
+}
+
+// UploadPreviewImages uploads images from PreviewWithImage to Matrix and returns final BeeperLinkPreviews.
+func UploadPreviewImages(ctx context.Context, previews []*PreviewWithImage, intent bridgev2.MatrixAPI, roomID id.RoomID) []*event.BeeperLinkPreview {
+	if len(previews) == 0 {
+		return nil
+	}
+
+	result := make([]*event.BeeperLinkPreview, 0, len(previews))
+	for _, p := range previews {
+		if p == nil || p.Preview == nil {
+			continue
+		}
+		
+		preview := p.Preview
+		
+		// Upload image if we have data
+		if len(p.ImageData) > 0 && intent != nil {
+			uri, file, err := intent.UploadMedia(ctx, roomID, p.ImageData, "", preview.ImageType)
+			if err == nil {
+				preview.ImageURL = uri
+				preview.ImageEncryption = file
+			}
+		}
+		
+		result = append(result, preview)
+	}
+	
+	return result
+}
+
+// ExtractBeeperPreviews extracts just the BeeperLinkPreview from PreviewWithImage slice.
+func ExtractBeeperPreviews(previews []*PreviewWithImage) []*event.BeeperLinkPreview {
+	if len(previews) == 0 {
+		return nil
+	}
+	
+	result := make([]*event.BeeperLinkPreview, 0, len(previews))
+	for _, p := range previews {
+		if p != nil && p.Preview != nil {
+			result = append(result, p.Preview)
+		}
+	}
+	return result
 }
 
 // FormatPreviewsForContext formats link previews for injection into LLM context.

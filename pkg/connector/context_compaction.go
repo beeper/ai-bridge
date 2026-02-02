@@ -22,7 +22,7 @@ type CompactionConfig struct {
 	SummarizationEnabled *bool `yaml:"summarization_enabled" json:"summarization_enabled,omitempty"`
 
 	// SummarizationModel is the model to use for generating summaries
-	// Default: same as conversation model, or a fast model like gemini-2.5-flash
+	// Default: same as conversation model, or a strong model like anthropic/claude-opus-4.5
 	SummarizationModel string `yaml:"summarization_model" json:"summarization_model,omitempty"`
 
 	// MaxSummaryTokens is the maximum tokens for generated summaries
@@ -472,7 +472,7 @@ Be concise but preserve critical context. Format the summary as bullet points.`
 		model = c.config.SummarizationModel
 	}
 	if model == "" {
-		model = "google/gemini-2.5-flash" // Fast and cheap default
+		model = "anthropic/claude-opus-4.5"
 	}
 
 	maxTokens := c.config.MaxSummaryTokens

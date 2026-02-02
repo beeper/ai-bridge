@@ -63,7 +63,7 @@ type PruningConfig struct {
 	SummarizationEnabled *bool `yaml:"summarization_enabled" json:"summarization_enabled,omitempty"`
 
 	// SummarizationModel is the model to use for generating summaries
-	// Default: "google/gemini-2.5-flash" (fast and cheap)
+	// Default: "anthropic/claude-opus-4.5"
 	SummarizationModel string `yaml:"summarization_model" json:"summarization_model,omitempty"`
 
 	// MaxSummaryTokens is the maximum tokens for generated summaries

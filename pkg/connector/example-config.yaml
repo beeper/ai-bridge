@@ -12,14 +12,14 @@ beeper:
 # These are used when a room doesn't have a specific model configured.
 providers:
   beeper:
-    default_model: "google/gemini-2.5-flash"
+    default_model: "anthropic/claude-opus-4.5"
     # PDF processing engine for OpenRouter's file-parser plugin.
     # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
     default_pdf_engine: "mistral-ocr"
   openai:
-    default_model: "openai/gpt-4o-mini"
+    default_model: "openai/gpt-5.2"
   openrouter:
-    default_model: "google/gemini-2.5-flash"
+    default_model: "anthropic/claude-opus-4.5"
     # PDF processing engine for OpenRouter's file-parser plugin.
     # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
     default_pdf_engine: "mistral-ocr"
@@ -78,7 +78,7 @@ pruning:
   summarization_enabled: true
 
   # Model to use for generating summaries (default: fast model)
-  summarization_model: "google/gemini-2.5-flash"
+  summarization_model: "anthropic/claude-opus-4.5"
 
   # Maximum tokens for generated summaries
   max_summary_tokens: 500
@@ -114,3 +114,9 @@ link_previews:
 
   # Maximum page size to download in bytes (default: 10MB)
   max_page_bytes: 10485760
+
+  # Maximum image size to download in bytes (default: 5MB)
+  max_image_bytes: 5242880
+
+  # How long to cache URL previews (default: 1h)
+  cache_ttl: 1h
