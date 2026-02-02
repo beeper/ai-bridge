@@ -134,6 +134,18 @@ func BuiltinTools() []ToolDefinition {
 			Parameters:  toolspec.MemoryForgetSchema(),
 			Execute:     executeMemoryForget,
 		},
+		{
+			Name:        ToolNameGravatarFetch,
+			Description: toolspec.GravatarFetchDescription,
+			Parameters:  toolspec.GravatarFetchSchema(),
+			Execute:     executeGravatarFetch,
+		},
+		{
+			Name:        ToolNameGravatarSet,
+			Description: toolspec.GravatarSetDescription,
+			Parameters:  toolspec.GravatarSetSchema(),
+			Execute:     executeGravatarSet,
+		},
 	}
 }
 
@@ -164,6 +176,8 @@ const (
 	ToolNameMemoryGet    = toolspec.MemoryGetName
 	ToolNameMemoryStore  = toolspec.MemoryStoreName
 	ToolNameMemoryForget = toolspec.MemoryForgetName
+	ToolNameGravatarFetch = toolspec.GravatarFetchName
+	ToolNameGravatarSet   = toolspec.GravatarSetName
 )
 
 // ImageResultPrefix is the prefix used to identify image results that need media sending.
@@ -1492,4 +1506,63 @@ func executeMemoryForget(ctx context.Context, args map[string]any) (string, erro
 	}
 
 	return string(output), nil
+}
+
+func executeGravatarFetch(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil || btc.Client == nil || btc.Meta == nil {
+		return "", fmt.Errorf("bridge context not available")
+	}
+	if !btc.Client.isBossRoom(btc.Meta) {
+		return "", fmt.Errorf("gravatar tools are only available in rooms managed by the Boss agent")
+	}
+
+	email := ""
+	if raw, ok := args["email"].(string); ok {
+		email = strings.TrimSpace(raw)
+	}
+	if email == "" {
+		loginMeta := loginMetadata(btc.Client.UserLogin)
+		if loginMeta != nil && loginMeta.Gravatar != nil && loginMeta.Gravatar.Primary != nil {
+			email = loginMeta.Gravatar.Primary.Email
+		}
+	}
+	if email == "" {
+		return "", fmt.Errorf("email is required")
+	}
+
+	profile, err := fetchGravatarProfile(ctx, email)
+	if err != nil {
+		return "", err
+	}
+	return formatGravatarMarkdown(profile, "fetched"), nil
+}
+
+func executeGravatarSet(ctx context.Context, args map[string]any) (string, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil || btc.Client == nil || btc.Meta == nil {
+		return "", fmt.Errorf("bridge context not available")
+	}
+	if !btc.Client.isBossRoom(btc.Meta) {
+		return "", fmt.Errorf("gravatar tools are only available in rooms managed by the Boss agent")
+	}
+
+	email, ok := args["email"].(string)
+	if !ok || strings.TrimSpace(email) == "" {
+		return "", fmt.Errorf("email is required")
+	}
+
+	profile, err := fetchGravatarProfile(ctx, email)
+	if err != nil {
+		return "", err
+	}
+
+	loginMeta := loginMetadata(btc.Client.UserLogin)
+	state := ensureGravatarState(loginMeta)
+	state.Primary = profile
+	if err := btc.Client.UserLogin.Save(ctx); err != nil {
+		return "", fmt.Errorf("failed to save Gravatar profile: %w", err)
+	}
+
+	return formatGravatarMarkdown(profile, "primary set"), nil
 }

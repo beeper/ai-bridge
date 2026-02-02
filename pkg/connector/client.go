@@ -295,6 +295,7 @@ type pendingMessage struct {
 	MimeType      string                   // MIME type of the media
 	EncryptedFile *event.EncryptedFileInfo // For encrypted Matrix media (E2EE rooms)
 	TargetMsgID   networkid.MessageID      // For edit_regenerate
+	SourceEventID id.EventID               // For regenerate (original user message ID)
 	StatusEvents  []*event.Event           // Extra events to mark sent when processing starts
 }
 
@@ -550,14 +551,18 @@ func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 	// Build prompt NOW with fresh history (includes previous AI responses)
 	var promptMessages []openai.ChatCompletionMessageParamUnion
 	var err error
+	eventID := id.EventID("")
+	if pending.Event != nil {
+		eventID = pending.Event.ID
+	}
 
 	switch pending.Type {
 	case pendingTypeText:
-		promptMessages, err = oc.buildPrompt(ctx, pending.Portal, pending.Meta, pending.MessageBody)
+		promptMessages, err = oc.buildPrompt(ctx, pending.Portal, pending.Meta, pending.MessageBody, eventID)
 	case pendingTypeImage, pendingTypePDF, pendingTypeAudio, pendingTypeVideo:
-		promptMessages, err = oc.buildPromptWithMedia(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.MediaURL, pending.MimeType, pending.EncryptedFile, pending.Type)
+		promptMessages, err = oc.buildPromptWithMedia(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.MediaURL, pending.MimeType, pending.EncryptedFile, pending.Type, eventID)
 	case pendingTypeRegenerate:
-		promptMessages, err = oc.buildPromptForRegenerate(ctx, pending.Portal, pending.Meta, pending.MessageBody)
+		promptMessages, err = oc.buildPromptForRegenerate(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.SourceEventID)
 	case pendingTypeEditRegenerate:
 		promptMessages, err = oc.buildPromptUpToMessage(ctx, pending.Portal, pending.Meta, pending.TargetMsgID, pending.MessageBody)
 	default:
@@ -1353,11 +1358,11 @@ func (oc *AIClient) buildBasePrompt(
 			if !shouldIncludeInHistory(msgMeta) {
 				continue
 			}
-			// Include message ID so the AI can reference specific messages for reactions/replies
-			// Format: "message body [message_id: $eventId]" (matches clawdbot pattern)
+			// Include message ID so the AI can reference specific messages for reactions/replies.
+			// Format: message body + "\n[message_id: $eventId]" (matches clawdbot pattern).
 			body := msgMeta.Body
 			if history[i].MXID != "" {
-				body = fmt.Sprintf("%s [message_id: %s]", msgMeta.Body, history[i].MXID)
+				body = appendMessageIDHint(msgMeta.Body, history[i].MXID)
 			}
 			switch msgMeta.Role {
 			case "assistant":
@@ -1372,8 +1377,8 @@ func (oc *AIClient) buildBasePrompt(
 }
 
 // buildPrompt builds a prompt with the latest user message
-func (oc *AIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, latest string) ([]openai.ChatCompletionMessageParamUnion, error) {
-	return oc.buildPromptWithLinkContext(ctx, portal, meta, latest, nil)
+func (oc *AIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, latest string, eventID id.EventID) ([]openai.ChatCompletionMessageParamUnion, error) {
+	return oc.buildPromptWithLinkContext(ctx, portal, meta, latest, nil, eventID)
 }
 
 // buildPromptWithLinkContext builds a prompt with the latest user message and optional link context.
@@ -1385,6 +1390,7 @@ func (oc *AIClient) buildPromptWithLinkContext(
 	meta *PortalMetadata,
 	latest string,
 	rawEventContent map[string]any,
+	eventID id.EventID,
 ) ([]openai.ChatCompletionMessageParamUnion, error) {
 	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
 	if err != nil {
@@ -1411,6 +1417,7 @@ func (oc *AIClient) buildPromptWithLinkContext(
 		}
 	}
 
+	finalMessage = appendMessageIDHint(finalMessage, eventID)
 	prompt = append(prompt, openai.UserMessage(finalMessage))
 	return prompt, nil
 }
@@ -1485,15 +1492,17 @@ func (oc *AIClient) buildPromptWithMedia(
 	mimeType string,
 	encryptedFile *event.EncryptedFileInfo,
 	mediaType pendingMessageType,
+	eventID id.EventID,
 ) ([]openai.ChatCompletionMessageParamUnion, error) {
 	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
 	if err != nil {
 		return nil, err
 	}
 
+	captionWithID := appendMessageIDHint(caption, eventID)
 	textContent := openai.ChatCompletionContentPartUnionParam{
 		OfText: &openai.ChatCompletionContentPartTextParam{
-			Text: caption,
+			Text: captionWithID,
 		},
 	}
 
@@ -1558,6 +1567,7 @@ func (oc *AIClient) buildPromptWithMedia(
 		}
 		dataURL := buildDataURL(actualMimeType, b64Data)
 		videoPrompt := fmt.Sprintf("%s\n\nVideo data URL: %s", caption, dataURL)
+		videoPrompt = appendMessageIDHint(videoPrompt, eventID)
 		userMsg := openai.ChatCompletionMessageParamUnion{
 			OfUser: &openai.ChatCompletionUserMessageParam{
 				Content: openai.ChatCompletionUserMessageParamContentUnion{
@@ -1620,7 +1630,11 @@ func (oc *AIClient) buildPromptUpToMessage(
 			// Stop after adding the target message
 			if msg.ID == targetMessageID {
 				// Use the new body for the edited message
-				prompt = append(prompt, openai.UserMessage(newBody))
+				body := newBody
+				if msg.MXID != "" {
+					body = appendMessageIDHint(newBody, msg.MXID)
+				}
+				prompt = append(prompt, openai.UserMessage(body))
 				break
 			}
 
@@ -1630,11 +1644,15 @@ func (oc *AIClient) buildPromptUpToMessage(
 			}
 
 			// Skip assistant messages that came after the target (we're going backwards)
+			body := msgMeta.Body
+			if msg.MXID != "" {
+				body = appendMessageIDHint(msgMeta.Body, msg.MXID)
+			}
 			switch msgMeta.Role {
 			case "assistant":
-				prompt = append(prompt, openai.AssistantMessage(msgMeta.Body))
+				prompt = append(prompt, openai.AssistantMessage(body))
 			default:
-				prompt = append(prompt, openai.UserMessage(msgMeta.Body))
+				prompt = append(prompt, openai.UserMessage(body))
 			}
 		}
 	} else {
@@ -2016,7 +2034,7 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 	}
 
 	// Build prompt with combined body
-	promptMessages, err := oc.buildPromptWithLinkContext(ctx, last.Portal, last.Meta, combinedBody, nil)
+	promptMessages, err := oc.buildPromptWithLinkContext(ctx, last.Portal, last.Meta, combinedBody, nil, last.Event.ID)
 	if err != nil {
 		oc.log.Err(err).Msg("Failed to build prompt for debounced messages")
 		return

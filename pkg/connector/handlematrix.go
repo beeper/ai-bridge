@@ -118,12 +118,18 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		rawEventContent = msg.Event.Content.Raw
 	}
 
-	promptMessages, err := oc.buildPromptWithLinkContext(ctx, portal, meta, body, rawEventContent)
+	eventID := id.EventID("")
+	if msg.Event != nil {
+		eventID = msg.Event.ID
+	}
+
+	promptMessages, err := oc.buildPromptWithLinkContext(ctx, portal, meta, body, rawEventContent, eventID)
 	if err != nil {
 		return nil, err
 	}
 	userMessage := &database.Message{
 		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+		MXID:     msg.Event.ID,
 		Room:     portal.PortalKey,
 		SenderID: humanUserID(oc.UserLogin.ID),
 		Metadata: &MessageMetadata{
@@ -373,6 +379,11 @@ func (oc *AIClient) handleMediaMessage(
 		mimeType = config.defaultMimeType
 	}
 
+	eventID := id.EventID("")
+	if msg.Event != nil {
+		eventID = msg.Event.ID
+	}
+
 	var visionModel string
 	var visionFallback bool
 	if msgType == event.MsgImage {
@@ -436,13 +447,14 @@ func (oc *AIClient) handleMediaMessage(
 			return &bridgev2.MatrixMessageResponse{}, nil
 		}
 
-		promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined)
+		promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined, eventID)
 		if err != nil {
 			return nil, err
 		}
 
 		userMessage := &database.Message{
 			ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+			MXID:     msg.Event.ID,
 			Room:     portal.PortalKey,
 			SenderID: humanUserID(oc.UserLogin.ID),
 			Metadata: &MessageMetadata{
@@ -482,13 +494,14 @@ func (oc *AIClient) handleMediaMessage(
 			return &bridgev2.MatrixMessageResponse{}, nil
 		}
 
-		promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined)
+		promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined, eventID)
 		if err != nil {
 			return nil, err
 		}
 
 		userMessage := &database.Message{
 			ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+			MXID:     msg.Event.ID,
 			Room:     portal.PortalKey,
 			SenderID: humanUserID(oc.UserLogin.ID),
 			Metadata: &MessageMetadata{
@@ -513,13 +526,14 @@ func (oc *AIClient) handleMediaMessage(
 	}
 
 	// Build prompt with media
-	promptMessages, err := oc.buildPromptWithMedia(ctx, portal, meta, caption, string(mediaURL), mimeType, encryptedFile, config.msgType)
+	promptMessages, err := oc.buildPromptWithMedia(ctx, portal, meta, caption, string(mediaURL), mimeType, encryptedFile, config.msgType, eventID)
 	if err != nil {
 		return nil, err
 	}
 
 	userMessage := &database.Message{
 		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+		MXID:     msg.Event.ID,
 		Room:     portal.PortalKey,
 		SenderID: humanUserID(oc.UserLogin.ID),
 		Metadata: &MessageMetadata{
@@ -587,13 +601,19 @@ func (oc *AIClient) handleTextFileMessage(
 		return &bridgev2.MatrixMessageResponse{}, nil
 	}
 
-	promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined)
+	eventID := id.EventID("")
+	if msg.Event != nil {
+		eventID = msg.Event.ID
+	}
+
+	promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined, eventID)
 	if err != nil {
 		return nil, err
 	}
 
 	userMessage := &database.Message{
 		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
+		MXID:     msg.Event.ID,
 		Room:     portal.PortalKey,
 		SenderID: humanUserID(oc.UserLogin.ID),
 		Metadata: &MessageMetadata{
@@ -958,7 +978,7 @@ func (oc *AIClient) handleRegenerate(
 	oc.sendSystemNotice(runCtx, portal, "Regenerating response...")
 
 	// Build prompt excluding the old assistant response
-	prompt, err := oc.buildPromptForRegenerate(runCtx, portal, meta, userMeta.Body)
+	prompt, err := oc.buildPromptForRegenerate(runCtx, portal, meta, userMeta.Body, lastUserMessage.MXID)
 	if err != nil {
 		oc.sendSystemNotice(runCtx, portal, "Failed to regenerate: "+err.Error())
 		return
@@ -970,6 +990,7 @@ func (oc *AIClient) handleRegenerate(
 		Meta:        meta,
 		Type:        pendingTypeRegenerate,
 		MessageBody: userMeta.Body,
+		SourceEventID: lastUserMessage.MXID,
 	}, prompt)
 }
 
@@ -1052,6 +1073,7 @@ func (oc *AIClient) buildPromptForRegenerate(
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	latestUserBody string,
+	latestUserID id.EventID,
 ) ([]openai.ChatCompletionMessageParamUnion, error) {
 	var prompt []openai.ChatCompletionMessageParamUnion
 	systemPrompt := oc.effectivePrompt(meta)
@@ -1086,11 +1108,15 @@ func (oc *AIClient) buildPromptForRegenerate(
 				continue
 			}
 
+			body := msgMeta.Body
+			if msg.MXID != "" {
+				body = appendMessageIDHint(msgMeta.Body, msg.MXID)
+			}
 			switch msgMeta.Role {
 			case "assistant":
-				prompt = append(prompt, openai.AssistantMessage(msgMeta.Body))
+				prompt = append(prompt, openai.AssistantMessage(body))
 			default:
-				prompt = append(prompt, openai.UserMessage(msgMeta.Body))
+				prompt = append(prompt, openai.UserMessage(body))
 			}
 		}
 
@@ -1104,6 +1130,6 @@ func (oc *AIClient) buildPromptForRegenerate(
 		}
 	}
 
-	prompt = append(prompt, openai.UserMessage(latestUserBody))
+	prompt = append(prompt, openai.UserMessage(appendMessageIDHint(latestUserBody, latestUserID)))
 	return prompt, nil
 }

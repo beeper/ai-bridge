@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -87,34 +88,99 @@ func fetchGravatarProfile(ctx context.Context, email string) (*GravatarProfile, 
 	}, nil
 }
 
-func formatGravatarProfileJSON(profile map[string]any) string {
-	if profile == nil {
-		return "{}"
-	}
-	payload, err := json.MarshalIndent(profile, "", "  ")
-	if err != nil {
-		return "{}"
-	}
-	return string(payload)
-}
-
-func formatGravatarContext(profile *GravatarProfile) string {
+func formatGravatarMarkdown(profile *GravatarProfile, status string) string {
 	if profile == nil {
 		return ""
 	}
-	lines := []string{
-		"## User Profile (Gravatar)",
-		fmt.Sprintf("Email: %s", profile.Email),
-		fmt.Sprintf("Hash: %s", profile.Hash),
+	lines := []string{"## Gravatar Profile"}
+	if status != "" {
+		lines = append(lines, fmt.Sprintf("status: %s", status))
+	}
+	if profile.Email != "" {
+		lines = append(lines, fmt.Sprintf("email: %s", profile.Email))
+	}
+	if profile.Hash != "" {
+		lines = append(lines, fmt.Sprintf("hash: %s", profile.Hash))
 	}
 	if profile.FetchedAt > 0 {
-		lines = append(lines, fmt.Sprintf("FetchedAt: %s", time.Unix(profile.FetchedAt, 0).UTC().Format(time.RFC3339)))
+		lines = append(lines, fmt.Sprintf("fetched_at: %s", time.Unix(profile.FetchedAt, 0).UTC().Format(time.RFC3339)))
 	}
-	lines = append(lines,
-		"Profile JSON:",
-		formatGravatarProfileJSON(profile.Profile),
-	)
+	var flattened []string
+	flattenGravatarValue(profile.Profile, "profile", &flattened)
+	lines = append(lines, flattened...)
 	return strings.Join(lines, "\n")
+}
+
+func flattenGravatarValue(value any, prefix string, out *[]string) {
+	switch v := value.(type) {
+	case map[string]any:
+		if len(v) == 0 {
+			return
+		}
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			child := v[key]
+			if isGravatarEmpty(child) {
+				continue
+			}
+			nextPrefix := key
+			if prefix != "" {
+				nextPrefix = prefix + "." + key
+			}
+			flattenGravatarValue(child, nextPrefix, out)
+		}
+	case []any:
+		if len(v) == 0 {
+			return
+		}
+		for i, child := range v {
+			if isGravatarEmpty(child) {
+				continue
+			}
+			nextPrefix := fmt.Sprintf("%s[%d]", prefix, i)
+			flattenGravatarValue(child, nextPrefix, out)
+		}
+	default:
+		if isGravatarEmpty(v) {
+			return
+		}
+		label := prefix
+		if label == "" {
+			label = "value"
+		}
+		*out = append(*out, fmt.Sprintf("%s: %s", label, formatGravatarScalar(v)))
+	}
+}
+
+func isGravatarEmpty(value any) bool {
+	if value == nil {
+		return true
+	}
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v) == ""
+	case []any:
+		return len(v) == 0
+	case map[string]any:
+		return len(v) == 0
+	default:
+		return false
+	}
+}
+
+func formatGravatarScalar(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case json.Number:
+		return v.String()
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 func (oc *AIClient) gravatarContext() string {
@@ -122,5 +188,5 @@ func (oc *AIClient) gravatarContext() string {
 	if loginMeta == nil || loginMeta.Gravatar == nil || loginMeta.Gravatar.Primary == nil {
 		return ""
 	}
-	return formatGravatarContext(loginMeta.Gravatar.Primary)
+	return formatGravatarMarkdown(loginMeta.Gravatar.Primary, "primary")
 }

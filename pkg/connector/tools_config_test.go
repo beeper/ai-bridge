@@ -18,6 +18,8 @@ func TestDefaultToolsConfigIncludesCoreTools(t *testing.T) {
 		toolspec.MemoryGetName,
 		toolspec.MemoryStoreName,
 		toolspec.MemoryForgetName,
+		toolspec.GravatarFetchName,
+		toolspec.GravatarSetName,
 	}
 
 	for _, name := range want {

@@ -649,6 +649,7 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 		CommandRegenerate,
 		CommandTitle,
 		CommandModels,
+		CommandGravatar,
 		CommandAgent,
 		CommandAgents,
 		CommandCreateAgent,
@@ -659,7 +660,87 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 	oc.br.Log.Info().
 		Str("section", HelpSectionAI.Name).
 		Int("section_order", HelpSectionAI.Order).
-		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, debounce, tools, mode, new, fork, regenerate, title, models, agent, agents, create-agent, delete-agent, manage, playground")
+		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, debounce, tools, mode, new, fork, regenerate, title, models, gravatar, agent, agents, create-agent, delete-agent, manage, playground")
+}
+
+// CommandGravatar handles the !ai gravatar command
+var CommandGravatar = &commands.FullHandler{
+	Func: fnGravatar,
+	Name: "gravatar",
+	Help: commands.HelpMeta{
+		Section:     HelpSectionAI,
+		Description: "Fetch or set the Gravatar profile for this login",
+		Args:        "[fetch|set] [email]",
+	},
+	RequiresPortal: true,
+	RequiresLogin:  true,
+}
+
+func fnGravatar(ce *commands.Event) {
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
+		return
+	}
+	if !client.isBossRoom(meta) {
+		ce.Reply("Gravatar commands are only available in rooms managed by the Boss agent.")
+		return
+	}
+
+	if len(ce.Args) == 0 {
+		loginMeta := loginMetadata(client.UserLogin)
+		if loginMeta == nil || loginMeta.Gravatar == nil || loginMeta.Gravatar.Primary == nil {
+			ce.Reply("No Gravatar profile set. Use `!ai gravatar set <email>`.")
+			return
+		}
+		ce.Reply(formatGravatarMarkdown(loginMeta.Gravatar.Primary, "primary"))
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(ce.Args[0]))
+	switch action {
+	case "fetch":
+		email := ""
+		if len(ce.Args) > 1 {
+			email = ce.Args[1]
+		}
+		if strings.TrimSpace(email) == "" {
+			loginMeta := loginMetadata(client.UserLogin)
+			if loginMeta != nil && loginMeta.Gravatar != nil && loginMeta.Gravatar.Primary != nil {
+				email = loginMeta.Gravatar.Primary.Email
+			}
+		}
+		if strings.TrimSpace(email) == "" {
+			ce.Reply("Email is required. Usage: `!ai gravatar fetch <email>`.")
+			return
+		}
+		profile, err := fetchGravatarProfile(ce.Ctx, email)
+		if err != nil {
+			ce.Reply("Failed to fetch Gravatar profile: %s", err.Error())
+			return
+		}
+		ce.Reply(formatGravatarMarkdown(profile, "fetched"))
+		return
+	case "set":
+		if len(ce.Args) < 2 || strings.TrimSpace(ce.Args[1]) == "" {
+			ce.Reply("Email is required. Usage: `!ai gravatar set <email>`.")
+			return
+		}
+		profile, err := fetchGravatarProfile(ce.Ctx, ce.Args[1])
+		if err != nil {
+			ce.Reply("Failed to fetch Gravatar profile: %s", err.Error())
+			return
+		}
+		state := ensureGravatarState(loginMetadata(client.UserLogin))
+		state.Primary = profile
+		if err := client.UserLogin.Save(ce.Ctx); err != nil {
+			ce.Reply("Failed to save Gravatar profile: %s", err.Error())
+			return
+		}
+		ce.Reply(formatGravatarMarkdown(profile, "primary set"))
+		return
+	default:
+		ce.Reply("Usage: `!ai gravatar fetch <email>` or `!ai gravatar set <email>`.")
+	}
 }
 
 // CommandAgent handles the !ai agent command

@@ -35,6 +35,13 @@ func hasAssignedAgent(meta *PortalMetadata) bool {
 	return meta.AgentID != "" || meta.DefaultAgentID != ""
 }
 
+func hasBossAgent(meta *PortalMetadata) bool {
+	if meta == nil {
+		return false
+	}
+	return agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID)
+}
+
 // getDefaultToolsConfig returns the default tools configuration for a new room.
 func getDefaultToolsConfig(_ string) ToolsConfig {
 	config := ToolsConfig{
@@ -58,6 +65,8 @@ func getDefaultToolsConfig(_ string) ToolsConfig {
 	registerTool(&config, defaultMemoryGetTool(), "builtin")
 	registerTool(&config, defaultMemoryStoreTool(), "builtin")
 	registerTool(&config, defaultMemoryForgetTool(), "builtin")
+	registerTool(&config, defaultGravatarFetchTool(), "builtin")
+	registerTool(&config, defaultGravatarSetTool(), "builtin")
 
 	return config
 }
@@ -133,6 +142,27 @@ func ensureToolsConfig(meta *PortalMetadata, provider string) bool {
 		changed = true
 	}
 
+	// Only expose Gravatar tools when the Boss agent is assigned to the room.
+	if hasBossAgent(meta) {
+		if _, ok := meta.ToolsConfig.Tools[toolspec.GravatarFetchName]; !ok {
+			registerTool(&meta.ToolsConfig, defaultGravatarFetchTool(), "builtin")
+			changed = true
+		}
+		if _, ok := meta.ToolsConfig.Tools[toolspec.GravatarSetName]; !ok {
+			registerTool(&meta.ToolsConfig, defaultGravatarSetTool(), "builtin")
+			changed = true
+		}
+	} else {
+		if _, ok := meta.ToolsConfig.Tools[toolspec.GravatarFetchName]; ok {
+			delete(meta.ToolsConfig.Tools, toolspec.GravatarFetchName)
+			changed = true
+		}
+		if _, ok := meta.ToolsConfig.Tools[toolspec.GravatarSetName]; ok {
+			delete(meta.ToolsConfig.Tools, toolspec.GravatarSetName)
+			changed = true
+		}
+	}
+
 	return changed
 }
 
@@ -167,6 +197,9 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 			continue
 		}
 		if name == ToolNameMessage && !hasAssignedAgent(meta) {
+			continue
+		}
+		if (name == toolspec.GravatarFetchName || name == toolspec.GravatarSetName) && !hasBossAgent(meta) {
 			continue
 		}
 
@@ -1876,6 +1909,7 @@ func (oc *AIClient) syncChatCounter(ctx context.Context) error {
 func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 	oc.log.Debug().Msg("Ensuring default AI chat room exists")
 	loginMeta := loginMetadata(oc.UserLogin)
+	defaultPortalKey := defaultChatPortalKey(oc.UserLogin.ID)
 
 	if loginMeta.DefaultChatPortalID != "" {
 		portalKey := networkid.PortalKey{
@@ -1886,6 +1920,30 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		if err != nil {
 			oc.log.Warn().Err(err).Msg("Failed to load default chat portal by ID")
 		} else if portal != nil {
+			if portal.MXID != "" {
+				oc.log.Debug().Stringer("portal", portal.PortalKey).Msg("Existing default chat already has MXID")
+				return nil
+			}
+			info := oc.chatInfoFromPortal(ctx, portal)
+			oc.log.Info().Stringer("portal", portal.PortalKey).Msg("Default chat missing MXID; creating Matrix room")
+			err := portal.CreateMatrixRoom(ctx, oc.UserLogin, info)
+			if err != nil {
+				oc.log.Err(err).Msg("Failed to create Matrix room for default chat")
+			}
+			oc.sendWelcomeMessage(ctx, portal)
+			return err
+		}
+	}
+
+	if loginMeta.DefaultChatPortalID == "" {
+		portal, err := oc.UserLogin.Bridge.GetExistingPortalByKey(ctx, defaultPortalKey)
+		if err != nil {
+			oc.log.Warn().Err(err).Msg("Failed to load default chat portal by deterministic key")
+		} else if portal != nil {
+			loginMeta.DefaultChatPortalID = string(portal.PortalKey.ID)
+			if err := oc.UserLogin.Save(ctx); err != nil {
+				oc.log.Warn().Err(err).Msg("Failed to persist default chat portal ID")
+			}
 			if portal.MXID != "" {
 				oc.log.Debug().Stringer("portal", portal.PortalKey).Msg("Existing default chat already has MXID")
 				return nil
@@ -1956,8 +2014,30 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		ModelID:      modelID,
 		Title:        "New AI Chat",
 		SystemPrompt: beeperAgent.SystemPrompt,
+		PortalKey:    &defaultPortalKey,
 	})
 	if err != nil {
+		existingPortal, existingErr := oc.UserLogin.Bridge.GetExistingPortalByKey(ctx, defaultPortalKey)
+		if existingErr == nil && existingPortal != nil {
+			loginMeta.DefaultChatPortalID = string(existingPortal.PortalKey.ID)
+			if err := oc.UserLogin.Save(ctx); err != nil {
+				oc.log.Warn().Err(err).Msg("Failed to persist default chat portal ID")
+			}
+			if existingPortal.MXID != "" {
+				oc.log.Debug().Stringer("portal", existingPortal.PortalKey).Msg("Existing default chat already has MXID")
+				return nil
+			}
+			info := oc.chatInfoFromPortal(ctx, existingPortal)
+			oc.log.Info().Stringer("portal", existingPortal.PortalKey).Msg("Default chat missing MXID; creating Matrix room")
+			createErr := existingPortal.CreateMatrixRoom(ctx, oc.UserLogin, info)
+			if createErr != nil {
+				oc.log.Err(createErr).Msg("Failed to create Matrix room for default chat")
+				return createErr
+			}
+			oc.sendWelcomeMessage(ctx, existingPortal)
+			oc.log.Info().Stringer("portal", existingPortal.PortalKey).Msg("New AI Chat room created")
+			return nil
+		}
 		oc.log.Err(err).Msg("Failed to create default portal")
 		return err
 	}
