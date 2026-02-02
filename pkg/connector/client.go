@@ -25,7 +25,6 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
-	"maunium.net/go/mautrix/bridgev2/matrix"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
@@ -995,26 +994,19 @@ func (oc *AIClient) isGroupChat(ctx context.Context, portal *bridgev2.Portal) bo
 		return false
 	}
 
-	// Get the matrix client
-	matrixConn, ok := oc.UserLogin.Bridge.Matrix.(*matrix.Connector)
-	if !ok {
-		return false
-	}
-
-	client := matrixConn.AS.BotClient()
-	if client == nil {
-		return false
-	}
-
 	// Get member count
-	members, err := client.JoinedMembers(ctx, portal.MXID)
+	matrixConn := oc.UserLogin.Bridge.Matrix
+	if matrixConn == nil {
+		return false
+	}
+	members, err := matrixConn.GetMembers(ctx, portal.MXID)
 	if err != nil {
 		oc.log.Debug().Err(err).Msg("Failed to get joined members for group chat detection")
 		return false
 	}
 
 	// Group chat = more than 2 members (user + bot = 1:1, user + bot + others = group)
-	return len(members.Joined) > 2
+	return len(members) > 2
 }
 
 // effectivePDFEngine returns the PDF engine to use for the given portal.

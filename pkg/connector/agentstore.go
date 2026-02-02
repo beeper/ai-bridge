@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/matrix"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/format"
@@ -157,13 +156,14 @@ func (s *AgentStoreAdapter) loadAgentFromDataRoom(ctx context.Context, agentID s
 	}
 
 	// Get the Matrix connector to read state events
-	matrixConn, ok := s.client.UserLogin.Bridge.Matrix.(*matrix.Connector)
+	matrixConn := s.client.UserLogin.Bridge.Matrix
+	stateConn, ok := matrixConn.(bridgev2.MatrixConnectorWithArbitraryRoomState)
 	if !ok {
-		return nil, fmt.Errorf("matrix connector not available")
+		return nil, fmt.Errorf("matrix connector does not support state access")
 	}
 
 	// Read the agent data state event
-	evt, err := matrixConn.GetStateEvent(ctx, portal.MXID, AgentDataEventType, "")
+	evt, err := stateConn.GetStateEvent(ctx, portal.MXID, AgentDataEventType, "")
 	if err != nil {
 		// State event doesn't exist yet - this is normal for newly created rooms
 		return nil, nil

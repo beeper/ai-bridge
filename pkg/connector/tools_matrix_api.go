@@ -2,32 +2,22 @@ package connector
 
 import (
 	"context"
-	"errors"
-	"net/http"
+	"fmt"
+	"time"
 
-	"maunium.net/go/mautrix"
-	"maunium.net/go/mautrix/bridgev2/matrix"
+	"go.mau.fi/util/variationselector"
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
 
-// getMatrixClient returns the mautrix.Client from the bridge framework.
-// This provides access to Matrix API methods like GetRelations, GetProfile, etc.
-func getMatrixClient(btc *BridgeToolContext) *mautrix.Client {
-	matrixConn, ok := btc.Client.UserLogin.Bridge.Matrix.(*matrix.Connector)
-	if !ok {
+// getMatrixConnector returns the Matrix connector interface from the bridge.
+func getMatrixConnector(btc *BridgeToolContext) bridgev2.MatrixConnector {
+	if btc == nil || btc.Client == nil || btc.Client.UserLogin == nil || btc.Client.UserLogin.Bridge == nil {
 		return nil
 	}
-	return matrixConn.AS.BotClient()
-}
-
-// getMatrixConnector returns the matrix.Connector for state queries.
-func getMatrixConnector(btc *BridgeToolContext) *matrix.Connector {
-	matrixConn, ok := btc.Client.UserLogin.Bridge.Matrix.(*matrix.Connector)
-	if !ok {
-		return nil
-	}
-	return matrixConn
+	return btc.Client.UserLogin.Bridge.Matrix
 }
 
 // MatrixReactionSummary represents a summary of reactions on a message.
@@ -37,54 +27,57 @@ type MatrixReactionSummary struct {
 	Users []string `json:"users"` // User IDs who reacted
 }
 
-// listMatrixReactions lists all reactions on a message using the relations API.
+// listMatrixReactions lists all reactions on a message using the bridge database.
 func listMatrixReactions(ctx context.Context, btc *BridgeToolContext, eventID id.EventID) ([]MatrixReactionSummary, error) {
-	client := getMatrixClient(btc)
-	if client == nil {
+	if btc == nil || btc.Client == nil || btc.Client.UserLogin == nil || btc.Client.UserLogin.Bridge == nil || btc.Portal == nil {
 		return nil, nil
 	}
 
-	// Query relations API for reactions (m.annotation)
-	resp, err := getRelationsWithFallback(ctx, client, btc.Portal.MXID, eventID, &mautrix.ReqGetRelations{
-		RelationType: event.RelAnnotation,
-		EventType:    event.EventReaction,
-		Limit:        100,
-	})
+	targetPart, err := btc.Client.UserLogin.Bridge.DB.Message.GetPartByMXID(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+	if targetPart == nil {
+		return nil, fmt.Errorf("target message not found")
+	}
+
+	receiver := btc.Portal.Receiver
+	if receiver == "" {
+		receiver = btc.Client.UserLogin.ID
+	}
+
+	reactions, err := btc.Client.UserLogin.Bridge.DB.Reaction.GetAllToMessagePart(
+		ctx,
+		receiver,
+		targetPart.ID,
+		targetPart.PartID,
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	// Aggregate reactions by emoji
 	summaries := make(map[string]*MatrixReactionSummary)
-	for _, evt := range resp.Chunk {
-		content, ok := evt.Content.Parsed.(*event.ReactionEventContent)
-		if !ok {
-			// Try to parse from raw
-			if relatesTo, ok := evt.Content.Raw["m.relates_to"].(map[string]any); ok {
-				if key, ok := relatesTo["key"].(string); ok && key != "" {
-					sender := evt.Sender.String()
-					if summaries[key] == nil {
-						summaries[key] = &MatrixReactionSummary{Key: key, Count: 0, Users: []string{}}
-					}
-					summaries[key].Count++
-					summaries[key].Users = append(summaries[key].Users, sender)
-				}
-			}
+	for _, reaction := range reactions {
+		emoji := reaction.Emoji
+		if emoji == "" {
+			emoji = string(reaction.EmojiID)
+		}
+		if emoji == "" {
 			continue
 		}
-		if content.RelatesTo.Key == "" {
-			continue
+
+		sender := reaction.SenderMXID.String()
+		if sender == "" {
+			sender = string(reaction.SenderID)
 		}
-		key := content.RelatesTo.Key
-		sender := evt.Sender.String()
-		if summaries[key] == nil {
-			summaries[key] = &MatrixReactionSummary{Key: key, Count: 0, Users: []string{}}
+
+		if summaries[emoji] == nil {
+			summaries[emoji] = &MatrixReactionSummary{Key: emoji, Count: 0, Users: []string{}}
 		}
-		summaries[key].Count++
-		summaries[key].Users = append(summaries[key].Users, sender)
+		summaries[emoji].Count++
+		summaries[emoji].Users = append(summaries[emoji].Users, sender)
 	}
 
-	// Convert to slice
 	result := make([]MatrixReactionSummary, 0, len(summaries))
 	for _, summary := range summaries {
 		result = append(result, *summary)
@@ -92,139 +85,100 @@ func listMatrixReactions(ctx context.Context, btc *BridgeToolContext, eventID id
 	return result, nil
 }
 
-// removeMatrixReactions removes the bot's reactions from a message.
+// removeMatrixReactions removes the bot's reactions from a message using the bridge database.
 // If emoji is specified, only removes that specific reaction.
 // If emoji is empty, removes all of the bot's reactions.
 func removeMatrixReactions(ctx context.Context, btc *BridgeToolContext, eventID id.EventID, emoji string) (int, error) {
-	client := getMatrixClient(btc)
-	if client == nil {
+	if btc == nil || btc.Client == nil || btc.Client.UserLogin == nil || btc.Client.UserLogin.Bridge == nil || btc.Portal == nil {
 		return 0, nil
 	}
 
-	removed := 0
-	var locallyTracked []id.EventID
-	if btc.Portal != nil {
-		locallyTracked = takeSentReactions(btc.Portal.MXID, eventID, emoji)
-		if len(locallyTracked) > 0 {
-			removed += redactReactionEvents(ctx, client, btc.Portal.MXID, locallyTracked)
-		}
+	intent := btc.Client.getModelIntent(ctx, btc.Portal)
+	if intent == nil {
+		return 0, fmt.Errorf("failed to get model intent")
 	}
 
-	// Query relations API for reactions
-	resp, err := getRelationsWithFallback(ctx, client, btc.Portal.MXID, eventID, &mautrix.ReqGetRelations{
-		RelationType: event.RelAnnotation,
-		EventType:    event.EventReaction,
-		Limit:        200,
-	})
+	targetPart, err := btc.Client.UserLogin.Bridge.DB.Message.GetPartByMXID(ctx, eventID)
 	if err != nil {
-		if isRelationsUnsupported(err) {
-			return removed, nil
-		}
-		if removed > 0 {
-			return removed, nil
-		}
+		return 0, err
+	}
+	if targetPart == nil {
+		return 0, fmt.Errorf("target message not found")
+	}
+
+	senderID := btc.Client.reactionSenderID(ctx, btc.Portal)
+	if senderID == "" {
+		return 0, fmt.Errorf("failed to resolve reaction sender")
+	}
+
+	receiver := btc.Portal.Receiver
+	if receiver == "" {
+		receiver = btc.Client.UserLogin.ID
+	}
+
+	reactions, err := btc.Client.UserLogin.Bridge.DB.Reaction.GetAllToMessageBySender(
+		ctx,
+		receiver,
+		targetPart.ID,
+		senderID,
+	)
+	if err != nil {
 		return 0, err
 	}
 
-	// Get bot's user ID
-	botMXID := client.UserID
-
-	alreadyRemoved := make(map[id.EventID]struct{}, len(locallyTracked))
-	for _, evtID := range locallyTracked {
-		alreadyRemoved[evtID] = struct{}{}
-	}
-
-	// Find reaction events from the bot that match
-	var toRemove []id.EventID
-	for _, evt := range resp.Chunk {
-		if evt.Sender != botMXID {
+	normalizedEmoji := variationselector.Remove(emoji)
+	var targets []*database.Reaction
+	for _, reaction := range reactions {
+		if reaction.MessagePartID != targetPart.PartID {
 			continue
 		}
-
-		// Check emoji if specified
-		if emoji != "" {
-			var key string
-			if content, ok := evt.Content.Parsed.(*event.ReactionEventContent); ok {
-				key = content.RelatesTo.Key
-			} else if relatesTo, ok := evt.Content.Raw["m.relates_to"].(map[string]any); ok {
-				key, _ = relatesTo["key"].(string)
+		if normalizedEmoji != "" {
+			reactionEmoji := reaction.Emoji
+			if reactionEmoji == "" {
+				reactionEmoji = string(reaction.EmojiID)
 			}
-			if key != emoji {
+			if reactionEmoji != normalizedEmoji {
 				continue
 			}
 		}
-
-		if _, seen := alreadyRemoved[evt.ID]; seen {
-			continue
-		}
-		toRemove = append(toRemove, evt.ID)
+		targets = append(targets, reaction)
 	}
 
-	// Redact each reaction event
-	removed += redactReactionEvents(ctx, client, btc.Portal.MXID, toRemove)
-
-	return removed, nil
-}
-
-func redactReactionEvents(ctx context.Context, client *mautrix.Client, roomID id.RoomID, eventIDs []id.EventID) int {
 	removed := 0
-	for _, evtID := range eventIDs {
-		_, err := client.RedactEvent(ctx, roomID, evtID)
-		if err == nil {
+	var firstErr error
+	for _, reaction := range targets {
+		_, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventRedaction, &event.Content{
+			Parsed: &event.RedactionEventContent{
+				Redacts: reaction.MXID,
+			},
+		}, &bridgev2.MatrixSendExtra{Timestamp: time.Now(), ReactionMeta: reaction})
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if err := btc.Client.UserLogin.Bridge.DB.Reaction.Delete(ctx, reaction); err == nil {
 			removed++
 		}
 	}
-	return removed
-}
 
-func getRelationsWithFallback(
-	ctx context.Context,
-	client *mautrix.Client,
-	roomID id.RoomID,
-	eventID id.EventID,
-	req *mautrix.ReqGetRelations,
-) (*mautrix.RespGetRelations, error) {
-	resp, err := client.GetRelations(ctx, roomID, eventID, req)
-	if err == nil || !isRelationsUnsupported(err) {
-		return resp, err
+	if removed == 0 && firstErr != nil {
+		return 0, firstErr
 	}
-	return getRelationsV3(ctx, client, roomID, eventID, req)
-}
-
-func getRelationsV3(
-	ctx context.Context,
-	client *mautrix.Client,
-	roomID id.RoomID,
-	eventID id.EventID,
-	req *mautrix.ReqGetRelations,
-) (*mautrix.RespGetRelations, error) {
-	if req == nil {
-		req = &mautrix.ReqGetRelations{}
-	}
-
-	var resp mautrix.RespGetRelations
-	urlPath := client.BuildURLWithQuery(
-		append(mautrix.ClientURLPath{"v3", "rooms", roomID, "relations", eventID}, req.PathSuffix()...),
-		req.Query(),
-	)
-	_, err := client.MakeRequest(ctx, http.MethodGet, urlPath, nil, &resp)
-	if err != nil {
-		return nil, err
-	}
-	return &resp, nil
-}
-
-func isRelationsUnsupported(err error) bool {
-	return errors.Is(err, mautrix.MUnrecognized)
+	return removed, nil
 }
 
 // sendMatrixReadReceipt sends a read receipt for a message.
 func sendMatrixReadReceipt(ctx context.Context, btc *BridgeToolContext, eventID id.EventID) error {
-	client := getMatrixClient(btc)
-	if client == nil {
+	if btc == nil || btc.Client == nil || btc.Client.UserLogin == nil || btc.Client.UserLogin.Bridge == nil || btc.Portal == nil {
 		return nil
 	}
-	return client.MarkRead(ctx, btc.Portal.MXID, eventID)
+	bot := btc.Client.UserLogin.Bridge.Bot
+	if bot == nil {
+		return nil
+	}
+	return bot.MarkRead(ctx, btc.Portal.MXID, eventID, time.Now())
 }
 
 // MatrixUserProfile represents a user's profile information.
@@ -236,14 +190,17 @@ type MatrixUserProfile struct {
 
 // getMatrixUserProfile gets a user's profile information.
 func getMatrixUserProfile(ctx context.Context, btc *BridgeToolContext, userID id.UserID) (*MatrixUserProfile, error) {
-	client := getMatrixClient(btc)
-	if client == nil {
+	matrixConn := getMatrixConnector(btc)
+	if matrixConn == nil || btc.Portal == nil {
 		return nil, nil
 	}
 
-	profile, err := client.GetProfile(ctx, userID)
+	profile, err := matrixConn.GetMemberInfo(ctx, btc.Portal.MXID, userID)
 	if err != nil {
 		return nil, err
+	}
+	if profile == nil {
+		return nil, nil
 	}
 
 	return &MatrixUserProfile{
@@ -272,29 +229,28 @@ func getMatrixRoomInfo(ctx context.Context, btc *BridgeToolContext) (*MatrixRoom
 		RoomID: btc.Portal.MXID.String(),
 	}
 
-	// Get room name
-	nameEvt, err := matrixConn.GetStateEvent(ctx, btc.Portal.MXID, event.StateRoomName, "")
-	if err == nil && nameEvt != nil {
-		if content, ok := nameEvt.Content.Parsed.(*event.RoomNameEventContent); ok {
-			info.Name = content.Name
+	if stateConn, ok := matrixConn.(bridgev2.MatrixConnectorWithArbitraryRoomState); ok {
+		// Get room name
+		nameEvt, err := stateConn.GetStateEvent(ctx, btc.Portal.MXID, event.StateRoomName, "")
+		if err == nil && nameEvt != nil {
+			if content, ok := nameEvt.Content.Parsed.(*event.RoomNameEventContent); ok {
+				info.Name = content.Name
+			}
+		}
+
+		// Get room topic
+		topicEvt, err := stateConn.GetStateEvent(ctx, btc.Portal.MXID, event.StateTopic, "")
+		if err == nil && topicEvt != nil {
+			if content, ok := topicEvt.Content.Parsed.(*event.TopicEventContent); ok {
+				info.Topic = content.Topic
+			}
 		}
 	}
 
-	// Get room topic
-	topicEvt, err := matrixConn.GetStateEvent(ctx, btc.Portal.MXID, event.StateTopic, "")
-	if err == nil && topicEvt != nil {
-		if content, ok := topicEvt.Content.Parsed.(*event.TopicEventContent); ok {
-			info.Topic = content.Topic
-		}
-	}
-
-	// Get member count using the client
-	client := getMatrixClient(btc)
-	if client != nil {
-		members, err := client.JoinedMembers(ctx, btc.Portal.MXID)
-		if err == nil {
-			info.MemberCount = len(members.Joined)
-		}
+	// Get member count using the connector
+	members, err := matrixConn.GetMembers(ctx, btc.Portal.MXID)
+	if err == nil {
+		info.MemberCount = len(members)
 	}
 
 	return info, nil

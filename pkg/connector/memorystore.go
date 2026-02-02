@@ -10,7 +10,6 @@ import (
 	"unicode"
 
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/matrix"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -637,9 +636,10 @@ func (m *MemoryStore) loadMemoryIndex(ctx context.Context, portal *bridgev2.Port
 		return nil, nil
 	}
 
-	matrixConn, ok := m.client.UserLogin.Bridge.Matrix.(*matrix.Connector)
+	matrixConn := m.client.UserLogin.Bridge.Matrix
+	stateConn, ok := matrixConn.(bridgev2.MatrixConnectorWithArbitraryRoomState)
 	if !ok {
-		return nil, fmt.Errorf("matrix connector not available")
+		return nil, fmt.Errorf("matrix connector does not support state access")
 	}
 
 	var allEntries []MemoryIndexEntry
@@ -647,7 +647,7 @@ func (m *MemoryStore) loadMemoryIndex(ctx context.Context, portal *bridgev2.Port
 	// Load all index chunks (state key format: "0", "1", "2", etc.)
 	for chunkID := 0; ; chunkID++ {
 		stateKey := fmt.Sprintf("%d", chunkID)
-		evt, err := matrixConn.GetStateEvent(ctx, portal.MXID, MemoryIndexEventType, stateKey)
+		evt, err := stateConn.GetStateEvent(ctx, portal.MXID, MemoryIndexEventType, stateKey)
 		if err != nil || evt == nil {
 			break
 		}
@@ -764,12 +764,12 @@ func (m *MemoryStore) sendMemoryEvent(ctx context.Context, portal *bridgev2.Port
 }
 
 func (m *MemoryStore) fetchMemoryEvent(ctx context.Context, portal *bridgev2.Portal, eventID id.EventID) (string, error) {
-	matrixConn, ok := m.client.UserLogin.Bridge.Matrix.(*matrix.Connector)
-	if !ok {
-		return "", fmt.Errorf("matrix connector not available")
+	bot := m.client.UserLogin.Bridge.Bot
+	if bot == nil {
+		return "", fmt.Errorf("matrix bot not available")
 	}
 
-	evt, err := matrixConn.AS.BotClient().GetEvent(ctx, portal.MXID, eventID)
+	evt, err := bot.GetEvent(ctx, portal.MXID, eventID)
 	if err != nil {
 		return "", err
 	}
