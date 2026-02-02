@@ -32,14 +32,15 @@ func (p *exaProvider) Name() string {
 
 func (p *exaProvider) Fetch(ctx context.Context, req Request) (*Response, error) {
 	endpoint := strings.TrimRight(p.cfg.BaseURL, "/") + "/contents"
+	maxChars := req.MaxChars
+	if maxChars <= 0 {
+		maxChars = p.cfg.TextMaxCharacters
+	}
 	payload := map[string]any{
 		"urls": []string{req.URL},
 		"text": map[string]any{
-			"maxCharacters": req.MaxChars,
+			"maxCharacters": maxChars,
 		},
-	}
-	if !p.cfg.IncludeText {
-		payload["text"] = true
 	}
 
 	start := time.Now()
