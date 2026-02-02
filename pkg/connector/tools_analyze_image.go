@@ -53,11 +53,16 @@ func executeAnalyzeImage(ctx context.Context, args map[string]any) (string, erro
 		if err != nil {
 			return "", fmt.Errorf("failed to parse data URI: %w", err)
 		}
-	} else if strings.HasPrefix(imageURL, "mxc://") {
-		// Matrix media URL - use bridge's download function
-		imageB64, mimeType, err = btc.Client.downloadAndEncodeMedia(ctx, imageURL, nil, 20)
+	} else if strings.HasPrefix(imageURL, "mxc://") ||
+		strings.HasPrefix(imageURL, "file://") ||
+		strings.HasPrefix(imageURL, "/") ||
+		strings.HasPrefix(imageURL, "~") ||
+		strings.HasPrefix(imageURL, ".") {
+		// Matrix media URL or local file path
+		resolved := expandUserPath(imageURL)
+		imageB64, mimeType, err = btc.Client.downloadAndEncodeMedia(ctx, resolved, nil, 20)
 		if err != nil {
-			return "", fmt.Errorf("failed to download Matrix media: %w", err)
+			return "", fmt.Errorf("failed to load image: %w", err)
 		}
 	} else if strings.HasPrefix(imageURL, "http://") || strings.HasPrefix(imageURL, "https://") {
 		// HTTP(S) URL - fetch and encode
