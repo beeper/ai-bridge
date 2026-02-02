@@ -61,6 +61,8 @@ func toolDisplayTitle(toolName string) string {
 	switch toolName {
 	case "web_search":
 		return "Web Search"
+	case "web_search_openrouter":
+		return "Web Search (OpenRouter)"
 	case "image_generation":
 		return "Image Generation"
 	case ToolNameImageGenerate:
