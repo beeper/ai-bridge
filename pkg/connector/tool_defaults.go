@@ -86,3 +86,21 @@ func defaultMemoryForgetTool() mcp.Tool {
 		InputSchema: toolspec.MemoryForgetSchema(),
 	}
 }
+
+func defaultGravatarFetchTool() mcp.Tool {
+	return mcp.Tool{
+		Name:        toolspec.GravatarFetchName,
+		Description: toolspec.GravatarFetchDescription,
+		Annotations: &mcp.ToolAnnotations{Title: "Gravatar Fetch"},
+		InputSchema: toolspec.GravatarFetchSchema(),
+	}
+}
+
+func defaultGravatarSetTool() mcp.Tool {
+	return mcp.Tool{
+		Name:        toolspec.GravatarSetName,
+		Description: toolspec.GravatarSetDescription,
+		Annotations: &mcp.ToolAnnotations{Title: "Gravatar Set"},
+		InputSchema: toolspec.GravatarSetSchema(),
+	}
+}

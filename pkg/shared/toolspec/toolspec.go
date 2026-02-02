@@ -41,6 +41,11 @@ const (
 	MemoryStoreDescription  = "Store a new memory for later recall. Use this to remember important facts, user preferences, decisions, or context that should persist across conversations."
 	MemoryForgetName        = "memory_forget"
 	MemoryForgetDescription = "Remove a memory by its ID/path. Use this to delete outdated or incorrect information."
+
+	GravatarFetchName        = "gravatar_fetch"
+	GravatarFetchDescription = "Fetch a Gravatar profile for an email address."
+	GravatarSetName          = "gravatar_set"
+	GravatarSetDescription   = "Set the primary Gravatar profile for this login."
 )
 
 // CalculatorSchema returns the JSON schema for the calculator tool.
@@ -99,6 +104,33 @@ func WebFetchSchema() map[string]any {
 			},
 		},
 		"required": []string{"url"},
+	}
+}
+
+// GravatarFetchSchema returns the JSON schema for the Gravatar fetch tool.
+func GravatarFetchSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"email": map[string]any{
+				"type":        "string",
+				"description": "Email address to fetch from Gravatar. If omitted, uses the stored Gravatar email.",
+			},
+		},
+	}
+}
+
+// GravatarSetSchema returns the JSON schema for the Gravatar set tool.
+func GravatarSetSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"email": map[string]any{
+				"type":        "string",
+				"description": "Email address to set as the primary Gravatar profile.",
+			},
+		},
+		"required": []string{"email"},
 	}
 }
 
