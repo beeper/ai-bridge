@@ -283,6 +283,9 @@ func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
 	if toolName == ToolNameMessage && !hasAssignedAgent(meta) {
 		return false
 	}
+	if (toolName == toolspec.GravatarFetchName || toolName == toolspec.GravatarSetName) && !hasBossAgent(meta) {
+		return false
+	}
 
 	// 0. Check agent policy first (if room has an agent assigned)
 	if hasAssignedAgent(meta) {

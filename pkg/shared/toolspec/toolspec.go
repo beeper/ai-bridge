@@ -73,7 +73,25 @@ func WebSearchSchema() map[string]any {
 			},
 			"count": map[string]any{
 				"type":        "number",
-				"description": "Optional: max results to return (OpenClaw uses count)",
+				"description": "Optional: max results to return (1-10). OpenClaw uses count.",
+				"minimum":     1,
+				"maximum":     10,
+			},
+			"country": map[string]any{
+				"type":        "string",
+				"description": "Optional: 2-letter country code for region-specific results (e.g., 'US', 'DE', 'ALL').",
+			},
+			"search_lang": map[string]any{
+				"type":        "string",
+				"description": "Optional: ISO language code for search results (e.g., 'en', 'de').",
+			},
+			"ui_lang": map[string]any{
+				"type":        "string",
+				"description": "Optional: ISO language code for UI elements.",
+			},
+			"freshness": map[string]any{
+				"type":        "string",
+				"description": "Optional: time filter ('pd', 'pw', 'pm', 'py') or range 'YYYY-MM-DDtoYYYY-MM-DD'.",
 			},
 		},
 		"required": []string{"query"},
