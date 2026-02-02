@@ -824,81 +824,204 @@ func (oc *AIClient) handleFork(
 	))
 }
 
-// handleNewChat creates a new empty chat with a specified model
+// handleNewChat creates a new chat using the current room's agent/model,
+// or an explicitly provided agent/model.
 func (oc *AIClient) handleNewChat(
 	ctx context.Context,
 	_ *event.Event,
 	portal *bridgev2.Portal,
-	_ *PortalMetadata,
-	arg string,
+	meta *PortalMetadata,
+	args []string,
 ) {
 	runCtx := oc.backgroundContext(ctx)
 
-	beeperAgent := agents.GetBeeperAI()
-	if beeperAgent == nil {
-		oc.sendSystemNotice(runCtx, portal, "Default Beeper AI agent not found.")
+	const usage = "Usage: !ai new [agent <agent_id> | model <model_id>]"
+
+	targetType := "current"
+	targetID := ""
+
+	if len(args) >= 2 {
+		cmd := strings.ToLower(args[0])
+		if cmd != "agent" && cmd != "model" {
+			oc.sendSystemNotice(runCtx, portal, usage)
+			return
+		}
+		targetType = cmd
+		targetID = args[1]
+		if targetID == "" {
+			oc.sendSystemNotice(runCtx, portal, usage)
+			return
+		}
+		if len(args) > 2 {
+			oc.sendSystemNotice(runCtx, portal, usage)
+			return
+		}
+	} else if len(args) == 1 {
+		oc.sendSystemNotice(runCtx, portal, usage)
+		return
+	} else if len(args) > 1 {
+		oc.sendSystemNotice(runCtx, portal, usage)
 		return
 	}
 
-	// Determine model: use argument or Beeper AI agent's default
-	modelID := arg
-	if modelID == "" {
-		modelID = beeperAgent.Model.Primary
-	}
-	if modelID == "" {
-		modelID = oc.effectiveModel(nil)
-	}
-
-	// Validate model (fallback to provider default when using agent default)
-	valid, err := oc.validateModel(runCtx, modelID)
-	if (err != nil || !valid) && arg == "" {
-		fallbackModel := oc.effectiveModel(nil)
-		if fallbackModel != "" && fallbackModel != modelID {
-			if ok, _ := oc.validateModel(runCtx, fallbackModel); ok {
-				modelID = fallbackModel
-				valid = true
-				err = nil
+	switch targetType {
+	case "agent":
+		if targetID == "" {
+			oc.sendSystemNotice(runCtx, portal, usage)
+			return
+		}
+		store := NewAgentStoreAdapter(oc)
+		agent, err := store.GetAgentByID(runCtx, targetID)
+		if err != nil || agent == nil {
+			oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Agent not found: %s", targetID))
+			return
+		}
+		modelID, err := oc.resolveAgentModelForNewChat(runCtx, agent, "")
+		if err != nil {
+			oc.sendSystemNotice(runCtx, portal, err.Error())
+			return
+		}
+		oc.createAndOpenAgentChat(runCtx, portal, agent, modelID)
+		return
+	case "model":
+		if targetID == "" {
+			oc.sendSystemNotice(runCtx, portal, usage)
+			return
+		}
+		modelID, err := oc.resolveExplicitModelID(runCtx, targetID)
+		if err != nil {
+			oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Invalid model: %s", targetID))
+			return
+		}
+		oc.createAndOpenModelChat(runCtx, portal, modelID)
+		return
+	default:
+		// targetType == "current": use current room's agent/model only
+		if meta == nil {
+			oc.sendSystemNotice(runCtx, portal, "Failed to read current room settings.")
+			return
+		}
+		agentID := meta.AgentID
+		if agentID == "" {
+			agentID = meta.DefaultAgentID
+		}
+		if agentID != "" {
+			store := NewAgentStoreAdapter(oc)
+			agent, err := store.GetAgentByID(runCtx, agentID)
+			if err != nil || agent == nil {
+				oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Agent not found: %s", agentID))
+				return
 			}
+			modelID, err := oc.resolveAgentModelForNewChat(runCtx, agent, oc.effectiveModel(meta))
+			if err != nil {
+				oc.sendSystemNotice(runCtx, portal, err.Error())
+				return
+			}
+			oc.createAndOpenAgentChat(runCtx, portal, agent, modelID)
+			return
+		}
+
+		modelID := oc.effectiveModel(meta)
+		if modelID == "" {
+			oc.sendSystemNotice(runCtx, portal, "No model configured for this room.")
+			return
+		}
+		if ok, _ := oc.validateModel(runCtx, modelID); !ok {
+			oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Invalid model: %s", modelID))
+			return
+		}
+		oc.createAndOpenModelChat(runCtx, portal, modelID)
+		return
+	}
+}
+
+func (oc *AIClient) resolveExplicitModelID(ctx context.Context, modelID string) (string, error) {
+	resolved, ok, err := oc.resolveModelID(ctx, modelID)
+	if err != nil {
+		return "", err
+	}
+	if !ok || resolved == "" {
+		return "", fmt.Errorf("invalid model: %s", modelID)
+	}
+	return resolved, nil
+}
+
+func (oc *AIClient) resolveAgentModelForNewChat(ctx context.Context, agent *agents.AgentDefinition, preferredModel string) (string, error) {
+	if preferredModel != "" {
+		if ok, _ := oc.validateModel(ctx, preferredModel); ok {
+			return preferredModel, nil
 		}
 	}
-	if err != nil || !valid {
-		oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Invalid model: %s", modelID))
-		return
+
+	if agent != nil && agent.Model.Primary != "" {
+		if ok, _ := oc.validateModel(ctx, agent.Model.Primary); ok {
+			return agent.Model.Primary, nil
+		}
 	}
 
-	// Create new chat with default Beeper AI agent
-	chatResp, err := oc.createAgentChatWithModel(runCtx, beeperAgent, modelID)
+	fallback := oc.effectiveModel(nil)
+	if fallback != "" {
+		if ok, _ := oc.validateModel(ctx, fallback); ok {
+			return fallback, nil
+		}
+	}
+
+	if preferredModel != "" {
+		return "", fmt.Errorf("Invalid model: %s", preferredModel)
+	}
+	return "", fmt.Errorf("No valid model available")
+}
+
+func (oc *AIClient) createAndOpenAgentChat(ctx context.Context, portal *bridgev2.Portal, agent *agents.AgentDefinition, modelID string) {
+	chatResp, err := oc.createAgentChatWithModel(ctx, agent, modelID)
 	if err != nil {
-		oc.sendSystemNotice(runCtx, portal, "Failed to create chat: "+err.Error())
+		oc.sendSystemNotice(ctx, portal, "Failed to create chat: "+err.Error())
 		return
 	}
 
-	newPortal, err := oc.UserLogin.Bridge.GetPortalByKey(runCtx, chatResp.PortalKey)
+	newPortal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, chatResp.PortalKey)
 	if err != nil || newPortal == nil {
 		msg := "Failed to load new chat."
 		if err != nil {
 			msg = "Failed to load new chat: " + err.Error()
 		}
-		oc.sendSystemNotice(runCtx, portal, msg)
+		oc.sendSystemNotice(ctx, portal, msg)
 		return
 	}
 
 	chatInfo := chatResp.PortalInfo
-
-	// Create Matrix room
-	if err := newPortal.CreateMatrixRoom(runCtx, oc.UserLogin, chatInfo); err != nil {
-		oc.sendSystemNotice(runCtx, portal, "Failed to create room: "+err.Error())
+	if err := newPortal.CreateMatrixRoom(ctx, oc.UserLogin, chatInfo); err != nil {
+		oc.sendSystemNotice(ctx, portal, "Failed to create room: "+err.Error())
 		return
 	}
 
-	// Send welcome message (excluded from LLM history)
-	oc.sendWelcomeMessage(runCtx, newPortal)
+	oc.sendWelcomeMessage(ctx, newPortal)
 
-	// Send confirmation with link
 	roomLink := fmt.Sprintf("https://matrix.to/#/%s", newPortal.MXID)
-	oc.sendSystemNotice(runCtx, portal, fmt.Sprintf(
+	oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
 		"Created new %s chat.\nOpen: %s",
-		oc.agentModelDisplayName(beeperAgent.Name, modelID), roomLink,
+		oc.agentModelDisplayName(agent.Name, modelID), roomLink,
+	))
+}
+
+func (oc *AIClient) createAndOpenModelChat(ctx context.Context, portal *bridgev2.Portal, modelID string) {
+	newPortal, chatInfo, err := oc.createNewChatWithModel(ctx, modelID)
+	if err != nil {
+		oc.sendSystemNotice(ctx, portal, "Failed to create chat: "+err.Error())
+		return
+	}
+
+	if err := newPortal.CreateMatrixRoom(ctx, oc.UserLogin, chatInfo); err != nil {
+		oc.sendSystemNotice(ctx, portal, "Failed to create room: "+err.Error())
+		return
+	}
+
+	oc.sendWelcomeMessage(ctx, newPortal)
+
+	roomLink := fmt.Sprintf("https://matrix.to/#/%s", newPortal.MXID)
+	oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
+		"Created new %s chat.\nOpen: %s",
+		modelContactName(modelID, oc.findModelInfo(modelID)), roomLink,
 	))
 }
 

@@ -473,8 +473,8 @@ var CommandNew = &commands.FullHandler{
 	Name: "new",
 	Help: commands.HelpMeta{
 		Section:     HelpSectionAI,
-		Description: "Create a new chat with Beeper AI (optionally override model)",
-		Args:        "[_model_]",
+		Description: "Create a new chat using current agent/model (or specify agent/model)",
+		Args:        "[agent <agent_id> | model <model_id>]",
 	},
 	RequiresPortal: true,
 	RequiresLogin:  true,
@@ -486,13 +486,8 @@ func fnNew(ce *commands.Event) {
 		return
 	}
 
-	var arg string
-	if len(ce.Args) > 0 {
-		arg = ce.Args[0]
-	}
-
 	// Run async
-	go client.handleNewChat(ce.Ctx, nil, ce.Portal, meta, arg)
+	go client.handleNewChat(ce.Ctx, nil, ce.Portal, meta, ce.Args)
 }
 
 // CommandFork handles the !ai fork command

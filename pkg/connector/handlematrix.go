@@ -461,6 +461,10 @@ func (oc *AIClient) sendAckReaction(ctx context.Context, portal *bridgev2.Portal
 	if portal == nil || portal.MXID == "" || targetEventID == "" || emoji == "" {
 		return ""
 	}
+	if err := oc.ensureModelInRoom(ctx, portal); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to ensure ghost is in room for ack reaction")
+		return ""
+	}
 	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return ""
