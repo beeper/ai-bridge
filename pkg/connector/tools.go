@@ -1162,6 +1162,41 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 	if !ok {
 		return "", fmt.Errorf("missing or invalid 'query' argument")
 	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return "", fmt.Errorf("missing or invalid 'query' argument")
+	}
+
+	count := 5
+	if rawCount, ok := args["count"]; ok {
+		switch v := rawCount.(type) {
+		case float64:
+			count = int(v)
+		case int:
+			count = v
+		case int64:
+			count = int(v)
+		}
+	}
+	if count < 1 {
+		count = 1
+	} else if count > 10 {
+		count = 10
+	}
+
+	var ignoredOptions []string
+	if v, _ := args["country"].(string); strings.TrimSpace(v) != "" {
+		ignoredOptions = append(ignoredOptions, "country")
+	}
+	if v, _ := args["search_lang"].(string); strings.TrimSpace(v) != "" {
+		ignoredOptions = append(ignoredOptions, "search_lang")
+	}
+	if v, _ := args["ui_lang"].(string); strings.TrimSpace(v) != "" {
+		ignoredOptions = append(ignoredOptions, "ui_lang")
+	}
+	if v, _ := args["freshness"].(string); strings.TrimSpace(v) != "" {
+		ignoredOptions = append(ignoredOptions, "freshness")
+	}
 
 	result, err := websearch.DuckDuckGoSearch(ctx, query)
 	if err != nil {
@@ -1170,8 +1205,11 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 
 	// Build response from available data
 	var text strings.Builder
-	header := fmt.Sprintf("Search results for: %s\n\n", query)
+	header := fmt.Sprintf("Search results for: %s (count: %d)\n\n", query, count)
 	text.WriteString(header)
+	if len(ignoredOptions) > 0 {
+		text.WriteString(fmt.Sprintf("Note: options %s are not supported by this provider and were ignored.\n\n", strings.Join(ignoredOptions, ", ")))
+	}
 
 	if result.Answer != "" {
 		text.WriteString(fmt.Sprintf("Answer: %s\n", result.Answer))
@@ -1185,7 +1223,11 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 
 	if len(result.Results) > 0 {
 		text.WriteString("\nResults:\n")
-		for _, topic := range result.Results {
+		limit := count
+		if limit > len(result.Results) {
+			limit = len(result.Results)
+		}
+		for _, topic := range result.Results[:limit] {
 			title := topic.Title
 			if title == "" {
 				title = topic.Snippet
