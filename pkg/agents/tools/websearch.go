@@ -51,10 +51,25 @@ func executeWebSearch(ctx context.Context, args map[string]any) (*Result, error)
 	}
 
 	if len(response.Results) > 0 {
-		text.WriteString("\nRelated information:\n")
+		text.WriteString("\nResults:\n")
 		for _, result := range response.Results {
-			text.WriteString(fmt.Sprintf("- %s\n", result.Snippet))
+			title := result.Title
+			if title == "" {
+				title = result.Snippet
+			}
+			if title == "" {
+				continue
+			}
+			line := fmt.Sprintf("- %s", title)
+			if result.URL != "" {
+				line = fmt.Sprintf("%s (%s)", line, result.URL)
+			}
+			text.WriteString(line + "\n")
+			if result.Snippet != "" && result.Snippet != title {
+				text.WriteString(fmt.Sprintf("  %s\n", result.Snippet))
+			}
 		}
+		text.WriteString("\nTip: use web_fetch with a result URL for full text.\n")
 	}
 
 	if response.NoResults {

@@ -86,177 +86,58 @@ func BuiltinTools() []ToolDefinition {
 		},
 		{
 			Name:        ToolNameTTS,
-			Description: "Convert text to speech audio. Returns audio that will be sent as a voice message. Only available on Beeper and OpenAI providers.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"text": map[string]any{
-						"type":        "string",
-						"description": "The text to convert to speech (max 4096 characters)",
-					},
-					"voice": map[string]any{
-						"type":        "string",
-						"enum":        []string{"alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"},
-						"description": "The voice to use for speech synthesis (default: alloy)",
-					},
-				},
-				"required": []string{"text"},
-			},
-			Execute: executeTTS,
+			Description: toolspec.TTSDescription,
+			Parameters:  toolspec.TTSSchema(),
+			Execute:     executeTTS,
 		},
 		{
 			Name:        ToolNameWebFetch,
-			Description: "Fetch a web page and extract its readable content as text or markdown.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"url": map[string]any{
-						"type":        "string",
-						"description": "The URL to fetch (must be http or https)",
-					},
-					"max_chars": map[string]any{
-						"type":        "number",
-						"description": "Maximum characters to return (default: 50000)",
-					},
-				},
-				"required": []string{"url"},
-			},
-			Execute: executeWebFetch,
+			Description: toolspec.WebFetchDescription,
+			Parameters:  toolspec.WebFetchSchema(),
+			Execute:     executeWebFetch,
 		},
 		{
 			Name:        ToolNameImage,
-			Description: "Generate an image from a text prompt using AI image generation.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"prompt": map[string]any{
-						"type":        "string",
-						"description": "The text prompt describing the image to generate",
-					},
-					"model": map[string]any{
-						"type":        "string",
-						"description": "Image model to use (default: google/gemini-3-pro-image-preview)",
-					},
-				},
-				"required": []string{"prompt"},
-			},
-			Execute: executeImageGeneration,
+			Description: toolspec.ImageDescription,
+			Parameters:  toolspec.ImageSchema(),
+			Execute:     executeImageGeneration,
 		},
 		{
 			Name:        ToolNameAnalyzeImage,
-			Description: "Analyze an image with a custom prompt. Use this to examine image details, read text from images (OCR), identify objects, or get specific information about visual content.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"image_url": map[string]any{
-						"type":        "string",
-						"description": "URL of the image to analyze (http/https URL, mxc:// Matrix URL, or data: URI with base64)",
-					},
-					"prompt": map[string]any{
-						"type":        "string",
-						"description": "What to analyze or look for in the image (e.g., 'describe this image', 'read the text', 'what objects are visible')",
-					},
-				},
-				"required": []string{"image_url", "prompt"},
-			},
-			Execute: executeAnalyzeImage,
+			Description: toolspec.AnalyzeImageDescription,
+			Parameters:  toolspec.AnalyzeImageSchema(),
+			Execute:     executeAnalyzeImage,
 		},
 		{
 			Name:        ToolNameSessionStatus,
-			Description: "Get current session status including time, date, model info, and context usage. Use this tool when asked about current time, date, day of week, or what model is being used.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"set_model": map[string]any{
-						"type":        "string",
-						"description": "Optional: change the model for this session (e.g., 'gpt-4o', 'claude-sonnet-4-20250514')",
-					},
-				},
-			},
-			Execute: executeSessionStatus,
+			Description: toolspec.SessionStatusDescription,
+			Parameters:  toolspec.SessionStatusSchema(),
+			Execute:     executeSessionStatus,
 		},
 		// Memory tools (matching OpenClaw interface)
 		{
 			Name:        ToolNameMemorySearch,
-			Description: "Search your memory for relevant information. Use this to recall facts, preferences, decisions, or context from previous conversations.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query": map[string]any{
-						"type":        "string",
-						"description": "Search query to find relevant memories",
-					},
-					"maxResults": map[string]any{
-						"type":        "number",
-						"description": "Maximum number of results to return (default: 6)",
-					},
-					"minScore": map[string]any{
-						"type":        "number",
-						"description": "Minimum relevance score threshold (0-1, default: 0.35)",
-					},
-				},
-				"required": []string{"query"},
-			},
-			Execute: executeMemorySearch,
+			Description: toolspec.MemorySearchDescription,
+			Parameters:  toolspec.MemorySearchSchema(),
+			Execute:     executeMemorySearch,
 		},
 		{
 			Name:        ToolNameMemoryGet,
-			Description: "Retrieve the full content of a specific memory by its path.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"path": map[string]any{
-						"type":        "string",
-						"description": "The memory path (e.g., 'agent:myagent/fact:abc123' or 'global/fact:xyz789')",
-					},
-				},
-				"required": []string{"path"},
-			},
-			Execute: executeMemoryGet,
+			Description: toolspec.MemoryGetDescription,
+			Parameters:  toolspec.MemoryGetSchema(),
+			Execute:     executeMemoryGet,
 		},
 		{
 			Name:        ToolNameMemoryStore,
-			Description: "Store a new memory for later recall. Use this to remember important facts, user preferences, decisions, or context that should persist across conversations.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"content": map[string]any{
-						"type":        "string",
-						"description": "The content to store in memory",
-					},
-					"importance": map[string]any{
-						"type":        "number",
-						"description": "Importance score from 0 to 1 (default: 0.5). Higher values make the memory more likely to surface in searches.",
-					},
-					"category": map[string]any{
-						"type":        "string",
-						"enum":        []string{"preference", "decision", "entity", "fact", "other"},
-						"description": "Category of memory (default: 'other')",
-					},
-					"scope": map[string]any{
-						"type":        "string",
-						"enum":        []string{"agent", "global"},
-						"description": "Where to store the memory: 'agent' for this agent only, 'global' for all agents (default: 'agent')",
-					},
-				},
-				"required": []string{"content"},
-			},
-			Execute: executeMemoryStore,
+			Description: toolspec.MemoryStoreDescription,
+			Parameters:  toolspec.MemoryStoreSchema(),
+			Execute:     executeMemoryStore,
 		},
 		{
 			Name:        ToolNameMemoryForget,
-			Description: "Remove a memory by its ID/path. Use this to delete outdated or incorrect information.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "The memory ID or path to forget",
-					},
-				},
-				"required": []string{"id"},
-			},
-			Execute: executeMemoryForget,
+			Description: toolspec.MemoryForgetDescription,
+			Parameters:  toolspec.MemoryForgetSchema(),
+			Execute:     executeMemoryForget,
 		},
 	}
 }
@@ -265,26 +146,26 @@ func BuiltinTools() []ToolDefinition {
 const ToolNameMessage = toolspec.MessageName
 
 // ToolNameTTS is the name of the text-to-speech tool.
-const ToolNameTTS = "tts"
+const ToolNameTTS = toolspec.TTSName
 
 // ToolNameWebFetch is the name of the web fetch tool.
-const ToolNameWebFetch = "web_fetch"
+const ToolNameWebFetch = toolspec.WebFetchName
 
 // ToolNameImage is the name of the image generation tool.
-const ToolNameImage = "image"
+const ToolNameImage = toolspec.ImageName
 
 // ToolNameAnalyzeImage is the name of the image analysis tool.
-const ToolNameAnalyzeImage = "analyze_image"
+const ToolNameAnalyzeImage = toolspec.AnalyzeImageName
 
 // ToolNameSessionStatus is the name of the session status tool.
-const ToolNameSessionStatus = "session_status"
+const ToolNameSessionStatus = toolspec.SessionStatusName
 
 // Memory tool names (matching OpenClaw interface)
 const (
-	ToolNameMemorySearch = "memory_search"
-	ToolNameMemoryGet    = "memory_get"
-	ToolNameMemoryStore  = "memory_store"
-	ToolNameMemoryForget = "memory_forget"
+	ToolNameMemorySearch = toolspec.MemorySearchName
+	ToolNameMemoryGet    = toolspec.MemoryGetName
+	ToolNameMemoryStore  = toolspec.MemoryStoreName
+	ToolNameMemoryForget = toolspec.MemoryForgetName
 )
 
 // ImageResultPrefix is the prefix used to identify image results that need media sending.
@@ -1197,15 +1078,26 @@ func executeWebSearch(ctx context.Context, args map[string]any) (string, error) 
 		text.WriteString(fmt.Sprintf("Definition: %s\n", result.Definition))
 	}
 
-	// Add related topics if no direct answer
-	if result.Answer == "" && result.Summary == "" && len(result.Results) > 0 {
-		text.WriteString("Related information:\n")
+	if len(result.Results) > 0 {
+		text.WriteString("\nResults:\n")
 		for _, topic := range result.Results {
-			if topic.Snippet == "" {
+			title := topic.Title
+			if title == "" {
+				title = topic.Snippet
+			}
+			if title == "" {
 				continue
 			}
-			text.WriteString(fmt.Sprintf("- %s\n", topic.Snippet))
+			line := fmt.Sprintf("- %s", title)
+			if topic.URL != "" {
+				line = fmt.Sprintf("%s (%s)", line, topic.URL)
+			}
+			text.WriteString(line + "\n")
+			if topic.Snippet != "" && topic.Snippet != title {
+				text.WriteString(fmt.Sprintf("  %s\n", topic.Snippet))
+			}
 		}
+		text.WriteString("\nTip: use web_fetch with a result URL for full text.\n")
 	}
 
 	if text.Len() == len(header) {

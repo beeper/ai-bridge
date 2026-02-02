@@ -48,8 +48,20 @@ func getDefaultToolsConfig(_ string) ToolsConfig {
 	// Web search - uses DuckDuckGo
 	registerTool(&config, defaultWebSearchTool(), "builtin")
 
+	// Web fetch - fetch and extract page content
+	registerTool(&config, defaultWebFetchTool(), "builtin")
+
 	// Chat info tool (title/description)
 	registerTool(&config, defaultChatInfoTool(), "builtin")
+
+	// Session status tool
+	registerTool(&config, defaultSessionStatusTool(), "builtin")
+
+	// Memory tools
+	registerTool(&config, defaultMemorySearchTool(), "builtin")
+	registerTool(&config, defaultMemoryGetTool(), "builtin")
+	registerTool(&config, defaultMemoryStoreTool(), "builtin")
+	registerTool(&config, defaultMemoryForgetTool(), "builtin")
 
 	return config
 }
@@ -84,9 +96,39 @@ func ensureToolsConfig(meta *PortalMetadata, provider string) bool {
 		changed = true
 	}
 
+	// Ensure web fetch tool exists
+	if _, ok := meta.ToolsConfig.Tools[toolspec.WebFetchName]; !ok {
+		registerTool(&meta.ToolsConfig, defaultWebFetchTool(), "builtin")
+		changed = true
+	}
+
 	// Ensure chat info tool exists
 	if _, ok := meta.ToolsConfig.Tools[ToolNameSetChatInfo]; !ok {
 		registerTool(&meta.ToolsConfig, defaultChatInfoTool(), "builtin")
+		changed = true
+	}
+
+	// Ensure session status tool exists
+	if _, ok := meta.ToolsConfig.Tools[toolspec.SessionStatusName]; !ok {
+		registerTool(&meta.ToolsConfig, defaultSessionStatusTool(), "builtin")
+		changed = true
+	}
+
+	// Ensure memory tools exist
+	if _, ok := meta.ToolsConfig.Tools[toolspec.MemorySearchName]; !ok {
+		registerTool(&meta.ToolsConfig, defaultMemorySearchTool(), "builtin")
+		changed = true
+	}
+	if _, ok := meta.ToolsConfig.Tools[toolspec.MemoryGetName]; !ok {
+		registerTool(&meta.ToolsConfig, defaultMemoryGetTool(), "builtin")
+		changed = true
+	}
+	if _, ok := meta.ToolsConfig.Tools[toolspec.MemoryStoreName]; !ok {
+		registerTool(&meta.ToolsConfig, defaultMemoryStoreTool(), "builtin")
+		changed = true
+	}
+	if _, ok := meta.ToolsConfig.Tools[toolspec.MemoryForgetName]; !ok {
+		registerTool(&meta.ToolsConfig, defaultMemoryForgetTool(), "builtin")
 		changed = true
 	}
 
@@ -283,8 +325,20 @@ func normalizeToolName(name string) string {
 		return ToolNameCalculator
 	case "websearch", "search":
 		return ToolNameWebSearch
+	case "webfetch", "fetch":
+		return toolspec.WebFetchName
 	case "chatinfo", "chat_info", "setchatinfo":
 		return ToolNameSetChatInfo
+	case "session", "status", "sessionstatus":
+		return toolspec.SessionStatusName
+	case "memorysearch", "memsearch", "mem_search":
+		return toolspec.MemorySearchName
+	case "memoryget", "memget", "mem_get":
+		return toolspec.MemoryGetName
+	case "memorystore", "memstore", "mem_store":
+		return toolspec.MemoryStoreName
+	case "memoryforget", "memforget", "mem_forget":
+		return toolspec.MemoryForgetName
 	default:
 		return name
 	}

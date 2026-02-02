@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -636,7 +637,12 @@ func (oc *AIClient) setToolEnabled(ctx context.Context, portal *bridgev2.Portal,
 	// Check if tool exists
 	entry, ok := meta.ToolsConfig.Tools[normalizedName]
 	if !ok || entry == nil {
-		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Unknown tool: %s. Available: calculator, web_search, set_chat_info", toolName))
+		available := make([]string, 0, len(meta.ToolsConfig.Tools))
+		for name := range meta.ToolsConfig.Tools {
+			available = append(available, name)
+		}
+		sort.Strings(available)
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Unknown tool: %s. Available: %s", toolName, strings.Join(available, ", ")))
 		return
 	}
 

@@ -32,6 +32,7 @@ type AgentDefinition struct {
 	ReasoningEffort string       `json:"reasoning_effort,omitempty"` // none, low, medium, high
 	ResponseMode    ResponseMode `json:"response_mode,omitempty"`    // natural (OpenClaw-style), raw (pass-through)
 	Identity        *Identity    `json:"identity,omitempty"`         // custom identity for prompt
+	HeartbeatPrompt string       `json:"heartbeat_prompt,omitempty"` // prompt for heartbeat polling (clawdbot parity)
 
 	// Memory configuration (optional, uses defaults if nil)
 	Memory *MemoryConfig `json:"memory,omitempty"`

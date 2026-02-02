@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -78,8 +79,10 @@ func DuckDuckGoSearch(ctx context.Context, query string) (*SearchResponse, error
 		if topic.Text == "" {
 			continue
 		}
+		title, snippet := splitTopicText(topic.Text)
 		response.Results = append(response.Results, SearchResult{
-			Snippet: topic.Text,
+			Title:   title,
+			Snippet: snippet,
 			URL:     topic.FirstURL,
 		})
 		if i >= 2 { // Limit to 3 results.
@@ -93,4 +96,12 @@ func DuckDuckGoSearch(ctx context.Context, query string) (*SearchResponse, error
 	}
 
 	return response, nil
+}
+
+func splitTopicText(text string) (title string, snippet string) {
+	parts := strings.SplitN(text, " - ", 2)
+	if len(parts) == 2 {
+		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	}
+	return strings.TrimSpace(text), ""
 }

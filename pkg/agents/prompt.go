@@ -2,6 +2,7 @@ package agents
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -33,6 +34,8 @@ type SystemPromptParams struct {
 	IsSubagent       bool              // True if this is a spawned subagent
 	IsGroupChat      bool              // True if this is a group chat (multiple users)
 	ReasoningTagHint bool              // Add <think>...</think> format hints
+	HeartbeatPrompt  string            // Heartbeat matching prompt (empty = disabled)
+	HasSessionStatus bool              // True if session_status tool is available (for time hints)
 }
 
 // RoomInfo contains room display information visible to the LLM.
@@ -44,9 +47,11 @@ type RoomInfo struct {
 
 // RuntimeInfo contains runtime context for the LLM.
 type RuntimeInfo struct {
-	AgentID string // Current agent ID
-	Model   string // Current model being used
-	Channel string // Communication channel
+	AgentID      string   // Current agent ID
+	Model        string   // Current model being used
+	Channel      string   // Communication channel
+	Host         string   // Hostname (optional, for clawdbot parity)
+	Capabilities []string // Model capabilities (optional, e.g., "vision", "tools")
 }
 
 // SubagentPromptParams contains inputs for building a subagent system prompt.
@@ -162,6 +167,9 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 			buildSilentRepliesSection(),
 			buildReactionsSectionWithGuidance(params.ReactionGuidance),
 		)
+		if messaging := buildMessagingSection(params.Tools); messaging != "" {
+			sections = append(sections, messaging)
+		}
 		if toolsSection := buildToolsSectionFromList(params.Tools); toolsSection != "" {
 			sections = append(sections, toolsSection)
 		}
@@ -172,8 +180,12 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		if runtime := buildRuntimeSection(params.RuntimeInfo); runtime != "" {
 			sections = append(sections, runtime)
 		}
-		if dateSection := buildDateSectionFromParams(params.Date, params.Timezone); dateSection != "" {
+		if dateSection := buildDateSectionFromParams(params.Date, params.Timezone, params.HasSessionStatus); dateSection != "" {
 			sections = append(sections, dateSection)
+		}
+		// Heartbeat section (when enabled)
+		if heartbeat := buildHeartbeatSection(params.HeartbeatPrompt); heartbeat != "" {
+			sections = append(sections, heartbeat)
 		}
 		// Reasoning format hints for thinking models
 		if params.ReasoningTagHint {
@@ -308,6 +320,12 @@ func buildRuntimeSection(info *RuntimeInfo) string {
 	if info.Channel != "" {
 		parts = append(parts, fmt.Sprintf("channel=%s", info.Channel))
 	}
+	if info.Host != "" {
+		parts = append(parts, fmt.Sprintf("host=%s", info.Host))
+	}
+	if len(info.Capabilities) > 0 {
+		parts = append(parts, fmt.Sprintf("caps=%s", strings.Join(info.Capabilities, ",")))
+	}
 	return fmt.Sprintf("Runtime: %s", strings.Join(parts, " | "))
 }
 
@@ -361,6 +379,24 @@ Use the message tool with action=react.
 	return buildReactionsSection()
 }
 
+func buildMessagingSection(toolList []tools.ToolInfo) string {
+	for _, tool := range toolList {
+		if tool.Enabled && tool.Name == "message" {
+			return `## Messaging
+Use the message tool for channel actions:
+- action=react: Add emoji reaction (requires emoji; message_id optional, defaults to triggering message; set remove:true to remove)
+- action=reactions: List all reactions on a message (requires message_id)
+- action=read: Send read receipt (message_id optional, defaults to triggering message)
+- action=send: Send a message to the current chat
+- action=channel-info: Get room info (name, topic, member count)
+- action=member-info: Get user profile (requires user_id)
+
+If you use message(action=send) to deliver the user-visible reply, respond with ONLY: NO_REPLY`
+		}
+	}
+	return ""
+}
+
 // buildExtraPromptSection wraps the extra prompt with a contextual header.
 // Matches clawdbot's conditional headers based on context.
 func buildExtraPromptSection(extra string, isSubagent, isGroupChat bool) string {
@@ -411,14 +447,33 @@ Use plain human language for narration unless in a technical context.`
 
 // buildDateSectionFromParams creates the date/time section from params.
 // Uses clawdbot format with markdown header.
-func buildDateSectionFromParams(date time.Time, timezone string) string {
+func buildDateSectionFromParams(date time.Time, timezone string, hasSessionStatus bool) string {
 	if date.IsZero() {
 		date = time.Now()
 	}
 	if timezone == "" {
 		timezone = "UTC"
 	}
-	return fmt.Sprintf("## Current Date & Time\nTime zone: %s\nCurrent date: %s", timezone, date.Format("January 2, 2006"))
+	section := fmt.Sprintf("## Current Date & Time\nTime zone: %s\nCurrent date: %s", timezone, date.Format("January 2, 2006"))
+	if hasSessionStatus {
+		section += "\nIf you need the exact current time or day of week, use the session_status tool."
+	}
+	return section
+}
+
+// buildHeartbeatSection creates the heartbeat section when heartbeat polling is enabled.
+// Matches clawdbot's heartbeat prompt pattern.
+func buildHeartbeatSection(heartbeatPrompt string) string {
+	if heartbeatPrompt == "" {
+		return ""
+	}
+	return `## Heartbeats
+Heartbeat prompt: ` + heartbeatPrompt + `
+
+If you receive a heartbeat poll (a message matching the prompt above), and there is nothing that needs attention, reply exactly:
+` + HeartbeatToken + `
+
+This must be your ENTIRE message. No other text.`
 }
 
 // buildAgentListSection creates the agent list section for Boss agent.
@@ -506,6 +561,124 @@ func filterEmpty(sections []string) []string {
 		}
 	}
 	return result
+}
+
+// SilentReplyToken is the expected response when the agent has nothing to say.
+const SilentReplyToken = "NO_REPLY"
+
+// HeartbeatToken is the expected response for heartbeat polls.
+const HeartbeatToken = "HEARTBEAT_OK"
+
+// DefaultMaxAckChars is the max length for heartbeat acknowledgements (clawdbot uses 300).
+const DefaultMaxAckChars = 300
+
+// IsSilentReplyText checks if the given text is a silent reply token.
+// Handles edge cases like markdown wrapping: **NO_REPLY**, `NO_REPLY`, etc.
+// Matches clawdbot's isSilentReplyText from tokens.ts.
+func IsSilentReplyText(text string) bool {
+	return containsToken(text, SilentReplyToken)
+}
+
+// IsHeartbeatReplyText checks if the given text is a heartbeat reply token.
+// Handles edge cases like markdown wrapping: **HEARTBEAT_OK**, etc.
+func IsHeartbeatReplyText(text string) bool {
+	return containsToken(text, HeartbeatToken)
+}
+
+// containsToken checks if text contains token at start/end, handling markdown/HTML wrapping.
+// Based on clawdbot's isSilentReplyText pattern.
+func containsToken(text, token string) bool {
+	if text == "" {
+		return false
+	}
+	// Strip common markup wrappers
+	stripped := stripMarkup(text)
+	trimmed := strings.TrimSpace(stripped)
+
+	// Exact match after stripping
+	if trimmed == token {
+		return true
+	}
+
+	// Check if token appears at start or end (allowing punctuation/whitespace)
+	escaped := regexp.QuoteMeta(token)
+	// Prefix pattern: token at start, followed by end or non-word
+	prefixPattern := regexp.MustCompile(`(?i)^\s*` + escaped + `(?:$|\W)`)
+	if prefixPattern.MatchString(stripped) {
+		return true
+	}
+	// Suffix pattern: word boundary + token at end
+	suffixPattern := regexp.MustCompile(`(?i)\b` + escaped + `\W*$`)
+	return suffixPattern.MatchString(stripped)
+}
+
+// stripMarkup removes common HTML/markdown formatting that models might wrap tokens in.
+// Based on clawdbot's stripMarkup from heartbeat.ts.
+func stripMarkup(text string) string {
+	// Remove HTML tags
+	text = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(text, " ")
+	// Remove &nbsp;
+	text = strings.ReplaceAll(text, "&nbsp;", " ")
+	// Remove leading/trailing markdown emphasis: *, `, ~, _
+	text = regexp.MustCompile(`^[*\x60~_]+`).ReplaceAllString(text, "")
+	text = regexp.MustCompile(`[*\x60~_]+$`).ReplaceAllString(text, "")
+	return text
+}
+
+// StripHeartbeatToken removes the heartbeat token from text and returns the remaining content.
+// Returns (shouldSkip, strippedText, didStrip).
+// - shouldSkip: true if response should be suppressed (just the token, no real content)
+// - strippedText: text with token removed
+// - didStrip: true if token was found and removed
+// Based on clawdbot's stripHeartbeatToken from heartbeat.ts.
+func StripHeartbeatToken(text string, maxAckChars int) (shouldSkip bool, strippedText string, didStrip bool) {
+	if text == "" {
+		return true, "", false
+	}
+	if maxAckChars <= 0 {
+		maxAckChars = DefaultMaxAckChars
+	}
+
+	stripped := stripMarkup(text)
+	trimmed := strings.TrimSpace(stripped)
+
+	// Exact match - skip entirely
+	if trimmed == HeartbeatToken {
+		return true, "", true
+	}
+
+	// Try to remove token from start or end
+	escaped := regexp.QuoteMeta(HeartbeatToken)
+
+	// Remove from start
+	prefixPattern := regexp.MustCompile(`(?i)^\s*` + escaped + `\s*`)
+	if prefixPattern.MatchString(trimmed) {
+		remaining := strings.TrimSpace(prefixPattern.ReplaceAllString(trimmed, ""))
+		if remaining == "" {
+			return true, "", true
+		}
+		// Has content after token - check length
+		if len(remaining) <= maxAckChars {
+			return false, remaining, true
+		}
+		return false, remaining, true
+	}
+
+	// Remove from end
+	suffixPattern := regexp.MustCompile(`(?i)\s*` + escaped + `\s*$`)
+	if suffixPattern.MatchString(trimmed) {
+		remaining := strings.TrimSpace(suffixPattern.ReplaceAllString(trimmed, ""))
+		if remaining == "" {
+			return true, "", true
+		}
+		if len(remaining) <= maxAckChars {
+			return false, remaining, true
+		}
+		return false, remaining, true
+	}
+
+	// Token not found
+	return false, text, false
 }
 
 // SafetySection matches OpenClaw/clawdbot baseline safety block.

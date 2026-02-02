@@ -156,6 +156,14 @@ func TestIsSilentReplyText(t *testing.T) {
 		{"empty", "", false},
 		{"partial", "NO_REPL", false},
 		{"with newline suffix", "NO_REPLY\n", true},
+		// Markup handling (clawdbot parity)
+		{"bold markdown", "**NO_REPLY**", true},
+		{"italic markdown", "*NO_REPLY*", true},
+		{"backtick markdown", "`NO_REPLY`", true},
+		{"html bold", "<b>NO_REPLY</b>", true},
+		{"html italic", "<i>NO_REPLY</i>", true},
+		{"html span", "<span>NO_REPLY</span>", true},
+		{"mixed formatting", "**`NO_REPLY`**", true},
 	}
 
 	for _, tt := range tests {

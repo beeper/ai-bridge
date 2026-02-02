@@ -43,6 +43,13 @@ var (
 	// silentSuffixRE matches NO_REPLY at the end (word boundary)
 	// Matches OpenClaw's isSilentReplyText suffix check.
 	silentSuffixRE = regexp.MustCompile(`\b` + regexp.QuoteMeta(SilentReplyToken) + `\b\W*$`)
+
+	// markupRE matches HTML tags for stripping
+	markupTagRE = regexp.MustCompile(`<[^>]*>`)
+	// markupEmphasisPrefixRE matches markdown emphasis at start: *, `, ~, _
+	markupEmphasisPrefixRE = regexp.MustCompile("^[*`~_]+")
+	// markupEmphasisSuffixRE matches markdown emphasis at end
+	markupEmphasisSuffixRE = regexp.MustCompile("[*`~_]+$")
 )
 
 // ParseResponseDirectives extracts directives from LLM response text.
@@ -103,17 +110,41 @@ func ParseResponseDirectives(text string, currentEventID id.EventID) *ResponseDi
 }
 
 // isSilentReplyText checks if text starts or ends with the silent token.
+// Handles edge cases like markdown/HTML wrapping: **NO_REPLY**, <b>NO_REPLY</b>.
 // Matches clawdbot's isSilentReplyText behavior.
 func isSilentReplyText(text string) bool {
 	if text == "" {
 		return false
 	}
+
+	// Strip markup first (handles **NO_REPLY**, <b>NO_REPLY</b>, etc.)
+	stripped := stripMarkup(text)
+
+	// Exact match after stripping
+	if strings.TrimSpace(stripped) == SilentReplyToken {
+		return true
+	}
+
 	// Check prefix
-	if silentPrefixRE.MatchString(text) {
+	if silentPrefixRE.MatchString(stripped) {
 		return true
 	}
 	// Check suffix
-	return silentSuffixRE.MatchString(text)
+	return silentSuffixRE.MatchString(stripped)
+}
+
+// stripMarkup removes common HTML/markdown formatting that models might wrap tokens in.
+// Based on clawdbot's stripMarkup from heartbeat.ts.
+func stripMarkup(text string) string {
+	// Remove HTML tags
+	text = markupTagRE.ReplaceAllString(text, " ")
+	// Remove &nbsp;
+	text = strings.ReplaceAll(text, "&nbsp;", " ")
+	// Remove leading markdown emphasis
+	text = markupEmphasisPrefixRE.ReplaceAllString(text, "")
+	// Remove trailing markdown emphasis
+	text = markupEmphasisSuffixRE.ReplaceAllString(text, "")
+	return text
 }
 
 // normalizeDirectiveWhitespace cleans up whitespace after directive removal.
@@ -136,9 +167,11 @@ func normalizeDirectiveWhitespace(text string) string {
 // StripSilentToken removes the silent token from text if present.
 // Returns the cleaned text.
 func StripSilentToken(text string) string {
+	// Strip markup first to handle wrapped tokens
+	stripped := stripMarkup(text)
 	// Remove from start
-	text = silentPrefixRE.ReplaceAllString(text, "")
+	stripped = silentPrefixRE.ReplaceAllString(stripped, "")
 	// Remove from end
-	text = silentSuffixRE.ReplaceAllString(text, "")
-	return strings.TrimSpace(text)
+	stripped = silentSuffixRE.ReplaceAllString(stripped, "")
+	return strings.TrimSpace(stripped)
 }

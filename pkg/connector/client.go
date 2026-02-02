@@ -860,9 +860,28 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		}
 	}
 
+	// Build capabilities list from metadata
+	var caps []string
+	if meta.Capabilities.SupportsVision {
+		caps = append(caps, "vision")
+	}
+	if meta.Capabilities.SupportsToolCalling {
+		caps = append(caps, "tools")
+	}
+	if meta.Capabilities.SupportsReasoning {
+		caps = append(caps, "reasoning")
+	}
+	if meta.Capabilities.SupportsAudio {
+		caps = append(caps, "audio")
+	}
+	if meta.Capabilities.SupportsVideo {
+		caps = append(caps, "video")
+	}
+
 	params.RuntimeInfo = &agents.RuntimeInfo{
-		AgentID: agent.ID,
-		Model:   oc.effectiveModel(meta),
+		AgentID:      agent.ID,
+		Model:        oc.effectiveModel(meta),
+		Capabilities: caps,
 	}
 
 	// clawdbot-parity: populate context flags
@@ -880,6 +899,17 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 
 	// Reasoning hints for models that support it
 	params.ReasoningTagHint = meta.Capabilities.SupportsReasoning && meta.EmitThinking
+
+	// Heartbeat prompt from agent config (clawdbot parity)
+	params.HeartbeatPrompt = agent.HeartbeatPrompt
+
+	// Check if session_status tool is available for time hints
+	for _, tool := range availableTools {
+		if tool.Name == "session_status" && tool.Enabled && tool.Available {
+			params.HasSessionStatus = true
+			break
+		}
+	}
 
 	// For boss agent, include agent list
 	if agent.ID == "boss" {
