@@ -340,7 +340,7 @@ func (s *AgentStoreAdapter) GetAgentByID(ctx context.Context, agentID string) (*
 func (s *AgentStoreAdapter) GetAgentForRoom(ctx context.Context, meta *PortalMetadata) (*agents.AgentDefinition, error) {
 	agentID := resolveAgentID(meta)
 	if agentID == "" {
-		agentID = agents.DefaultAgentID // Default to Beeper AI
+		agentID = agents.DefaultAgentID // Default to Beep
 	}
 
 	return s.GetAgentByID(ctx, agentID)

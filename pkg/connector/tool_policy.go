@@ -76,6 +76,7 @@ func (oc *AIClient) isToolAvailable(meta *PortalMetadata, toolName string) (bool
 
 // isToolEnabled checks if a specific tool is enabled (policy + availability).
 func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
+	toolName = normalizeToolAlias(toolName)
 	switch toolName {
 	case ToolNameAnalyzeImage:
 		toolName = ToolNameImage

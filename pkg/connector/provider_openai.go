@@ -190,6 +190,10 @@ func (o *OpenAIProvider) buildResponsesParams(params GenerateParams) responses.R
 		})
 	}
 
+	if isOpenRouterBaseURL(o.baseURL) {
+		responsesParams.Tools = renameWebSearchToolParams(responsesParams.Tools)
+	}
+
 	// Ensure tool names are unique – Anthropic rejects duplicates
 	responsesParams.Tools = dedupeToolParams(responsesParams.Tools)
 
@@ -723,7 +727,26 @@ func MakeToolDedupMiddleware(log zerolog.Logger) option.Middleware {
 		req.ContentLength = int64(len(bodyBytes))
 		req.Header.Set("Content-Length", fmt.Sprintf("%d", len(bodyBytes)))
 
-		return next(req)
+		resp, err := next(req)
+		if err != nil || resp == nil || resp.Body == nil {
+			return resp, err
+		}
+
+		respBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			resp.Body = io.NopCloser(bytes.NewReader(respBytes))
+			return resp, err
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(respBytes))
+
+		if resp.StatusCode >= http.StatusBadRequest && bytes.Contains(respBytes, []byte("tools: Tool names must be unique")) {
+			log.Warn().
+				Str("request_json", string(bodyBytes)).
+				Str("response_json", string(respBytes)).
+				Msg("Responses request rejected: duplicate tools")
+		}
+
+		return resp, err
 	}
 }
 

@@ -965,6 +965,7 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		PromptMode:        agent.PromptMode,
 		HeartbeatPrompt:   agent.HeartbeatPrompt,
 	}
+	params.ContextFiles = oc.buildBootstrapContextFiles(ctx, agentID)
 	if meta != nil && strings.TrimSpace(meta.SubagentParentRoomID) != "" {
 		params.PromptMode = agents.PromptModeMinimal
 	}
@@ -1332,6 +1333,7 @@ func (oc *AIClient) buildBasePrompt(
 	meta *PortalMetadata,
 ) ([]openai.ChatCompletionMessageParamUnion, error) {
 	var prompt []openai.ChatCompletionMessageParamUnion
+	prompt = maybePrependSessionGreeting(ctx, portal, meta, prompt, oc.log)
 
 	// Add system prompt - agent prompt takes priority, then room override, then config default
 	systemPrompt := oc.effectiveAgentPrompt(ctx, portal, meta)
@@ -1862,8 +1864,9 @@ func (oc *AIClient) ensureAgentModelGhostDisplayName(ctx context.Context, agentI
 	displayName := oc.agentModelDisplayName(agentName, modelID)
 	if ghost.Name == "" || !ghost.NameSet || ghost.Name != displayName {
 		ghost.UpdateInfo(ctx, &bridgev2.UserInfo{
-			Name:  ptr.Ptr(displayName),
-			IsBot: ptr.Ptr(true),
+			Name:        ptr.Ptr(displayName),
+			IsBot:       ptr.Ptr(true),
+			Identifiers: modelContactIdentifiers(modelID, oc.findModelInfo(modelID)),
 		})
 		oc.log.Debug().Str("agent", agentID).Str("model", modelID).Str("name", displayName).Msg("Updated agent ghost display name")
 	}

@@ -87,6 +87,45 @@ func TestStoreWriteReadListDelete(t *testing.T) {
 	}
 }
 
+func TestStoreWriteIfMissing(t *testing.T) {
+	ctx := context.Background()
+	db := setupTextfsDB(t)
+	store := NewStore(db, "bridge", "login", "agent")
+
+	if _, err := store.Write(ctx, "AGENTS.md", "original"); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+	wrote, err := store.WriteIfMissing(ctx, "AGENTS.md", "new")
+	if err != nil {
+		t.Fatalf("write if missing: %v", err)
+	}
+	if wrote {
+		t.Fatal("expected WriteIfMissing to skip existing file")
+	}
+	entry, found, err := store.Read(ctx, "AGENTS.md")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !found || entry.Content != "original" {
+		t.Fatalf("unexpected content: %q", entry.Content)
+	}
+
+	wrote, err = store.WriteIfMissing(ctx, "SOUL.md", "persona")
+	if err != nil {
+		t.Fatalf("write if missing (new): %v", err)
+	}
+	if !wrote {
+		t.Fatal("expected WriteIfMissing to create new file")
+	}
+	entry, found, err = store.Read(ctx, "SOUL.md")
+	if err != nil {
+		t.Fatalf("read new: %v", err)
+	}
+	if !found || entry.Content != "persona" {
+		t.Fatalf("unexpected new content: %q", entry.Content)
+	}
+}
+
 func TestStoreDirEntries(t *testing.T) {
 	ctx := context.Background()
 	db := setupTextfsDB(t)

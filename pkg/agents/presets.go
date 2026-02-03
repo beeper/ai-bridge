@@ -17,7 +17,7 @@ const (
 )
 
 // PresetAgents contains the default agent definitions.
-// Includes Beeper AI (default), Playground (sandbox), and Boss (meta).
+// Includes Beep (default), Playground (sandbox), and Boss (meta).
 var PresetAgents = []*AgentDefinition{
 	BeeperAIAgent,
 	BeeperSearchAgent,

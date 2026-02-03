@@ -7,20 +7,11 @@ import (
 )
 
 func resolvePromptWorkspaceDir() string {
-	cwd, err := os.Getwd()
-	if err == nil && strings.TrimSpace(cwd) != "" {
-		return cwd
-	}
 	return "/"
 }
 
 func resolvePromptRepoRoot(workspaceDir string) string {
-	workspaceDir = strings.TrimSpace(workspaceDir)
-	if workspaceDir == "" {
-		return ""
-	}
-	root := findGitRoot(workspaceDir)
-	return root
+	return ""
 }
 
 func findGitRoot(startDir string) string {

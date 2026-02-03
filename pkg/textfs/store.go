@@ -85,6 +85,37 @@ func (s *Store) Write(ctx context.Context, relPath, content string) (*FileEntry,
 	}, nil
 }
 
+// WriteIfMissing writes a file only if it does not already exist.
+// Returns true if a new entry was created.
+func (s *Store) WriteIfMissing(ctx context.Context, relPath, content string) (bool, error) {
+	path, err := NormalizePath(relPath)
+	if err != nil {
+		return false, err
+	}
+	hash := hashContent(content)
+	updatedAt := time.Now().UnixMilli()
+	source := ClassifySource(path)
+	result, err := s.db.Exec(ctx,
+		`INSERT INTO ai_memory_files
+           (bridge_id, login_id, agent_id, path, source, content, hash, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (bridge_id, login_id, agent_id, path)
+         DO NOTHING`,
+		s.bridgeID, s.loginID, s.agentID, path, source, content, hash, updatedAt,
+	)
+	if err != nil {
+		return false, err
+	}
+	if result == nil {
+		return false, nil
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, nil
+	}
+	return rows > 0, nil
+}
+
 func (s *Store) Delete(ctx context.Context, relPath string) error {
 	path, err := NormalizePath(relPath)
 	if err != nil {

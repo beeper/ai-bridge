@@ -153,11 +153,18 @@ func executeMessageMemberInfo(ctx context.Context, args map[string]any, btc *Bri
 		return "", fmt.Errorf("user profile not available")
 	}
 
-	return jsonActionResult("member-info", map[string]any{
+	result := map[string]any{
 		"user_id":      profile.UserID,
 		"display_name": profile.DisplayName,
 		"avatar_url":   profile.AvatarURL,
-	})
+	}
+	if _, modelID, ok := parseAgentModelFromGhostID(string(userID)); ok {
+		result["com.beeper.ai.model_id"] = modelID
+	} else if modelID := parseModelFromGhostID(string(userID)); modelID != "" {
+		result["com.beeper.ai.model_id"] = modelID
+	}
+
+	return jsonActionResult("member-info", result)
 }
 
 // executeMessageReactions handles the reactions action - lists reactions on a message.

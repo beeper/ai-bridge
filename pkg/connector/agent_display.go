@@ -1,26 +1,11 @@
 package connector
 
-import (
-	"fmt"
+import "github.com/beeper/ai-bridge/pkg/agents"
 
-	"github.com/beeper/ai-bridge/pkg/agents"
-)
-
-// agentModelDisplayName returns a display name for an agent+model combination.
-// Example: "Beeper AI (Claude Sonnet)"
+// agentModelDisplayName returns a display name for an agent.
+// Example: "Beep"
 func (oc *AIClient) agentModelDisplayName(agentName, modelID string) string {
-	modelInfo := oc.findModelInfo(modelID)
-	modelName := modelID
-	if modelInfo != nil && modelInfo.Name != "" {
-		modelName = modelInfo.Name
-	} else {
-		// Try to extract a readable name from the model ID
-		_, actualModel := ParseModelPrefix(modelID)
-		if actualModel != "" {
-			modelName = actualModel
-		}
-	}
-	return fmt.Sprintf("%s (%s)", agentName, modelName)
+	return agentName
 }
 
 // agentDefaultModel returns the default model for an agent.

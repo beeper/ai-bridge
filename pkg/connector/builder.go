@@ -121,13 +121,15 @@ func (oc *AIClient) createBuilderRoom(ctx context.Context) (*bridgev2.Portal, *b
 			SenderLogin: oc.UserLogin.ID,
 		}
 		bossMember.UserInfo = &bridgev2.UserInfo{
-			Name:  ptr.Ptr(bossDisplayName),
-			IsBot: ptr.Ptr(true),
+			Name:        ptr.Ptr(bossDisplayName),
+			IsBot:       ptr.Ptr(true),
+			Identifiers: modelContactIdentifiers(modelID, oc.findModelInfo(modelID)),
 		}
 		bossMember.MemberEventExtra = map[string]any{
-			"displayname":         bossDisplayName,
-			"com.beeper.ai.model": modelID,
-			"com.beeper.ai.agent": bossAgent.ID,
+			"displayname":            bossDisplayName,
+			"com.beeper.ai.model":    modelID,
+			"com.beeper.ai.model_id": modelID,
+			"com.beeper.ai.agent":    bossAgent.ID,
 		}
 		members.MemberMap = bridgev2.ChatMemberMap{
 			humanID:     humanMember,

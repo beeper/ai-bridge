@@ -120,14 +120,16 @@ type PortalMetadata struct {
 	LastRoomStateSync   int64             `json:"last_room_state_sync,omitempty"` // Track when we've synced room state
 	PDFConfig           *PDFConfig        `json:"pdf_config,omitempty"`           // Per-room PDF processing configuration
 
-	ConversationMode           string `json:"conversation_mode,omitempty"`
-	LastResponseID             string `json:"last_response_id,omitempty"`
-	EmitThinking               bool   `json:"emit_thinking,omitempty"`
-	EmitToolArgs               bool   `json:"emit_tool_args,omitempty"`
-	CompactionCount            int    `json:"compaction_count,omitempty"`
-	MemoryFlushAt              int64  `json:"memory_flush_at,omitempty"`
-	MemoryFlushCompactionCount int    `json:"memory_flush_compaction_count,omitempty"`
-	MemoryBootstrapAt          int64  `json:"memory_bootstrap_at,omitempty"`
+	ConversationMode           string           `json:"conversation_mode,omitempty"`
+	LastResponseID             string           `json:"last_response_id,omitempty"`
+	EmitThinking               bool             `json:"emit_thinking,omitempty"`
+	EmitToolArgs               bool             `json:"emit_tool_args,omitempty"`
+	CompactionCount            int              `json:"compaction_count,omitempty"`
+	MemoryFlushAt              int64            `json:"memory_flush_at,omitempty"`
+	MemoryFlushCompactionCount int              `json:"memory_flush_compaction_count,omitempty"`
+	MemoryBootstrapAt          int64            `json:"memory_bootstrap_at,omitempty"`
+	SessionBootstrappedAt      int64            `json:"session_bootstrapped_at,omitempty"`
+	SessionBootstrapByAgent    map[string]int64 `json:"session_bootstrap_by_agent,omitempty"`
 
 	// Agent-related metadata
 	DefaultAgentID       string `json:"default_agent_id,omitempty"`        // Agent assigned to this room (legacy name, same as AgentID)

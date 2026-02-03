@@ -1,0 +1,110 @@
+package connector
+
+import (
+	"context"
+	"path"
+	"strings"
+	"time"
+
+	"github.com/beeper/ai-bridge/pkg/agents"
+	"github.com/beeper/ai-bridge/pkg/textfs"
+)
+
+func (oc *AIClient) buildBootstrapContextFiles(ctx context.Context, agentID string) []agents.EmbeddedContextFile {
+	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.DB == nil {
+		return nil
+	}
+	if strings.TrimSpace(agentID) == "" {
+		agentID = "default"
+	}
+	store := textfs.NewStore(
+		oc.UserLogin.Bridge.DB.Database,
+		string(oc.UserLogin.Bridge.DB.BridgeID),
+		string(oc.UserLogin.ID),
+		agentID,
+	)
+
+	if _, err := agents.EnsureBootstrapFiles(ctx, store); err != nil {
+		oc.log.Warn().Err(err).Msg("failed to ensure workspace bootstrap files")
+	}
+
+	files, err := agents.LoadBootstrapFiles(ctx, store)
+	if err != nil {
+		oc.log.Warn().Err(err).Msg("failed to load workspace bootstrap files")
+		return nil
+	}
+
+	maxChars := agents.DefaultBootstrapMaxChars
+	if oc.connector != nil && oc.connector.Config.Agents != nil && oc.connector.Config.Agents.Defaults != nil {
+		if oc.connector.Config.Agents.Defaults.BootstrapMaxChars > 0 {
+			maxChars = oc.connector.Config.Agents.Defaults.BootstrapMaxChars
+		}
+	}
+
+	warn := func(message string) {
+		oc.log.Warn().Msg(message)
+	}
+	contextFiles := agents.BuildBootstrapContextFiles(files, maxChars, warn)
+	return oc.applySoulEvilToContextFiles(ctx, store, contextFiles, maxChars)
+}
+
+func (oc *AIClient) applySoulEvilToContextFiles(
+	ctx context.Context,
+	store *textfs.Store,
+	files []agents.EmbeddedContextFile,
+	maxChars int,
+) []agents.EmbeddedContextFile {
+	if oc == nil || oc.connector == nil || oc.connector.Config.Agents == nil || oc.connector.Config.Agents.Defaults == nil {
+		return files
+	}
+	config := oc.connector.Config.Agents.Defaults.SoulEvil
+	if config == nil {
+		return files
+	}
+	userTimezone, _ := oc.resolveUserTimezone()
+	decision := agents.DecideSoulEvil(agents.SoulEvilCheckParams{
+		Config:       config,
+		UserTimezone: userTimezone,
+		Now:          time.Now(),
+	})
+	if !decision.UseEvil {
+		return files
+	}
+
+	entry, found, err := store.Read(ctx, decision.FileName)
+	if err != nil || !found {
+		oc.log.Warn().Msgf("SOUL_EVIL active (%s) but file missing: %s", decision.Reason, decision.FileName)
+		return files
+	}
+	if strings.TrimSpace(entry.Content) == "" {
+		oc.log.Warn().Msgf("SOUL_EVIL active (%s) but file empty: %s", decision.Reason, decision.FileName)
+		return files
+	}
+
+	soulIndex := findSoulFileIndex(files)
+	if soulIndex == -1 {
+		oc.log.Warn().Msgf("SOUL_EVIL active (%s) but SOUL.md not in bootstrap files", decision.Reason)
+		return files
+	}
+
+	trimmed := agents.TrimBootstrapContent(entry.Content, agents.DefaultSoulFilename, maxChars)
+	if strings.TrimSpace(trimmed.Content) == "" {
+		oc.log.Warn().Msgf("SOUL_EVIL active (%s) but trimmed content empty", decision.Reason)
+		return files
+	}
+
+	files[soulIndex].Content = trimmed.Content
+	oc.log.Debug().Msgf("SOUL_EVIL active (%s) using %s", decision.Reason, decision.FileName)
+	return files
+}
+
+func findSoulFileIndex(files []agents.EmbeddedContextFile) int {
+	for idx, file := range files {
+		normalized := strings.ReplaceAll(strings.TrimSpace(file.Path), "\\", "/")
+		base := path.Base(normalized)
+		if strings.EqualFold(base, agents.DefaultSoulFilename) {
+			return idx
+		}
+	}
+	return -1
+}
