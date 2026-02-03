@@ -197,7 +197,7 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 		}
 
 		// Add session tools for non-boss rooms
-		if !oc.isBuilderRoom(portal) {
+		if !hasBossAgent(meta) && !oc.isBuilderRoom(portal) {
 			var enabledSessions []*tools.Tool
 			for _, tool := range tools.SessionTools() {
 				if oc.isToolEnabled(meta, tool.Name) {
@@ -212,12 +212,17 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 		}
 	}
 
-	// Add boss tools if this is the Builder room
-	if oc.isBuilderRoom(portal) {
-		bossTools := tools.BossTools()
+	// Add boss tools if this is a Boss room
+	if hasBossAgent(meta) || oc.isBuilderRoom(portal) {
+		var enabledBoss []*tools.Tool
+		for _, tool := range tools.BossTools() {
+			if oc.isToolEnabled(meta, tool.Name) {
+				enabledBoss = append(enabledBoss, tool)
+			}
+		}
 		strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
-		params.Tools = append(params.Tools, bossToolsToOpenAI(bossTools, strictMode, &oc.log)...)
-		log.Debug().Int("count", len(bossTools)).Msg("Added boss agent tools")
+		params.Tools = append(params.Tools, bossToolsToOpenAI(enabledBoss, strictMode, &oc.log)...)
+		log.Debug().Int("count", len(enabledBoss)).Msg("Added boss agent tools")
 	}
 
 	return params
@@ -1234,14 +1239,19 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 
 	// Add boss tools for Boss agent rooms (needed for multi-turn tool use)
 	agentID := resolveAgentID(meta)
-	if agents.IsBossAgent(agentID) {
-		bossTools := tools.BossTools()
+	if hasBossAgent(meta) || agents.IsBossAgent(agentID) {
+		var enabledBoss []*tools.Tool
+		for _, tool := range tools.BossTools() {
+			if oc.isToolEnabled(meta, tool.Name) {
+				enabledBoss = append(enabledBoss, tool)
+			}
+		}
 		strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
-		params.Tools = append(params.Tools, bossToolsToOpenAI(bossTools, strictMode, &oc.log)...)
+		params.Tools = append(params.Tools, bossToolsToOpenAI(enabledBoss, strictMode, &oc.log)...)
 	}
 
 	// Add session tools for non-boss rooms (needed for multi-turn tool use)
-	if meta.Capabilities.SupportsToolCalling && !agents.IsBossAgent(agentID) {
+	if meta.Capabilities.SupportsToolCalling && !(hasBossAgent(meta) || agents.IsBossAgent(agentID)) {
 		var enabledSessions []*tools.Tool
 		for _, tool := range tools.SessionTools() {
 			if oc.isToolEnabled(meta, tool.Name) {
@@ -1320,9 +1330,14 @@ func (oc *AIClient) streamChatCompletions(
 				params.Tools = append(params.Tools, bossToolsToChatTools(enabledSessions, &oc.log)...)
 			}
 		}
-		if oc.isBuilderRoom(portal) {
-			bossTools := tools.BossTools()
-			params.Tools = append(params.Tools, bossToolsToChatTools(bossTools, &oc.log)...)
+		if hasBossAgent(meta) || oc.isBuilderRoom(portal) {
+			var enabledBoss []*tools.Tool
+			for _, tool := range tools.BossTools() {
+				if oc.isToolEnabled(meta, tool.Name) {
+					enabledBoss = append(enabledBoss, tool)
+				}
+			}
+			params.Tools = append(params.Tools, bossToolsToChatTools(enabledBoss, &oc.log)...)
 		}
 		params.Tools = dedupeChatToolParams(params.Tools)
 	}
