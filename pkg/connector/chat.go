@@ -71,6 +71,10 @@ func getDefaultToolsConfig(_ string) ToolsConfig {
 	registerTool(&config, defaultMemoryStoreTool(), "builtin")
 	registerTool(&config, defaultMemoryForgetTool(), "builtin")
 
+	// Gravatar tools (filtered later based on boss agent presence)
+	registerTool(&config, defaultGravatarFetchTool(), "builtin")
+	registerTool(&config, defaultGravatarSetTool(), "builtin")
+
 	return config
 }
 
@@ -347,7 +351,7 @@ func (oc *AIClient) canUseImageGeneration() bool {
 		return false
 	}
 	switch loginMeta.Provider {
-	case ProviderOpenAI, ProviderOpenRouter, ProviderBeeper, ProviderCustom:
+	case ProviderOpenAI, ProviderOpenRouter, ProviderBeeper:
 		return true
 	default:
 		return false

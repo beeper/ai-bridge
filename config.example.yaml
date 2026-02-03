@@ -41,8 +41,8 @@ encryption:
 network:
   # Beeper AI credentials for automatic login (optional)
   beeper:
-    base_url: ""  # Required if using Beeper provider
-    token: ""
+    base_url: ""  # Optional. If empty, login uses selected Beeper domain.
+    token: ""     # Beeper AI key (requires Beeper Plus)
 
   # Per-provider default models
   providers:
@@ -52,8 +52,16 @@ network:
       # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
       default_pdf_engine: "mistral-ocr"
     openai:
+      # Optional. If set, overrides login-provided key.
+      api_key: ""
+      # Optional. Defaults to https://api.openai.com/v1
+      base_url: "https://api.openai.com/v1"
       default_model: "openai/gpt-5.2"
     openrouter:
+      # Optional. If set, overrides login-provided key.
+      api_key: ""
+      # Optional. Defaults to https://openrouter.ai/api/v1
+      base_url: "https://openrouter.ai/api/v1"
       default_model: "anthropic/claude-opus-4.5"
       # PDF processing engine for OpenRouter's file-parser plugin.
       # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native

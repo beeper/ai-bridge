@@ -19,6 +19,7 @@ type DedupeCache struct {
 	entries map[string]int64 // key → timestamp (unix ms)
 	ttl     time.Duration
 	maxSize int
+	lastTS  int64
 }
 
 // NewDedupeCache creates a new deduplication cache with the given TTL and max size.
@@ -46,7 +47,7 @@ func (c *DedupeCache) Check(key string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	now := time.Now().UnixNano()
+	now := c.nextTimestamp()
 	cutoff := now - c.ttl.Nanoseconds()
 
 	// Check if exists and not expired
@@ -59,6 +60,15 @@ func (c *DedupeCache) Check(key string) bool {
 	c.touch(key, now)
 	c.prune(cutoff)
 	return false // First time
+}
+
+func (c *DedupeCache) nextTimestamp() int64 {
+	now := time.Now().UnixNano()
+	if now <= c.lastTS {
+		now = c.lastTS + 1
+	}
+	c.lastTS = now
+	return now
 }
 
 // touch updates the timestamp for a key, moving it to the end of the LRU order.

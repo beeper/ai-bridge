@@ -97,9 +97,9 @@ func NewContextGuard(sessionID string, config ContextGuardConfig) *ContextGuard 
 
 // RecordMessage records a new message and its estimated token count.
 // Returns any warnings triggered by this message.
+// Warning callbacks are invoked after releasing the lock.
 func (g *ContextGuard) RecordMessage(tokenEstimate int) []ContextWarning {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 
 	g.messageCount++
 	g.tokenEstimate += tokenEstimate
@@ -117,7 +117,18 @@ func (g *ContextGuard) RecordMessage(tokenEstimate int) []ContextWarning {
 	}
 	g.turnTimestamps = newTimestamps
 
-	return g.checkLimitsLocked()
+	warnings := g.checkLimitsLocked()
+	onWarning := g.onWarning
+	g.mu.Unlock()
+
+	// Invoke callbacks outside the lock to avoid deadlocks.
+	if onWarning != nil {
+		for _, w := range warnings {
+			onWarning(w)
+		}
+	}
+
+	return warnings
 }
 
 // checkLimitsLocked checks all limits and returns any warnings.
@@ -180,13 +191,6 @@ func (g *ContextGuard) checkLimitsLocked() []ContextWarning {
 			SessionID: g.sessionID,
 		}
 		warnings = append(warnings, w)
-	}
-
-	// Call warning callback if set
-	if g.onWarning != nil {
-		for _, w := range warnings {
-			g.onWarning(w)
-		}
 	}
 
 	return warnings

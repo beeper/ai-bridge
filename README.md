@@ -13,6 +13,16 @@ Currently best works with alpha versions of Beeper Desktop. Beeper Plus users ca
 - **Per-room settings** for model, temperature, system prompt, context limits, and tools
 - **User-managed keys** via login flow, plus optional Beeper-managed credentials
 
+## Login flows
+
+There are two login flows:
+- **Beeper**: Select a Beeper domain (or set `network.beeper.base_url` in config) and provide a **Beeper AI key** unless it is already in `config.yaml`.
+- **Custom**: Provide API keys for the services you want to use (OpenRouter/OpenAI plus optional search/fetch providers). Base URLs are configured only in `config.yaml`.
+
+Base URL overrides live in config:
+- `network.providers.openai.base_url`
+- `network.providers.openrouter.base_url`
+
 ## When to use what
 
 Common to all methods:
