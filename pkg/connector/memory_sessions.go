@@ -48,7 +48,7 @@ func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sess
 		if !ok || meta == nil {
 			continue
 		}
-		if meta.IsAgentDataRoom || meta.IsGlobalMemoryRoom {
+		if meta.IsAgentDataRoom || meta.IsGlobalMemoryRoom || meta.IsCronRoom {
 			continue
 		}
 		if resolveAgentID(meta) != m.agentID {

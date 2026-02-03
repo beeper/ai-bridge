@@ -1,0 +1,100 @@
+package cron
+
+import (
+	"fmt"
+	"strings"
+)
+
+// normalizeRequiredName trims and validates a job name.
+func normalizeRequiredName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return "", fmt.Errorf("cron job name is required")
+	}
+	return name, nil
+}
+
+func normalizeOptionalText(raw *string) string {
+	if raw == nil {
+		return ""
+	}
+	trimmed := strings.TrimSpace(*raw)
+	return trimmed
+}
+
+func normalizeOptionalAgentID(raw *string) string {
+	if raw == nil {
+		return ""
+	}
+	trimmed := strings.TrimSpace(*raw)
+	return trimmed
+}
+
+func truncateText(input string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	if len(input) <= maxLen {
+		return input
+	}
+	if maxLen == 1 {
+		return "…"
+	}
+	return strings.TrimSpace(input[:maxLen-1]) + "…"
+}
+
+// inferLegacyName mirrors OpenClaw's fallback naming.
+func inferLegacyName(job *CronJobCreate) string {
+	if job == nil {
+		return "Cron job"
+	}
+	text := ""
+	switch strings.ToLower(job.Payload.Kind) {
+	case "systemevent":
+		text = job.Payload.Text
+	case "agentturn":
+		text = job.Payload.Message
+	}
+	firstLine := ""
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			firstLine = line
+			break
+		}
+	}
+	if firstLine != "" {
+		return truncateText(firstLine, 60)
+	}
+	switch strings.ToLower(job.Schedule.Kind) {
+	case "cron":
+		if strings.TrimSpace(job.Schedule.Expr) != "" {
+			return "Cron: " + truncateText(strings.TrimSpace(job.Schedule.Expr), 52)
+		}
+	case "every":
+		if job.Schedule.EveryMs > 0 {
+			return fmt.Sprintf("Every: %dms", job.Schedule.EveryMs)
+		}
+	case "at":
+		return "One-shot"
+	}
+	return "Cron job"
+}
+
+func normalizePayloadToSystemText(payload CronPayload) string {
+	if strings.EqualFold(payload.Kind, "systemEvent") {
+		return strings.TrimSpace(payload.Text)
+	}
+	return strings.TrimSpace(payload.Message)
+}
+
+func resolveJobPayloadTextForMain(job CronJob) (string, string) {
+	if strings.EqualFold(job.Payload.Kind, "systemEvent") {
+		text := strings.TrimSpace(job.Payload.Text)
+		if text == "" {
+			return "", "main job requires non-empty systemEvent text"
+		}
+		return text, ""
+	}
+	return "", `main job requires payload.kind="systemEvent"`
+}

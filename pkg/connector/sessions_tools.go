@@ -64,7 +64,7 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 			continue
 		}
 		meta := portalMeta(candidate)
-		if meta != nil && (meta.IsAgentDataRoom || meta.IsGlobalMemoryRoom) {
+		if meta != nil && (meta.IsAgentDataRoom || meta.IsGlobalMemoryRoom || meta.IsCronRoom) {
 			continue
 		}
 		kind := resolveSessionKind(currentRoomID, candidate, meta)
@@ -264,6 +264,9 @@ func resolveSessionKind(current id.RoomID, portal *bridgev2.Portal, meta *Portal
 		return "main"
 	}
 	if meta != nil {
+		if meta.IsCronRoom {
+			return "cron"
+		}
 		if strings.TrimSpace(meta.SubagentParentRoomID) != "" {
 			return "other"
 		}

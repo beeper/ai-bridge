@@ -22,6 +22,8 @@ type Config struct {
 	Tools      ToolProvidersConfig                `yaml:"tools"`
 	ToolPolicy *toolpolicy.GlobalToolPolicyConfig `yaml:"tool_policy"`
 	Agents     *AgentsConfig                      `yaml:"agents"`
+	Channels   *ChannelsConfig                    `yaml:"channels"`
+	Cron       *CronConfig                        `yaml:"cron"`
 
 	// Global settings
 	DefaultSystemPrompt string              `yaml:"default_system_prompt"`
@@ -41,7 +43,8 @@ type Config struct {
 
 // AgentsConfig configures agent defaults (OpenClaw-style).
 type AgentsConfig struct {
-	Defaults *AgentDefaultsConfig `yaml:"defaults"`
+	Defaults *AgentDefaultsConfig  `yaml:"defaults"`
+	List     []AgentEntryConfig    `yaml:"list"`
 }
 
 // AgentDefaultsConfig defines default agent settings.
@@ -50,6 +53,59 @@ type AgentDefaultsConfig struct {
 	SkipBootstrap     bool                   `yaml:"skip_bootstrap"`
 	BootstrapMaxChars int                    `yaml:"bootstrap_max_chars"`
 	SoulEvil          *agents.SoulEvilConfig `yaml:"soul_evil"`
+	Heartbeat         *HeartbeatConfig       `yaml:"heartbeat"`
+}
+
+// AgentEntryConfig defines per-agent overrides (OpenClaw-style).
+type AgentEntryConfig struct {
+	ID        string           `yaml:"id"`
+	Heartbeat *HeartbeatConfig `yaml:"heartbeat"`
+}
+
+// HeartbeatConfig configures periodic heartbeat runs (OpenClaw-style).
+type HeartbeatConfig struct {
+	Every           string                     `yaml:"every"`
+	ActiveHours     *HeartbeatActiveHoursConfig `yaml:"activeHours"`
+	Model           string                     `yaml:"model"`
+	Session         string                     `yaml:"session"`
+	Target          string                     `yaml:"target"`
+	To              string                     `yaml:"to"`
+	Prompt          string                     `yaml:"prompt"`
+	AckMaxChars     int                        `yaml:"ackMaxChars"`
+	IncludeReasoning *bool                     `yaml:"includeReasoning"`
+}
+
+type HeartbeatActiveHoursConfig struct {
+	Start    string `yaml:"start"`
+	End      string `yaml:"end"`
+	Timezone string `yaml:"timezone"`
+}
+
+// CronConfig configures cron scheduling (OpenClaw-style).
+type CronConfig struct {
+	Enabled           *bool  `yaml:"enabled"`
+	Store             string `yaml:"store"`
+	MaxConcurrentRuns int    `yaml:"maxConcurrentRuns"`
+}
+
+// ChannelsConfig defines per-channel settings (limited to heartbeat visibility for Matrix).
+type ChannelsConfig struct {
+	Defaults *ChannelDefaultsConfig `yaml:"defaults"`
+	Matrix   *ChannelConfig         `yaml:"matrix"`
+}
+
+type ChannelDefaultsConfig struct {
+	Heartbeat *ChannelHeartbeatVisibilityConfig `yaml:"heartbeat"`
+}
+
+type ChannelConfig struct {
+	Heartbeat *ChannelHeartbeatVisibilityConfig `yaml:"heartbeat"`
+}
+
+type ChannelHeartbeatVisibilityConfig struct {
+	ShowOk      *bool `yaml:"showOk"`
+	ShowAlerts  *bool `yaml:"showAlerts"`
+	UseIndicator *bool `yaml:"useIndicator"`
 }
 
 // MemoryConfig configures memory behavior (OpenClaw-style).
@@ -360,6 +416,33 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Str, "inbound", "dedupe_ttl")
 	helper.Copy(configupgrade.Int, "inbound", "dedupe_max_size")
 	helper.Copy(configupgrade.Int, "inbound", "default_debounce_ms")
+
+	// Cron configuration
+	helper.Copy(configupgrade.Bool, "cron", "enabled")
+	helper.Copy(configupgrade.Str, "cron", "store")
+	helper.Copy(configupgrade.Int, "cron", "maxConcurrentRuns")
+
+	// Agents heartbeat configuration
+	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "every")
+	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "prompt")
+	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "model")
+	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "session")
+	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "target")
+	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "to")
+	helper.Copy(configupgrade.Int, "agents", "defaults", "heartbeat", "ackMaxChars")
+	helper.Copy(configupgrade.Bool, "agents", "defaults", "heartbeat", "includeReasoning")
+	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "activeHours", "start")
+	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "activeHours", "end")
+	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "activeHours", "timezone")
+	helper.Copy(configupgrade.List, "agents", "list")
+
+	// Channels heartbeat visibility
+	helper.Copy(configupgrade.Bool, "channels", "defaults", "heartbeat", "showOk")
+	helper.Copy(configupgrade.Bool, "channels", "defaults", "heartbeat", "showAlerts")
+	helper.Copy(configupgrade.Bool, "channels", "defaults", "heartbeat", "useIndicator")
+	helper.Copy(configupgrade.Bool, "channels", "matrix", "heartbeat", "showOk")
+	helper.Copy(configupgrade.Bool, "channels", "matrix", "heartbeat", "showAlerts")
+	helper.Copy(configupgrade.Bool, "channels", "matrix", "heartbeat", "useIndicator")
 
 	// Tools (search + fetch)
 	helper.Copy(configupgrade.Str, "tools", "search", "provider")
