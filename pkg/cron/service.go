@@ -36,25 +36,25 @@ type CronEvent struct {
 
 // CronServiceDeps provides integration hooks.
 type CronServiceDeps struct {
-	NowMs              func() int64
-	Log                Logger
-	StorePath          string
-	CronEnabled        bool
-	EnqueueSystemEvent func(text string, agentID string) error
+	NowMs               func() int64
+	Log                 Logger
+	StorePath           string
+	CronEnabled         bool
+	EnqueueSystemEvent  func(text string, agentID string) error
 	RequestHeartbeatNow func(reason string)
-	RunHeartbeatOnce   func(reason string) HeartbeatRunResult
+	RunHeartbeatOnce    func(reason string) HeartbeatRunResult
 	RunIsolatedAgentJob func(job CronJob, message string) (status string, summary string, outputText string, err error)
-	OnEvent            func(evt CronEvent)
+	OnEvent             func(evt CronEvent)
 }
 
 // CronService schedules and runs jobs.
 type CronService struct {
-	deps          CronServiceDeps
-	store         *CronStoreFile
-	timer         *time.Timer
-	running       bool
+	deps           CronServiceDeps
+	store          *CronStoreFile
+	timer          *time.Timer
+	running        bool
 	warnedDisabled bool
-	mu            sync.Mutex
+	mu             sync.Mutex
 }
 
 // NewCronService creates a new cron service.
@@ -493,11 +493,14 @@ func (c *CronService) ensureLoaded() error {
 	mutated := false
 	for i := range c.store.Jobs {
 		job := c.store.Jobs[i]
-		if strings.TrimSpace(job.Name) == "" {
-			name := inferLegacyName(&CronJobCreate{Payload: job.Payload, Schedule: job.Schedule})
-			job.Name = name
+		name := strings.TrimSpace(job.Name)
+		if name == "" {
+			name = inferLegacyName(&CronJobCreate{Payload: job.Payload, Schedule: job.Schedule})
+			mutated = true
+		} else if name != job.Name {
 			mutated = true
 		}
+		job.Name = name
 		if strings.TrimSpace(job.Description) != job.Description {
 			job.Description = strings.TrimSpace(job.Description)
 			mutated = true

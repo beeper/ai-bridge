@@ -51,7 +51,7 @@ func (oc *AIClient) enqueueCronSystemEvent(text string, agentID string) error {
 		agentID = agents.DefaultAgentID
 	}
 	hb := resolveHeartbeatConfig(&oc.connector.Config, agentID)
-	portal, sessionKey, err := oc.resolveHeartbeatPortal(agentID, hb)
+	portal, sessionKey, err := oc.resolveHeartbeatSessionPortal(agentID, hb)
 	if err != nil || portal == nil || sessionKey == "" {
 		if err != nil {
 			oc.log.Warn().Err(err).Str("agent_id", agentID).Msg("cron: unable to resolve heartbeat session for system event")

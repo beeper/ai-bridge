@@ -21,13 +21,13 @@ type HeartbeatRunConfig struct {
 }
 
 type HeartbeatRunOutcome struct {
-	Status   string
-	Reason   string
-	Text     string
-	Preview  string
-	Sent     bool
-	Silent   bool
-	Skipped  bool
+	Status  string
+	Reason  string
+	Text    string
+	Preview string
+	Sent    bool
+	Silent  bool
+	Skipped bool
 }
 
 type heartbeatRunContext struct {

@@ -164,6 +164,12 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 		return agenttools.JSONResult(out).Text(), nil
 	case "runs":
 		jobID := readCronJobID(args)
+		if jobID == "" {
+			return agenttools.JSONResult(map[string]any{
+				"status": "error",
+				"error":  "id is required",
+			}).Text(), nil
+		}
 		limit := agenttools.ReadIntDefault(args, "limit", 200)
 		runs, err := client.readCronRuns(jobID, limit)
 		if err != nil {

@@ -269,11 +269,11 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 			indicator = resolveIndicatorType(status)
 		}
 		emitHeartbeatEvent(&HeartbeatEventPayload{
-			TS:           time.Now().UnixMilli(),
-			Status:       status,
-			Reason:       hb.Reason,
-			Channel:      hb.Channel,
-			Silent:       silent,
+			TS:            time.Now().UnixMilli(),
+			Status:        status,
+			Reason:        hb.Reason,
+			Channel:       hb.Channel,
+			Silent:        silent,
 			IndicatorType: indicator,
 		})
 		sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: status, Silent: silent, Skipped: true})
@@ -289,11 +289,11 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 				indicator = resolveIndicatorType("skipped")
 			}
 			emitHeartbeatEvent(&HeartbeatEventPayload{
-				TS:           time.Now().UnixMilli(),
-				Status:       "skipped",
-				Reason:       "duplicate",
-				Preview:      cleaned[:minInt(len(cleaned), 200)],
-				Channel:      hb.Channel,
+				TS:            time.Now().UnixMilli(),
+				Status:        "skipped",
+				Reason:        "duplicate",
+				Preview:       cleaned[:minInt(len(cleaned), 200)],
+				Channel:       hb.Channel,
 				IndicatorType: indicator,
 			})
 			sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: "duplicate", Skipped: true})
@@ -308,11 +308,11 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 			preview = state.reasoning.String()
 		}
 		emitHeartbeatEvent(&HeartbeatEventPayload{
-			TS:           time.Now().UnixMilli(),
-			Status:       "skipped",
-			Reason:       targetReason,
-			Preview:      preview[:minInt(len(preview), 200)],
-			Channel:      hb.Channel,
+			TS:      time.Now().UnixMilli(),
+			Status:  "skipped",
+			Reason:  targetReason,
+			Preview: preview[:minInt(len(preview), 200)],
+			Channel: hb.Channel,
 		})
 		sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: targetReason, Skipped: true})
 		return
@@ -325,11 +325,11 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 			indicator = resolveIndicatorType("sent")
 		}
 		emitHeartbeatEvent(&HeartbeatEventPayload{
-			TS:           time.Now().UnixMilli(),
-			Status:       "skipped",
-			Reason:       "alerts-disabled",
-			Preview:      cleaned[:minInt(len(cleaned), 200)],
-			Channel:      hb.Channel,
+			TS:            time.Now().UnixMilli(),
+			Status:        "skipped",
+			Reason:        "alerts-disabled",
+			Preview:       cleaned[:minInt(len(cleaned), 200)],
+			Channel:       hb.Channel,
 			IndicatorType: indicator,
 		})
 		sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: "alerts-disabled", Skipped: true})
@@ -353,11 +353,11 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		indicator = resolveIndicatorType("sent")
 	}
 	emitHeartbeatEvent(&HeartbeatEventPayload{
-		TS:           time.Now().UnixMilli(),
-		Status:       "sent",
-		Reason:       hb.Reason,
-		Preview:      cleaned[:minInt(len(cleaned), 200)],
-		Channel:      hb.Channel,
+		TS:            time.Now().UnixMilli(),
+		Status:        "sent",
+		Reason:        hb.Reason,
+		Preview:       cleaned[:minInt(len(cleaned), 200)],
+		Channel:       hb.Channel,
 		IndicatorType: indicator,
 	})
 	sendOutcome(HeartbeatRunOutcome{Status: "ran", Text: cleaned, Sent: true})
