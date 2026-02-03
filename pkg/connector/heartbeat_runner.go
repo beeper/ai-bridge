@@ -252,22 +252,17 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 
 	deliveryPortal, deliveryRoom, deliveryReason := oc.resolveHeartbeatDeliveryPortal(agentID, heartbeat)
 	visibility := defaultHeartbeatVisibility
-	channel := "none"
+	channel := ""
 	if deliveryPortal != nil && deliveryRoom != "" {
 		channel = "matrix"
 		visibility = resolveHeartbeatVisibility(cfg, "matrix")
 	}
 	if !visibility.ShowAlerts && !visibility.ShowOk && !visibility.UseIndicator {
 		emitHeartbeatEvent(&HeartbeatEventPayload{
-			TS:     time.Now().UnixMilli(),
-			Status: "skipped",
-			Reason: "alerts-disabled",
-			Channel: func() string {
-				if channel == "matrix" {
-					return channel
-				}
-				return ""
-			}(),
+			TS:      time.Now().UnixMilli(),
+			Status:  "skipped",
+			Reason:  "alerts-disabled",
+			Channel: channel,
 		})
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "alerts-disabled"}
 	}
