@@ -180,31 +180,7 @@ func fnModel(ce *commands.Event) {
 
 	agentID := resolveAgentID(meta)
 	if agentID != "" {
-		store := NewAgentStoreAdapter(client)
-		agent, err := store.GetAgentByID(ce.Ctx, agentID)
-		if err != nil || agent == nil {
-			ce.Reply("Agent not found: %s", agentID)
-			return
-		}
-		oldModel := client.agentDefaultModel(agent)
-		if oldModel == modelID {
-			ce.Reply("Agent model already set to: %s", modelID)
-			return
-		}
-		if agent.IsPreset {
-			if err := client.setAgentModelOverride(ce.Ctx, agent.ID, modelID); err != nil {
-				ce.Reply("Failed to update agent model: %v", err)
-				return
-			}
-		} else {
-			agent.Model.Primary = modelID
-			if err := store.SaveAgent(ce.Ctx, agent); err != nil {
-				ce.Reply("Failed to update agent model: %v", err)
-				return
-			}
-		}
-		client.applyAgentModelChange(ce.Ctx, agent.ID, oldModel, modelID)
-		ce.Reply("Agent model changed to: %s", modelID)
+		ce.Reply("Cannot set room model while an agent is assigned. Edit the agent instead.")
 		return
 	}
 
