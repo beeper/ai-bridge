@@ -38,6 +38,9 @@ func (oc *AIClient) emitToolProgress(ctx context.Context, portal *bridgev2.Porta
 	if portal == nil || portal.MXID == "" {
 		return
 	}
+	if state != nil && state.suppressSend {
+		return
+	}
 	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return
@@ -133,6 +136,9 @@ func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Port
 	if portal == nil || portal.MXID == "" {
 		return ""
 	}
+	if state != nil && state.suppressSend {
+		return ""
+	}
 	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return ""
@@ -160,17 +166,19 @@ func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Port
 		toolCallData["agent_id"] = state.agentID
 	}
 
-	eventContent := &event.Content{
-		Raw: map[string]any{
-			"body":              fmt.Sprintf("Calling %s...", displayTitle),
-			"msgtype":           event.MsgNotice,
-			BeeperAIToolCallKey: toolCallData,
-			"m.relates_to": map[string]any{
-				"rel_type": RelReference,
-				"event_id": state.initialEventID.String(),
-			},
-		},
+	eventRaw := map[string]any{
+		"body":              fmt.Sprintf("Calling %s...", displayTitle),
+		"msgtype":           event.MsgNotice,
+		BeeperAIToolCallKey: toolCallData,
 	}
+	if state.initialEventID != "" {
+		eventRaw["m.relates_to"] = map[string]any{
+			"rel_type": RelReference,
+			"event_id": state.initialEventID.String(),
+		}
+	}
+
+	eventContent := &event.Content{Raw: eventRaw}
 
 	resp, err := intent.SendMessage(ctx, portal.MXID, ToolCallEventType, eventContent, nil)
 	if err != nil {
@@ -190,6 +198,9 @@ func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Port
 // sendToolResultEvent sends a tool result as a timeline event
 func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall, result string, resultStatus ResultStatus) id.EventID {
 	if portal == nil || portal.MXID == "" {
+		return ""
+	}
+	if state != nil && state.suppressSend {
 		return ""
 	}
 	intent := oc.getModelIntent(ctx, portal)
@@ -236,17 +247,19 @@ func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Po
 		toolResultData["output"] = map[string]any{"result": result}
 	}
 
-	eventContent := &event.Content{
-		Raw: map[string]any{
-			"body":                bodyText,
-			"msgtype":             event.MsgNotice,
-			BeeperAIToolResultKey: toolResultData,
-			"m.relates_to": map[string]any{
-				"rel_type": RelReference,
-				"event_id": tool.eventID.String(),
-			},
-		},
+	eventRaw := map[string]any{
+		"body":                bodyText,
+		"msgtype":             event.MsgNotice,
+		BeeperAIToolResultKey: toolResultData,
 	}
+	if tool.eventID != "" {
+		eventRaw["m.relates_to"] = map[string]any{
+			"rel_type": RelReference,
+			"event_id": tool.eventID.String(),
+		}
+	}
+
+	eventContent := &event.Content{Raw: eventRaw}
 
 	resp, err := intent.SendMessage(ctx, portal.MXID, ToolResultEventType, eventContent, nil)
 	if err != nil {

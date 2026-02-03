@@ -12,6 +12,9 @@ func (oc *AIClient) emitStreamDelta(ctx context.Context, portal *bridgev2.Portal
 	if portal == nil || portal.MXID == "" {
 		return
 	}
+	if state != nil && state.suppressSend {
+		return
+	}
 	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return
@@ -55,6 +58,9 @@ func (oc *AIClient) emitStreamDelta(ctx context.Context, portal *bridgev2.Portal
 // emitGenerationStatus sends a generation status update event
 func (oc *AIClient) emitGenerationStatus(ctx context.Context, portal *bridgev2.Portal, state *streamingState, statusType string, message string, details *GenerationDetails) {
 	if portal == nil || portal.MXID == "" {
+		return
+	}
+	if state != nil && state.suppressSend {
 		return
 	}
 	intent := oc.getModelIntent(ctx, portal)

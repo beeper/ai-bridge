@@ -266,6 +266,7 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		})
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "alerts-disabled"}
 	}
+	suppressSend := deliveryPortal == nil || deliveryRoom == ""
 	hbCfg := &HeartbeatRunConfig{
 		Reason:           reason,
 		AckMaxChars:      resolveHeartbeatAckMaxChars(cfg, heartbeat),
@@ -275,6 +276,7 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		IncludeReasoning: heartbeat != nil && heartbeat.IncludeReasoning != nil && *heartbeat.IncludeReasoning,
 		TargetRoom:       deliveryRoom,
 		TargetReason:     deliveryReason,
+		SuppressSend:     suppressSend,
 		AgentID:          agentID,
 		Channel:          channel,
 		SuppressSave:     true,
@@ -284,7 +286,20 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	if agent, err := store.GetAgentByID(context.Background(), agentID); err == nil {
 		agentDef = agent
 	}
+	isExecEvent := reason == "exec-event"
+	hasExecCompletion := false
+	if isExecEvent {
+		for _, evt := range peekSystemEvents(sessionKey) {
+			if strings.Contains(evt, "Exec finished") {
+				hasExecCompletion = true
+				break
+			}
+		}
+	}
 	prompt := resolveHeartbeatPrompt(cfg, heartbeat, agentDef)
+	if hasExecCompletion {
+		prompt = execEventPrompt
+	}
 	systemEvents := formatSystemEvents(drainSystemEventEntries(sessionKey))
 	if systemEvents != "" {
 		prompt = systemEvents + "\n\n" + prompt
@@ -425,9 +440,6 @@ func (oc *AIClient) resolveHeartbeatDeliveryPortal(agentID string, heartbeat *He
 	if portal := oc.lastActivePortal(agentID); portal != nil {
 		return portal, portal.MXID, ""
 	}
-	if portal := oc.defaultChatPortal(); portal != nil {
-		return portal, portal.MXID, ""
-	}
 	return nil, "", "no-target"
 }
 
@@ -493,6 +505,10 @@ func parseActiveHoursTime(raw string, allow24 bool) *int {
 }
 
 var activeHoursPattern = regexp.MustCompile(`^([01]\d|2[0-3]|24):([0-5]\d)$`)
+
+const execEventPrompt = "An async command you ran earlier has completed. The result is shown in the system messages above. " +
+	"Please relay the command output to the user in a helpful way. If the command succeeded, share the relevant output. " +
+	"If it failed, explain what went wrong."
 
 func resolveActiveHoursTimezone(oc *AIClient, raw string) *time.Location {
 	trimmed := strings.TrimSpace(raw)

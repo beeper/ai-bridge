@@ -15,6 +15,7 @@ type HeartbeatRunConfig struct {
 	IncludeReasoning bool
 	TargetRoom       id.RoomID
 	TargetReason     string
+	SuppressSend     bool
 	AgentID          string
 	Channel          string
 	SuppressSave     bool

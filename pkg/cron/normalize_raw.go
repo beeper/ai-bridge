@@ -22,7 +22,7 @@ func normalizeCronJobInputRaw(raw any, applyDefaults bool) rawRecord {
 	if val, ok := base["agentId"]; ok {
 		switch v := val.(type) {
 		case nil:
-			next["agentId"] = ""
+			next["agentId"] = nil
 		case string:
 			trimmed := strings.TrimSpace(v)
 			if trimmed == "" {

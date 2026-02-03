@@ -9,7 +9,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 
-	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/cron"
 )
 
@@ -18,10 +17,7 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 		return "error", "", "", fmt.Errorf("missing client")
 	}
 	ctx := oc.backgroundContext(context.Background())
-	agentID := strings.TrimSpace(job.AgentID)
-	if agentID == "" {
-		agentID = agents.DefaultAgentID
-	}
+	agentID := resolveCronAgentID(job.AgentID)
 	portal, err := oc.getOrCreateCronRoom(ctx, agentID, job.ID, job.Name)
 	if err != nil {
 		return "error", "", "", err
