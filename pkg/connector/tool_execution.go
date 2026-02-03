@@ -25,6 +25,14 @@ type activeToolCall struct {
 	itemID      string     // Item ID from the stream event (used as call_id for continuation)
 }
 
+func normalizeToolArgsJSON(argsJSON string) string {
+	trimmed := strings.TrimSpace(argsJSON)
+	if trimmed == "" || trimmed == "null" {
+		return "{}"
+	}
+	return trimmed
+}
+
 // emitToolProgress sends a tool progress update event
 func (oc *AIClient) emitToolProgress(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall, status ToolStatus, message string, percent int) {
 	if portal == nil || portal.MXID == "" {
@@ -258,6 +266,7 @@ func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Po
 // executeBuiltinTool finds and executes a builtin tool by name.
 // For Builder rooms, this also handles boss agent tools. Session tools are handled for all rooms.
 func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Portal, toolName string, argsJSON string) (string, error) {
+	argsJSON = normalizeToolArgsJSON(argsJSON)
 	var args map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("invalid tool arguments: %w", err)

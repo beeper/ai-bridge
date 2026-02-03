@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -120,26 +121,87 @@ func (m *MemorySearchManager) shouldUseBatch(provider string) bool {
 
 func (m *MemorySearchManager) resetBatchFailures() {
 	m.mu.Lock()
+	if m.batchFailures > 0 {
+		m.log.Debug().Msg("memory embeddings: batch recovered; resetting failure count")
+	}
 	m.batchFailures = 0
 	m.batchLastError = ""
 	m.batchLastProvider = ""
 	m.mu.Unlock()
 }
 
-func (m *MemorySearchManager) recordBatchFailure(provider string, err error, forceDisable bool) {
+type batchAttemptError struct {
+	err      error
+	attempts int
+}
+
+func (e *batchAttemptError) Error() string {
+	if e == nil || e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func (e *batchAttemptError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+func batchAttempts(err error) int {
+	var attemptErr *batchAttemptError
+	if errors.As(err, &attemptErr) && attemptErr.attempts > 0 {
+		return attemptErr.attempts
+	}
+	return 1
+}
+
+func isBatchTimeoutError(message string) bool {
+	return strings.Contains(strings.ToLower(message), "timed out") ||
+		strings.Contains(strings.ToLower(message), "timeout")
+}
+
+func (m *MemorySearchManager) runBatchWithTimeoutRetry(provider string, run func() (map[string][]float64, error)) (map[string][]float64, error) {
+	result, err := run()
+	if err == nil {
+		return result, nil
+	}
+	message := err.Error()
+	if isBatchTimeoutError(message) {
+		m.log.Warn().Msg(fmt.Sprintf("memory embeddings: %s batch timed out; retrying once", provider))
+		result, retryErr := run()
+		if retryErr == nil {
+			return result, nil
+		}
+		return result, &batchAttemptError{err: retryErr, attempts: 2}
+	}
+	return result, err
+}
+
+func (m *MemorySearchManager) recordBatchFailure(provider string, err error, attempts int, forceDisable bool) (bool, int) {
 	if m == nil {
-		return
+		return true, 0
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.batchFailures++
+	increment := attempts
+	if increment < 1 {
+		increment = 1
+	}
+	if forceDisable {
+		increment = batchFailureLimit
+	}
+	m.batchFailures += increment
 	if err != nil {
 		m.batchLastError = err.Error()
 	}
 	m.batchLastProvider = provider
-	if forceDisable || m.batchFailures >= batchFailureLimit {
+	disabled := forceDisable || m.batchFailures >= batchFailureLimit
+	if disabled {
 		m.batchEnabled = false
 	}
+	return disabled, m.batchFailures
 }
 
 func batchCustomID(source, relPath string, chunkHash string, startLine, endLine, index int) string {

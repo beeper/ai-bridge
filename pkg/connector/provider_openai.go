@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
@@ -832,6 +833,38 @@ func dedupeToolParams(tools []responses.ToolUnionParam) []responses.ToolUnionPar
 		result = append(result, t)
 	}
 	return result
+}
+
+func logToolParamDuplicates(log *zerolog.Logger, tools []responses.ToolUnionParam) {
+	if log == nil || len(tools) == 0 {
+		return
+	}
+
+	counts := make(map[string]int, len(tools))
+	for _, t := range tools {
+		name := ""
+		switch {
+		case t.OfFunction != nil:
+			name = t.OfFunction.Name
+		case t.OfWebSearch != nil:
+			name = "web_search"
+		}
+		if name == "" {
+			continue
+		}
+		counts[name]++
+	}
+
+	var dupes []string
+	for name, count := range counts {
+		if count > 1 {
+			dupes = append(dupes, fmt.Sprintf("%s(%d)", name, count))
+		}
+	}
+	if len(dupes) > 0 {
+		sort.Strings(dupes)
+		log.Warn().Strs("dupes", dupes).Msg("Duplicate tool names detected for request")
+	}
 }
 
 // dedupeChatToolParams removes tools with duplicate identifiers in Chat Completions.
