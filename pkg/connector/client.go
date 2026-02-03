@@ -2062,6 +2062,10 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 
 	// Save user message to database - we must do this ourselves since we already
 	// returned Pending: true to the bridge framework when debouncing started
+	// Ensure ghost row exists to avoid foreign key violations.
+	if _, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userMessage.SenderID); err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to ensure user ghost before saving debounced message")
+	}
 	if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, userMessage); err != nil {
 		oc.log.Err(err).Msg("Failed to save debounced user message to database")
 	}
