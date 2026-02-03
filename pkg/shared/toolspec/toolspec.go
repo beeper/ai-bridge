@@ -40,10 +40,6 @@ const (
 	MemorySearchDescription = "Search your memory for relevant information. Use this to recall facts, preferences, decisions, or context from previous conversations."
 	MemoryGetName           = "memory_get"
 	MemoryGetDescription    = "Retrieve the full content of a specific memory by its path."
-	MemoryStoreName         = "memory_store"
-	MemoryStoreDescription  = "Store a new memory for later recall. Use this to remember important facts, user preferences, decisions, or context that should persist across conversations."
-	MemoryForgetName        = "memory_forget"
-	MemoryForgetDescription = "Remove a memory by its ID/path. Use this to delete outdated or incorrect information."
 
 	GravatarFetchName        = "gravatar_fetch"
 	GravatarFetchDescription = "Fetch a Gravatar profile for an email address."
@@ -508,47 +504,5 @@ func MemoryGetSchema() map[string]any {
 			},
 		},
 		"required": []string{"path"},
-	}
-}
-
-// MemoryStoreSchema returns the JSON schema for the memory_store tool.
-func MemoryStoreSchema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"content": map[string]any{
-				"type":        "string",
-				"description": "The content to store in memory",
-			},
-			"importance": map[string]any{
-				"type":        "number",
-				"description": "Importance score from 0 to 1 (default: 0.5). Higher values make the memory more likely to surface in searches.",
-			},
-			"category": map[string]any{
-				"type":        "string",
-				"enum":        []string{"preference", "decision", "entity", "fact", "other"},
-				"description": "Category of memory (default: 'other')",
-			},
-			"scope": map[string]any{
-				"type":        "string",
-				"enum":        []string{"agent", "global"},
-				"description": "Where to store the memory: 'agent' for this agent only, 'global' for all agents (default: 'agent')",
-			},
-		},
-		"required": []string{"content"},
-	}
-}
-
-// MemoryForgetSchema returns the JSON schema for the memory_forget tool.
-func MemoryForgetSchema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"id": map[string]any{
-				"type":        "string",
-				"description": "The memory ID or path to forget",
-			},
-		},
-		"required": []string{"id"},
 	}
 }

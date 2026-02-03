@@ -31,7 +31,7 @@ var ToolGroups = map[string][]string{
 	tools.GroupBuilder:   {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "create_room", "modify_room", "list_rooms", "sessions_list", "sessions_history", "sessions_send"},
 	tools.GroupMessaging: {"message"},
 	tools.GroupSessions:  {"sessions_list", "sessions_history", "sessions_send"},
-	tools.GroupMemory:    {"memory_search", "memory_get", "memory_store", "memory_forget"},
+	tools.GroupMemory:    {"memory_search", "memory_get"},
 	tools.GroupWeb:       {"web_search", "web_fetch"},
 	tools.GroupMedia:     {"image", "image_generate", "tts"},
 	tools.GroupStatus:    {"session_status"},
