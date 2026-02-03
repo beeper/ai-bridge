@@ -6,6 +6,20 @@ import (
 	"strings"
 )
 
+/*
+Original OpenClaw prompt snippets (reference copy, do not edit):
+
+- "You are a personal assistant running inside OpenClaw."
+- "OpenClaw is controlled via subcommands. Do not invent commands."
+- "To manage the Gateway daemon service (start/stop/restart):"
+  "- openclaw gateway status"
+  "- openclaw gateway start"
+  "- openclaw gateway stop"
+  "- openclaw gateway restart"
+  "- If unsure, ask the user to run `openclaw help` (or `openclaw gateway --help`) and paste the output."
+- "When diagnosing issues, run `openclaw status` yourself when possible; only ask the user if you lack access (e.g., sandboxed)."
+*/
+
 func buildSkillsSection(params struct {
 	skillsPrompt string
 	isMinimal    bool
@@ -130,7 +144,7 @@ func buildMessagingSection(params struct {
 		"## Messaging",
 		"- Reply in current session → automatically routes to the source channel (Signal, Telegram, etc.)",
 		"- Cross-session messaging → use sessions_send(sessionKey, message)",
-		"- Never use exec/curl for provider messaging; OpenClaw handles all routing internally.",
+		"- Never use exec/curl for provider messaging; Beep by Beeper handles all routing internally.",
 		messageToolBlock,
 		"",
 	}
@@ -162,13 +176,13 @@ func buildDocsSection(params struct {
 	}
 	return []string{
 		"## Documentation",
-		fmt.Sprintf("OpenClaw docs: %s", docsPath),
+		fmt.Sprintf("Beep by Beeper docs: %s", docsPath),
 		"Mirror: https://docs.openclaw.ai",
 		"Source: https://github.com/openclaw/openclaw",
 		"Community: https://discord.com/invite/clawd",
 		"Find new skills: https://clawhub.com",
-		"For OpenClaw behavior, commands, config, or architecture: consult local docs first.",
-		"When diagnosing issues, run `openclaw status` yourself when possible; only ask the user if you lack access (e.g., sandboxed).",
+		"For Beep by Beeper behavior, commands, config, or architecture: consult local docs first.",
+		"When diagnosing issues, run `beep status` yourself when possible; only ask the user if you lack access (e.g., sandboxed).",
 		"",
 	}
 }
@@ -248,7 +262,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"nodes":            "List/describe/notify/camera/screen/invoke on paired nodes",
 		"cron":             "Manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
 		"message":          "Send messages and channel actions",
-		"gateway":          "Restart, apply config, or run updates on the running OpenClaw process",
+		"gateway":          "Restart, apply config, or run updates on the running Beep by Beeper process",
 		"agents_list":      "List agent ids allowed for sessions_spawn",
 		"sessions_list":    "List other sessions (incl. sub-agents) with filters/last",
 		"sessions_history": "Fetch history for another session/sub-agent",
@@ -470,7 +484,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	}
 
 	if promptMode == PromptModeNone {
-		return "You are a personal assistant running inside OpenClaw."
+		return "You are a personal assistant called Beep. You run inside the Beeper app."
 	}
 
 	toolingLines := ""
@@ -485,7 +499,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 			"- apply_patch: apply multi-file patches",
 			fmt.Sprintf("- %s: run shell commands (supports background via yieldMs/background)", execToolName),
 			fmt.Sprintf("- %s: manage background exec sessions", processToolName),
-			"- browser: control openclaw's dedicated browser",
+			"- browser: control Beeper's dedicated browser",
 			"- canvas: present/eval/snapshot the Canvas",
 			"- nodes: list/describe/notify/camera/screen/invoke on paired nodes",
 			"- cron: manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
@@ -496,7 +510,8 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	}
 
 	lines := []string{
-		"You are a personal assistant running inside OpenClaw.",
+		"You are a personal assistant called Beep. You run inside the Beeper app.",
+		"Beeper is an all-in-one chat app by Automattic.",
 		"",
 		"## Tooling",
 		"Tool availability (filtered by policy):",
@@ -514,26 +529,26 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	}
 	lines = append(lines, buildSafetySection()...)
 	lines = append(lines,
-		"## OpenClaw CLI Quick Reference",
-		"OpenClaw is controlled via subcommands. Do not invent commands.",
+		"## Beep by Beeper CLI Quick Reference",
+		"Beep by Beeper is controlled via subcommands. Do not invent commands.",
 		"To manage the Gateway daemon service (start/stop/restart):",
-		"- openclaw gateway status",
-		"- openclaw gateway start",
-		"- openclaw gateway stop",
-		"- openclaw gateway restart",
-		"If unsure, ask the user to run `openclaw help` (or `openclaw gateway --help`) and paste the output.",
+		"- beep gateway status",
+		"- beep gateway start",
+		"- beep gateway stop",
+		"- beep gateway restart",
+		"If unsure, ask the user to run `beep help` (or `beep gateway --help`) and paste the output.",
 		"",
 	)
 	lines = append(lines, skillsSection...)
 	lines = append(lines, memorySection...)
 	if hasGateway && !isMinimal {
 		lines = append(lines,
-			"## OpenClaw Self-Update",
+			"## Beep by Beeper Self-Update",
 			strings.Join([]string{
 				"Get Updates (self-update) is ONLY allowed when the user explicitly asks for it.",
 				"Do not run config.apply or update.run unless the user explicitly requests an update or config change; if it's not explicit, ask first.",
 				"Actions: config.get, config.schema, config.apply (validate + write full config, then restart), update.run (update deps or git, then restart).",
-				"After restart, OpenClaw pings the last active session automatically.",
+				"After restart, Beep pings the last active session automatically.",
 			}, "\n"),
 			"",
 		)
@@ -600,7 +615,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	lines = append(lines, buildTimeSection(userTimezone)...)
 	lines = append(lines,
 		"## Workspace Files (injected)",
-		"These user-editable files are loaded by OpenClaw and included below in Project Context.",
+		"These user-editable files are loaded by Beep and included below in Project Context.",
 		"",
 	)
 	lines = append(lines, buildReplyTagsSection(isMinimal)...)
@@ -709,7 +724,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 			heartbeatPromptLine,
 			"If you receive a heartbeat poll (a user message matching the heartbeat prompt above), and there is nothing that needs attention, reply exactly:",
 			HeartbeatToken,
-			"OpenClaw treats a leading/trailing \"HEARTBEAT_OK\" as a heartbeat ack (and may discard it).",
+			"Beep by Beeper treats a leading/trailing \"HEARTBEAT_OK\" as a heartbeat ack (and may discard it).",
 			"If something needs attention, do NOT include \"HEARTBEAT_OK\"; reply with the alert text instead.",
 			"",
 		)

@@ -18,29 +18,29 @@ type ResolvedTimeFormat string
 // SystemPromptParams contains all inputs for building a system prompt.
 // This matches OpenClaw's buildAgentSystemPrompt params.
 type SystemPromptParams struct {
-	WorkspaceDir       string
-	DefaultThinkLevel  string
-	ReasoningLevel     string
-	ExtraSystemPrompt  string
-	OwnerNumbers       []string
-	ReasoningTagHint   bool
-	ToolNames          []string
-	ToolSummaries      map[string]string
-	ModelAliasLines    []string
-	UserTimezone       string
-	UserTime           string
-	UserTimeFormat     ResolvedTimeFormat
-	ContextFiles       []EmbeddedContextFile
-	SkillsPrompt       string
-	HeartbeatPrompt    string
-	DocsPath           string
-	WorkspaceNotes     []string
-	TTSHint            string
-	PromptMode         PromptMode
-	RuntimeInfo        *RuntimeInfo
-	MessageToolHints   []string
-	SandboxInfo        *SandboxInfo
-	ReactionGuidance   *ReactionGuidance
+	WorkspaceDir      string
+	DefaultThinkLevel string
+	ReasoningLevel    string
+	ExtraSystemPrompt string
+	OwnerNumbers      []string
+	ReasoningTagHint  bool
+	ToolNames         []string
+	ToolSummaries     map[string]string
+	ModelAliasLines   []string
+	UserTimezone      string
+	UserTime          string
+	UserTimeFormat    ResolvedTimeFormat
+	ContextFiles      []EmbeddedContextFile
+	SkillsPrompt      string
+	HeartbeatPrompt   string
+	DocsPath          string
+	WorkspaceNotes    []string
+	TTSHint           string
+	PromptMode        PromptMode
+	RuntimeInfo       *RuntimeInfo
+	MessageToolHints  []string
+	SandboxInfo       *SandboxInfo
+	ReactionGuidance  *ReactionGuidance
 }
 
 // RuntimeInfo contains runtime context for the LLM.
@@ -210,7 +210,10 @@ func StripHeartbeatToken(text string, maxAckChars int) (shouldSkip bool, strippe
 }
 
 // DefaultSystemPrompt is the default prompt for general-purpose agents.
-const DefaultSystemPrompt = `You are a personal assistant running inside OpenClaw.`
+const DefaultSystemPrompt = `You are a personal assistant called Beep. You run inside the Beeper app.`
+
+// Original OpenClaw system prompt (reference copy, do not edit).
+const originalOpenClawSystemPrompt = `You are a personal assistant running inside OpenClaw.`
 
 // BossSystemPrompt is the system prompt for the Boss agent.
 const BossSystemPrompt = `You are the Agent Builder, an AI that helps users manage their AI chats and create custom AI agents.
