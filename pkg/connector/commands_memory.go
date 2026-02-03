@@ -1,0 +1,163 @@
+package connector
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"maunium.net/go/mautrix/bridgev2/commands"
+
+	"github.com/beeper/ai-bridge/pkg/connector/commandregistry"
+	"github.com/beeper/ai-bridge/pkg/textfs"
+)
+
+const memoryCommandMaxBytes = 256 * 1024
+
+// CommandMemory handles the !ai memory command
+var CommandMemory = registerAICommand(commandregistry.Definition{
+	Name:           "memory",
+	Description:    "Inspect and edit memory files/index",
+	Args:           "<status|reindex|get|set|append> [...]",
+	Section:        HelpSectionAI,
+	RequiresPortal: true,
+	RequiresLogin:  true,
+	Handler:        fnMemory,
+})
+
+func fnMemory(ce *commands.Event) {
+	if ce.User == nil || !ce.User.Permissions.Admin {
+		ce.Reply("This command is restricted to bridge admins.")
+		return
+	}
+	client, meta, ok := requireClientMeta(ce)
+	if !ok {
+		return
+	}
+	if len(ce.Args) == 0 {
+		ce.Reply("Usage: !ai memory <status|reindex|get|set|append> ...")
+		return
+	}
+
+	switch strings.ToLower(ce.Args[0]) {
+	case "status":
+		manager, errMsg := getMemorySearchManager(client, resolveAgentID(meta))
+		if manager == nil {
+			ce.Reply("Memory search disabled: %s", errMsg)
+			return
+		}
+		status, err := manager.StatusDetails(ce.Ctx)
+		if err != nil {
+			ce.Reply("Failed to fetch memory status: %v", err)
+			return
+		}
+		lines := []string{
+			"Memory status:",
+			fmt.Sprintf("Provider: %s", status.Provider),
+			fmt.Sprintf("Model: %s", status.Model),
+			fmt.Sprintf("Sources: %s", strings.Join(status.Sources, ", ")),
+			fmt.Sprintf("Extra paths: %s", strings.Join(status.ExtraPaths, ", ")),
+			fmt.Sprintf("Vector enabled: %t", status.VectorEnabled),
+			fmt.Sprintf("FTS enabled: %t (available=%t)", status.FTSEnabled, status.FTSAvailable),
+			fmt.Sprintf("Cache enabled: %t (entries=%d)", status.CacheEnabled, status.CacheEntries),
+			fmt.Sprintf("Files: %d", status.FileCount),
+			fmt.Sprintf("Chunks: %d", status.ChunkCount),
+		}
+		if status.Fallback != nil {
+			lines = append(lines, fmt.Sprintf("Fallback: %s (%s)", status.Fallback.From, status.Fallback.Reason))
+		}
+		ce.Reply(strings.Join(lines, "\n"))
+		return
+	case "reindex":
+		manager, errMsg := getMemorySearchManager(client, resolveAgentID(meta))
+		if manager == nil {
+			ce.Reply("Memory search disabled: %s", errMsg)
+			return
+		}
+		if err := manager.sync(ce.Ctx, "", true); err != nil {
+			ce.Reply("Memory reindex failed: %v", err)
+			return
+		}
+		ce.Reply("Memory reindex queued.")
+		return
+	case "get":
+		if len(ce.Args) < 2 {
+			ce.Reply("Usage: !ai memory get <path> [from] [lines]")
+			return
+		}
+		manager, errMsg := getMemorySearchManager(client, resolveAgentID(meta))
+		if manager == nil {
+			ce.Reply("Memory search disabled: %s", errMsg)
+			return
+		}
+		path := ce.Args[1]
+		var from *int
+		var lines *int
+		if len(ce.Args) > 2 {
+			if val, err := strconv.Atoi(ce.Args[2]); err == nil && val > 0 {
+				from = &val
+			}
+		}
+		if len(ce.Args) > 3 {
+			if val, err := strconv.Atoi(ce.Args[3]); err == nil && val > 0 {
+				lines = &val
+			}
+		}
+		result, err := manager.ReadFile(ce.Ctx, path, from, lines)
+		if err != nil {
+			ce.Reply("Memory get failed: %v", err)
+			return
+		}
+		text, _ := result["text"].(string)
+		trunc := textfs.TruncateHead(text, textfs.DefaultMaxLines, textfs.DefaultMaxBytes)
+		output := trunc.Content
+		if trunc.Truncated {
+			output += "\n\n[truncated]"
+		}
+		ce.Reply(output)
+		return
+	case "set", "append":
+		args, err := splitQuotedArgs(ce.RawArgs)
+		if err != nil {
+			ce.Reply("Invalid arguments: %v", err)
+			return
+		}
+		if len(args) < 3 {
+			ce.Reply("Usage: !ai memory %s <path> <content>", ce.Args[0])
+			return
+		}
+		path := args[1]
+		content := strings.Join(args[2:], " ")
+		if len([]byte(content)) > memoryCommandMaxBytes {
+			ce.Reply("Content exceeds %s limit.", textfs.FormatSize(memoryCommandMaxBytes))
+			return
+		}
+		store := textfs.NewStore(
+			client.UserLogin.Bridge.DB.Database,
+			string(client.UserLogin.Bridge.DB.BridgeID),
+			string(client.UserLogin.ID),
+			resolveAgentID(meta),
+		)
+		if strings.ToLower(ce.Args[0]) == "append" {
+			if existing, found, err := store.Read(ce.Ctx, path); err == nil && found {
+				sep := "\n"
+				if strings.HasSuffix(existing.Content, "\n") || existing.Content == "" {
+					sep = ""
+				}
+				content = existing.Content + sep + content
+				if len([]byte(content)) > memoryCommandMaxBytes {
+					ce.Reply("Content exceeds %s limit after append.", textfs.FormatSize(memoryCommandMaxBytes))
+					return
+				}
+			}
+		}
+		if _, err := store.Write(ce.Ctx, path, content); err != nil {
+			ce.Reply("Memory write failed: %v", err)
+			return
+		}
+		ce.Reply("Memory file updated: %s", path)
+		return
+	default:
+		ce.Reply("Unknown memory subcommand. Use status, reindex, get, set, or append.")
+		return
+	}
+}

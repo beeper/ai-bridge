@@ -234,9 +234,15 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 		)
 	}
 
-	embeddings, err := m.embedChunks(ctx, chunks)
-	if err != nil {
-		return err
+	var embeddings [][]float64
+	if m.cfg.Store.Vector.Enabled {
+		var err error
+		embeddings, err = m.embedChunks(ctx, chunks)
+		if err != nil {
+			return err
+		}
+	} else {
+		embeddings = make([][]float64, len(chunks))
 	}
 	now := time.Now().UnixMilli()
 	for i, chunk := range chunks {
@@ -244,7 +250,7 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 		if i < len(embeddings) {
 			embedding = embeddings[i]
 		}
-		if m.vectorDims == 0 && len(embedding) > 0 {
+		if m.cfg.Store.Vector.Enabled && m.vectorDims == 0 && len(embedding) > 0 {
 			m.vectorDims = len(embedding)
 		}
 		embeddingJSON, _ := json.Marshal(embedding)
@@ -369,8 +375,11 @@ func (m *MemorySearchManager) embedBatchWithRetry(ctx context.Context, texts []s
 			if err == nil {
 				break
 			}
-			sleep := time.Duration(math.Min(8000, float64(500*(1<<attempt)))) * time.Millisecond
-			time.Sleep(sleep)
+			sleepMs := 500 * (1 << attempt)
+			if sleepMs > 8000 {
+				sleepMs = 8000
+			}
+			time.Sleep(time.Duration(sleepMs) * time.Millisecond)
 		}
 		if err != nil {
 			return nil, err
@@ -448,6 +457,9 @@ func maybePruneEmbeddingCache(ctx context.Context, m *MemorySearchManager) {
 }
 
 func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float64, limit int) ([]memory.HybridVectorResult, error) {
+	if !m.cfg.Store.Vector.Enabled {
+		return nil, nil
+	}
 	if len(queryVec) == 0 || limit <= 0 {
 		return nil, nil
 	}

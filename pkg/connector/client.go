@@ -1406,6 +1406,7 @@ func (oc *AIClient) buildPromptWithLinkContext(
 	if err != nil {
 		return nil, err
 	}
+	prompt = oc.injectMemoryContext(ctx, portal, meta, prompt)
 
 	// Build final message with link context
 	finalMessage := latest
@@ -1508,6 +1509,7 @@ func (oc *AIClient) buildPromptWithMedia(
 	if err != nil {
 		return nil, err
 	}
+	prompt = oc.injectMemoryContext(ctx, portal, meta, prompt)
 
 	captionWithID := appendMessageIDHint(caption, eventID)
 	textContent := openai.ChatCompletionContentPartUnionParam{

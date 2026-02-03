@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"net/url"
@@ -21,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/memory"
 	"github.com/beeper/ai-bridge/pkg/shared/calc"
 	"github.com/beeper/ai-bridge/pkg/shared/media"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
@@ -1902,14 +1904,48 @@ func executeMemorySearch(ctx context.Context, args map[string]any) (string, erro
 		input.MinScore = &minScore
 	}
 
-	memStore := NewMemoryStore(btc.Client)
-	results, err := memStore.Search(ctx, btc.Portal, input)
-	if err != nil {
-		return "", fmt.Errorf("memory search failed: %w", err)
+	meta := portalMeta(btc.Portal)
+	agentID := resolveAgentID(meta)
+	manager, errMsg := getMemorySearchManager(btc.Client, agentID)
+	if manager == nil {
+		output, _ := json.Marshal(map[string]any{
+			"results":  []memory.SearchResult{},
+			"disabled": true,
+			"error":    errMsg,
+		})
+		return string(output), nil
 	}
 
-	// Format as JSON
-	output, err := json.Marshal(results)
+	opts := memory.SearchOptions{
+		SessionKey: btc.Portal.PortalKey.String(),
+		MinScore:   math.NaN(),
+	}
+	if input.MaxResults != nil {
+		opts.MaxResults = *input.MaxResults
+	}
+	if input.MinScore != nil {
+		opts.MinScore = *input.MinScore
+	}
+	results, err := manager.Search(ctx, input.Query, opts)
+	if err != nil {
+		output, _ := json.Marshal(map[string]any{
+			"results":  []memory.SearchResult{},
+			"disabled": true,
+			"error":    err.Error(),
+		})
+		return string(output), nil
+	}
+
+	status := manager.Status()
+	payload := map[string]any{
+		"results":  results,
+		"provider": status.Provider,
+		"model":    status.Model,
+	}
+	if status.Fallback != nil {
+		payload["fallback"] = status.Fallback
+	}
+	output, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("failed to format results: %w", err)
 	}
@@ -1929,15 +1965,41 @@ func executeMemoryGet(ctx context.Context, args map[string]any) (string, error) 
 		return "", fmt.Errorf("missing or invalid 'path' argument")
 	}
 
-	input := MemoryGetInput{Path: path}
-
-	memStore := NewMemoryStore(btc.Client)
-	result, err := memStore.Get(ctx, btc.Portal, input)
-	if err != nil {
-		return "", fmt.Errorf("memory get failed: %w", err)
+	meta := portalMeta(btc.Portal)
+	agentID := resolveAgentID(meta)
+	manager, errMsg := getMemorySearchManager(btc.Client, agentID)
+	if manager == nil {
+		output, _ := json.Marshal(map[string]any{
+			"path":     path,
+			"text":     "",
+			"disabled": true,
+			"error":    errMsg,
+		})
+		return string(output), nil
 	}
 
-	// Format as JSON
+	var from *int
+	var lines *int
+	if rawFrom, ok := args["from"].(float64); ok {
+		val := int(rawFrom)
+		from = &val
+	}
+	if rawLines, ok := args["lines"].(float64); ok {
+		val := int(rawLines)
+		lines = &val
+	}
+
+	result, err := manager.ReadFile(ctx, path, from, lines)
+	if err != nil {
+		output, _ := json.Marshal(map[string]any{
+			"path":     path,
+			"text":     "",
+			"disabled": true,
+			"error":    err.Error(),
+		})
+		return string(output), nil
+	}
+
 	output, err := json.Marshal(result)
 	if err != nil {
 		return "", fmt.Errorf("failed to format result: %w", err)

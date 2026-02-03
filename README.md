@@ -12,6 +12,16 @@ Currently best works with alpha versions of Beeper Desktop. Beeper Plus users ca
 - **Multimodal input** (images, PDFs, audio, video) when the selected model supports it
 - **Per-room settings** for model, temperature, system prompt, context limits, and tools
 - **User-managed keys** via login flow, plus optional Beeper-managed credentials
+- **OpenClaw-style memory search** over `MEMORY.md` + `memory/*.md` stored in the bridge DB
+- **Virtual file tools** (`read`, `write`, `edit`, `ls`, `find`, `grep`) backed by SQLite
+
+## Memory
+
+Memory is DB-only (SQLite) and modeled after OpenClaw:
+- `memory_search` returns snippet results with path + line ranges.
+- `memory_get` reads line ranges from `MEMORY.md` or `memory/*.md`.
+- Memory files are stored in the bridge DB (not on disk) and are per-agent.
+- Optional session transcript indexing can be enabled via `network.memory_search.experimental.session_memory`.
 
 ## Login flows
 

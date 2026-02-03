@@ -10,6 +10,7 @@ import (
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
+	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
 )
 
@@ -303,6 +304,11 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 	store := NewBossStoreAdapter(oc)
 	executor := tools.NewBossToolExecutor(store)
 
+	var meta *PortalMetadata
+	if portal != nil {
+		meta = portalMeta(portal)
+	}
+
 	var result *tools.Result
 	var err error
 
@@ -311,6 +317,18 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 			if portal != nil && portal.MXID != "" {
 				args["room_id"] = portal.MXID.String()
 			}
+		}
+	}
+	if toolName == "sessions_spawn" {
+		if agentID, ok := args["agent_id"].(string); !ok || strings.TrimSpace(agentID) == "" {
+			var resolved string
+			if meta != nil {
+				resolved = resolveAgentID(meta)
+			}
+			if resolved == "" {
+				resolved = agents.DefaultAgentID
+			}
+			args["agent_id"] = resolved
 		}
 	}
 
@@ -343,6 +361,8 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 		result, err = executor.ExecuteSessionsHistory(ctx, args)
 	case "sessions_send":
 		result, err = executor.ExecuteSessionsSend(ctx, args)
+	case "sessions_spawn":
+		result, err = executor.ExecuteSessionsSpawn(ctx, args)
 	default:
 		return nil // Not a boss tool
 	}

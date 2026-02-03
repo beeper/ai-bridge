@@ -45,6 +45,8 @@ func (oc *AIClient) responseWithRetry(
 			if !autoCompactionAttempted {
 				autoCompactionAttempted = true
 
+				oc.maybeRunMemoryFlush(ctx, portal, meta, currentPrompt)
+
 				// Get context window from model
 				contextWindow := oc.getModelContextWindow(meta)
 				if contextWindow <= 0 {
@@ -70,6 +72,10 @@ func (oc *AIClient) responseWithRetry(
 				)
 
 				if compactionSuccess && len(compacted) > 2 {
+					if meta != nil {
+						meta.CompactionCount++
+						oc.savePortalQuiet(ctx, portal, "compaction count")
+					}
 					// Emit compaction end event
 					oc.emitCompactionStatus(ctx, portal, &CompactionEvent{
 						Type:           CompactionEventEnd,

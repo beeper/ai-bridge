@@ -1,4 +1,4 @@
--- v22 -> v23: ai memory tables
+-- v26 -> v27: ai memory tables
 CREATE TABLE IF NOT EXISTS ai_memory_files (
   bridge_id TEXT NOT NULL,
   login_id TEXT NOT NULL,
