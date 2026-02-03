@@ -769,6 +769,7 @@ type AgentDefinitionContent struct {
 	IsPreset        bool                         `json:"is_preset,omitempty"`
 	MemoryConfig    *AgentMemoryConfig           `json:"memory_config,omitempty"` // Memory configuration (matches OpenClaw)
 	MemorySearch    *agents.MemorySearchConfig   `json:"memory_search,omitempty"`
+	HeartbeatPrompt string                       `json:"heartbeat_prompt,omitempty"`
 	CreatedAt       int64                        `json:"created_at"`
 	UpdatedAt       int64                        `json:"updated_at"`
 }

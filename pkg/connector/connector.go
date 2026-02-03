@@ -271,6 +271,9 @@ func (oc *OpenAIConnector) FillPortalBridgeInfo(portal *bridgev2.Portal, content
 	} else if meta.IsGlobalMemoryRoom {
 		// Global memory room = auto-hidden by clients
 		content.BeeperRoomTypeV2 = "global_memory"
+	} else if meta.IsCronRoom {
+		// Cron rooms are hidden by clients
+		content.BeeperRoomTypeV2 = "cron"
 	} else {
 		content.BeeperRoomTypeV2 = "ai"
 	}

@@ -180,6 +180,15 @@ func globalMemoryPortalKey(loginID networkid.UserLoginID) networkid.PortalKey {
 	}
 }
 
+// cronPortalKey creates a deterministic portal key for a cron job room.
+// Format: "openai:{loginID}:cron:{agentID}:{jobID}"
+func cronPortalKey(loginID networkid.UserLoginID, agentID, jobID string) networkid.PortalKey {
+	return networkid.PortalKey{
+		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:cron:%s:%s", loginID, url.PathEscape(agentID), url.PathEscape(jobID))),
+		Receiver: loginID,
+	}
+}
+
 // MemoryScope represents where a memory is stored
 type MemoryScope string
 

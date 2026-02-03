@@ -156,59 +156,9 @@ func stripMarkup(text string) string {
 }
 
 // StripHeartbeatToken removes the heartbeat token from text and returns the remaining content.
-// Returns (shouldSkip, strippedText, didStrip).
-// - shouldSkip: true if response should be suppressed (just the token, no real content)
-// - strippedText: text with token removed
-// - didStrip: true if token was found and removed
-// Based on OpenClaw's stripHeartbeatToken from heartbeat.ts.
+// This preserves legacy behavior for non-heartbeat messages.
 func StripHeartbeatToken(text string, maxAckChars int) (shouldSkip bool, strippedText string, didStrip bool) {
-	if text == "" {
-		return true, "", false
-	}
-	if maxAckChars <= 0 {
-		maxAckChars = DefaultMaxAckChars
-	}
-
-	stripped := stripMarkup(text)
-	trimmed := strings.TrimSpace(stripped)
-
-	// Exact match - skip entirely
-	if trimmed == HeartbeatToken {
-		return true, "", true
-	}
-
-	// Try to remove token from start or end
-	escaped := regexp.QuoteMeta(HeartbeatToken)
-
-	// Remove from start
-	prefixPattern := regexp.MustCompile(`(?i)^\s*` + escaped + `\s*`)
-	if prefixPattern.MatchString(trimmed) {
-		remaining := strings.TrimSpace(prefixPattern.ReplaceAllString(trimmed, ""))
-		if remaining == "" {
-			return true, "", true
-		}
-		// Has content after token - check length
-		if len(remaining) <= maxAckChars {
-			return false, remaining, true
-		}
-		return false, remaining, true
-	}
-
-	// Remove from end
-	suffixPattern := regexp.MustCompile(`(?i)\s*` + escaped + `\s*$`)
-	if suffixPattern.MatchString(trimmed) {
-		remaining := strings.TrimSpace(suffixPattern.ReplaceAllString(trimmed, ""))
-		if remaining == "" {
-			return true, "", true
-		}
-		if len(remaining) <= maxAckChars {
-			return false, remaining, true
-		}
-		return false, remaining, true
-	}
-
-	// Token not found
-	return false, text, false
+	return StripHeartbeatTokenWithMode(text, StripHeartbeatModeMessage, maxAckChars)
 }
 
 // DefaultSystemPrompt is the default prompt for general-purpose agents.

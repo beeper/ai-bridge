@@ -87,11 +87,21 @@ type UserLoginMetadata struct {
 
 	// Agent Builder room for managing agents
 	BuilderRoomID networkid.PortalID `json:"builder_room_id,omitempty"`
+	// Last active room per agent (used for heartbeat delivery).
+	LastActiveRoomByAgent map[string]string `json:"last_active_room_by_agent,omitempty"`
+	// Heartbeat dedupe state per agent.
+	HeartbeatState map[string]HeartbeatState `json:"heartbeat_state,omitempty"`
 	// Note: Custom agents are now stored in Matrix state events (CustomAgentsEventType)
 	// in the Builder room, not in UserLoginMetadata
 
 	// Global Memory room for shared agent memories
 	GlobalMemoryRoomID networkid.PortalID `json:"global_memory_room_id,omitempty"`
+}
+
+// HeartbeatState tracks last heartbeat delivery for dedupe.
+type HeartbeatState struct {
+	LastHeartbeatText   string `json:"last_heartbeat_text,omitempty"`
+	LastHeartbeatSentAt int64  `json:"last_heartbeat_sent_at,omitempty"`
 }
 
 // GravatarProfile stores the selected Gravatar profile for a login.
@@ -142,6 +152,8 @@ type PortalMetadata struct {
 	IsRawMode            bool   `json:"is_raw_mode,omitempty"`             // True if this is a playground/raw mode room (no directive processing)
 	IsAgentDataRoom      bool   `json:"is_agent_data_room,omitempty"`      // True if this is a hidden room for storing agent data
 	IsGlobalMemoryRoom   bool   `json:"is_global_memory_room,omitempty"`   // True if this is the global memory room
+	IsCronRoom           bool   `json:"is_cron_room,omitempty"`            // True if this is a hidden cron room
+	CronJobID            string `json:"cron_job_id,omitempty"`             // Cron job ID for cron rooms
 	SubagentParentRoomID string `json:"subagent_parent_room_id,omitempty"` // Parent room ID for subagent sessions
 
 	// Ack reaction config - similar to OpenClaw's ack reactions
