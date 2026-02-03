@@ -39,7 +39,7 @@ const (
 var ToolGroups = map[string][]string{
 	GroupSearch:     {"web_search", "web_search_openrouter"},
 	GroupCalc:       {"calculator"},
-	GroupBuilder:    {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "run_internal_command", "create_room", "modify_room", "list_rooms", "sessions_list", "sessions_history", "sessions_send"},
+	GroupBuilder:    {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "run_internal_command", "create_room", "modify_room", "list_rooms", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn"},
 	GroupMessaging:  {"message"},
 	GroupSessions:   {"sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status"},
 	GroupMemory:     {"memory_search", "memory_get"},

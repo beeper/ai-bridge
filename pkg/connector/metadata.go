@@ -42,10 +42,10 @@ type FileAnnotation struct {
 
 // UserDefaults stores user-level default settings for new chats
 type UserDefaults struct {
-	Model           string          `json:"model,omitempty"`
-	SystemPrompt    string          `json:"system_prompt,omitempty"`
-	Temperature     *float64        `json:"temperature,omitempty"`
-	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	SystemPrompt    string   `json:"system_prompt,omitempty"`
+	Temperature     *float64 `json:"temperature,omitempty"`
+	ReasoningEffort string   `json:"reasoning_effort,omitempty"`
 }
 
 // ServiceTokens stores optional per-login credentials for external services.
@@ -120,10 +120,14 @@ type PortalMetadata struct {
 	LastRoomStateSync   int64             `json:"last_room_state_sync,omitempty"` // Track when we've synced room state
 	PDFConfig           *PDFConfig        `json:"pdf_config,omitempty"`           // Per-room PDF processing configuration
 
-	ConversationMode string `json:"conversation_mode,omitempty"`
-	LastResponseID   string `json:"last_response_id,omitempty"`
-	EmitThinking     bool   `json:"emit_thinking,omitempty"`
-	EmitToolArgs     bool   `json:"emit_tool_args,omitempty"`
+	ConversationMode           string `json:"conversation_mode,omitempty"`
+	LastResponseID             string `json:"last_response_id,omitempty"`
+	EmitThinking               bool   `json:"emit_thinking,omitempty"`
+	EmitToolArgs               bool   `json:"emit_tool_args,omitempty"`
+	CompactionCount            int    `json:"compaction_count,omitempty"`
+	MemoryFlushAt              int64  `json:"memory_flush_at,omitempty"`
+	MemoryFlushCompactionCount int    `json:"memory_flush_compaction_count,omitempty"`
+	MemoryBootstrapAt          int64  `json:"memory_bootstrap_at,omitempty"`
 
 	// Agent-related metadata
 	DefaultAgentID     string `json:"default_agent_id,omitempty"`      // Agent assigned to this room (legacy name, same as AgentID)

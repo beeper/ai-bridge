@@ -37,22 +37,22 @@ const (
 	AnalyzeImageDescription = "Deprecated alias for image (vision analysis)."
 
 	MemorySearchName        = "memory_search"
-	MemorySearchDescription = "Search your memory for relevant information. Use this to recall facts, preferences, decisions, or context from previous conversations."
+	MemorySearchDescription = "Mandatory recall step: semantically search MEMORY.md + memory/*.md (and optional session transcripts) before answering questions about prior work, decisions, dates, people, preferences, or todos; returns top snippets with path + lines."
 	MemoryGetName           = "memory_get"
-	MemoryGetDescription    = "Retrieve the full content of a specific memory by its path."
+	MemoryGetDescription    = "Safe snippet read from MEMORY.md, memory/*.md, or configured memorySearch.extraPaths with optional from/lines; use after memory_search to pull only the needed lines and keep context small."
 
-	ReadName        = "read"
-	ReadDescription = "Read a text file from the virtual workspace. Supports offset/limit for large files."
-	WriteName       = "write"
+	ReadName         = "read"
+	ReadDescription  = "Read a text file from the virtual workspace. Supports offset/limit for large files."
+	WriteName        = "write"
 	WriteDescription = "Write content to a text file in the virtual workspace. Creates or overwrites the file."
-	EditName        = "edit"
-	EditDescription = "Edit a text file by replacing exact text (oldText -> newText)."
-	LsName          = "ls"
-	LsDescription   = "List directory contents in the virtual workspace."
-	FindName        = "find"
-	FindDescription = "Search for files by glob pattern in the virtual workspace."
-	GrepName        = "grep"
-	GrepDescription = "Search file contents for a pattern in the virtual workspace."
+	EditName         = "edit"
+	EditDescription  = "Edit a text file by replacing exact text (oldText -> newText)."
+	LsName           = "ls"
+	LsDescription    = "List directory contents in the virtual workspace."
+	FindName         = "find"
+	FindDescription  = "Search for files by glob pattern in the virtual workspace."
+	GrepName         = "grep"
+	GrepDescription  = "Search file contents for a pattern in the virtual workspace."
 
 	GravatarFetchName        = "gravatar_fetch"
 	GravatarFetchDescription = "Fetch a Gravatar profile for an email address."
@@ -664,7 +664,7 @@ func MemoryGetSchema() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "The memory path (e.g., 'agent:myagent/fact:abc123' or 'global/fact:xyz789')",
+				"description": "Path to a memory file (e.g., 'MEMORY.md' or 'memory/2026-02-03.md')",
 			},
 			"from": map[string]any{
 				"type":        "number",

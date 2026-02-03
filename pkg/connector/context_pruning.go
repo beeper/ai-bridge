@@ -82,11 +82,22 @@ type PruningConfig struct {
 	// CustomInstructions are additional instructions for the summarization model
 	CustomInstructions string `yaml:"custom_instructions" json:"custom_instructions,omitempty"`
 
+	// MemoryFlush runs a pre-compaction memory write pass.
+	MemoryFlush *MemoryFlushConfig `yaml:"memory_flush" json:"memory_flush,omitempty"`
+
 	// MaxHistoryTurns limits conversation history to the last N user turns (and their associated
 	// assistant responses). This reduces token usage for long-running DM sessions.
 	// A value of 0 means no limit (default behavior).
 	// Default: 0 (unlimited)
 	MaxHistoryTurns int `yaml:"max_history_turns" json:"max_history_turns,omitempty"`
+}
+
+// MemoryFlushConfig configures pre-compaction memory flush behavior (OpenClaw-style).
+type MemoryFlushConfig struct {
+	Enabled             *bool  `yaml:"enabled" json:"enabled,omitempty"`
+	SoftThresholdTokens int    `yaml:"soft_threshold_tokens" json:"soft_threshold_tokens,omitempty"`
+	Prompt              string `yaml:"prompt" json:"prompt,omitempty"`
+	SystemPrompt        string `yaml:"system_prompt" json:"system_prompt,omitempty"`
 }
 
 // DefaultPruningConfig returns OpenClaw's default settings

@@ -40,16 +40,16 @@ type AgentStoreInterface interface {
 
 // AgentData represents agent data for boss tools (avoids import cycle).
 type AgentData struct {
-	ID           string                        `json:"id"`
-	Name         string                        `json:"name"`
-	Description  string                        `json:"description,omitempty"`
-	Model        string                        `json:"model,omitempty"`
-	SystemPrompt string                        `json:"system_prompt,omitempty"`
-	Tools        *toolpolicy.ToolPolicyConfig  `json:"tools,omitempty"`
-	Temperature  float64                       `json:"temperature,omitempty"`
-	IsPreset     bool                          `json:"is_preset,omitempty"`
-	CreatedAt    int64                         `json:"created_at"`
-	UpdatedAt    int64                         `json:"updated_at"`
+	ID           string                       `json:"id"`
+	Name         string                       `json:"name"`
+	Description  string                       `json:"description,omitempty"`
+	Model        string                       `json:"model,omitempty"`
+	SystemPrompt string                       `json:"system_prompt,omitempty"`
+	Tools        *toolpolicy.ToolPolicyConfig `json:"tools,omitempty"`
+	Temperature  float64                      `json:"temperature,omitempty"`
+	IsPreset     bool                         `json:"is_preset,omitempty"`
+	CreatedAt    int64                        `json:"created_at"`
+	UpdatedAt    int64                        `json:"updated_at"`
 }
 
 // ModelData represents model data for boss tools.
@@ -476,6 +476,34 @@ var SessionsSendTool = &Tool{
 	Group: GroupSessions,
 }
 
+// SessionsSpawnTool tool definition.
+var SessionsSpawnTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "sessions_spawn",
+		Description: "Create a new chat session (room) for an agent",
+		Annotations: &mcp.ToolAnnotations{Title: "Spawn Session"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "Optional room name (auto-generated if omitted)",
+				},
+				"agent_id": map[string]any{
+					"type":        "string",
+					"description": "Agent ID to assign to the new session (defaults to current room agent)",
+				},
+				"system_prompt": map[string]any{
+					"type":        "string",
+					"description": "Optional system prompt override for the new session",
+				},
+			},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupSessions,
+}
+
 // BossTools returns all boss agent tools.
 func BossTools() []*Tool {
 	return []*Tool{
@@ -496,6 +524,7 @@ func BossTools() []*Tool {
 		SessionsListTool,
 		SessionsHistoryTool,
 		SessionsSendTool,
+		SessionsSpawnTool,
 	}
 }
 
@@ -505,6 +534,7 @@ func SessionTools() []*Tool {
 		SessionsListTool,
 		SessionsHistoryTool,
 		SessionsSendTool,
+		SessionsSpawnTool,
 	}
 }
 
@@ -544,18 +574,6 @@ func readToolPolicyConfig(input map[string]any) (*toolpolicy.ToolPolicyConfig, e
 	return &cfg, nil
 }
 
-func legacyToolPolicyConfig(input map[string]any) *toolpolicy.ToolPolicyConfig {
-	profile := ReadStringDefault(input, "tool_profile", "")
-	alsoAllow := ReadStringArray(input, "tool_also_allow")
-	if profile == "" && len(alsoAllow) == 0 {
-		return nil
-	}
-	return &toolpolicy.ToolPolicyConfig{
-		Profile:   toolpolicy.ToolProfileID(profile),
-		AlsoAllow: alsoAllow,
-	}
-}
-
 // ExecuteCreateAgent handles the create_agent tool.
 func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[string]any) (*Result, error) {
 	name, err := ReadString(input, "name", true)
@@ -571,9 +589,6 @@ func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[str
 		return ErrorResult("create_agent", fmt.Sprintf("invalid tools config: %v", err)), nil
 	}
 	if toolsConfig == nil {
-		toolsConfig = legacyToolPolicyConfig(input)
-	}
-	if toolsConfig == nil {
 		toolsConfig = &toolpolicy.ToolPolicyConfig{Profile: toolpolicy.ProfileFull}
 	}
 
@@ -582,15 +597,15 @@ func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[str
 	now := time.Now().Unix()
 
 	agent := AgentData{
-		ID:            agentID,
-		Name:          name,
-		Description:   description,
-		Model:         model,
-		SystemPrompt:  systemPrompt,
+		ID:           agentID,
+		Name:         name,
+		Description:  description,
+		Model:        model,
+		SystemPrompt: systemPrompt,
 		Tools:        toolsConfig,
-		IsPreset:      false,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		IsPreset:     false,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 
 	if err := e.store.SaveAgent(ctx, agent); err != nil {
@@ -628,16 +643,16 @@ func (e *BossToolExecutor) ExecuteForkAgent(ctx context.Context, input map[strin
 	now := time.Now().Unix()
 
 	forked := AgentData{
-		ID:            agentID,
-		Name:          newName,
-		Description:   source.Description,
-		Model:         source.Model,
-		SystemPrompt:  source.SystemPrompt,
-		Tools:         source.Tools.Clone(),
-		Temperature:   source.Temperature,
-		IsPreset:      false,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:           agentID,
+		Name:         newName,
+		Description:  source.Description,
+		Model:        source.Model,
+		SystemPrompt: source.SystemPrompt,
+		Tools:        source.Tools.Clone(),
+		Temperature:  source.Temperature,
+		IsPreset:     false,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 
 	if err := e.store.SaveAgent(ctx, forked); err != nil {
@@ -688,10 +703,6 @@ func (e *BossToolExecutor) ExecuteEditAgent(ctx context.Context, input map[strin
 	}
 	if toolsConfig, err := readToolPolicyConfig(input); err == nil && toolsConfig != nil {
 		agent.Tools = toolsConfig
-	} else if toolsConfig == nil {
-		if legacy := legacyToolPolicyConfig(input); legacy != nil {
-			agent.Tools = legacy
-		}
 	} else if err != nil {
 		return ErrorResult("edit_agent", fmt.Sprintf("invalid tools config: %v", err)), nil
 	}
@@ -1023,5 +1034,40 @@ func (e *BossToolExecutor) ExecuteSessionsSend(ctx context.Context, input map[st
 		"success": true,
 		"room_id": roomID,
 		"message": "Message sent successfully",
+	}), nil
+}
+
+// ExecuteSessionsSpawn handles the sessions_spawn tool.
+func (e *BossToolExecutor) ExecuteSessionsSpawn(ctx context.Context, input map[string]any) (*Result, error) {
+	name := ReadStringDefault(input, "name", "")
+	agentID, _ := ReadString(input, "agent_id", false)
+	systemPrompt := ReadStringDefault(input, "system_prompt", "")
+
+	if agentID == "" {
+		return ErrorResult("sessions_spawn", "agent_id is required"), nil
+	}
+
+	if name == "" {
+		name = fmt.Sprintf("Spawned Session %s", time.Now().Format("2006-01-02 15:04"))
+	}
+
+	room := RoomData{
+		Name:           name,
+		AgentID:        agentID,
+		DefaultAgentID: agentID,
+		SystemPrompt:   systemPrompt,
+		CreatedAt:      time.Now().Unix(),
+	}
+
+	roomID, err := e.store.CreateRoom(ctx, room)
+	if err != nil {
+		return ErrorResult("sessions_spawn", fmt.Sprintf("failed to create session: %v", err)), nil
+	}
+
+	return JSONResult(map[string]any{
+		"success":  true,
+		"room_id":  roomID,
+		"agent_id": agentID,
+		"message":  fmt.Sprintf("Created session '%s' with agent '%s'", name, agentID),
 	}), nil
 }

@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/beeper/ai-bridge/pkg/memory"
 	"github.com/beeper/ai-bridge/pkg/textfs"
@@ -21,19 +20,19 @@ import (
 const memorySnippetMaxChars = 700
 
 type MemorySearchManager struct {
-	client      *AIClient
-	db          *dbutil.Database
-	bridgeID    string
-	loginID     string
-	agentID     string
-	cfg         *memory.ResolvedConfig
-	provider    memory.EmbeddingProvider
-	status      memory.ProviderStatus
-	providerKey string
-	vectorDims  int
+	client       *AIClient
+	db           *dbutil.Database
+	bridgeID     string
+	loginID      string
+	agentID      string
+	cfg          *memory.ResolvedConfig
+	provider     memory.EmbeddingProvider
+	status       memory.ProviderStatus
+	providerKey  string
+	vectorDims   int
 	ftsAvailable bool
-	ftsError    string
-	log         zerolog.Logger
+	ftsError     string
+	log          zerolog.Logger
 
 	mu sync.Mutex
 }
@@ -198,24 +197,26 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 		}
 	}
 
-	queryVec, err := m.provider.EmbedQuery(ctx, cleaned)
-	if err != nil {
-		return nil, err
-	}
 	vectorResults := []memory.HybridVectorResult{}
-	hasVector := false
-	for _, v := range queryVec {
-		if v != 0 {
-			hasVector = true
-			break
-		}
-	}
-	if hasVector {
-		results, err := m.searchVector(ctx, queryVec, candidates)
+	if m.cfg.Store.Vector.Enabled {
+		queryVec, err := m.provider.EmbedQuery(ctx, cleaned)
 		if err != nil {
 			return nil, err
 		}
-		vectorResults = results
+		hasVector := false
+		for _, v := range queryVec {
+			if v != 0 {
+				hasVector = true
+				break
+			}
+		}
+		if hasVector {
+			results, err := m.searchVector(ctx, queryVec, candidates)
+			if err != nil {
+				return nil, err
+			}
+			vectorResults = results
+		}
 	}
 
 	if !m.cfg.Query.Hybrid.Enabled {
@@ -317,12 +318,12 @@ func memoryManagerCacheKey(bridgeID, loginID, agentID string, cfg *memory.Resolv
 	sort.Strings(sources)
 	sort.Strings(extra)
 	payload := map[string]any{
-		"sources":     sources,
-		"extraPaths":  extra,
-		"provider":    cfg.Provider,
-		"model":       cfg.Model,
-		"fallback":    cfg.Fallback,
-		"remoteBase":  cfg.Remote.BaseURL,
+		"sources":       sources,
+		"extraPaths":    extra,
+		"provider":      cfg.Provider,
+		"model":         cfg.Model,
+		"fallback":      cfg.Fallback,
+		"remoteBase":    cfg.Remote.BaseURL,
 		"remoteHeaders": sortedHeaderNames(cfg.Remote.Headers),
 		"remoteBatch": map[string]any{
 			"enabled":        cfg.Remote.Batch.Enabled,
@@ -341,10 +342,10 @@ func memoryManagerCacheKey(bridgeID, loginID, agentID string, cfg *memory.Resolv
 			"vectorEnabled": cfg.Store.Vector.Enabled,
 			"vectorExt":     cfg.Store.Vector.ExtensionPath,
 		},
-		"chunking": cfg.Chunking,
-		"sync":     cfg.Sync,
-		"query":    cfg.Query,
-		"cache":    cfg.Cache,
+		"chunking":     cfg.Chunking,
+		"sync":         cfg.Sync,
+		"query":        cfg.Query,
+		"cache":        cfg.Cache,
 		"experimental": cfg.Experimental,
 	}
 	raw, _ := json.Marshal(payload)
