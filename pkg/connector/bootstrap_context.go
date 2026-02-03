@@ -10,7 +10,7 @@ import (
 	"github.com/beeper/ai-bridge/pkg/textfs"
 )
 
-func (oc *AIClient) buildBootstrapContextFiles(ctx context.Context, agentID string) []agents.EmbeddedContextFile {
+func (oc *AIClient) buildBootstrapContextFiles(ctx context.Context, agentID string, meta *PortalMetadata) []agents.EmbeddedContextFile {
 	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.DB == nil {
 		return nil
 	}
@@ -24,14 +24,23 @@ func (oc *AIClient) buildBootstrapContextFiles(ctx context.Context, agentID stri
 		agentID,
 	)
 
-	if _, err := agents.EnsureBootstrapFiles(ctx, store); err != nil {
-		oc.log.Warn().Err(err).Msg("failed to ensure workspace bootstrap files")
+	skipBootstrap := false
+	if oc.connector != nil && oc.connector.Config.Agents != nil && oc.connector.Config.Agents.Defaults != nil {
+		skipBootstrap = oc.connector.Config.Agents.Defaults.SkipBootstrap
+	}
+	if !skipBootstrap {
+		if _, err := agents.EnsureBootstrapFiles(ctx, store); err != nil {
+			oc.log.Warn().Err(err).Msg("failed to ensure workspace bootstrap files")
+		}
 	}
 
 	files, err := agents.LoadBootstrapFiles(ctx, store)
 	if err != nil {
 		oc.log.Warn().Err(err).Msg("failed to load workspace bootstrap files")
 		return nil
+	}
+	if meta != nil && strings.TrimSpace(meta.SubagentParentRoomID) != "" {
+		files = agents.FilterBootstrapFilesForSession(files, true)
 	}
 
 	maxChars := agents.DefaultBootstrapMaxChars

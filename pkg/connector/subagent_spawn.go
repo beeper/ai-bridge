@@ -271,7 +271,7 @@ func (oc *AIClient) executeSessionsSpawn(ctx context.Context, portal *bridgev2.P
 		}
 	}
 
-	chatResp, err := oc.createAgentChatWithModel(ctx, targetAgent, resolvedModel)
+	chatResp, err := oc.createAgentChatWithModel(ctx, targetAgent, resolvedModel, modelApplied)
 	if err != nil {
 		return tools.JSONResult(map[string]any{
 			"status": "error",

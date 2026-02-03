@@ -45,6 +45,12 @@ func modelUserID(modelID string) networkid.UserID {
 	return networkid.UserID(fmt.Sprintf("model-%s", url.PathEscape(modelID)))
 }
 
+// agentUserID creates a ghost user ID for an agent (no model suffix).
+// Format: "agent-{agent-id}"
+func agentUserID(agentID string) networkid.UserID {
+	return networkid.UserID(fmt.Sprintf("agent-%s", url.PathEscape(agentID)))
+}
+
 // parseModelFromGhostID extracts the model ID from a ghost ID (format: "model-{escaped-model-id}")
 // Returns empty string if the ghost ID doesn't match the expected format.
 func parseModelFromGhostID(ghostID string) string {
@@ -58,10 +64,25 @@ func parseModelFromGhostID(ghostID string) string {
 }
 
 // agentModelUserID creates a ghost user ID for an agent+model combination.
-// Format: "agent-{agent-id}:model-{model-id}"
-// This allows different model variants of the same agent to have different ghosts.
+// Format: "agent-{agent-id}:model-{model-id}".
+// Deprecated: kept for backwards compatibility with old room state.
 func agentModelUserID(agentID, modelID string) networkid.UserID {
 	return networkid.UserID(fmt.Sprintf("agent-%s:model-%s", url.PathEscape(agentID), url.PathEscape(modelID)))
+}
+
+// parseAgentFromGhostID extracts the agent ID from a ghost ID (format: "agent-{escaped-agent-id}").
+// Returns empty string and false if the ghost ID is not an agent-only ghost.
+func parseAgentFromGhostID(ghostID string) (agentID string, ok bool) {
+	if strings.Contains(ghostID, ":model-") {
+		return "", false
+	}
+	if suffix, hasPrefix := strings.CutPrefix(ghostID, "agent-"); hasPrefix {
+		agentID, err := url.PathUnescape(suffix)
+		if err == nil {
+			return agentID, true
+		}
+	}
+	return "", false
 }
 
 // parseAgentModelFromGhostID extracts agent and model IDs from a composite ghost ID.

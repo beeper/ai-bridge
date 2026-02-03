@@ -94,12 +94,12 @@ func (oc *AIClient) createBuilderRoom(ctx context.Context) (*bridgev2.Portal, *b
 	pm.Model = bossAgent.Model.Primary // Explicit model - always use Boss agent's model
 	pm.IsBuilderRoom = true            // Mark as protected from overrides
 
-	// Use agent+model ghost for the Boss agent
+	// Use agent ghost for the Boss agent
 	modelID := pm.Model
 	if modelID == "" {
 		modelID = oc.effectiveModel(nil)
 	}
-	bossGhostID := agentModelUserID(bossAgent.ID, modelID)
+	bossGhostID := agentUserID(bossAgent.ID)
 	bossDisplayName := oc.agentModelDisplayName(bossAgent.Name, modelID)
 	portal.OtherUserID = bossGhostID
 
@@ -127,7 +127,6 @@ func (oc *AIClient) createBuilderRoom(ctx context.Context) (*bridgev2.Portal, *b
 		}
 		bossMember.MemberEventExtra = map[string]any{
 			"displayname":            bossDisplayName,
-			"com.beeper.ai.model":    modelID,
 			"com.beeper.ai.model_id": modelID,
 			"com.beeper.ai.agent":    bossAgent.ID,
 		}

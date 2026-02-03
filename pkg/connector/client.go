@@ -653,16 +653,41 @@ func (oc *AIClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*
 func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	ghostID := string(ghost.ID)
 
+	// Parse agent from ghost ID (format: "agent-{id}")
+	if agentID, ok := parseAgentFromGhostID(ghostID); ok {
+		store := NewAgentStoreAdapter(oc)
+		agent, err := store.GetAgentByID(ctx, agentID)
+		displayName := "Unknown Agent"
+		modelID := ""
+		if err == nil && agent != nil {
+			displayName = agent.Name
+			if agent.Model.Primary != "" {
+				modelID = ResolveAlias(agent.Model.Primary)
+			}
+		}
+		identifiers := []string{agentID}
+		if modelID != "" {
+			identifiers = append(identifiers, modelContactIdentifiers(modelID, oc.findModelInfo(modelID))...)
+		}
+		return &bridgev2.UserInfo{
+			Name:         ptr.Ptr(displayName),
+			IsBot:        ptr.Ptr(true),
+			Identifiers:  uniqueStrings(identifiers),
+			ExtraUpdates: updateGhostLastSync,
+		}, nil
+	}
+
 	// Parse agent+model from ghost ID (format: "agent-{id}:model-{id}")
 	if agentID, modelID, ok := parseAgentModelFromGhostID(ghostID); ok {
 		store := NewAgentStoreAdapter(oc)
 		agent, err := store.GetAgentByID(ctx, agentID)
+		identifiers := append([]string{agentID}, modelContactIdentifiers(modelID, oc.findModelInfo(modelID))...)
 		if err == nil && agent != nil {
 			displayName := oc.agentModelDisplayName(agent.Name, modelID)
 			return &bridgev2.UserInfo{
 				Name:         ptr.Ptr(displayName),
 				IsBot:        ptr.Ptr(true),
-				Identifiers:  []string{agentID},
+				Identifiers:  uniqueStrings(identifiers),
 				ExtraUpdates: updateGhostLastSync,
 			}, nil
 		}
@@ -671,7 +696,7 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 		return &bridgev2.UserInfo{
 			Name:         ptr.Ptr(displayName),
 			IsBot:        ptr.Ptr(true),
-			Identifiers:  []string{agentID},
+			Identifiers:  uniqueStrings(identifiers),
 			ExtraUpdates: updateGhostLastSync,
 		}, nil
 	}
@@ -965,7 +990,10 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		PromptMode:        agent.PromptMode,
 		HeartbeatPrompt:   agent.HeartbeatPrompt,
 	}
-	params.ContextFiles = oc.buildBootstrapContextFiles(ctx, agentID)
+	if oc.connector != nil && oc.connector.Config.Memory != nil {
+		params.MemoryCitations = strings.TrimSpace(oc.connector.Config.Memory.Citations)
+	}
+	params.ContextFiles = oc.buildBootstrapContextFiles(ctx, agentID, meta)
 	if meta != nil && strings.TrimSpace(meta.SubagentParentRoomID) != "" {
 		params.PromptMode = agents.PromptModeMinimal
 	}
@@ -1855,9 +1883,9 @@ func (oc *AIClient) ensureGhostDisplayNameWithGhost(ctx context.Context, ghost *
 	}
 }
 
-// ensureAgentModelGhostDisplayName ensures the agent+model ghost has its display name set.
-func (oc *AIClient) ensureAgentModelGhostDisplayName(ctx context.Context, agentID, modelID, agentName string) {
-	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, agentModelUserID(agentID, modelID))
+// ensureAgentGhostDisplayName ensures the agent ghost has its display name set.
+func (oc *AIClient) ensureAgentGhostDisplayName(ctx context.Context, agentID, modelID, agentName string) {
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, agentUserID(agentID))
 	if err != nil || ghost == nil {
 		return
 	}
@@ -1881,16 +1909,16 @@ func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal)
 	// Check if an agent is configured for this room
 	agentID := resolveAgentID(meta)
 
-	// Use agent+model ghost if an agent is configured
+	// Use agent ghost if an agent is configured
 	if agentID != "" {
 		modelID := oc.effectiveModel(meta)
-		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, agentModelUserID(agentID, modelID))
+		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, agentUserID(agentID))
 		if err == nil && ghost != nil {
 			// Ensure the ghost has a display name set
 			store := NewAgentStoreAdapter(oc)
 			agent, _ := store.GetAgentByID(ctx, agentID)
 			if agent != nil {
-				oc.ensureAgentModelGhostDisplayName(ctx, agentID, modelID, agent.Name)
+				oc.ensureAgentGhostDisplayName(ctx, agentID, modelID, agent.Name)
 			}
 			return ghost.Intent
 		}

@@ -803,10 +803,12 @@ func fnAgent(ce *commands.Event) {
 	meta.AgentID = agent.ID
 	meta.DefaultAgentID = agent.ID
 	meta.AgentPrompt = agent.SystemPrompt
+	meta.Model = ""
 	modelID := client.effectiveModel(meta)
-	ce.Portal.OtherUserID = agentModelUserID(agent.ID, modelID)
+	meta.Capabilities = getModelCapabilities(modelID, client.findModelInfo(modelID))
+	ce.Portal.OtherUserID = agentUserID(agent.ID)
 	client.savePortalQuiet(ce.Ctx, ce.Portal, "agent change")
-	client.ensureAgentModelGhostDisplayName(ce.Ctx, agent.ID, modelID, agent.Name)
+	client.ensureAgentGhostDisplayName(ce.Ctx, agent.ID, modelID, agent.Name)
 	_ = client.BroadcastRoomState(ce.Ctx, ce.Portal)
 	ce.Reply("Agent set to: **%s** (`%s`)", agent.Name, agent.ID)
 }
