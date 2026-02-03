@@ -174,8 +174,9 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 		modelID := oc.effectiveModel(meta)
 		store := NewAgentStoreAdapter(oc)
 		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil {
-			displayName = oc.agentModelDisplayName(agent.Name, modelID)
-			oc.ensureAgentGhostDisplayName(ctx, agentID, modelID, agent.Name)
+			agentName := oc.resolveAgentDisplayName(ctx, agent)
+			displayName = oc.agentModelDisplayName(agentName, modelID)
+			oc.ensureAgentGhostDisplayName(ctx, agentID, modelID, agentName)
 		} else {
 			displayName = agentID // Fallback to agent ID
 		}

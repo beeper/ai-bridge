@@ -846,7 +846,8 @@ func fnAgent(ce *commands.Event) {
 	meta.Capabilities = getModelCapabilities(modelID, client.findModelInfo(modelID))
 	ce.Portal.OtherUserID = agentUserID(agent.ID)
 	client.savePortalQuiet(ce.Ctx, ce.Portal, "agent change")
-	client.ensureAgentGhostDisplayName(ce.Ctx, agent.ID, modelID, agent.Name)
+	agentName := client.resolveAgentDisplayName(ce.Ctx, agent)
+	client.ensureAgentGhostDisplayName(ce.Ctx, agent.ID, modelID, agentName)
 	_ = client.BroadcastRoomState(ce.Ctx, ce.Portal)
 	ce.Reply("Agent set to: **%s** (`%s`)", agent.Name, agent.ID)
 }
@@ -879,7 +880,8 @@ func fnAgents(ce *commands.Event) {
 	// Group by preset vs custom
 	var presets, custom []string
 	for id, agent := range agentsMap {
-		line := fmt.Sprintf("• **%s** (`%s`)", agent.Name, id)
+		agentName := client.resolveAgentDisplayName(ce.Ctx, agent)
+		line := fmt.Sprintf("• **%s** (`%s`)", agentName, id)
 		if agent.Description != "" {
 			line += fmt.Sprintf(" - %s", agent.Description)
 		}
