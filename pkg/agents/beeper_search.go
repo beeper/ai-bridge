@@ -1,6 +1,9 @@
 package agents
 
-import "github.com/beeper/ai-bridge/pkg/shared/toolspec"
+import (
+	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
+	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
+)
 
 // BeeperSearchPrompt is the system prompt for the Beeper Search agent.
 const BeeperSearchPrompt = `You are Beeper Search, a focused research assistant.
@@ -23,10 +26,9 @@ var BeeperSearchAgent = &AgentDefinition{
 			ModelClaudeOpus,
 		},
 	},
-	ToolProfile: ProfileFull,
-	ToolOverrides: map[string]bool{
-		toolspec.WebSearchOpenRouterName: true,
-		toolspec.WebSearchName:           false,
+	Tools: &toolpolicy.ToolPolicyConfig{
+		Profile: toolpolicy.ProfileFull,
+		Deny:    []string{toolspec.WebSearchName},
 	},
 	SystemPrompt: BeeperSearchPrompt,
 	PromptMode:   PromptModeFull,

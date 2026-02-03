@@ -1,5 +1,7 @@
 package agents
 
+import "github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
+
 // PlaygroundAgent is a sandbox for direct model access with minimal tools.
 // This is for advanced users who want raw model interaction without agent personality.
 var PlaygroundAgent = &AgentDefinition{
@@ -13,7 +15,7 @@ var PlaygroundAgent = &AgentDefinition{
 			ModelZAIGLM47,
 		},
 	},
-	ToolProfile:  ProfileMinimal,  // web search, calculator, chat info
+	Tools:        &toolpolicy.ToolPolicyConfig{Profile: toolpolicy.ProfileMinimal},
 	PromptMode:   PromptModeNone,  // no system prompt sections
 	ResponseMode: ResponseModeRaw, // no directive processing
 	IsPreset:     true,

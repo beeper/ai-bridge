@@ -1,5 +1,7 @@
 package agents
 
+import "github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
+
 // BeeperAIPrompt is the system prompt for the default Beeper AI agent.
 // Matches clawdbot/OpenClaw default personality style.
 const BeeperAIPrompt = `You are Beeper AI, a warm, helpful, and efficient personal assistant.
@@ -34,7 +36,7 @@ var BeeperAIAgent = &AgentDefinition{
 			ModelZAIGLM47,
 		},
 	},
-	ToolProfile:  ProfileCoding,
+	Tools:        &toolpolicy.ToolPolicyConfig{Profile: toolpolicy.ProfileCoding},
 	SystemPrompt: BeeperAIPrompt,
 	PromptMode:   PromptModeFull,
 	IsPreset:     true,

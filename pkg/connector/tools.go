@@ -14,13 +14,18 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/beeper/ai-bridge/pkg/shared/calc"
 	"github.com/beeper/ai-bridge/pkg/shared/media"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
+	"github.com/beeper/ai-bridge/pkg/textfs"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
@@ -133,6 +138,42 @@ func BuiltinTools() []ToolDefinition {
 			Execute:     executeMemoryGet,
 		},
 		{
+			Name:        ToolNameRead,
+			Description: toolspec.ReadDescription,
+			Parameters:  toolspec.ReadSchema(),
+			Execute:     executeReadFile,
+		},
+		{
+			Name:        ToolNameWrite,
+			Description: toolspec.WriteDescription,
+			Parameters:  toolspec.WriteSchema(),
+			Execute:     executeWriteFile,
+		},
+		{
+			Name:        ToolNameEdit,
+			Description: toolspec.EditDescription,
+			Parameters:  toolspec.EditSchema(),
+			Execute:     executeEditFile,
+		},
+		{
+			Name:        ToolNameLs,
+			Description: toolspec.LsDescription,
+			Parameters:  toolspec.LsSchema(),
+			Execute:     executeLs,
+		},
+		{
+			Name:        ToolNameFind,
+			Description: toolspec.FindDescription,
+			Parameters:  toolspec.FindSchema(),
+			Execute:     executeFind,
+		},
+		{
+			Name:        ToolNameGrep,
+			Description: toolspec.GrepDescription,
+			Parameters:  toolspec.GrepSchema(),
+			Execute:     executeGrep,
+		},
+		{
 			Name:        ToolNameGravatarFetch,
 			Description: toolspec.GravatarFetchDescription,
 			Parameters:  toolspec.GravatarFetchSchema(),
@@ -174,6 +215,12 @@ const (
 	ToolNameMemoryGet     = toolspec.MemoryGetName
 	ToolNameGravatarFetch = toolspec.GravatarFetchName
 	ToolNameGravatarSet   = toolspec.GravatarSetName
+	ToolNameRead          = toolspec.ReadName
+	ToolNameWrite         = toolspec.WriteName
+	ToolNameEdit          = toolspec.EditName
+	ToolNameLs            = toolspec.LsName
+	ToolNameFind          = toolspec.FindName
+	ToolNameGrep          = toolspec.GrepName
 )
 
 // ImageResultPrefix is the prefix used to identify image results that need media sending.
@@ -1434,6 +1481,499 @@ Chat: %s%s%s`,
 	return status, nil
 }
 
+const textFSMaxBytes = 256 * 1024
+
+func textFSStore(ctx context.Context) (*textfs.Store, error) {
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil {
+		return nil, fmt.Errorf("file tool requires bridge context")
+	}
+	meta := portalMeta(btc.Portal)
+	agentID := resolveAgentID(meta)
+	if agentID == "" {
+		agentID = "default"
+	}
+	db := btc.Client.UserLogin.Bridge.DB.Database
+	bridgeID := string(btc.Client.UserLogin.Bridge.DB.BridgeID)
+	loginID := string(btc.Client.UserLogin.ID)
+	return textfs.NewStore(db, bridgeID, loginID, agentID), nil
+}
+
+func readStringArg(args map[string]any, keys ...string) (string, bool) {
+	for _, key := range keys {
+		if raw, ok := args[key]; ok {
+			if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
+				return s, true
+			}
+		}
+	}
+	return "", false
+}
+
+func readIntArg(args map[string]any, keys ...string) (int, bool) {
+	for _, key := range keys {
+		if raw, ok := args[key]; ok {
+			switch v := raw.(type) {
+			case float64:
+				return int(v), true
+			case int:
+				return v, true
+			case int64:
+				return int(v), true
+			case string:
+				if strings.TrimSpace(v) == "" {
+					continue
+				}
+				if parsed, err := strconv.Atoi(v); err == nil {
+					return parsed, true
+				}
+			}
+		}
+	}
+	return 0, false
+}
+
+// executeReadFile handles the read tool.
+func executeReadFile(ctx context.Context, args map[string]any) (string, error) {
+	store, err := textFSStore(ctx)
+	if err != nil {
+		return "", err
+	}
+	path, ok := readStringArg(args, "path", "file_path")
+	if !ok {
+		return "", fmt.Errorf("missing or invalid 'path' argument")
+	}
+	offset, _ := readIntArg(args, "offset")
+	limit, _ := readIntArg(args, "limit")
+
+	entry, found, err := store.Read(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("file not found: %s", path)
+	}
+
+	content := strings.ReplaceAll(entry.Content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+	lines := strings.Split(content, "\n")
+	totalLines := len(lines)
+	startLine := 1
+	if offset > 0 {
+		startLine = offset
+	}
+	if startLine > totalLines {
+		return "", fmt.Errorf("offset %d is beyond end of file (%d lines total)", startLine, totalLines)
+	}
+	startIdx := startLine - 1
+	endIdx := totalLines
+	if limit > 0 {
+		endIdx = startIdx + limit
+		if endIdx > totalLines {
+			endIdx = totalLines
+		}
+	}
+	selected := strings.Join(lines[startIdx:endIdx], "\n")
+	trunc := textfs.TruncateHead(selected, textfs.DefaultMaxLines, textfs.DefaultMaxBytes)
+	if trunc.FirstLineExceedsLimit {
+		return fmt.Sprintf("[Line %d exceeds %s limit. Use offset/limit to read smaller sections.]", startLine, textfs.FormatSize(textfs.DefaultMaxBytes)), nil
+	}
+
+	output := trunc.Content
+	notices := []string{}
+	if endIdx < totalLines {
+		notices = append(notices, fmt.Sprintf("Showing lines %d-%d of %d. Use offset=%d to continue", startLine, endIdx, totalLines, endIdx+1))
+	}
+	if trunc.TruncatedBy == "bytes" {
+		notices = append(notices, fmt.Sprintf("%s limit reached", textfs.FormatSize(textfs.DefaultMaxBytes)))
+	}
+	if len(notices) > 0 {
+		output += "\n\n[" + strings.Join(notices, ". ") + "]"
+	}
+	return output, nil
+}
+
+// executeWriteFile handles the write tool.
+func executeWriteFile(ctx context.Context, args map[string]any) (string, error) {
+	store, err := textFSStore(ctx)
+	if err != nil {
+		return "", err
+	}
+	path, ok := readStringArg(args, "path", "file_path")
+	if !ok {
+		return "", fmt.Errorf("missing or invalid 'path' argument")
+	}
+	content, ok := args["content"].(string)
+	if !ok {
+		return "", fmt.Errorf("missing or invalid 'content' argument")
+	}
+	if len(content) > textFSMaxBytes {
+		return "", fmt.Errorf("content exceeds %s limit", textfs.FormatSize(textFSMaxBytes))
+	}
+	if _, err := store.Write(ctx, path, content); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Successfully wrote %d bytes to %s", len([]byte(content)), path), nil
+}
+
+// executeEditFile handles the edit tool.
+func executeEditFile(ctx context.Context, args map[string]any) (string, error) {
+	store, err := textFSStore(ctx)
+	if err != nil {
+		return "", err
+	}
+	path, ok := readStringArg(args, "path", "file_path")
+	if !ok {
+		return "", fmt.Errorf("missing or invalid 'path' argument")
+	}
+	oldText, ok := readStringArg(args, "oldText", "old_string")
+	if !ok {
+		return "", fmt.Errorf("missing or invalid 'oldText' argument")
+	}
+	newText, ok := readStringArg(args, "newText", "new_string")
+	if !ok {
+		return "", fmt.Errorf("missing or invalid 'newText' argument")
+	}
+
+	entry, found, err := store.Read(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("file not found: %s", path)
+	}
+
+	original := entry.Content
+	normalized := strings.ReplaceAll(original, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	oldNormalized := strings.ReplaceAll(oldText, "\r\n", "\n")
+	oldNormalized = strings.ReplaceAll(oldNormalized, "\r", "\n")
+	newNormalized := strings.ReplaceAll(newText, "\r\n", "\n")
+	newNormalized = strings.ReplaceAll(newNormalized, "\r", "\n")
+
+	if oldNormalized == "" {
+		return "", fmt.Errorf("oldText must not be empty")
+	}
+	count := strings.Count(normalized, oldNormalized)
+	if count == 0 {
+		return "", fmt.Errorf("could not find the exact text in %s", path)
+	}
+	if count > 1 {
+		return "", fmt.Errorf("found %d occurrences in %s; please make the match unique", count, path)
+	}
+
+	updated := strings.Replace(normalized, oldNormalized, newNormalized, 1)
+	if strings.Contains(original, "\r\n") {
+		updated = strings.ReplaceAll(updated, "\n", "\r\n")
+	}
+	if len(updated) > textFSMaxBytes {
+		return "", fmt.Errorf("content exceeds %s limit", textfs.FormatSize(textFSMaxBytes))
+	}
+	if _, err := store.Write(ctx, path, updated); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Successfully replaced text in %s.", path), nil
+}
+
+// executeLs handles the ls tool.
+func executeLs(ctx context.Context, args map[string]any) (string, error) {
+	store, err := textFSStore(ctx)
+	if err != nil {
+		return "", err
+	}
+	rawPath, _ := readStringArg(args, "path")
+	dir, err := textfs.NormalizeDir(rawPath)
+	if err != nil {
+		return "", err
+	}
+	limit, ok := readIntArg(args, "limit")
+	if !ok || limit <= 0 {
+		limit = 500
+	}
+	entries, err := store.ListWithPrefix(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	var exactFile bool
+	for _, entry := range entries {
+		if entry.Path == dir {
+			exactFile = true
+			break
+		}
+	}
+	names, hasDir := store.DirEntries(entries, dir)
+	if len(names) == 0 {
+		if exactFile && !hasDir {
+			return "", fmt.Errorf("not a directory: %s", rawPath)
+		}
+		return "(empty directory)", nil
+	}
+	entryLimitReached := false
+	if len(names) > limit {
+		names = names[:limit]
+		entryLimitReached = true
+	}
+	output := strings.Join(names, "\n")
+	trunc := textfs.TruncateHead(output, len(names)+1, textfs.DefaultMaxBytes)
+	result := trunc.Content
+	notices := []string{}
+	if entryLimitReached {
+		notices = append(notices, fmt.Sprintf("%d entries limit reached. Use limit=%d for more", limit, limit*2))
+	}
+	if trunc.Truncated {
+		notices = append(notices, fmt.Sprintf("%s limit reached", textfs.FormatSize(textfs.DefaultMaxBytes)))
+	}
+	if len(notices) > 0 {
+		result += "\n\n[" + strings.Join(notices, ". ") + "]"
+	}
+	return result, nil
+}
+
+// executeFind handles the find tool.
+func executeFind(ctx context.Context, args map[string]any) (string, error) {
+	store, err := textFSStore(ctx)
+	if err != nil {
+		return "", err
+	}
+	pattern, ok := readStringArg(args, "pattern")
+	if !ok {
+		return "", fmt.Errorf("missing or invalid 'pattern' argument")
+	}
+	rawPath, _ := readStringArg(args, "path")
+	dir, err := textfs.NormalizeDir(rawPath)
+	if err != nil {
+		return "", err
+	}
+	limit, ok := readIntArg(args, "limit")
+	if !ok || limit <= 0 {
+		limit = 1000
+	}
+	entries, err := store.ListWithPrefix(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	var exactFile bool
+	for _, entry := range entries {
+		if entry.Path == dir {
+			exactFile = true
+			break
+		}
+	}
+	hasDir := false
+	for _, entry := range entries {
+		if dir != "" && strings.HasPrefix(entry.Path, dir+"/") {
+			hasDir = true
+			break
+		}
+	}
+	if exactFile && !hasDir {
+		return "", fmt.Errorf("not a directory: %s", rawPath)
+	}
+	results := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		rel := entry.Path
+		if dir != "" {
+			if !strings.HasPrefix(entry.Path, dir+"/") {
+				continue
+			}
+			rel = strings.TrimPrefix(entry.Path, dir+"/")
+		}
+		match, err := doublestar.PathMatch(pattern, rel)
+		if err != nil || !match {
+			continue
+		}
+		results = append(results, rel)
+	}
+	if len(results) == 0 {
+		return "No files found matching pattern", nil
+	}
+	sort.Slice(results, func(i, j int) bool {
+		return strings.ToLower(results[i]) < strings.ToLower(results[j])
+	})
+	resultLimitReached := false
+	if len(results) > limit {
+		results = results[:limit]
+		resultLimitReached = true
+	}
+	output := strings.Join(results, "\n")
+	trunc := textfs.TruncateHead(output, len(results)+1, textfs.DefaultMaxBytes)
+	result := trunc.Content
+	notices := []string{}
+	if resultLimitReached {
+		notices = append(notices, fmt.Sprintf("%d results limit reached", limit))
+	}
+	if trunc.Truncated {
+		notices = append(notices, fmt.Sprintf("%s limit reached", textfs.FormatSize(textfs.DefaultMaxBytes)))
+	}
+	if len(notices) > 0 {
+		result += "\n\n[" + strings.Join(notices, ". ") + "]"
+	}
+	return result, nil
+}
+
+// executeGrep handles the grep tool.
+func executeGrep(ctx context.Context, args map[string]any) (string, error) {
+	store, err := textFSStore(ctx)
+	if err != nil {
+		return "", err
+	}
+	pattern, ok := readStringArg(args, "pattern")
+	if !ok {
+		return "", fmt.Errorf("missing or invalid 'pattern' argument")
+	}
+	rawPath, _ := readStringArg(args, "path")
+	dir, err := textfs.NormalizeDir(rawPath)
+	if err != nil {
+		return "", err
+	}
+	glob, _ := readStringArg(args, "glob")
+	contextLines, _ := readIntArg(args, "context")
+	limit, ok := readIntArg(args, "limit")
+	if !ok || limit <= 0 {
+		limit = 100
+	}
+	ignoreCase, _ := args["ignoreCase"].(bool)
+	literal, _ := args["literal"].(bool)
+
+	entries, err := store.ListWithPrefix(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	var exactFile bool
+	for _, entry := range entries {
+		if entry.Path == dir {
+			exactFile = true
+			break
+		}
+	}
+	hasDir := false
+	for _, entry := range entries {
+		if dir != "" && strings.HasPrefix(entry.Path, dir+"/") {
+			hasDir = true
+			break
+		}
+	}
+	if exactFile && !hasDir {
+		hasDir = false
+	} else {
+		hasDir = true
+	}
+	if len(entries) == 0 {
+		return "", fmt.Errorf("path not found: %s", rawPath)
+	}
+
+	regexPattern := pattern
+	if literal {
+		regexPattern = regexp.QuoteMeta(pattern)
+	}
+	if ignoreCase {
+		regexPattern = "(?i)" + regexPattern
+	}
+	re, err := regexp.Compile(regexPattern)
+	if err != nil {
+		return "", fmt.Errorf("invalid pattern: %w", err)
+	}
+
+	formatPath := func(p string) string {
+		if hasDir && dir != "" {
+			return strings.TrimPrefix(p, dir+"/")
+		}
+		if hasDir && dir == "" {
+			return p
+		}
+		return path.Base(p)
+	}
+
+	var outputLines []string
+	matchCount := 0
+	matchLimitReached := false
+	linesTruncated := false
+	for _, entry := range entries {
+		if dir != "" && hasDir {
+			if !strings.HasPrefix(entry.Path, dir+"/") {
+				continue
+			}
+		} else if !hasDir && entry.Path != dir {
+			continue
+		}
+		rel := entry.Path
+		if dir != "" && hasDir {
+			rel = strings.TrimPrefix(entry.Path, dir+"/")
+		}
+		if glob != "" {
+			match, err := doublestar.PathMatch(glob, rel)
+			if err != nil || !match {
+				continue
+			}
+		}
+		content := strings.ReplaceAll(entry.Content, "\r\n", "\n")
+		content = strings.ReplaceAll(content, "\r", "\n")
+		lines := strings.Split(content, "\n")
+		for idx, line := range lines {
+			if matchCount >= limit {
+				matchLimitReached = true
+				break
+			}
+			if !re.MatchString(line) {
+				continue
+			}
+			matchCount++
+			start := idx
+			end := idx
+			if contextLines > 0 {
+				if idx-contextLines > 0 {
+					start = idx - contextLines
+				} else {
+					start = 0
+				}
+				if idx+contextLines < len(lines)-1 {
+					end = idx + contextLines
+				} else {
+					end = len(lines) - 1
+				}
+			}
+			for lineIdx := start; lineIdx <= end; lineIdx++ {
+				text := lines[lineIdx]
+				truncLine, wasTruncated := textfs.TruncateLine(text, textfs.GrepMaxLineLength)
+				if wasTruncated {
+					linesTruncated = true
+				}
+				displayPath := formatPath(entry.Path)
+				lineNo := lineIdx + 1
+				if lineIdx == idx {
+					outputLines = append(outputLines, fmt.Sprintf("%s:%d: %s", displayPath, lineNo, truncLine))
+				} else {
+					outputLines = append(outputLines, fmt.Sprintf("%s-%d- %s", displayPath, lineNo, truncLine))
+				}
+			}
+		}
+		if matchLimitReached {
+			break
+		}
+	}
+
+	if matchCount == 0 {
+		return "No matches found", nil
+	}
+	rawOutput := strings.Join(outputLines, "\n")
+	trunc := textfs.TruncateHead(rawOutput, len(outputLines)+1, textfs.DefaultMaxBytes)
+	result := trunc.Content
+	notices := []string{}
+	if matchLimitReached {
+		notices = append(notices, fmt.Sprintf("%d matches limit reached. Use limit=%d for more, or refine pattern", limit, limit*2))
+	}
+	if trunc.Truncated {
+		notices = append(notices, fmt.Sprintf("%s limit reached", textfs.FormatSize(textfs.DefaultMaxBytes)))
+	}
+	if linesTruncated {
+		notices = append(notices, fmt.Sprintf("Some lines truncated to %d chars. Use read tool to see full lines", textfs.GrepMaxLineLength))
+	}
+	if len(notices) > 0 {
+		result += "\n\n[" + strings.Join(notices, ". ") + "]"
+	}
+	return result, nil
+}
+
 // GetBuiltinTool returns a builtin tool by name, or nil if not found
 func GetBuiltinTool(name string) *ToolDefinition {
 	for _, tool := range BuiltinTools() {
@@ -1511,75 +2051,6 @@ func executeMemoryGet(ctx context.Context, args map[string]any) (string, error) 
 	result, err := memStore.Get(ctx, btc.Portal, input)
 	if err != nil {
 		return "", fmt.Errorf("memory get failed: %w", err)
-	}
-
-	// Format as JSON
-	output, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("failed to format result: %w", err)
-	}
-
-	return string(output), nil
-}
-
-// executeMemoryStore handles the memory_store tool
-func executeMemoryStore(ctx context.Context, args map[string]any) (string, error) {
-	btc := GetBridgeToolContext(ctx)
-	if btc == nil {
-		return "", fmt.Errorf("memory_store requires bridge context")
-	}
-
-	content, ok := args["content"].(string)
-	if !ok || content == "" {
-		return "", fmt.Errorf("missing or invalid 'content' argument")
-	}
-
-	var input MemoryStoreInput
-	input.Content = content
-
-	if importance, ok := args["importance"].(float64); ok {
-		input.Importance = &importance
-	}
-	if category, ok := args["category"].(string); ok {
-		input.Category = &category
-	}
-	if scope, ok := args["scope"].(string); ok {
-		input.Scope = &scope
-	}
-
-	memStore := NewMemoryStore(btc.Client)
-	result, err := memStore.Store(ctx, btc.Portal, input)
-	if err != nil {
-		return "", fmt.Errorf("memory store failed: %w", err)
-	}
-
-	// Format as JSON
-	output, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("failed to format result: %w", err)
-	}
-
-	return string(output), nil
-}
-
-// executeMemoryForget handles the memory_forget tool
-func executeMemoryForget(ctx context.Context, args map[string]any) (string, error) {
-	btc := GetBridgeToolContext(ctx)
-	if btc == nil {
-		return "", fmt.Errorf("memory_forget requires bridge context")
-	}
-
-	id, ok := args["id"].(string)
-	if !ok || id == "" {
-		return "", fmt.Errorf("missing or invalid 'id' argument")
-	}
-
-	input := MemoryForgetInput{ID: id}
-
-	memStore := NewMemoryStore(btc.Client)
-	result, err := memStore.Forget(ctx, btc.Portal, input)
-	if err != nil {
-		return "", fmt.Errorf("memory forget failed: %w", err)
 	}
 
 	// Format as JSON
