@@ -626,15 +626,8 @@ type RoomSettingsEventContent struct {
 	ReasoningEffort     string      `json:"reasoning_effort,omitempty"`
 	ConversationMode    string      `json:"conversation_mode,omitempty"` // "messages" or "responses"
 	DefaultAgentID      string      `json:"default_agent_id,omitempty"`
-	ToolToggle          *ToolToggle `json:"tool_toggle,omitempty"` // Single field for toggling any tool
 	EmitThinking        *bool       `json:"emit_thinking,omitempty"`
 	EmitToolArgs        *bool       `json:"emit_tool_args,omitempty"`
-}
-
-// ToolToggle represents a request to toggle a specific tool on/off
-type ToolToggle struct {
-	Name    string `json:"name"`    // Tool name (e.g., "calculator", "web_search", "online")
-	Enabled bool   `json:"enabled"` // Desired state
 }
 
 // ToolInfo describes a tool and its status for room state broadcasting

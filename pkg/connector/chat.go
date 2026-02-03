@@ -467,7 +467,6 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 
 	// Initialize or copy metadata
 	var pmeta *PortalMetadata
-	loginMeta := loginMetadata(oc.UserLogin)
 	if opts.CopyFrom != nil {
 		pmeta = &PortalMetadata{
 			Model:               opts.CopyFrom.Model,

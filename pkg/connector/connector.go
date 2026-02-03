@@ -189,14 +189,6 @@ func (oc *OpenAIConnector) processRoomSettingsContent(
 	if content.ConversationMode != "" {
 		changes = append(changes, fmt.Sprintf("conversation_mode=%s", content.ConversationMode))
 	}
-	if content.ToolToggle != nil {
-		state := "off"
-		if content.ToolToggle.Enabled {
-			state = "on"
-		}
-		changes = append(changes, fmt.Sprintf("%s=%s", content.ToolToggle.Name, state))
-	}
-
 	if len(changes) > 0 {
 		client.sendSystemNotice(ctx, portal, fmt.Sprintf("Configuration updated: %s", strings.Join(changes, ", ")))
 	}
