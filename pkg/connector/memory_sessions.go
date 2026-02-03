@@ -24,7 +24,7 @@ type sessionPortal struct {
 	portalKey networkid.PortalKey
 }
 
-func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sessionKey string) error {
+func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sessionKey, generation string) error {
 	if m == nil || m.client == nil {
 		return fmt.Errorf("memory search unavailable")
 	}
@@ -127,7 +127,7 @@ func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sess
 				if needsFullReindex || indexAll || existingHash == "" || existingHash != hash {
 					if err := m.upsertSessionFile(ctx, key, path, content, hash); err != nil {
 						m.log.Warn().Err(err).Str("session", key).Msg("memory session write failed")
-					} else if err := m.indexContent(ctx, path, "sessions", content); err != nil {
+					} else if err := m.indexContent(ctx, path, "sessions", content, generation); err != nil {
 						m.log.Warn().Err(err).Str("session", key).Msg("memory session index failed")
 					}
 				}

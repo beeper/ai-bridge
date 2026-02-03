@@ -681,10 +681,6 @@ func fnGravatar(ce *commands.Event) {
 	if !ok {
 		return
 	}
-	if !client.isBossRoom(meta) {
-		ce.Reply("Gravatar commands are only available in rooms managed by the Boss agent.")
-		return
-	}
 
 	if len(ce.Args) == 0 {
 		loginMeta := loginMetadata(client.UserLogin)

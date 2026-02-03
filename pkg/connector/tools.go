@@ -102,10 +102,27 @@ const (
 	ToolNameApplyPatch    = toolspec.ApplyPatchName
 	ToolNameWrite         = toolspec.WriteName
 	ToolNameEdit          = toolspec.EditName
+	ToolNameStat          = toolspec.StatName
 	ToolNameLS            = toolspec.LSName
 	ToolNameFind          = toolspec.FindName
 	ToolNameGrep          = toolspec.GrepName
 )
+
+type memorySearchOutput struct {
+	Results  []memory.SearchResult  `json:"results"`
+	Provider string                 `json:"provider,omitempty"`
+	Model    string                 `json:"model,omitempty"`
+	Fallback *memory.FallbackStatus `json:"fallback,omitempty"`
+	Disabled bool                   `json:"disabled,omitempty"`
+	Error    string                 `json:"error,omitempty"`
+}
+
+type memoryGetOutput struct {
+	Path     string `json:"path"`
+	Text     string `json:"text"`
+	Disabled bool   `json:"disabled,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
 
 // ImageResultPrefix is the prefix used to identify image results that need media sending.
 const ImageResultPrefix = "IMAGE:"
@@ -1595,31 +1612,37 @@ func executeMemorySearch(ctx context.Context, args map[string]any) (string, erro
 		return "", fmt.Errorf("memory_search requires bridge context")
 	}
 
-	query, ok := args["query"].(string)
+	queryRaw, ok := args["query"].(string)
+	query := strings.TrimSpace(queryRaw)
 	if !ok || query == "" {
-		return "", fmt.Errorf("missing or invalid 'query' argument")
+		return "", fmt.Errorf("query required")
 	}
 
 	var input MemorySearchInput
 	input.Query = query
 
-	if maxResults, ok := args["maxResults"].(float64); ok {
-		max := int(maxResults)
-		input.MaxResults = &max
+	if raw := args["maxResults"]; raw != nil {
+		if max, ok := readNumberArg(raw); ok {
+			val := int(max)
+			input.MaxResults = &val
+		}
 	}
-	if minScore, ok := args["minScore"].(float64); ok {
-		input.MinScore = &minScore
+	if raw := args["minScore"]; raw != nil {
+		if score, ok := readNumberArg(raw); ok {
+			input.MinScore = &score
+		}
 	}
 
 	meta := portalMeta(btc.Portal)
 	agentID := resolveAgentID(meta)
 	manager, errMsg := getMemorySearchManager(btc.Client, agentID)
 	if manager == nil {
-		output, _ := json.Marshal(map[string]any{
-			"results":  []memory.SearchResult{},
-			"disabled": true,
-			"error":    errMsg,
-		})
+		payload := memorySearchOutput{
+			Results:  []memory.SearchResult{},
+			Disabled: true,
+			Error:    errMsg,
+		}
+		output, _ := json.MarshalIndent(payload, "", "  ")
 		return string(output), nil
 	}
 
@@ -1635,24 +1658,23 @@ func executeMemorySearch(ctx context.Context, args map[string]any) (string, erro
 	}
 	results, err := manager.Search(ctx, input.Query, opts)
 	if err != nil {
-		output, _ := json.Marshal(map[string]any{
-			"results":  []memory.SearchResult{},
-			"disabled": true,
-			"error":    err.Error(),
-		})
+		payload := memorySearchOutput{
+			Results:  []memory.SearchResult{},
+			Disabled: true,
+			Error:    err.Error(),
+		}
+		output, _ := json.MarshalIndent(payload, "", "  ")
 		return string(output), nil
 	}
 
 	status := manager.Status()
-	payload := map[string]any{
-		"results":  results,
-		"provider": status.Provider,
-		"model":    status.Model,
+	payload := memorySearchOutput{
+		Results:  results,
+		Provider: status.Provider,
+		Model:    status.Model,
+		Fallback: status.Fallback,
 	}
-	if status.Fallback != nil {
-		payload["fallback"] = status.Fallback
-	}
-	output, err := json.Marshal(payload)
+	output, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("failed to format results: %w", err)
 	}
@@ -1667,47 +1689,62 @@ func executeMemoryGet(ctx context.Context, args map[string]any) (string, error) 
 		return "", fmt.Errorf("memory_get requires bridge context")
 	}
 
-	path, ok := args["path"].(string)
+	pathRaw, ok := args["path"].(string)
+	path := strings.TrimSpace(pathRaw)
 	if !ok || path == "" {
-		return "", fmt.Errorf("missing or invalid 'path' argument")
+		return "", fmt.Errorf("path required")
 	}
 
 	meta := portalMeta(btc.Portal)
 	agentID := resolveAgentID(meta)
 	manager, errMsg := getMemorySearchManager(btc.Client, agentID)
 	if manager == nil {
-		output, _ := json.Marshal(map[string]any{
-			"path":     path,
-			"text":     "",
-			"disabled": true,
-			"error":    errMsg,
-		})
+		payload := memoryGetOutput{
+			Path:     path,
+			Text:     "",
+			Disabled: true,
+			Error:    errMsg,
+		}
+		output, _ := json.MarshalIndent(payload, "", "  ")
 		return string(output), nil
 	}
 
 	var from *int
 	var lines *int
-	if rawFrom, ok := args["from"].(float64); ok {
-		val := int(rawFrom)
-		from = &val
+	if raw := args["from"]; raw != nil {
+		if value, ok := readNumberArg(raw); ok {
+			val := int(value)
+			from = &val
+		}
 	}
-	if rawLines, ok := args["lines"].(float64); ok {
-		val := int(rawLines)
-		lines = &val
+	if raw := args["lines"]; raw != nil {
+		if value, ok := readNumberArg(raw); ok {
+			val := int(value)
+			lines = &val
+		}
 	}
 
 	result, err := manager.ReadFile(ctx, path, from, lines)
 	if err != nil {
-		output, _ := json.Marshal(map[string]any{
-			"path":     path,
-			"text":     "",
-			"disabled": true,
-			"error":    err.Error(),
-		})
+		payload := memoryGetOutput{
+			Path:     path,
+			Text:     "",
+			Disabled: true,
+			Error:    err.Error(),
+		}
+		output, _ := json.MarshalIndent(payload, "", "  ")
 		return string(output), nil
 	}
-
-	output, err := json.Marshal(result)
+	text, _ := result["text"].(string)
+	resolvedPath, _ := result["path"].(string)
+	if resolvedPath == "" {
+		resolvedPath = path
+	}
+	payload := memoryGetOutput{
+		Path: resolvedPath,
+		Text: text,
+	}
+	output, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("failed to format result: %w", err)
 	}
@@ -1715,13 +1752,32 @@ func executeMemoryGet(ctx context.Context, args map[string]any) (string, error) 
 	return string(output), nil
 }
 
+func readNumberArg(raw any) (float64, bool) {
+	switch v := raw.(type) {
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0, false
+		}
+		return v, true
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return 0, false
+		}
+		parsed, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+			return 0, false
+		}
+		return parsed, true
+	default:
+		return 0, false
+	}
+}
+
 func executeGravatarFetch(ctx context.Context, args map[string]any) (string, error) {
 	btc := GetBridgeToolContext(ctx)
 	if btc == nil || btc.Client == nil || btc.Meta == nil {
 		return "", fmt.Errorf("bridge context not available")
-	}
-	if !btc.Client.isBossRoom(btc.Meta) {
-		return "", fmt.Errorf("gravatar tools are only available in rooms managed by the Boss agent")
 	}
 
 	email := ""
@@ -1749,9 +1805,6 @@ func executeGravatarSet(ctx context.Context, args map[string]any) (string, error
 	btc := GetBridgeToolContext(ctx)
 	if btc == nil || btc.Client == nil || btc.Meta == nil {
 		return "", fmt.Errorf("bridge context not available")
-	}
-	if !btc.Client.isBossRoom(btc.Meta) {
-		return "", fmt.Errorf("gravatar tools are only available in rooms managed by the Boss agent")
 	}
 
 	email, ok := args["email"].(string)

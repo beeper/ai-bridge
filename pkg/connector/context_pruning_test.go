@@ -259,29 +259,29 @@ func TestPruneContext(t *testing.T) {
 func TestToolPatternMatching(t *testing.T) {
 	t.Run("exact match", func(t *testing.T) {
 		config := &PruningConfig{
-			ToolsAllow: []string{"exec"},
+			ToolsAllow: []string{"list_tools"},
 		}
 		pred := makeToolPrunablePredicate(config)
 
-		if !pred("exec") {
-			t.Error("Should match exact 'exec'")
+		if !pred("list_tools") {
+			t.Error("Should match exact 'list_tools'")
 		}
-		if pred("exec_background") {
-			t.Error("Should not match 'exec_background' with exact pattern")
+		if pred("list_tools_background") {
+			t.Error("Should not match 'list_tools_background' with exact pattern")
 		}
 	})
 
 	t.Run("wildcard suffix", func(t *testing.T) {
 		config := &PruningConfig{
-			ToolsAllow: []string{"exec*"},
+			ToolsAllow: []string{"list_*"},
 		}
 		pred := makeToolPrunablePredicate(config)
 
-		if !pred("exec") {
-			t.Error("Should match 'exec'")
+		if !pred("list_tools") {
+			t.Error("Should match 'list_tools'")
 		}
-		if !pred("exec_background") {
-			t.Error("Should match 'exec_background'")
+		if !pred("list_models") {
+			t.Error("Should match 'list_models'")
 		}
 		if pred("read") {
 			t.Error("Should not match 'read'")
@@ -334,15 +334,15 @@ func TestToolPatternMatching(t *testing.T) {
 
 	t.Run("case insensitive", func(t *testing.T) {
 		config := &PruningConfig{
-			ToolsAllow: []string{"EXEC*"},
+			ToolsAllow: []string{"LIST_*"},
 		}
 		pred := makeToolPrunablePredicate(config)
 
-		if !pred("exec") {
-			t.Error("Should match lowercase 'exec'")
+		if !pred("list_tools") {
+			t.Error("Should match lowercase 'list_tools'")
 		}
-		if !pred("EXEC") {
-			t.Error("Should match uppercase 'EXEC'")
+		if !pred("LIST_TOOLS") {
+			t.Error("Should match uppercase 'LIST_TOOLS'")
 		}
 	})
 }

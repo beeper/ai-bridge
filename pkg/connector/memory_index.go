@@ -59,13 +59,12 @@ func (m *MemorySearchManager) sync(ctx context.Context, sessionKey string, force
 	if err != nil {
 		return err
 	}
-	if needsFullReindex {
-		if err := m.clearIndex(ctx); err != nil {
-			return err
-		}
+	generation := m.indexGen
+	if needsFullReindex || generation == "" {
+		generation = uuid.NewString()
 	}
 
-	if err := m.indexMemoryFiles(ctx, needsFullReindex); err != nil {
+	if err := m.indexMemoryFiles(ctx, needsFullReindex, generation); err != nil {
 		return err
 	}
 	if hasSource(m.cfg.Sources, "memory") {
@@ -73,29 +72,36 @@ func (m *MemorySearchManager) sync(ctx context.Context, sessionKey string, force
 	}
 
 	if m.cfg.Experimental.SessionMemory && hasSource(m.cfg.Sources, "sessions") {
-		if err := m.syncSessions(ctx, needsFullReindex, sessionKey); err != nil {
+		if err := m.syncSessions(ctx, needsFullReindex, sessionKey, generation); err != nil {
 			return err
 		}
 		m.sessionsDirty = false
 	}
 
-	return m.updateMeta(ctx)
+	if err := m.updateMeta(ctx, generation); err != nil {
+		return err
+	}
+	if needsFullReindex {
+		m.indexGen = generation
+		m.cleanupOldGenerations(ctx, generation)
+	}
+	return nil
 }
 
 func (m *MemorySearchManager) needsFullReindex(ctx context.Context, force bool) (bool, error) {
 	if force {
 		return true, nil
 	}
-	var provider, model, providerKey string
+	var provider, model, providerKey, indexGen string
 	var chunkTokens, chunkOverlap int
 	var vectorDims sql.NullInt64
 	row := m.db.QueryRow(ctx,
-		`SELECT provider, model, provider_key, chunk_tokens, chunk_overlap, vector_dims
+		`SELECT provider, model, provider_key, chunk_tokens, chunk_overlap, vector_dims, index_generation
          FROM ai_memory_meta
          WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
 		m.bridgeID, m.loginID, m.agentID,
 	)
-	switch err := row.Scan(&provider, &model, &providerKey, &chunkTokens, &chunkOverlap, &vectorDims); err {
+	switch err := row.Scan(&provider, &model, &providerKey, &chunkTokens, &chunkOverlap, &vectorDims, &indexGen); err {
 	case nil:
 		if provider != m.status.Provider ||
 			model != m.status.Model ||
@@ -106,6 +112,13 @@ func (m *MemorySearchManager) needsFullReindex(ctx context.Context, force bool) 
 		}
 		if vectorDims.Valid {
 			m.vectorDims = int(vectorDims.Int64)
+		}
+		m.indexGen = strings.TrimSpace(indexGen)
+		if m.indexGen == "" {
+			m.indexGen = m.deriveIndexGeneration(ctx)
+			if m.indexGen == "" {
+				return true, nil
+			}
 		}
 		return false, nil
 	case sql.ErrNoRows:
@@ -150,19 +163,21 @@ func (m *MemorySearchManager) clearIndex(ctx context.Context) error {
 	return nil
 }
 
-func (m *MemorySearchManager) updateMeta(ctx context.Context) error {
+func (m *MemorySearchManager) updateMeta(ctx context.Context, generation string) error {
 	vectorDims := m.vectorDims
 	_, err := m.db.Exec(ctx,
 		`INSERT INTO ai_memory_meta
-           (bridge_id, login_id, agent_id, provider, model, provider_key, chunk_tokens, chunk_overlap, vector_dims, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           (bridge_id, login_id, agent_id, provider, model, provider_key, chunk_tokens, chunk_overlap, vector_dims, index_generation, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (bridge_id, login_id, agent_id)
          DO UPDATE SET provider=excluded.provider, model=excluded.model, provider_key=excluded.provider_key,
-           chunk_tokens=excluded.chunk_tokens, chunk_overlap=excluded.chunk_overlap, vector_dims=excluded.vector_dims, updated_at=excluded.updated_at`,
+           chunk_tokens=excluded.chunk_tokens, chunk_overlap=excluded.chunk_overlap, vector_dims=excluded.vector_dims,
+           index_generation=excluded.index_generation, updated_at=excluded.updated_at`,
 		m.bridgeID, m.loginID, m.agentID,
 		m.status.Provider, m.status.Model, m.providerKey,
 		m.cfg.Chunking.Tokens, m.cfg.Chunking.Overlap,
 		vectorDimsOrNull(vectorDims),
+		generation,
 		time.Now().UnixMilli(),
 	)
 	return err
@@ -175,7 +190,31 @@ func vectorDimsOrNull(value int) any {
 	return value
 }
 
-func (m *MemorySearchManager) indexMemoryFiles(ctx context.Context, force bool) error {
+func (m *MemorySearchManager) deriveIndexGeneration(ctx context.Context) string {
+	if m == nil {
+		return ""
+	}
+	row := m.db.QueryRow(ctx,
+		`SELECT id FROM ai_memory_chunks
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+		m.bridgeID, m.loginID, m.agentID,
+	)
+	var id string
+	if err := row.Scan(&id); err != nil {
+		return ""
+	}
+	if id == "" {
+		return ""
+	}
+	if parts := strings.SplitN(id, ":", 2); len(parts) == 2 {
+		return parts[0]
+	}
+	return ""
+}
+
+func (m *MemorySearchManager) indexMemoryFiles(ctx context.Context, force bool, generation string) error {
 	store := textfs.NewStore(m.db, m.bridgeID, m.loginID, m.agentID)
 	entries, err := store.List(ctx)
 	if err != nil {
@@ -200,30 +239,33 @@ func (m *MemorySearchManager) indexMemoryFiles(ctx context.Context, force bool) 
 
 	for _, entry := range activePaths {
 		source := "memory"
-		needs, err := m.needsFileIndex(ctx, entry, source)
+		needs, err := m.needsFileIndex(ctx, entry, source, generation)
 		if err != nil {
 			return err
 		}
 		if !force && !needs {
 			continue
 		}
-		if err := m.indexContent(ctx, entry.Path, source, entry.Content); err != nil {
+		if err := m.indexContent(ctx, entry.Path, source, entry.Content, generation); err != nil {
 			return err
 		}
 	}
 
-	if err := m.removeStaleMemoryChunks(ctx, activePaths); err != nil {
+	if err := m.removeStaleMemoryChunks(ctx, activePaths, generation); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *MemorySearchManager) needsFileIndex(ctx context.Context, entry textfs.FileEntry, source string) (bool, error) {
+func (m *MemorySearchManager) needsFileIndex(ctx context.Context, entry textfs.FileEntry, source, generation string) (bool, error) {
 	var updatedAt sql.NullInt64
+	genSQL, genArgs := generationFilterSQL(7, generation)
+	args := []any{m.bridgeID, m.loginID, m.agentID, entry.Path, source, m.status.Model}
+	args = append(args, genArgs...)
 	row := m.db.QueryRow(ctx,
 		`SELECT MAX(updated_at) FROM ai_memory_chunks
-         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5 AND model=$6`,
-		m.bridgeID, m.loginID, m.agentID, entry.Path, source, m.status.Model,
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5 AND model=$6`+genSQL,
+		args...,
 	)
 	if err := row.Scan(&updatedAt); err != nil {
 		return true, err
@@ -237,7 +279,7 @@ func (m *MemorySearchManager) needsFileIndex(ctx context.Context, entry textfs.F
 	return false, nil
 }
 
-func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, content string) error {
+func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, content, generation string) error {
 	cleanContent := normalizeNewlines(content)
 	chunks := memory.ChunkMarkdown(cleanContent, m.cfg.Chunking.Tokens, m.cfg.Chunking.Overlap)
 	filtered := chunks[:0]
@@ -252,25 +294,6 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 		return nil
 	}
 
-	if m.vectorReady {
-		ids := m.collectChunkIDs(ctx, path, source, m.status.Model)
-		m.deleteVectorIDs(ctx, ids)
-	}
-	if _, err := m.db.Exec(ctx,
-		`DELETE FROM ai_memory_chunks
-         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5 AND model=$6`,
-		m.bridgeID, m.loginID, m.agentID, path, source, m.status.Model,
-	); err != nil {
-		return err
-	}
-	if m.ftsAvailable {
-		_, _ = m.db.Exec(ctx,
-			`DELETE FROM ai_memory_chunks_fts
-             WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5 AND model=$6`,
-			m.bridgeID, m.loginID, m.agentID, path, source, m.status.Model,
-		)
-	}
-
 	var embeddings [][]float64
 	if m.cfg.Store.Vector.Enabled {
 		var err error
@@ -283,6 +306,7 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 	}
 	now := time.Now().UnixMilli()
 	vectorReady := false
+	newIDs := make([]string, 0, len(chunks))
 	for i, chunk := range chunks {
 		embedding := []float64{}
 		if i < len(embeddings) {
@@ -295,7 +319,8 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 			vectorReady = m.ensureVectorTable(ctx, len(embedding))
 		}
 		embeddingJSON, _ := json.Marshal(embedding)
-		chunkID := uuid.NewString()
+		chunkID := buildChunkID(generation)
+		newIDs = append(newIDs, chunkID)
 		_, err := m.db.Exec(ctx,
 			`INSERT INTO ai_memory_chunks
              (id, bridge_id, login_id, agent_id, path, source, start_line, end_line, hash, model, text, embedding, updated_at)
@@ -322,15 +347,95 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 			)
 		}
 	}
+	if err := m.deletePathChunks(ctx, path, source, generation, newIDs); err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func (m *MemorySearchManager) removeStaleMemoryChunks(ctx context.Context, active map[string]textfs.FileEntry) error {
+func buildChunkID(generation string) string {
+	generation = strings.TrimSpace(generation)
+	if generation == "" {
+		return uuid.NewString()
+	}
+	return generation + ":" + uuid.NewString()
+}
+
+func (m *MemorySearchManager) deletePathChunks(ctx context.Context, path, source, generation string, keepIDs []string) error {
+	if m == nil {
+		return nil
+	}
+	genFilter, genArgs := generationFilterSQL(7, generation)
+	args := []any{m.bridgeID, m.loginID, m.agentID, path, source, m.status.Model}
+	args = append(args, genArgs...)
+	placeholders := ""
+	placeholderArgs := []any{}
+	if len(keepIDs) > 0 {
+		ids := make([]string, 0, len(keepIDs))
+		for _, id := range keepIDs {
+			if id != "" {
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) > 0 {
+			start := 7 + len(genArgs)
+			parts := make([]string, 0, len(ids))
+			for i, id := range ids {
+				parts = append(parts, fmt.Sprintf("$%d", start+i))
+				placeholderArgs = append(placeholderArgs, id)
+			}
+			placeholders = " AND id NOT IN (" + strings.Join(parts, ",") + ")"
+		}
+	}
+	args = append(args, placeholderArgs...)
+	rows, err := m.db.Query(ctx,
+		`SELECT id FROM ai_memory_chunks
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5 AND model=$6`+genFilter+placeholders,
+		args...,
+	)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if len(ids) == 0 {
+		return nil
+	}
+	if m.vectorReady {
+		m.deleteVectorIDs(ctx, ids)
+	}
+	for _, id := range ids {
+		_, _ = m.db.Exec(ctx,
+			`DELETE FROM ai_memory_chunks_fts
+             WHERE id=$1`,
+			id,
+		)
+	}
+	_, err = m.db.Exec(ctx,
+		`DELETE FROM ai_memory_chunks
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5 AND model=$6`+genFilter+placeholders,
+		args...,
+	)
+	return err
+}
+
+func (m *MemorySearchManager) removeStaleMemoryChunks(ctx context.Context, active map[string]textfs.FileEntry, generation string) error {
+	genSQL, genArgs := generationFilterSQL(5, generation)
+	args := []any{m.bridgeID, m.loginID, m.agentID, "memory"}
+	args = append(args, genArgs...)
 	rows, err := m.db.Query(ctx,
 		`SELECT DISTINCT path FROM ai_memory_chunks
-         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND source=$4`,
-		m.bridgeID, m.loginID, m.agentID, "memory",
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND source=$4`+genSQL,
+		args...,
 	)
 	if err != nil {
 		return err
@@ -352,24 +457,67 @@ func (m *MemorySearchManager) removeStaleMemoryChunks(ctx context.Context, activ
 	}
 
 	for _, path := range stalePaths {
+		delGenSQL, delGenArgs := generationFilterSQL(6, generation)
 		if m.vectorReady {
-			ids := m.collectChunkIDs(ctx, path, "memory", m.status.Model)
+			ids := m.collectChunkIDs(ctx, path, "memory", m.status.Model, generation)
 			m.deleteVectorIDs(ctx, ids)
 		}
 		_, _ = m.db.Exec(ctx,
 			`DELETE FROM ai_memory_chunks
-             WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5`,
-			m.bridgeID, m.loginID, m.agentID, path, "memory",
+             WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5`+delGenSQL,
+			append([]any{m.bridgeID, m.loginID, m.agentID, path, "memory"}, delGenArgs...)...,
 		)
 		if m.ftsAvailable {
 			_, _ = m.db.Exec(ctx,
 				`DELETE FROM ai_memory_chunks_fts
-                 WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5`,
-				m.bridgeID, m.loginID, m.agentID, path, "memory",
+                 WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5`+delGenSQL,
+				append([]any{m.bridgeID, m.loginID, m.agentID, path, "memory"}, delGenArgs...)...,
 			)
 		}
 	}
 	return nil
+}
+
+func (m *MemorySearchManager) cleanupOldGenerations(ctx context.Context, generation string) {
+	generation = strings.TrimSpace(generation)
+	if generation == "" {
+		return
+	}
+	rows, err := m.db.Query(ctx,
+		`SELECT id FROM ai_memory_chunks
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND id NOT LIKE $4`,
+		m.bridgeID, m.loginID, m.agentID, generation+":%",
+	)
+	if err != nil {
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if len(ids) == 0 {
+		return
+	}
+	if m.vectorReady {
+		m.deleteVectorIDs(ctx, ids)
+	}
+	for _, id := range ids {
+		_, _ = m.db.Exec(ctx,
+			`DELETE FROM ai_memory_chunks_fts WHERE id=$1`,
+			id,
+		)
+	}
+	_, _ = m.db.Exec(ctx,
+		`DELETE FROM ai_memory_chunks
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND id NOT LIKE $4`,
+		m.bridgeID, m.loginID, m.agentID, generation+":%",
+	)
 }
 
 type missingChunk struct {
@@ -564,8 +712,8 @@ func (m *MemorySearchManager) lookupEmbeddingCache(ctx context.Context, hash str
 	var raw string
 	row := m.db.QueryRow(ctx,
 		`SELECT embedding FROM ai_memory_embedding_cache
-         WHERE bridge_id=$1 AND provider=$2 AND model=$3 AND provider_key=$4 AND hash=$5`,
-		m.bridgeID, m.status.Provider, m.status.Model, m.providerKey, hash,
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND provider=$4 AND model=$5 AND provider_key=$6 AND hash=$7`,
+		m.bridgeID, m.loginID, m.agentID, m.status.Provider, m.status.Model, m.providerKey, hash,
 	)
 	if err := row.Scan(&raw); err != nil {
 		return nil, false
@@ -585,11 +733,11 @@ func (m *MemorySearchManager) storeEmbeddingCache(ctx context.Context, hash stri
 	dims := len(embedding)
 	_, err := m.db.Exec(ctx,
 		`INSERT INTO ai_memory_embedding_cache
-         (bridge_id, provider, model, provider_key, hash, embedding, dims, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (bridge_id, provider, model, provider_key, hash)
+         (bridge_id, login_id, agent_id, provider, model, provider_key, hash, embedding, dims, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (bridge_id, login_id, agent_id, provider, model, provider_key, hash)
          DO UPDATE SET embedding=excluded.embedding, dims=excluded.dims, updated_at=excluded.updated_at`,
-		m.bridgeID, m.status.Provider, m.status.Model, m.providerKey, hash, string(raw), dims, time.Now().UnixMilli(),
+		m.bridgeID, m.loginID, m.agentID, m.status.Provider, m.status.Model, m.providerKey, hash, string(raw), dims, time.Now().UnixMilli(),
 	)
 	if err != nil {
 		return err
@@ -605,8 +753,8 @@ func maybePruneEmbeddingCache(ctx context.Context, m *MemorySearchManager) {
 	var count int
 	row := m.db.QueryRow(ctx,
 		`SELECT COUNT(*) FROM ai_memory_embedding_cache
-         WHERE bridge_id=$1 AND provider=$2 AND model=$3 AND provider_key=$4`,
-		m.bridgeID, m.status.Provider, m.status.Model, m.providerKey,
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND provider=$4 AND model=$5 AND provider_key=$6`,
+		m.bridgeID, m.loginID, m.agentID, m.status.Provider, m.status.Model, m.providerKey,
 	)
 	if err := row.Scan(&count); err != nil {
 		return
@@ -619,11 +767,11 @@ func maybePruneEmbeddingCache(ctx context.Context, m *MemorySearchManager) {
 		`DELETE FROM ai_memory_embedding_cache
          WHERE rowid IN (
            SELECT rowid FROM ai_memory_embedding_cache
-           WHERE bridge_id=$1 AND provider=$2 AND model=$3 AND provider_key=$4
+           WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND provider=$4 AND model=$5 AND provider_key=$6
            ORDER BY updated_at ASC
-           LIMIT $5
+           LIMIT $7
          )`,
-		m.bridgeID, m.status.Provider, m.status.Model, m.providerKey, toRemove,
+		m.bridgeID, m.loginID, m.agentID, m.status.Provider, m.status.Model, m.providerKey, toRemove,
 	)
 }
 
@@ -636,17 +784,19 @@ func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float
 	}
 	if m.ensureVectorTable(ctx, len(queryVec)) {
 		filterSQL, filterArgs := sourceFilterSQLQuestion(m.cfg.Sources)
+		genSQL, genArgs := generationFilterSQLQuestion(m.indexGen)
 		args := []any{vectorToBlob(queryVec), m.bridgeID, m.loginID, m.agentID, m.status.Model}
 		args = append(args, filterArgs...)
+		args = append(args, genArgs...)
 		args = append(args, limit)
 		rows, err := m.queryVector(ctx,
 			fmt.Sprintf(`SELECT c.id, c.path, c.start_line, c.end_line, c.text, c.source,
                vec_distance_cosine(v.embedding, ?) AS dist
              FROM %s v
              JOIN ai_memory_chunks c ON c.id = v.id
-             WHERE c.bridge_id=? AND c.login_id=? AND c.agent_id=? AND c.model=?%s
+             WHERE c.bridge_id=? AND c.login_id=? AND c.agent_id=? AND c.model=?%s%s
              ORDER BY dist ASC
-             LIMIT ?`, memoryVectorTable, filterSQL),
+             LIMIT ?`, memoryVectorTable, filterSQL, genSQL),
 			args...,
 		)
 		if err == nil {
@@ -681,11 +831,13 @@ func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float
 
 	baseArgs := []any{m.bridgeID, m.loginID, m.agentID, m.status.Model}
 	filterSQL, filterArgs := sourceFilterSQL(5, m.cfg.Sources)
+	genSQL, genArgs := generationFilterSQL(5+len(filterArgs), m.indexGen)
 	args := append(baseArgs, filterArgs...)
+	args = append(args, genArgs...)
 	rows, err := m.db.Query(ctx,
 		`SELECT id, path, start_line, end_line, text, embedding, source
          FROM ai_memory_chunks
-         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND model=$4`+filterSQL,
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND model=$4`+filterSQL+genSQL,
 		args...,
 	)
 	if err != nil {
@@ -745,12 +897,14 @@ func (m *MemorySearchManager) searchKeyword(ctx context.Context, query string, l
 	}
 	baseArgs := []any{ftsQuery, m.status.Model, m.bridgeID, m.loginID, m.agentID}
 	filterSQL, filterArgs := sourceFilterSQL(6, m.cfg.Sources)
+	genSQL, genArgs := generationFilterSQL(6+len(filterArgs), m.indexGen)
 	args := append(baseArgs, filterArgs...)
+	args = append(args, genArgs...)
 	rows, err := m.db.Query(ctx,
 		`SELECT id, path, source, start_line, end_line, text,
            bm25(ai_memory_chunks_fts) AS rank
          FROM ai_memory_chunks_fts
-         WHERE ai_memory_chunks_fts MATCH $1 AND model=$2 AND bridge_id=$3 AND login_id=$4 AND agent_id=$5`+filterSQL+`
+         WHERE ai_memory_chunks_fts MATCH $1 AND model=$2 AND bridge_id=$3 AND login_id=$4 AND agent_id=$5`+filterSQL+genSQL+`
          ORDER BY rank ASC
          LIMIT $`+fmt.Sprintf("%d", len(args)+1),
 		append(args, limit)...,
@@ -811,6 +965,22 @@ func sourceFilterSQLQuestion(sources []string) (string, []any) {
 	return " AND c.source IN (" + strings.Join(placeholders, ",") + ")", args
 }
 
+func generationFilterSQL(startIndex int, generation string) (string, []any) {
+	generation = strings.TrimSpace(generation)
+	if generation == "" {
+		return "", nil
+	}
+	return fmt.Sprintf(" AND id LIKE $%d", startIndex), []any{generation + ":%"}
+}
+
+func generationFilterSQLQuestion(generation string) (string, []any) {
+	generation = strings.TrimSpace(generation)
+	if generation == "" {
+		return "", nil
+	}
+	return " AND c.id LIKE ?", []any{generation + ":%"}
+}
+
 func parseEmbedding(raw string) []float64 {
 	var values []float64
 	if err := json.Unmarshal([]byte(raw), &values); err != nil {
@@ -841,14 +1011,17 @@ func cosineSimilarity(a, b []float64) float64 {
 	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }
 
-func (m *MemorySearchManager) collectChunkIDs(ctx context.Context, path, source, model string) []string {
+func (m *MemorySearchManager) collectChunkIDs(ctx context.Context, path, source, model, generation string) []string {
 	if m == nil {
 		return nil
 	}
+	genSQL, genArgs := generationFilterSQL(7, generation)
+	args := []any{m.bridgeID, m.loginID, m.agentID, path, source, model}
+	args = append(args, genArgs...)
 	rows, err := m.db.Query(ctx,
 		`SELECT id FROM ai_memory_chunks
-         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5 AND model=$6`,
-		m.bridgeID, m.loginID, m.agentID, path, source, model,
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5 AND model=$6`+genSQL,
+		args...,
 	)
 	if err != nil {
 		return nil

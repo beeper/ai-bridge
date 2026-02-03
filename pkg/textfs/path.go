@@ -51,7 +51,7 @@ func IsMemoryPath(relPath string) bool {
 	normalized = strings.ReplaceAll(normalized, "\\", "/")
 	normalized = strings.TrimPrefix(normalized, "./")
 	normalized = strings.TrimLeft(normalized, "/")
-	if strings.EqualFold(normalized, "memory.md") || normalized == "MEMORY.md" {
+	if normalized == "MEMORY.md" || normalized == "memory.md" {
 		return true
 	}
 	return strings.HasPrefix(normalized, "memory/")

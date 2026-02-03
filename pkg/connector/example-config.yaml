@@ -194,7 +194,7 @@ pruning:
   # Placeholder text for hard-cleared tool results
   hard_clear_placeholder: "[Old tool result content cleared]"
 
-  # Tool patterns to allow/deny pruning (supports wildcards: exec*, *_search)
+  # Tool patterns to allow/deny pruning (supports wildcards: list_*, *_search)
   # Empty means all tools are prunable unless denied
   # tools_allow: []
   # tools_deny: []

@@ -7,7 +7,6 @@ import (
 
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 	agenttools "github.com/beeper/ai-bridge/pkg/agents/tools"
-	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 )
 
 func (oc *AIClient) resolveToolPolicyModelContext(meta *PortalMetadata) (provider string, modelID string) {
@@ -61,9 +60,6 @@ func (oc *AIClient) isToolAvailable(meta *PortalMetadata, toolName string) (bool
 	}
 	if agenttools.IsBossTool(toolName) && !(meta.IsBuilderRoom || hasBossAgent(meta)) {
 		return false, SourceGlobalDefault, "Builder room only"
-	}
-	if toolName == toolspec.GravatarSetName && !hasBossAgent(meta) {
-		return false, SourceGlobalDefault, "Boss agent only"
 	}
 
 	if toolName == ToolNameImageGenerate && !oc.canUseImageGeneration() {

@@ -33,6 +33,7 @@ type MemorySearchManager struct {
 	status       memory.ProviderStatus
 	providerKey  string
 	vectorDims   int
+	indexGen     string
 	ftsAvailable bool
 	ftsError     string
 	log          zerolog.Logger
@@ -55,28 +56,60 @@ type MemorySearchManager struct {
 }
 
 type MemorySearchStatus struct {
-	Provider            string
-	Model               string
-	Fallback            *memory.FallbackStatus
-	Sources             []string
-	ExtraPaths          []string
-	VectorEnabled       bool
-	VectorReady         bool
-	VectorError         string
-	FTSEnabled          bool
-	FTSAvailable        bool
-	CacheEnabled        bool
-	CacheEntries        int
-	FileCount           int
-	ChunkCount          int
-	BatchEnabled        bool
-	BatchFailures       int
-	BatchLastError      string
-	BatchLastProvider   string
-	BatchWait           bool
-	BatchConcurrency    int
-	BatchPollIntervalMs int
-	BatchTimeoutMinutes int
+	Files             int
+	Chunks            int
+	Dirty             bool
+	WorkspaceDir      string
+	DBPath            string
+	Provider          string
+	Model             string
+	RequestedProvider string
+	Sources           []string
+	ExtraPaths        []string
+	SourceCounts      []MemorySearchSourceCount
+	Cache             *MemorySearchCacheStatus
+	FTS               *MemorySearchFTSStatus
+	Fallback          *memory.FallbackStatus
+	Vector            *MemorySearchVectorStatus
+	Batch             *MemorySearchBatchStatus
+}
+
+type MemorySearchSourceCount struct {
+	Source string
+	Files  int
+	Chunks int
+}
+
+type MemorySearchCacheStatus struct {
+	Enabled    bool
+	Entries    int
+	MaxEntries int
+}
+
+type MemorySearchFTSStatus struct {
+	Enabled   bool
+	Available bool
+	Error     string
+}
+
+type MemorySearchVectorStatus struct {
+	Enabled       bool
+	Available     *bool
+	ExtensionPath string
+	LoadError     string
+	Dims          int
+}
+
+type MemorySearchBatchStatus struct {
+	Enabled        bool
+	Failures       int
+	Limit          int
+	Wait           bool
+	Concurrency    int
+	PollIntervalMs int
+	TimeoutMs      int
+	LastError      string
+	LastProvider   string
 }
 
 var memoryManagerCache = struct {
@@ -150,47 +183,133 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 		return nil, fmt.Errorf("memory search unavailable")
 	}
 	status := &MemorySearchStatus{
-		Provider:            m.status.Provider,
-		Model:               m.status.Model,
-		Fallback:            m.status.Fallback,
-		Sources:             append([]string{}, m.cfg.Sources...),
-		ExtraPaths:          append([]string{}, m.cfg.ExtraPaths...),
-		VectorEnabled:       m.cfg.Store.Vector.Enabled,
-		VectorReady:         m.vectorReady,
-		VectorError:         m.vectorError,
-		FTSEnabled:          m.cfg.Query.Hybrid.Enabled,
-		FTSAvailable:        m.ftsAvailable,
-		CacheEnabled:        m.cfg.Cache.Enabled,
-		BatchEnabled:        m.batchEnabled && (m.status.Provider == "openai" || m.status.Provider == "gemini"),
-		BatchFailures:       m.batchFailures,
-		BatchLastError:      m.batchLastError,
-		BatchLastProvider:   m.batchLastProvider,
-		BatchWait:           m.cfg.Remote.Batch.Wait,
-		BatchConcurrency:    m.cfg.Remote.Batch.Concurrency,
-		BatchPollIntervalMs: m.cfg.Remote.Batch.PollIntervalMs,
-		BatchTimeoutMinutes: m.cfg.Remote.Batch.TimeoutMinutes,
+		Dirty:             m.dirty,
+		WorkspaceDir:      "bridge-db",
+		DBPath:            fmt.Sprintf("bridge-db://%s/%s/%s.sqlite", m.bridgeID, m.loginID, m.agentID),
+		Provider:          m.status.Provider,
+		Model:             m.status.Model,
+		RequestedProvider: m.cfg.Provider,
+		Sources:           append([]string{}, m.cfg.Sources...),
+		ExtraPaths:        append([]string{}, m.cfg.ExtraPaths...),
+		Fallback:          m.status.Fallback,
 	}
 
+	genSQL, genArgs := generationFilterSQL(5, m.indexGen)
+	sourceSQL, sourceArgs := sourceFilterSQL(4, m.cfg.Sources)
+	chunkArgs := []any{m.bridgeID, m.loginID, m.agentID}
+	chunkArgs = append(chunkArgs, sourceArgs...)
+	chunkArgs = append(chunkArgs, genArgs...)
+	row := m.db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM ai_memory_chunks
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`+sourceSQL+genSQL,
+		chunkArgs...,
+	)
+	_ = row.Scan(&status.Chunks)
+
+	files := 0
+	if hasSource(m.cfg.Sources, "memory") {
+		row = m.db.QueryRow(ctx,
+			`SELECT COUNT(*) FROM ai_memory_files WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND source=$4`,
+			m.bridgeID, m.loginID, m.agentID, "memory",
+		)
+		var count int
+		_ = row.Scan(&count)
+		files += count
+	}
+	if hasSource(m.cfg.Sources, "sessions") {
+		row = m.db.QueryRow(ctx,
+			`SELECT COUNT(*) FROM ai_memory_session_files WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
+			m.bridgeID, m.loginID, m.agentID,
+		)
+		var count int
+		_ = row.Scan(&count)
+		files += count
+	}
+	status.Files = files
+
+	status.SourceCounts = buildSourceCounts(ctx, m)
+
+	cacheStatus := &MemorySearchCacheStatus{Enabled: m.cfg.Cache.Enabled, MaxEntries: m.cfg.Cache.MaxEntries}
 	if m.cfg.Cache.Enabled {
 		row := m.db.QueryRow(ctx,
-			`SELECT COUNT(*) FROM ai_memory_embedding_cache WHERE bridge_id=$1 AND provider=$2 AND model=$3 AND provider_key=$4`,
-			m.bridgeID, m.status.Provider, m.status.Model, m.providerKey,
+			`SELECT COUNT(*) FROM ai_memory_embedding_cache
+             WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND provider=$4 AND model=$5 AND provider_key=$6`,
+			m.bridgeID, m.loginID, m.agentID, m.status.Provider, m.status.Model, m.providerKey,
 		)
-		_ = row.Scan(&status.CacheEntries)
+		_ = row.Scan(&cacheStatus.Entries)
+	}
+	status.Cache = cacheStatus
+
+	status.FTS = &MemorySearchFTSStatus{
+		Enabled:   m.cfg.Query.Hybrid.Enabled,
+		Available: m.ftsAvailable,
+		Error:     m.ftsError,
 	}
 
-	row := m.db.QueryRow(ctx,
-		`SELECT COUNT(*) FROM ai_memory_files WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
-		m.bridgeID, m.loginID, m.agentID,
-	)
-	_ = row.Scan(&status.FileCount)
-	row = m.db.QueryRow(ctx,
-		`SELECT COUNT(*) FROM ai_memory_chunks WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
-		m.bridgeID, m.loginID, m.agentID,
-	)
-	_ = row.Scan(&status.ChunkCount)
+	vectorAvailable := (*bool)(nil)
+	if m.vectorReady {
+		ready := true
+		vectorAvailable = &ready
+	} else if m.vectorError != "" {
+		ready := false
+		vectorAvailable = &ready
+	}
+	status.Vector = &MemorySearchVectorStatus{
+		Enabled:       m.cfg.Store.Vector.Enabled,
+		Available:     vectorAvailable,
+		ExtensionPath: m.cfg.Store.Vector.ExtensionPath,
+		LoadError:     m.vectorError,
+		Dims:          m.vectorDims,
+	}
+
+	timeoutMs := m.cfg.Remote.Batch.TimeoutMinutes * 60 * 1000
+	status.Batch = &MemorySearchBatchStatus{
+		Enabled:        m.batchEnabled && (m.status.Provider == "openai" || m.status.Provider == "gemini"),
+		Failures:       m.batchFailures,
+		Limit:          2,
+		Wait:           m.cfg.Remote.Batch.Wait,
+		Concurrency:    m.cfg.Remote.Batch.Concurrency,
+		PollIntervalMs: m.cfg.Remote.Batch.PollIntervalMs,
+		TimeoutMs:      timeoutMs,
+		LastError:      m.batchLastError,
+		LastProvider:   m.batchLastProvider,
+	}
 
 	return status, nil
+}
+
+func buildSourceCounts(ctx context.Context, m *MemorySearchManager) []MemorySearchSourceCount {
+	if m == nil {
+		return nil
+	}
+	out := make([]MemorySearchSourceCount, 0, len(m.cfg.Sources))
+	for _, source := range m.cfg.Sources {
+		count := MemorySearchSourceCount{Source: source}
+		switch source {
+		case "memory":
+			row := m.db.QueryRow(ctx,
+				`SELECT COUNT(*) FROM ai_memory_files WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND source=$4`,
+				m.bridgeID, m.loginID, m.agentID, "memory",
+			)
+			_ = row.Scan(&count.Files)
+		case "sessions":
+			row := m.db.QueryRow(ctx,
+				`SELECT COUNT(*) FROM ai_memory_session_files WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
+				m.bridgeID, m.loginID, m.agentID,
+			)
+			_ = row.Scan(&count.Files)
+		}
+		genSQL, genArgs := generationFilterSQL(5, m.indexGen)
+		args := []any{m.bridgeID, m.loginID, m.agentID, source}
+		args = append(args, genArgs...)
+		row := m.db.QueryRow(ctx,
+			`SELECT COUNT(*) FROM ai_memory_chunks WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND source=$4`+genSQL,
+			args...,
+		)
+		_ = row.Scan(&count.Chunks)
+		out = append(out, count)
+	}
+	return out
 }
 
 func (m *MemorySearchManager) Search(ctx context.Context, query string, opts memory.SearchOptions) ([]memory.SearchResult, error) {
@@ -310,8 +429,12 @@ func (m *MemorySearchManager) ReadFile(ctx context.Context, relPath string, from
 		start = *from
 	}
 	count := len(lineList)
-	if lines != nil && *lines > 0 {
-		count = *lines
+	if lines != nil {
+		if *lines > 0 {
+			count = *lines
+		} else {
+			count = 1
+		}
 	}
 	if start < 1 {
 		start = 1
@@ -321,10 +444,7 @@ func (m *MemorySearchManager) ReadFile(ctx context.Context, relPath string, from
 		end = len(lineList)
 	}
 	if start > len(lineList) {
-		start = len(lineList)
-	}
-	if start < 1 {
-		start = 1
+		return map[string]any{"path": entry.Path, "text": ""}, nil
 	}
 	slice := lineList[start-1 : end]
 	return map[string]any{"path": entry.Path, "text": strings.Join(slice, "\n")}, nil

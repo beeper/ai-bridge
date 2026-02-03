@@ -49,7 +49,7 @@ type PruningConfig struct {
 	// Default: "[Old tool result content cleared]"
 	HardClearPlaceholder string `yaml:"hard_clear_placeholder" json:"hard_clear_placeholder,omitempty"`
 
-	// ToolsAllow is a list of tool name patterns to prune (supports wildcards: exec*, *_search)
+	// ToolsAllow is a list of tool name patterns to prune (supports wildcards: list_*, *_search)
 	// Empty means all tools are prunable (unless in deny list)
 	ToolsAllow []string `yaml:"tools_allow" json:"tools_allow,omitempty"`
 
@@ -212,7 +212,7 @@ type compiledPattern struct {
 	regex *regexp.Regexp
 }
 
-// compilePattern compiles a tool name pattern (supports wildcards like exec*, *_search)
+// compilePattern compiles a tool name pattern (supports wildcards like list_*, *_search)
 func compilePattern(pattern string) compiledPattern {
 	pattern = strings.TrimSpace(strings.ToLower(pattern))
 	if pattern == "" {
