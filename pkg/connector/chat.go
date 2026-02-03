@@ -1064,7 +1064,6 @@ func (oc *AIClient) applyAgentChatInfo(chatInfo *bridgev2.ChatInfo, agentID, age
 // updatePortalConfig applies room settings to portal metadata
 func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Portal, config *RoomSettingsEventContent) {
 	meta := portalMeta(portal)
-	loginMeta := loginMetadata(oc.UserLogin)
 
 	// Track old model for membership change
 	oldModel := meta.Model

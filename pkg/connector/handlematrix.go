@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/agents/tools"
-	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -813,168 +811,60 @@ func (oc *AIClient) handleToolsCommand(
 ) {
 	runCtx := oc.backgroundContext(ctx)
 
-	// Get provider info
-	loginMeta := loginMetadata(oc.UserLogin)
-	isOpenRouter := loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper
-
 	// No args - show status
 	if arg == "" {
-		oc.showToolsStatus(runCtx, portal, meta, isOpenRouter)
+		oc.showToolsStatus(runCtx, portal, meta)
 		return
 	}
 
 	parts := strings.SplitN(arg, " ", 2)
 	action := strings.ToLower(parts[0])
-	var toolName string
-	if len(parts) > 1 {
-		toolName = strings.ToLower(parts[1])
-	}
 
 	switch action {
-	case "on", "enable", "true", "1":
-		if toolName == "" {
-			// Enable all tools
-			oc.setAllTools(runCtx, portal, meta, true)
-		} else {
-			// Enable specific tool
-			oc.setToolEnabled(runCtx, portal, meta, toolName, true, isOpenRouter)
-		}
-	case "off", "disable", "false", "0":
-		if toolName == "" {
-			// Disable all tools
-			oc.setAllTools(runCtx, portal, meta, false)
-		} else {
-			// Disable specific tool
-			oc.setToolEnabled(runCtx, portal, meta, toolName, false, isOpenRouter)
-		}
 	case "list":
-		oc.showToolsStatus(runCtx, portal, meta, isOpenRouter)
+		oc.showToolsStatus(runCtx, portal, meta)
+	case "on", "enable", "true", "1", "off", "disable", "false", "0":
+		oc.sendSystemNotice(runCtx, portal, "Per-tool toggles are no longer supported. Update tool policy in agent settings or the global tool_policy config.")
 	default:
 		oc.sendSystemNotice(runCtx, portal, "Usage:\n"+
 			"• /tools - Show current tool status\n"+
-			"• /tools on - Enable all tools\n"+
-			"• /tools off - Disable all tools\n"+
-			"• /tools on <tool> - Enable specific tool\n"+
-			"• /tools off <tool> - Disable specific tool\n"+
-			"• /tools list - List available tools")
+			"• /tools list - List available tools\n"+
+			"Tool toggles are managed by tool policy.")
 	}
 }
 
 // showToolsStatus displays the current status of all tools
-func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, isOpenRouter bool) {
+func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) {
 	var sb strings.Builder
 	sb.WriteString("Tool Status:\n\n")
 
-	supportsTools := meta.Capabilities.SupportsToolCalling
+	toolsList := oc.buildAvailableTools(meta)
+	sort.Slice(toolsList, func(i, j int) bool {
+		return toolsList[i].Name < toolsList[j].Name
+	})
 
-	loginMeta := loginMetadata(oc.UserLogin)
-	ensureToolsConfig(meta, loginMeta.Provider)
-
-	// Tools from config (includes sessions when assigned)
 	sb.WriteString("Tools:\n")
-	names := make([]string, 0, len(meta.ToolsConfig.Tools))
-	for name, entry := range meta.ToolsConfig.Tools {
-		if entry == nil {
-			continue
-		}
-		if name == ToolNameMessage && !hasAssignedAgent(meta) {
-			continue
-		}
-		if tools.IsSessionTool(name) && !hasAssignedAgent(meta) {
-			continue
-		}
-		if (name == toolspec.GravatarFetchName || name == toolspec.GravatarSetName) && !hasBossAgent(meta) {
-			continue
-		}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		entry := meta.ToolsConfig.Tools[name]
-		if entry == nil {
-			continue
-		}
-		enabled := oc.isToolEnabled(meta, name)
+	for _, tool := range toolsList {
 		status := "✗"
-		if enabled {
+		if tool.Enabled {
 			status = "✓"
 		}
-		availability := ""
-		if !supportsTools {
-			availability = " (model doesn't support tools)"
+		desc := tool.Description
+		if desc == "" {
+			desc = tool.DisplayName
 		}
-		sb.WriteString(fmt.Sprintf("  [%s] %s: %s%s\n", status, name, entry.Tool.Description, availability))
+		reason := ""
+		if !tool.Enabled && tool.Reason != "" {
+			reason = fmt.Sprintf(" (%s)", tool.Reason)
+		}
+		sb.WriteString(fmt.Sprintf("  [%s] %s: %s%s\n", status, tool.Name, desc, reason))
 	}
 
-	if !supportsTools {
+	if meta != nil && !meta.Capabilities.SupportsToolCalling {
 		sb.WriteString(fmt.Sprintf("\nNote: Current model (%s) may not support tool calling.\n", oc.effectiveModel(meta)))
 	}
 
 	oc.sendSystemNotice(ctx, portal, sb.String())
-}
-
-// setAllTools enables or disables all tools
-func (oc *AIClient) setAllTools(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, enabled bool) {
-	loginMeta := loginMetadata(oc.UserLogin)
-	ensureToolsConfig(meta, loginMeta.Provider)
-
-	// Set all tools to the same state
-	for _, entry := range meta.ToolsConfig.Tools {
-		if entry == nil {
-			continue
-		}
-		entry.Enabled = &enabled
-	}
-
-	if err := portal.Save(ctx); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to save portal after tools change")
-	}
-	if err := oc.BroadcastRoomState(ctx, portal); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to broadcast room state after tools change")
-	}
-
-	status := "disabled"
-	if enabled {
-		status = "enabled"
-	}
-	oc.sendSystemNotice(ctx, portal, fmt.Sprintf("All tools %s.", status))
-}
-
-// setToolEnabled enables or disables a specific tool
-func (oc *AIClient) setToolEnabled(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, toolName string, enabled bool, isOpenRouter bool) {
-	loginMeta := loginMetadata(oc.UserLogin)
-	ensureToolsConfig(meta, loginMeta.Provider)
-
-	// Normalize tool name
-	normalizedName := normalizeToolName(toolName)
-
-	// Check if tool exists
-	entry, ok := meta.ToolsConfig.Tools[normalizedName]
-	if !ok || entry == nil {
-		available := make([]string, 0, len(meta.ToolsConfig.Tools))
-		for name := range meta.ToolsConfig.Tools {
-			available = append(available, name)
-		}
-		sort.Strings(available)
-		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Unknown tool: %s. Available: %s", toolName, strings.Join(available, ", ")))
-		return
-	}
-
-	// Apply the toggle
-	entry.Enabled = &enabled
-
-	if err := portal.Save(ctx); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to save portal after tool change")
-	}
-	if err := oc.BroadcastRoomState(ctx, portal); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to broadcast room state after tool change")
-	}
-
-	status := "disabled"
-	if enabled {
-		status = "enabled"
-	}
-	oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Tool '%s' %s.", toolName, status))
 }
 
 // handleRegenerate regenerates the last AI response

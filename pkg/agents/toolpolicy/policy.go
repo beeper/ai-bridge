@@ -18,32 +18,40 @@ const (
 
 // Tool group constants for policy composition (OpenClaw-style shorthands).
 const (
-	GroupSearch    = "group:search"
-	GroupCalc      = "group:calc"
-	GroupBuilder   = "group:builder"
-	GroupMessaging = "group:messaging"
-	GroupSessions  = "group:sessions"
-	GroupMemory    = "group:memory"
-	GroupWeb       = "group:web"
-	GroupMedia     = "group:media"
-	GroupStatus    = "group:status"
-	GroupOpenClaw  = "group:openclaw"
-	GroupFS        = "group:fs"
+	GroupSearch     = "group:search"
+	GroupCalc       = "group:calc"
+	GroupBuilder    = "group:builder"
+	GroupMessaging  = "group:messaging"
+	GroupSessions   = "group:sessions"
+	GroupMemory     = "group:memory"
+	GroupWeb        = "group:web"
+	GroupMedia      = "group:media"
+	GroupRuntime    = "group:runtime"
+	GroupUI         = "group:ui"
+	GroupAutomation = "group:automation"
+	GroupNodes      = "group:nodes"
+	GroupStatus     = "group:status"
+	GroupOpenClaw   = "group:openclaw"
+	GroupFS         = "group:fs"
 )
 
 // ToolGroups maps group names to tool names for policy composition.
 var ToolGroups = map[string][]string{
-	GroupSearch:    {"web_search", "web_search_openrouter"},
-	GroupCalc:      {"calculator"},
-	GroupBuilder:   {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "run_internal_command", "create_room", "modify_room", "list_rooms", "sessions_list", "sessions_history", "sessions_send"},
-	GroupMessaging: {"message"},
-	GroupSessions:  {"sessions_list", "sessions_history", "sessions_send"},
-	GroupMemory:    {"memory_search", "memory_get"},
-	GroupWeb:       {"web_search", "web_search_openrouter", "web_fetch"},
-	GroupMedia:     {"image", "image_generate", "tts"},
-	GroupStatus:    {"session_status"},
-	GroupOpenClaw:  {"calculator", "web_search", "web_search_openrouter", "web_fetch", "message", "sessions_list", "sessions_history", "sessions_send", "session_status", "memory_search", "memory_get", "image", "image_generate", "tts", "read", "write", "edit", "ls", "find", "grep"},
-	GroupFS:        {"read", "write", "edit", "ls", "find", "grep"},
+	GroupSearch:     {"web_search", "web_search_openrouter"},
+	GroupCalc:       {"calculator"},
+	GroupBuilder:    {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "run_internal_command", "create_room", "modify_room", "list_rooms", "sessions_list", "sessions_history", "sessions_send"},
+	GroupMessaging:  {"message"},
+	GroupSessions:   {"sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status"},
+	GroupMemory:     {"memory_search", "memory_get"},
+	GroupWeb:        {"web_search", "web_search_openrouter", "web_fetch"},
+	GroupMedia:      {"image", "image_generate", "tts"},
+	GroupRuntime:    {"exec", "process"},
+	GroupUI:         {"browser", "canvas"},
+	GroupAutomation: {"cron", "gateway"},
+	GroupNodes:      {"nodes"},
+	GroupStatus:     {"session_status"},
+	GroupOpenClaw:   {"message", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_search_openrouter", "web_fetch", "image"},
+	GroupFS:         {"read", "write", "edit", "ls", "find", "grep", "apply_patch"},
 }
 
 type toolProfilePolicy struct {
@@ -53,30 +61,30 @@ type toolProfilePolicy struct {
 
 // ToolProfiles define which tool groups each profile allows.
 var ToolProfiles = map[ToolProfileID]toolProfilePolicy{
-	ProfileMinimal:   {Allow: []string{GroupSearch, GroupMessaging, GroupStatus}},
-	ProfileCoding:    {Allow: []string{GroupCalc, GroupWeb, GroupMessaging, GroupMedia, GroupStatus, GroupMemory, GroupSessions, GroupFS}},
-	ProfileMessaging: {Allow: []string{GroupWeb, GroupMessaging, GroupSessions, GroupStatus, GroupMemory}},
-	ProfileFull:      {Allow: []string{GroupCalc, GroupWeb, GroupMessaging, GroupMedia, GroupStatus, GroupMemory, GroupSessions, GroupFS}},
-	ProfileBoss:      {Allow: []string{GroupBuilder, GroupSessions, GroupMessaging, GroupStatus, GroupMemory, GroupFS}},
+	ProfileMinimal:   {Allow: []string{"session_status"}},
+	ProfileCoding:    {Allow: []string{GroupFS, GroupRuntime, GroupSessions, GroupMemory, "image"}},
+	ProfileMessaging: {Allow: []string{GroupMessaging, "sessions_list", "sessions_history", "sessions_send", "session_status"}},
+	ProfileFull:      {},
+	ProfileBoss:      {Allow: []string{GroupBuilder, GroupSessions, GroupMessaging, GroupMemory, GroupFS}},
 }
 
 // ToolPolicyConfig matches OpenClaw's allow/deny policy (global or per-agent).
 type ToolPolicyConfig struct {
-	Allow      []string                     `json:"allow,omitempty" yaml:"allow"`
-	AlsoAllow  []string                     `json:"alsoAllow,omitempty" yaml:"alsoAllow"`
-	Deny       []string                     `json:"deny,omitempty" yaml:"deny"`
-	Profile    ToolProfileID                `json:"profile,omitempty" yaml:"profile"`
-	ByProvider map[string]ToolPolicyConfig  `json:"byProvider,omitempty" yaml:"byProvider"`
+	Allow      []string                    `json:"allow,omitempty" yaml:"allow"`
+	AlsoAllow  []string                    `json:"alsoAllow,omitempty" yaml:"alsoAllow"`
+	Deny       []string                    `json:"deny,omitempty" yaml:"deny"`
+	Profile    ToolProfileID               `json:"profile,omitempty" yaml:"profile"`
+	ByProvider map[string]ToolPolicyConfig `json:"byProvider,omitempty" yaml:"byProvider"`
 }
 
 // GlobalToolPolicyConfig extends ToolPolicyConfig with subagent defaults.
 type GlobalToolPolicyConfig struct {
-	Allow      []string                     `json:"allow,omitempty" yaml:"allow"`
-	AlsoAllow  []string                     `json:"alsoAllow,omitempty" yaml:"alsoAllow"`
-	Deny       []string                     `json:"deny,omitempty" yaml:"deny"`
-	Profile    ToolProfileID                `json:"profile,omitempty" yaml:"profile"`
-	ByProvider map[string]ToolPolicyConfig  `json:"byProvider,omitempty" yaml:"byProvider"`
-	Subagents  *SubagentToolPolicyConfig    `json:"subagents,omitempty" yaml:"subagents"`
+	Allow      []string                    `json:"allow,omitempty" yaml:"allow"`
+	AlsoAllow  []string                    `json:"alsoAllow,omitempty" yaml:"alsoAllow"`
+	Deny       []string                    `json:"deny,omitempty" yaml:"deny"`
+	Profile    ToolProfileID               `json:"profile,omitempty" yaml:"profile"`
+	ByProvider map[string]ToolPolicyConfig `json:"byProvider,omitempty" yaml:"byProvider"`
+	Subagents  *SubagentToolPolicyConfig   `json:"subagents,omitempty" yaml:"subagents"`
 }
 
 // SubagentToolPolicyConfig configures subagent tool defaults.
@@ -146,6 +154,7 @@ func (c *ToolPolicyConfig) Clone() *ToolPolicyConfig {
 var toolNameAliases = map[string]string{
 	"bash":        "exec",
 	"apply-patch": "apply_patch",
+	"agents_list": "list_agents",
 }
 
 // NormalizeToolName converts to lowercase and resolves aliases.
@@ -497,6 +506,7 @@ var defaultSubagentDeny = []string{
 	"sessions_list",
 	"sessions_history",
 	"sessions_send",
+	"sessions_spawn",
 	"session_status",
 	"create_agent",
 	"fork_agent",
@@ -505,6 +515,8 @@ var defaultSubagentDeny = []string{
 	"list_agents",
 	"list_models",
 	"list_tools",
+	"gateway",
+	"cron",
 	"run_internal_command",
 	"create_room",
 	"modify_room",

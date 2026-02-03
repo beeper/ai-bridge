@@ -121,8 +121,17 @@ network:
       direct:
         enabled: true
         timeout_seconds: 30
-        max_chars: 50000
-        max_redirects: 3
+      max_chars: 50000
+      max_redirects: 3
+
+  # Tool policy (OpenClaw-style). Controls allow/deny lists and profiles.
+  # tool_policy:
+  #   profile: "full"
+  #   allow: ["group:openclaw"]
+  #   deny: []
+  #   subagents:
+  #     tools:
+  #       deny: ["sessions_list", "sessions_history", "sessions_send"]
 
   # Context pruning configuration (OpenClaw-style).
   # Reduces token usage by intelligently truncating old tool results.
