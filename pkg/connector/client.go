@@ -328,15 +328,12 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		log.Warn().Err(err).Int("entries", len(entries)).Msg("Debounce flush failed")
 	})
 
-	// Use per-user base_url if provided
-	baseURL := strings.TrimSpace(meta.BaseURL)
-
 	// Initialize provider based on login metadata
 	// All providers use the OpenAI SDK with different base URLs
 	switch meta.Provider {
 	case ProviderBeeper:
 		// Beeper mode: routes through Beeper's OpenRouter proxy
-		beeperBaseURL := baseURL
+		beeperBaseURL := connector.resolveBeeperBaseURL(meta)
 		if beeperBaseURL == "" {
 			return nil, fmt.Errorf("beeper base_url is required for Beeper provider")
 		}
@@ -362,10 +359,7 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 
 	case ProviderOpenRouter:
 		// OpenRouter direct access
-		openrouterURL := baseURL
-		if openrouterURL == "" {
-			openrouterURL = "https://openrouter.ai/api/v1"
-		}
+		openrouterURL := connector.resolveOpenRouterBaseURL()
 
 		// Get PDF engine from provider config
 		pdfEngine := connector.Config.Providers.OpenRouter.DefaultPDFEngine
@@ -383,10 +377,7 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 
 	default:
 		// OpenAI (default) or Custom OpenAI-compatible provider
-		openaiURL := baseURL
-		if openaiURL == "" {
-			openaiURL = "https://api.openai.com/v1"
-		}
+		openaiURL := connector.resolveOpenAIBaseURL()
 		provider, err := NewOpenAIProviderWithBaseURL(key, openaiURL, log)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OpenAI provider: %w", err)
@@ -474,17 +465,18 @@ func (oc *AIClient) dispatchOrQueue(
 			oc.sendSuccessStatus(ctx, portal, extra)
 		}
 		runCtx := withStatusEvents(ctx, pending.StatusEvents)
-		go func() {
+		metaSnapshot := clonePortalMetadata(meta)
+		go func(metaSnapshot *PortalMetadata) {
 			defer func() {
 				// Remove ack reaction after response is complete (if configured)
-				if meta.AckReactionRemoveAfter && evt != nil {
+				if metaSnapshot != nil && metaSnapshot.AckReactionRemoveAfter && evt != nil {
 					oc.removeAckReaction(oc.backgroundContext(ctx), portal, evt.ID)
 				}
 				oc.releaseRoom(portal.MXID)
 				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
 			}()
-			oc.dispatchCompletionInternal(runCtx, evt, portal, meta, promptMessages)
-		}()
+			oc.dispatchCompletionInternal(runCtx, evt, portal, metaSnapshot, promptMessages)
+		}(metaSnapshot)
 		return userMessage, false
 	}
 
@@ -517,13 +509,14 @@ func (oc *AIClient) dispatchOrQueueWithStatus(
 			oc.sendSuccessStatus(ctx, portal, extra)
 		}
 		runCtx := withStatusEvents(ctx, pending.StatusEvents)
-		go func() {
+		metaSnapshot := clonePortalMetadata(meta)
+		go func(metaSnapshot *PortalMetadata) {
 			defer func() {
 				oc.releaseRoom(portal.MXID)
 				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
 			}()
-			oc.dispatchCompletionInternal(runCtx, evt, portal, meta, promptMessages)
-		}()
+			oc.dispatchCompletionInternal(runCtx, evt, portal, metaSnapshot, promptMessages)
+		}(metaSnapshot)
 		return
 	}
 
@@ -558,15 +551,17 @@ func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 		eventID = pending.Event.ID
 	}
 
+	metaSnapshot := clonePortalMetadata(pending.Meta)
+
 	switch pending.Type {
 	case pendingTypeText:
-		promptMessages, err = oc.buildPrompt(ctx, pending.Portal, pending.Meta, pending.MessageBody, eventID)
+		promptMessages, err = oc.buildPrompt(ctx, pending.Portal, metaSnapshot, pending.MessageBody, eventID)
 	case pendingTypeImage, pendingTypePDF, pendingTypeAudio, pendingTypeVideo:
-		promptMessages, err = oc.buildPromptWithMedia(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.MediaURL, pending.MimeType, pending.EncryptedFile, pending.Type, eventID)
+		promptMessages, err = oc.buildPromptWithMedia(ctx, pending.Portal, metaSnapshot, pending.MessageBody, pending.MediaURL, pending.MimeType, pending.EncryptedFile, pending.Type, eventID)
 	case pendingTypeRegenerate:
-		promptMessages, err = oc.buildPromptForRegenerate(ctx, pending.Portal, pending.Meta, pending.MessageBody, pending.SourceEventID)
+		promptMessages, err = oc.buildPromptForRegenerate(ctx, pending.Portal, metaSnapshot, pending.MessageBody, pending.SourceEventID)
 	case pendingTypeEditRegenerate:
-		promptMessages, err = oc.buildPromptUpToMessage(ctx, pending.Portal, pending.Meta, pending.TargetMsgID, pending.MessageBody)
+		promptMessages, err = oc.buildPromptUpToMessage(ctx, pending.Portal, metaSnapshot, pending.TargetMsgID, pending.MessageBody)
 	default:
 		err = fmt.Errorf("unknown pending message type: %s", pending.Type)
 	}
@@ -592,7 +587,7 @@ func (oc *AIClient) processNextPending(ctx context.Context, roomID id.RoomID) {
 			// Check for more pending messages
 			oc.processNextPending(oc.backgroundContext(ctx), roomID)
 		}()
-		oc.dispatchCompletionInternal(runCtx, pending.Event, pending.Portal, pending.Meta, promptMessages)
+		oc.dispatchCompletionInternal(runCtx, pending.Event, pending.Portal, metaSnapshot, promptMessages)
 	}()
 }
 

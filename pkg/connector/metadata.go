@@ -64,10 +64,20 @@ type UserDefaults struct {
 	Tools           map[string]bool `json:"tools,omitempty"` // tool_name → enabled
 }
 
+// ServiceTokens stores optional per-login credentials for external services.
+type ServiceTokens struct {
+	OpenAI     string `json:"openai,omitempty"`
+	OpenRouter string `json:"openrouter,omitempty"`
+	Exa        string `json:"exa,omitempty"`
+	Brave      string `json:"brave,omitempty"`
+	Perplexity string `json:"perplexity,omitempty"`
+	Proxy      string `json:"proxy,omitempty"`
+}
+
 // UserLoginMetadata is stored on each login row to keep per-user settings.
 type UserLoginMetadata struct {
 	Persona              string         `json:"persona,omitempty"`
-	Provider             string         `json:"provider,omitempty"` // Selected provider (beeper, openai, openrouter, custom)
+	Provider             string         `json:"provider,omitempty"` // Selected provider (beeper, openai, openrouter)
 	APIKey               string         `json:"api_key,omitempty"`
 	BaseURL              string         `json:"base_url,omitempty"`               // Per-user API endpoint
 	TitleGenerationModel string         `json:"title_generation_model,omitempty"` // Model to use for generating chat titles
@@ -84,6 +94,9 @@ type UserLoginMetadata struct {
 
 	// User-level defaults for new chats (set via provisioning API)
 	Defaults *UserDefaults `json:"defaults,omitempty"`
+
+	// Optional per-login tokens for external services
+	ServiceTokens *ServiceTokens `json:"service_tokens,omitempty"`
 
 	// Agent Builder room for managing agents
 	BuilderRoomID networkid.PortalID `json:"builder_room_id,omitempty"`
@@ -144,6 +157,33 @@ type PortalMetadata struct {
 
 	// Debounce configuration (0 = use default, -1 = disabled)
 	DebounceMs int `json:"debounce_ms,omitempty"`
+}
+
+func clonePortalMetadata(src *PortalMetadata) *PortalMetadata {
+	if src == nil {
+		return nil
+	}
+
+	clone := *src
+
+	if src.PDFConfig != nil {
+		pdf := *src.PDFConfig
+		clone.PDFConfig = &pdf
+	}
+
+	if src.ToolsConfig.Tools != nil {
+		clone.ToolsConfig.Tools = make(map[string]*ToolEntry, len(src.ToolsConfig.Tools))
+		for name, entry := range src.ToolsConfig.Tools {
+			if entry == nil {
+				clone.ToolsConfig.Tools[name] = nil
+				continue
+			}
+			entryCopy := *entry
+			clone.ToolsConfig.Tools[name] = &entryCopy
+		}
+	}
+
+	return &clone
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild

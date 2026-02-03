@@ -72,6 +72,29 @@ var globalPreviewCache = &previewCache{
 	entries: make(map[string]*previewCacheEntry),
 }
 
+func cloneBeeperLinkPreview(src *event.BeeperLinkPreview) *event.BeeperLinkPreview {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	return &clone
+}
+
+func clonePreviewWithImage(src *PreviewWithImage) *PreviewWithImage {
+	if src == nil {
+		return nil
+	}
+	clone := &PreviewWithImage{
+		Preview:  cloneBeeperLinkPreview(src.Preview),
+		ImageURL: src.ImageURL,
+	}
+	if len(src.ImageData) > 0 {
+		clone.ImageData = make([]byte, len(src.ImageData))
+		copy(clone.ImageData, src.ImageData)
+	}
+	return clone
+}
+
 func (c *previewCache) get(url string) *PreviewWithImage {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -80,7 +103,7 @@ func (c *previewCache) get(url string) *PreviewWithImage {
 	if !ok || time.Now().After(entry.expiresAt) {
 		return nil
 	}
-	return entry.preview
+	return clonePreviewWithImage(entry.preview)
 }
 
 func (c *previewCache) set(url string, preview *PreviewWithImage, ttl time.Duration) {
@@ -88,7 +111,7 @@ func (c *previewCache) set(url string, preview *PreviewWithImage, ttl time.Durat
 	defer c.mu.Unlock()
 
 	c.entries[url] = &previewCacheEntry{
-		preview:   preview,
+		preview:   clonePreviewWithImage(preview),
 		expiresAt: time.Now().Add(ttl),
 	}
 
@@ -404,7 +427,10 @@ func UploadPreviewImages(ctx context.Context, previews []*PreviewWithImage, inte
 			continue
 		}
 
-		preview := p.Preview
+		preview := cloneBeeperLinkPreview(p.Preview)
+		if preview == nil {
+			continue
+		}
 
 		// Upload image if we have data
 		if len(p.ImageData) > 0 && intent != nil {

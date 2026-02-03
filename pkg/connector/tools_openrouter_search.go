@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/beeper/ai-bridge/pkg/search"
 )
@@ -36,5 +37,17 @@ func resolveOpenRouterSearchConfig(ctx context.Context) *search.Config {
 	}
 	cfg.Provider = search.ProviderOpenRouter
 	cfg.Fallbacks = []string{search.ProviderOpenRouter}
+	if btc := GetBridgeToolContext(ctx); btc != nil && btc.Client != nil && btc.Client.UserLogin != nil {
+		meta := loginMetadata(btc.Client.UserLogin)
+		services := btc.Client.connector.resolveServiceConfig(meta)
+		if svc, ok := services[serviceOpenRouter]; ok {
+			if svc.BaseURL != "" {
+				cfg.OpenRouter.BaseURL = strings.TrimRight(svc.BaseURL, "/")
+			}
+			if cfg.OpenRouter.APIKey == "" {
+				cfg.OpenRouter.APIKey = svc.APIKey
+			}
+		}
+	}
 	return cfg
 }
