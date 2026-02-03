@@ -414,6 +414,18 @@ func CronSchema() map[string]any {
 				"enum":        []string{"status", "list", "add", "update", "remove", "run", "runs", "wake"},
 				"description": "Action to perform: status, list, add, update, remove, run, runs, wake.",
 			},
+			"gatewayUrl": map[string]any{
+				"type":        "string",
+				"description": "Optional: gateway URL (ignored by bridge; accepted for compatibility).",
+			},
+			"gatewayToken": map[string]any{
+				"type":        "string",
+				"description": "Optional: gateway token (ignored by bridge; accepted for compatibility).",
+			},
+			"timeoutMs": map[string]any{
+				"type":        "number",
+				"description": "Optional: timeout in ms (ignored by bridge; accepted for compatibility).",
+			},
 			"id": map[string]any{
 				"type":        "string",
 				"description": "Cron job ID (for update/remove/run/runs).",
@@ -437,6 +449,12 @@ func CronSchema() map[string]any {
 			"includeDisabled": map[string]any{
 				"type":        "boolean",
 				"description": "Include disabled jobs in list.",
+			},
+			"contextMessages": map[string]any{
+				"type":        "number",
+				"description": "For add: include recent context lines (0-10) appended to systemEvent text.",
+				"minimum":     0,
+				"maximum":     10,
 			},
 			"mode": map[string]any{
 				"type":        "string",

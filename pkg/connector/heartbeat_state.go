@@ -4,11 +4,13 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"maunium.net/go/mautrix/id"
 )
 
 const heartbeatDedupeWindowMs = 24 * 60 * 60 * 1000
 
-func (oc *AIClient) isDuplicateHeartbeat(agentID, text string) bool {
+func (oc *AIClient) isDuplicateHeartbeat(agentID string, roomID id.RoomID, text string) bool {
 	if oc == nil || oc.UserLogin == nil {
 		return false
 	}
@@ -20,7 +22,7 @@ func (oc *AIClient) isDuplicateHeartbeat(agentID, text string) bool {
 	if meta == nil || meta.HeartbeatState == nil {
 		return false
 	}
-	state, ok := meta.HeartbeatState[normalizeAgentID(agentID)]
+	state, ok := meta.HeartbeatState[heartbeatDedupeKey(agentID, roomID)]
 	if !ok {
 		return false
 	}
@@ -32,7 +34,7 @@ func (oc *AIClient) isDuplicateHeartbeat(agentID, text string) bool {
 	return false
 }
 
-func (oc *AIClient) recordHeartbeatText(agentID, text string) {
+func (oc *AIClient) recordHeartbeatText(agentID string, roomID id.RoomID, text string) {
 	if oc == nil || oc.UserLogin == nil {
 		return
 	}
@@ -47,10 +49,18 @@ func (oc *AIClient) recordHeartbeatText(agentID, text string) {
 	if meta.HeartbeatState == nil {
 		meta.HeartbeatState = make(map[string]HeartbeatState)
 	}
-	key := normalizeAgentID(agentID)
+	key := heartbeatDedupeKey(agentID, roomID)
 	meta.HeartbeatState[key] = HeartbeatState{
 		LastHeartbeatText:   trimmed,
 		LastHeartbeatSentAt: time.Now().UnixMilli(),
 	}
 	_ = oc.UserLogin.Save(oc.backgroundContext(context.Background()))
+}
+
+func heartbeatDedupeKey(agentID string, roomID id.RoomID) string {
+	key := normalizeAgentID(agentID)
+	if roomID == "" {
+		return key
+	}
+	return key + ":" + roomID.String()
 }

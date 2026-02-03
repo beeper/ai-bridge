@@ -18,8 +18,8 @@ func ComputeNextRunAtMs(schedule CronSchedule, nowMs int64) *int64 {
 		return nil
 	case "every":
 		everyMs := schedule.EveryMs
-		if everyMs <= 0 {
-			return nil
+		if everyMs < 1 {
+			everyMs = 1
 		}
 		anchor := schedule.AnchorMs
 		if anchor <= 0 {
@@ -30,6 +30,9 @@ func ComputeNextRunAtMs(schedule CronSchedule, nowMs int64) *int64 {
 		}
 		elapsed := nowMs - anchor
 		steps := (elapsed + everyMs - 1) / everyMs
+		if steps < 1 {
+			steps = 1
+		}
 		next := anchor + steps*everyMs
 		return &next
 	case "cron":

@@ -19,7 +19,8 @@ func ResolveCronStorePath(storePath string) string {
 	if trimmed != "" {
 		if strings.HasPrefix(trimmed, "~") {
 			if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-				return filepath.Join(home, strings.TrimPrefix(trimmed, "~"))
+				replaced := strings.Replace(trimmed, "~", home, 1)
+				return filepath.Clean(replaced)
 			}
 		}
 		return filepath.Clean(trimmed)

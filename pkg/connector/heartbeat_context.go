@@ -14,6 +14,7 @@ type HeartbeatRunConfig struct {
 	UseIndicator     bool
 	IncludeReasoning bool
 	TargetRoom       id.RoomID
+	TargetReason     string
 	AgentID          string
 	Channel          string
 	SuppressSave     bool

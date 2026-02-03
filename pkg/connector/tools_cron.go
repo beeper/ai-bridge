@@ -44,10 +44,12 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 		out := map[string]any{
 			"enabled":   enabled,
 			"storePath": storePath,
-			"jobCount":  jobCount,
+			"jobs":      jobCount,
 		}
 		if nextWake != nil {
 			out["nextWakeAtMs"] = *nextWake
+		} else {
+			out["nextWakeAtMs"] = nil
 		}
 		return agenttools.JSONResult(out).Text(), nil
 	case "list":
@@ -60,8 +62,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 			}).Text(), nil
 		}
 		return agenttools.JSONResult(map[string]any{
-			"jobs":  jobs,
-			"count": len(jobs),
+			"jobs": jobs,
 		}).Text(), nil
 	case "add":
 		normalizedArgs := coerceCronArgs(args)
@@ -79,6 +80,10 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 				"error":  "payload.kind is required",
 			}).Text(), nil
 		}
+		contextMessages := agenttools.ReadIntDefault(args, "contextMessages", 0)
+		if contextMessages > 0 {
+			injectCronReminderContext(&jobInput, btc, contextMessages)
+		}
 		job, err := client.cronService.Add(jobInput)
 		if err != nil {
 			return agenttools.JSONResult(map[string]any{
@@ -86,9 +91,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 				"error":  err.Error(),
 			}).Text(), nil
 		}
-		return agenttools.JSONResult(map[string]any{
-			"job": job,
-		}).Text(), nil
+		return agenttools.JSONResult(job).Text(), nil
 	case "update":
 		jobID := readCronJobID(args)
 		if jobID == "" {
@@ -112,9 +115,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 				"error":  err.Error(),
 			}).Text(), nil
 		}
-		return agenttools.JSONResult(map[string]any{
-			"job": job,
-		}).Text(), nil
+		return agenttools.JSONResult(job).Text(), nil
 	case "remove":
 		jobID := readCronJobID(args)
 		if jobID == "" {
@@ -131,6 +132,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 			}).Text(), nil
 		}
 		return agenttools.JSONResult(map[string]any{
+			"ok":      true,
 			"removed": removed,
 		}).Text(), nil
 	case "run":
@@ -153,6 +155,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 			}).Text(), nil
 		}
 		out := map[string]any{
+			"ok":  true,
 			"ran": ran,
 		}
 		if reason != "" {
@@ -170,11 +173,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 			}).Text(), nil
 		}
 		out := map[string]any{
-			"runs":  runs,
-			"count": len(runs),
-		}
-		if jobID != "" {
-			out["jobId"] = jobID
+			"entries": runs,
 		}
 		return agenttools.JSONResult(out).Text(), nil
 	case "wake":
@@ -189,7 +188,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 		if mode == "" {
 			mode = "next-heartbeat"
 		}
-		enqueued, err := client.cronService.Wake(mode, text)
+		_, err := client.cronService.Wake(mode, text)
 		if err != nil {
 			return agenttools.JSONResult(map[string]any{
 				"status": "error",
@@ -197,7 +196,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 			}).Text(), nil
 		}
 		return agenttools.JSONResult(map[string]any{
-			"enqueued": enqueued,
+			"ok": true,
 		}).Text(), nil
 	default:
 		return agenttools.JSONResult(map[string]any{
@@ -301,12 +300,121 @@ func injectCronContext(job *cron.CronJobCreate, btc *BridgeToolContext) {
 		}
 		job.AgentID = &agentID
 	}
-	if strings.TrimSpace(job.Payload.Channel) == "" {
-		job.Payload.Channel = "matrix"
+}
+
+const (
+	reminderContextMessagesMax   = 10
+	reminderContextPerMessageMax = 220
+	reminderContextTotalMax      = 700
+	reminderContextMarker        = "\n\nRecent context:\n"
+)
+
+func injectCronReminderContext(job *cron.CronJobCreate, btc *BridgeToolContext, count int) {
+	if job == nil || btc == nil || btc.Client == nil {
+		return
 	}
-	if strings.TrimSpace(job.Payload.To) == "" && btc.Portal != nil && btc.Portal.MXID != "" {
-		job.Payload.To = btc.Portal.MXID.String()
+	if strings.ToLower(strings.TrimSpace(job.Payload.Kind)) != "systemevent" {
+		return
 	}
+	text := strings.TrimSpace(job.Payload.Text)
+	if text == "" {
+		return
+	}
+	contextLines := buildReminderContextLines(btc, count)
+	if len(contextLines) == 0 {
+		return
+	}
+	baseText := stripExistingReminderContext(text)
+	job.Payload.Text = baseText + reminderContextMarker + strings.Join(contextLines, "\n")
+}
+
+func stripExistingReminderContext(text string) string {
+	idx := strings.Index(text, reminderContextMarker)
+	if idx == -1 {
+		return strings.TrimSpace(text)
+	}
+	return strings.TrimSpace(text[:idx])
+}
+
+func buildReminderContextLines(btc *BridgeToolContext, count int) []string {
+	if btc == nil || btc.Client == nil || btc.Portal == nil {
+		return nil
+	}
+	maxMessages := count
+	if maxMessages <= 0 {
+		return nil
+	}
+	if maxMessages > reminderContextMessagesMax {
+		maxMessages = reminderContextMessagesMax
+	}
+	ctx := btc.Client.backgroundContext(context.Background())
+	history, err := btc.Client.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, btc.Portal.PortalKey, maxMessages)
+	if err != nil || len(history) == 0 {
+		return nil
+	}
+	entries := make([]contextEntry, 0, len(history))
+	for i := len(history) - 1; i >= 0; i-- {
+		msg := history[i]
+		meta := messageMeta(msg)
+		if !shouldIncludeInHistory(meta) {
+			continue
+		}
+		role := strings.ToLower(strings.TrimSpace(meta.Role))
+		if role != "user" && role != "assistant" {
+			continue
+		}
+		text := normalizeContextText(meta.Body)
+		if text == "" {
+			continue
+		}
+		entries = append(entries, contextEntry{role: role, text: text})
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	if len(entries) > maxMessages {
+		entries = entries[len(entries)-maxMessages:]
+	}
+	lines := make([]string, 0, len(entries))
+	total := 0
+	for _, entry := range entries {
+		label := "User"
+		if entry.role == "assistant" {
+			label = "Assistant"
+		}
+		text := truncateContextText(entry.text, reminderContextPerMessageMax)
+		line := fmt.Sprintf("- %s: %s", label, text)
+		total += len(line)
+		if total > reminderContextTotalMax {
+			break
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+type contextEntry struct {
+	role string
+	text string
+}
+
+func normalizeContextText(raw string) string {
+	return strings.Join(strings.Fields(raw), " ")
+}
+
+func truncateContextText(input string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	runes := []rune(input)
+	if len(runes) <= maxLen {
+		return input
+	}
+	if maxLen <= 3 {
+		return string(runes[:maxLen])
+	}
+	truncated := strings.TrimRight(string(runes[:maxLen-3]), " ")
+	return truncated + "..."
 }
 
 func (oc *AIClient) readCronRuns(jobID string, limit int) ([]cron.CronRunLogEntry, error) {

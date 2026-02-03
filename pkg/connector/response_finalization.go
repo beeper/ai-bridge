@@ -235,6 +235,11 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	cleaned := strings.TrimSpace(finalText)
 	hasContent := cleaned != ""
 	includeReasoning := hb.IncludeReasoning && state.reasoning.Len() > 0
+	deliverable := hb.TargetRoom != "" && hb.TargetRoom == portal.MXID
+	targetReason := strings.TrimSpace(hb.TargetReason)
+	if targetReason == "" {
+		targetReason = "no-target"
+	}
 
 	sendOutcome := func(out HeartbeatRunOutcome) {
 		if state.heartbeatResultCh != nil {
@@ -246,11 +251,11 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	}
 
 	if shouldSkip && !hasContent {
-		if includeReasoning && hb.ShowAlerts {
+		if includeReasoning && hb.ShowAlerts && deliverable {
 			oc.sendPlainAssistantMessage(ctx, portal, "Reasoning: "+state.reasoning.String())
 		}
 		silent := true
-		if hb.ShowOk {
+		if hb.ShowOk && deliverable {
 			oc.sendPlainAssistantMessage(ctx, portal, agents.HeartbeatToken)
 			silent = false
 		}
@@ -277,7 +282,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 
 	// Deduplicate identical heartbeat content within 24h
 	if hasContent && !shouldSkip {
-		if oc.isDuplicateHeartbeat(hb.AgentID, cleaned) {
+		if oc.isDuplicateHeartbeat(hb.AgentID, portal.MXID, cleaned) {
 			oc.redactInitialStreamingMessage(ctx, portal, intent, state)
 			indicator := (*HeartbeatIndicatorType)(nil)
 			if hb.UseIndicator {
@@ -294,6 +299,23 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 			sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: "duplicate", Skipped: true})
 			return
 		}
+	}
+
+	if !deliverable {
+		oc.redactInitialStreamingMessage(ctx, portal, intent, state)
+		preview := cleaned
+		if preview == "" && state.reasoning.Len() > 0 {
+			preview = state.reasoning.String()
+		}
+		emitHeartbeatEvent(&HeartbeatEventPayload{
+			TS:           time.Now().UnixMilli(),
+			Status:       "skipped",
+			Reason:       targetReason,
+			Preview:      preview[:minInt(len(preview), 200)],
+			Channel:      hb.Channel,
+		})
+		sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: targetReason, Skipped: true})
+		return
 	}
 
 	if !hb.ShowAlerts {
@@ -323,7 +345,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 
 	// Record heartbeat for dedupe
 	if hb.AgentID != "" && cleaned != "" {
-		oc.recordHeartbeatText(hb.AgentID, cleaned)
+		oc.recordHeartbeatText(hb.AgentID, portal.MXID, cleaned)
 	}
 
 	indicator := (*HeartbeatIndicatorType)(nil)
