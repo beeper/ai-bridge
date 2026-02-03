@@ -251,3 +251,14 @@ func IsToolUniquenessError(err error) bool {
 	}
 	return false
 }
+
+// IsNoResponseChunksError checks if the Responses streaming returned no chunks.
+func IsNoResponseChunksError(err error) bool {
+	for err != nil {
+		if strings.Contains(err.Error(), "No response chunks received") {
+			return true
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
+}

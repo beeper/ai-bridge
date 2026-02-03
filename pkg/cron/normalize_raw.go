@@ -28,7 +28,7 @@ func normalizeCronJobInputRaw(raw any, applyDefaults bool) rawRecord {
 			if trimmed == "" {
 				delete(next, "agentId")
 			} else {
-				next["agentId"] = trimmed
+				next["agentId"] = sanitizeAgentID(trimmed)
 			}
 		}
 	}

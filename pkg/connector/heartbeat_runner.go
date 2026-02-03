@@ -231,16 +231,13 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "quiet-hours"}
 	}
 
-	sessionPortal, sessionKey, err := oc.resolveHeartbeatPortal(agentID, heartbeat)
-	if err != nil || sessionPortal == nil || sessionPortal.MXID == "" {
-		reason := "no-session"
-		if errors.Is(err, errHeartbeatNoTarget) || errors.Is(err, errHeartbeatTargetNotFound) {
-			reason = "no-target"
-		}
-		return cron.HeartbeatRunResult{Status: "skipped", Reason: reason}
-	}
-	if oc.isRoomBusy(sessionPortal.MXID) {
+	if oc.hasInflightRequests() {
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "requests-in-flight"}
+	}
+
+	sessionPortal, sessionKey, err := oc.resolveHeartbeatSessionPortal(agentID, heartbeat)
+	if err != nil || sessionPortal == nil || sessionPortal.MXID == "" {
+		return cron.HeartbeatRunResult{Status: "skipped", Reason: "no-session"}
 	}
 
 	// Skip when HEARTBEAT.md exists but is effectively empty.
@@ -253,7 +250,27 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "empty-heartbeat-file"}
 	}
 
-	visibility := resolveHeartbeatVisibility(cfg, "matrix")
+	deliveryPortal, deliveryRoom, deliveryReason := oc.resolveHeartbeatDeliveryPortal(agentID, heartbeat)
+	visibility := defaultHeartbeatVisibility
+	channel := "none"
+	if deliveryPortal != nil && deliveryRoom != "" {
+		channel = "matrix"
+		visibility = resolveHeartbeatVisibility(cfg, "matrix")
+	}
+	if !visibility.ShowAlerts && !visibility.ShowOk && !visibility.UseIndicator {
+		emitHeartbeatEvent(&HeartbeatEventPayload{
+			TS:     time.Now().UnixMilli(),
+			Status: "skipped",
+			Reason: "alerts-disabled",
+			Channel: func() string {
+				if channel == "matrix" {
+					return channel
+				}
+				return ""
+			}(),
+		})
+		return cron.HeartbeatRunResult{Status: "skipped", Reason: "alerts-disabled"}
+	}
 	hbCfg := &HeartbeatRunConfig{
 		Reason:           reason,
 		AckMaxChars:      resolveHeartbeatAckMaxChars(cfg, heartbeat),
@@ -261,9 +278,10 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		ShowAlerts:       visibility.ShowAlerts,
 		UseIndicator:     visibility.UseIndicator,
 		IncludeReasoning: heartbeat != nil && heartbeat.IncludeReasoning != nil && *heartbeat.IncludeReasoning,
-		TargetRoom:       sessionPortal.MXID,
+		TargetRoom:       deliveryRoom,
+		TargetReason:     deliveryReason,
 		AgentID:          agentID,
-		Channel:          "matrix",
+		Channel:          channel,
 		SuppressSave:     true,
 	}
 	var agentDef *agents.AgentDefinition
@@ -277,7 +295,8 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		prompt = systemEvents + "\n\n" + prompt
 	}
 
-	promptMessages, err := oc.buildPromptWithHeartbeat(context.Background(), sessionPortal, portalMeta(sessionPortal), prompt)
+	promptMeta := portalMeta(sessionPortal)
+	promptMessages, err := oc.buildPromptWithHeartbeat(context.Background(), sessionPortal, promptMeta, prompt)
 	if err != nil {
 		return cron.HeartbeatRunResult{Status: "failed", Reason: err.Error()}
 	}
@@ -285,8 +304,12 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	resultCh := make(chan HeartbeatRunOutcome, 1)
 	runCtx := withHeartbeatRun(oc.backgroundContext(context.Background()), hbCfg, resultCh)
 	done := make(chan struct{})
+	sendPortal := sessionPortal
+	if deliveryPortal != nil && deliveryPortal.MXID != "" {
+		sendPortal = deliveryPortal
+	}
 	go func() {
-		oc.streamingResponseWithRetry(runCtx, nil, sessionPortal, portalMeta(sessionPortal), promptMessages)
+		oc.streamingResponseWithRetry(runCtx, nil, sendPortal, promptMeta, promptMessages)
 		close(done)
 	}()
 
@@ -383,32 +406,34 @@ func (oc *AIClient) resolveHeartbeatPortal(agentID string, heartbeat *HeartbeatC
 	return portal, key, nil
 }
 
-func (oc *AIClient) resolveHeartbeatDeliveryPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, id.RoomID) {
+func (oc *AIClient) resolveHeartbeatDeliveryPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, id.RoomID, string) {
 	if heartbeat != nil {
 		if strings.TrimSpace(heartbeat.Target) == "none" {
-			return nil, ""
+			return nil, "", "target-none"
 		}
 		if strings.TrimSpace(heartbeat.To) != "" {
 			if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(strings.TrimSpace(heartbeat.To))); err == nil && portal != nil {
-				return portal, portal.MXID
+				return portal, portal.MXID, ""
 			}
+			return nil, "", "no-target"
 		}
 		if strings.TrimSpace(heartbeat.Target) != "" && strings.ToLower(strings.TrimSpace(heartbeat.Target)) != "last" {
 			target := strings.TrimSpace(heartbeat.Target)
 			if strings.HasPrefix(target, "!") {
 				if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(target)); err == nil && portal != nil {
-					return portal, portal.MXID
+					return portal, portal.MXID, ""
 				}
 			}
+			return nil, "", "no-target"
 		}
 	}
 	if portal := oc.lastActivePortal(agentID); portal != nil {
-		return portal, portal.MXID
+		return portal, portal.MXID, ""
 	}
 	if portal := oc.defaultChatPortal(); portal != nil {
-		return portal, portal.MXID
+		return portal, portal.MXID, ""
 	}
-	return nil, ""
+	return nil, "", "no-target"
 }
 
 func (oc *AIClient) shouldRunHeartbeatForFile(agentID string, reason string) bool {

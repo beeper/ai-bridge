@@ -385,6 +385,21 @@ func (oc *AIClient) streamingResponseWithToolSchemaFallback(
 		}
 		return success, cle, chatErr
 	}
+	if IsNoResponseChunksError(err) {
+		oc.log.Warn().Err(err).Msg("Responses streaming returned no chunks; retrying without tools")
+		if meta != nil && meta.Capabilities.SupportsToolCalling {
+			metaCopy := *meta
+			metaCopy.Capabilities = meta.Capabilities
+			metaCopy.Capabilities.SupportsToolCalling = false
+			success, cle, retryErr := oc.streamingResponse(ctx, evt, portal, &metaCopy, messages)
+			if success || cle != nil || retryErr == nil {
+				return success, cle, retryErr
+			}
+			err = retryErr
+		}
+		oc.log.Warn().Err(err).Msg("Responses retry failed; falling back to chat completions")
+		return oc.streamChatCompletions(ctx, evt, portal, meta, messages)
+	}
 	return success, cle, err
 }
 
@@ -429,8 +444,9 @@ func (oc *AIClient) streamingResponse(
 
 	stream := oc.api.Responses.NewStreaming(ctx, params)
 	if stream == nil {
-		log.Error().Msg("Failed to create Responses API streaming request")
-		return false, nil, &PreDeltaError{Err: fmt.Errorf("responses streaming not available")}
+		initErr := fmt.Errorf("responses streaming not available")
+		logResponsesFailure(log, initErr, params, meta, messages, "stream_init")
+		return false, nil, &PreDeltaError{Err: initErr}
 	}
 
 	// Initialize streaming state with turn tracking
@@ -894,14 +910,14 @@ func (oc *AIClient) streamingResponse(
 			log.Debug().Str("reason", state.finishReason).Str("response_id", state.responseID).Int("images", len(state.pendingImages)).Msg("Response stream completed")
 
 		case "error":
-			log.Error().Str("error", streamEvent.Message).Msg("Responses API stream error")
+			apiErr := fmt.Errorf("API error: %s", streamEvent.Message)
+			logResponsesFailure(log, apiErr, params, meta, messages, "stream_event_error")
 			// Check for context length error
 			if strings.Contains(streamEvent.Message, "context_length") || strings.Contains(streamEvent.Message, "token") {
 				return false, &ContextLengthError{
 					OriginalError: fmt.Errorf("%s", streamEvent.Message),
 				}, nil
 			}
-			apiErr := fmt.Errorf("API error: %s", streamEvent.Message)
 			if state.initialEventID != "" {
 				return false, nil, &NonFallbackError{Err: apiErr}
 			}
@@ -911,7 +927,7 @@ func (oc *AIClient) streamingResponse(
 
 	// Check for stream errors
 	if err := stream.Err(); err != nil {
-		log.Error().Err(err).Msg("Responses API streaming error")
+		logResponsesFailure(log, err, params, meta, messages, "stream_err")
 		cle := ParseContextLengthError(err)
 		if cle != nil {
 			return false, cle, nil
@@ -956,7 +972,8 @@ func (oc *AIClient) streamingResponse(
 		// Start continuation stream
 		stream = oc.api.Responses.NewStreaming(ctx, continuationParams)
 		if stream == nil {
-			log.Error().Msg("Failed to create continuation streaming request")
+			initErr := fmt.Errorf("continuation streaming not available")
+			logResponsesFailure(log, initErr, continuationParams, meta, messages, "continuation_init")
 			break
 		}
 
@@ -1187,12 +1204,13 @@ func (oc *AIClient) streamingResponse(
 				log.Debug().Str("reason", state.finishReason).Str("response_id", state.responseID).Msg("Continuation stream completed")
 
 			case "error":
-				log.Error().Str("error", streamEvent.Message).Msg("Continuation stream error")
+				apiErr := fmt.Errorf("API error: %s", streamEvent.Message)
+				logResponsesFailure(log, apiErr, continuationParams, meta, messages, "continuation_event_error")
 			}
 		}
 
 		if err := stream.Err(); err != nil {
-			log.Error().Err(err).Msg("Continuation streaming error")
+			logResponsesFailure(log, err, continuationParams, meta, messages, "continuation_err")
 			break
 		}
 	}
@@ -1407,8 +1425,9 @@ func (oc *AIClient) streamChatCompletions(
 
 	stream := oc.api.Chat.Completions.NewStreaming(ctx, params)
 	if stream == nil {
-		log.Error().Msg("Failed to create Chat Completions streaming request")
-		return false, nil, &PreDeltaError{Err: fmt.Errorf("chat completions streaming not available")}
+		initErr := fmt.Errorf("chat completions streaming not available")
+		logChatCompletionsFailure(log, initErr, params, meta, messages, "stream_init")
+		return false, nil, &PreDeltaError{Err: initErr}
 	}
 
 	// Initialize streaming state with source event ID for [[reply_to_current]] support
@@ -1534,7 +1553,7 @@ func (oc *AIClient) streamChatCompletions(
 		if cle := ParseContextLengthError(err); cle != nil {
 			return false, cle, nil
 		}
-		log.Error().Err(err).Msg("Chat Completions stream error")
+		logChatCompletionsFailure(log, err, params, meta, messages, "stream_err")
 		if state.initialEventID != "" {
 			return false, nil, &NonFallbackError{Err: err}
 		}

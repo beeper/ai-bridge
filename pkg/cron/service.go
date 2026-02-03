@@ -502,6 +502,9 @@ func (c *CronService) ensureLoaded() error {
 			job.Description = strings.TrimSpace(job.Description)
 			mutated = true
 		}
+		if migrated := migrateLegacyPayload(&job.Payload); migrated {
+			mutated = true
+		}
 		c.store.Jobs[i] = job
 	}
 	if mutated {
