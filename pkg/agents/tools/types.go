@@ -14,6 +14,7 @@ type Tool struct {
 	mcp.Tool                                                                  // Name, Description, InputSchema
 	Type     ToolType                                                         // builtin, provider, plugin, mcp
 	Group    string                                                           // group:search, group:code, etc.
+	PluginID string                                                           // Optional plugin id for grouping
 	Execute  func(ctx context.Context, input map[string]any) (*Result, error) // nil for provider tools
 }
 
@@ -90,9 +91,10 @@ func (t *Tool) ToMCPTool() mcp.Tool {
 // Clone creates a copy of the tool.
 func (t *Tool) Clone() *Tool {
 	return &Tool{
-		Tool:    t.Tool,
-		Type:    t.Type,
-		Group:   t.Group,
-		Execute: t.Execute,
+		Tool:     t.Tool,
+		Type:     t.Type,
+		Group:    t.Group,
+		PluginID: t.PluginID,
+		Execute:  t.Execute,
 	}
 }

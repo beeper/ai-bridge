@@ -21,11 +21,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/beeper/ai-bridge/pkg/shared/calc"
 	"github.com/beeper/ai-bridge/pkg/shared/media"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 	"github.com/beeper/ai-bridge/pkg/textfs"
+	"github.com/bmatcuk/doublestar/v4"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
@@ -69,123 +69,7 @@ func GetBridgeToolContext(ctx context.Context) *BridgeToolContext {
 
 // BuiltinTools returns the list of available builtin tools
 func BuiltinTools() []ToolDefinition {
-	return []ToolDefinition{
-		{
-			Name:        toolspec.CalculatorName,
-			Description: toolspec.CalculatorDescription,
-			Parameters:  toolspec.CalculatorSchema(),
-			Execute:     executeCalculator,
-		},
-		{
-			Name:        toolspec.WebSearchName,
-			Description: toolspec.WebSearchDescription,
-			Parameters:  toolspec.WebSearchSchema(),
-			Execute:     executeWebSearch,
-		},
-		{
-			Name:        toolspec.WebSearchOpenRouterName,
-			Description: toolspec.WebSearchOpenRouterDescription,
-			Parameters:  toolspec.WebSearchSchema(),
-			Execute:     executeWebSearchOpenRouter,
-		},
-		{
-			Name:        ToolNameMessage,
-			Description: toolspec.MessageDescription,
-			Parameters:  toolspec.MessageSchema(),
-			Execute:     executeMessage,
-		},
-		{
-			Name:        ToolNameTTS,
-			Description: toolspec.TTSDescription,
-			Parameters:  toolspec.TTSSchema(),
-			Execute:     executeTTS,
-		},
-		{
-			Name:        ToolNameWebFetch,
-			Description: toolspec.WebFetchDescription,
-			Parameters:  toolspec.WebFetchSchema(),
-			Execute:     executeWebFetch,
-		},
-		{
-			Name:        ToolNameImage,
-			Description: toolspec.ImageDescription,
-			Parameters:  toolspec.ImageSchema(),
-			Execute:     executeAnalyzeImage,
-		},
-		{
-			Name:        ToolNameImageGenerate,
-			Description: toolspec.ImageGenerateDescription,
-			Parameters:  toolspec.ImageGenerateSchema(),
-			Execute:     executeImageGeneration,
-		},
-		{
-			Name:        ToolNameSessionStatus,
-			Description: toolspec.SessionStatusDescription,
-			Parameters:  toolspec.SessionStatusSchema(),
-			Execute:     executeSessionStatus,
-		},
-		// Memory tools (matching OpenClaw interface)
-		{
-			Name:        ToolNameMemorySearch,
-			Description: toolspec.MemorySearchDescription,
-			Parameters:  toolspec.MemorySearchSchema(),
-			Execute:     executeMemorySearch,
-		},
-		{
-			Name:        ToolNameMemoryGet,
-			Description: toolspec.MemoryGetDescription,
-			Parameters:  toolspec.MemoryGetSchema(),
-			Execute:     executeMemoryGet,
-		},
-		{
-			Name:        ToolNameRead,
-			Description: toolspec.ReadDescription,
-			Parameters:  toolspec.ReadSchema(),
-			Execute:     executeReadFile,
-		},
-		{
-			Name:        ToolNameWrite,
-			Description: toolspec.WriteDescription,
-			Parameters:  toolspec.WriteSchema(),
-			Execute:     executeWriteFile,
-		},
-		{
-			Name:        ToolNameEdit,
-			Description: toolspec.EditDescription,
-			Parameters:  toolspec.EditSchema(),
-			Execute:     executeEditFile,
-		},
-		{
-			Name:        ToolNameLs,
-			Description: toolspec.LsDescription,
-			Parameters:  toolspec.LsSchema(),
-			Execute:     executeLs,
-		},
-		{
-			Name:        ToolNameFind,
-			Description: toolspec.FindDescription,
-			Parameters:  toolspec.FindSchema(),
-			Execute:     executeFind,
-		},
-		{
-			Name:        ToolNameGrep,
-			Description: toolspec.GrepDescription,
-			Parameters:  toolspec.GrepSchema(),
-			Execute:     executeGrep,
-		},
-		{
-			Name:        ToolNameGravatarFetch,
-			Description: toolspec.GravatarFetchDescription,
-			Parameters:  toolspec.GravatarFetchSchema(),
-			Execute:     executeGravatarFetch,
-		},
-		{
-			Name:        ToolNameGravatarSet,
-			Description: toolspec.GravatarSetDescription,
-			Parameters:  toolspec.GravatarSetSchema(),
-			Execute:     executeGravatarSet,
-		},
-	}
+	return buildBuiltinToolDefinitions()
 }
 
 // ToolNameMessage is the name of the message tool.
