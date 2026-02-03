@@ -133,18 +133,6 @@ func BuiltinTools() []ToolDefinition {
 			Execute:     executeMemoryGet,
 		},
 		{
-			Name:        ToolNameMemoryStore,
-			Description: toolspec.MemoryStoreDescription,
-			Parameters:  toolspec.MemoryStoreSchema(),
-			Execute:     executeMemoryStore,
-		},
-		{
-			Name:        ToolNameMemoryForget,
-			Description: toolspec.MemoryForgetDescription,
-			Parameters:  toolspec.MemoryForgetSchema(),
-			Execute:     executeMemoryForget,
-		},
-		{
 			Name:        ToolNameGravatarFetch,
 			Description: toolspec.GravatarFetchDescription,
 			Parameters:  toolspec.GravatarFetchSchema(),
@@ -184,8 +172,6 @@ const ToolNameSessionStatus = toolspec.SessionStatusName
 const (
 	ToolNameMemorySearch  = toolspec.MemorySearchName
 	ToolNameMemoryGet     = toolspec.MemoryGetName
-	ToolNameMemoryStore   = toolspec.MemoryStoreName
-	ToolNameMemoryForget  = toolspec.MemoryForgetName
 	ToolNameGravatarFetch = toolspec.GravatarFetchName
 	ToolNameGravatarSet   = toolspec.GravatarSetName
 )

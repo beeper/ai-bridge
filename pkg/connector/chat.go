@@ -69,8 +69,6 @@ func getDefaultToolsConfig(_ string) ToolsConfig {
 	// Memory tools
 	registerTool(&config, defaultMemorySearchTool(), "builtin")
 	registerTool(&config, defaultMemoryGetTool(), "builtin")
-	registerTool(&config, defaultMemoryStoreTool(), "builtin")
-	registerTool(&config, defaultMemoryForgetTool(), "builtin")
 
 	// Session tools
 	registerTool(&config, defaultSessionsListTool(), "builtin")
@@ -137,14 +135,6 @@ func ensureToolsConfig(meta *PortalMetadata, provider string) bool {
 	}
 	if _, ok := meta.ToolsConfig.Tools[toolspec.MemoryGetName]; !ok {
 		registerTool(&meta.ToolsConfig, defaultMemoryGetTool(), "builtin")
-		changed = true
-	}
-	if _, ok := meta.ToolsConfig.Tools[toolspec.MemoryStoreName]; !ok {
-		registerTool(&meta.ToolsConfig, defaultMemoryStoreTool(), "builtin")
-		changed = true
-	}
-	if _, ok := meta.ToolsConfig.Tools[toolspec.MemoryForgetName]; !ok {
-		registerTool(&meta.ToolsConfig, defaultMemoryForgetTool(), "builtin")
 		changed = true
 	}
 
@@ -435,10 +425,6 @@ func normalizeToolName(name string) string {
 		return toolspec.MemorySearchName
 	case "memoryget", "memget", "mem_get":
 		return toolspec.MemoryGetName
-	case "memorystore", "memstore", "mem_store":
-		return toolspec.MemoryStoreName
-	case "memoryforget", "memforget", "mem_forget":
-		return toolspec.MemoryForgetName
 	default:
 		return name
 	}

@@ -79,24 +79,6 @@ func defaultMemoryGetTool() mcp.Tool {
 	}
 }
 
-func defaultMemoryStoreTool() mcp.Tool {
-	return mcp.Tool{
-		Name:        toolspec.MemoryStoreName,
-		Description: toolspec.MemoryStoreDescription,
-		Annotations: &mcp.ToolAnnotations{Title: "Memory Store"},
-		InputSchema: toolspec.MemoryStoreSchema(),
-	}
-}
-
-func defaultMemoryForgetTool() mcp.Tool {
-	return mcp.Tool{
-		Name:        toolspec.MemoryForgetName,
-		Description: toolspec.MemoryForgetDescription,
-		Annotations: &mcp.ToolAnnotations{Title: "Memory Forget"},
-		InputSchema: toolspec.MemoryForgetSchema(),
-	}
-}
-
 func defaultGravatarFetchTool() mcp.Tool {
 	return mcp.Tool{
 		Name:        toolspec.GravatarFetchName,

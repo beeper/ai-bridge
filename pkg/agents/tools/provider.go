@@ -60,26 +60,6 @@ var (
 		Type:  ToolTypeProvider,
 		Group: GroupMemory,
 	}
-	MemoryStoreTool = &Tool{
-		Tool: mcp.Tool{
-			Name:        toolspec.MemoryStoreName,
-			Description: toolspec.MemoryStoreDescription,
-			Annotations: &mcp.ToolAnnotations{Title: "Memory Store"},
-			InputSchema: toolspec.MemoryStoreSchema(),
-		},
-		Type:  ToolTypeProvider,
-		Group: GroupMemory,
-	}
-	MemoryForgetTool = &Tool{
-		Tool: mcp.Tool{
-			Name:        toolspec.MemoryForgetName,
-			Description: toolspec.MemoryForgetDescription,
-			Annotations: &mcp.ToolAnnotations{Title: "Memory Forget"},
-			InputSchema: toolspec.MemoryForgetSchema(),
-		},
-		Type:  ToolTypeProvider,
-		Group: GroupMemory,
-	}
 	ImageTool = &Tool{
 		Tool: mcp.Tool{
 			Name:        toolspec.ImageName,
@@ -123,10 +103,8 @@ func ProviderTools() []*Tool {
 		MessageTool,
 		WebFetchTool,
 		SessionStatusTool,
-		MemorySearchTool,
-		MemoryGetTool,
-		MemoryStoreTool,
-		MemoryForgetTool,
+	MemorySearchTool,
+	MemoryGetTool,
 		ImageTool,
 		TTSTool,
 		AnalyzeImageTool,
