@@ -4,10 +4,13 @@ import "github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 
 // BeeperAIAgent is the default agent for all new chats.
 // It provides a simple, clean AI experience with sensible defaults.
+const DefaultAgentAvatarMXC = "mxc://beeper.com/51a668657dd9e0132cc823ad9402c6c2d0fc3321"
+
 var BeeperAIAgent = &AgentDefinition{
 	ID:          "beeper",
 	Name:        "Beep",
 	Description: "Your AI assistant",
+	AvatarURL:   DefaultAgentAvatarMXC,
 	Model: ModelConfig{
 		Primary: ModelClaudeOpus,
 		Fallbacks: []string{

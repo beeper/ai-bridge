@@ -19,6 +19,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 )
 
 // Tool name constants
@@ -383,6 +384,14 @@ func (oc *AIClient) createAgentChatWithModel(ctx context.Context, agent *agents.
 
 	// Update the OtherUserID to be the agent ghost
 	portal.OtherUserID = agentGhostID
+	agentAvatar := strings.TrimSpace(agent.AvatarURL)
+	if agentAvatar == "" {
+		agentAvatar = strings.TrimSpace(agents.DefaultAgentAvatarMXC)
+	}
+	if agentAvatar != "" {
+		portal.AvatarID = networkid.AvatarID(agentAvatar)
+		portal.AvatarMXC = id.ContentURIString(agentAvatar)
+	}
 
 	if err := portal.Save(ctx); err != nil {
 		return nil, fmt.Errorf("failed to save portal with agent config: %w", err)
@@ -502,6 +511,11 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 	portal.OtherUserID = modelUserID(modelID)
 	portal.Name = title
 	portal.NameSet = true
+	defaultAvatar := strings.TrimSpace(agents.DefaultAgentAvatarMXC)
+	if defaultAvatar != "" {
+		portal.AvatarID = networkid.AvatarID(defaultAvatar)
+		portal.AvatarMXC = id.ContentURIString(defaultAvatar)
+	}
 	// Note: portal.Topic is NOT set to SystemPrompt - they are separate concepts
 
 	if err := portal.Save(ctx); err != nil {
@@ -830,15 +844,25 @@ func (oc *AIClient) createForkedChat(
 		portal.OtherUserID = agentUserID(agentID)
 
 		agentName := agentID
+		agentAvatar := ""
 		// Try preset first - guaranteed to work for built-in agents (like "beeper")
 		if preset := agents.GetPresetByID(agentID); preset != nil {
 			agentName = oc.resolveAgentDisplayName(ctx, preset)
+			agentAvatar = preset.AvatarURL
 		} else {
 			// Custom agent - need Matrix state lookup
 			store := NewAgentStoreAdapter(oc)
 			if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil {
 				agentName = oc.resolveAgentDisplayName(ctx, agent)
+				agentAvatar = agent.AvatarURL
 			}
+		}
+		if strings.TrimSpace(agentAvatar) == "" {
+			agentAvatar = strings.TrimSpace(agents.DefaultAgentAvatarMXC)
+		}
+		if agentAvatar != "" {
+			portal.AvatarID = networkid.AvatarID(agentAvatar)
+			portal.AvatarMXC = id.ContentURIString(agentAvatar)
 		}
 		oc.applyAgentChatInfo(chatInfo, agentID, agentName, modelID)
 
