@@ -280,7 +280,7 @@ func (oc *OpenAIConnector) GetName() bridgev2.BridgeName {
 	return bridgev2.BridgeName{
 		DisplayName:          "Beeper AI",
 		NetworkURL:           "https://www.beeper.com/ai",
-		NetworkIcon:          "mxc://maunium.net/HPiAFz2uVH54camzatoorkWY",
+		NetworkIcon:          "mxc://beeper.com/51a668657dd9e0132cc823ad9402c6c2d0fc3321",
 		NetworkID:            "ai",
 		BeeperBridgeType:     "ai",
 		DefaultPort:          29345,

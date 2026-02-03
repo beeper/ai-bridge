@@ -1517,6 +1517,7 @@ func executeWriteFile(ctx context.Context, args map[string]any) (string, error) 
 	}
 	if entry != nil {
 		notifyMemoryFileChanged(ctx, entry.Path)
+		maybeRefreshAgentIdentity(ctx, entry.Path)
 	}
 	return fmt.Sprintf("Successfully wrote %d bytes to %s", len([]byte(content)), path), nil
 }
@@ -1580,6 +1581,7 @@ func executeEditFile(ctx context.Context, args map[string]any) (string, error) {
 	}
 	if entry != nil {
 		notifyMemoryFileChanged(ctx, entry.Path)
+		maybeRefreshAgentIdentity(ctx, entry.Path)
 	}
 	return fmt.Sprintf("Successfully replaced text in %s.", path), nil
 }

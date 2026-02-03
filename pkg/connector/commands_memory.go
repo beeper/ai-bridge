@@ -271,11 +271,13 @@ func fnMemory(ce *commands.Event) {
 			return
 		}
 		if entry != nil {
-			notifyMemoryFileChanged(WithBridgeToolContext(ce.Ctx, &BridgeToolContext{
+			ctx := WithBridgeToolContext(ce.Ctx, &BridgeToolContext{
 				Client: client,
 				Portal: ce.Portal,
 				Meta:   meta,
-			}), entry.Path)
+			})
+			notifyMemoryFileChanged(ctx, entry.Path)
+			maybeRefreshAgentIdentity(ctx, entry.Path)
 		}
 		ce.Reply("Memory file updated: %s", path)
 		return

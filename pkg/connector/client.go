@@ -1895,11 +1895,34 @@ func (oc *AIClient) ensureAgentGhostDisplayName(ctx context.Context, agentID, mo
 		return
 	}
 	displayName := oc.agentModelDisplayName(agentName, modelID)
-	if ghost.Name == "" || !ghost.NameSet || ghost.Name != displayName {
+	var avatar *bridgev2.Avatar
+	if agentID != "" {
+		store := NewAgentStoreAdapter(oc)
+		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil {
+			avatarURL := strings.TrimSpace(agent.AvatarURL)
+			if avatarURL != "" {
+				avatar = &bridgev2.Avatar{
+					ID:  networkid.AvatarID(avatarURL),
+					MXC: id.ContentURIString(avatarURL),
+				}
+			}
+		}
+	}
+	shouldUpdate := ghost.Name == "" || !ghost.NameSet || ghost.Name != displayName
+	if avatar != nil {
+		if !ghost.AvatarSet || ghost.AvatarMXC != avatar.MXC || ghost.AvatarID != avatar.ID {
+			shouldUpdate = true
+		}
+	} else if ghost.AvatarMXC != "" && ghost.AvatarSet {
+		avatar = &bridgev2.Avatar{Remove: true}
+		shouldUpdate = true
+	}
+	if shouldUpdate {
 		ghost.UpdateInfo(ctx, &bridgev2.UserInfo{
 			Name:        ptr.Ptr(displayName),
 			IsBot:       ptr.Ptr(true),
 			Identifiers: modelContactIdentifiers(modelID, oc.findModelInfo(modelID)),
+			Avatar:      avatar,
 		})
 		oc.log.Debug().Str("agent", agentID).Str("model", modelID).Str("name", displayName).Msg("Updated agent ghost display name")
 	}
