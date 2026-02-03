@@ -185,16 +185,20 @@ func (s *Store) ListWithPrefix(ctx context.Context, dir string) ([]FileEntry, er
 
 func (s *Store) DirEntries(entries []FileEntry, dir string) ([]string, bool) {
 	prefix := ""
-	if dir != "" {
-		prefix = dir + "/"
+	normalizedDir := dir
+	if normalized, err := NormalizeDir(dir); err == nil {
+		normalizedDir = normalized
+	}
+	if normalizedDir != "" {
+		prefix = normalizedDir + "/"
 	}
 	seen := make(map[string]bool)
 	hasDir := false
 	for _, entry := range entries {
-		if prefix != "" && !strings.HasPrefix(entry.Path, prefix) && entry.Path != dir {
+		if prefix != "" && !strings.HasPrefix(entry.Path, prefix) && entry.Path != normalizedDir {
 			continue
 		}
-		if entry.Path == dir {
+		if entry.Path == normalizedDir {
 			continue
 		}
 		hasDir = true
@@ -208,6 +212,19 @@ func (s *Store) DirEntries(entries []FileEntry, dir string) ([]string, bool) {
 			name = name + "/"
 		}
 		seen[name] = true
+	}
+	if normalizedDir == "" {
+		for _, virtual := range VirtualRootEntries() {
+			if virtual == "" {
+				continue
+			}
+			if _, ok := seen[virtual]; !ok {
+				seen[virtual] = true
+			}
+		}
+	}
+	if !hasDir && IsVirtualDir(normalizedDir) {
+		hasDir = true
 	}
 	if len(seen) == 0 {
 		return nil, hasDir

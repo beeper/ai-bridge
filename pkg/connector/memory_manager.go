@@ -170,6 +170,7 @@ func getMemorySearchManager(client *AIClient, agentID string) (*MemorySearchMana
 	manager.batchEnabled = cfg.Remote.Batch.Enabled
 
 	manager.ensureSchema(context.Background())
+	manager.ensureDefaultMemoryFiles(context.Background())
 	manager.ensureIntervalSync()
 	memoryManagerCache.managers[cacheKey] = manager
 	return manager, ""
@@ -177,6 +178,17 @@ func getMemorySearchManager(client *AIClient, agentID string) (*MemorySearchMana
 
 func (m *MemorySearchManager) Status() memory.ProviderStatus {
 	return m.status
+}
+
+func (m *MemorySearchManager) ensureDefaultMemoryFiles(ctx context.Context) {
+	if m == nil || m.db == nil || m.cfg == nil {
+		return
+	}
+	if !hasSource(m.cfg.Sources, "memory") {
+		return
+	}
+	store := textfs.NewStore(m.db, m.bridgeID, m.loginID, m.agentID)
+	_, _ = store.WriteIfMissing(ctx, "MEMORY.md", "")
 }
 
 func (m *MemorySearchManager) ProbeVectorAvailability(ctx context.Context) bool {
