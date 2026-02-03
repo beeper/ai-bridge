@@ -73,6 +73,23 @@ func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sess
 		}
 	}
 
+	dirtyFiles := 0
+	row := m.db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM ai_memory_session_state
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3
+           AND (pending_bytes > 0 OR pending_messages > 0)`,
+		m.bridgeID, m.loginID, m.agentID,
+	)
+	_ = row.Scan(&dirtyFiles)
+
+	m.log.Debug().
+		Int("files", len(active)).
+		Bool("needsFullReindex", force).
+		Int("dirtyFiles", dirtyFiles).
+		Bool("batch", m.batchEnabled).
+		Int("concurrency", m.indexConcurrency()).
+		Msg("memory sync: indexing session files")
+
 	for key, session := range active {
 		state, _ := m.loadSessionState(ctx, key)
 		maxRowID, deltaBytes, deltaMessages, err := m.computeSessionDelta(ctx, session.portalKey, state.lastRowID)

@@ -15,16 +15,16 @@ import (
 )
 
 const (
-	embeddingBatchMaxTokens       = 8000
-	embeddingApproxCharsPerToken  = 1
-	embeddingIndexConcurrency     = 4
-	embeddingRetryMaxAttempts     = 3
-	embeddingRetryBaseDelay       = 500 * time.Millisecond
-	embeddingRetryMaxDelay        = 8 * time.Second
-	embeddingQueryTimeoutRemote   = 60 * time.Second
-	embeddingQueryTimeoutLocal    = 5 * time.Minute
-	embeddingBatchTimeoutRemote   = 2 * time.Minute
-	embeddingBatchTimeoutLocal    = 10 * time.Minute
+	embeddingBatchMaxTokens      = 8000
+	embeddingApproxCharsPerToken = 1
+	embeddingIndexConcurrency    = 4
+	embeddingRetryMaxAttempts    = 3
+	embeddingRetryBaseDelay      = 500 * time.Millisecond
+	embeddingRetryMaxDelay       = 8 * time.Second
+	embeddingQueryTimeoutRemote  = 60 * time.Second
+	embeddingQueryTimeoutLocal   = 5 * time.Minute
+	embeddingBatchTimeoutRemote  = 2 * time.Minute
+	embeddingBatchTimeoutLocal   = 10 * time.Minute
 )
 
 var retryableEmbeddingRE = regexp.MustCompile(`(?i)(rate[_ ]limit|too many requests|429|resource has been exhausted|5\\d\\d|cloudflare)`)
@@ -135,7 +135,7 @@ func (m *MemorySearchManager) embedBatchWithRetry(ctx context.Context, texts []s
 		timeout := m.resolveEmbeddingTimeout("batch")
 		m.log.Debug().Str("provider", m.status.Provider).Int("items", len(texts)).Int64("timeoutMs", timeout.Milliseconds()).
 			Msg("memory embeddings: batch start")
-		result, err := m.withTimeout(ctx, timeout, fmt.Sprintf(
+		result, err := m.withTimeoutBatch(ctx, timeout, fmt.Sprintf(
 			"memory embeddings batch timed out after %ds",
 			int(math.Round(float64(timeout.Milliseconds())/1000.0)),
 		), func(ctx context.Context) ([][]float64, error) {
@@ -163,7 +163,7 @@ func (m *MemorySearchManager) embedQueryWithTimeout(ctx context.Context, text st
 	timeout := m.resolveEmbeddingTimeout("query")
 	m.log.Debug().Str("provider", m.status.Provider).Int64("timeoutMs", timeout.Milliseconds()).
 		Msg("memory embeddings: query start")
-	result, err := m.withTimeout(ctx, timeout, fmt.Sprintf(
+	result, err := m.withTimeoutQuery(ctx, timeout, fmt.Sprintf(
 		"memory embeddings query timed out after %ds",
 		int(math.Round(float64(timeout.Milliseconds())/1000.0)),
 	), func(ctx context.Context) ([]float64, error) {
@@ -190,8 +190,7 @@ func (m *MemorySearchManager) resolveEmbeddingTimeout(kind string) time.Duration
 	return embeddingBatchTimeoutRemote
 }
 
-func (m *MemorySearchManager) withTimeout[T any](ctx context.Context, timeout time.Duration, message string, fn func(ctx context.Context) (T, error)) (T, error) {
-	var zero T
+func (m *MemorySearchManager) withTimeoutBatch(ctx context.Context, timeout time.Duration, message string, fn func(ctx context.Context) ([][]float64, error)) ([][]float64, error) {
 	if timeout <= 0 {
 		return fn(ctx)
 	}
@@ -202,9 +201,25 @@ func (m *MemorySearchManager) withTimeout[T any](ctx context.Context, timeout ti
 		return result, nil
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return zero, fmt.Errorf(message)
+		return nil, errors.New(message)
 	}
-	return zero, err
+	return nil, err
+}
+
+func (m *MemorySearchManager) withTimeoutQuery(ctx context.Context, timeout time.Duration, message string, fn func(ctx context.Context) ([]float64, error)) ([]float64, error) {
+	if timeout <= 0 {
+		return fn(ctx)
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	result, err := fn(ctx)
+	if err == nil {
+		return result, nil
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return nil, errors.New(message)
+	}
+	return nil, err
 }
 
 func (m *MemorySearchManager) loadEmbeddingCache(ctx context.Context, chunks []memory.Chunk) map[string][]float64 {

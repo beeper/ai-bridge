@@ -202,6 +202,13 @@ func (m *MemorySearchManager) indexMemoryFiles(ctx context.Context, force bool, 
 		activePaths[path] = entry
 	}
 
+	m.log.Debug().
+		Int("files", len(activePaths)).
+		Bool("needsFullReindex", force).
+		Bool("batch", m.batchEnabled).
+		Int("concurrency", m.indexConcurrency()).
+		Msg("memory sync: indexing memory files")
+
 	for _, entry := range activePaths {
 		source := "memory"
 		needs, err := m.needsFileIndex(ctx, entry, source, generation)
@@ -220,6 +227,19 @@ func (m *MemorySearchManager) indexMemoryFiles(ctx context.Context, force bool, 
 		return err
 	}
 	return nil
+}
+
+func (m *MemorySearchManager) indexConcurrency() int {
+	if m == nil {
+		return 1
+	}
+	if m.batchEnabled && m.cfg != nil && m.cfg.Remote.Batch.Concurrency > 0 {
+		return m.cfg.Remote.Batch.Concurrency
+	}
+	if embeddingIndexConcurrency > 0 {
+		return embeddingIndexConcurrency
+	}
+	return 1
 }
 
 func (m *MemorySearchManager) needsFileIndex(ctx context.Context, entry textfs.FileEntry, source, generation string) (bool, error) {

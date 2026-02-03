@@ -346,9 +346,11 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 		shouldSync := m.dirty || m.sessionsDirty
 		m.mu.Unlock()
 		if shouldSync {
-			if err := m.sync(ctx, opts.SessionKey, false); err != nil {
-				m.log.Warn().Msg("memory sync failed (search): " + err.Error())
-			}
+			go func(sessionKey string) {
+				if err := m.sync(context.Background(), sessionKey, false); err != nil {
+					m.log.Warn().Msg("memory sync failed (search): " + err.Error())
+				}
+			}(opts.SessionKey)
 		}
 	}
 
