@@ -6,10 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/textfs"
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
+
+	"github.com/beeper/ai-bridge/pkg/textfs"
 )
 
 func (oc *AIClient) injectMemoryContext(

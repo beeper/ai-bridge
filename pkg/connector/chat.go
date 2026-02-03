@@ -41,11 +41,6 @@ func hasBossAgent(meta *PortalMetadata) bool {
 	return agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID)
 }
 
-func isBossPrivilegedTool(toolName string) bool {
-	return (tools.IsBossTool(toolName) && !tools.IsSessionTool(toolName)) ||
-		toolName == toolspec.GravatarSetName
-}
-
 // buildAvailableTools returns a list of ToolInfo for all tools based on tool policy.
 func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	names := oc.toolNamesForPortal(meta)
@@ -733,9 +728,9 @@ func (oc *AIClient) resolveAgentModelForNewChat(ctx context.Context, agent *agen
 	}
 
 	if preferredModel != "" {
-		return "", fmt.Errorf("Invalid model: %s", preferredModel)
+		return "", fmt.Errorf("invalid model: %s", preferredModel)
 	}
-	return "", fmt.Errorf("No valid model available")
+	return "", fmt.Errorf("no valid model available")
 }
 
 func (oc *AIClient) createAndOpenAgentChat(ctx context.Context, portal *bridgev2.Portal, agent *agents.AgentDefinition, modelID string) {

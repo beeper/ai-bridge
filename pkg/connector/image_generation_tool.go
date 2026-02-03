@@ -343,9 +343,7 @@ func normalizeOpenAIModel(model string) string {
 	}
 	_, actual := ParseModelPrefix(model)
 	actual = strings.TrimSpace(actual)
-	if strings.HasPrefix(actual, "openai/") {
-		actual = strings.TrimPrefix(actual, "openai/")
-	}
+	actual = strings.TrimPrefix(actual, "openai/")
 	if actual == "" {
 		return strings.TrimSpace(model)
 	}
@@ -358,9 +356,7 @@ func normalizeGeminiModel(model string) string {
 	}
 	_, actual := ParseModelPrefix(model)
 	actual = strings.TrimSpace(actual)
-	if strings.HasPrefix(actual, "google/") {
-		actual = strings.TrimPrefix(actual, "google/")
-	}
+	actual = strings.TrimPrefix(actual, "google/")
 	if actual == "" {
 		return strings.TrimSpace(model)
 	}

@@ -11,10 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/beeper/ai-bridge/pkg/memory"
 	"github.com/beeper/ai-bridge/pkg/memory/embedding"
 	"github.com/beeper/ai-bridge/pkg/textfs"
-	"github.com/google/uuid"
 )
 
 func (m *MemorySearchManager) ensureSchema(ctx context.Context) {

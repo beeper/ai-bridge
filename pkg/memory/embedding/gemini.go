@@ -16,9 +16,9 @@ const (
 )
 
 type geminiClient struct {
-	baseURL  string
-	headers  map[string]string
-	model    string
+	baseURL   string
+	headers   map[string]string
+	model     string
 	modelPath string
 }
 
@@ -61,9 +61,9 @@ func NewGeminiProvider(apiKey, baseURL, model string, headers map[string]string)
 	}
 	normalized := NormalizeGeminiModel(model)
 	client := &geminiClient{
-		baseURL:  normalizeGeminiBaseURL(baseURL),
-		headers:  mergeHeaders(map[string]string{"x-goog-api-key": apiKey}, headers),
-		model:    normalized,
+		baseURL:   normalizeGeminiBaseURL(baseURL),
+		headers:   mergeHeaders(map[string]string{"x-goog-api-key": apiKey}, headers),
+		model:     normalized,
 		modelPath: buildGeminiModelPath(normalized),
 	}
 

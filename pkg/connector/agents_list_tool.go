@@ -4,9 +4,10 @@ import (
 	"context"
 	"sort"
 
+	"maunium.net/go/mautrix/bridgev2"
+
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
-	"maunium.net/go/mautrix/bridgev2"
 )
 
 type agentListEntry struct {

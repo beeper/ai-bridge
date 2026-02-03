@@ -13,10 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/memory"
-	"github.com/beeper/ai-bridge/pkg/textfs"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/dbutil"
+
+	"github.com/beeper/ai-bridge/pkg/memory"
+	"github.com/beeper/ai-bridge/pkg/textfs"
 )
 
 const memorySnippetMaxChars = 700

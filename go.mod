@@ -8,9 +8,9 @@ tool go.mau.fi/util/cmd/maubuild
 
 require (
 	github.com/PuerkitoBio/goquery v1.11.0
-	github.com/bmatcuk/doublestar/v4 v4.6.1
 	github.com/dyatlov/go-opengraph/opengraph v0.0.0-20220524092352-606d7b1e5f8a
 	github.com/google/uuid v1.6.0
+	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/modelcontextprotocol/go-sdk v1.2.0
 	github.com/openai/openai-go/v3 v3.16.0
 	github.com/pkoukk/tiktoken-go v0.1.8
@@ -31,7 +31,6 @@ require (
 	github.com/lib/pq v1.10.9 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-sqlite3 v1.14.33 // indirect
 	github.com/petermattis/goid v0.0.0-20260113132338-7c7de50cc741 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect

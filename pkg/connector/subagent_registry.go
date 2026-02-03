@@ -37,12 +37,3 @@ func (oc *AIClient) unregisterSubagentRun(runID string) {
 	defer oc.subagentRunsMu.Unlock()
 	delete(oc.subagentRuns, runID)
 }
-
-func (oc *AIClient) subagentRun(runID string) *subagentRun {
-	if oc == nil || runID == "" {
-		return nil
-	}
-	oc.subagentRunsMu.Lock()
-	defer oc.subagentRunsMu.Unlock()
-	return oc.subagentRuns[runID]
-}

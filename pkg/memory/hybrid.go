@@ -39,12 +39,12 @@ func BM25RankToScore(rank float64) float64 {
 }
 
 type HybridVectorResult struct {
-	ID         string
-	Path       string
-	StartLine  int
-	EndLine    int
-	Source     string
-	Snippet    string
+	ID          string
+	Path        string
+	StartLine   int
+	EndLine     int
+	Source      string
+	Snippet     string
 	VectorScore float64
 }
 
@@ -61,25 +61,25 @@ type HybridKeywordResult struct {
 // MergeHybridResults merges vector + keyword results with weighted scores.
 func MergeHybridResults(vector []HybridVectorResult, keyword []HybridKeywordResult, vectorWeight, textWeight float64) []SearchResult {
 	type entry struct {
-		id         string
-		path       string
-		startLine  int
-		endLine    int
-		source     string
-		snippet    string
+		id          string
+		path        string
+		startLine   int
+		endLine     int
+		source      string
+		snippet     string
 		vectorScore float64
-		textScore  float64
+		textScore   float64
 	}
 	byID := make(map[string]*entry)
 
 	for _, r := range vector {
 		byID[r.ID] = &entry{
-			id:         r.ID,
-			path:       r.Path,
-			startLine:  r.StartLine,
-			endLine:    r.EndLine,
-			source:     r.Source,
-			snippet:    r.Snippet,
+			id:          r.ID,
+			path:        r.Path,
+			startLine:   r.StartLine,
+			endLine:     r.EndLine,
+			source:      r.Source,
+			snippet:     r.Snippet,
 			vectorScore: r.VectorScore,
 		}
 	}
