@@ -129,10 +129,9 @@ func (oc *AIClient) runSubagentCompletion(
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) (bool, error) {
 	responseFn := oc.streamingResponseWithToolSchemaFallback
-	if oc.isOpenRouterProvider() && hasMultimodalContent(prompt) {
-		responseFn = oc.streamChatCompletions
-	}
 	if hasAudioContent(prompt) {
+		responseFn = oc.streamChatCompletions
+	} else if oc.resolveModelAPI(meta) == ModelAPIChatCompletions {
 		responseFn = oc.streamChatCompletions
 	}
 

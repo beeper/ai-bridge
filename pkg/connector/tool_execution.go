@@ -35,20 +35,11 @@ func normalizeToolArgsJSON(argsJSON string) string {
 
 // emitToolProgress sends a tool progress update event
 func (oc *AIClient) emitToolProgress(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall, status ToolStatus, message string, percent int) {
-	if portal == nil || portal.MXID == "" {
+	if state == nil || tool == nil {
 		return
 	}
-	if state != nil && state.suppressSend {
-		return
-	}
-	intent := oc.getModelIntent(ctx, portal)
-	if intent == nil {
-		return
-	}
-
-	content := map[string]any{
+	data := map[string]any{
 		"call_id":   tool.callID,
-		"turn_id":   state.turnID,
 		"tool_name": tool.toolName,
 		"status":    string(status),
 		"progress": map[string]any{
@@ -56,16 +47,7 @@ func (oc *AIClient) emitToolProgress(ctx context.Context, portal *bridgev2.Porta
 			"percent": percent,
 		},
 	}
-
-	if state.agentID != "" {
-		content["agent_id"] = state.agentID
-	}
-
-	eventContent := &event.Content{Raw: content}
-
-	if _, err := intent.SendMessage(ctx, portal.MXID, ToolProgressEventType, eventContent, nil); err != nil {
-		oc.log.Debug().Err(err).Str("tool", tool.toolName).Msg("Failed to emit tool progress")
-	}
+	oc.emitStreamEvent(ctx, portal, state, StreamEventSourceInternal, "tool_progress", data, nil)
 }
 
 func toolDisplayTitle(toolName string) string {

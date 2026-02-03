@@ -64,15 +64,15 @@ type AgentEntryConfig struct {
 
 // HeartbeatConfig configures periodic heartbeat runs (OpenClaw-style).
 type HeartbeatConfig struct {
-	Every           string                     `yaml:"every"`
-	ActiveHours     *HeartbeatActiveHoursConfig `yaml:"activeHours"`
-	Model           string                     `yaml:"model"`
-	Session         string                     `yaml:"session"`
-	Target          string                     `yaml:"target"`
-	To              string                     `yaml:"to"`
-	Prompt          string                     `yaml:"prompt"`
-	AckMaxChars     int                        `yaml:"ackMaxChars"`
-	IncludeReasoning *bool                     `yaml:"includeReasoning"`
+	Every            *string                    `yaml:"every"`
+	ActiveHours      *HeartbeatActiveHoursConfig `yaml:"activeHours"`
+	Model            *string                    `yaml:"model"`
+	Session          *string                    `yaml:"session"`
+	Target           *string                    `yaml:"target"`
+	To               *string                    `yaml:"to"`
+	Prompt           *string                    `yaml:"prompt"`
+	AckMaxChars      *int                       `yaml:"ackMaxChars"`
+	IncludeReasoning *bool                      `yaml:"includeReasoning"`
 }
 
 type HeartbeatActiveHoursConfig struct {

@@ -49,29 +49,29 @@ func resolveHeartbeatConfig(cfg *Config, agentID string) *HeartbeatConfig {
 		return base
 	}
 	merged := *base
-	// Override with non-zero fields
-	if strings.TrimSpace(override.Every) != "" {
+	// Override with explicitly provided fields (OpenClaw-style)
+	if override.Every != nil {
 		merged.Every = override.Every
 	}
 	if override.ActiveHours != nil {
 		merged.ActiveHours = override.ActiveHours
 	}
-	if strings.TrimSpace(override.Model) != "" {
+	if override.Model != nil {
 		merged.Model = override.Model
 	}
-	if strings.TrimSpace(override.Session) != "" {
+	if override.Session != nil {
 		merged.Session = override.Session
 	}
-	if strings.TrimSpace(override.Target) != "" {
+	if override.Target != nil {
 		merged.Target = override.Target
 	}
-	if strings.TrimSpace(override.To) != "" {
+	if override.To != nil {
 		merged.To = override.To
 	}
-	if strings.TrimSpace(override.Prompt) != "" {
+	if override.Prompt != nil {
 		merged.Prompt = override.Prompt
 	}
-	if override.AckMaxChars > 0 {
+	if override.AckMaxChars != nil {
 		merged.AckMaxChars = override.AckMaxChars
 	}
 	if override.IncludeReasoning != nil {
@@ -100,14 +100,19 @@ func isHeartbeatEnabledForAgent(cfg *Config, agentID string) bool {
 }
 
 func resolveHeartbeatIntervalMs(cfg *Config, overrideEvery string, heartbeat *HeartbeatConfig) int64 {
-	raw := strings.TrimSpace(overrideEvery)
-	if raw == "" && heartbeat != nil {
-		raw = strings.TrimSpace(heartbeat.Every)
+	raw := ""
+	hasRaw := false
+	if strings.TrimSpace(overrideEvery) != "" {
+		raw = strings.TrimSpace(overrideEvery)
+		hasRaw = true
+	} else if heartbeat != nil && heartbeat.Every != nil {
+		raw = strings.TrimSpace(*heartbeat.Every)
+		hasRaw = true
+	} else if cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil && cfg.Agents.Defaults.Heartbeat.Every != nil {
+		raw = strings.TrimSpace(*cfg.Agents.Defaults.Heartbeat.Every)
+		hasRaw = true
 	}
-	if raw == "" && cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil {
-		raw = strings.TrimSpace(cfg.Agents.Defaults.Heartbeat.Every)
-	}
-	if raw == "" {
+	if !hasRaw {
 		raw = agents.DefaultHeartbeatEvery
 	}
 	if strings.TrimSpace(raw) == "" {
@@ -124,31 +129,47 @@ func resolveHeartbeatPrompt(cfg *Config, heartbeat *HeartbeatConfig, agent *agen
 	if agent != nil && strings.TrimSpace(agent.HeartbeatPrompt) != "" {
 		return agents.ResolveHeartbeatPrompt(agent.HeartbeatPrompt)
 	}
-	if heartbeat != nil && strings.TrimSpace(heartbeat.Prompt) != "" {
-		return agents.ResolveHeartbeatPrompt(heartbeat.Prompt)
+	raw := ""
+	hasRaw := false
+	if heartbeat != nil && heartbeat.Prompt != nil {
+		raw = *heartbeat.Prompt
+		hasRaw = true
+	} else if cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil && cfg.Agents.Defaults.Heartbeat.Prompt != nil {
+		raw = *cfg.Agents.Defaults.Heartbeat.Prompt
+		hasRaw = true
 	}
-	if cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil {
-		return agents.ResolveHeartbeatPrompt(cfg.Agents.Defaults.Heartbeat.Prompt)
+	if !hasRaw {
+		raw = ""
 	}
-	return agents.ResolveHeartbeatPrompt("")
+	return agents.ResolveHeartbeatPrompt(raw)
 }
 
 func resolveHeartbeatAckMaxChars(cfg *Config, heartbeat *HeartbeatConfig) int {
-	if heartbeat != nil && heartbeat.AckMaxChars > 0 {
-		return heartbeat.AckMaxChars
+	if heartbeat != nil && heartbeat.AckMaxChars != nil {
+		if *heartbeat.AckMaxChars < 0 {
+			return 0
+		}
+		return *heartbeat.AckMaxChars
 	}
-	if cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil && cfg.Agents.Defaults.Heartbeat.AckMaxChars > 0 {
-		return cfg.Agents.Defaults.Heartbeat.AckMaxChars
+	if cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil && cfg.Agents.Defaults.Heartbeat.AckMaxChars != nil {
+		if *cfg.Agents.Defaults.Heartbeat.AckMaxChars < 0 {
+			return 0
+		}
+		return *cfg.Agents.Defaults.Heartbeat.AckMaxChars
 	}
 	return agents.DefaultMaxAckChars
 }
 
 func resolveHeartbeatTarget(cfg *Config, heartbeat *HeartbeatConfig) string {
-	if heartbeat != nil && strings.TrimSpace(heartbeat.Target) != "" {
-		return strings.TrimSpace(heartbeat.Target)
+	if heartbeat != nil && heartbeat.Target != nil {
+		if trimmed := strings.TrimSpace(*heartbeat.Target); trimmed != "" {
+			return trimmed
+		}
 	}
-	if cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil && strings.TrimSpace(cfg.Agents.Defaults.Heartbeat.Target) != "" {
-		return strings.TrimSpace(cfg.Agents.Defaults.Heartbeat.Target)
+	if cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil && cfg.Agents.Defaults.Heartbeat.Target != nil {
+		if trimmed := strings.TrimSpace(*cfg.Agents.Defaults.Heartbeat.Target); trimmed != "" {
+			return trimmed
+		}
 	}
 	return defaultHeartbeatTarget
 }
