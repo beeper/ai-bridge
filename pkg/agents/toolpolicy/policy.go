@@ -37,9 +37,9 @@ const (
 
 // ToolGroups maps group names to tool names for policy composition.
 var ToolGroups = map[string][]string{
-	GroupSearch:     {"web_search", "web_search_openrouter"},
+	GroupSearch:     {"web_search"},
 	GroupCalc:       {"calculator"},
-	GroupBuilder:    {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "run_internal_command", "create_room", "modify_room", "list_rooms", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn"},
+	GroupBuilder:    {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "run_internal_command", "modify_room"},
 	GroupMessaging:  {"message"},
 	GroupSessions:   {"sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status"},
 	GroupMemory:     {"memory_search", "memory_get"},
@@ -50,8 +50,8 @@ var ToolGroups = map[string][]string{
 	GroupAutomation: {"cron", "gateway"},
 	GroupNodes:      {"nodes"},
 	GroupStatus:     {"session_status"},
-	GroupOpenClaw:   {"browser", "canvas", "nodes", "cron", "message", "gateway", "agents_list", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_fetch", "image", "read", "write", "edit", "ls", "find", "grep", "apply_patch"},
-	GroupFS:         {"read", "write", "edit", "ls", "find", "grep", "apply_patch"},
+	GroupOpenClaw:   {"message", "agents_list", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_fetch", "image"},
+	GroupFS:         {"read", "write", "edit"},
 }
 
 type toolProfilePolicy struct {
@@ -519,9 +519,7 @@ var defaultSubagentDeny = []string{
 	"gateway",
 	"cron",
 	"run_internal_command",
-	"create_room",
 	"modify_room",
-	"list_rooms",
 	"memory_search",
 	"memory_get",
 	"gravatar_fetch",

@@ -43,7 +43,7 @@ func hasBossAgent(meta *PortalMetadata) bool {
 
 func isBossPrivilegedTool(toolName string) bool {
 	return (tools.IsBossTool(toolName) && !tools.IsSessionTool(toolName)) ||
-		toolName == toolspec.GravatarFetchName || toolName == toolspec.GravatarSetName
+		toolName == toolspec.GravatarSetName
 }
 
 // buildAvailableTools returns a list of ToolInfo for all tools based on tool policy.
@@ -65,6 +65,7 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 				toolType = string(metaTool.Type)
 			}
 		}
+		description = oc.toolDescriptionForPortal(meta, name, description)
 
 		available, source, reason := oc.isToolAvailable(meta, name)
 		allowed := oc.isToolAllowedByPolicy(meta, name)

@@ -32,7 +32,6 @@ func BuiltinTools() []*Tool {
 	return []*Tool{
 		Calculator,
 		WebSearch,
-		WebSearchOpenRouter,
 		MessageTool,
 		WebFetchTool,
 		SessionStatusTool,
@@ -42,14 +41,9 @@ func BuiltinTools() []*Tool {
 		ImageGenerateTool,
 		TTSTool,
 		GravatarFetchTool,
-		GravatarSetTool,
 		ReadTool,
 		WriteTool,
 		EditTool,
-		LsTool,
-		FindTool,
-		GrepTool,
-		ApplyPatchTool,
 	}
 }
 

@@ -48,48 +48,4 @@ var (
 		Group:   GroupFS,
 		Execute: execUnavailable(toolspec.EditName),
 	}
-	LsTool = &Tool{
-		Tool: mcp.Tool{
-			Name:        toolspec.LsName,
-			Description: toolspec.LsDescription,
-			Annotations: &mcp.ToolAnnotations{Title: "Ls"},
-			InputSchema: toolspec.LsSchema(),
-		},
-		Type:    ToolTypeBuiltin,
-		Group:   GroupFS,
-		Execute: execUnavailable(toolspec.LsName),
-	}
-	FindTool = &Tool{
-		Tool: mcp.Tool{
-			Name:        toolspec.FindName,
-			Description: toolspec.FindDescription,
-			Annotations: &mcp.ToolAnnotations{Title: "Find"},
-			InputSchema: toolspec.FindSchema(),
-		},
-		Type:    ToolTypeBuiltin,
-		Group:   GroupFS,
-		Execute: execUnavailable(toolspec.FindName),
-	}
-	GrepTool = &Tool{
-		Tool: mcp.Tool{
-			Name:        toolspec.GrepName,
-			Description: toolspec.GrepDescription,
-			Annotations: &mcp.ToolAnnotations{Title: "Grep"},
-			InputSchema: toolspec.GrepSchema(),
-		},
-		Type:    ToolTypeBuiltin,
-		Group:   GroupFS,
-		Execute: execUnavailable(toolspec.GrepName),
-	}
-	ApplyPatchTool = &Tool{
-		Tool: mcp.Tool{
-			Name:        toolspec.ApplyPatchName,
-			Description: toolspec.ApplyPatchDescription,
-			Annotations: &mcp.ToolAnnotations{Title: "Apply Patch"},
-			InputSchema: toolspec.ApplyPatchSchema(),
-		},
-		Type:    ToolTypeBuiltin,
-		Group:   GroupFS,
-		Execute: execUnavailable(toolspec.ApplyPatchName),
-	}
 )

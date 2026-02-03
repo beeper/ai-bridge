@@ -6,7 +6,7 @@ import "github.com/modelcontextprotocol/go-sdk/mcp"
 var AgentsListTool = &Tool{
 	Tool: mcp.Tool{
 		Name:        "agents_list",
-		Description: "List agent ids allowed for sessions_spawn",
+		Description: "List agent ids you can target with sessions_spawn (based on allowlists).",
 		Annotations: &mcp.ToolAnnotations{Title: "Agents List"},
 		InputSchema: map[string]any{
 			"type":       "object",

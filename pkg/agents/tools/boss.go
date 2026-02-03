@@ -47,6 +47,7 @@ type AgentData struct {
 	Model        string                       `json:"model,omitempty"`
 	SystemPrompt string                       `json:"system_prompt,omitempty"`
 	Tools        *toolpolicy.ToolPolicyConfig `json:"tools,omitempty"`
+	Subagents    *SubagentConfig              `json:"subagents,omitempty"`
 	Temperature  float64                      `json:"temperature,omitempty"`
 	IsPreset     bool                         `json:"is_preset,omitempty"`
 	CreatedAt    int64                        `json:"created_at"`
@@ -139,6 +140,20 @@ var CreateAgentTool = &Tool{
 						},
 					},
 				},
+				"subagents": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"model": map[string]any{
+							"type":        "string",
+							"description": "Default model override for subagents spawned by this agent",
+						},
+						"allowAgents": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Agent ids allowed for sessions_spawn (use \"*\" for any)",
+						},
+					},
+				},
 			},
 			"required": []string{"name"},
 		},
@@ -228,6 +243,20 @@ var EditAgentTool = &Tool{
 							"type":                 "object",
 							"additionalProperties": map[string]any{"type": "object"},
 							"description":          "Optional provider- or model-specific overrides keyed by provider or provider/model",
+						},
+					},
+				},
+				"subagents": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"model": map[string]any{
+							"type":        "string",
+							"description": "Default model override for subagents spawned by this agent",
+						},
+						"allowAgents": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Agent ids allowed for sessions_spawn (use \"*\" for any)",
 						},
 					},
 				},
@@ -330,35 +359,6 @@ var RunInternalCommandTool = &Tool{
 	Group: GroupBuilder,
 }
 
-// CreateRoomTool tool definition.
-var CreateRoomTool = &Tool{
-	Tool: mcp.Tool{
-		Name:        "create_room",
-		Description: "Create a new chat room with a specific agent",
-		Annotations: &mcp.ToolAnnotations{Title: "Create Room"},
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"name": map[string]any{
-					"type":        "string",
-					"description": "Display name for the room",
-				},
-				"agent_id": map[string]any{
-					"type":        "string",
-					"description": "ID of the agent to assign to this room (e.g., 'beeper' or a custom agent ID)",
-				},
-				"system_prompt": map[string]any{
-					"type":        "string",
-					"description": "Optional custom system prompt override for this room",
-				},
-			},
-			"required": []string{"name", "agent_id"},
-		},
-	},
-	Type:  ToolTypeBuiltin,
-	Group: GroupBuilder,
-}
-
 // ModifyRoomTool tool definition.
 var ModifyRoomTool = &Tool{
 	Tool: mcp.Tool{
@@ -392,21 +392,6 @@ var ModifyRoomTool = &Tool{
 	Group: GroupBuilder,
 }
 
-// ListRoomsTool tool definition.
-var ListRoomsTool = &Tool{
-	Tool: mcp.Tool{
-		Name:        "list_rooms",
-		Description: "List all chat rooms and their assigned agents",
-		Annotations: &mcp.ToolAnnotations{Title: "List Rooms"},
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	},
-	Type:  ToolTypeBuiltin,
-	Group: GroupBuilder,
-}
-
 // SessionsListTool tool definition.
 var SessionsListTool = &Tool{
 	Tool: mcp.Tool{
@@ -416,9 +401,21 @@ var SessionsListTool = &Tool{
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"kinds": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
 				"limit": map[string]any{
 					"type":        "number",
 					"description": "Maximum number of sessions to return (default: 50)",
+				},
+				"activeMinutes": map[string]any{
+					"type":        "number",
+					"description": "Only include sessions active within this many minutes",
+				},
+				"messageLimit": map[string]any{
+					"type":        "number",
+					"description": "Include the last N messages for each session",
 				},
 			},
 		},
@@ -436,16 +433,20 @@ var SessionsHistoryTool = &Tool{
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"room_id": map[string]any{
+				"sessionKey": map[string]any{
 					"type":        "string",
-					"description": "ID of the room to get history from",
+					"description": "Session key to fetch history from",
 				},
 				"limit": map[string]any{
 					"type":        "number",
 					"description": "Maximum number of messages to return (default: 50)",
 				},
+				"includeTools": map[string]any{
+					"type":        "boolean",
+					"description": "Whether to include tool calls in the returned history",
+				},
 			},
-			"required": []string{"room_id"},
+			"required": []string{"sessionKey"},
 		},
 	},
 	Type:  ToolTypeBuiltin,
@@ -456,21 +457,33 @@ var SessionsHistoryTool = &Tool{
 var SessionsSendTool = &Tool{
 	Tool: mcp.Tool{
 		Name:        "sessions_send",
-		Description: "Send a message to another session.",
+		Description: "Send a message into another session. Use sessionKey or label to identify the target.",
 		Annotations: &mcp.ToolAnnotations{Title: "Send to Session"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"room_id": map[string]any{
+				"sessionKey": map[string]any{
 					"type":        "string",
-					"description": "ID of the room to send the message to",
+					"description": "Session key of the target session",
+				},
+				"label": map[string]any{
+					"type":        "string",
+					"description": "Session label to target (alternative to sessionKey)",
+				},
+				"agentId": map[string]any{
+					"type":        "string",
+					"description": "Agent id filter for label lookups",
 				},
 				"message": map[string]any{
 					"type":        "string",
 					"description": "The message to send",
 				},
+				"timeoutSeconds": map[string]any{
+					"type":        "number",
+					"description": "Optional timeout for the remote session",
+				},
 			},
-			"required": []string{"room_id", "message"},
+			"required": []string{"message"},
 		},
 	},
 	Type:  ToolTypeBuiltin,
@@ -540,9 +553,7 @@ func BossTools() []*Tool {
 		ListToolsDef,
 		RunInternalCommandTool,
 		// Room management
-		CreateRoomTool,
 		ModifyRoomTool,
-		ListRoomsTool,
 		// Session management
 		SessionsListTool,
 		SessionsHistoryTool,
@@ -598,6 +609,25 @@ func readToolPolicyConfig(input map[string]any) (*toolpolicy.ToolPolicyConfig, e
 	return &cfg, nil
 }
 
+func readSubagentConfig(input map[string]any) (*SubagentConfig, error) {
+	raw, err := ReadMap(input, "subagents", false)
+	if err != nil || raw == nil {
+		return nil, err
+	}
+	bytes, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var cfg SubagentConfig
+	if err := json.Unmarshal(bytes, &cfg); err != nil {
+		return nil, err
+	}
+	if cfg.Model == "" && len(cfg.AllowAgents) == 0 {
+		return nil, nil
+	}
+	return &cfg, nil
+}
+
 // ExecuteCreateAgent handles the create_agent tool.
 func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[string]any) (*Result, error) {
 	name, err := ReadString(input, "name", true)
@@ -611,6 +641,10 @@ func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[str
 	toolsConfig, err := readToolPolicyConfig(input)
 	if err != nil {
 		return ErrorResult("create_agent", fmt.Sprintf("invalid tools config: %v", err)), nil
+	}
+	subagentsConfig, err := readSubagentConfig(input)
+	if err != nil {
+		return ErrorResult("create_agent", fmt.Sprintf("invalid subagents config: %v", err)), nil
 	}
 	if toolsConfig == nil {
 		toolsConfig = &toolpolicy.ToolPolicyConfig{Profile: toolpolicy.ProfileFull}
@@ -627,6 +661,7 @@ func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[str
 		Model:        model,
 		SystemPrompt: systemPrompt,
 		Tools:        toolsConfig,
+		Subagents:    subagentsConfig,
 		IsPreset:     false,
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -673,6 +708,7 @@ func (e *BossToolExecutor) ExecuteForkAgent(ctx context.Context, input map[strin
 		Model:        source.Model,
 		SystemPrompt: source.SystemPrompt,
 		Tools:        source.Tools.Clone(),
+		Subagents:    cloneSubagentConfig(source.Subagents),
 		Temperature:  source.Temperature,
 		IsPreset:     false,
 		CreatedAt:    now,
@@ -729,6 +765,11 @@ func (e *BossToolExecutor) ExecuteEditAgent(ctx context.Context, input map[strin
 		agent.Tools = toolsConfig
 	} else if err != nil {
 		return ErrorResult("edit_agent", fmt.Sprintf("invalid tools config: %v", err)), nil
+	}
+	if subagentsConfig, err := readSubagentConfig(input); err == nil && subagentsConfig != nil {
+		agent.Subagents = subagentsConfig
+	} else if err != nil {
+		return ErrorResult("edit_agent", fmt.Sprintf("invalid subagents config: %v", err)), nil
 	}
 
 	agent.UpdatedAt = time.Now().Unix()
@@ -883,41 +924,6 @@ func (e *BossToolExecutor) ExecuteRunInternalCommand(ctx context.Context, input 
 	}), nil
 }
 
-// ExecuteCreateRoom handles the create_room tool.
-func (e *BossToolExecutor) ExecuteCreateRoom(ctx context.Context, input map[string]any) (*Result, error) {
-	name, err := ReadString(input, "name", true)
-	if err != nil {
-		return ErrorResult("create_room", err.Error()), nil
-	}
-
-	agentID, err := ReadString(input, "agent_id", true)
-	if err != nil {
-		return ErrorResult("create_room", err.Error()), nil
-	}
-
-	systemPrompt := ReadStringDefault(input, "system_prompt", "")
-
-	room := RoomData{
-		Name:           name,
-		AgentID:        agentID,
-		DefaultAgentID: agentID,
-		SystemPrompt:   systemPrompt,
-		CreatedAt:      time.Now().Unix(),
-	}
-
-	roomID, err := e.store.CreateRoom(ctx, room)
-	if err != nil {
-		return ErrorResult("create_room", fmt.Sprintf("failed to create room: %v", err)), nil
-	}
-
-	return JSONResult(map[string]any{
-		"success":  true,
-		"room_id":  roomID,
-		"agent_id": agentID,
-		"message":  fmt.Sprintf("Created room '%s' with agent '%s'", name, agentID),
-	}), nil
-}
-
 // ExecuteModifyRoom handles the modify_room tool.
 func (e *BossToolExecutor) ExecuteModifyRoom(ctx context.Context, input map[string]any) (*Result, error) {
 	roomID, err := ReadString(input, "room_id", true)
@@ -948,34 +954,18 @@ func (e *BossToolExecutor) ExecuteModifyRoom(ctx context.Context, input map[stri
 	}), nil
 }
 
-// ExecuteListRooms handles the list_rooms tool.
-func (e *BossToolExecutor) ExecuteListRooms(ctx context.Context, _ map[string]any) (*Result, error) {
-	rooms, err := e.store.ListRooms(ctx)
-	if err != nil {
-		return ErrorResult("list_rooms", fmt.Sprintf("failed to list rooms: %v", err)), nil
-	}
-
-	var roomList []map[string]any
-	for _, room := range rooms {
-		roomList = append(roomList, map[string]any{
-			"id":         room.ID,
-			"name":       room.Name,
-			"agent_id":   room.AgentID,
-			"created_at": room.CreatedAt,
-		})
-	}
-
-	return JSONResult(map[string]any{
-		"rooms": roomList,
-		"count": len(roomList),
-	}), nil
-}
-
 // ExecuteSessionsList handles the sessions_list tool.
 func (e *BossToolExecutor) ExecuteSessionsList(ctx context.Context, input map[string]any) (*Result, error) {
 	limit := 50
 	if l, ok := input["limit"].(float64); ok && l > 0 {
 		limit = int(l)
+	}
+	messageLimit := 0
+	if l, ok := input["messageLimit"].(float64); ok && l > 0 {
+		messageLimit = int(l)
+		if messageLimit > 20 {
+			messageLimit = 20
+		}
 	}
 
 	rooms, err := e.store.ListRooms(ctx)
@@ -990,12 +980,28 @@ func (e *BossToolExecutor) ExecuteSessionsList(ctx context.Context, input map[st
 
 	var sessionList []map[string]any
 	for _, room := range rooms {
-		sessionList = append(sessionList, map[string]any{
+		entry := map[string]any{
 			"room_id":    room.ID,
 			"name":       room.Name,
 			"agent_id":   room.AgentID,
 			"created_at": room.CreatedAt,
-		})
+		}
+		if messageLimit > 0 {
+			messages, err := e.store.GetRoomHistory(ctx, room.ID, messageLimit)
+			if err == nil && len(messages) > 0 {
+				var messageList []map[string]any
+				for _, msg := range messages {
+					messageList = append(messageList, map[string]any{
+						"id":        msg.ID,
+						"role":      msg.Role,
+						"content":   msg.Content,
+						"timestamp": msg.Timestamp,
+					})
+				}
+				entry["messages"] = messageList
+			}
+		}
+		sessionList = append(sessionList, entry)
 	}
 
 	return JSONResult(map[string]any{
@@ -1006,9 +1012,15 @@ func (e *BossToolExecutor) ExecuteSessionsList(ctx context.Context, input map[st
 
 // ExecuteSessionsHistory handles the sessions_history tool.
 func (e *BossToolExecutor) ExecuteSessionsHistory(ctx context.Context, input map[string]any) (*Result, error) {
-	roomID, err := ReadString(input, "room_id", true)
+	roomID, err := ReadString(input, "sessionKey", false)
 	if err != nil {
 		return ErrorResult("sessions_history", err.Error()), nil
+	}
+	if roomID == "" {
+		roomID = ReadStringDefault(input, "room_id", "")
+	}
+	if roomID == "" {
+		return ErrorResult("sessions_history", "sessionKey is required"), nil
 	}
 
 	limit := 50
@@ -1040,14 +1052,39 @@ func (e *BossToolExecutor) ExecuteSessionsHistory(ctx context.Context, input map
 
 // ExecuteSessionsSend handles the sessions_send tool.
 func (e *BossToolExecutor) ExecuteSessionsSend(ctx context.Context, input map[string]any) (*Result, error) {
-	roomID, err := ReadString(input, "room_id", true)
+	roomID, err := ReadString(input, "sessionKey", false)
 	if err != nil {
 		return ErrorResult("sessions_send", err.Error()), nil
+	}
+	if roomID == "" {
+		roomID = ReadStringDefault(input, "room_id", "")
 	}
 
 	message, err := ReadString(input, "message", true)
 	if err != nil {
 		return ErrorResult("sessions_send", err.Error()), nil
+	}
+
+	if roomID == "" {
+		label := ReadStringDefault(input, "label", "")
+		if label == "" {
+			return ErrorResult("sessions_send", "sessionKey or label is required"), nil
+		}
+		rooms, err := e.store.ListRooms(ctx)
+		if err != nil {
+			return ErrorResult("sessions_send", fmt.Sprintf("failed to list sessions: %v", err)), nil
+		}
+		var resolved string
+		for _, room := range rooms {
+			if strings.EqualFold(strings.TrimSpace(room.Name), strings.TrimSpace(label)) {
+				resolved = room.ID
+				break
+			}
+		}
+		if resolved == "" {
+			return ErrorResult("sessions_send", fmt.Sprintf("no session found for label '%s'", label)), nil
+		}
+		roomID = resolved
 	}
 
 	if err := e.store.SendToRoom(ctx, roomID, message); err != nil {
@@ -1058,67 +1095,5 @@ func (e *BossToolExecutor) ExecuteSessionsSend(ctx context.Context, input map[st
 		"success": true,
 		"room_id": roomID,
 		"message": "Message sent successfully",
-	}), nil
-}
-
-// ExecuteSessionsSpawn handles the sessions_spawn tool.
-func (e *BossToolExecutor) ExecuteSessionsSpawn(ctx context.Context, input map[string]any) (*Result, error) {
-	task, err := ReadString(input, "task", true)
-	if err != nil {
-		return ErrorResult("sessions_spawn", err.Error()), nil
-	}
-	label := ReadStringDefault(input, "label", "")
-	agentID := ReadStringDefault(input, "agentId", "")
-	if agentID == "" {
-		agentID = ReadStringDefault(input, "agent_id", "")
-	}
-	requesterSession := ReadStringDefault(input, "requester_session_key", "")
-	requesterChannel := ReadStringDefault(input, "requester_channel", "")
-
-	if agentID == "" {
-		return ErrorResult("sessions_spawn", "agentId is required"), nil
-	}
-
-	name := strings.TrimSpace(label)
-	if name == "" {
-		trimmedTask := strings.TrimSpace(task)
-		if trimmedTask == "" {
-			name = fmt.Sprintf("Spawned Session %s", time.Now().Format("2006-01-02 15:04"))
-		} else {
-			const maxNameLen = 60
-			if len(trimmedTask) > maxNameLen {
-				trimmedTask = trimmedTask[:maxNameLen-3] + "..."
-			}
-			name = fmt.Sprintf("Subagent: %s", trimmedTask)
-		}
-	}
-
-	room := RoomData{
-		Name:           name,
-		AgentID:        agentID,
-		DefaultAgentID: agentID,
-		CreatedAt:      time.Now().Unix(),
-	}
-
-	roomID, err := e.store.CreateRoom(ctx, room)
-	if err != nil {
-		return ErrorResult("sessions_spawn", fmt.Sprintf("failed to create session: %v", err)), nil
-	}
-	systemPrompt := buildSubagentSystemPrompt(subagentPromptParams{
-		RequesterSessionKey: requesterSession,
-		RequesterChannel:    requesterChannel,
-		ChildSessionKey:     roomID,
-		Label:               label,
-		Task:                task,
-	})
-	if err := e.store.ModifyRoom(ctx, roomID, RoomData{SystemPrompt: systemPrompt}); err != nil {
-		return ErrorResult("sessions_spawn", fmt.Sprintf("failed to configure session: %v", err)), nil
-	}
-
-	return JSONResult(map[string]any{
-		"success":  true,
-		"room_id":  roomID,
-		"agent_id": agentID,
-		"message":  fmt.Sprintf("Created session '%s' with agent '%s'", name, agentID),
 	}), nil
 }

@@ -169,8 +169,7 @@ func resolveSubagentPolicy(meta *PortalMetadata, global *toolpolicy.GlobalToolPo
 	if meta == nil {
 		return nil
 	}
-	agentID := resolveAgentID(meta)
-	if agentID == "" || !strings.HasPrefix(strings.ToLower(agentID), "subagent:") {
+	if strings.TrimSpace(meta.SubagentParentRoomID) == "" {
 		return nil
 	}
 	return toolpolicy.ResolveSubagentToolPolicy(global)

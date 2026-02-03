@@ -137,6 +137,7 @@ type PortalMetadata struct {
 	IsRawMode          bool   `json:"is_raw_mode,omitempty"`           // True if this is a playground/raw mode room (no directive processing)
 	IsAgentDataRoom    bool   `json:"is_agent_data_room,omitempty"`    // True if this is a hidden room for storing agent data
 	IsGlobalMemoryRoom bool   `json:"is_global_memory_room,omitempty"` // True if this is the global memory room
+	SubagentParentRoomID string `json:"subagent_parent_room_id,omitempty"` // Parent room ID for subagent sessions
 
 	// Ack reaction config - similar to OpenClaw's ack reactions
 	AckReactionEmoji       string `json:"ack_reaction_emoji,omitempty"`        // Emoji to react with when message received (e.g., "👀", "🤔"). Empty = disabled.

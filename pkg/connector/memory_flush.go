@@ -229,9 +229,6 @@ func memoryFlushTools() []ToolDefinition {
 		ToolNameRead:  true,
 		ToolNameWrite: true,
 		ToolNameEdit:  true,
-		ToolNameLs:    true,
-		ToolNameFind:  true,
-		ToolNameGrep:  true,
 	}
 	var out []ToolDefinition
 	for _, tool := range BuiltinTools() {
