@@ -82,6 +82,9 @@ type UserLoginMetadata struct {
 	// Optional per-login tokens for external services
 	ServiceTokens *ServiceTokens `json:"service_tokens,omitempty"`
 
+	// AgentModelOverrides stores per-agent model overrides (agent ID -> model ID).
+	AgentModelOverrides map[string]string `json:"agent_model_overrides,omitempty"`
+
 	// Agent Builder room for managing agents
 	BuilderRoomID networkid.PortalID `json:"builder_room_id,omitempty"`
 	// Note: Custom agents are now stored in Matrix state events (CustomAgentsEventType)

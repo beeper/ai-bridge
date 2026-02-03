@@ -124,6 +124,38 @@ var CommandModel = registerAICommand(commandregistry.Definition{
 	Handler:        fnModel,
 })
 
+// CommandSetRoom handles the !ai set-room command.
+var CommandSetRoom = registerAICommand(commandregistry.Definition{
+	Name:           "set-room",
+	Description:    "Set per-room parameters (model, temperature, system prompt)",
+	Args:           "<model|temp|system-prompt> <value>",
+	Section:        HelpSectionAI,
+	RequiresPortal: true,
+	RequiresLogin:  true,
+	Handler:        fnSetRoom,
+})
+
+func fnSetRoom(ce *commands.Event) {
+	if len(ce.Args) < 2 {
+		ce.Reply("Usage: !ai set-room <model|temp|system-prompt> <value>")
+		return
+	}
+
+	field := strings.ToLower(strings.TrimSpace(ce.Args[0]))
+	ce.Args = ce.Args[1:]
+
+	switch field {
+	case "model":
+		fnModel(ce)
+	case "temp", "temperature":
+		fnTemp(ce)
+	case "system-prompt", "prompt", "system":
+		fnSystemPrompt(ce)
+	default:
+		ce.Reply("Unknown field: %s", field)
+	}
+}
+
 func fnModel(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
 	if !ok {
@@ -143,6 +175,36 @@ func fnModel(ce *commands.Event) {
 	valid, err := client.validateModel(ce.Ctx, modelID)
 	if err != nil || !valid {
 		ce.Reply("Invalid model: %s", modelID)
+		return
+	}
+
+	agentID := resolveAgentID(meta)
+	if agentID != "" {
+		store := NewAgentStoreAdapter(client)
+		agent, err := store.GetAgentByID(ce.Ctx, agentID)
+		if err != nil || agent == nil {
+			ce.Reply("Agent not found: %s", agentID)
+			return
+		}
+		oldModel := client.agentDefaultModel(agent)
+		if oldModel == modelID {
+			ce.Reply("Agent model already set to: %s", modelID)
+			return
+		}
+		if agent.IsPreset {
+			if err := client.setAgentModelOverride(ce.Ctx, agent.ID, modelID); err != nil {
+				ce.Reply("Failed to update agent model: %v", err)
+				return
+			}
+		} else {
+			agent.Model.Primary = modelID
+			if err := store.SaveAgent(ce.Ctx, agent); err != nil {
+				ce.Reply("Failed to update agent model: %v", err)
+				return
+			}
+		}
+		client.applyAgentModelChange(ce.Ctx, agent.ID, oldModel, modelID)
+		ce.Reply("Agent model changed to: %s", modelID)
 		return
 	}
 
