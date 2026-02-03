@@ -1,6 +1,9 @@
 package connector
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+)
 
 const (
 	serviceOpenAI     = "openai"
@@ -32,17 +35,22 @@ func normalizeBeeperBaseURL(raw string) string {
 	if base == "" {
 		return ""
 	}
-	base = strings.TrimRight(base, "/")
-	if schemeIdx := strings.Index(base, "://"); schemeIdx != -1 {
-		hostStart := schemeIdx + 3
-		if slash := strings.Index(base[hostStart:], "/"); slash != -1 {
-			base = base[:hostStart+slash]
-		}
-	} else if slash := strings.Index(base, "/"); slash != -1 {
-		base = base[:slash]
+	if !strings.Contains(base, "://") {
+		base = "https://" + base
 	}
-	base = strings.TrimRight(base, "/")
-	return base + beeperBasePath
+	parsed, err := url.Parse(base)
+	if err != nil {
+		return ""
+	}
+	host := strings.TrimRight(parsed.Host, "/")
+	if host == "" {
+		return ""
+	}
+	scheme := parsed.Scheme
+	if scheme == "" {
+		scheme = "https"
+	}
+	return scheme + "://" + host + beeperBasePath
 }
 
 func (oc *OpenAIConnector) resolveOpenAIBaseURL() string {
