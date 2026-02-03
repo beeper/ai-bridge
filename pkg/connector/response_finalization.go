@@ -101,7 +101,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	}
 
 	// Use cleaned content (directives stripped)
-	cleanedContent := directives.Text
+	cleanedContent := stripMessageIDHintLines(directives.Text)
 	rendered := format.RenderMarkdown(cleanedContent, true, true)
 
 	// Build AI metadata following the new schema

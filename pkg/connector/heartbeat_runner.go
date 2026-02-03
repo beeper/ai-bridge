@@ -352,7 +352,9 @@ var (
 func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, string, error) {
 	session := ""
 	if heartbeat != nil {
-		session = strings.TrimSpace(heartbeat.Session)
+		if heartbeat.Session != nil {
+			session = strings.TrimSpace(*heartbeat.Session)
+		}
 	}
 	if session == "" {
 		portal := oc.lastActivePortal(agentID)
@@ -390,8 +392,8 @@ func (oc *AIClient) resolveHeartbeatPortal(agentID string, heartbeat *HeartbeatC
 		return nil, "", errHeartbeatNoTarget
 	}
 	if heartbeat != nil {
-		if strings.TrimSpace(heartbeat.To) != "" {
-			room := strings.TrimSpace(heartbeat.To)
+		if heartbeat.To != nil && strings.TrimSpace(*heartbeat.To) != "" {
+			room := strings.TrimSpace(*heartbeat.To)
 			if strings.HasPrefix(room, "!") {
 				if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(room)); err == nil && portal != nil {
 					return portal, portal.MXID.String(), nil
@@ -418,17 +420,17 @@ func (oc *AIClient) resolveHeartbeatPortal(agentID string, heartbeat *HeartbeatC
 
 func (oc *AIClient) resolveHeartbeatDeliveryPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, id.RoomID, string) {
 	if heartbeat != nil {
-		if strings.TrimSpace(heartbeat.Target) == "none" {
+		if heartbeat.Target != nil && strings.TrimSpace(*heartbeat.Target) == "none" {
 			return nil, "", "target-none"
 		}
-		if strings.TrimSpace(heartbeat.To) != "" {
-			if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(strings.TrimSpace(heartbeat.To))); err == nil && portal != nil {
+		if heartbeat.To != nil && strings.TrimSpace(*heartbeat.To) != "" {
+			if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(strings.TrimSpace(*heartbeat.To))); err == nil && portal != nil {
 				return portal, portal.MXID, ""
 			}
 			return nil, "", "no-target"
 		}
-		if strings.TrimSpace(heartbeat.Target) != "" && strings.ToLower(strings.TrimSpace(heartbeat.Target)) != "last" {
-			target := strings.TrimSpace(heartbeat.Target)
+		if heartbeat.Target != nil && strings.TrimSpace(*heartbeat.Target) != "" && strings.ToLower(strings.TrimSpace(*heartbeat.Target)) != "last" {
+			target := strings.TrimSpace(*heartbeat.Target)
 			if strings.HasPrefix(target, "!") {
 				if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(target)); err == nil && portal != nil {
 					return portal, portal.MXID, ""

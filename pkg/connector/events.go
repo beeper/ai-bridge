@@ -70,6 +70,12 @@ var StreamDeltaEventType = event.Type{
 	Class: event.MessageEventType,
 }
 
+// StreamEventType is the unified event type for AI streaming updates
+var StreamEventType = event.Type{
+	Type:  "com.beeper.ai.stream_event",
+	Class: event.MessageEventType,
+}
+
 // GenerationStatusEventType provides rich status updates during generation
 var GenerationStatusEventType = event.Type{
 	Type:  "com.beeper.ai.generation_status",

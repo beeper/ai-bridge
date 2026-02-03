@@ -15,7 +15,7 @@ const DefaultHeartbeatEvery = "30m"
 // Returns false when content is empty/missing so the LLM can decide.
 func IsHeartbeatContentEffectivelyEmpty(content string) bool {
 	if content == "" {
-		return false
+		return true
 	}
 	lines := strings.Split(content, "\n")
 	for _, line := range lines {
@@ -94,8 +94,8 @@ func StripHeartbeatTokenWithMode(text string, mode StripHeartbeatMode, maxAckCha
 	if trimmed == "" {
 		return true, "", false
 	}
-	if maxAckChars <= 0 {
-		maxAckChars = DefaultMaxAckChars
+	if maxAckChars < 0 {
+		maxAckChars = 0
 	}
 
 	stripMarkup := func(input string) string {

@@ -143,19 +143,19 @@ func (oc *AIClient) streamingResponseWithRetry(
 	meta *PortalMetadata,
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) {
-	// OpenRouter multimodal inputs are handled via Chat Completions.
-	if oc.isOpenRouterProvider() && hasMultimodalContent(prompt) {
-		oc.responseWithModelFallback(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
-		return
-	}
 	// Use Chat Completions API for audio (native support)
 	// SDK v3.16.0 has ResponseInputAudioParam but it's not wired into the union
 	if hasAudioContent(prompt) {
 		oc.responseWithModelFallback(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
 		return
 	}
-	// Use Responses API for other content (images, files, text)
-	oc.responseWithModelFallback(ctx, evt, portal, meta, prompt, oc.streamingResponseWithToolSchemaFallback, "responses")
+	switch oc.resolveModelAPI(meta) {
+	case ModelAPIChatCompletions:
+		oc.responseWithModelFallback(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
+	default:
+		// Use Responses API for other content (images, files, text)
+		oc.responseWithModelFallback(ctx, evt, portal, meta, prompt, oc.streamingResponseWithToolSchemaFallback, "responses")
+	}
 }
 
 // notifyContextLengthExceeded sends a user-friendly notice about context overflow

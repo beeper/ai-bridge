@@ -7,57 +7,33 @@ import (
 	"maunium.net/go/mautrix/event"
 )
 
-// emitStreamDelta sends a streaming delta event to the room
-func (oc *AIClient) emitStreamDelta(ctx context.Context, portal *bridgev2.Portal, state *streamingState, contentType StreamContentType, delta string, extra map[string]any) {
-	if portal == nil || portal.MXID == "" {
-		return
-	}
-	if state != nil && state.suppressSend {
-		return
-	}
-	intent := oc.getModelIntent(ctx, portal)
-	if intent == nil {
-		return
-	}
+type StreamEventSource string
 
-	eventContent := &event.Content{
-		Raw: map[string]any{
-			"turn_id":      state.turnID,
-			"target_event": state.initialEventID.String(),
-			"content_type": string(contentType),
-			"delta":        delta,
-			"seq":          state.sequenceNum,
-			"m.relates_to": map[string]any{
-				"rel_type": RelReference,
-				"event_id": state.initialEventID.String(),
-			},
-		},
-	}
+const (
+	StreamEventSourceResponses       StreamEventSource = "responses"
+	StreamEventSourceChatCompletions StreamEventSource = "chat_completions"
+	StreamEventSourceInternal        StreamEventSource = "internal"
+)
 
-	// Add agent_id if set
-	if state.agentID != "" {
-		eventContent.Raw["agent_id"] = state.agentID
-	}
-
-	// Merge extra fields
-	for k, v := range extra {
-		if _, exists := eventContent.Raw[k]; !exists {
-			eventContent.Raw[k] = v
-		}
-	}
-
-	if _, err := intent.SendMessage(ctx, portal.MXID, StreamDeltaEventType, eventContent, nil); err != nil {
-		oc.log.Warn().Err(err).
-			Stringer("target_event", state.initialEventID).
-			Str("content_type", string(contentType)).
-			Int("seq", state.sequenceNum).
-			Msg("Failed to emit stream delta")
-	}
+type StreamEventRawPayload struct {
+	Type string
+	JSON string
 }
 
-// emitGenerationStatus sends a generation status update event
-func (oc *AIClient) emitGenerationStatus(ctx context.Context, portal *bridgev2.Portal, state *streamingState, statusType string, message string, details *GenerationDetails) {
+// emitStreamEvent sends a unified streaming event to the room.
+func (oc *AIClient) emitStreamEvent(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	source StreamEventSource,
+	kind string,
+	data map[string]any,
+	raw *StreamEventRawPayload,
+) {
 	if portal == nil || portal.MXID == "" {
+		return
+	}
+	if state == nil {
 		return
 	}
 	if state != nil && state.suppressSend {
@@ -68,20 +44,59 @@ func (oc *AIClient) emitGenerationStatus(ctx context.Context, portal *bridgev2.P
 		return
 	}
 
-	content := map[string]any{
-		"turn_id":        state.turnID,
-		"status":         statusType,
-		"status_message": message,
-	}
+	state.sequenceNum++
+	seq := state.sequenceNum
 
+	content := map[string]any{
+		"turn_id": state.turnID,
+		"seq":     seq,
+		"source":  string(source),
+		"kind":    kind,
+	}
 	if state.initialEventID != "" {
 		content["target_event"] = state.initialEventID.String()
+		content["m.relates_to"] = map[string]any{
+			"rel_type": RelReference,
+			"event_id": state.initialEventID.String(),
+		}
 	}
-
 	if state.agentID != "" {
 		content["agent_id"] = state.agentID
 	}
+	if data != nil {
+		content["data"] = data
+	}
+	if raw != nil {
+		content["raw"] = map[string]any{
+			"type": raw.Type,
+			"json": raw.JSON,
+		}
+	}
 
+	eventContent := &event.Content{Raw: content}
+
+	if _, err := intent.SendMessage(ctx, portal.MXID, StreamEventType, eventContent, nil); err != nil {
+		oc.log.Warn().Err(err).
+			Str("kind", kind).
+			Int("seq", seq).
+			Msg("Failed to emit stream event")
+	}
+}
+
+func (oc *AIClient) emitStatusEvent(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	statusType string,
+	message string,
+	details *GenerationDetails,
+) {
+	data := map[string]any{
+		"status": statusType,
+	}
+	if message != "" {
+		data["message"] = message
+	}
 	if details != nil {
 		detailsMap := map[string]any{}
 		if details.CurrentTool != "" {
@@ -95,13 +110,8 @@ func (oc *AIClient) emitGenerationStatus(ctx context.Context, portal *bridgev2.P
 			detailsMap["tools_total"] = details.ToolsTotal
 		}
 		if len(detailsMap) > 0 {
-			content["details"] = detailsMap
+			data["details"] = detailsMap
 		}
 	}
-
-	eventContent := &event.Content{Raw: content}
-
-	if _, err := intent.SendMessage(ctx, portal.MXID, GenerationStatusEventType, eventContent, nil); err != nil {
-		oc.log.Debug().Err(err).Str("status", statusType).Msg("Failed to emit generation status")
-	}
+	oc.emitStreamEvent(ctx, portal, state, StreamEventSourceInternal, "status", data, nil)
 }
