@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/cron"
 )
 
@@ -47,9 +46,7 @@ func (oc *AIClient) enqueueCronSystemEvent(text string, agentID string) error {
 	if oc == nil {
 		return fmt.Errorf("missing client")
 	}
-	if strings.TrimSpace(agentID) == "" {
-		agentID = agents.DefaultAgentID
-	}
+	agentID = resolveCronAgentID(agentID)
 	hb := resolveHeartbeatConfig(&oc.connector.Config, agentID)
 	portal, sessionKey, err := oc.resolveHeartbeatSessionPortal(agentID, hb)
 	if err != nil || portal == nil || sessionKey == "" {

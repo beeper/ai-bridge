@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-
-	"github.com/beeper/ai-bridge/pkg/agents"
 )
 
 // normalizeRequiredName trims and validates a job name.
@@ -43,10 +41,12 @@ var (
 	agentIDTrailingDash = regexp.MustCompile(`-+$`)
 )
 
+const cronDefaultAgentID = "main"
+
 func sanitizeAgentID(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return agents.DefaultAgentID
+		return cronDefaultAgentID
 	}
 	lowered := strings.ToLower(trimmed)
 	if agentIDValidRe.MatchString(lowered) {
@@ -59,7 +59,7 @@ func sanitizeAgentID(raw string) string {
 		cleaned = cleaned[:64]
 	}
 	if cleaned == "" {
-		return agents.DefaultAgentID
+		return cronDefaultAgentID
 	}
 	return cleaned
 }

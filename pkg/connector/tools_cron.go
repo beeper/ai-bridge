@@ -61,9 +61,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 				"error":  err.Error(),
 			}).Text(), nil
 		}
-		return agenttools.JSONResult(map[string]any{
-			"jobs": jobs,
-		}).Text(), nil
+		return agenttools.JSONResult(jobs).Text(), nil
 	case "add":
 		normalizedArgs := coerceCronArgs(args)
 		jobInput, err := cron.NormalizeCronJobCreateRaw(normalizedArgs)
@@ -362,7 +360,7 @@ func buildReminderContextLines(btc *BridgeToolContext, count int) []string {
 	for i := len(history) - 1; i >= 0; i-- {
 		msg := history[i]
 		meta := messageMeta(msg)
-		if !shouldIncludeInHistory(meta) {
+		if meta == nil {
 			continue
 		}
 		role := strings.ToLower(strings.TrimSpace(meta.Role))

@@ -23,6 +23,9 @@ func ResolveCronStorePath(storePath string) string {
 				return filepath.Clean(replaced)
 			}
 		}
+		if abs, err := filepath.Abs(trimmed); err == nil {
+			return abs
+		}
 		return filepath.Clean(trimmed)
 	}
 	home, err := os.UserHomeDir()
