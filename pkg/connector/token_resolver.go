@@ -27,6 +27,24 @@ func trimToken(value string) string {
 	return strings.TrimSpace(value)
 }
 
+func normalizeBeeperBaseURL(raw string) string {
+	base := strings.TrimSpace(raw)
+	if base == "" {
+		return ""
+	}
+	base = strings.TrimRight(base, "/")
+	if schemeIdx := strings.Index(base, "://"); schemeIdx != -1 {
+		hostStart := schemeIdx + 3
+		if slash := strings.Index(base[hostStart:], "/"); slash != -1 {
+			base = base[:hostStart+slash]
+		}
+	} else if slash := strings.Index(base, "/"); slash != -1 {
+		base = base[:slash]
+	}
+	base = strings.TrimRight(base, "/")
+	return base + beeperBasePath
+}
+
 func (oc *OpenAIConnector) resolveOpenAIBaseURL() string {
 	base := strings.TrimSpace(oc.Config.Providers.OpenAI.BaseURL)
 	if base == "" {
@@ -45,12 +63,12 @@ func (oc *OpenAIConnector) resolveOpenRouterBaseURL() string {
 
 func (oc *OpenAIConnector) resolveBeeperBaseURL(meta *UserLoginMetadata) string {
 	if meta != nil {
-		base := strings.TrimRight(strings.TrimSpace(meta.BaseURL), "/")
+		base := normalizeBeeperBaseURL(meta.BaseURL)
 		if base != "" {
 			return base
 		}
 	}
-	return strings.TrimRight(strings.TrimSpace(oc.Config.Beeper.BaseURL), "/")
+	return normalizeBeeperBaseURL(oc.Config.Beeper.BaseURL)
 }
 
 func (oc *OpenAIConnector) resolveBeeperToken(meta *UserLoginMetadata) string {
