@@ -18,7 +18,11 @@ func registerAICommand(def commandregistry.Definition) *commands.FullHandler {
 func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 	handlers := aiCommandRegistry.All()
 	if len(handlers) > 0 {
-		proc.AddHandlers(handlers...)
+		commandHandlers := make([]commands.CommandHandler, 0, len(handlers))
+		for _, handler := range handlers {
+			commandHandlers = append(commandHandlers, handler)
+		}
+		proc.AddHandlers(commandHandlers...)
 	}
 
 	names := aiCommandRegistry.Names()
