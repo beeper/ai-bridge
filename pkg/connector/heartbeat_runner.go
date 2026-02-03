@@ -246,17 +246,7 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "empty-heartbeat-file"}
 	}
 
-	targetPortal := sessionPortal
-	targetRoomID := targetPortal.MXID
-	if heartbeat != nil && strings.TrimSpace(heartbeat.Target) != "" || strings.TrimSpace(heartbeat.To) != "" {
-		if portal, roomID := oc.resolveHeartbeatDeliveryPortal(agentID, heartbeat); portal != nil {
-			targetPortal = portal
-			targetRoomID = roomID
-		} else {
-			targetRoomID = ""
-		}
-	}
-
+	target := resolveHeartbeatTarget(cfg, heartbeat)
 	visibility := resolveHeartbeatVisibility(cfg, "matrix")
 	hbCfg := &HeartbeatRunConfig{
 		Reason:           reason,
@@ -265,13 +255,22 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		ShowAlerts:       visibility.ShowAlerts,
 		UseIndicator:     visibility.UseIndicator,
 		IncludeReasoning: heartbeat != nil && heartbeat.IncludeReasoning != nil && *heartbeat.IncludeReasoning,
-		TargetRoom:       targetRoomID,
+		TargetRoom:       sessionPortal.MXID,
 		AgentID:          agentID,
 		Channel:          "matrix",
 		SuppressSave:     true,
 	}
+	if strings.EqualFold(strings.TrimSpace(target), "none") {
+		hbCfg.ShowOk = false
+		hbCfg.ShowAlerts = false
+	}
 
-	prompt := resolveHeartbeatPrompt(cfg, heartbeat, nil)
+	var agentDef *agents.AgentDefinition
+	store := NewAgentStoreAdapter(oc)
+	if agent, err := store.GetAgentByID(context.Background(), agentID); err == nil {
+		agentDef = agent
+	}
+	prompt := resolveHeartbeatPrompt(cfg, heartbeat, agentDef)
 	systemEvents := formatSystemEvents(drainSystemEventEntries(sessionKey))
 	if systemEvents != "" {
 		prompt = systemEvents + "\n\n" + prompt
@@ -363,7 +362,10 @@ func (oc *AIClient) resolveHeartbeatDeliveryPortal(agentID string, heartbeat *He
 	if portal := oc.lastActivePortal(agentID); portal != nil {
 		return portal, portal.MXID
 	}
-	return oc.defaultChatPortal(), ""
+	if portal := oc.defaultChatPortal(); portal != nil {
+		return portal, portal.MXID
+	}
+	return nil, ""
 }
 
 func (oc *AIClient) shouldRunHeartbeatForFile(agentID string, reason string) bool {
