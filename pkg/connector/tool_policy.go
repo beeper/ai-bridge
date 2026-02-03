@@ -59,7 +59,7 @@ func (oc *AIClient) isToolAvailable(meta *PortalMetadata, toolName string) (bool
 	if agenttools.IsSessionTool(toolName) && !hasAssignedAgent(meta) {
 		return false, SourceGlobalDefault, "Requires an assigned agent"
 	}
-	if agenttools.IsBossTool(toolName) && !meta.IsBuilderRoom {
+	if agenttools.IsBossTool(toolName) && !(meta.IsBuilderRoom || hasBossAgent(meta)) {
 		return false, SourceGlobalDefault, "Builder room only"
 	}
 	if (toolName == toolspec.GravatarFetchName || toolName == toolspec.GravatarSetName) && !hasBossAgent(meta) {
@@ -104,7 +104,7 @@ func (oc *AIClient) toolNamesForPortal(meta *PortalMetadata) []string {
 	for _, tool := range agenttools.ProviderTools() {
 		nameSet[tool.Name] = struct{}{}
 	}
-	if meta != nil && meta.IsBuilderRoom {
+	if meta != nil && (meta.IsBuilderRoom || hasBossAgent(meta)) {
 		for _, tool := range agenttools.BossTools() {
 			nameSet[tool.Name] = struct{}{}
 		}

@@ -270,8 +270,12 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 		toolName = ToolNameImage
 	}
 
-	// Check if this is the Builder room or a session tool - use boss tool executor
-	if oc.isBuilderRoom(portal) || tools.IsSessionTool(toolName) {
+	var meta *PortalMetadata
+	if portal != nil {
+		meta = portalMeta(portal)
+	}
+	// Check if this is a Boss room or a session tool - use boss tool executor
+	if (meta != nil && hasBossAgent(meta)) || oc.isBuilderRoom(portal) || tools.IsSessionTool(toolName) || tools.IsBossTool(toolName) {
 		if result := oc.executeBossTool(ctx, portal, toolName, args); result != nil {
 			return result.Content, result.Error
 		}
