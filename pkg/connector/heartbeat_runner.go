@@ -91,7 +91,9 @@ func (r *HeartbeatRunner) updateConfig(cfg *Config) {
 		intervals = append(intervals, intervalMs)
 		prevState := prev[agent.agentID]
 		nextDue := now + intervalMs
+		lastRun := int64(0)
 		if prevState != nil {
+			lastRun = prevState.lastRunMs
 			if prevState.lastRunMs > 0 {
 				nextDue = prevState.lastRunMs + intervalMs
 			} else if prevState.intervalMs == intervalMs && prevState.nextDueMs > now {
@@ -102,7 +104,7 @@ func (r *HeartbeatRunner) updateConfig(cfg *Config) {
 			agentID:    agent.agentID,
 			heartbeat:  agent.heartbeat,
 			intervalMs: intervalMs,
-			lastRunMs:  prevState.lastRunMs,
+			lastRunMs:  lastRun,
 			nextDueMs:  nextDue,
 		}
 	}
