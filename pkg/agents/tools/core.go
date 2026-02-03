@@ -95,7 +95,7 @@ var (
 			InputSchema: toolspec.GravatarFetchSchema(),
 		},
 		Type:  ToolTypeBuiltin,
-		Group: GroupBuilder,
+		Group: GroupOpenClaw,
 	}
 	GravatarSetTool = &Tool{
 		Tool: mcp.Tool{

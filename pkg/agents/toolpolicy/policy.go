@@ -50,8 +50,8 @@ var ToolGroups = map[string][]string{
 	GroupAutomation: {"cron", "gateway"},
 	GroupNodes:      {"nodes"},
 	GroupStatus:     {"session_status"},
-	GroupOpenClaw:   {"message", "agents_list", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_fetch", "image"},
-	GroupFS:         {"read", "write", "edit", "apply_patch"},
+	GroupOpenClaw:   {"message", "agents_list", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_fetch", "image", "gravatar_fetch"},
+	GroupFS:         {"read", "write", "edit", "apply_patch", "ls", "find", "grep"},
 }
 
 type toolProfilePolicy struct {
@@ -62,8 +62,8 @@ type toolProfilePolicy struct {
 // ToolProfiles define which tool groups each profile allows.
 var ToolProfiles = map[ToolProfileID]toolProfilePolicy{
 	ProfileMinimal:   {Allow: []string{"session_status"}},
-	ProfileCoding:    {Allow: []string{GroupFS, GroupRuntime, GroupSessions, GroupMemory, "image"}},
-	ProfileMessaging: {Allow: []string{GroupMessaging, "sessions_list", "sessions_history", "sessions_send", "session_status"}},
+	ProfileCoding:    {Allow: []string{GroupFS, GroupRuntime, GroupSessions, GroupMemory, "image", "gravatar_fetch"}},
+	ProfileMessaging: {Allow: []string{GroupMessaging, "sessions_list", "sessions_history", "sessions_send", "session_status", "gravatar_fetch"}},
 	ProfileFull:      {},
 	ProfileBoss:      {},
 }
