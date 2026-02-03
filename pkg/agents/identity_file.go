@@ -13,11 +13,11 @@ type IdentityFile struct {
 }
 
 var identityPlaceholderValues = map[string]struct{}{
-	"pick something you like":                                  {},
+	"pick something you like": {},
 	"ai? robot? familiar? ghost in the machine? something weirder?": {},
-	"how do you come across? sharp? warm? chaotic? calm?":      {},
-	"your signature - pick one that feels right":              {},
-	"workspace-relative path, http(s) url, or data uri":       {},
+	"how do you come across? sharp? warm? chaotic? calm?":           {},
+	"your signature - pick one that feels right":                    {},
+	"workspace-relative path, http(s) url, or data uri":             {},
 }
 
 func normalizeIdentityValue(value string) string {

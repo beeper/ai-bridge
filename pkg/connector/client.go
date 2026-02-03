@@ -660,7 +660,13 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 		displayName := "Unknown Agent"
 		modelID := oc.agentModelOverride(agentID)
 		if err == nil && agent != nil {
-			displayName = agent.Name
+			displayName = oc.resolveAgentDisplayName(ctx, agent)
+			if displayName == "" {
+				displayName = agent.Name
+			}
+			if displayName == "" {
+				displayName = agent.ID
+			}
 			if modelID == "" && agent.Model.Primary != "" {
 				modelID = ResolveAlias(agent.Model.Primary)
 			}
@@ -999,6 +1005,7 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 	if oc.connector != nil && oc.connector.Config.Memory != nil {
 		params.MemoryCitations = strings.TrimSpace(oc.connector.Config.Memory.Citations)
 	}
+	params.UserIdentitySupplement = oc.gravatarContext()
 	params.ContextFiles = oc.buildBootstrapContextFiles(ctx, agentID, meta)
 	if meta != nil && strings.TrimSpace(meta.SubagentParentRoomID) != "" {
 		params.PromptMode = agents.PromptModeMinimal
@@ -1068,15 +1075,7 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 	// Default thinking level (OpenClaw prompt expects this value)
 	params.DefaultThinkLevel = "off"
 
-	base := agents.BuildSystemPrompt(params)
-	gravatarContext := oc.gravatarContext()
-	if gravatarContext == "" {
-		return base
-	}
-	if strings.TrimSpace(base) == "" {
-		return gravatarContext
-	}
-	return fmt.Sprintf("%s\n\n%s", base, gravatarContext)
+	return agents.BuildSystemPrompt(params)
 }
 
 // effectiveTemperature returns the temperature to use

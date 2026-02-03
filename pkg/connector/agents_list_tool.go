@@ -69,8 +69,9 @@ func (oc *AIClient) executeAgentsList(ctx context.Context, portal *bridgev2.Port
 		}
 		if agent := configured[id]; agent != nil {
 			entry.Configured = true
-			if agent.Name != "" {
-				entry.Name = agent.Name
+			agentName := oc.resolveAgentDisplayName(ctx, agent)
+			if agentName != "" {
+				entry.Name = agentName
 			}
 		}
 		entries = append(entries, entry)
