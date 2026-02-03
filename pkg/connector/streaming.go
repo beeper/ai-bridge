@@ -334,6 +334,15 @@ func (oc *AIClient) streamingResponseWithToolSchemaFallback(
 	if success || cle != nil || err == nil {
 		return success, cle, err
 	}
+	if IsToolUniquenessError(err) {
+		oc.log.Warn().Err(err).Msg("Duplicate tool names rejected; retrying without tools")
+		if meta != nil {
+			metaCopy := *meta
+			metaCopy.Capabilities = meta.Capabilities
+			metaCopy.Capabilities.SupportsToolCalling = false
+			return oc.streamingResponse(ctx, evt, portal, &metaCopy, messages)
+		}
+	}
 	if IsToolSchemaError(err) {
 		oc.log.Warn().Err(err).Msg("Responses tool schema rejected; falling back to chat completions")
 		success, cle, chatErr := oc.streamChatCompletions(ctx, evt, portal, meta, messages)
@@ -707,7 +716,7 @@ func (oc *AIClient) streamingResponse(
 			state.sequenceNum++
 			oc.emitStreamDelta(ctx, portal, state, StreamContentToolResult, result, map[string]any{
 				"call_id":   tool.callID,
-				"tool_name": streamEvent.Name,
+				"tool_name": toolName,
 				"status":    "completed",
 			})
 

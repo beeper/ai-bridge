@@ -494,6 +494,9 @@ func (m *MemorySearchManager) embedChunks(ctx context.Context, chunks []memory.C
 	embeddings := make([][]float64, len(chunks))
 	var missing []missingChunk
 	for i, chunk := range chunks {
+		if chunk.Text == "" {
+			continue
+		}
 		if m.cfg.Cache.Enabled {
 			if cached, ok := m.lookupEmbeddingCache(ctx, chunk.Hash); ok {
 				embeddings[i] = cached
@@ -567,56 +570,20 @@ func (m *MemorySearchManager) embedChunks(ctx context.Context, chunks []memory.C
 		}
 	}
 
-	texts := make([]string, len(missing))
+	missingChunks := make([]memory.Chunk, len(missing))
 	for i, item := range missing {
-		texts[i] = item.chunk.Text
+		missingChunks[i] = item.chunk
 	}
-	results, err := m.embedBatchWithRetry(ctx, texts)
+	results, err := m.embedChunksInBatches(ctx, missingChunks)
 	if err != nil {
 		return nil, err
 	}
 	for i, item := range missing {
 		if i < len(results) {
 			embeddings[item.index] = results[i]
-			if m.cfg.Cache.Enabled {
-				_ = m.storeEmbeddingCache(ctx, item.chunk.Hash, results[i])
-			}
 		}
 	}
 	return embeddings, nil
-}
-
-func (m *MemorySearchManager) embedBatchWithRetry(ctx context.Context, texts []string) ([][]float64, error) {
-	if len(texts) == 0 {
-		return nil, nil
-	}
-	const maxBatchSize = 64
-	var results [][]float64
-	for start := 0; start < len(texts); start += maxBatchSize {
-		end := start + maxBatchSize
-		if end > len(texts) {
-			end = len(texts)
-		}
-		batch := texts[start:end]
-		var batchResult [][]float64
-		var err error
-		for attempt := 0; attempt < 3; attempt++ {
-			batchResult, err = m.provider.EmbedBatch(ctx, batch)
-			if err == nil {
-				break
-			}
-			sleepMs := 500 * (1 << attempt)
-			if sleepMs > 8000 {
-				sleepMs = 8000
-			}
-			time.Sleep(time.Duration(sleepMs) * time.Millisecond)
-		}
-		if err != nil {
-			return nil, err
-		}
-		results = append(results, batchResult...)
-	}
-	return results, nil
 }
 
 func (m *MemorySearchManager) embedChunksWithOpenAIBatch(
