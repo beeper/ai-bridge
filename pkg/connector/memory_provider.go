@@ -144,15 +144,35 @@ func finalizeProvider(cfg *memory.ResolvedConfig, provider *providerConfig) *mem
 
 func resolveOpenAIEmbeddingConfig(client *AIClient, cfg *memory.ResolvedConfig) (string, string, map[string]string) {
 	var apiKey string
+	var baseURL string
 	if strings.TrimSpace(cfg.Remote.APIKey) != "" {
 		apiKey = strings.TrimSpace(cfg.Remote.APIKey)
 	} else if client != nil && client.connector != nil {
 		meta := loginMetadata(client.UserLogin)
 		apiKey = strings.TrimSpace(client.connector.resolveOpenAIAPIKey(meta))
+		if apiKey == "" && meta != nil && meta.Provider == ProviderBeeper {
+			services := client.connector.resolveServiceConfig(meta)
+			if svc, ok := services[serviceOpenAI]; ok {
+				apiKey = strings.TrimSpace(svc.APIKey)
+				if baseURL == "" {
+					baseURL = strings.TrimSpace(svc.BaseURL)
+				}
+			}
+		}
 	}
-	baseURL := strings.TrimSpace(cfg.Remote.BaseURL)
+	if strings.TrimSpace(cfg.Remote.BaseURL) != "" {
+		baseURL = strings.TrimSpace(cfg.Remote.BaseURL)
+	}
 	if baseURL == "" && client != nil && client.connector != nil {
-		baseURL = client.connector.resolveOpenAIBaseURL()
+		if meta := loginMetadata(client.UserLogin); meta != nil && meta.Provider == ProviderBeeper {
+			services := client.connector.resolveServiceConfig(meta)
+			if svc, ok := services[serviceOpenAI]; ok && strings.TrimSpace(svc.BaseURL) != "" {
+				baseURL = strings.TrimSpace(svc.BaseURL)
+			}
+		}
+		if baseURL == "" {
+			baseURL = client.connector.resolveOpenAIBaseURL()
+		}
 	}
 	headers := cfg.Remote.Headers
 	return apiKey, baseURL, headers

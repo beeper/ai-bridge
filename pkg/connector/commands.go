@@ -808,7 +808,14 @@ func fnAgent(ce *commands.Event) {
 			ce.Reply("Current agent ID: %s (not found)", agentID)
 			return
 		}
-		ce.Reply("Current agent: **%s** (`%s`)\n%s", agent.Name, agent.ID, agent.Description)
+		displayName := client.resolveAgentDisplayName(ce.Ctx, agent)
+		if displayName == "" {
+			displayName = agent.Name
+		}
+		if displayName == "" {
+			displayName = agent.ID
+		}
+		ce.Reply("Current agent: **%s** (`%s`)\n%s", displayName, agent.ID, agent.Description)
 		return
 	}
 
@@ -849,7 +856,14 @@ func fnAgent(ce *commands.Event) {
 	agentName := client.resolveAgentDisplayName(ce.Ctx, agent)
 	client.ensureAgentGhostDisplayName(ce.Ctx, agent.ID, modelID, agentName)
 	_ = client.BroadcastRoomState(ce.Ctx, ce.Portal)
-	ce.Reply("Agent set to: **%s** (`%s`)", agent.Name, agent.ID)
+	displayName := agentName
+	if displayName == "" {
+		displayName = agent.Name
+	}
+	if displayName == "" {
+		displayName = agent.ID
+	}
+	ce.Reply("Agent set to: **%s** (`%s`)", displayName, agent.ID)
 }
 
 // CommandAgents handles the !ai agents command

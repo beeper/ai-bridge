@@ -92,21 +92,21 @@ func formatGravatarMarkdown(profile *GravatarProfile, status string) string {
 	if profile == nil {
 		return ""
 	}
-	lines := []string{"## Gravatar Profile", "hint: this is the user"}
+	lines := []string{"User identity supplement (Gravatar):"}
 	if status != "" {
-		lines = append(lines, fmt.Sprintf("status: %s", status))
+		lines = append(lines, fmt.Sprintf("gravatar.status: %s", status))
 	}
 	if profile.Email != "" {
-		lines = append(lines, fmt.Sprintf("email: %s", profile.Email))
+		lines = append(lines, fmt.Sprintf("gravatar.email: %s", profile.Email))
 	}
 	if profile.Hash != "" {
-		lines = append(lines, fmt.Sprintf("hash: %s", profile.Hash))
+		lines = append(lines, fmt.Sprintf("gravatar.hash: %s", profile.Hash))
 	}
 	if profile.FetchedAt > 0 {
-		lines = append(lines, fmt.Sprintf("fetched_at: %s", time.Unix(profile.FetchedAt, 0).UTC().Format(time.RFC3339)))
+		lines = append(lines, fmt.Sprintf("gravatar.fetched_at: %s", time.Unix(profile.FetchedAt, 0).UTC().Format(time.RFC3339)))
 	}
 	var flattened []string
-	flattenGravatarValue(profile.Profile, "profile", &flattened)
+	flattenGravatarValue(profile.Profile, "gravatar.profile", &flattened)
 	lines = append(lines, flattened...)
 	return strings.Join(lines, "\n")
 }

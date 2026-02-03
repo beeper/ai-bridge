@@ -68,11 +68,26 @@ func buildMemorySection(params struct {
 	return lines
 }
 
-func buildUserIdentitySection(ownerLine string, isMinimal bool) []string {
-	if ownerLine == "" || isMinimal {
+func buildUserIdentitySection(ownerLine string, supplement string, isMinimal bool) []string {
+	if isMinimal {
 		return nil
 	}
-	return []string{"## User Identity", ownerLine, ""}
+	ownerLine = strings.TrimSpace(ownerLine)
+	supplement = strings.TrimSpace(supplement)
+	if ownerLine == "" && supplement == "" {
+		return nil
+	}
+	lines := []string{"## User Identity"}
+	if ownerLine != "" {
+		lines = append(lines, ownerLine)
+	}
+	if supplement != "" {
+		for _, line := range strings.Split(supplement, "\n") {
+			lines = append(lines, line)
+		}
+	}
+	lines = append(lines, "")
+	return lines
 }
 
 func buildTimeSection(userTimezone string) []string {
@@ -617,7 +632,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		lines = append(lines, strings.Join(sandboxLines, "\n"), "")
 	}
 
-	lines = append(lines, buildUserIdentitySection(ownerLine, isMinimal)...)
+	lines = append(lines, buildUserIdentitySection(ownerLine, params.UserIdentitySupplement, isMinimal)...)
 	lines = append(lines, buildTimeSection(userTimezone)...)
 	lines = append(lines,
 		"## Workspace Files (injected)",

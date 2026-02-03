@@ -18,30 +18,31 @@ type ResolvedTimeFormat string
 // SystemPromptParams contains all inputs for building a system prompt.
 // This matches OpenClaw's buildAgentSystemPrompt params.
 type SystemPromptParams struct {
-	WorkspaceDir      string
-	DefaultThinkLevel string
-	ReasoningLevel    string
-	ExtraSystemPrompt string
-	OwnerNumbers      []string
-	ReasoningTagHint  bool
-	ToolNames         []string
-	ToolSummaries     map[string]string
-	ModelAliasLines   []string
-	UserTimezone      string
-	UserTime          string
-	UserTimeFormat    ResolvedTimeFormat
-	ContextFiles      []EmbeddedContextFile
-	SkillsPrompt      string
-	HeartbeatPrompt   string
-	DocsPath          string
-	WorkspaceNotes    []string
-	TTSHint           string
-	PromptMode        PromptMode
-	RuntimeInfo       *RuntimeInfo
-	MessageToolHints  []string
-	SandboxInfo       *SandboxInfo
-	ReactionGuidance  *ReactionGuidance
-	MemoryCitations   string
+	WorkspaceDir           string
+	DefaultThinkLevel      string
+	ReasoningLevel         string
+	ExtraSystemPrompt      string
+	OwnerNumbers           []string
+	ReasoningTagHint       bool
+	ToolNames              []string
+	ToolSummaries          map[string]string
+	ModelAliasLines        []string
+	UserTimezone           string
+	UserTime               string
+	UserTimeFormat         ResolvedTimeFormat
+	ContextFiles           []EmbeddedContextFile
+	SkillsPrompt           string
+	HeartbeatPrompt        string
+	DocsPath               string
+	WorkspaceNotes         []string
+	TTSHint                string
+	PromptMode             PromptMode
+	RuntimeInfo            *RuntimeInfo
+	MessageToolHints       []string
+	SandboxInfo            *SandboxInfo
+	ReactionGuidance       *ReactionGuidance
+	MemoryCitations        string
+	UserIdentitySupplement string
 }
 
 // RuntimeInfo contains runtime context for the LLM.
