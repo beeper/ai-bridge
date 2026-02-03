@@ -5,7 +5,8 @@ package agents
 
 import (
 	"encoding/json"
-	"maps"
+
+	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 )
 
 // AgentDefinition is the persistent agent configuration.
@@ -22,10 +23,8 @@ type AgentDefinition struct {
 	SystemPrompt string     `json:"system_prompt,omitempty"`
 	PromptMode   PromptMode `json:"prompt_mode,omitempty"` // full, minimal, none
 
-	// Tool policy (like OpenClaw profiles)
-	ToolProfile   ToolProfile     `json:"tool_profile,omitempty"`    // minimal, coding, messaging, full, boss
-	ToolOverrides map[string]bool `json:"tool_overrides,omitempty"`  // explicit allow/deny
-	ToolAlsoAllow []string        `json:"tool_also_allow,omitempty"` // additive allows (supports wildcards)
+	// Tool policy (OpenClaw-style)
+	Tools *toolpolicy.ToolPolicyConfig `json:"tools,omitempty"`
 
 	// Agent behavior
 	Temperature     float64      `json:"temperature,omitempty"`
@@ -240,7 +239,7 @@ func (a *AgentDefinition) Clone() *AgentDefinition {
 		Model:           a.Model.Clone(),
 		SystemPrompt:    a.SystemPrompt,
 		PromptMode:      a.PromptMode,
-		ToolProfile:     a.ToolProfile,
+		Tools:           a.Tools.Clone(),
 		Temperature:     a.Temperature,
 		ReasoningEffort: a.ReasoningEffort,
 		IsPreset:        a.IsPreset,
@@ -248,15 +247,6 @@ func (a *AgentDefinition) Clone() *AgentDefinition {
 		UpdatedAt:       a.UpdatedAt,
 	}
 
-	if a.ToolOverrides != nil {
-		clone.ToolOverrides = make(map[string]bool)
-		maps.Copy(clone.ToolOverrides, a.ToolOverrides)
-	}
-
-	if a.ToolAlsoAllow != nil {
-		clone.ToolAlsoAllow = make([]string, len(a.ToolAlsoAllow))
-		copy(clone.ToolAlsoAllow, a.ToolAlsoAllow)
-	}
 
 	if a.Identity != nil {
 		clone.Identity = &Identity{

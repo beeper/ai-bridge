@@ -70,6 +70,14 @@ func getDefaultToolsConfig(_ string) ToolsConfig {
 	registerTool(&config, defaultMemorySearchTool(), "builtin")
 	registerTool(&config, defaultMemoryGetTool(), "builtin")
 
+	// File tools (OpenClaw-compatible textfs)
+	registerTool(&config, defaultReadTool(), "builtin")
+	registerTool(&config, defaultWriteTool(), "builtin")
+	registerTool(&config, defaultEditTool(), "builtin")
+	registerTool(&config, defaultLsTool(), "builtin")
+	registerTool(&config, defaultFindTool(), "builtin")
+	registerTool(&config, defaultGrepTool(), "builtin")
+
 	// Session tools
 	registerTool(&config, defaultSessionsListTool(), "builtin")
 	registerTool(&config, defaultSessionsHistoryTool(), "builtin")
@@ -135,6 +143,31 @@ func ensureToolsConfig(meta *PortalMetadata, provider string) bool {
 	}
 	if _, ok := meta.ToolsConfig.Tools[toolspec.MemoryGetName]; !ok {
 		registerTool(&meta.ToolsConfig, defaultMemoryGetTool(), "builtin")
+		changed = true
+	}
+
+	if _, ok := meta.ToolsConfig.Tools[toolspec.ReadName]; !ok {
+		registerTool(&meta.ToolsConfig, defaultReadTool(), "builtin")
+		changed = true
+	}
+	if _, ok := meta.ToolsConfig.Tools[toolspec.WriteName]; !ok {
+		registerTool(&meta.ToolsConfig, defaultWriteTool(), "builtin")
+		changed = true
+	}
+	if _, ok := meta.ToolsConfig.Tools[toolspec.EditName]; !ok {
+		registerTool(&meta.ToolsConfig, defaultEditTool(), "builtin")
+		changed = true
+	}
+	if _, ok := meta.ToolsConfig.Tools[toolspec.LsName]; !ok {
+		registerTool(&meta.ToolsConfig, defaultLsTool(), "builtin")
+		changed = true
+	}
+	if _, ok := meta.ToolsConfig.Tools[toolspec.FindName]; !ok {
+		registerTool(&meta.ToolsConfig, defaultFindTool(), "builtin")
+		changed = true
+	}
+	if _, ok := meta.ToolsConfig.Tools[toolspec.GrepName]; !ok {
+		registerTool(&meta.ToolsConfig, defaultGrepTool(), "builtin")
 		changed = true
 	}
 

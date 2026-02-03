@@ -1,6 +1,10 @@
 package tools
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
+)
 
 var (
 	toolLookupOnce    sync.Once
@@ -8,18 +12,19 @@ var (
 	allToolByName     map[string]*Tool
 )
 
-// Tool group constants for policy composition (like OpenClaw's TOOL_GROUPS).
+// Tool group constants for policy composition (OpenClaw-style shorthands).
 const (
-	GroupSearch    = "group:search"
-	GroupCalc      = "group:calc"
-	GroupBuilder   = "group:builder"
-	GroupChat      = "group:chat"
-	GroupMessaging = "group:messaging"
-	GroupSessions  = "group:sessions"
-	GroupMemory    = "group:memory"
-	GroupWeb       = "group:web"
-	GroupMedia     = "group:media"
-	GroupStatus    = "group:status"
+	GroupSearch    = toolpolicy.GroupSearch
+	GroupCalc      = toolpolicy.GroupCalc
+	GroupBuilder   = toolpolicy.GroupBuilder
+	GroupMessaging = toolpolicy.GroupMessaging
+	GroupSessions  = toolpolicy.GroupSessions
+	GroupMemory    = toolpolicy.GroupMemory
+	GroupWeb       = toolpolicy.GroupWeb
+	GroupMedia     = toolpolicy.GroupMedia
+	GroupStatus    = toolpolicy.GroupStatus
+	GroupOpenClaw  = toolpolicy.GroupOpenClaw
+	GroupFS        = "group:fs"
 )
 
 // BuiltinTools returns all locally-executable builtin tools.
@@ -28,15 +33,46 @@ func BuiltinTools() []*Tool {
 		Calculator,
 		WebSearch,
 		WebSearchOpenRouter,
+		MessageTool,
+		WebFetchTool,
+		SessionStatusTool,
+		MemorySearchTool,
+		MemoryGetTool,
+		ImageTool,
+		ImageGenerateTool,
+		TTSTool,
+		GravatarFetchTool,
+		GravatarSetTool,
+		ReadTool,
+		WriteTool,
+		EditTool,
+		LsTool,
+		FindTool,
+		GrepTool,
 	}
 }
 
 // AllTools returns all tools (builtin + provider markers).
 func AllTools() []*Tool {
-	tools := BuiltinTools()
-	tools = append(tools, SessionTools()...)
-	tools = append(tools, ProviderTools()...)
-	return tools
+	seen := make(map[string]struct{})
+	var all []*Tool
+	appendTools := func(list []*Tool) {
+		for _, tool := range list {
+			if tool == nil || tool.Name == "" {
+				continue
+			}
+			if _, ok := seen[tool.Name]; ok {
+				continue
+			}
+			seen[tool.Name] = struct{}{}
+			all = append(all, tool)
+		}
+	}
+	appendTools(BuiltinTools())
+	appendTools(SessionTools())
+	appendTools(BossTools())
+	appendTools(ProviderTools())
+	return all
 }
 
 // DefaultRegistry returns a registry with all default tools registered.

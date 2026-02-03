@@ -1,0 +1,66 @@
+package textfs
+
+import (
+	"fmt"
+	"path"
+	"strings"
+)
+
+// NormalizePath normalizes a virtual file path and prevents escaping the root.
+func NormalizePath(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	cleaned := strings.ReplaceAll(trimmed, "\\", "/")
+	cleaned = strings.TrimPrefix(cleaned, "file://")
+	for strings.HasPrefix(cleaned, "/") {
+		cleaned = strings.TrimPrefix(cleaned, "/")
+	}
+	cleaned = strings.TrimPrefix(cleaned, "./")
+	cleaned = path.Clean(cleaned)
+	if cleaned == "." || cleaned == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if strings.HasPrefix(cleaned, "..") || strings.Contains(cleaned, "/..") {
+		return "", fmt.Errorf("path escapes virtual root")
+	}
+	cleaned = strings.TrimSuffix(cleaned, "/")
+	return cleaned, nil
+}
+
+// NormalizeDir normalizes a directory path; empty means root.
+func NormalizeDir(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed == "." || trimmed == "/" {
+		return "", nil
+	}
+	cleaned, err := NormalizePath(trimmed)
+	if err != nil {
+		return "", err
+	}
+	return cleaned, nil
+}
+
+// IsMemoryPath returns true for MEMORY.md or memory/*.md.
+func IsMemoryPath(relPath string) bool {
+	normalized := strings.TrimSpace(relPath)
+	if normalized == "" {
+		return false
+	}
+	normalized = strings.ReplaceAll(normalized, "\\", "/")
+	normalized = strings.TrimPrefix(normalized, "./")
+	normalized = strings.TrimLeft(normalized, "/")
+	if strings.EqualFold(normalized, "memory.md") || normalized == "MEMORY.md" {
+		return true
+	}
+	return strings.HasPrefix(normalized, "memory/")
+}
+
+// ClassifySource returns the default source label for a path.
+func ClassifySource(path string) string {
+	if IsMemoryPath(path) {
+		return "memory"
+	}
+	return "workspace"
+}

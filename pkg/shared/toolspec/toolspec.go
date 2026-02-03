@@ -41,6 +41,19 @@ const (
 	MemoryGetName           = "memory_get"
 	MemoryGetDescription    = "Retrieve the full content of a specific memory by its path."
 
+	ReadName        = "read"
+	ReadDescription = "Read a text file from the virtual workspace. Supports offset/limit for large files."
+	WriteName       = "write"
+	WriteDescription = "Write content to a text file in the virtual workspace. Creates or overwrites the file."
+	EditName        = "edit"
+	EditDescription = "Edit a text file by replacing exact text (oldText -> newText)."
+	LsName          = "ls"
+	LsDescription   = "List directory contents in the virtual workspace."
+	FindName        = "find"
+	FindDescription = "Search for files by glob pattern in the virtual workspace."
+	GrepName        = "grep"
+	GrepDescription = "Search file contents for a pattern in the virtual workspace."
+
 	GravatarFetchName        = "gravatar_fetch"
 	GravatarFetchDescription = "Fetch a Gravatar profile for an email address."
 	GravatarSetName          = "gravatar_set"
@@ -121,6 +134,165 @@ func WebFetchSchema() map[string]any {
 			},
 		},
 		"required": []string{"url"},
+	}
+}
+
+// ReadSchema returns the JSON schema for the read tool.
+func ReadSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path": map[string]any{
+				"type":        "string",
+				"description": "Path to the file to read (relative to the virtual workspace)",
+			},
+			"file_path": map[string]any{
+				"type":        "string",
+				"description": "OpenClaw/Claude-style alias for path",
+			},
+			"offset": map[string]any{
+				"type":        "number",
+				"description": "Line number to start reading from (1-indexed)",
+			},
+			"limit": map[string]any{
+				"type":        "number",
+				"description": "Maximum number of lines to read",
+			},
+		},
+		"required": []string{"path"},
+	}
+}
+
+// WriteSchema returns the JSON schema for the write tool.
+func WriteSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path": map[string]any{
+				"type":        "string",
+				"description": "Path to the file to write (relative to the virtual workspace)",
+			},
+			"file_path": map[string]any{
+				"type":        "string",
+				"description": "OpenClaw/Claude-style alias for path",
+			},
+			"content": map[string]any{
+				"type":        "string",
+				"description": "Content to write to the file",
+			},
+		},
+		"required": []string{"path", "content"},
+	}
+}
+
+// EditSchema returns the JSON schema for the edit tool.
+func EditSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path": map[string]any{
+				"type":        "string",
+				"description": "Path to the file to edit (relative to the virtual workspace)",
+			},
+			"file_path": map[string]any{
+				"type":        "string",
+				"description": "OpenClaw/Claude-style alias for path",
+			},
+			"oldText": map[string]any{
+				"type":        "string",
+				"description": "Exact text to find and replace (must match exactly)",
+			},
+			"old_string": map[string]any{
+				"type":        "string",
+				"description": "OpenClaw/Claude-style alias for oldText",
+			},
+			"newText": map[string]any{
+				"type":        "string",
+				"description": "Replacement text",
+			},
+			"new_string": map[string]any{
+				"type":        "string",
+				"description": "OpenClaw/Claude-style alias for newText",
+			},
+		},
+		"required": []string{"path", "oldText", "newText"},
+	}
+}
+
+// LsSchema returns the JSON schema for the ls tool.
+func LsSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path": map[string]any{
+				"type":        "string",
+				"description": "Directory to list (default: root)",
+			},
+			"limit": map[string]any{
+				"type":        "number",
+				"description": "Maximum number of entries to return (default: 500)",
+			},
+		},
+	}
+}
+
+// FindSchema returns the JSON schema for the find tool.
+func FindSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"pattern": map[string]any{
+				"type":        "string",
+				"description": "Glob pattern to match files (e.g. '*.md', '**/*.json')",
+			},
+			"path": map[string]any{
+				"type":        "string",
+				"description": "Directory to search in (default: root)",
+			},
+			"limit": map[string]any{
+				"type":        "number",
+				"description": "Maximum number of results (default: 1000)",
+			},
+		},
+		"required": []string{"pattern"},
+	}
+}
+
+// GrepSchema returns the JSON schema for the grep tool.
+func GrepSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"pattern": map[string]any{
+				"type":        "string",
+				"description": "Search pattern (regex or literal string)",
+			},
+			"path": map[string]any{
+				"type":        "string",
+				"description": "Directory or file to search (default: root)",
+			},
+			"glob": map[string]any{
+				"type":        "string",
+				"description": "Filter files by glob pattern, e.g. '*.ts' or '**/*.md'",
+			},
+			"ignoreCase": map[string]any{
+				"type":        "boolean",
+				"description": "Case-insensitive search (default: false)",
+			},
+			"literal": map[string]any{
+				"type":        "boolean",
+				"description": "Treat pattern as literal string instead of regex (default: false)",
+			},
+			"context": map[string]any{
+				"type":        "number",
+				"description": "Number of lines to show before and after each match (default: 0)",
+			},
+			"limit": map[string]any{
+				"type":        "number",
+				"description": "Maximum number of matches to return (default: 100)",
+			},
+		},
+		"required": []string{"pattern"},
 	}
 }
 

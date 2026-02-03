@@ -733,8 +733,8 @@ func (e *BossToolExecutor) ExecuteListTools(ctx context.Context, _ map[string]an
 	// Add profile descriptions
 	profiles := map[string][]string{
 		"minimal": {GroupSearch, GroupMessaging, GroupStatus},
-		"coding":  {GroupCalc, GroupWeb, GroupMessaging, GroupMedia, GroupStatus, GroupMemory},
-		"full":    {GroupCalc, GroupWeb, GroupMessaging, GroupMedia, GroupStatus, GroupMemory},
+		"coding":  {GroupFS, GroupCalc, GroupWeb, GroupMessaging, GroupMedia, GroupStatus, GroupMemory},
+		"full":    {GroupFS, GroupCalc, GroupWeb, GroupMessaging, GroupMedia, GroupStatus, GroupMemory},
 	}
 
 	return JSONResult(map[string]any{

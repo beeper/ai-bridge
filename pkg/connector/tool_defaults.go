@@ -79,6 +79,60 @@ func defaultMemoryGetTool() mcp.Tool {
 	}
 }
 
+func defaultReadTool() mcp.Tool {
+	return mcp.Tool{
+		Name:        toolspec.ReadName,
+		Description: toolspec.ReadDescription,
+		Annotations: &mcp.ToolAnnotations{Title: "Read"},
+		InputSchema: toolspec.ReadSchema(),
+	}
+}
+
+func defaultWriteTool() mcp.Tool {
+	return mcp.Tool{
+		Name:        toolspec.WriteName,
+		Description: toolspec.WriteDescription,
+		Annotations: &mcp.ToolAnnotations{Title: "Write"},
+		InputSchema: toolspec.WriteSchema(),
+	}
+}
+
+func defaultEditTool() mcp.Tool {
+	return mcp.Tool{
+		Name:        toolspec.EditName,
+		Description: toolspec.EditDescription,
+		Annotations: &mcp.ToolAnnotations{Title: "Edit"},
+		InputSchema: toolspec.EditSchema(),
+	}
+}
+
+func defaultLsTool() mcp.Tool {
+	return mcp.Tool{
+		Name:        toolspec.LsName,
+		Description: toolspec.LsDescription,
+		Annotations: &mcp.ToolAnnotations{Title: "Ls"},
+		InputSchema: toolspec.LsSchema(),
+	}
+}
+
+func defaultFindTool() mcp.Tool {
+	return mcp.Tool{
+		Name:        toolspec.FindName,
+		Description: toolspec.FindDescription,
+		Annotations: &mcp.ToolAnnotations{Title: "Find"},
+		InputSchema: toolspec.FindSchema(),
+	}
+}
+
+func defaultGrepTool() mcp.Tool {
+	return mcp.Tool{
+		Name:        toolspec.GrepName,
+		Description: toolspec.GrepDescription,
+		Annotations: &mcp.ToolAnnotations{Title: "Grep"},
+		InputSchema: toolspec.GrepSchema(),
+	}
+}
+
 func defaultGravatarFetchTool() mcp.Tool {
 	return mcp.Tool{
 		Name:        toolspec.GravatarFetchName,
