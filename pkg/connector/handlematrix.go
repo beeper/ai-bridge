@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -865,13 +867,34 @@ func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal
 
 	supportsTools := meta.Capabilities.SupportsToolCalling
 
-	// Builtin tools
-	sb.WriteString("Builtin Tools:\n")
-	for _, tool := range BuiltinTools() {
-		if tool.Name == ToolNameMessage && !hasAssignedAgent(meta) {
+	loginMeta := loginMetadata(oc.UserLogin)
+	ensureToolsConfig(meta, loginMeta.Provider)
+
+	// Tools from config (includes sessions when assigned)
+	sb.WriteString("Tools:\n")
+	names := make([]string, 0, len(meta.ToolsConfig.Tools))
+	for name, entry := range meta.ToolsConfig.Tools {
+		if entry == nil {
 			continue
 		}
-		enabled := oc.isToolEnabled(meta, tool.Name)
+		if name == ToolNameMessage && !hasAssignedAgent(meta) {
+			continue
+		}
+		if tools.IsSessionTool(name) && !hasAssignedAgent(meta) {
+			continue
+		}
+		if (name == toolspec.GravatarFetchName || name == toolspec.GravatarSetName) && !hasBossAgent(meta) {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		entry := meta.ToolsConfig.Tools[name]
+		if entry == nil {
+			continue
+		}
+		enabled := oc.isToolEnabled(meta, name)
 		status := "✗"
 		if enabled {
 			status = "✓"
@@ -880,7 +903,7 @@ func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal
 		if !supportsTools {
 			availability = " (model doesn't support tools)"
 		}
-		sb.WriteString(fmt.Sprintf("  [%s] %s: %s%s\n", status, tool.Name, tool.Description, availability))
+		sb.WriteString(fmt.Sprintf("  [%s] %s: %s%s\n", status, name, entry.Tool.Description, availability))
 	}
 
 	if !supportsTools {

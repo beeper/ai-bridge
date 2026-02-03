@@ -88,27 +88,6 @@ func (q *ReactionQueue) DrainFeedback() []ReactionFeedback {
 	return result
 }
 
-// PeekFeedback returns queued feedback without clearing.
-func (q *ReactionQueue) PeekFeedback() []ReactionFeedback {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if len(q.feedback) == 0 {
-		return nil
-	}
-
-	result := make([]ReactionFeedback, len(q.feedback))
-	copy(result, q.feedback)
-	return result
-}
-
-// HasFeedback returns true if there's pending feedback.
-func (q *ReactionQueue) HasFeedback() bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return len(q.feedback) > 0
-}
-
 // EnqueueReactionFeedback adds reaction feedback for a room.
 func EnqueueReactionFeedback(roomID id.RoomID, feedback ReactionFeedback) {
 	q := getReactionQueue(roomID)

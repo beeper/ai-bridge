@@ -21,6 +21,7 @@ type Config struct {
 	// Global settings
 	DefaultSystemPrompt string        `yaml:"default_system_prompt"`
 	ModelCacheDuration  time.Duration `yaml:"model_cache_duration"`
+	MemorySearch        *MemorySearchConfig `yaml:"memory_search"`
 
 	// Context pruning configuration (OpenClaw-style)
 	Pruning *PruningConfig `yaml:"pruning"`
@@ -30,6 +31,98 @@ type Config struct {
 
 	// Inbound message processing configuration
 	Inbound *InboundConfig `yaml:"inbound"`
+}
+
+// MemorySearchConfig configures semantic memory search (OpenClaw-style).
+type MemorySearchConfig struct {
+	Enabled      *bool                         `yaml:"enabled"`
+	Sources      []string                      `yaml:"sources"`
+	ExtraPaths   []string                      `yaml:"extra_paths"`
+	Provider     string                        `yaml:"provider"`
+	Model        string                        `yaml:"model"`
+	Remote       *MemorySearchRemoteConfig     `yaml:"remote"`
+	Fallback     string                        `yaml:"fallback"`
+	Local        *MemorySearchLocalConfig      `yaml:"local"`
+	Store        *MemorySearchStoreConfig      `yaml:"store"`
+	Chunking     *MemorySearchChunkingConfig   `yaml:"chunking"`
+	Sync         *MemorySearchSyncConfig       `yaml:"sync"`
+	Query        *MemorySearchQueryConfig      `yaml:"query"`
+	Cache        *MemorySearchCacheConfig      `yaml:"cache"`
+	Experimental *MemorySearchExperimentalConfig `yaml:"experimental"`
+}
+
+type MemorySearchRemoteConfig struct {
+	BaseURL string            `yaml:"base_url"`
+	APIKey  string            `yaml:"api_key"`
+	Headers map[string]string `yaml:"headers"`
+	Batch   *MemorySearchBatchConfig `yaml:"batch"`
+}
+
+type MemorySearchBatchConfig struct {
+	Enabled       *bool `yaml:"enabled"`
+	Wait          *bool `yaml:"wait"`
+	Concurrency   int   `yaml:"concurrency"`
+	PollIntervalMs int  `yaml:"poll_interval_ms"`
+	TimeoutMinutes int  `yaml:"timeout_minutes"`
+}
+
+type MemorySearchLocalConfig struct {
+	ModelPath   string `yaml:"model_path"`
+	ModelCacheDir string `yaml:"model_cache_dir"`
+	BaseURL     string `yaml:"base_url"`
+	APIKey      string `yaml:"api_key"`
+}
+
+type MemorySearchStoreConfig struct {
+	Driver string `yaml:"driver"`
+	Path   string `yaml:"path"`
+	Vector *MemorySearchVectorConfig `yaml:"vector"`
+}
+
+type MemorySearchVectorConfig struct {
+	Enabled       *bool `yaml:"enabled"`
+	ExtensionPath string `yaml:"extension_path"`
+}
+
+type MemorySearchChunkingConfig struct {
+	Tokens  int `yaml:"tokens"`
+	Overlap int `yaml:"overlap"`
+}
+
+type MemorySearchSyncConfig struct {
+	OnSessionStart *bool `yaml:"on_session_start"`
+	OnSearch       *bool `yaml:"on_search"`
+	Watch          *bool `yaml:"watch"`
+	WatchDebounceMs int  `yaml:"watch_debounce_ms"`
+	IntervalMinutes int  `yaml:"interval_minutes"`
+	Sessions       *MemorySearchSessionSyncConfig `yaml:"sessions"`
+}
+
+type MemorySearchSessionSyncConfig struct {
+	DeltaBytes    int `yaml:"delta_bytes"`
+	DeltaMessages int `yaml:"delta_messages"`
+}
+
+type MemorySearchQueryConfig struct {
+	MaxResults int `yaml:"max_results"`
+	MinScore   float64 `yaml:"min_score"`
+	Hybrid     *MemorySearchHybridConfig `yaml:"hybrid"`
+}
+
+type MemorySearchHybridConfig struct {
+	Enabled            *bool   `yaml:"enabled"`
+	VectorWeight       float64 `yaml:"vector_weight"`
+	TextWeight         float64 `yaml:"text_weight"`
+	CandidateMultiplier int    `yaml:"candidate_multiplier"`
+}
+
+type MemorySearchCacheConfig struct {
+	Enabled   *bool `yaml:"enabled"`
+	MaxEntries int `yaml:"max_entries"`
+}
+
+type MemorySearchExperimentalConfig struct {
+	SessionMemory *bool `yaml:"session_memory"`
 }
 
 // ToolProvidersConfig configures external tool providers like search and fetch.

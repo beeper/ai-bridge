@@ -195,6 +195,21 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 			params.Tools = append(params.Tools, ToOpenAITools(enabledTools, strictMode, &oc.log)...)
 			log.Debug().Int("count", len(enabledTools)).Msg("Added builtin function tools")
 		}
+
+		// Add session tools for non-boss rooms
+		if !oc.isBuilderRoom(portal) {
+			var enabledSessions []*tools.Tool
+			for _, tool := range tools.SessionTools() {
+				if oc.isToolEnabled(meta, tool.Name) {
+					enabledSessions = append(enabledSessions, tool)
+				}
+			}
+			if len(enabledSessions) > 0 {
+				strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
+				params.Tools = append(params.Tools, bossToolsToOpenAI(enabledSessions, strictMode, &oc.log)...)
+				log.Debug().Int("count", len(enabledSessions)).Msg("Added session tools")
+			}
+		}
 	}
 
 	// Add boss tools if this is the Builder room
@@ -345,6 +360,9 @@ func (oc *AIClient) streamingResponse(
 	typingCtrl := NewTypingController(oc, ctx, portal)
 	typingCtrl.Start()
 	defer typingCtrl.Stop()
+	touchTyping := func() {
+		typingCtrl.RefreshTTL()
+	}
 
 	// Apply proactive context pruning if enabled
 	messages = oc.applyProactivePruning(ctx, messages, meta)
@@ -403,6 +421,7 @@ func (oc *AIClient) streamingResponse(
 
 		switch streamEvent.Type {
 		case "response.output_text.delta":
+			touchTyping()
 			state.accumulated.WriteString(streamEvent.Delta)
 
 			// First token - send initial message synchronously to capture event_id
@@ -433,6 +452,7 @@ func (oc *AIClient) streamingResponse(
 			}
 
 		case "response.reasoning_text.delta":
+			touchTyping()
 			state.reasoning.WriteString(streamEvent.Delta)
 
 			// Check if this is first content (reasoning before text)
@@ -457,6 +477,7 @@ func (oc *AIClient) streamingResponse(
 			}
 
 		case "response.function_call_arguments.delta":
+			touchTyping()
 			// Get or create active tool call
 			tool, exists := activeTools[streamEvent.ItemID]
 			if !exists {
@@ -494,6 +515,7 @@ func (oc *AIClient) streamingResponse(
 			}
 
 		case "response.function_call_arguments.done":
+			touchTyping()
 			// Function call complete - execute the tool and send result
 			tool, exists := activeTools[streamEvent.ItemID]
 			if !exists {
@@ -674,6 +696,7 @@ func (oc *AIClient) streamingResponse(
 			oc.emitGenerationStatus(ctx, portal, state, "generating", "Continuing generation...", nil)
 
 		case "response.web_search_call.searching":
+			touchTyping()
 			// Web search starting
 			tool := &activeToolCall{
 				callID:      NewCallID(),
@@ -696,6 +719,7 @@ func (oc *AIClient) streamingResponse(
 			oc.emitToolProgress(ctx, portal, state, tool, ToolStatusRunning, "Searching...", 0)
 
 		case "response.web_search_call.completed":
+			touchTyping()
 			// Web search completed
 			tool, exists := activeTools[streamEvent.ItemID]
 			if exists {
@@ -728,6 +752,7 @@ func (oc *AIClient) streamingResponse(
 			oc.emitGenerationStatus(ctx, portal, state, "generating", "Continuing generation...", nil)
 
 		case "response.image_generation_call.in_progress", "response.image_generation_call.generating":
+			touchTyping()
 			// Image generation in progress
 			tool, exists := activeTools[streamEvent.ItemID]
 			if !exists {
@@ -755,6 +780,7 @@ func (oc *AIClient) streamingResponse(
 			log.Debug().Str("item_id", streamEvent.ItemID).Msg("Image generation in progress")
 
 		case "response.image_generation_call.completed":
+			touchTyping()
 			// Image generation completed - the actual image data will be in response.completed
 			tool, exists := activeTools[streamEvent.ItemID]
 			if exists {
@@ -885,6 +911,7 @@ func (oc *AIClient) streamingResponse(
 
 			switch streamEvent.Type {
 			case "response.output_text.delta":
+				touchTyping()
 				state.accumulated.WriteString(streamEvent.Delta)
 				if !state.firstToken && state.initialEventID != "" {
 					state.sequenceNum++
@@ -892,6 +919,7 @@ func (oc *AIClient) streamingResponse(
 				}
 
 			case "response.reasoning_text.delta":
+				touchTyping()
 				state.reasoning.WriteString(streamEvent.Delta)
 				if !state.firstToken && state.initialEventID != "" {
 					state.sequenceNum++
@@ -899,6 +927,7 @@ func (oc *AIClient) streamingResponse(
 				}
 
 			case "response.function_call_arguments.delta":
+				touchTyping()
 				tool, exists := activeTools[streamEvent.ItemID]
 				if !exists {
 					if !ensureInitialEvent() {
@@ -920,6 +949,7 @@ func (oc *AIClient) streamingResponse(
 				tool.input.WriteString(streamEvent.Delta)
 
 			case "response.function_call_arguments.done":
+				touchTyping()
 				tool, exists := activeTools[streamEvent.ItemID]
 				if !exists {
 					if !ensureInitialEvent() {
@@ -1109,6 +1139,8 @@ func (oc *AIClient) streamingResponse(
 		}
 	}
 
+	typingCtrl.MarkRunComplete()
+
 	// Send final edit to persist complete content with metadata (including reasoning)
 	if state.initialEventID != "" {
 		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
@@ -1208,6 +1240,20 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 		params.Tools = append(params.Tools, bossToolsToOpenAI(bossTools, strictMode, &oc.log)...)
 	}
 
+	// Add session tools for non-boss rooms (needed for multi-turn tool use)
+	if meta.Capabilities.SupportsToolCalling && !agents.IsBossAgent(agentID) {
+		var enabledSessions []*tools.Tool
+		for _, tool := range tools.SessionTools() {
+			if oc.isToolEnabled(meta, tool.Name) {
+				enabledSessions = append(enabledSessions, tool)
+			}
+		}
+		if len(enabledSessions) > 0 {
+			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
+			params.Tools = append(params.Tools, bossToolsToOpenAI(enabledSessions, strictMode, &oc.log)...)
+		}
+	}
+
 	// Prevent duplicate tool names (Anthropic rejects duplicates)
 	params.Tools = dedupeToolParams(params.Tools)
 
@@ -1239,6 +1285,9 @@ func (oc *AIClient) streamChatCompletions(
 	typingCtrl := NewTypingController(oc, ctx, portal)
 	typingCtrl.Start()
 	defer typingCtrl.Stop()
+	touchTyping := func() {
+		typingCtrl.RefreshTTL()
+	}
 
 	// Apply proactive context pruning if enabled
 	messages = oc.applyProactivePruning(ctx, messages, meta)
@@ -1259,6 +1308,17 @@ func (oc *AIClient) streamChatCompletions(
 		})
 		if len(enabledTools) > 0 {
 			params.Tools = append(params.Tools, ToOpenAIChatTools(enabledTools, &oc.log)...)
+		}
+		if !oc.isBuilderRoom(portal) {
+			var enabledSessions []*tools.Tool
+			for _, tool := range tools.SessionTools() {
+				if oc.isToolEnabled(meta, tool.Name) {
+					enabledSessions = append(enabledSessions, tool)
+				}
+			}
+			if len(enabledSessions) > 0 {
+				params.Tools = append(params.Tools, bossToolsToChatTools(enabledSessions, &oc.log)...)
+			}
 		}
 		if oc.isBuilderRoom(portal) {
 			bossTools := tools.BossTools()
@@ -1290,6 +1350,7 @@ func (oc *AIClient) streamChatCompletions(
 
 		for _, choice := range chunk.Choices {
 			if choice.Delta.Content != "" {
+				touchTyping()
 				state.accumulated.WriteString(choice.Delta.Content)
 
 				if state.firstToken && state.accumulated.Len() > 0 {
@@ -1318,6 +1379,7 @@ func (oc *AIClient) streamChatCompletions(
 
 			// Handle tool calls from Chat Completions API
 			for _, toolDelta := range choice.Delta.ToolCalls {
+				touchTyping()
 				toolIdx := int(toolDelta.Index)
 				tool, exists := activeTools[toolIdx]
 				if !exists {
@@ -1397,6 +1459,7 @@ func (oc *AIClient) streamChatCompletions(
 	// Execute any accumulated tool calls
 	for _, tool := range activeTools {
 		if tool.input.Len() > 0 && tool.toolName != "" && oc.isToolEnabled(meta, tool.toolName) {
+			touchTyping()
 			// Wrap context with bridge info for tools that need it (e.g., channel-edit, react)
 			toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
 				Client:        oc,
@@ -1517,6 +1580,8 @@ func (oc *AIClient) streamChatCompletions(
 			oc.emitGenerationStatus(ctx, portal, state, "generating", "Continuing generation...", nil)
 		}
 	}
+
+	typingCtrl.MarkRunComplete()
 
 	state.completedAtMs = time.Now().UnixMilli()
 	oc.emitGenerationStatus(ctx, portal, state, "completed", "Generation complete", nil)

@@ -34,6 +34,7 @@ func BuiltinTools() []*Tool {
 // AllTools returns all tools (builtin + provider markers).
 func AllTools() []*Tool {
 	tools := BuiltinTools()
+	tools = append(tools, SessionTools()...)
 	tools = append(tools, ProviderTools()...)
 	return tools
 }

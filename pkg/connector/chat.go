@@ -43,7 +43,8 @@ func hasBossAgent(meta *PortalMetadata) bool {
 }
 
 func isBossPrivilegedTool(toolName string) bool {
-	return tools.IsBossTool(toolName) || toolName == toolspec.GravatarFetchName || toolName == toolspec.GravatarSetName
+	return (tools.IsBossTool(toolName) && !tools.IsSessionTool(toolName)) ||
+		toolName == toolspec.GravatarFetchName || toolName == toolspec.GravatarSetName
 }
 
 // getDefaultToolsConfig returns the default tools configuration for a new room.
@@ -70,6 +71,11 @@ func getDefaultToolsConfig(_ string) ToolsConfig {
 	registerTool(&config, defaultMemoryGetTool(), "builtin")
 	registerTool(&config, defaultMemoryStoreTool(), "builtin")
 	registerTool(&config, defaultMemoryForgetTool(), "builtin")
+
+	// Session tools
+	registerTool(&config, defaultSessionsListTool(), "builtin")
+	registerTool(&config, defaultSessionsHistoryTool(), "builtin")
+	registerTool(&config, defaultSessionsSendTool(), "builtin")
 
 	// Gravatar tools (filtered later based on boss agent presence)
 	registerTool(&config, defaultGravatarFetchTool(), "builtin")
@@ -153,6 +159,35 @@ func ensureToolsConfig(meta *PortalMetadata, provider string) bool {
 		changed = true
 	}
 
+	// Only expose session tools when an agent is assigned to the room.
+	if hasAssignedAgent(meta) {
+		if _, ok := meta.ToolsConfig.Tools[tools.SessionsListTool.Name]; !ok {
+			registerTool(&meta.ToolsConfig, defaultSessionsListTool(), "builtin")
+			changed = true
+		}
+		if _, ok := meta.ToolsConfig.Tools[tools.SessionsHistoryTool.Name]; !ok {
+			registerTool(&meta.ToolsConfig, defaultSessionsHistoryTool(), "builtin")
+			changed = true
+		}
+		if _, ok := meta.ToolsConfig.Tools[tools.SessionsSendTool.Name]; !ok {
+			registerTool(&meta.ToolsConfig, defaultSessionsSendTool(), "builtin")
+			changed = true
+		}
+	} else {
+		if _, ok := meta.ToolsConfig.Tools[tools.SessionsListTool.Name]; ok {
+			delete(meta.ToolsConfig.Tools, tools.SessionsListTool.Name)
+			changed = true
+		}
+		if _, ok := meta.ToolsConfig.Tools[tools.SessionsHistoryTool.Name]; ok {
+			delete(meta.ToolsConfig.Tools, tools.SessionsHistoryTool.Name)
+			changed = true
+		}
+		if _, ok := meta.ToolsConfig.Tools[tools.SessionsSendTool.Name]; ok {
+			delete(meta.ToolsConfig.Tools, tools.SessionsSendTool.Name)
+			changed = true
+		}
+	}
+
 	// Only expose Gravatar tools when the Boss agent is assigned to the room.
 	if hasBossAgent(meta) {
 		if _, ok := meta.ToolsConfig.Tools[toolspec.GravatarFetchName]; !ok {
@@ -208,6 +243,9 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 			continue
 		}
 		if name == ToolNameMessage && !hasAssignedAgent(meta) {
+			continue
+		}
+		if tools.IsSessionTool(name) && !hasAssignedAgent(meta) {
 			continue
 		}
 		if (name == toolspec.GravatarFetchName || name == toolspec.GravatarSetName) && !hasBossAgent(meta) {
@@ -288,6 +326,9 @@ func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
 	}
 
 	if toolName == ToolNameMessage && !hasAssignedAgent(meta) {
+		return false
+	}
+	if tools.IsSessionTool(toolName) && !hasAssignedAgent(meta) {
 		return false
 	}
 	if (toolName == toolspec.GravatarFetchName || toolName == toolspec.GravatarSetName) && !hasBossAgent(meta) {

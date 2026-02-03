@@ -382,7 +382,7 @@ var SessionsListTool = &Tool{
 		},
 	},
 	Type:  ToolTypeBuiltin,
-	Group: GroupBuilder,
+	Group: GroupSessions,
 }
 
 // SessionsHistoryTool tool definition.
@@ -407,7 +407,7 @@ var SessionsHistoryTool = &Tool{
 		},
 	},
 	Type:  ToolTypeBuiltin,
-	Group: GroupBuilder,
+	Group: GroupSessions,
 }
 
 // SessionsSendTool tool definition.
@@ -432,7 +432,7 @@ var SessionsSendTool = &Tool{
 		},
 	},
 	Type:  ToolTypeBuiltin,
-	Group: GroupBuilder,
+	Group: GroupSessions,
 }
 
 // BossTools returns all boss agent tools.
@@ -456,6 +456,25 @@ func BossTools() []*Tool {
 		SessionsHistoryTool,
 		SessionsSendTool,
 	}
+}
+
+// SessionTools returns the cross-session tools available to non-boss agents.
+func SessionTools() []*Tool {
+	return []*Tool{
+		SessionsListTool,
+		SessionsHistoryTool,
+		SessionsSendTool,
+	}
+}
+
+// IsSessionTool checks if a tool name is a session tool.
+func IsSessionTool(toolName string) bool {
+	for _, t := range SessionTools() {
+		if t.Name == toolName {
+			return true
+		}
+	}
+	return false
 }
 
 // IsBossTool checks if a tool name is a Boss agent tool.

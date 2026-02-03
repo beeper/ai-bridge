@@ -18,6 +18,9 @@ func TestDefaultToolsConfigIncludesCoreTools(t *testing.T) {
 		toolspec.MemoryGetName,
 		toolspec.MemoryStoreName,
 		toolspec.MemoryForgetName,
+		"sessions_list",
+		"sessions_history",
+		"sessions_send",
 		toolspec.GravatarFetchName,
 		toolspec.GravatarSetName,
 	}

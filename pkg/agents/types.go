@@ -36,6 +36,8 @@ type AgentDefinition struct {
 
 	// Memory configuration (optional, uses defaults if nil)
 	Memory *MemoryConfig `json:"memory,omitempty"`
+	// Memory search configuration override (OpenClaw-style)
+	MemorySearch *MemorySearchConfig `json:"memory_search,omitempty"`
 
 	// Metadata
 	IsPreset  bool  `json:"is_preset,omitempty"`
@@ -86,6 +88,98 @@ type MemoryConfig struct {
 	EnableGlobal *bool    `json:"enable_global,omitempty"` // nil = true (access global memory)
 	MaxResults   int      `json:"max_results,omitempty"`   // default: 6
 	MinScore     float64  `json:"min_score,omitempty"`     // default: 0.35
+}
+
+// MemorySearchConfig configures semantic memory search (OpenClaw-style).
+type MemorySearchConfig struct {
+	Enabled      *bool                          `json:"enabled,omitempty"`
+	Sources      []string                       `json:"sources,omitempty"`
+	ExtraPaths   []string                       `json:"extra_paths,omitempty"`
+	Provider     string                         `json:"provider,omitempty"`
+	Model        string                         `json:"model,omitempty"`
+	Remote       *MemorySearchRemoteConfig      `json:"remote,omitempty"`
+	Fallback     string                         `json:"fallback,omitempty"`
+	Local        *MemorySearchLocalConfig       `json:"local,omitempty"`
+	Store        *MemorySearchStoreConfig       `json:"store,omitempty"`
+	Chunking     *MemorySearchChunkingConfig    `json:"chunking,omitempty"`
+	Sync         *MemorySearchSyncConfig        `json:"sync,omitempty"`
+	Query        *MemorySearchQueryConfig       `json:"query,omitempty"`
+	Cache        *MemorySearchCacheConfig       `json:"cache,omitempty"`
+	Experimental *MemorySearchExperimentalConfig `json:"experimental,omitempty"`
+}
+
+type MemorySearchRemoteConfig struct {
+	BaseURL string            `json:"base_url,omitempty"`
+	APIKey  string            `json:"api_key,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Batch   *MemorySearchBatchConfig `json:"batch,omitempty"`
+}
+
+type MemorySearchBatchConfig struct {
+	Enabled        *bool `json:"enabled,omitempty"`
+	Wait           *bool `json:"wait,omitempty"`
+	Concurrency    int   `json:"concurrency,omitempty"`
+	PollIntervalMs int   `json:"poll_interval_ms,omitempty"`
+	TimeoutMinutes int   `json:"timeout_minutes,omitempty"`
+}
+
+type MemorySearchLocalConfig struct {
+	ModelPath    string `json:"model_path,omitempty"`
+	ModelCacheDir string `json:"model_cache_dir,omitempty"`
+	BaseURL      string `json:"base_url,omitempty"`
+	APIKey       string `json:"api_key,omitempty"`
+}
+
+type MemorySearchStoreConfig struct {
+	Driver string `json:"driver,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Vector *MemorySearchVectorConfig `json:"vector,omitempty"`
+}
+
+type MemorySearchVectorConfig struct {
+	Enabled       *bool `json:"enabled,omitempty"`
+	ExtensionPath string `json:"extension_path,omitempty"`
+}
+
+type MemorySearchChunkingConfig struct {
+	Tokens  int `json:"tokens,omitempty"`
+	Overlap int `json:"overlap,omitempty"`
+}
+
+type MemorySearchSyncConfig struct {
+	OnSessionStart *bool `json:"on_session_start,omitempty"`
+	OnSearch       *bool `json:"on_search,omitempty"`
+	Watch          *bool `json:"watch,omitempty"`
+	WatchDebounceMs int  `json:"watch_debounce_ms,omitempty"`
+	IntervalMinutes int  `json:"interval_minutes,omitempty"`
+	Sessions       *MemorySearchSessionSyncConfig `json:"sessions,omitempty"`
+}
+
+type MemorySearchSessionSyncConfig struct {
+	DeltaBytes    int `json:"delta_bytes,omitempty"`
+	DeltaMessages int `json:"delta_messages,omitempty"`
+}
+
+type MemorySearchQueryConfig struct {
+	MaxResults int `json:"max_results,omitempty"`
+	MinScore   float64 `json:"min_score,omitempty"`
+	Hybrid     *MemorySearchHybridConfig `json:"hybrid,omitempty"`
+}
+
+type MemorySearchHybridConfig struct {
+	Enabled            *bool   `json:"enabled,omitempty"`
+	VectorWeight       float64 `json:"vector_weight,omitempty"`
+	TextWeight         float64 `json:"text_weight,omitempty"`
+	CandidateMultiplier int    `json:"candidate_multiplier,omitempty"`
+}
+
+type MemorySearchCacheConfig struct {
+	Enabled   *bool `json:"enabled,omitempty"`
+	MaxEntries int `json:"max_entries,omitempty"`
+}
+
+type MemorySearchExperimentalConfig struct {
+	SessionMemory *bool `json:"session_memory,omitempty"`
 }
 
 // Clone creates a deep copy of the memory config.
@@ -173,6 +267,13 @@ func (a *AgentDefinition) Clone() *AgentDefinition {
 
 	if a.Memory != nil {
 		clone.Memory = a.Memory.Clone()
+	}
+	if a.MemorySearch != nil {
+		copyBytes, _ := json.Marshal(a.MemorySearch)
+		var ms MemorySearchConfig
+		if err := json.Unmarshal(copyBytes, &ms); err == nil {
+			clone.MemorySearch = &ms
+		}
 	}
 
 	return clone

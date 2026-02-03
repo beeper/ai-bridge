@@ -36,15 +36,3 @@ func (r *Registry) Get(name string) Provider {
 	}
 	return r.providers[name]
 }
-
-// Names returns registered provider names.
-func (r *Registry) Names() []string {
-	if r == nil {
-		return nil
-	}
-	out := make([]string, 0, len(r.providers))
-	for name := range r.providers {
-		out = append(out, name)
-	}
-	return out
-}

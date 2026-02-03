@@ -3,6 +3,7 @@ package connector
 import (
 	"reflect"
 
+	"github.com/beeper/ai-bridge/pkg/agents"
 	"maunium.net/go/mautrix/event"
 )
 
@@ -774,6 +775,7 @@ type AgentDefinitionContent struct {
 	IdentityPersona string             `json:"identity_persona,omitempty"`
 	IsPreset        bool               `json:"is_preset,omitempty"`
 	MemoryConfig    *AgentMemoryConfig `json:"memory_config,omitempty"` // Memory configuration (matches OpenClaw)
+	MemorySearch    *agents.MemorySearchConfig `json:"memory_search,omitempty"`
 	CreatedAt       int64              `json:"created_at"`
 	UpdatedAt       int64              `json:"updated_at"`
 }
