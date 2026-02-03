@@ -19,6 +19,7 @@ func (oc *AIClient) notifySessionMemoryChange(
 	if oc == nil || portal == nil || meta == nil {
 		return
 	}
+	ctx = oc.backgroundContext(ctx)
 	agentID := resolveAgentID(meta)
 	manager, _ := getMemorySearchManager(oc, agentID)
 	if manager == nil {
@@ -39,6 +40,9 @@ func (m *MemorySearchManager) notifySessionChanged(ctx context.Context, sessionK
 	if force && key != "" {
 		_ = m.resetSessionState(ctx, key)
 	}
+	m.mu.Lock()
+	m.sessionsDirty = true
+	m.mu.Unlock()
 	m.scheduleSessionSync(key)
 }
 

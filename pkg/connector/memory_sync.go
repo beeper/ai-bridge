@@ -12,7 +12,7 @@ func (m *MemorySearchManager) warmSession(ctx context.Context, sessionKey string
 	if m == nil || m.cfg == nil {
 		return
 	}
-	if !m.cfg.Sync.OnSessionStart || m.cfg.Sync.OnSearch {
+	if !m.cfg.Sync.OnSessionStart {
 		return
 	}
 	key := strings.TrimSpace(sessionKey)
