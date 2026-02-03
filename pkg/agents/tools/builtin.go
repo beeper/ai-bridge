@@ -42,6 +42,7 @@ func BuiltinTools() []*Tool {
 		TTSTool,
 		GravatarFetchTool,
 		ReadTool,
+		ApplyPatchTool,
 		WriteTool,
 		EditTool,
 	}
