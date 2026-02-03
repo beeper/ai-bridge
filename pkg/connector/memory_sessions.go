@@ -77,7 +77,7 @@ func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sess
 		state, _ := m.loadSessionState(ctx, key)
 		maxRowID, deltaBytes, deltaMessages, err := m.computeSessionDelta(ctx, session.portalKey, state.lastRowID)
 		if err != nil {
-			m.log.Warn().Err(err).Str("session", key).Msg("memory session delta failed")
+			m.log.Warn().Str("session", key).Msg("memory session delta failed: " + err.Error())
 			continue
 		}
 

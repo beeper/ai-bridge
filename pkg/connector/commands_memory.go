@@ -47,6 +47,13 @@ func fnMemory(ce *commands.Event) {
 			ce.Reply("Memory search disabled: %s", errMsg)
 			return
 		}
+		deep := false
+		if len(ce.Args) > 1 {
+			switch strings.ToLower(strings.TrimSpace(ce.Args[1])) {
+			case "deep", "probe", "verbose":
+				deep = true
+			}
+		}
 		status, err := manager.StatusDetails(ce.Ctx)
 		if err != nil {
 			ce.Reply("Failed to fetch memory status: %v", err)
@@ -56,10 +63,18 @@ func fnMemory(ce *commands.Event) {
 			"Memory status:",
 			fmt.Sprintf("Provider: %s", status.Provider),
 			fmt.Sprintf("Model: %s", status.Model),
+			fmt.Sprintf("Requested provider: %s", status.RequestedProvider),
+			fmt.Sprintf("Workspace: %s", status.WorkspaceDir),
+			fmt.Sprintf("DB: %s", status.DBPath),
 			fmt.Sprintf("Sources: %s", strings.Join(status.Sources, ", ")),
 			fmt.Sprintf("Extra paths: %s", strings.Join(status.ExtraPaths, ", ")),
 			fmt.Sprintf("Files: %d", status.Files),
 			fmt.Sprintf("Chunks: %d", status.Chunks),
+		}
+		if len(status.SourceCounts) > 0 {
+			for _, source := range status.SourceCounts {
+				lines = append(lines, fmt.Sprintf("Source %s: %d files / %d chunks", source.Source, source.Files, source.Chunks))
+			}
 		}
 		if status.Vector != nil {
 			ready := "unknown"
@@ -67,6 +82,12 @@ func fnMemory(ce *commands.Event) {
 				ready = fmt.Sprintf("%t", *status.Vector.Available)
 			}
 			lines = append(lines, fmt.Sprintf("Vector enabled: %t (available=%s)", status.Vector.Enabled, ready))
+			if status.Vector.ExtensionPath != "" {
+				lines = append(lines, fmt.Sprintf("Vector extension: %s", status.Vector.ExtensionPath))
+			}
+			if status.Vector.Dims > 0 {
+				lines = append(lines, fmt.Sprintf("Vector dims: %d", status.Vector.Dims))
+			}
 			if status.Vector.LoadError != "" {
 				lines = append(lines, fmt.Sprintf("Vector error: %s", status.Vector.LoadError))
 			}
@@ -78,16 +99,32 @@ func fnMemory(ce *commands.Event) {
 			}
 		}
 		if status.Cache != nil {
-			lines = append(lines, fmt.Sprintf("Cache enabled: %t (entries=%d)", status.Cache.Enabled, status.Cache.Entries))
+			lines = append(lines, fmt.Sprintf("Cache enabled: %t (entries=%d max=%d)", status.Cache.Enabled, status.Cache.Entries, status.Cache.MaxEntries))
 		}
 		if status.Batch != nil {
-			lines = append(lines, fmt.Sprintf("Batch enabled: %t (failures=%d)", status.Batch.Enabled, status.Batch.Failures))
+			lines = append(lines, fmt.Sprintf("Batch enabled: %t (failures=%d limit=%d)", status.Batch.Enabled, status.Batch.Failures, status.Batch.Limit))
+			lines = append(lines, fmt.Sprintf("Batch wait: %t concurrency=%d poll=%dms timeout=%dms", status.Batch.Wait, status.Batch.Concurrency, status.Batch.PollIntervalMs, status.Batch.TimeoutMs))
 			if status.Batch.LastError != "" {
 				lines = append(lines, fmt.Sprintf("Batch error: %s", status.Batch.LastError))
+			}
+			if status.Batch.LastProvider != "" {
+				lines = append(lines, fmt.Sprintf("Batch provider: %s", status.Batch.LastProvider))
 			}
 		}
 		if status.Fallback != nil {
 			lines = append(lines, fmt.Sprintf("Fallback: %s (%s)", status.Fallback.From, status.Fallback.Reason))
+		}
+		if deep {
+			if status.Vector != nil && status.Vector.Enabled {
+				vectorOk := manager.ProbeVectorAvailability(ce.Ctx)
+				lines = append(lines, fmt.Sprintf("Vector probe: %t", vectorOk))
+			}
+			embedOk, embedErr := manager.ProbeEmbeddingAvailability(ce.Ctx)
+			if embedErr != "" {
+				lines = append(lines, fmt.Sprintf("Embedding probe: %t (%s)", embedOk, embedErr))
+			} else {
+				lines = append(lines, fmt.Sprintf("Embedding probe: %t", embedOk))
+			}
 		}
 		ce.Reply(strings.Join(lines, "\n"))
 		return

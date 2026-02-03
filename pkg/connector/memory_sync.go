@@ -31,7 +31,7 @@ func (m *MemorySearchManager) warmSession(ctx context.Context, sessionKey string
 
 	go func() {
 		if err := m.sync(context.Background(), key, false); err != nil {
-			m.log.Warn().Err(err).Str("session", key).Msg("memory sync failed on session start")
+			m.log.Warn().Str("session", key).Msg("memory sync failed (session-start): " + err.Error())
 		}
 	}()
 }
@@ -70,7 +70,7 @@ func (m *MemorySearchManager) scheduleWatchSync() {
 		m.watchTimer = nil
 		m.mu.Unlock()
 		if err := m.sync(context.Background(), "", false); err != nil {
-			m.log.Warn().Err(err).Msg("memory sync failed on watch")
+			m.log.Warn().Msg("memory sync failed (watch): " + err.Error())
 		}
 	})
 	m.mu.Unlock()
@@ -90,7 +90,7 @@ func (m *MemorySearchManager) ensureIntervalSync() {
 			defer ticker.Stop()
 			for range ticker.C {
 				if err := m.sync(context.Background(), "", false); err != nil {
-					m.log.Warn().Err(err).Msg("memory sync failed on interval")
+					m.log.Warn().Msg("memory sync failed (interval): " + err.Error())
 				}
 			}
 		}()

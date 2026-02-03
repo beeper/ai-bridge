@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -168,7 +170,6 @@ func getMemorySearchManager(client *AIClient, agentID string) (*MemorySearchMana
 	manager.batchEnabled = cfg.Remote.Batch.Enabled
 
 	manager.ensureSchema(context.Background())
-	manager.ensureVectorConn(context.Background())
 	manager.ensureIntervalSync()
 	memoryManagerCache.managers[cacheKey] = manager
 	return manager, ""
@@ -178,19 +179,42 @@ func (m *MemorySearchManager) Status() memory.ProviderStatus {
 	return m.status
 }
 
+func (m *MemorySearchManager) ProbeVectorAvailability(ctx context.Context) bool {
+	if m == nil || m.cfg == nil || !m.cfg.Store.Vector.Enabled {
+		return false
+	}
+	m.ensureVectorConn(ctx)
+	m.mu.Lock()
+	ready := m.vectorReady
+	m.mu.Unlock()
+	return ready
+}
+
+func (m *MemorySearchManager) ProbeEmbeddingAvailability(ctx context.Context) (bool, string) {
+	if m == nil || m.provider == nil {
+		return false, "memory search unavailable"
+	}
+	_, err := m.embedBatchWithRetry(ctx, []string{"ping"})
+	if err != nil {
+		return false, err.Error()
+	}
+	return true, ""
+}
+
 func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchStatus, error) {
 	if m == nil {
 		return nil, fmt.Errorf("memory search unavailable")
 	}
+	workspaceDir := resolvePromptWorkspaceDir()
 	status := &MemorySearchStatus{
 		Dirty:             m.dirty,
-		WorkspaceDir:      "bridge-db",
-		DBPath:            fmt.Sprintf("bridge-db://%s/%s/%s.sqlite", m.bridgeID, m.loginID, m.agentID),
+		WorkspaceDir:      workspaceDir,
+		DBPath:            resolveMemoryDBPath(m.cfg, m.agentID),
 		Provider:          m.status.Provider,
 		Model:             m.status.Model,
 		RequestedProvider: m.cfg.Provider,
 		Sources:           append([]string{}, m.cfg.Sources...),
-		ExtraPaths:        append([]string{}, m.cfg.ExtraPaths...),
+		ExtraPaths:        resolveStatusExtraPaths(m.cfg.ExtraPaths, workspaceDir),
 		Fallback:          m.status.Fallback,
 	}
 
@@ -233,8 +257,8 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 	if m.cfg.Cache.Enabled {
 		row := m.db.QueryRow(ctx,
 			`SELECT COUNT(*) FROM ai_memory_embedding_cache
-             WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND provider=$4 AND model=$5 AND provider_key=$6`,
-			m.bridgeID, m.loginID, m.agentID, m.status.Provider, m.status.Model, m.providerKey,
+             WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
+			m.bridgeID, m.loginID, m.agentID,
 		)
 		_ = row.Scan(&cacheStatus.Entries)
 	}
@@ -264,7 +288,7 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 
 	timeoutMs := m.cfg.Remote.Batch.TimeoutMinutes * 60 * 1000
 	status.Batch = &MemorySearchBatchStatus{
-		Enabled:        m.batchEnabled && (m.status.Provider == "openai" || m.status.Provider == "gemini"),
+		Enabled:        m.batchEnabled,
 		Failures:       m.batchFailures,
 		Limit:          2,
 		Wait:           m.cfg.Remote.Batch.Wait,
@@ -323,7 +347,7 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 		m.mu.Unlock()
 		if shouldSync {
 			if err := m.sync(ctx, opts.SessionKey, false); err != nil {
-				m.log.Warn().Err(err).Msg("memory sync failed on search")
+				m.log.Warn().Msg("memory sync failed (search): " + err.Error())
 			}
 		}
 	}
@@ -367,7 +391,7 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 
 	vectorResults := []memory.HybridVectorResult{}
 	if m.cfg.Store.Vector.Enabled {
-		queryVec, err := m.provider.EmbedQuery(ctx, cleaned)
+		queryVec, err := m.embedQueryWithTimeout(ctx, cleaned)
 		if err != nil {
 			return nil, err
 		}
@@ -380,10 +404,9 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 		}
 		if hasVector {
 			results, err := m.searchVector(ctx, queryVec, candidates)
-			if err != nil {
-				return nil, err
+			if err == nil {
+				vectorResults = results
 			}
-			vectorResults = results
 		}
 	}
 
@@ -560,11 +583,35 @@ func truncateSnippet(text string) string {
 	if text == "" {
 		return ""
 	}
-	if len([]rune(text)) <= memorySnippetMaxChars {
+	limit := memorySnippetMaxChars
+	count := 0
+	for _, r := range text {
+		if r <= 0xFFFF {
+			count++
+		} else {
+			count += 2
+		}
+		if count > limit {
+			break
+		}
+	}
+	if count <= limit {
 		return text
 	}
-	runes := []rune(text)
-	return string(runes[:memorySnippetMaxChars])
+	out := make([]rune, 0, len(text))
+	count = 0
+	for _, r := range text {
+		inc := 1
+		if r > 0xFFFF {
+			inc = 2
+		}
+		if count+inc > limit {
+			break
+		}
+		out = append(out, r)
+		count += inc
+	}
+	return string(out)
 }
 
 func isAllowedMemoryPath(path string, extraPaths []string) bool {
@@ -613,4 +660,46 @@ func normalizeExtraPaths(paths []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func resolveStatusExtraPaths(paths []string, workspaceDir string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(paths))
+	for _, raw := range paths {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		candidate := trimmed
+		if !filepath.IsAbs(candidate) && strings.TrimSpace(workspaceDir) != "" {
+			candidate = filepath.Join(workspaceDir, candidate)
+		}
+		cleaned := filepath.Clean(candidate)
+		if _, ok := seen[cleaned]; ok {
+			continue
+		}
+		seen[cleaned] = struct{}{}
+		out = append(out, cleaned)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func resolveMemoryDBPath(cfg *memory.ResolvedConfig, agentID string) string {
+	if cfg != nil {
+		if strings.TrimSpace(cfg.Store.Path) != "" {
+			return cfg.Store.Path
+		}
+	}
+	if strings.TrimSpace(agentID) == "" {
+		agentID = "main"
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return filepath.Join("/tmp", "openclaw", "memory", agentID+".sqlite")
+	}
+	return filepath.Join(home, ".openclaw", "memory", agentID+".sqlite")
 }
