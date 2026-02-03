@@ -1,7 +1,6 @@
 package connector
 
 import (
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/random"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -28,20 +27,6 @@ type ModelCapabilities struct {
 	SupportsToolCalling bool `json:"supports_tool_calling"` // Models that support function calling
 }
 
-// ToolEntry stores a tool definition with its enabled state
-// Uses MCP SDK types for future MCP integration
-type ToolEntry struct {
-	Tool    mcp.Tool `json:"tool"`              // MCP SDK tool definition (name, description, annotations)
-	Enabled *bool    `json:"enabled,omitempty"` // nil = auto (use defaults), true/false = explicit
-	Type    string   `json:"type"`              // builtin, provider, plugin, mcp
-}
-
-// ToolsConfig stores per-room tool configuration using MCP SDK types
-// Tools map stores tool definitions + enabled state
-type ToolsConfig struct {
-	Tools map[string]*ToolEntry `json:"tools,omitempty"` // Tool name -> entry
-}
-
 // PDFConfig stores per-room PDF processing configuration
 type PDFConfig struct {
 	Engine string `json:"engine,omitempty"` // pdf-text (free), mistral-ocr (OCR, paid, default), native
@@ -61,7 +46,6 @@ type UserDefaults struct {
 	SystemPrompt    string          `json:"system_prompt,omitempty"`
 	Temperature     *float64        `json:"temperature,omitempty"`
 	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
-	Tools           map[string]bool `json:"tools,omitempty"` // tool_name → enabled
 }
 
 // ServiceTokens stores optional per-login credentials for external services.
@@ -134,7 +118,6 @@ type PortalMetadata struct {
 	WelcomeSent         bool              `json:"welcome_sent,omitempty"`
 	Capabilities        ModelCapabilities `json:"capabilities,omitempty"`
 	LastRoomStateSync   int64             `json:"last_room_state_sync,omitempty"` // Track when we've synced room state
-	ToolsConfig         ToolsConfig       `json:"tools_config,omitempty"`         // Per-tool configuration using MCP SDK types
 	PDFConfig           *PDFConfig        `json:"pdf_config,omitempty"`           // Per-room PDF processing configuration
 
 	ConversationMode string `json:"conversation_mode,omitempty"`
@@ -169,18 +152,6 @@ func clonePortalMetadata(src *PortalMetadata) *PortalMetadata {
 	if src.PDFConfig != nil {
 		pdf := *src.PDFConfig
 		clone.PDFConfig = &pdf
-	}
-
-	if src.ToolsConfig.Tools != nil {
-		clone.ToolsConfig.Tools = make(map[string]*ToolEntry, len(src.ToolsConfig.Tools))
-		for name, entry := range src.ToolsConfig.Tools {
-			if entry == nil {
-				clone.ToolsConfig.Tools[name] = nil
-				continue
-			}
-			entryCopy := *entry
-			clone.ToolsConfig.Tools[name] = &entryCopy
-		}
 	}
 
 	return &clone

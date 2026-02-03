@@ -347,23 +347,6 @@ func (s *AgentStoreAdapter) GetAgentForRoom(ctx context.Context, meta *PortalMet
 	return s.GetAgentByID(ctx, agentID)
 }
 
-// CreateExecutorForAgent creates a tools.Executor configured for an agent.
-func (s *AgentStoreAdapter) CreateExecutorForAgent(agent *agents.AgentDefinition) *tools.Executor {
-	registry := tools.DefaultRegistry()
-
-	// Register boss tools if this is the boss agent
-	if agent.ID == "boss" {
-		for _, tool := range tools.BossTools() {
-			if !registry.Has(tool.Name) {
-				registry.Register(tool)
-			}
-		}
-	}
-
-	policy := agents.CreatePolicyFromProfile(agent, registry)
-	return tools.NewExecutor(registry, policy)
-}
-
 // ToAgentDefinitionContent converts an AgentDefinition to its Matrix event form.
 func ToAgentDefinitionContent(agent *agents.AgentDefinition) *AgentDefinitionContent {
 	content := &AgentDefinitionContent{
@@ -375,9 +358,7 @@ func ToAgentDefinitionContent(agent *agents.AgentDefinition) *AgentDefinitionCon
 		ModelFallback:   agent.Model.Fallbacks,
 		SystemPrompt:    agent.SystemPrompt,
 		PromptMode:      string(agent.PromptMode),
-		ToolProfile:     string(agent.ToolProfile),
-		ToolOverrides:   agent.ToolOverrides,
-		ToolAlsoAllow:   agent.ToolAlsoAllow,
+		Tools:           agent.Tools.Clone(),
 		Temperature:     agent.Temperature,
 		ReasoningEffort: agent.ReasoningEffort,
 		IsPreset:        agent.IsPreset,
@@ -421,9 +402,7 @@ func FromAgentDefinitionContent(content *AgentDefinitionContent) *agents.AgentDe
 		},
 		SystemPrompt:    content.SystemPrompt,
 		PromptMode:      agents.PromptMode(content.PromptMode),
-		ToolProfile:     agents.ToolProfile(content.ToolProfile),
-		ToolOverrides:   content.ToolOverrides,
-		ToolAlsoAllow:   content.ToolAlsoAllow,
+		Tools:           content.Tools.Clone(),
 		Temperature:     content.Temperature,
 		ReasoningEffort: content.ReasoningEffort,
 		IsPreset:        content.IsPreset,
@@ -782,18 +761,16 @@ var _ tools.AgentStoreInterface = (*BossStoreAdapter)(nil)
 // agentToToolsData converts an AgentDefinition to tools.AgentData.
 func agentToToolsData(agent *agents.AgentDefinition) tools.AgentData {
 	return tools.AgentData{
-		ID:            agent.ID,
-		Name:          agent.Name,
-		Description:   agent.Description,
-		Model:         agent.Model.Primary,
-		SystemPrompt:  agent.SystemPrompt,
-		ToolProfile:   string(agent.ToolProfile),
-		ToolOverrides: agent.ToolOverrides,
-		ToolAlsoAllow: agent.ToolAlsoAllow,
-		Temperature:   agent.Temperature,
-		IsPreset:      agent.IsPreset,
-		CreatedAt:     agent.CreatedAt,
-		UpdatedAt:     agent.UpdatedAt,
+		ID:           agent.ID,
+		Name:         agent.Name,
+		Description:  agent.Description,
+		Model:        agent.Model.Primary,
+		SystemPrompt: agent.SystemPrompt,
+		Tools:        agent.Tools.Clone(),
+		Temperature:  agent.Temperature,
+		IsPreset:     agent.IsPreset,
+		CreatedAt:    agent.CreatedAt,
+		UpdatedAt:    agent.UpdatedAt,
 	}
 }
 
@@ -806,13 +783,11 @@ func toolsDataToAgent(data tools.AgentData) *agents.AgentDefinition {
 		Model: agents.ModelConfig{
 			Primary: data.Model,
 		},
-		SystemPrompt:  data.SystemPrompt,
-		ToolProfile:   agents.ToolProfile(data.ToolProfile),
-		ToolOverrides: data.ToolOverrides,
-		ToolAlsoAllow: data.ToolAlsoAllow,
-		Temperature:   data.Temperature,
-		IsPreset:      data.IsPreset,
-		CreatedAt:     data.CreatedAt,
-		UpdatedAt:     data.UpdatedAt,
+		SystemPrompt: data.SystemPrompt,
+		Tools:        data.Tools.Clone(),
+		Temperature:  data.Temperature,
+		IsPreset:     data.IsPreset,
+		CreatedAt:    data.CreatedAt,
+		UpdatedAt:    data.UpdatedAt,
 	}
 }

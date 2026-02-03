@@ -28,6 +28,7 @@ const (
 	GroupMedia     = "group:media"
 	GroupStatus    = "group:status"
 	GroupOpenClaw  = "group:openclaw"
+	GroupFS        = "group:fs"
 )
 
 // ToolGroups maps group names to tool names for policy composition.
@@ -41,7 +42,8 @@ var ToolGroups = map[string][]string{
 	GroupWeb:       {"web_search", "web_search_openrouter", "web_fetch"},
 	GroupMedia:     {"image", "image_generate", "tts"},
 	GroupStatus:    {"session_status"},
-	GroupOpenClaw:  {"calculator", "web_search", "web_search_openrouter", "web_fetch", "message", "sessions_list", "sessions_history", "sessions_send", "session_status", "memory_search", "memory_get", "image", "image_generate", "tts"},
+	GroupOpenClaw:  {"calculator", "web_search", "web_search_openrouter", "web_fetch", "message", "sessions_list", "sessions_history", "sessions_send", "session_status", "memory_search", "memory_get", "image", "image_generate", "tts", "read", "write", "edit", "ls", "find", "grep"},
+	GroupFS:        {"read", "write", "edit", "ls", "find", "grep"},
 }
 
 type toolProfilePolicy struct {
@@ -52,10 +54,10 @@ type toolProfilePolicy struct {
 // ToolProfiles define which tool groups each profile allows.
 var ToolProfiles = map[ToolProfileID]toolProfilePolicy{
 	ProfileMinimal:   {Allow: []string{GroupSearch, GroupMessaging, GroupStatus}},
-	ProfileCoding:    {Allow: []string{GroupCalc, GroupWeb, GroupMessaging, GroupMedia, GroupStatus, GroupMemory}},
+	ProfileCoding:    {Allow: []string{GroupCalc, GroupWeb, GroupMessaging, GroupMedia, GroupStatus, GroupMemory, GroupSessions, GroupFS}},
 	ProfileMessaging: {Allow: []string{GroupWeb, GroupMessaging, GroupSessions, GroupStatus, GroupMemory}},
-	ProfileFull:      {},
-	ProfileBoss:      {Allow: []string{GroupBuilder, GroupSessions, GroupMessaging, GroupStatus, GroupMemory}},
+	ProfileFull:      {Allow: []string{GroupCalc, GroupWeb, GroupMessaging, GroupMedia, GroupStatus, GroupMemory, GroupSessions, GroupFS}},
+	ProfileBoss:      {Allow: []string{GroupBuilder, GroupSessions, GroupMessaging, GroupStatus, GroupMemory, GroupFS}},
 }
 
 // ToolPolicyConfig matches OpenClaw's allow/deny policy (global or per-agent).
