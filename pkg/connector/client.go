@@ -1000,7 +1000,7 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		ExtraSystemPrompt: extraSystemPrompt,
 		UserTimezone:      timezone,
 		PromptMode:        agent.PromptMode,
-		HeartbeatPrompt:   agent.HeartbeatPrompt,
+		HeartbeatPrompt:   resolveHeartbeatPrompt(oc.connector.Config, resolveHeartbeatConfig(oc.connector.Config, agent.ID), agent),
 	}
 	if oc.connector != nil && oc.connector.Config.Memory != nil {
 		params.MemoryCitations = strings.TrimSpace(oc.connector.Config.Memory.Citations)
