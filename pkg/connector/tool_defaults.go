@@ -3,6 +3,7 @@ package connector
 import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	agenttools "github.com/beeper/ai-bridge/pkg/agents/tools"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 )
 
@@ -112,4 +113,16 @@ func defaultGravatarSetTool() mcp.Tool {
 		Annotations: &mcp.ToolAnnotations{Title: "Gravatar Set"},
 		InputSchema: toolspec.GravatarSetSchema(),
 	}
+}
+
+func defaultSessionsListTool() mcp.Tool {
+	return agenttools.SessionsListTool.Tool
+}
+
+func defaultSessionsHistoryTool() mcp.Tool {
+	return agenttools.SessionsHistoryTool.Tool
+}
+
+func defaultSessionsSendTool() mcp.Tool {
+	return agenttools.SessionsSendTool.Tool
 }

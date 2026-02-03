@@ -99,19 +99,6 @@ func (r *Registry) All() []*Tool {
 	return tools
 }
 
-// Names returns all registered tool names.
-func (r *Registry) Names() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	names := make([]string, 0, len(r.tools))
-	for name := range r.tools {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
 // Groups returns all group names.
 func (r *Registry) Groups() []string {
 	r.mu.RLock()

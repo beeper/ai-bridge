@@ -22,27 +22,6 @@ func init() {
 	BridgeStateHumanErrors[AIImageError] = "Image is too large or has invalid dimensions for this model."
 }
 
-// ReasoningLevelError indicates that the requested reasoning level is not supported
-type ReasoningLevelError struct {
-	RequestedLevel string
-	OriginalError  error
-}
-
-func (e *ReasoningLevelError) Error() string {
-	return e.OriginalError.Error()
-}
-
-// ParseReasoningLevelError checks if err is a reasoning level error
-func ParseReasoningLevelError(err error) *ReasoningLevelError {
-	if err == nil {
-		return nil
-	}
-	if !IsReasoningError(err) {
-		return nil
-	}
-	return &ReasoningLevelError{OriginalError: err}
-}
-
 // FallbackReasoningLevel returns a lower reasoning level to try when the current one fails.
 // Returns empty string if there's no fallback available (already at "none" or unknown level).
 func FallbackReasoningLevel(current string) string {

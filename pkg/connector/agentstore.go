@@ -401,6 +401,9 @@ func ToAgentDefinitionContent(agent *agents.AgentDefinition) *AgentDefinitionCon
 			MinScore:     agent.Memory.MinScore,
 		}
 	}
+	if agent.MemorySearch != nil {
+		content.MemorySearch = agent.MemorySearch
+	}
 
 	return content
 }
@@ -445,6 +448,9 @@ func FromAgentDefinitionContent(content *AgentDefinitionContent) *agents.AgentDe
 			MaxResults:   content.MemoryConfig.MaxResults,
 			MinScore:     content.MemoryConfig.MinScore,
 		}
+	}
+	if content.MemorySearch != nil {
+		def.MemorySearch = content.MemorySearch
 	}
 
 	return def

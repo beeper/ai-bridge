@@ -44,7 +44,7 @@ var ProfileAllowlists = map[ToolProfile][]string{
 	ProfileCoding:    {tools.GroupCalc, tools.GroupWeb, tools.GroupMessaging, tools.GroupMedia, tools.GroupStatus, tools.GroupMemory},
 	ProfileMessaging: {tools.GroupWeb, tools.GroupMessaging, tools.GroupSessions, tools.GroupStatus, tools.GroupMemory},
 	ProfileFull:      {tools.GroupCalc, tools.GroupWeb, tools.GroupMessaging, tools.GroupMedia, tools.GroupStatus, tools.GroupMemory},
-	ProfileBoss:      {tools.GroupBuilder, tools.GroupMessaging, tools.GroupStatus, tools.GroupMemory},
+	ProfileBoss:      {tools.GroupBuilder, tools.GroupSessions, tools.GroupMessaging, tools.GroupStatus, tools.GroupMemory},
 }
 
 // ResolveTools returns allowed tool names for an agent based on its profile and overrides.

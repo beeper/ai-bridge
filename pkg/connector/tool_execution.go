@@ -258,7 +258,7 @@ func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Po
 }
 
 // executeBuiltinTool finds and executes a builtin tool by name.
-// For Builder room, this also handles boss agent tools.
+// For Builder rooms, this also handles boss agent tools. Session tools are handled for all rooms.
 func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Portal, toolName string, argsJSON string) (string, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
@@ -270,8 +270,8 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 		toolName = ToolNameImage
 	}
 
-	// Check if this is the Builder room - use boss tool executor for boss tools
-	if oc.isBuilderRoom(portal) {
+	// Check if this is the Builder room or a session tool - use boss tool executor
+	if oc.isBuilderRoom(portal) || tools.IsSessionTool(toolName) {
 		if result := oc.executeBossTool(ctx, portal, toolName, args); result != nil {
 			return result.Content, result.Error
 		}
@@ -333,6 +333,12 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 		result, err = executor.ExecuteModifyRoom(ctx, args)
 	case "list_rooms":
 		result, err = executor.ExecuteListRooms(ctx, args)
+	case "sessions_list":
+		result, err = executor.ExecuteSessionsList(ctx, args)
+	case "sessions_history":
+		result, err = executor.ExecuteSessionsHistory(ctx, args)
+	case "sessions_send":
+		result, err = executor.ExecuteSessionsSend(ctx, args)
 	default:
 		return nil // Not a boss tool
 	}
