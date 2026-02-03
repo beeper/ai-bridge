@@ -25,6 +25,7 @@ type AgentStoreInterface interface {
 	DeleteAgent(ctx context.Context, agentID string) error
 	ListModels(ctx context.Context) ([]ModelData, error)
 	ListAvailableTools(ctx context.Context) ([]ToolInfo, error)
+	RunInternalCommand(ctx context.Context, roomID string, command string) (string, error)
 	// Room management
 	CreateRoom(ctx context.Context, room RoomData) (string, error)
 	ModifyRoom(ctx context.Context, roomID string, updates RoomData) error
@@ -262,6 +263,31 @@ var ListToolsDef = &Tool{
 	Group: GroupBuilder,
 }
 
+// RunInternalCommandTool tool definition.
+var RunInternalCommandTool = &Tool{
+	Tool: mcp.Tool{
+		Name:        "run_internal_command",
+		Description: "Run an internal !ai command in a target room",
+		Annotations: &mcp.ToolAnnotations{Title: "Run Internal Command"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"command": map[string]any{
+					"type":        "string",
+					"description": "The !ai command to run (with or without prefix)",
+				},
+				"room_id": map[string]any{
+					"type":        "string",
+					"description": "Optional target room ID (defaults to the current room)",
+				},
+			},
+			"required": []string{"command"},
+		},
+	},
+	Type:  ToolTypeBuiltin,
+	Group: GroupBuilder,
+}
+
 // CreateRoomTool tool definition.
 var CreateRoomTool = &Tool{
 	Tool: mcp.Tool{
@@ -420,6 +446,7 @@ func BossTools() []*Tool {
 		ListAgentsTool,
 		ListModelsTool,
 		ListToolsDef,
+		RunInternalCommandTool,
 		// Room management
 		CreateRoomTool,
 		ModifyRoomTool,
@@ -695,6 +722,31 @@ func (e *BossToolExecutor) ExecuteListTools(ctx context.Context, _ map[string]an
 		"tools":    toolList,
 		"count":    len(toolList),
 		"profiles": profiles,
+	}), nil
+}
+
+// ExecuteRunInternalCommand handles the run_internal_command tool.
+func (e *BossToolExecutor) ExecuteRunInternalCommand(ctx context.Context, input map[string]any) (*Result, error) {
+	command, err := ReadString(input, "command", true)
+	if err != nil {
+		return ErrorResult("run_internal_command", err.Error()), nil
+	}
+
+	roomID := ReadStringDefault(input, "room_id", "")
+	if roomID == "" {
+		return ErrorResult("run_internal_command", "room_id is required"), nil
+	}
+
+	message, err := e.store.RunInternalCommand(ctx, roomID, command)
+	if err != nil {
+		return ErrorResult("run_internal_command", fmt.Sprintf("failed to run command: %v", err)), nil
+	}
+
+	return JSONResult(map[string]any{
+		"success": true,
+		"room_id": roomID,
+		"command": command,
+		"message": message,
 	}), nil
 }
 

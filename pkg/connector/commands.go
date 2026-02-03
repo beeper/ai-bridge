@@ -9,6 +9,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/commands"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
+	"github.com/beeper/ai-bridge/pkg/connector/commandregistry"
 )
 
 // HelpSectionAI is the help section for AI-related commands
@@ -112,17 +113,15 @@ func splitQuotedArgs(input string) ([]string, error) {
 }
 
 // CommandModel handles the !ai model command
-var CommandModel = &commands.FullHandler{
-	Func: fnModel,
-	Name: "model",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Get or set the AI model for this chat",
-		Args:        "[_model name_]",
-	},
+var CommandModel = registerAICommand(commandregistry.Definition{
+	Name:           "model",
+	Description:    "Get or set the AI model for this chat",
+	Args:           "[_model name_]",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnModel,
+})
 
 func fnModel(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -154,18 +153,16 @@ func fnModel(ce *commands.Event) {
 }
 
 // CommandTemp handles the !ai temp command
-var CommandTemp = &commands.FullHandler{
-	Func:    fnTemp,
-	Name:    "temp",
-	Aliases: []string{"temperature"},
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Get or set the temperature (0-2)",
-		Args:        "[_value_]",
-	},
+var CommandTemp = registerAICommand(commandregistry.Definition{
+	Name:           "temp",
+	Aliases:        []string{"temperature"},
+	Description:    "Get or set the temperature (0-2)",
+	Args:           "[_value_]",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnTemp,
+})
 
 func fnTemp(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -194,18 +191,16 @@ func fnTemp(ce *commands.Event) {
 }
 
 // CommandSystemPrompt handles the !ai system-prompt command
-var CommandSystemPrompt = &commands.FullHandler{
-	Func:    fnSystemPrompt,
-	Name:    "system-prompt",
-	Aliases: []string{"prompt", "system"}, // Backwards compatibility
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Get or set the system prompt (shows full constructed prompt)",
-		Args:        "[_text_]",
-	},
+var CommandSystemPrompt = registerAICommand(commandregistry.Definition{
+	Name:           "system-prompt",
+	Aliases:        []string{"prompt", "system"},
+	Description:    "Get or set the system prompt (shows full constructed prompt)",
+	Args:           "[_text_]",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnSystemPrompt,
+})
 
 func fnSystemPrompt(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -241,17 +236,15 @@ func fnSystemPrompt(ce *commands.Event) {
 }
 
 // CommandContext handles the !ai context command
-var CommandContext = &commands.FullHandler{
-	Func: fnContext,
-	Name: "context",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Get or set context message limit (1-100)",
-		Args:        "[_count_]",
-	},
+var CommandContext = registerAICommand(commandregistry.Definition{
+	Name:           "context",
+	Description:    "Get or set context message limit (1-100)",
+	Args:           "[_count_]",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnContext,
+})
 
 func fnContext(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -276,18 +269,16 @@ func fnContext(ce *commands.Event) {
 }
 
 // CommandTokens handles the !ai tokens command
-var CommandTokens = &commands.FullHandler{
-	Func:    fnTokens,
-	Name:    "tokens",
-	Aliases: []string{"maxtokens"},
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Get or set max completion tokens (1-16384)",
-		Args:        "[_count_]",
-	},
+var CommandTokens = registerAICommand(commandregistry.Definition{
+	Name:           "tokens",
+	Aliases:        []string{"maxtokens"},
+	Description:    "Get or set max completion tokens (1-16384)",
+	Args:           "[_count_]",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnTokens,
+})
 
 func fnTokens(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -312,16 +303,14 @@ func fnTokens(ce *commands.Event) {
 }
 
 // CommandConfig handles the !ai config command
-var CommandConfig = &commands.FullHandler{
-	Func: fnConfig,
-	Name: "config",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Show current chat configuration",
-	},
+var CommandConfig = registerAICommand(commandregistry.Definition{
+	Name:           "config",
+	Description:    "Show current chat configuration",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnConfig,
+})
 
 func fnConfig(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -343,17 +332,15 @@ func fnConfig(ce *commands.Event) {
 }
 
 // CommandDebounce handles the !ai debounce command
-var CommandDebounce = &commands.FullHandler{
-	Func: fnDebounce,
-	Name: "debounce",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Get or set message debounce delay (ms), 'off' to disable, 'default' to reset",
-		Args:        "[_delay_|off|default]",
-	},
+var CommandDebounce = registerAICommand(commandregistry.Definition{
+	Name:           "debounce",
+	Description:    "Get or set message debounce delay (ms), 'off' to disable, 'default' to reset",
+	Args:           "[_delay_|off|default]",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnDebounce,
+})
 
 func fnDebounce(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -402,17 +389,15 @@ func fnDebounce(ce *commands.Event) {
 }
 
 // CommandTools handles the !ai tools command
-var CommandTools = &commands.FullHandler{
-	Func: fnTools,
-	Name: "tools",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Enable/disable tools",
-		Args:        "[on|off] [_tool_]",
-	},
+var CommandTools = registerAICommand(commandregistry.Definition{
+	Name:           "tools",
+	Description:    "Enable/disable tools",
+	Args:           "[on|off] [_tool_]",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnTools,
+})
 
 func fnTools(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -425,17 +410,15 @@ func fnTools(ce *commands.Event) {
 }
 
 // CommandMode handles the !ai mode command
-var CommandMode = &commands.FullHandler{
-	Func: fnMode,
-	Name: "mode",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Set conversation mode (messages|responses)",
-		Args:        "[_mode_]",
-	},
+var CommandMode = registerAICommand(commandregistry.Definition{
+	Name:           "mode",
+	Description:    "Set conversation mode (messages|responses)",
+	Args:           "[_mode_]",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnMode,
+})
 
 func fnMode(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -469,17 +452,15 @@ func fnMode(ce *commands.Event) {
 }
 
 // CommandNew handles the !ai new command
-var CommandNew = &commands.FullHandler{
-	Func: fnNew,
-	Name: "new",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Create a new chat using current agent/model (or specify agent/model)",
-		Args:        "[agent <agent_id> | model <model_id>]",
-	},
+var CommandNew = registerAICommand(commandregistry.Definition{
+	Name:           "new",
+	Description:    "Create a new chat using current agent/model (or specify agent/model)",
+	Args:           "[agent <agent_id> | model <model_id>]",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnNew,
+})
 
 func fnNew(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -492,17 +473,15 @@ func fnNew(ce *commands.Event) {
 }
 
 // CommandFork handles the !ai fork command
-var CommandFork = &commands.FullHandler{
-	Func: fnFork,
-	Name: "fork",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Fork conversation to a new chat",
-		Args:        "[_event_id_]",
-	},
+var CommandFork = registerAICommand(commandregistry.Definition{
+	Name:           "fork",
+	Description:    "Fork conversation to a new chat",
+	Args:           "[_event_id_]",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnFork,
+})
 
 func fnFork(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -520,16 +499,14 @@ func fnFork(ce *commands.Event) {
 }
 
 // CommandRegenerate handles the !ai regenerate command
-var CommandRegenerate = &commands.FullHandler{
-	Func: fnRegenerate,
-	Name: "regenerate",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Regenerate the last AI response",
-	},
+var CommandRegenerate = registerAICommand(commandregistry.Definition{
+	Name:           "regenerate",
+	Description:    "Regenerate the last AI response",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnRegenerate,
+})
 
 func fnRegenerate(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -542,17 +519,15 @@ func fnRegenerate(ce *commands.Event) {
 }
 
 // CommandTitle handles the !ai title command
-var CommandTitle = &commands.FullHandler{
-	Func:    fnTitle,
-	Name:    "title",
-	Aliases: []string{"retitle"},
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Regenerate the chat room title",
-	},
+var CommandTitle = registerAICommand(commandregistry.Definition{
+	Name:           "title",
+	Aliases:        []string{"retitle"},
+	Description:    "Regenerate the chat room title",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnTitle,
+})
 
 func fnTitle(ce *commands.Event) {
 	client, ok := requireClient(ce)
@@ -568,15 +543,13 @@ func fnTitle(ce *commands.Event) {
 }
 
 // CommandModels handles the !ai models command
-var CommandModels = &commands.FullHandler{
-	Func: fnModels,
-	Name: "models",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "List all available models",
-	},
+var CommandModels = registerAICommand(commandregistry.Definition{
+	Name:          "models",
+	Description:   "List all available models",
+	Section:       HelpSectionAI,
 	RequiresLogin: true,
-}
+	Handler:       fnModels,
+})
 
 func fnModels(ce *commands.Event) {
 	client, ok := requireClient(ce)
@@ -632,51 +605,17 @@ func fnModels(ce *commands.Event) {
 	ce.Reply(sb.String())
 }
 
-// registerCommands registers all AI commands with the command processor
-func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
-	proc.AddHandlers(
-		CommandModel,
-		CommandTemp,
-		CommandSystemPrompt,
-		CommandContext,
-		CommandTokens,
-		CommandConfig,
-		CommandTimezone,
-		CommandDebounce,
-		CommandTools,
-		CommandMode,
-		CommandNew,
-		CommandFork,
-		CommandRegenerate,
-		CommandTitle,
-		CommandModels,
-		CommandGravatar,
-		CommandAgent,
-		CommandAgents,
-		CommandCreateAgent,
-		CommandDeleteAgent,
-		CommandManage,
-		CommandPlayground,
-	)
-	oc.br.Log.Info().
-		Str("section", HelpSectionAI.Name).
-		Int("section_order", HelpSectionAI.Order).
-		Msg("Registered AI commands: model, temp, prompt, context, tokens, config, timezone, debounce, tools, mode, new, fork, regenerate, title, models, gravatar, agent, agents, create-agent, delete-agent, manage, playground")
-}
-
 // CommandTimezone handles the !ai timezone command
-var CommandTimezone = &commands.FullHandler{
-	Func:    fnTimezone,
-	Name:    "timezone",
-	Aliases: []string{"tz"},
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Get or set your timezone for all chats (IANA name)",
-		Args:        "[_timezone_|reset]",
-	},
+var CommandTimezone = registerAICommand(commandregistry.Definition{
+	Name:           "timezone",
+	Aliases:        []string{"tz"},
+	Description:    "Get or set your timezone for all chats (IANA name)",
+	Args:           "[_timezone_|reset]",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnTimezone,
+})
 
 func fnTimezone(ce *commands.Event) {
 	client, _, ok := requireClientMeta(ce)
@@ -726,17 +665,15 @@ func fnTimezone(ce *commands.Event) {
 }
 
 // CommandGravatar handles the !ai gravatar command
-var CommandGravatar = &commands.FullHandler{
-	Func: fnGravatar,
-	Name: "gravatar",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Fetch or set the Gravatar profile for this login",
-		Args:        "[fetch|set] [email]",
-	},
+var CommandGravatar = registerAICommand(commandregistry.Definition{
+	Name:           "gravatar",
+	Description:    "Fetch or set the Gravatar profile for this login",
+	Args:           "[fetch|set] [email]",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnGravatar,
+})
 
 func fnGravatar(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -806,17 +743,15 @@ func fnGravatar(ce *commands.Event) {
 }
 
 // CommandAgent handles the !ai agent command
-var CommandAgent = &commands.FullHandler{
-	Func: fnAgent,
-	Name: "agent",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Get or set the agent for this chat",
-		Args:        "[_agent id_]",
-	},
+var CommandAgent = registerAICommand(commandregistry.Definition{
+	Name:           "agent",
+	Description:    "Get or set the agent for this chat",
+	Args:           "[_agent id_]",
+	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
-}
+	Handler:        fnAgent,
+})
 
 func fnAgent(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
@@ -880,15 +815,13 @@ func fnAgent(ce *commands.Event) {
 }
 
 // CommandAgents handles the !ai agents command
-var CommandAgents = &commands.FullHandler{
-	Func: fnAgents,
-	Name: "agents",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "List available agents",
-	},
+var CommandAgents = registerAICommand(commandregistry.Definition{
+	Name:          "agents",
+	Description:   "List available agents",
+	Section:       HelpSectionAI,
 	RequiresLogin: true,
-}
+	Handler:       fnAgents,
+})
 
 func fnAgents(ce *commands.Event) {
 	client, ok := requireClient(ce)
@@ -941,16 +874,14 @@ func fnAgents(ce *commands.Event) {
 }
 
 // CommandCreateAgent handles the !ai create-agent command
-var CommandCreateAgent = &commands.FullHandler{
-	Func: fnCreateAgent,
-	Name: "create-agent",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Create a new custom agent",
-		Args:        "<id> <name> [model] [system prompt...]",
-	},
+var CommandCreateAgent = registerAICommand(commandregistry.Definition{
+	Name:          "create-agent",
+	Description:   "Create a new custom agent",
+	Args:          "<id> <name> [model] [system prompt...]",
+	Section:       HelpSectionAI,
 	RequiresLogin: true,
-}
+	Handler:       fnCreateAgent,
+})
 
 func fnCreateAgent(ce *commands.Event) {
 	client, ok := requireClient(ce)
@@ -1022,16 +953,14 @@ func fnCreateAgent(ce *commands.Event) {
 }
 
 // CommandDeleteAgent handles the !ai delete-agent command
-var CommandDeleteAgent = &commands.FullHandler{
-	Func: fnDeleteAgent,
-	Name: "delete-agent",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Delete a custom agent",
-		Args:        "<id>",
-	},
+var CommandDeleteAgent = registerAICommand(commandregistry.Definition{
+	Name:          "delete-agent",
+	Description:   "Delete a custom agent",
+	Args:          "<id>",
+	Section:       HelpSectionAI,
 	RequiresLogin: true,
-}
+	Handler:       fnDeleteAgent,
+})
 
 func fnDeleteAgent(ce *commands.Event) {
 	client, ok := requireClient(ce)

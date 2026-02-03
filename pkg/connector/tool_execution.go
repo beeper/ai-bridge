@@ -272,7 +272,7 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 
 	// Check if this is the Builder room - use boss tool executor for boss tools
 	if oc.isBuilderRoom(portal) {
-		if result := oc.executeBossTool(ctx, toolName, args); result != nil {
+		if result := oc.executeBossTool(ctx, portal, toolName, args); result != nil {
 			return result.Content, result.Error
 		}
 	}
@@ -294,13 +294,21 @@ type bossToolResult struct {
 
 // executeBossTool attempts to execute a boss agent tool.
 // Returns nil if the tool is not a boss tool.
-func (oc *AIClient) executeBossTool(ctx context.Context, toolName string, args map[string]any) *bossToolResult {
+func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal, toolName string, args map[string]any) *bossToolResult {
 	// Create boss tool executor with store adapter
 	store := NewBossStoreAdapter(oc)
 	executor := tools.NewBossToolExecutor(store)
 
 	var result *tools.Result
 	var err error
+
+	if toolName == "run_internal_command" {
+		if roomID, ok := args["room_id"].(string); !ok || strings.TrimSpace(roomID) == "" {
+			if portal != nil && portal.MXID != "" {
+				args["room_id"] = portal.MXID.String()
+			}
+		}
+	}
 
 	switch toolName {
 	case "create_agent":
@@ -317,6 +325,8 @@ func (oc *AIClient) executeBossTool(ctx context.Context, toolName string, args m
 		result, err = executor.ExecuteListModels(ctx, args)
 	case "list_tools":
 		result, err = executor.ExecuteListTools(ctx, args)
+	case "run_internal_command":
+		result, err = executor.ExecuteRunInternalCommand(ctx, args)
 	case "create_room":
 		result, err = executor.ExecuteCreateRoom(ctx, args)
 	case "modify_room":
