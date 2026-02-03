@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 
@@ -106,47 +105,6 @@ func (oc *AIClient) canUseImageGeneration() bool {
 		return true
 	default:
 		return false
-	}
-}
-
-// applyToolToggle applies a tool toggle from client
-func (oc *AIClient) applyToolToggle(meta *PortalMetadata, toggle ToolToggle, provider string) {
-	// Ensure tools config is initialized
-	ensureToolsConfig(meta, provider)
-
-	// Normalize tool name aliases
-	toolName := normalizeToolName(toggle.Name)
-
-	// Check if tool exists
-	entry, ok := meta.ToolsConfig.Tools[toolName]
-	if !ok || entry == nil {
-		oc.log.Warn().Str("tool", toggle.Name).Msg("Unknown tool in toggle request")
-		return
-	}
-
-	// Apply toggle
-	entry.Enabled = &toggle.Enabled
-
-	oc.log.Info().Str("tool", toolName).Bool("enabled", toggle.Enabled).Msg("Applied tool toggle from client")
-}
-
-// normalizeToolName converts common aliases to canonical tool names
-func normalizeToolName(name string) string {
-	switch name {
-	case "calc":
-		return ToolNameCalculator
-	case "websearch", "search":
-		return ToolNameWebSearch
-	case "webfetch", "fetch":
-		return toolspec.WebFetchName
-	case "session", "status", "sessionstatus":
-		return toolspec.SessionStatusName
-	case "memorysearch", "memsearch", "mem_search":
-		return toolspec.MemorySearchName
-	case "memoryget", "memget", "mem_get":
-		return toolspec.MemoryGetName
-	default:
-		return name
 	}
 }
 
@@ -521,7 +479,6 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 			MaxCompletionTokens: opts.CopyFrom.MaxCompletionTokens,
 			ReasoningEffort:     opts.CopyFrom.ReasoningEffort,
 			Capabilities:        opts.CopyFrom.Capabilities,
-			ToolsConfig:         opts.CopyFrom.ToolsConfig,
 			ConversationMode:    opts.CopyFrom.ConversationMode,
 			DefaultAgentID:      opts.CopyFrom.DefaultAgentID,
 			AgentPrompt:         opts.CopyFrom.AgentPrompt,
@@ -534,7 +491,6 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 			Title:        title,
 			SystemPrompt: opts.SystemPrompt,
 			Capabilities: getModelCapabilities(modelID, oc.findModelInfo(modelID)),
-			ToolsConfig:  getDefaultToolsConfig(loginMeta.Provider),
 		}
 	}
 	portal.Metadata = pmeta
@@ -1142,11 +1098,6 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 		meta.DefaultAgentID = config.DefaultAgentID
 	}
 
-	// Handle tool toggle from client
-	if config.ToolToggle != nil {
-		oc.applyToolToggle(meta, *config.ToolToggle, loginMeta.Provider)
-	}
-
 	meta.LastRoomStateSync = time.Now().Unix()
 
 	// Handle model switch - generate membership events if model changed
@@ -1483,13 +1434,6 @@ func (oc *AIClient) broadcastCapabilities(ctx context.Context, portal *bridgev2.
 
 	roomCaps := oc.getRoomCapabilities(ctx, meta)
 
-	// Ensure tools config is initialized
-	if ensureToolsConfig(meta, loginMeta.Provider) {
-		if err := portal.Save(ctx); err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to save portal after tools initialization")
-		}
-	}
-
 	// Build reasoning effort options if model supports reasoning
 	var reasoningEfforts []ReasoningEffortOption
 	if roomCaps.SupportsReasoning {
@@ -1543,7 +1487,6 @@ func (oc *AIClient) broadcastSettings(ctx context.Context, portal *bridgev2.Port
 		ReasoningEffort:     meta.ReasoningEffort,
 		ConversationMode:    meta.ConversationMode,
 		DefaultAgentID:      meta.DefaultAgentID,
-		// Note: ToolToggle is only for setting changes, not broadcasts
 	}
 
 	bot := oc.UserLogin.Bridge.Bot
