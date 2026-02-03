@@ -76,6 +76,7 @@ func (ol *OpenAILogin) SubmitUserInput(ctx context.Context, input map[string]str
 			}
 			baseURL = beeperBaseURLFromDomain(domain)
 		}
+		baseURL = normalizeBeeperBaseURL(baseURL)
 		apiKey := strings.TrimSpace(ol.Connector.Config.Beeper.Token)
 		if apiKey == "" {
 			apiKey = strings.TrimSpace(input["beeper_token"])
