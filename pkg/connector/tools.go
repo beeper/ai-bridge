@@ -102,6 +102,9 @@ const (
 	ToolNameApplyPatch    = toolspec.ApplyPatchName
 	ToolNameWrite         = toolspec.WriteName
 	ToolNameEdit          = toolspec.EditName
+	ToolNameLS            = toolspec.LSName
+	ToolNameFind          = toolspec.FindName
+	ToolNameGrep          = toolspec.GrepName
 )
 
 // ImageResultPrefix is the prefix used to identify image results that need media sending.

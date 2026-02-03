@@ -27,6 +27,9 @@ func builtinToolExecutors() map[string]toolExecutor {
 		ToolNameApplyPatch:      executeApplyPatch,
 		ToolNameWrite:           executeWriteFile,
 		ToolNameEdit:            executeEditFile,
+		ToolNameLS:              executeLS,
+		ToolNameFind:            executeFind,
+		ToolNameGrep:            executeGrep,
 		ToolNameGravatarFetch:   executeGravatarFetch,
 		ToolNameGravatarSet:     executeGravatarSet,
 	}
