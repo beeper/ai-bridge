@@ -234,6 +234,9 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 		log.Debug().Int("count", len(enabledBoss)).Msg("Added boss agent tools")
 	}
 
+	// Prevent duplicate tool names (Anthropic rejects duplicates)
+	params.Tools = dedupeToolParams(params.Tools)
+
 	return params
 }
 

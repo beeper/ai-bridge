@@ -888,13 +888,6 @@ func (oc *AIClient) effectivePrompt(meta *PortalMetadata) string {
 	return fmt.Sprintf("%s\n\n%s", base, gravatarContext)
 }
 
-func (oc *AIClient) isBossRoom(meta *PortalMetadata) bool {
-	if meta == nil {
-		return false
-	}
-	return agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID)
-}
-
 // getLinkPreviewConfig returns the link preview configuration, with defaults filled in.
 func (oc *AIClient) getLinkPreviewConfig() LinkPreviewConfig {
 	config := DefaultLinkPreviewConfig()

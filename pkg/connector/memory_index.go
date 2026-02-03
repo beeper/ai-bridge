@@ -128,41 +128,6 @@ func (m *MemorySearchManager) needsFullReindex(ctx context.Context, force bool) 
 	}
 }
 
-func (m *MemorySearchManager) clearIndex(ctx context.Context) error {
-	if m.vectorReady {
-		rows, err := m.db.Query(ctx,
-			`SELECT id FROM ai_memory_chunks
-         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
-			m.bridgeID, m.loginID, m.agentID,
-		)
-		if err == nil {
-			var ids []string
-			for rows.Next() {
-				var id string
-				if err := rows.Scan(&id); err == nil {
-					ids = append(ids, id)
-				}
-			}
-			rows.Close()
-			m.deleteVectorIDs(ctx, ids)
-		}
-	}
-	_, err := m.db.Exec(ctx,
-		`DELETE FROM ai_memory_chunks WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
-		m.bridgeID, m.loginID, m.agentID,
-	)
-	if err != nil {
-		return err
-	}
-	if m.ftsAvailable {
-		_, _ = m.db.Exec(ctx,
-			`DELETE FROM ai_memory_chunks_fts WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
-			m.bridgeID, m.loginID, m.agentID,
-		)
-	}
-	return nil
-}
-
 func (m *MemorySearchManager) updateMeta(ctx context.Context, generation string) error {
 	vectorDims := m.vectorDims
 	_, err := m.db.Exec(ctx,

@@ -677,7 +677,7 @@ var CommandGravatar = registerAICommand(commandregistry.Definition{
 })
 
 func fnGravatar(ce *commands.Event) {
-	client, meta, ok := requireClientMeta(ce)
+	client, _, ok := requireClientMeta(ce)
 	if !ok {
 		return
 	}
