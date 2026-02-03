@@ -45,7 +45,9 @@ type AgentsConfig struct {
 
 // AgentDefaultsConfig defines default agent settings.
 type AgentDefaultsConfig struct {
-	Subagents *agents.SubagentConfig `yaml:"subagents"`
+	Subagents         *agents.SubagentConfig `yaml:"subagents"`
+	BootstrapMaxChars int                    `yaml:"bootstrap_max_chars"`
+	SoulEvil          *agents.SoulEvilConfig `yaml:"soul_evil"`
 }
 
 // MemorySearchConfig configures semantic memory search (OpenClaw-style).

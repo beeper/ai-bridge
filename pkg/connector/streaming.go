@@ -234,6 +234,10 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 		log.Debug().Int("count", len(enabledBoss)).Msg("Added boss agent tools")
 	}
 
+	if oc.isOpenRouterProvider() {
+		params.Tools = renameWebSearchToolParams(params.Tools)
+	}
+
 	// Prevent duplicate tool names (Anthropic rejects duplicates)
 	params.Tools = dedupeToolParams(params.Tools)
 	logToolParamDuplicates(log, params.Tools)
@@ -335,13 +339,21 @@ func (oc *AIClient) streamingResponseWithToolSchemaFallback(
 		return success, cle, err
 	}
 	if IsToolUniquenessError(err) {
-		oc.log.Warn().Err(err).Msg("Duplicate tool names rejected; retrying without tools")
-		if meta != nil {
-			metaCopy := *meta
-			metaCopy.Capabilities = meta.Capabilities
-			metaCopy.Capabilities.SupportsToolCalling = false
-			return oc.streamingResponse(ctx, evt, portal, &metaCopy, messages)
+		oc.log.Warn().Err(err).Msg("Duplicate tool names rejected; retrying with chat completions")
+		success, cle, chatErr := oc.streamChatCompletions(ctx, evt, portal, meta, messages)
+		if success || cle != nil || chatErr == nil {
+			return success, cle, chatErr
 		}
+		if IsToolSchemaError(chatErr) || IsToolUniquenessError(chatErr) {
+			oc.log.Warn().Err(chatErr).Msg("Chat completions tools rejected; retrying without tools")
+			if meta != nil {
+				metaCopy := *meta
+				metaCopy.Capabilities = meta.Capabilities
+				metaCopy.Capabilities.SupportsToolCalling = false
+				return oc.streamChatCompletions(ctx, evt, portal, &metaCopy, messages)
+			}
+		}
+		return success, cle, chatErr
 	}
 	if IsToolSchemaError(err) {
 		oc.log.Warn().Err(err).Msg("Responses tool schema rejected; falling back to chat completions")
@@ -560,11 +572,6 @@ func (oc *AIClient) streamingResponse(
 				activeTools[streamEvent.ItemID] = tool
 			}
 
-			// Update tool name from done event (delta events don't have the name)
-			if tool.toolName == "" && streamEvent.Name != "" {
-				tool.toolName = streamEvent.Name
-			}
-
 			// Store the item ID for continuation (this is the call_id for the Responses API)
 			tool.itemID = streamEvent.ItemID
 
@@ -576,6 +583,7 @@ func (oc *AIClient) streamingResponse(
 			if toolName == "" {
 				toolName = strings.TrimSpace(streamEvent.Name)
 			}
+			tool.toolName = toolName
 			argsJSON := strings.TrimSpace(tool.input.String())
 			if argsJSON == "" {
 				argsJSON = strings.TrimSpace(streamEvent.Arguments)
@@ -682,10 +690,9 @@ func (oc *AIClient) streamingResponse(
 			// Store result for API continuation
 			tool.result = result
 			args := argsJSON
-			name := toolName
 			state.pendingFunctionOutputs = append(state.pendingFunctionOutputs, functionCallOutput{
 				callID:    streamEvent.ItemID,
-				name:      name,
+				name:      toolName,
 				arguments: args,
 				output:    result,
 			})
@@ -1000,22 +1007,23 @@ func (oc *AIClient) streamingResponse(
 					activeTools[streamEvent.ItemID] = tool
 				}
 
-				// Update tool name from done event (delta events don't have the name)
-				if tool.toolName == "" && streamEvent.Name != "" {
-					tool.toolName = streamEvent.Name
-				}
-
 				tool.itemID = streamEvent.ItemID
 
 				if !ensureInitialEvent() {
 					return false, nil, &PreDeltaError{Err: fmt.Errorf("failed to send initial streaming message for tool call")}
 				}
 
+				toolName := strings.TrimSpace(tool.toolName)
+				if toolName == "" {
+					toolName = strings.TrimSpace(streamEvent.Name)
+				}
+				tool.toolName = toolName
+
 				resultStatus := ResultStatusSuccess
 				var result string
-				if !oc.isToolEnabled(meta, streamEvent.Name) {
+				if !oc.isToolEnabled(meta, toolName) {
 					resultStatus = ResultStatusError
-					result = fmt.Sprintf("Error: tool %s is disabled", streamEvent.Name)
+					result = fmt.Sprintf("Error: tool %s is disabled", toolName)
 				} else {
 					toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
 						Client:        oc,
@@ -1024,9 +1032,9 @@ func (oc *AIClient) streamingResponse(
 						SourceEventID: state.sourceEventID,
 					})
 					var err error
-					result, err = oc.executeBuiltinTool(toolCtx, portal, streamEvent.Name, streamEvent.Arguments)
+					result, err = oc.executeBuiltinTool(toolCtx, portal, toolName, streamEvent.Arguments)
 					if err != nil {
-						log.Warn().Err(err).Str("tool", streamEvent.Name).Msg("Tool execution failed (continuation)")
+						log.Warn().Err(err).Str("tool", toolName).Msg("Tool execution failed (continuation)")
 						result = fmt.Sprintf("Error: %s", err.Error())
 						resultStatus = ResultStatusError
 					}
@@ -1113,13 +1121,9 @@ func (oc *AIClient) streamingResponse(
 				if args == "" {
 					args = "{}"
 				}
-				name := strings.TrimSpace(tool.toolName)
-				if name == "" {
-					name = strings.TrimSpace(streamEvent.Name)
-				}
 				state.pendingFunctionOutputs = append(state.pendingFunctionOutputs, functionCallOutput{
 					callID:    streamEvent.ItemID,
-					name:      name,
+					name:      toolName,
 					arguments: args,
 					output:    result,
 				})
@@ -1131,7 +1135,7 @@ func (oc *AIClient) streamingResponse(
 
 				state.toolCalls = append(state.toolCalls, ToolCallMetadata{
 					CallID:        tool.callID,
-					ToolName:      streamEvent.Name,
+					ToolName:      toolName,
 					ToolType:      string(tool.toolType),
 					Input:         inputMap,
 					Output:        map[string]any{"result": result},
@@ -1146,7 +1150,7 @@ func (oc *AIClient) streamingResponse(
 				state.sequenceNum++
 				oc.emitStreamDelta(ctx, portal, state, StreamContentToolResult, result, map[string]any{
 					"call_id":   tool.callID,
-					"tool_name": streamEvent.Name,
+					"tool_name": toolName,
 					"status":    "completed",
 				})
 				oc.emitGenerationStatus(ctx, portal, state, "generating", "Continuing generation...", nil)
@@ -1298,6 +1302,10 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
 			params.Tools = append(params.Tools, bossToolsToOpenAI(enabledSessions, strictMode, &oc.log)...)
 		}
+	}
+
+	if oc.isOpenRouterProvider() {
+		params.Tools = renameWebSearchToolParams(params.Tools)
 	}
 
 	// Prevent duplicate tool names (Anthropic rejects duplicates)

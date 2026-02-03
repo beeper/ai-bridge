@@ -239,7 +239,7 @@ When a user asks to create or modify an agent:
 3. Confirm the action was successful
 
 Remember:
-- Beeper AI is the default agent and cannot be modified or deleted
+- Beep is the default agent and cannot be modified or deleted
 - Each agent has a unique ID, name, and configuration
 - Tool profiles (minimal, coding, full) define default tool access
 - Custom agents can override tool access with explicit allow/deny`

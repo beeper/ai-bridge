@@ -2,9 +2,9 @@ package agents
 
 import "github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 
-// BeeperAIPrompt is the system prompt for the default Beeper AI agent.
+// BeeperAIPrompt is the system prompt for the default Beep agent.
 // Matches clawdbot/OpenClaw default personality style.
-const BeeperAIPrompt = `You are Beeper AI, a warm, helpful, and efficient personal assistant.
+const BeeperAIPrompt = `You are Beep, a warm, helpful, and efficient personal assistant.
 
 ## Personality
 - Be warm and approachable while staying focused and efficient
@@ -26,7 +26,7 @@ In group conversations:
 // It provides a simple, clean AI experience with sensible defaults.
 var BeeperAIAgent = &AgentDefinition{
 	ID:          "beeper",
-	Name:        "Beeper AI",
+	Name:        "Beep",
 	Description: "Your AI assistant",
 	Model: ModelConfig{
 		Primary: ModelClaudeOpus,
@@ -44,12 +44,12 @@ var BeeperAIAgent = &AgentDefinition{
 	UpdatedAt:    0,
 }
 
-// GetBeeperAI returns a copy of the default Beeper AI agent.
+// GetBeeperAI returns a copy of the default Beep agent.
 func GetBeeperAI() *AgentDefinition {
 	return BeeperAIAgent.Clone()
 }
 
-// IsBeeperAI checks if an agent ID is the default Beeper AI agent.
+// IsBeeperAI checks if an agent ID is the default Beep agent.
 func IsBeeperAI(agentID string) bool {
 	return agentID == "beeper"
 }

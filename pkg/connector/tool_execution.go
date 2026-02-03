@@ -66,6 +66,7 @@ func (oc *AIClient) emitToolProgress(ctx context.Context, portal *bridgev2.Porta
 }
 
 func toolDisplayTitle(toolName string) string {
+	toolName = normalizeToolAlias(toolName)
 	switch toolName {
 	case "web_search":
 		return "Web Search"
@@ -271,6 +272,8 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("invalid tool arguments: %w", err)
 	}
+
+	toolName = normalizeToolAlias(toolName)
 
 	// Normalize deprecated tool aliases
 	if toolName == ToolNameAnalyzeImage {

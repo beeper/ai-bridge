@@ -975,8 +975,9 @@ func (oc *AIClient) composeChatInfo(title, modelID string) *bridgev2.ChatInfo {
 			// Set displayname directly in membership event content
 			// This works because MemberEventContent.Displayname has omitempty
 			MemberEventExtra: map[string]any{
-				"displayname":         modelName,
-				"com.beeper.ai.model": modelID,
+				"displayname":            modelName,
+				"com.beeper.ai.model":    modelID,
+				"com.beeper.ai.model_id": modelID,
 			},
 		},
 	}
@@ -1040,14 +1041,17 @@ func (oc *AIClient) applyAgentChatInfo(chatInfo *bridgev2.ChatInfo, agentID, age
 		Sender:      agentGhostID,
 		SenderLogin: oc.UserLogin.ID,
 	}
+	modelInfo := oc.findModelInfo(modelID)
 	agentMember.UserInfo = &bridgev2.UserInfo{
-		Name:  ptr.Ptr(agentDisplayName),
-		IsBot: ptr.Ptr(true),
+		Name:        ptr.Ptr(agentDisplayName),
+		IsBot:       ptr.Ptr(true),
+		Identifiers: modelContactIdentifiers(modelID, modelInfo),
 	}
 	agentMember.MemberEventExtra = map[string]any{
-		"displayname":         agentDisplayName,
-		"com.beeper.ai.model": modelID,
-		"com.beeper.ai.agent": agentID,
+		"displayname":            agentDisplayName,
+		"com.beeper.ai.model":    modelID,
+		"com.beeper.ai.model_id": modelID,
+		"com.beeper.ai.agent":    agentID,
 	}
 
 	members.MemberMap = bridgev2.ChatMemberMap{
@@ -1112,7 +1116,7 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 
 // handleModelSwitch generates membership change events when switching models
 // This creates leave/join events to show the model transition in the room timeline
-// For agent rooms, it swaps the agent+model ghost (e.g., "Beeper AI (Claude)" -> "Beeper AI (GPT)")
+// For agent rooms, it swaps the agent+model ghost (display name stays the agent name).
 func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Portal, oldModel, newModel string) {
 	if oldModel == newModel || oldModel == "" || newModel == "" {
 		return
@@ -1173,8 +1177,9 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 					Identifiers: modelContactIdentifiers(newModel, newInfo),
 				},
 				MemberEventExtra: map[string]any{
-					"displayname":         newModelName,
-					"com.beeper.ai.model": newModel,
+					"displayname":            newModelName,
+					"com.beeper.ai.model":    newModel,
+					"com.beeper.ai.model_id": newModel,
 				},
 			},
 		},
@@ -1218,7 +1223,7 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 }
 
 // handleAgentModelSwitch handles model switching for agent rooms.
-// Swaps the agent+model ghost (e.g., "Beeper AI (Claude)" -> "Beeper AI (GPT)")
+// Swaps the agent+model ghost (display name stays the agent name).
 func (oc *AIClient) handleAgentModelSwitch(ctx context.Context, portal *bridgev2.Portal, agentID, oldModel, newModel string) {
 	// Get the agent to determine display name
 	store := NewAgentStoreAdapter(oc)
@@ -1240,6 +1245,8 @@ func (oc *AIClient) handleAgentModelSwitch(ctx context.Context, portal *bridgev2
 
 	oldDisplayName := oc.agentModelDisplayName(agent.Name, oldModel)
 	newDisplayName := oc.agentModelDisplayName(agent.Name, newModel)
+	oldModelName := modelContactName(oldModel, oc.findModelInfo(oldModel))
+	newModelName := modelContactName(newModel, oc.findModelInfo(newModel))
 
 	// Create member changes: old agent+model leaves, new agent+model joins
 	memberChanges := &bridgev2.ChatMemberList{
@@ -1259,13 +1266,15 @@ func (oc *AIClient) handleAgentModelSwitch(ctx context.Context, portal *bridgev2
 				},
 				Membership: event.MembershipJoin,
 				UserInfo: &bridgev2.UserInfo{
-					Name:  ptr.Ptr(newDisplayName),
-					IsBot: ptr.Ptr(true),
+					Name:        ptr.Ptr(newDisplayName),
+					IsBot:       ptr.Ptr(true),
+					Identifiers: modelContactIdentifiers(newModel, oc.findModelInfo(newModel)),
 				},
 				MemberEventExtra: map[string]any{
-					"displayname":         newDisplayName,
-					"com.beeper.ai.model": newModel,
-					"com.beeper.ai.agent": agentID,
+					"displayname":            newDisplayName,
+					"com.beeper.ai.model":    newModel,
+					"com.beeper.ai.model_id": newModel,
+					"com.beeper.ai.agent":    agentID,
 				},
 			},
 		},
@@ -1295,7 +1304,7 @@ func (oc *AIClient) handleAgentModelSwitch(ctx context.Context, portal *bridgev2
 	oc.UserLogin.QueueRemoteEvent(evt)
 
 	// Send a notice about the model change
-	notice := fmt.Sprintf("Switched from %s to %s", oldDisplayName, newDisplayName)
+	notice := fmt.Sprintf("Switched model from %s to %s", oldModelName, newModelName)
 	oc.sendSystemNotice(ctx, portal, notice)
 
 	// Update bridge info and capabilities
@@ -1556,7 +1565,7 @@ func (oc *AIClient) bootstrap(ctx context.Context) {
 		// Don't return - still create the default chat (matches other bridge patterns)
 	}
 
-	// Create default chat room with Beeper AI agent
+	// Create default chat room with Beep agent
 	if err := oc.ensureDefaultChat(logCtx); err != nil {
 		oc.log.Warn().Err(err).Msg("Failed to ensure default chat")
 		// Continue anyway - default chat is optional
@@ -1703,7 +1712,7 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		return err
 	}
 
-	// Create default chat with Beeper AI agent
+	// Create default chat with Beep agent
 	beeperAgent := agents.GetBeeperAI()
 	if beeperAgent == nil {
 		return fmt.Errorf("beeper AI agent not found")
