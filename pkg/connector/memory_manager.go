@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/beeper/ai-bridge/pkg/memory"
 	"github.com/beeper/ai-bridge/pkg/textfs"
@@ -34,6 +35,10 @@ type MemorySearchManager struct {
 	ftsError     string
 	log          zerolog.Logger
 
+	dirty        bool
+	sessionWarm  map[string]struct{}
+	watchTimer   *time.Timer
+	intervalOnce sync.Once
 	mu sync.Mutex
 }
 
@@ -102,8 +107,12 @@ func getMemorySearchManager(client *AIClient, agentID string) (*MemorySearchMana
 		providerKey: providerResult.ProviderKey,
 		log:         client.log.With().Str("component", "memory").Logger(),
 	}
+	if hasSource(cfg.Sources, "memory") {
+		manager.dirty = true
+	}
 
 	manager.ensureSchema(context.Background())
+	manager.ensureIntervalSync()
 	memoryManagerCache.managers[cacheKey] = manager
 	return manager, ""
 }
@@ -154,6 +163,7 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 	if m == nil {
 		return nil, fmt.Errorf("memory search unavailable")
 	}
+	m.warmSession(ctx, opts.SessionKey)
 	if m.cfg.Sync.OnSearch {
 		if err := m.sync(ctx, opts.SessionKey, false); err != nil {
 			m.log.Warn().Err(err).Msg("memory sync failed on search")

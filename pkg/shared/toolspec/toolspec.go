@@ -19,7 +19,7 @@ const (
 	MessageDescription = "Send, delete, and manage messages via channel plugins. Supports actions: send, delete, react, poll, pin, threads, and more."
 
 	SessionStatusName        = "session_status"
-	SessionStatusDescription = "Show a /status-equivalent session status card (usage + time + cost when available). Use for model-use questions (\ud83d\udcca session_status). Optional: set per-session model override (model=default resets overrides)."
+	SessionStatusDescription = "Show a /status-equivalent session status card (usage + time + cost when available). Use for model-use questions (📊 session_status). Optional: set per-session model override (model=default resets overrides)."
 
 	// ImageName matches OpenClaw's image analysis tool (vision).
 	ImageName        = "image"

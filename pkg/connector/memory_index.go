@@ -65,6 +65,9 @@ func (m *MemorySearchManager) sync(ctx context.Context, sessionKey string, force
 	if err := m.indexMemoryFiles(ctx, needsFullReindex); err != nil {
 		return err
 	}
+	if hasSource(m.cfg.Sources, "memory") {
+		m.dirty = false
+	}
 
 	if m.cfg.Experimental.SessionMemory && hasSource(m.cfg.Sources, "sessions") {
 		if err := m.syncSessions(ctx, needsFullReindex, sessionKey); err != nil {
