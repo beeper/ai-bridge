@@ -42,6 +42,11 @@ var (
 		Err:        "please enter a base URL",
 		StatusCode: http.StatusBadRequest,
 	}
+	ErrOpenAIOrOpenRouterRequired = bridgev2.RespError{
+		ErrCode:    "IO.AI_BRIDGE.OPENAI_OR_OPENROUTER_REQUIRED",
+		Err:        "please enter an OpenAI or OpenRouter API key",
+		StatusCode: http.StatusBadRequest,
+	}
 	ErrAPIKeyInvalid = bridgev2.RespError{
 		ErrCode:    "IO.AI_BRIDGE.INVALID_API_KEY",
 		Err:        "the provided API key is invalid",

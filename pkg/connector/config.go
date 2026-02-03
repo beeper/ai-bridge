@@ -164,6 +164,8 @@ type BeeperConfig struct {
 
 // ProviderConfig holds settings for a specific AI provider.
 type ProviderConfig struct {
+	APIKey           string `yaml:"api_key"`
+	BaseURL          string `yaml:"base_url"`
 	DefaultModel     string `yaml:"default_model"`
 	DefaultPDFEngine string `yaml:"default_pdf_engine"` // pdf-text, mistral-ocr (default), native
 }
@@ -188,7 +190,11 @@ func upgradeConfig(helper configupgrade.Helper) {
 	// Per-provider default models
 	helper.Copy(configupgrade.Str, "providers", "beeper", "default_model")
 	helper.Copy(configupgrade.Str, "providers", "beeper", "default_pdf_engine")
+	helper.Copy(configupgrade.Str, "providers", "openai", "api_key")
+	helper.Copy(configupgrade.Str, "providers", "openai", "base_url")
 	helper.Copy(configupgrade.Str, "providers", "openai", "default_model")
+	helper.Copy(configupgrade.Str, "providers", "openrouter", "api_key")
+	helper.Copy(configupgrade.Str, "providers", "openrouter", "base_url")
 	helper.Copy(configupgrade.Str, "providers", "openrouter", "default_model")
 	helper.Copy(configupgrade.Str, "providers", "openrouter", "default_pdf_engine")
 

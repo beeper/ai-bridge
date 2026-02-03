@@ -319,7 +319,7 @@ func (oc *OpenAIConnector) GetDBMetaTypes() database.MetaTypes {
 
 func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
 	meta := loginMetadata(login)
-	key := strings.TrimSpace(meta.APIKey)
+	key := strings.TrimSpace(oc.resolveProviderAPIKey(meta))
 	if key == "" {
 		return fmt.Errorf("no API key available for this login; please login again")
 	}
@@ -328,36 +328,16 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 		return err
 	}
 	login.Client = client
-	meta.APIKey = key
 	client.scheduleBootstrap()
 	return nil
 }
 
-// hasBeeperConfig returns true if Beeper credentials are configured in the bridge config.
-func (oc *OpenAIConnector) hasBeeperConfig() bool {
-	return oc.Config.Beeper.BaseURL != "" && oc.Config.Beeper.Token != ""
-}
-
 // Package-level flow definitions (use Provider* constants as flow IDs)
-var (
-	beeperFlow = bridgev2.LoginFlow{
-		ID:          ProviderBeeper,
-		Name:        "Beeper AI",
-		Description: "Connect to Beeper AI (automatic)",
-	}
-	baseFlows = []bridgev2.LoginFlow{
-		{ID: ProviderOpenAI, Name: "OpenAI", Description: "Use your own OpenAI API key."},
-		{ID: ProviderOpenRouter, Name: "OpenRouter", Description: "Use your own OpenRouter API key."},
-		{ID: ProviderCustom, Name: "Custom OpenAI-compatible", Description: "Use a custom OpenAI-compatible API endpoint."},
-	}
-)
-
 func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
-	if oc.hasBeeperConfig() {
-		// When Beeper credentials are available, show Beeper as first option plus self-hosted options
-		return append([]bridgev2.LoginFlow{beeperFlow}, baseFlows...)
+	return []bridgev2.LoginFlow{
+		{ID: ProviderBeeper, Name: "Beeper AI", Description: "Connect via Beeper AI (recommended)."},
+		{ID: FlowCustom, Name: "Custom", Description: "Use your own API keys and services."},
 	}
-	return baseFlows
 }
 
 func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
@@ -373,7 +353,7 @@ func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User,
 	if !valid {
 		return nil, fmt.Errorf("login flow %s is not available", flowID)
 	}
-	return &OpenAILogin{User: user, Connector: oc, FlowID: flowID, Provider: flowID}, nil
+	return &OpenAILogin{User: user, Connector: oc, FlowID: flowID}, nil
 }
 
 // getLoginForPortal finds the correct user login based on the portal's Receiver.
