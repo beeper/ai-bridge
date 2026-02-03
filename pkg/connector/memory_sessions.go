@@ -431,25 +431,12 @@ func normalizeSessionText(text string) string {
 }
 
 func sessionPathForKey(sessionKey string) string {
-	if sessionKey == "" {
-		return "sessions/session.md"
-	}
-	cleaned := strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
-			return r
-		}
-		switch r {
-		case '-', '_', '.':
-			return r
-		case '/', '\\', ':':
-			return '_'
-		default:
-			return '_'
-		}
-	}, sessionKey)
+	cleaned := strings.TrimSpace(sessionKey)
 	if cleaned == "" {
-		cleaned = "session"
+		cleaned = "main"
 	}
+	cleaned = strings.ReplaceAll(cleaned, "/", "_")
+	cleaned = strings.ReplaceAll(cleaned, "\\", "_")
 	return "sessions/" + cleaned + ".jsonl"
 }
 

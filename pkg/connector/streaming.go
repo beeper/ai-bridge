@@ -236,6 +236,7 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 
 	// Prevent duplicate tool names (Anthropic rejects duplicates)
 	params.Tools = dedupeToolParams(params.Tools)
+	logToolParamDuplicates(log, params.Tools)
 
 	return params
 }
@@ -562,11 +563,21 @@ func (oc *AIClient) streamingResponse(
 				return false, nil, &PreDeltaError{Err: fmt.Errorf("failed to send initial streaming message for tool call")}
 			}
 
+			toolName := strings.TrimSpace(tool.toolName)
+			if toolName == "" {
+				toolName = strings.TrimSpace(streamEvent.Name)
+			}
+			argsJSON := strings.TrimSpace(tool.input.String())
+			if argsJSON == "" {
+				argsJSON = strings.TrimSpace(streamEvent.Arguments)
+			}
+			argsJSON = normalizeToolArgsJSON(argsJSON)
+
 			resultStatus := ResultStatusSuccess
 			var result string
-			if !oc.isToolEnabled(meta, streamEvent.Name) {
+			if !oc.isToolEnabled(meta, toolName) {
 				resultStatus = ResultStatusError
-				result = fmt.Sprintf("Error: tool %s is disabled", streamEvent.Name)
+				result = fmt.Sprintf("Error: tool %s is disabled", toolName)
 			} else {
 				// Wrap context with bridge info for tools that need it (e.g., channel-edit, react)
 				toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
@@ -576,9 +587,9 @@ func (oc *AIClient) streamingResponse(
 					SourceEventID: state.sourceEventID,
 				})
 				var err error
-				result, err = oc.executeBuiltinTool(toolCtx, portal, streamEvent.Name, streamEvent.Arguments)
+				result, err = oc.executeBuiltinTool(toolCtx, portal, toolName, argsJSON)
 				if err != nil {
-					log.Warn().Err(err).Str("tool", streamEvent.Name).Msg("Tool execution failed")
+					log.Warn().Err(err).Str("tool", toolName).Msg("Tool execution failed")
 					result = fmt.Sprintf("Error: %s", err.Error())
 					resultStatus = ResultStatusError
 				}
@@ -661,17 +672,8 @@ func (oc *AIClient) streamingResponse(
 
 			// Store result for API continuation
 			tool.result = result
-			args := strings.TrimSpace(tool.input.String())
-			if args == "" {
-				args = strings.TrimSpace(streamEvent.Arguments)
-			}
-			if args == "" {
-				args = "{}"
-			}
-			name := strings.TrimSpace(tool.toolName)
-			if name == "" {
-				name = strings.TrimSpace(streamEvent.Name)
-			}
+			args := argsJSON
+			name := toolName
 			state.pendingFunctionOutputs = append(state.pendingFunctionOutputs, functionCallOutput{
 				callID:    streamEvent.ItemID,
 				name:      name,
@@ -681,7 +683,7 @@ func (oc *AIClient) streamingResponse(
 
 			// Parse input for storage
 			var inputMap map[string]any
-			_ = json.Unmarshal([]byte(streamEvent.Arguments), &inputMap)
+			_ = json.Unmarshal([]byte(argsJSON), &inputMap)
 
 			// Send tool result timeline event
 			resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, result, resultStatus)
@@ -689,7 +691,7 @@ func (oc *AIClient) streamingResponse(
 			// Track tool call in metadata
 			state.toolCalls = append(state.toolCalls, ToolCallMetadata{
 				CallID:        tool.callID,
-				ToolName:      streamEvent.Name,
+				ToolName:      toolName,
 				ToolType:      string(tool.toolType),
 				Input:         inputMap,
 				Output:        map[string]any{"result": result},
@@ -1291,6 +1293,7 @@ func (oc *AIClient) buildContinuationParams(state *streamingState, meta *PortalM
 
 	// Prevent duplicate tool names (Anthropic rejects duplicates)
 	params.Tools = dedupeToolParams(params.Tools)
+	logToolParamDuplicates(&oc.log, params.Tools)
 
 	return params
 }
@@ -1508,7 +1511,7 @@ func (oc *AIClient) streamChatCompletions(
 
 	// Execute any accumulated tool calls
 	for _, tool := range activeTools {
-		if tool.input.Len() > 0 && tool.toolName != "" && oc.isToolEnabled(meta, tool.toolName) {
+		if tool.toolName != "" && oc.isToolEnabled(meta, tool.toolName) {
 			touchTyping()
 			// Wrap context with bridge info for tools that need it (e.g., channel-edit, react)
 			toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
@@ -1517,7 +1520,8 @@ func (oc *AIClient) streamChatCompletions(
 				Meta:          meta,
 				SourceEventID: state.sourceEventID,
 			})
-			result, err := oc.executeBuiltinTool(toolCtx, portal, tool.toolName, tool.input.String())
+			argsJSON := normalizeToolArgsJSON(tool.input.String())
+			result, err := oc.executeBuiltinTool(toolCtx, portal, tool.toolName, argsJSON)
 			resultStatus := ResultStatusSuccess
 			if err != nil {
 				log.Warn().Err(err).Str("tool", tool.toolName).Msg("Tool execution failed (Chat Completions)")
@@ -1596,7 +1600,7 @@ func (oc *AIClient) streamChatCompletions(
 
 			// Parse input for storage
 			var inputMap map[string]any
-			_ = json.Unmarshal([]byte(tool.input.String()), &inputMap)
+			_ = json.Unmarshal([]byte(argsJSON), &inputMap)
 
 			// Send tool result timeline event
 			resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, result, resultStatus)

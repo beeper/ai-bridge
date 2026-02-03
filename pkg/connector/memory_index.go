@@ -509,7 +509,9 @@ func (m *MemorySearchManager) embedChunks(ctx context.Context, chunks []memory.C
 	if m.shouldUseBatch(m.status.Provider) {
 		switch m.status.Provider {
 		case "openai":
-			batchResults, err := m.embedChunksWithOpenAIBatch(ctx, missing, relPath, source)
+			batchResults, err := m.runBatchWithTimeoutRetry("openai", func() (map[string][]float64, error) {
+				return m.embedChunksWithOpenAIBatch(ctx, missing, relPath, source)
+			})
 			if err == nil {
 				for _, item := range missing {
 					customID := batchCustomID(source, relPath, item.chunk.Hash, item.chunk.StartLine, item.chunk.EndLine, item.index)
@@ -523,9 +525,21 @@ func (m *MemorySearchManager) embedChunks(ctx context.Context, chunks []memory.C
 				m.resetBatchFailures()
 				return embeddings, nil
 			}
-			m.recordBatchFailure("openai", err, false)
+			message := err.Error()
+			forceDisable := strings.Contains(strings.ToLower(message), "asyncbatchembedcontent not available")
+			disabled, count := m.recordBatchFailure("openai", err, batchAttempts(err), forceDisable)
+			suffix := "keeping batch enabled"
+			if disabled {
+				suffix = "disabling batch"
+			}
+			m.log.Warn().Msg(fmt.Sprintf(
+				"memory embeddings: openai batch failed (%d/%d); %s; falling back to non-batch embeddings: %s",
+				count, batchFailureLimit, suffix, message,
+			))
 		case "gemini":
-			batchResults, err := m.embedChunksWithGeminiBatch(ctx, missing, relPath, source)
+			batchResults, err := m.runBatchWithTimeoutRetry("gemini", func() (map[string][]float64, error) {
+				return m.embedChunksWithGeminiBatch(ctx, missing, relPath, source)
+			})
 			if err == nil {
 				for _, item := range missing {
 					customID := batchCustomID(source, relPath, item.chunk.Hash, item.chunk.StartLine, item.chunk.EndLine, item.index)
@@ -539,8 +553,17 @@ func (m *MemorySearchManager) embedChunks(ctx context.Context, chunks []memory.C
 				m.resetBatchFailures()
 				return embeddings, nil
 			}
-			forceDisable := strings.Contains(strings.ToLower(err.Error()), "asyncbatchembedcontent not available")
-			m.recordBatchFailure("gemini", err, forceDisable)
+			message := err.Error()
+			forceDisable := strings.Contains(strings.ToLower(message), "asyncbatchembedcontent not available")
+			disabled, count := m.recordBatchFailure("gemini", err, batchAttempts(err), forceDisable)
+			suffix := "keeping batch enabled"
+			if disabled {
+				suffix = "disabling batch"
+			}
+			m.log.Warn().Msg(fmt.Sprintf(
+				"memory embeddings: gemini batch failed (%d/%d); %s; falling back to non-batch embeddings: %s",
+				count, batchFailureLimit, suffix, message,
+			))
 		}
 	}
 
