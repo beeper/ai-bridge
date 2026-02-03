@@ -14,26 +14,16 @@ const (
 	ProviderBeeper     = "beeper"     // Beeper's OpenRouter proxy
 	ProviderOpenAI     = "openai"     // Direct OpenAI API
 	ProviderOpenRouter = "openrouter" // Direct OpenRouter API
-	ProviderCustom     = "custom"     // Custom OpenAI-compatible endpoint
+	FlowCustom         = "custom"     // Custom login flow (provider resolved during login)
 )
 
-// providerConfig defines login configuration for a provider
-type providerConfig struct {
-	baseURL    string // API base URL (empty if provided at runtime)
-	keyName    string // Display name for API key field
-	keyDesc    string // Description for API key field
-	needsURL   bool   // Whether provider needs URL input
-	urlName    string // Display name for URL field
-	urlDesc    string // Description for URL field
-	defaultURL string // Default value for URL field (pre-populated in login form)
-}
+const beeperBasePath = "/_matrix/client/unstable/com.beeper.ai"
 
-// providerConfigs maps providers to their unified configuration
-var providerConfigs = map[string]providerConfig{
-	ProviderBeeper:     {"", "Beeper Access Token", "Your Beeper Matrix access token", true, "Beeper AI Proxy URL", "Your Beeper homeserver AI proxy endpoint", ""},
-	ProviderOpenAI:     {"https://api.openai.com/v1", "OpenAI API Key", "Generate one at https://platform.openai.com/account/api-keys", false, "", "", ""},
-	ProviderOpenRouter: {"https://openrouter.ai/api/v1", "OpenRouter API Key", "Generate one at https://openrouter.ai/keys", false, "", "", ""},
-	ProviderCustom:     {"", "API Key", "API key for authentication", true, "Base URL", "OpenAI-compatible API endpoint (e.g., https://api.example.com/v1)", "https://api.example.com/v1"},
+var beeperDomains = []string{
+	"beeper.com",
+	"beeper-dev.com",
+	"beeper-staging.com",
+	"beeper.localtest.me",
 }
 
 var (
@@ -46,61 +36,143 @@ type OpenAILogin struct {
 	User      *bridgev2.User
 	Connector *OpenAIConnector
 	FlowID    string
-	Provider  string // Set by CreateLogin based on flow ID
 }
 
 func (ol *OpenAILogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
-	// If Beeper provider and config has credentials, complete immediately (zero-step login)
-	if ol.Provider == ProviderBeeper && ol.Connector.hasBeeperConfig() {
-		return ol.finishLogin(ctx, ol.Connector.Config.Beeper.Token, ol.Connector.Config.Beeper.BaseURL)
+	step := ol.credentialsStep()
+	if step != nil {
+		return step, nil
 	}
-	return ol.credentialsStep(), nil
+
+	switch ol.FlowID {
+	case ProviderBeeper:
+		baseURL := ol.Connector.resolveBeeperBaseURL(nil)
+		apiKey := ol.Connector.resolveBeeperToken(nil)
+		if baseURL == "" || apiKey == "" {
+			return nil, &ErrBaseURLRequired
+		}
+		return ol.finishLogin(ctx, ProviderBeeper, apiKey, baseURL, nil)
+	case FlowCustom:
+		provider, apiKey, serviceTokens, err := ol.resolveCustomLogin(nil)
+		if err != nil {
+			return nil, err
+		}
+		return ol.finishLogin(ctx, provider, apiKey, "", serviceTokens)
+	default:
+		return nil, fmt.Errorf("login flow %s is not available", ol.FlowID)
+	}
 }
 
 func (ol *OpenAILogin) Cancel() {}
 
 func (ol *OpenAILogin) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
-	key := strings.TrimSpace(input["api_key"])
-	if key == "" {
-		return nil, &ErrAPIKeyRequired
-	}
-
-	cfg := providerConfigs[ol.Provider]
-	var baseURL string
-	if cfg.needsURL {
-		baseURL = strings.TrimSpace(input["base_url"])
+	switch ol.FlowID {
+	case ProviderBeeper:
+		baseURL := strings.TrimRight(strings.TrimSpace(ol.Connector.Config.Beeper.BaseURL), "/")
 		if baseURL == "" {
-			return nil, &ErrBaseURLRequired
+			domain := strings.TrimSpace(input["beeper_domain"])
+			if domain == "" {
+				return nil, &ErrBaseURLRequired
+			}
+			baseURL = beeperBaseURLFromDomain(domain)
 		}
-	} else {
-		baseURL = cfg.baseURL
+		apiKey := strings.TrimSpace(ol.Connector.Config.Beeper.Token)
+		if apiKey == "" {
+			apiKey = strings.TrimSpace(input["beeper_token"])
+		}
+		if apiKey == "" {
+			return nil, &ErrAPIKeyRequired
+		}
+		return ol.finishLogin(ctx, ProviderBeeper, apiKey, baseURL, nil)
+	case FlowCustom:
+		provider, apiKey, serviceTokens, err := ol.resolveCustomLogin(input)
+		if err != nil {
+			return nil, err
+		}
+		return ol.finishLogin(ctx, provider, apiKey, "", serviceTokens)
+	default:
+		return nil, fmt.Errorf("login flow %s is not available", ol.FlowID)
 	}
-
-	return ol.finishLogin(ctx, key, baseURL)
 }
 
 func (ol *OpenAILogin) credentialsStep() *bridgev2.LoginStep {
-	cfg, ok := providerConfigs[ol.Provider]
-	if !ok {
-		cfg = providerConfigs[ProviderCustom]
+	var fields []bridgev2.LoginInputDataField
+	switch ol.FlowID {
+	case ProviderBeeper:
+		if strings.TrimSpace(ol.Connector.Config.Beeper.BaseURL) == "" {
+			fields = append(fields, bridgev2.LoginInputDataField{
+				Type:         bridgev2.LoginInputFieldTypeSelect,
+				ID:           "beeper_domain",
+				Name:         "Beeper",
+				Description:  fmt.Sprintf("Select your Beeper domain (%s).", strings.Join(beeperDomains, ", ")),
+				DefaultValue: "beeper.com",
+				Options:      beeperDomains,
+			})
+		}
+		if strings.TrimSpace(ol.Connector.Config.Beeper.Token) == "" {
+			fields = append(fields, bridgev2.LoginInputDataField{
+				Type:        bridgev2.LoginInputFieldTypeToken,
+				ID:          "beeper_token",
+				Name:        "Beeper AI key",
+				Description: "Beeper AI needs a key to connect to Beeper servers. Requires Beeper Plus.",
+			})
+		}
+	case FlowCustom:
+		if !ol.configHasOpenRouterKey() {
+			fields = append(fields, bridgev2.LoginInputDataField{
+				Type:        bridgev2.LoginInputFieldTypeToken,
+				ID:          "openrouter_api_key",
+				Name:        "OpenRouter API Key",
+				Description: "Optional if you use OpenAI instead. Generate one at https://openrouter.ai/keys",
+			})
+		}
+		if !ol.configHasOpenAIKey() {
+			fields = append(fields, bridgev2.LoginInputDataField{
+				Type:        bridgev2.LoginInputFieldTypeToken,
+				ID:          "openai_api_key",
+				Name:        "OpenAI API Key",
+				Description: "Optional if you use OpenRouter instead. Generate one at https://platform.openai.com/account/api-keys",
+			})
+		}
+		if !ol.configHasProxyKey() {
+			fields = append(fields, bridgev2.LoginInputDataField{
+				Type:        bridgev2.LoginInputFieldTypeToken,
+				ID:          "proxy_api_key",
+				Name:        "Proxy API Key",
+				Description: "Optional. Used for Hungryserv proxy (search/fetch).",
+			})
+		}
+		if !ol.configHasExaKey() {
+			fields = append(fields, bridgev2.LoginInputDataField{
+				Type:        bridgev2.LoginInputFieldTypeToken,
+				ID:          "exa_api_key",
+				Name:        "Exa API Key",
+				Description: "Optional. Used for web search and fetch.",
+			})
+		}
+		if !ol.configHasBraveKey() {
+			fields = append(fields, bridgev2.LoginInputDataField{
+				Type:        bridgev2.LoginInputFieldTypeToken,
+				ID:          "brave_api_key",
+				Name:        "Brave Search API Key",
+				Description: "Optional. Used for web search.",
+			})
+		}
+		if !ol.configHasPerplexityKey() {
+			fields = append(fields, bridgev2.LoginInputDataField{
+				Type:        bridgev2.LoginInputFieldTypeToken,
+				ID:          "perplexity_api_key",
+				Name:        "Perplexity API Key",
+				Description: "Optional. Used for web search via OpenRouter.",
+			})
+		}
+	default:
+		return nil
 	}
 
-	var fields []bridgev2.LoginInputDataField
-	if cfg.needsURL {
-		fields = append(fields, bridgev2.LoginInputDataField{
-			Type:         bridgev2.LoginInputFieldTypeURL,
-			ID:           "base_url",
-			Name:         cfg.urlName,
-			Description:  cfg.urlDesc,
-			DefaultValue: cfg.defaultURL,
-		})
+	if len(fields) == 0 {
+		return nil
 	}
-	fields = append(fields, bridgev2.LoginInputDataField{
-		Type:        bridgev2.LoginInputFieldTypeToken,
-		ID:          "api_key",
-		Name:        cfg.keyName,
-		Description: cfg.keyDesc,
-	})
 
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeUserInput,
@@ -112,16 +184,21 @@ func (ol *OpenAILogin) credentialsStep() *bridgev2.LoginStep {
 	}
 }
 
-func (ol *OpenAILogin) finishLogin(ctx context.Context, apiKey, baseURL string) (*bridgev2.LoginStep, error) {
-	loginID := makeUserLoginID(ol.User.MXID, ol.Provider, apiKey)
+func (ol *OpenAILogin) finishLogin(ctx context.Context, provider, apiKey, baseURL string, serviceTokens *ServiceTokens) (*bridgev2.LoginStep, error) {
+	apiKey = strings.TrimSpace(apiKey)
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	loginID := makeUserLoginID(ol.User.MXID, provider, apiKey)
 	meta := &UserLoginMetadata{
-		Provider: ol.Provider,
+		Provider: provider,
 		APIKey:   apiKey,
 		BaseURL:  baseURL,
 	}
+	if serviceTokens != nil && !serviceTokensEmpty(serviceTokens) {
+		meta.ServiceTokens = serviceTokens
+	}
 	login, err := ol.User.NewLogin(ctx, &database.UserLogin{
 		ID:         loginID,
-		RemoteName: formatRemoteName(ol.Provider, apiKey, baseURL),
+		RemoteName: formatRemoteName(provider, apiKey),
 		Metadata:   meta,
 	}, nil)
 	if err != nil {
@@ -148,8 +225,134 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, apiKey, baseURL string) 
 	}, nil
 }
 
+func (ol *OpenAILogin) resolveCustomLogin(input map[string]string) (string, string, *ServiceTokens, error) {
+	if input == nil {
+		input = map[string]string{}
+	}
+	openrouterCfg := strings.TrimSpace(ol.Connector.Config.Providers.OpenRouter.APIKey)
+	openaiCfg := strings.TrimSpace(ol.Connector.Config.Providers.OpenAI.APIKey)
+
+	openrouterInput := ""
+	openaiInput := ""
+	if openrouterCfg == "" {
+		openrouterInput = strings.TrimSpace(input["openrouter_api_key"])
+	}
+	if openaiCfg == "" {
+		openaiInput = strings.TrimSpace(input["openai_api_key"])
+	}
+
+	openrouterToken := openrouterCfg
+	if openrouterToken == "" {
+		openrouterToken = openrouterInput
+	}
+	openaiToken := openaiCfg
+	if openaiToken == "" {
+		openaiToken = openaiInput
+	}
+
+	if openrouterToken == "" && openaiToken == "" {
+		return "", "", nil, &ErrOpenAIOrOpenRouterRequired
+	}
+
+	provider := ProviderOpenAI
+	apiKey := openaiToken
+	if openrouterToken != "" {
+		provider = ProviderOpenRouter
+		apiKey = openrouterToken
+	}
+
+	serviceTokens := &ServiceTokens{}
+
+	if provider != ProviderOpenAI && openaiCfg == "" && openaiInput != "" {
+		serviceTokens.OpenAI = openaiInput
+	}
+	if provider != ProviderOpenRouter && openrouterCfg == "" && openrouterInput != "" {
+		serviceTokens.OpenRouter = openrouterInput
+	}
+
+	if !ol.configHasProxyKey() {
+		serviceTokens.Proxy = strings.TrimSpace(input["proxy_api_key"])
+	}
+	if !ol.configHasExaKey() {
+		serviceTokens.Exa = strings.TrimSpace(input["exa_api_key"])
+	}
+	if !ol.configHasBraveKey() {
+		serviceTokens.Brave = strings.TrimSpace(input["brave_api_key"])
+	}
+	if !ol.configHasPerplexityKey() {
+		serviceTokens.Perplexity = strings.TrimSpace(input["perplexity_api_key"])
+	}
+
+	return provider, apiKey, serviceTokens, nil
+}
+
+func serviceTokensEmpty(tokens *ServiceTokens) bool {
+	if tokens == nil {
+		return true
+	}
+	return strings.TrimSpace(tokens.OpenAI) == "" &&
+		strings.TrimSpace(tokens.OpenRouter) == "" &&
+		strings.TrimSpace(tokens.Exa) == "" &&
+		strings.TrimSpace(tokens.Brave) == "" &&
+		strings.TrimSpace(tokens.Perplexity) == "" &&
+		strings.TrimSpace(tokens.Proxy) == ""
+}
+
+func beeperBaseURLFromDomain(domain string) string {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return ""
+	}
+	if !strings.HasPrefix(domain, "matrix.") {
+		domain = "matrix." + domain
+	}
+	return "https://" + domain + beeperBasePath
+}
+
+func (ol *OpenAILogin) configHasOpenRouterKey() bool {
+	return strings.TrimSpace(ol.Connector.Config.Providers.OpenRouter.APIKey) != ""
+}
+
+func (ol *OpenAILogin) configHasOpenAIKey() bool {
+	return strings.TrimSpace(ol.Connector.Config.Providers.OpenAI.APIKey) != ""
+}
+
+func (ol *OpenAILogin) configHasExaKey() bool {
+	if ol.Connector.Config.Tools.Search != nil && strings.TrimSpace(ol.Connector.Config.Tools.Search.Exa.APIKey) != "" {
+		return true
+	}
+	if ol.Connector.Config.Tools.Fetch != nil && strings.TrimSpace(ol.Connector.Config.Tools.Fetch.Exa.APIKey) != "" {
+		return true
+	}
+	return false
+}
+
+func (ol *OpenAILogin) configHasProxyKey() bool {
+	if ol.Connector.Config.Tools.Search != nil && strings.TrimSpace(ol.Connector.Config.Tools.Search.Proxy.APIKey) != "" {
+		return true
+	}
+	if ol.Connector.Config.Tools.Fetch != nil && strings.TrimSpace(ol.Connector.Config.Tools.Fetch.Proxy.APIKey) != "" {
+		return true
+	}
+	return false
+}
+
+func (ol *OpenAILogin) configHasBraveKey() bool {
+	if ol.Connector.Config.Tools.Search == nil {
+		return false
+	}
+	return strings.TrimSpace(ol.Connector.Config.Tools.Search.Brave.APIKey) != ""
+}
+
+func (ol *OpenAILogin) configHasPerplexityKey() bool {
+	if ol.Connector.Config.Tools.Search == nil {
+		return false
+	}
+	return strings.TrimSpace(ol.Connector.Config.Tools.Search.Perplexity.APIKey) != ""
+}
+
 // formatRemoteName generates a display name for the account based on provider.
-func formatRemoteName(provider, apiKey, baseURL string) string {
+func formatRemoteName(provider, apiKey string) string {
 	switch provider {
 	case ProviderBeeper:
 		return "Beeper AI"
@@ -157,8 +360,6 @@ func formatRemoteName(provider, apiKey, baseURL string) string {
 		return fmt.Sprintf("OpenAI (%s)", maskAPIKey(apiKey))
 	case ProviderOpenRouter:
 		return fmt.Sprintf("OpenRouter (%s)", maskAPIKey(apiKey))
-	case ProviderCustom:
-		return fmt.Sprintf("Custom (%s, %s)", baseURL, maskAPIKey(apiKey))
 	default:
 		return "AI Bridge"
 	}

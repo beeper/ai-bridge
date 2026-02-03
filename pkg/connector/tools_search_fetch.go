@@ -156,20 +156,111 @@ func buildSearchPayload(resp *search.Response) map[string]any {
 
 func resolveSearchConfig(ctx context.Context) *search.Config {
 	var cfg *search.Config
+	var meta *UserLoginMetadata
+	var connector *OpenAIConnector
 	if btc := GetBridgeToolContext(ctx); btc != nil && btc.Client != nil {
-		src := btc.Client.connector.Config.Tools.Search
+		connector = btc.Client.connector
+		src := connector.Config.Tools.Search
 		cfg = mapSearchConfig(src)
+		if btc.Client.UserLogin != nil {
+			meta = loginMetadata(btc.Client.UserLogin)
+		}
 	}
+	cfg = applyLoginTokensToSearchConfig(cfg, meta, connector)
 	return search.ApplyEnvDefaults(cfg)
 }
 
 func resolveFetchConfig(ctx context.Context) *fetch.Config {
 	var cfg *fetch.Config
+	var meta *UserLoginMetadata
+	var connector *OpenAIConnector
 	if btc := GetBridgeToolContext(ctx); btc != nil && btc.Client != nil {
-		src := btc.Client.connector.Config.Tools.Fetch
+		connector = btc.Client.connector
+		src := connector.Config.Tools.Fetch
 		cfg = mapFetchConfig(src)
+		if btc.Client.UserLogin != nil {
+			meta = loginMetadata(btc.Client.UserLogin)
+		}
 	}
+	cfg = applyLoginTokensToFetchConfig(cfg, meta, connector)
 	return fetch.ApplyEnvDefaults(cfg)
+}
+
+func applyLoginTokensToSearchConfig(cfg *search.Config, meta *UserLoginMetadata, connector *OpenAIConnector) *search.Config {
+	if cfg == nil {
+		cfg = &search.Config{}
+	}
+	if meta == nil || connector == nil {
+		return cfg
+	}
+
+	if meta.Provider == ProviderBeeper {
+		services := connector.resolveServiceConfig(meta)
+		if svc, ok := services[serviceProxy]; ok && svc.BaseURL != "" {
+			cfg.Provider = search.ProviderProxy
+			cfg.Fallbacks = []string{search.ProviderProxy}
+			cfg.Proxy.BaseURL = strings.TrimRight(svc.BaseURL, "/")
+			cfg.Proxy.SearchPath = "/search"
+			cfg.Proxy.APIKey = svc.APIKey
+		}
+		return cfg
+	}
+
+	services := connector.resolveServiceConfig(meta)
+	if cfg.Proxy.APIKey == "" {
+		cfg.Proxy.APIKey = services[serviceProxy].APIKey
+	}
+	if cfg.Exa.APIKey == "" {
+		cfg.Exa.APIKey = services[serviceExa].APIKey
+	}
+	if cfg.Brave.APIKey == "" {
+		cfg.Brave.APIKey = services[serviceBrave].APIKey
+	}
+	if cfg.Perplexity.APIKey == "" {
+		cfg.Perplexity.APIKey = services[servicePerplexity].APIKey
+	}
+	if cfg.OpenRouter.APIKey == "" {
+		cfg.OpenRouter.APIKey = services[serviceOpenRouter].APIKey
+	}
+	if cfg.OpenRouter.BaseURL == "" {
+		cfg.OpenRouter.BaseURL = services[serviceOpenRouter].BaseURL
+	}
+
+	return cfg
+}
+
+func applyLoginTokensToFetchConfig(cfg *fetch.Config, meta *UserLoginMetadata, connector *OpenAIConnector) *fetch.Config {
+	if cfg == nil {
+		cfg = &fetch.Config{}
+	}
+	if meta == nil || connector == nil {
+		return cfg
+	}
+
+	if meta.Provider == ProviderBeeper {
+		services := connector.resolveServiceConfig(meta)
+		if svc, ok := services[serviceProxy]; ok && svc.BaseURL != "" {
+			cfg.Provider = fetch.ProviderProxy
+			cfg.Fallbacks = []string{fetch.ProviderProxy}
+			cfg.Proxy.BaseURL = strings.TrimRight(svc.BaseURL, "/")
+			cfg.Proxy.ContentsPath = "/contents"
+			cfg.Proxy.APIKey = svc.APIKey
+		}
+		return cfg
+	}
+
+	services := connector.resolveServiceConfig(meta)
+	if cfg.Proxy.APIKey == "" {
+		cfg.Proxy.APIKey = services[serviceProxy].APIKey
+	}
+	if cfg.Exa.APIKey == "" {
+		cfg.Exa.APIKey = services[serviceExa].APIKey
+	}
+	if cfg.Exa.BaseURL == "" {
+		cfg.Exa.BaseURL = services[serviceExa].BaseURL
+	}
+
+	return cfg
 }
 
 func mapSearchConfig(src *SearchConfig) *search.Config {
