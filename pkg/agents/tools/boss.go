@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,9 +33,6 @@ type AgentStoreInterface interface {
 	CreateRoom(ctx context.Context, room RoomData) (string, error)
 	ModifyRoom(ctx context.Context, roomID string, updates RoomData) error
 	ListRooms(ctx context.Context) ([]RoomData, error)
-	// Session management (rooms with messages)
-	GetRoomHistory(ctx context.Context, roomID string, limit int) ([]MessageData, error)
-	SendToRoom(ctx context.Context, roomID string, message string) error
 }
 
 // AgentData represents agent data for boss tools (avoids import cycle).
@@ -70,14 +66,6 @@ type RoomData struct {
 	DefaultAgentID string `json:"default_agent_id,omitempty"`
 	SystemPrompt   string `json:"system_prompt,omitempty"`
 	CreatedAt      int64  `json:"created_at"`
-}
-
-// MessageData represents a message for session history.
-type MessageData struct {
-	ID        string `json:"id"`
-	Role      string `json:"role"` // "user" or "assistant"
-	Content   string `json:"content"`
-	Timestamp int64  `json:"timestamp"`
 }
 
 // NewBossToolExecutor creates a new boss tool executor.
@@ -951,149 +939,5 @@ func (e *BossToolExecutor) ExecuteModifyRoom(ctx context.Context, input map[stri
 		"success": true,
 		"room_id": roomID,
 		"message": fmt.Sprintf("Modified room '%s'", roomID),
-	}), nil
-}
-
-// ExecuteSessionsList handles the sessions_list tool.
-func (e *BossToolExecutor) ExecuteSessionsList(ctx context.Context, input map[string]any) (*Result, error) {
-	limit := 50
-	if l, ok := input["limit"].(float64); ok && l > 0 {
-		limit = int(l)
-	}
-	messageLimit := 0
-	if l, ok := input["messageLimit"].(float64); ok && l > 0 {
-		messageLimit = int(l)
-		if messageLimit > 20 {
-			messageLimit = 20
-		}
-	}
-
-	rooms, err := e.store.ListRooms(ctx)
-	if err != nil {
-		return ErrorResult("sessions_list", fmt.Sprintf("failed to list sessions: %v", err)), nil
-	}
-
-	// Limit results
-	if len(rooms) > limit {
-		rooms = rooms[:limit]
-	}
-
-	var sessionList []map[string]any
-	for _, room := range rooms {
-		entry := map[string]any{
-			"room_id":    room.ID,
-			"name":       room.Name,
-			"agent_id":   room.AgentID,
-			"created_at": room.CreatedAt,
-		}
-		if messageLimit > 0 {
-			messages, err := e.store.GetRoomHistory(ctx, room.ID, messageLimit)
-			if err == nil && len(messages) > 0 {
-				var messageList []map[string]any
-				for _, msg := range messages {
-					messageList = append(messageList, map[string]any{
-						"id":        msg.ID,
-						"role":      msg.Role,
-						"content":   msg.Content,
-						"timestamp": msg.Timestamp,
-					})
-				}
-				entry["messages"] = messageList
-			}
-		}
-		sessionList = append(sessionList, entry)
-	}
-
-	return JSONResult(map[string]any{
-		"sessions": sessionList,
-		"count":    len(sessionList),
-	}), nil
-}
-
-// ExecuteSessionsHistory handles the sessions_history tool.
-func (e *BossToolExecutor) ExecuteSessionsHistory(ctx context.Context, input map[string]any) (*Result, error) {
-	roomID, err := ReadString(input, "sessionKey", false)
-	if err != nil {
-		return ErrorResult("sessions_history", err.Error()), nil
-	}
-	if roomID == "" {
-		roomID = ReadStringDefault(input, "room_id", "")
-	}
-	if roomID == "" {
-		return ErrorResult("sessions_history", "sessionKey is required"), nil
-	}
-
-	limit := 50
-	if l, ok := input["limit"].(float64); ok && l > 0 {
-		limit = int(l)
-	}
-
-	messages, err := e.store.GetRoomHistory(ctx, roomID, limit)
-	if err != nil {
-		return ErrorResult("sessions_history", fmt.Sprintf("failed to get history: %v", err)), nil
-	}
-
-	var messageList []map[string]any
-	for _, msg := range messages {
-		messageList = append(messageList, map[string]any{
-			"id":        msg.ID,
-			"role":      msg.Role,
-			"content":   msg.Content,
-			"timestamp": msg.Timestamp,
-		})
-	}
-
-	return JSONResult(map[string]any{
-		"room_id":  roomID,
-		"messages": messageList,
-		"count":    len(messageList),
-	}), nil
-}
-
-// ExecuteSessionsSend handles the sessions_send tool.
-func (e *BossToolExecutor) ExecuteSessionsSend(ctx context.Context, input map[string]any) (*Result, error) {
-	roomID, err := ReadString(input, "sessionKey", false)
-	if err != nil {
-		return ErrorResult("sessions_send", err.Error()), nil
-	}
-	if roomID == "" {
-		roomID = ReadStringDefault(input, "room_id", "")
-	}
-
-	message, err := ReadString(input, "message", true)
-	if err != nil {
-		return ErrorResult("sessions_send", err.Error()), nil
-	}
-
-	if roomID == "" {
-		label := ReadStringDefault(input, "label", "")
-		if label == "" {
-			return ErrorResult("sessions_send", "sessionKey or label is required"), nil
-		}
-		rooms, err := e.store.ListRooms(ctx)
-		if err != nil {
-			return ErrorResult("sessions_send", fmt.Sprintf("failed to list sessions: %v", err)), nil
-		}
-		var resolved string
-		for _, room := range rooms {
-			if strings.EqualFold(strings.TrimSpace(room.Name), strings.TrimSpace(label)) {
-				resolved = room.ID
-				break
-			}
-		}
-		if resolved == "" {
-			return ErrorResult("sessions_send", fmt.Sprintf("no session found for label '%s'", label)), nil
-		}
-		roomID = resolved
-	}
-
-	if err := e.store.SendToRoom(ctx, roomID, message); err != nil {
-		return ErrorResult("sessions_send", fmt.Sprintf("failed to send message: %v", err)), nil
-	}
-
-	return JSONResult(map[string]any{
-		"success": true,
-		"room_id": roomID,
-		"message": "Message sent successfully",
 	}), nil
 }

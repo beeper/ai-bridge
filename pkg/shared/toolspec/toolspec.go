@@ -13,15 +13,15 @@ const (
 	WebFetchDescription = "Fetch and extract readable content from a URL (HTML \u2192 markdown/text). Use for lightweight page access without browser automation."
 
 	MessageName        = "message"
-	MessageDescription = "Send, delete, and manage messages via channel plugins. Supports actions: send, delete, react, poll, pin, threads, and more."
+	MessageDescription = "Send messages and channel actions. Supports actions: send, delete, react, poll, pin, threads, and more."
 
 	SessionStatusName        = "session_status"
 	SessionStatusDescription = "Show a /status-equivalent session status card (usage + time + cost when available). Use for model-use questions (📊 session_status). Optional: set per-session model override (model=default resets overrides)."
 
 	// ImageName matches OpenClaw's image analysis tool (vision).
-	ImageName                   = "image"
-	ImageDescription            = "Analyze an image with the configured image model (agents.defaults.imageModel). Provide a prompt and image path or URL."
-	ImageDescriptionVisionHint  = "Analyze an image with a vision model. Only use this tool when the image was NOT already provided in the user's message. Images mentioned in the prompt are automatically visible to you."
+	ImageName                  = "image"
+	ImageDescription           = "Analyze an image with the configured image model (agents.defaults.imageModel). Provide a prompt and image path or URL."
+	ImageDescriptionVisionHint = "Analyze an image with a vision model. Only use this tool when the image was NOT already provided in the user's message. Images mentioned in the prompt are automatically visible to you."
 
 	// ImageGenerateName is an AI image generation tool (not in OpenClaw).
 	ImageGenerateName        = "image_generate"
@@ -39,12 +39,12 @@ const (
 	MemoryGetName           = "memory_get"
 	MemoryGetDescription    = "Safe snippet read from MEMORY.md, memory/*.md, or configured memorySearch.extraPaths with optional from/lines; use after memory_search to pull only the needed lines and keep context small."
 
-	ReadName              = "read"
-	ReadDescription       = "Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files."
-	WriteName             = "write"
-	WriteDescription      = "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories."
-	EditName              = "edit"
-	EditDescription       = "Edit a file by replacing exact text. The oldText must match exactly (including whitespace). Use this for precise, surgical edits."
+	ReadName         = "read"
+	ReadDescription  = "Read file contents. Images sent as attachments. Text: first 2000 lines, lines truncated at 2000 chars. Use offset/limit for large files."
+	WriteName        = "write"
+	WriteDescription = "Write/overwrite file. Creates parent directories."
+	EditName         = "edit"
+	EditDescription  = "Replace exact text in file. Must match exactly including whitespace. Fails if text appears multiple times or not found."
 
 	GravatarFetchName        = "gravatar_fetch"
 	GravatarFetchDescription = "Fetch a Gravatar profile for an email address."

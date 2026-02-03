@@ -10,7 +10,6 @@ import (
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
 )
 
@@ -302,11 +301,6 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 	store := NewBossStoreAdapter(oc)
 	executor := tools.NewBossToolExecutor(store)
 
-	var meta *PortalMetadata
-	if portal != nil {
-		meta = portalMeta(portal)
-	}
-
 	var result *tools.Result
 	var err error
 
@@ -319,6 +313,39 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 	}
 	if toolName == "sessions_spawn" {
 		result, err = oc.executeSessionsSpawn(ctx, portal, args)
+		if err != nil {
+			return &bossToolResult{Error: err}
+		}
+		content := result.Text()
+		if result.Status == tools.ResultError {
+			return &bossToolResult{Error: fmt.Errorf("%s", content)}
+		}
+		return &bossToolResult{Content: content}
+	}
+	if toolName == "sessions_list" {
+		result, err = oc.executeSessionsList(ctx, portal, args)
+		if err != nil {
+			return &bossToolResult{Error: err}
+		}
+		content := result.Text()
+		if result.Status == tools.ResultError {
+			return &bossToolResult{Error: fmt.Errorf("%s", content)}
+		}
+		return &bossToolResult{Content: content}
+	}
+	if toolName == "sessions_history" {
+		result, err = oc.executeSessionsHistory(ctx, portal, args)
+		if err != nil {
+			return &bossToolResult{Error: err}
+		}
+		content := result.Text()
+		if result.Status == tools.ResultError {
+			return &bossToolResult{Error: fmt.Errorf("%s", content)}
+		}
+		return &bossToolResult{Content: content}
+	}
+	if toolName == "sessions_send" {
+		result, err = oc.executeSessionsSend(ctx, portal, args)
 		if err != nil {
 			return &bossToolResult{Error: err}
 		}
@@ -359,12 +386,6 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 		result, err = executor.ExecuteRunInternalCommand(ctx, args)
 	case "modify_room":
 		result, err = executor.ExecuteModifyRoom(ctx, args)
-	case "sessions_list":
-		result, err = executor.ExecuteSessionsList(ctx, args)
-	case "sessions_history":
-		result, err = executor.ExecuteSessionsHistory(ctx, args)
-	case "sessions_send":
-		result, err = executor.ExecuteSessionsSend(ctx, args)
 	default:
 		return nil // Not a boss tool
 	}
