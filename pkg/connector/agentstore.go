@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/format"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
+	"github.com/google/uuid"
 )
 
 // AgentStoreAdapter implements agents.AgentStore using Matrix state events.
@@ -507,6 +510,35 @@ func (b *BossStoreAdapter) ListModels(ctx context.Context) ([]tools.ModelData, e
 // ListAvailableTools implements tools.AgentStoreInterface.
 func (b *BossStoreAdapter) ListAvailableTools(ctx context.Context) ([]tools.ToolInfo, error) {
 	return b.store.ListAvailableTools(ctx)
+}
+
+// RunInternalCommand implements tools.AgentStoreInterface.
+func (b *BossStoreAdapter) RunInternalCommand(ctx context.Context, roomID string, command string) (string, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return "", fmt.Errorf("command is required")
+	}
+	if roomID == "" {
+		return "", fmt.Errorf("room_id is required")
+	}
+
+	prefix := b.store.client.connector.br.Config.CommandPrefix
+	if strings.HasPrefix(command, prefix) {
+		command = strings.TrimSpace(strings.TrimPrefix(command, prefix))
+	}
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return "", fmt.Errorf("command is empty after trimming prefix")
+	}
+
+	proc, ok := b.store.client.connector.br.Commands.(*commands.Processor)
+	if !ok {
+		return "", fmt.Errorf("command processor not available")
+	}
+
+	eventID := id.EventID(fmt.Sprintf("$internal-%s", uuid.NewString()))
+	proc.Handle(ctx, id.RoomID(roomID), eventID, b.store.client.UserLogin.User, command, "")
+	return "Command dispatched.", nil
 }
 
 // CreateRoom implements tools.AgentStoreInterface.

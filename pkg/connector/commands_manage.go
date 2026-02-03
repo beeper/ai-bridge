@@ -3,19 +3,19 @@ package connector
 import (
 	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+
+	"github.com/beeper/ai-bridge/pkg/connector/commandregistry"
 )
 
 // CommandManage handles the !ai manage command.
 // This creates or opens the Builder room for advanced users to manage custom agents.
-var CommandManage = &commands.FullHandler{
-	Func: fnManage,
-	Name: "manage",
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Open the agent management room (for creating custom agents)",
-	},
+var CommandManage = registerAICommand(commandregistry.Definition{
+	Name:          "manage",
+	Description:   "Open the agent management room (for creating custom agents)",
+	Section:       HelpSectionAI,
 	RequiresLogin: true,
-}
+	Handler:       fnManage,
+})
 
 func fnManage(ce *commands.Event) {
 	client, ok := requireClient(ce)

@@ -7,21 +7,20 @@ import (
 	"maunium.net/go/mautrix/bridgev2/commands"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
+	"github.com/beeper/ai-bridge/pkg/connector/commandregistry"
 )
 
 // CommandPlayground handles the !ai playground command.
 // This creates a playground room with minimal tools and no agent personality.
-var CommandPlayground = &commands.FullHandler{
-	Func:    fnPlayground,
-	Name:    "playground",
-	Aliases: []string{"sandbox"},
-	Help: commands.HelpMeta{
-		Section:     HelpSectionAI,
-		Description: "Create a model playground chat (minimal tools, no personality)",
-		Args:        "<model>",
-	},
+var CommandPlayground = registerAICommand(commandregistry.Definition{
+	Name:          "playground",
+	Aliases:       []string{"sandbox"},
+	Description:   "Create a model playground chat (minimal tools, no personality)",
+	Args:          "<model>",
+	Section:       HelpSectionAI,
 	RequiresLogin: true,
-}
+	Handler:       fnPlayground,
+})
 
 func fnPlayground(ce *commands.Event) {
 	client, ok := requireClient(ce)
