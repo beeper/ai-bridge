@@ -431,10 +431,6 @@ func hasUnsupportedKeywords(schema any) bool {
 	}
 }
 
-func cleanSchemaForProvider(schema any) any {
-	return cleanSchemaForProviderWithReport(schema, nil)
-}
-
 func cleanSchemaForProviderWithReport(schema any, report *schemaSanitizeReport) any {
 	if schema == nil {
 		return schema
