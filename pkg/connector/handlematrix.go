@@ -31,6 +31,9 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		return nil, fmt.Errorf("missing message event")
 	}
 
+	// Track last active room per agent for heartbeat routing
+	oc.recordAgentActivity(ctx, portal, meta)
+
 	// Check deduplication - skip if we've already processed this event
 	if msg.Event != nil && oc.inboundDedupeCache != nil {
 		dedupeKey := oc.buildDedupeKey(portal.MXID, msg.Event.ID)

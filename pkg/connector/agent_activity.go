@@ -1,0 +1,68 @@
+package connector
+
+import (
+	"context"
+
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/id"
+)
+
+func (oc *AIClient) recordAgentActivity(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) {
+	if oc == nil || portal == nil || portal.MXID == "" || meta == nil {
+		return
+	}
+	agentID := normalizeAgentID(resolveAgentID(meta))
+	if agentID == "" {
+		return
+	}
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta == nil {
+		return
+	}
+	if loginMeta.LastActiveRoomByAgent == nil {
+		loginMeta.LastActiveRoomByAgent = make(map[string]string)
+	}
+	loginMeta.LastActiveRoomByAgent[agentID] = portal.MXID.String()
+	_ = oc.UserLogin.Save(ctx)
+}
+
+func (oc *AIClient) lastActivePortal(agentID string) *bridgev2.Portal {
+	if oc == nil || oc.UserLogin == nil {
+		return nil
+	}
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta == nil || loginMeta.LastActiveRoomByAgent == nil {
+		return nil
+	}
+	room := loginMeta.LastActiveRoomByAgent[normalizeAgentID(agentID)]
+	if room == "" {
+		return nil
+	}
+	portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(room))
+	if err != nil {
+		return nil
+	}
+	return portal
+}
+
+func (oc *AIClient) defaultChatPortal() *bridgev2.Portal {
+	if oc == nil || oc.UserLogin == nil {
+		return nil
+	}
+	ctx := oc.backgroundContext(context.Background())
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta != nil && loginMeta.DefaultChatPortalID != "" {
+		portalKey := networkid.PortalKey{
+			ID:       networkid.PortalID(loginMeta.DefaultChatPortalID),
+			Receiver: oc.UserLogin.ID,
+		}
+		if portal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey); err == nil && portal != nil {
+			return portal
+		}
+	}
+	if portal, err := oc.UserLogin.Bridge.GetExistingPortalByKey(ctx, defaultChatPortalKey(oc.UserLogin.ID)); err == nil && portal != nil {
+		return portal
+	}
+	return nil
+}

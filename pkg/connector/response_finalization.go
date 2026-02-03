@@ -56,6 +56,10 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	if portal == nil || portal.MXID == "" {
 		return
 	}
+	if state != nil && state.heartbeat != nil {
+		oc.sendFinalHeartbeatTurn(ctx, portal, state, meta)
+		return
+	}
 	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return
@@ -190,6 +194,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {
 		oc.log.Warn().Err(err).Stringer("initial_event_id", state.initialEventID).Msg("Failed to send final assistant turn")
 	} else {
+		oc.recordAgentActivity(ctx, portal, meta)
 		oc.log.Debug().
 			Str("initial_event_id", state.initialEventID.String()).
 			Str("turn_id", state.turnID).
@@ -199,6 +204,185 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 			Int("link_previews", len(linkPreviews)).
 			Msg("Sent final assistant turn with metadata")
 	}
+}
+
+// sendFinalHeartbeatTurn handles heartbeat-specific response delivery.
+func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata) {
+	if portal == nil || portal.MXID == "" || state == nil || state.heartbeat == nil {
+		return
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return
+	}
+
+	hb := state.heartbeat
+	rawContent := state.accumulated.String()
+	ackMax := hb.AckMaxChars
+	if ackMax <= 0 {
+		ackMax = agents.DefaultMaxAckChars
+	}
+
+	shouldSkip, strippedText, didStrip := agents.StripHeartbeatTokenWithMode(
+		rawContent,
+		agents.StripHeartbeatModeHeartbeat,
+		ackMax,
+	)
+	finalText := rawContent
+	if didStrip {
+		finalText = strippedText
+	}
+	cleaned := strings.TrimSpace(finalText)
+	hasContent := cleaned != ""
+	includeReasoning := hb.IncludeReasoning && state.reasoning.Len() > 0
+
+	sendOutcome := func(out HeartbeatRunOutcome) {
+		if state.heartbeatResultCh != nil {
+			select {
+			case state.heartbeatResultCh <- out:
+			default:
+			}
+		}
+	}
+
+	if shouldSkip && !hasContent {
+		if includeReasoning && hb.ShowAlerts {
+			oc.sendPlainAssistantMessage(ctx, portal, "Reasoning: "+state.reasoning.String())
+		}
+		silent := true
+		if hb.ShowOk {
+			oc.sendPlainAssistantMessage(ctx, portal, agents.HeartbeatToken)
+			silent = false
+		}
+		oc.redactInitialStreamingMessage(ctx, portal, intent, state)
+		status := "ok-token"
+		if strings.TrimSpace(rawContent) == "" {
+			status = "ok-empty"
+		}
+		indicator := (*HeartbeatIndicatorType)(nil)
+		if hb.UseIndicator {
+			indicator = resolveIndicatorType(status)
+		}
+		emitHeartbeatEvent(&HeartbeatEventPayload{
+			TS:           time.Now().UnixMilli(),
+			Status:       status,
+			Reason:       hb.Reason,
+			Channel:      hb.Channel,
+			Silent:       silent,
+			IndicatorType: indicator,
+		})
+		sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: status, Silent: silent, Skipped: true})
+		return
+	}
+
+	// Deduplicate identical heartbeat content within 24h
+	if hasContent && !shouldSkip {
+		if oc.isDuplicateHeartbeat(hb.AgentID, cleaned) {
+			oc.redactInitialStreamingMessage(ctx, portal, intent, state)
+			indicator := (*HeartbeatIndicatorType)(nil)
+			if hb.UseIndicator {
+				indicator = resolveIndicatorType("skipped")
+			}
+			emitHeartbeatEvent(&HeartbeatEventPayload{
+				TS:           time.Now().UnixMilli(),
+				Status:       "skipped",
+				Reason:       "duplicate",
+				Preview:      cleaned[:minInt(len(cleaned), 200)],
+				Channel:      hb.Channel,
+				IndicatorType: indicator,
+			})
+			sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: "duplicate", Skipped: true})
+			return
+		}
+	}
+
+	if !hb.ShowAlerts {
+		oc.redactInitialStreamingMessage(ctx, portal, intent, state)
+		indicator := (*HeartbeatIndicatorType)(nil)
+		if hb.UseIndicator {
+			indicator = resolveIndicatorType("sent")
+		}
+		emitHeartbeatEvent(&HeartbeatEventPayload{
+			TS:           time.Now().UnixMilli(),
+			Status:       "skipped",
+			Reason:       "alerts-disabled",
+			Preview:      cleaned[:minInt(len(cleaned), 200)],
+			Channel:      hb.Channel,
+			IndicatorType: indicator,
+		})
+		sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: "alerts-disabled", Skipped: true})
+		return
+	}
+
+	if includeReasoning {
+		oc.sendPlainAssistantMessage(ctx, portal, "Reasoning: "+state.reasoning.String())
+	}
+
+	rendered := format.RenderMarkdown(cleaned, true, true)
+	oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, intent, rendered, nil)
+
+	// Record heartbeat for dedupe
+	if hb.AgentID != "" && cleaned != "" {
+		oc.recordHeartbeatText(hb.AgentID, cleaned)
+	}
+
+	indicator := (*HeartbeatIndicatorType)(nil)
+	if hb.UseIndicator {
+		indicator = resolveIndicatorType("sent")
+	}
+	emitHeartbeatEvent(&HeartbeatEventPayload{
+		TS:           time.Now().UnixMilli(),
+		Status:       "sent",
+		Reason:       hb.Reason,
+		Preview:      cleaned[:minInt(len(cleaned), 200)],
+		Channel:      hb.Channel,
+		IndicatorType: indicator,
+	})
+	sendOutcome(HeartbeatRunOutcome{Status: "ran", Text: cleaned, Sent: true})
+}
+
+func (oc *AIClient) redactInitialStreamingMessage(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, state *streamingState) {
+	if portal == nil || intent == nil || state == nil {
+		return
+	}
+	if state.initialEventID == "" {
+		return
+	}
+	_, err := intent.SendMessage(ctx, portal.MXID, event.EventRedaction, &event.Content{
+		Parsed: &event.RedactionEventContent{
+			Redacts: state.initialEventID,
+		},
+	}, nil)
+	if err != nil {
+		oc.log.Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact heartbeat reply message")
+	}
+}
+
+func (oc *AIClient) sendPlainAssistantMessage(ctx context.Context, portal *bridgev2.Portal, text string) {
+	if portal == nil || portal.MXID == "" {
+		return
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return
+	}
+	rendered := format.RenderMarkdown(text, true, true)
+	eventRawContent := map[string]any{
+		"msgtype":        event.MsgText,
+		"body":           rendered.Body,
+		"format":         rendered.Format,
+		"formatted_body": rendered.FormattedBody,
+	}
+	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{Raw: eventRawContent}, nil); err == nil {
+		oc.recordAgentActivity(ctx, portal, portalMeta(portal))
+	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // sendFinalAssistantTurnContent is a helper for raw mode that sends content without directive processing.
@@ -282,6 +466,7 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {
 		oc.log.Warn().Err(err).Stringer("initial_event_id", state.initialEventID).Msg("Failed to send final assistant turn (raw mode)")
 	} else {
+		oc.recordAgentActivity(ctx, portal, meta)
 		oc.log.Debug().
 			Str("initial_event_id", state.initialEventID.String()).
 			Str("turn_id", state.turnID).

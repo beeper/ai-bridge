@@ -439,7 +439,7 @@ func (oc *AIClient) streamingResponse(
 	if evt != nil {
 		sourceEventID = evt.ID
 	}
-	state := newStreamingState(meta, sourceEventID)
+	state := newStreamingState(ctx, meta, sourceEventID)
 
 	// Store base input for OpenRouter stateless continuations
 	if params.Input.OfInputItemList != nil {
@@ -1202,7 +1202,9 @@ func (oc *AIClient) streamingResponse(
 	// Send final edit to persist complete content with metadata (including reasoning)
 	if state.initialEventID != "" {
 		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
-		oc.saveAssistantMessage(ctx, log, portal, state, meta)
+		if !state.suppressSave {
+			oc.saveAssistantMessage(ctx, log, portal, state, meta)
+		}
 	}
 
 	// Send any generated images as separate messages
@@ -1414,7 +1416,7 @@ func (oc *AIClient) streamChatCompletions(
 	if evt != nil {
 		sourceEventID = evt.ID
 	}
-	state := newStreamingState(meta, sourceEventID)
+	state := newStreamingState(ctx, meta, sourceEventID)
 
 	// Track active tool calls by index
 	activeTools := make(map[int]*activeToolCall)
@@ -1673,7 +1675,9 @@ func (oc *AIClient) streamChatCompletions(
 	// Send final edit and save to database
 	if state.initialEventID != "" {
 		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
-		oc.saveAssistantMessage(ctx, log, portal, state, meta)
+		if !state.suppressSave {
+			oc.saveAssistantMessage(ctx, log, portal, state, meta)
+		}
 	}
 
 	log.Info().
