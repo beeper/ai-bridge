@@ -1924,7 +1924,8 @@ func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal)
 			store := NewAgentStoreAdapter(oc)
 			agent, _ := store.GetAgentByID(ctx, agentID)
 			if agent != nil {
-				oc.ensureAgentGhostDisplayName(ctx, agentID, modelID, agent.Name)
+				agentName := oc.resolveAgentDisplayName(ctx, agent)
+				oc.ensureAgentGhostDisplayName(ctx, agentID, modelID, agentName)
 			}
 			return ghost.Intent
 		}
