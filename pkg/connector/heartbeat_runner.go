@@ -274,6 +274,7 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		ShowAlerts:       visibility.ShowAlerts,
 		UseIndicator:     visibility.UseIndicator,
 		IncludeReasoning: heartbeat != nil && heartbeat.IncludeReasoning != nil && *heartbeat.IncludeReasoning,
+		ExecEvent:        hasExecCompletion,
 		TargetRoom:       deliveryRoom,
 		TargetReason:     deliveryReason,
 		SuppressSend:     suppressSend,
@@ -305,7 +306,15 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		prompt = systemEvents + "\n\n" + prompt
 	}
 
-	promptMeta := portalMeta(sessionPortal)
+	promptMeta := clonePortalMetadata(portalMeta(sessionPortal))
+	if promptMeta == nil {
+		promptMeta = &PortalMetadata{}
+	}
+	if heartbeat != nil && heartbeat.Model != nil {
+		if model := strings.TrimSpace(*heartbeat.Model); model != "" {
+			promptMeta.Model = model
+		}
+	}
 	promptMessages, err := oc.buildPromptWithHeartbeat(context.Background(), sessionPortal, promptMeta, prompt)
 	if err != nil {
 		return cron.HeartbeatRunResult{Status: "failed", Reason: err.Error()}
@@ -357,17 +366,19 @@ func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *Hea
 		}
 	}
 	if session == "" {
-		portal := oc.lastActivePortal(agentID)
-		if portal != nil {
+		if portal := oc.defaultChatPortal(); portal != nil {
 			return portal, portal.MXID.String(), nil
 		}
-		if portal = oc.defaultChatPortal(); portal != nil {
+		if portal := oc.lastActivePortal(agentID); portal != nil {
 			return portal, portal.MXID.String(), nil
 		}
 		return nil, "", fmt.Errorf("no session")
 	}
-	if strings.EqualFold(session, "main") {
+	if strings.EqualFold(session, "main") || strings.EqualFold(session, "global") {
 		if portal := oc.defaultChatPortal(); portal != nil {
+			return portal, portal.MXID.String(), nil
+		}
+		if portal := oc.lastActivePortal(agentID); portal != nil {
 			return portal, portal.MXID.String(), nil
 		}
 	}
@@ -375,6 +386,9 @@ func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *Hea
 		if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(session)); err == nil && portal != nil {
 			return portal, portal.MXID.String(), nil
 		}
+	}
+	if portal := oc.defaultChatPortal(); portal != nil {
+		return portal, portal.MXID.String(), nil
 	}
 	if portal := oc.lastActivePortal(agentID); portal != nil {
 		return portal, portal.MXID.String(), nil
@@ -534,15 +548,51 @@ func formatSystemEvents(events []SystemEvent) string {
 	}
 	lines := make([]string, 0, len(events))
 	for _, evt := range events {
-		text := strings.TrimSpace(evt.Text)
+		text := compactSystemEvent(evt.Text)
 		if text == "" {
 			continue
 		}
-		ts := time.UnixMilli(evt.TS).UTC().Format(time.RFC3339)
+		ts := formatSystemEventTimestamp(evt.TS)
 		lines = append(lines, fmt.Sprintf("System: [%s] %s", ts, text))
 	}
 	if len(lines) == 0 {
 		return ""
 	}
 	return strings.Join(lines, "\n")
+}
+
+var nodeLastInputRe = regexp.MustCompile(`(?i)\s*·\s*last input [^·]+`)
+
+func compactSystemEvent(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return ""
+	}
+	lowered := strings.ToLower(trimmed)
+	if strings.Contains(lowered, "reason periodic") {
+		return ""
+	}
+	// Filter out the actual heartbeat prompt, but not cron jobs that mention "heartbeat".
+	if strings.HasPrefix(lowered, "read heartbeat.md") {
+		return ""
+	}
+	// Filter heartbeat poll/wake noise.
+	if strings.Contains(lowered, "heartbeat poll") || strings.Contains(lowered, "heartbeat wake") {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "Node:") {
+		trimmed = strings.TrimSpace(nodeLastInputRe.ReplaceAllString(trimmed, ""))
+	}
+	return trimmed
+}
+
+func formatSystemEventTimestamp(ts int64) string {
+	if ts <= 0 {
+		return "unknown-time"
+	}
+	date := time.UnixMilli(ts).In(time.Local)
+	if date.IsZero() {
+		return "unknown-time"
+	}
+	return date.Format("2006-01-02 15:04:05 MST")
 }

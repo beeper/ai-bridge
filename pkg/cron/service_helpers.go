@@ -1,11 +1,11 @@
 package cron
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 const stuckRunMs int64 = 2 * 60 * 60 * 1000
@@ -304,9 +304,7 @@ func sortJobs(jobs []CronJob) {
 }
 
 func randomID() string {
-	buf := make([]byte, 16)
-	_, _ = rand.Read(buf)
-	return hex.EncodeToString(buf)
+	return uuid.NewString()
 }
 
 // helpers defined in normalize.go and utils.go

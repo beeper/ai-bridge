@@ -9,7 +9,6 @@ import (
 )
 
 const (
-	defaultCronDirName  = ".openclaw/cron"
 	defaultCronFileName = "jobs.json"
 )
 
@@ -17,22 +16,48 @@ const (
 func ResolveCronStorePath(storePath string) string {
 	trimmed := strings.TrimSpace(storePath)
 	if trimmed != "" {
-		if strings.HasPrefix(trimmed, "~") {
-			if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-				replaced := strings.Replace(trimmed, "~", home, 1)
-				return filepath.Clean(replaced)
-			}
+		return resolveUserPath(trimmed)
+	}
+	stateDir := resolveConfigDir()
+	return filepath.Join(stateDir, "cron", defaultCronFileName)
+}
+
+func resolveConfigDir() string {
+	override := strings.TrimSpace(os.Getenv("OPENCLAW_STATE_DIR"))
+	if override == "" {
+		override = strings.TrimSpace(os.Getenv("CLAWDBOT_STATE_DIR"))
+	}
+	if override != "" {
+		resolved := resolveUserPath(override)
+		if strings.TrimSpace(resolved) != "" {
+			return resolved
 		}
-		if abs, err := filepath.Abs(trimmed); err == nil {
-			return abs
-		}
-		return filepath.Clean(trimmed)
 	}
 	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return filepath.Join(os.TempDir(), "openclaw", "cron", defaultCronFileName)
+	if err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Join(home, ".openclaw")
 	}
-	return filepath.Join(home, defaultCronDirName, defaultCronFileName)
+	return filepath.Join(os.TempDir(), "openclaw")
+}
+
+func resolveUserPath(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "~") {
+		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+			replaced := strings.Replace(trimmed, "~", home, 1)
+			if abs, err := filepath.Abs(replaced); err == nil {
+				return abs
+			}
+			return filepath.Clean(replaced)
+		}
+	}
+	if abs, err := filepath.Abs(trimmed); err == nil {
+		return abs
+	}
+	return filepath.Clean(trimmed)
 }
 
 // LoadCronStore reads the JSON store, tolerating missing files.

@@ -7,7 +7,7 @@ type CronSchedule struct {
 	Kind     string `json:"kind"`
 	AtMs     int64  `json:"atMs,omitempty"`
 	EveryMs  int64  `json:"everyMs,omitempty"`
-	AnchorMs int64  `json:"anchorMs,omitempty"`
+	AnchorMs *int64 `json:"anchorMs,omitempty"`
 	Expr     string `json:"expr,omitempty"`
 	TZ       string `json:"tz,omitempty"`
 }

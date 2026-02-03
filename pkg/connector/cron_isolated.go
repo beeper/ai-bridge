@@ -17,7 +17,7 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 		return "error", "", "", fmt.Errorf("missing client")
 	}
 	ctx := oc.backgroundContext(context.Background())
-	agentID := resolveCronAgentID(job.AgentID)
+	agentID := resolveCronAgentID(job.AgentID, &oc.connector.Config)
 	portal, err := oc.getOrCreateCronRoom(ctx, agentID, job.ID, job.Name)
 	if err != nil {
 		return "error", "", "", err

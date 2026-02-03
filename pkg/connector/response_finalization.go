@@ -219,7 +219,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	hb := state.heartbeat
 	rawContent := state.accumulated.String()
 	ackMax := hb.AckMaxChars
-	if ackMax <= 0 {
+	if ackMax < 0 {
 		ackMax = agents.DefaultMaxAckChars
 	}
 
@@ -231,6 +231,12 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	finalText := rawContent
 	if didStrip {
 		finalText = strippedText
+	}
+	if hb.ExecEvent && strings.TrimSpace(rawContent) != "" {
+		if strings.TrimSpace(finalText) == "" {
+			finalText = rawContent
+		}
+		shouldSkip = false
 	}
 	cleaned := strings.TrimSpace(finalText)
 	hasContent := cleaned != ""

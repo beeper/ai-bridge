@@ -49,7 +49,11 @@ func isSystemEventContextChanged(sessionKey string, contextKey string) bool {
 	systemEventsMu.Lock()
 	defer systemEventsMu.Unlock()
 	entry := systemEvents[key]
-	return normalizeContextKey(contextKey) != normalizeContextKey(entry.lastContextKey)
+	lastContext := ""
+	if entry != nil {
+		lastContext = entry.lastContextKey
+	}
+	return normalizeContextKey(contextKey) != normalizeContextKey(lastContext)
 }
 
 func enqueueSystemEvent(sessionKey string, text string, contextKey string) {
