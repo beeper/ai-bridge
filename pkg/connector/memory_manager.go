@@ -37,6 +37,7 @@ type MemorySearchManager struct {
 	log          zerolog.Logger
 
 	dirty             bool
+	sessionsDirty     bool
 	sessionWarm       map[string]struct{}
 	watchTimer        *time.Timer
 	sessionWatchTimer *time.Timer
@@ -197,8 +198,13 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 	}
 	m.warmSession(ctx, opts.SessionKey)
 	if m.cfg.Sync.OnSearch {
-		if err := m.sync(ctx, opts.SessionKey, false); err != nil {
-			m.log.Warn().Err(err).Msg("memory sync failed on search")
+		m.mu.Lock()
+		shouldSync := m.dirty || m.sessionsDirty
+		m.mu.Unlock()
+		if shouldSync {
+			if err := m.sync(ctx, opts.SessionKey, false); err != nil {
+				m.log.Warn().Err(err).Msg("memory sync failed on search")
+			}
 		}
 	}
 

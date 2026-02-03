@@ -75,6 +75,7 @@ func (m *MemorySearchManager) sync(ctx context.Context, sessionKey string, force
 		if err := m.syncSessions(ctx, needsFullReindex, sessionKey); err != nil {
 			return err
 		}
+		m.sessionsDirty = false
 	}
 
 	return m.updateMeta(ctx)
