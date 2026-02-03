@@ -61,6 +61,13 @@ func (s *Store) Stat(ctx context.Context, relPath string) (*StatEntry, error) {
 				break
 			}
 		}
+		if !found && IsVirtualDir(dir) {
+			return &StatEntry{
+				Path:    dir,
+				Type:    StatTypeDir,
+				Entries: 0,
+			}, nil
+		}
 		if !found {
 			return nil, fmt.Errorf("path not found: %s", relPath)
 		}
