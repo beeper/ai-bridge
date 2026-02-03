@@ -166,15 +166,17 @@ func executeMessageMemberInfo(ctx context.Context, args map[string]any, btc *Bri
 			} else {
 				store := NewAgentStoreAdapter(btc.Client)
 				if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil && agent.Model.Primary != "" {
-					modelID = ResolveAlias(agent.Model.Primary)
+					if override := btc.Client.agentModelOverride(agentID); override != "" {
+						modelID = ResolveAlias(override)
+					} else {
+						modelID = ResolveAlias(agent.Model.Primary)
+					}
 				}
 			}
 		}
 		if modelID != "" {
 			result["com.beeper.ai.model_id"] = modelID
 		}
-	} else if _, modelID, ok := parseAgentModelFromGhostID(string(userID)); ok {
-		result["com.beeper.ai.model_id"] = modelID
 	} else if modelID := parseModelFromGhostID(string(userID)); modelID != "" {
 		result["com.beeper.ai.model_id"] = modelID
 	}

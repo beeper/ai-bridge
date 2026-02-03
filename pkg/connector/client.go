@@ -658,10 +658,10 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 		store := NewAgentStoreAdapter(oc)
 		agent, err := store.GetAgentByID(ctx, agentID)
 		displayName := "Unknown Agent"
-		modelID := ""
+		modelID := oc.agentModelOverride(agentID)
 		if err == nil && agent != nil {
 			displayName = agent.Name
-			if agent.Model.Primary != "" {
+			if modelID == "" && agent.Model.Primary != "" {
 				modelID = ResolveAlias(agent.Model.Primary)
 			}
 		}
@@ -669,30 +669,6 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 		if modelID != "" {
 			identifiers = append(identifiers, modelContactIdentifiers(modelID, oc.findModelInfo(modelID))...)
 		}
-		return &bridgev2.UserInfo{
-			Name:         ptr.Ptr(displayName),
-			IsBot:        ptr.Ptr(true),
-			Identifiers:  uniqueStrings(identifiers),
-			ExtraUpdates: updateGhostLastSync,
-		}, nil
-	}
-
-	// Parse agent+model from ghost ID (format: "agent-{id}:model-{id}")
-	if agentID, modelID, ok := parseAgentModelFromGhostID(ghostID); ok {
-		store := NewAgentStoreAdapter(oc)
-		agent, err := store.GetAgentByID(ctx, agentID)
-		identifiers := append([]string{agentID}, modelContactIdentifiers(modelID, oc.findModelInfo(modelID))...)
-		if err == nil && agent != nil {
-			displayName := oc.agentModelDisplayName(agent.Name, modelID)
-			return &bridgev2.UserInfo{
-				Name:         ptr.Ptr(displayName),
-				IsBot:        ptr.Ptr(true),
-				Identifiers:  uniqueStrings(identifiers),
-				ExtraUpdates: updateGhostLastSync,
-			}, nil
-		}
-		// Fallback for unknown agent
-		displayName := oc.agentModelDisplayName("Unknown Agent", modelID)
 		return &bridgev2.UserInfo{
 			Name:         ptr.Ptr(displayName),
 			IsBot:        ptr.Ptr(true),
@@ -811,6 +787,9 @@ func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 				if meta.Model != "" {
 					return ResolveAlias(meta.Model)
 				}
+				if override := oc.agentModelOverride(agentID); override != "" {
+					return ResolveAlias(override)
+				}
 				if agent.Model.Primary != "" {
 					return ResolveAlias(agent.Model.Primary)
 				}
@@ -831,6 +810,33 @@ func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 
 	// Provider default from config
 	return oc.defaultModelForProvider()
+}
+
+func (oc *AIClient) agentModelOverride(agentID string) string {
+	if agentID == "" || oc.UserLogin == nil {
+		return ""
+	}
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta == nil || loginMeta.AgentModelOverrides == nil {
+		return ""
+	}
+	return strings.TrimSpace(loginMeta.AgentModelOverrides[agentID])
+}
+
+func (oc *AIClient) setAgentModelOverride(ctx context.Context, agentID, modelID string) error {
+	if agentID == "" || oc.UserLogin == nil {
+		return fmt.Errorf("missing agent ID")
+	}
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta.AgentModelOverrides == nil {
+		loginMeta.AgentModelOverrides = make(map[string]string)
+	}
+	if modelID == "" {
+		delete(loginMeta.AgentModelOverrides, agentID)
+	} else {
+		loginMeta.AgentModelOverrides[agentID] = modelID
+	}
+	return oc.UserLogin.Save(ctx)
 }
 
 // effectiveModelForAPI returns the actual model name to send to the API

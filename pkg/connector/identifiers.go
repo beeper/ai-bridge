@@ -63,13 +63,6 @@ func parseModelFromGhostID(ghostID string) string {
 	return ""
 }
 
-// agentModelUserID creates a ghost user ID for an agent+model combination.
-// Format: "agent-{agent-id}:model-{model-id}".
-// Deprecated: kept for backwards compatibility with old room state.
-func agentModelUserID(agentID, modelID string) networkid.UserID {
-	return networkid.UserID(fmt.Sprintf("agent-%s:model-%s", url.PathEscape(agentID), url.PathEscape(modelID)))
-}
-
 // parseAgentFromGhostID extracts the agent ID from a ghost ID (format: "agent-{escaped-agent-id}").
 // Returns empty string and false if the ghost ID is not an agent-only ghost.
 func parseAgentFromGhostID(ghostID string) (agentID string, ok bool) {
@@ -83,27 +76,6 @@ func parseAgentFromGhostID(ghostID string) (agentID string, ok bool) {
 		}
 	}
 	return "", false
-}
-
-// parseAgentModelFromGhostID extracts agent and model IDs from a composite ghost ID.
-// Returns agentID, modelID, and true if successful.
-func parseAgentModelFromGhostID(ghostID string) (agentID, modelID string, ok bool) {
-	parts := strings.SplitN(ghostID, ":model-", 2)
-	if len(parts) != 2 {
-		return "", "", false
-	}
-
-	agentPart := parts[0]
-	modelPart := parts[1]
-
-	if suffix, hasPrefix := strings.CutPrefix(agentPart, "agent-"); hasPrefix {
-		agentID, err1 := url.PathUnescape(suffix)
-		modelID, err2 := url.PathUnescape(modelPart)
-		if err1 == nil && err2 == nil {
-			return agentID, modelID, true
-		}
-	}
-	return "", "", false
 }
 
 func humanUserID(loginID networkid.UserLoginID) networkid.UserID {

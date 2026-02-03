@@ -242,15 +242,6 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 
 	store := NewAgentStoreAdapter(oc)
 
-	// Check if identifier is an agent+model ghost ID (agent-{id}:model-{id})
-	if agentID, modelID, ok := parseAgentModelFromGhostID(id); ok {
-		agent, err := store.GetAgentByID(ctx, agentID)
-		if err != nil || agent == nil {
-			return nil, fmt.Errorf("agent '%s' not found", agentID)
-		}
-		return oc.resolveAgentIdentifierWithModel(ctx, agent, modelID, createChat)
-	}
-
 	// Check if identifier is an agent ghost ID (agent-{id})
 	if agentID, ok := parseAgentFromGhostID(id); ok {
 		agent, err := store.GetAgentByID(ctx, agentID)
@@ -728,9 +719,10 @@ func (oc *AIClient) resolveAgentModelForNewChat(ctx context.Context, agent *agen
 		}
 	}
 
-	if agent != nil && agent.Model.Primary != "" {
-		if ok, _ := oc.validateModel(ctx, agent.Model.Primary); ok {
-			return agent.Model.Primary, nil
+	if agent != nil {
+		defaultModel := oc.agentDefaultModel(agent)
+		if ok, _ := oc.validateModel(ctx, defaultModel); ok {
+			return defaultModel, nil
 		}
 	}
 
@@ -1354,6 +1346,33 @@ func (oc *AIClient) ensureSingleAIGhost(ctx context.Context, portal *bridgev2.Po
 		return portal.Save(ctx)
 	}
 	return nil
+}
+
+func (oc *AIClient) applyAgentModelChange(ctx context.Context, agentID, oldModel, newModel string) {
+	if agentID == "" || oldModel == "" || newModel == "" || oldModel == newModel {
+		return
+	}
+	portals, err := oc.listAllChatPortals(ctx)
+	if err != nil {
+		oc.log.Warn().Err(err).Msg("Failed to list portals for agent model change")
+		return
+	}
+	for _, portal := range portals {
+		meta := portalMeta(portal)
+		if resolveAgentID(meta) != agentID {
+			continue
+		}
+		if meta.Model != "" {
+			continue // Room override wins
+		}
+		meta.Capabilities = getModelCapabilities(newModel, oc.findModelInfo(newModel))
+		meta.LastRoomStateSync = time.Now().Unix()
+		if err := portal.Save(ctx); err != nil {
+			oc.log.Warn().Err(err).Stringer("portal", portal.PortalKey).Msg("Failed to save portal on agent model change")
+			continue
+		}
+		oc.handleAgentModelSwitch(ctx, portal, agentID, oldModel, newModel)
+	}
 }
 
 // BroadcastRoomState sends current room capabilities and settings to Matrix room state

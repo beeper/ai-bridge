@@ -9,6 +9,7 @@ import (
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 	agenttools "github.com/beeper/ai-bridge/pkg/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 )
 
 type toolPolicyResolution struct {
@@ -67,6 +68,16 @@ func (oc *AIClient) resolveToolPolicies(meta *PortalMetadata) toolPolicyResoluti
 		resolve.resolvePolicy(effective.AgentPolicy, resolveAgentPolicyLabel("agents.tools.allow", agent)),
 		resolve.resolvePolicy(effective.AgentProviderPolicy, resolveAgentPolicyLabel("agents.tools.byProvider.allow", agent)),
 		resolve.resolvePolicy(resolveSubagentPolicy(meta, globalTools), "tools.subagents"),
+	}
+	if !hasAssignedAgent(meta) {
+		modelRoomPolicy := &toolpolicy.ToolPolicy{
+			Allow: []string{
+				toolspec.MemorySearchName,
+				toolspec.MemoryGetName,
+				toolspec.WebSearchName,
+			},
+		}
+		resolvedPolicies = append(resolvedPolicies, resolve.resolvePolicy(modelRoomPolicy, "tools.model_rooms"))
 	}
 
 	allowed := resolve.applyPolicies(ctx.names, resolvedPolicies)
