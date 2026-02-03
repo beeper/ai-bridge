@@ -251,7 +251,7 @@ func (c *CronService) Run(id string, mode string) (bool, string, error) {
 func (c *CronService) Wake(mode string, text string) (bool, error) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
-		return false, errors.New("text required")
+		return false, nil
 	}
 	if c.deps.EnqueueSystemEvent == nil {
 		return false, errors.New("enqueueSystemEvent not configured")
@@ -380,8 +380,12 @@ func (c *CronService) executeJob(job *CronJob, forced bool) (bool, error) {
 			}
 			if mode == "full" {
 				maxChars := 8000
-				if job.Isolation != nil && job.Isolation.PostToMainMaxChars != nil && *job.Isolation.PostToMainMaxChars > 0 {
-					maxChars = *job.Isolation.PostToMainMaxChars
+				if job.Isolation != nil && job.Isolation.PostToMainMaxChars != nil {
+					if *job.Isolation.PostToMainMaxChars < 0 {
+						maxChars = 0
+					} else {
+						maxChars = *job.Isolation.PostToMainMaxChars
+					}
 				}
 				full := strings.TrimSpace(outputVal)
 				if full != "" {

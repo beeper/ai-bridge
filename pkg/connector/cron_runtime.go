@@ -46,7 +46,7 @@ func (oc *AIClient) enqueueCronSystemEvent(text string, agentID string) error {
 	if oc == nil {
 		return fmt.Errorf("missing client")
 	}
-	agentID = resolveCronAgentID(agentID)
+	agentID = resolveCronAgentID(agentID, &oc.connector.Config)
 	hb := resolveHeartbeatConfig(&oc.connector.Config, agentID)
 	portal, sessionKey, err := oc.resolveHeartbeatSessionPortal(agentID, hb)
 	if err != nil || portal == nil || sessionKey == "" {

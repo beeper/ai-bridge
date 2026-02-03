@@ -61,7 +61,9 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 				"error":  err.Error(),
 			}).Text(), nil
 		}
-		return agenttools.JSONResult(jobs).Text(), nil
+		return agenttools.JSONResult(map[string]any{
+			"jobs": jobs,
+		}).Text(), nil
 	case "add":
 		normalizedArgs := coerceCronArgs(args)
 		jobInput, err := cron.NormalizeCronJobCreateRaw(normalizedArgs)

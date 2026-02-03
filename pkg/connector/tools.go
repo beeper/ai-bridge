@@ -165,7 +165,10 @@ func normalizeMessageArgs(args map[string]any) {
 	hasMessageID := false
 	if raw, ok := args["message_id"]; ok {
 		if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
-			hasMessageID = true
+			args["message_id"] = normalizeMessageID(s)
+			if strings.TrimSpace(args["message_id"].(string)) != "" {
+				hasMessageID = true
+			}
 		}
 	}
 	if !hasMessageID {

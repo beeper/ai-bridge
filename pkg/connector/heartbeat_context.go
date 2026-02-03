@@ -13,6 +13,7 @@ type HeartbeatRunConfig struct {
 	ShowAlerts       bool
 	UseIndicator     bool
 	IncludeReasoning bool
+	ExecEvent        bool
 	TargetRoom       id.RoomID
 	TargetReason     string
 	SuppressSend     bool

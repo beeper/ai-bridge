@@ -21,12 +21,14 @@ func ComputeNextRunAtMs(schedule CronSchedule, nowMs int64) *int64 {
 		if everyMs < 1 {
 			everyMs = 1
 		}
-		anchor := schedule.AnchorMs
+		anchor := int64(0)
+		if schedule.AnchorMs != nil {
+			anchor = *schedule.AnchorMs
+		} else {
+			anchor = nowMs
+		}
 		if anchor < 0 {
 			anchor = 0
-		}
-		if anchor == 0 {
-			anchor = nowMs
 		}
 		if nowMs < anchor {
 			return &anchor

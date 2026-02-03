@@ -311,6 +311,12 @@ func NormalizeCronJobPatchRaw(raw any) (CronJobPatch, error) {
 	if normalized == nil {
 		return CronJobPatch{}, fmt.Errorf("invalid cron patch")
 	}
+	agentIDPresent := false
+	agentIDNil := false
+	if val, ok := normalized["agentId"]; ok {
+		agentIDPresent = true
+		agentIDNil = val == nil
+	}
 	data, err := json.Marshal(normalized)
 	if err != nil {
 		return CronJobPatch{}, err
@@ -318,6 +324,10 @@ func NormalizeCronJobPatchRaw(raw any) (CronJobPatch, error) {
 	var out CronJobPatch
 	if err := json.Unmarshal(data, &out); err != nil {
 		return CronJobPatch{}, err
+	}
+	if agentIDPresent && agentIDNil && out.AgentID == nil {
+		empty := ""
+		out.AgentID = &empty
 	}
 	return NormalizeCronJobPatch(out), nil
 }
