@@ -51,7 +51,7 @@ var ToolGroups = map[string][]string{
 	GroupNodes:      {"nodes"},
 	GroupStatus:     {"session_status"},
 	GroupOpenClaw:   {"message", "agents_list", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_fetch", "image"},
-	GroupFS:         {"read", "write", "edit"},
+	GroupFS:         {"read", "write", "edit", "apply_patch"},
 }
 
 type toolProfilePolicy struct {
@@ -65,7 +65,7 @@ var ToolProfiles = map[ToolProfileID]toolProfilePolicy{
 	ProfileCoding:    {Allow: []string{GroupFS, GroupRuntime, GroupSessions, GroupMemory, "image"}},
 	ProfileMessaging: {Allow: []string{GroupMessaging, "sessions_list", "sessions_history", "sessions_send", "session_status"}},
 	ProfileFull:      {},
-	ProfileBoss:      {Allow: []string{GroupBuilder, GroupSessions, GroupMessaging, GroupMemory, GroupFS}},
+	ProfileBoss:      {},
 }
 
 // ToolPolicyConfig matches OpenClaw's allow/deny policy (global or per-agent).

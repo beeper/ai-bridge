@@ -13,21 +13,22 @@ type toolExecutor func(ctx context.Context, args map[string]any) (string, error)
 
 func builtinToolExecutors() map[string]toolExecutor {
 	return map[string]toolExecutor{
-		toolspec.CalculatorName:          executeCalculator,
-		toolspec.WebSearchName:           executeWebSearch,
-		ToolNameMessage:                  executeMessage,
-		ToolNameTTS:                      executeTTS,
-		ToolNameWebFetch:                 executeWebFetch,
-		ToolNameImage:                    executeAnalyzeImage,
-		ToolNameImageGenerate:            executeImageGeneration,
-		ToolNameSessionStatus:            executeSessionStatus,
-		ToolNameMemorySearch:             executeMemorySearch,
-		ToolNameMemoryGet:                executeMemoryGet,
-		ToolNameRead:                     executeReadFile,
-		ToolNameWrite:                    executeWriteFile,
-		ToolNameEdit:                     executeEditFile,
-		ToolNameGravatarFetch:            executeGravatarFetch,
-		ToolNameGravatarSet:              executeGravatarSet,
+		toolspec.CalculatorName: executeCalculator,
+		toolspec.WebSearchName:  executeWebSearch,
+		ToolNameMessage:         executeMessage,
+		ToolNameTTS:             executeTTS,
+		ToolNameWebFetch:        executeWebFetch,
+		ToolNameImage:           executeAnalyzeImage,
+		ToolNameImageGenerate:   executeImageGeneration,
+		ToolNameSessionStatus:   executeSessionStatus,
+		ToolNameMemorySearch:    executeMemorySearch,
+		ToolNameMemoryGet:       executeMemoryGet,
+		ToolNameRead:            executeReadFile,
+		ToolNameApplyPatch:      executeApplyPatch,
+		ToolNameWrite:           executeWriteFile,
+		ToolNameEdit:            executeEditFile,
+		ToolNameGravatarFetch:   executeGravatarFetch,
+		ToolNameGravatarSet:     executeGravatarSet,
 	}
 }
 

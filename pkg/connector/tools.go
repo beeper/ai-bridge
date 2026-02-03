@@ -99,6 +99,7 @@ const (
 	ToolNameGravatarFetch = toolspec.GravatarFetchName
 	ToolNameGravatarSet   = toolspec.GravatarSetName
 	ToolNameRead          = toolspec.ReadName
+	ToolNameApplyPatch    = toolspec.ApplyPatchName
 	ToolNameWrite         = toolspec.WriteName
 	ToolNameEdit          = toolspec.EditName
 )
