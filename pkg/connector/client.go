@@ -29,6 +29,7 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
+	"github.com/beeper/ai-bridge/pkg/cron"
 )
 
 var (
@@ -274,6 +275,11 @@ type AIClient struct {
 
 	// Message debouncer for combining rapid messages
 	inboundDebouncer *Debouncer
+
+	// Cron + heartbeat
+	cronService     *cron.CronService
+	heartbeatRunner *HeartbeatRunner
+	heartbeatWake   *HeartbeatWake
 }
 
 // pendingMessageType indicates what kind of pending message this is
