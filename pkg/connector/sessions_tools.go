@@ -114,7 +114,7 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 		if messageLimit > 0 {
 			messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, candidate.PortalKey, messageLimit)
 			if err == nil && len(messages) > 0 {
-				entry["messages"] = buildSessionMessages(messages)
+				entry["messages"] = buildSessionMessages(messages, false)
 			}
 		}
 
@@ -168,9 +168,16 @@ func (oc *AIClient) executeSessionsHistory(ctx context.Context, portal *bridgev2
 		}), nil
 	}
 
+	includeTools := false
+	if raw, ok := args["includeTools"]; ok {
+		if value, ok := raw.(bool); ok {
+			includeTools = value
+		}
+	}
+
 	return tools.JSONResult(map[string]any{
 		"sessionKey": displayKey,
-		"messages":   buildSessionMessages(messages),
+		"messages":   buildSessionMessages(messages, includeTools),
 	}), nil
 }
 
@@ -370,14 +377,17 @@ func (oc *AIClient) lastMessageTimestamp(ctx context.Context, portal *bridgev2.P
 	return messages[len(messages)-1].Timestamp.UnixMilli()
 }
 
-func buildSessionMessages(messages []*database.Message) []map[string]any {
+func buildSessionMessages(messages []*database.Message, includeTools bool) []map[string]any {
 	result := make([]map[string]any, 0, len(messages))
 	for _, msg := range messages {
 		meta := messageMeta(msg)
 		if meta == nil {
 			continue
 		}
-		if meta.Role != "assistant" && meta.Role != "user" {
+		if !includeTools && meta.Role != "assistant" && meta.Role != "user" {
+			continue
+		}
+		if includeTools && meta.Role != "assistant" && meta.Role != "user" && meta.Role != "tool" {
 			continue
 		}
 		entry := map[string]any{

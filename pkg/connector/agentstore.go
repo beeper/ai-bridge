@@ -10,9 +10,7 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/commands"
-	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
-	"maunium.net/go/mautrix/format"
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
@@ -672,63 +670,6 @@ func (b *BossStoreAdapter) ListRooms(ctx context.Context) ([]tools.RoomData, err
 	}
 
 	return rooms, nil
-}
-
-// GetRoomHistory returns message history for a room.
-func (b *BossStoreAdapter) GetRoomHistory(ctx context.Context, roomID string, limit int) ([]tools.MessageData, error) {
-	portal, err := b.resolvePortalByRoomID(ctx, roomID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get messages from database
-	messages, err := b.store.client.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get messages: %w", err)
-	}
-
-	// Convert to tools.MessageData
-	var result []tools.MessageData
-	for _, msg := range messages {
-		msgMeta, ok := msg.Metadata.(*MessageMetadata)
-		if !ok || msgMeta == nil {
-			continue
-		}
-
-		result = append(result, tools.MessageData{
-			ID:        msg.MXID.String(),
-			Role:      msgMeta.Role,
-			Content:   msgMeta.Body,
-			Timestamp: msg.Timestamp.Unix(),
-		})
-	}
-
-	return result, nil
-}
-
-// SendToRoom sends a message to a room.
-func (b *BossStoreAdapter) SendToRoom(ctx context.Context, roomID string, message string) error {
-	portal, err := b.resolvePortalByRoomID(ctx, roomID)
-	if err != nil {
-		return err
-	}
-
-	// Get the bot to send the message
-	bot := b.store.client.UserLogin.Bridge.Bot
-
-	// Send the message as the bot
-	rendered := format.RenderMarkdown(message, true, true)
-	eventContent := &event.Content{
-		Raw: map[string]any{
-			"msgtype":        event.MsgText,
-			"body":           rendered.Body,
-			"format":         rendered.Format,
-			"formatted_body": rendered.FormattedBody,
-		},
-	}
-
-	_, err = bot.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
-	return err
 }
 
 // Verify interface compliance

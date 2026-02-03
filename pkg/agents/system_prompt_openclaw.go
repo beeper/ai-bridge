@@ -152,8 +152,8 @@ func buildVoiceSection(params struct {
 }
 
 func buildDocsSection(params struct {
-	docsPath    string
-	isMinimal   bool
+	docsPath     string
+	isMinimal    bool
 	readToolName string
 }) []string {
 	docsPath := strings.TrimSpace(params.docsPath)
@@ -235,9 +235,20 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"read":             "Read file contents",
 		"write":            "Create or overwrite files",
 		"edit":             "Make precise edits to files",
+		"apply_patch":      "Apply multi-file patches",
+		"grep":             "Search file contents for patterns",
+		"find":             "Find files by glob pattern",
+		"ls":               "List directory contents",
+		"exec":             "Run shell commands (pty available for TTY-required CLIs)",
+		"process":          "Manage background exec sessions",
 		"web_search":       "Search the web (Brave API)",
 		"web_fetch":        "Fetch and extract readable content from a URL",
+		"browser":          "Control web browser",
+		"canvas":           "Present/eval/snapshot the Canvas",
+		"nodes":            "List/describe/notify/camera/screen/invoke on paired nodes",
+		"cron":             "Manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
 		"message":          "Send messages and channel actions",
+		"gateway":          "Restart, apply config, or run updates on the running OpenClaw process",
 		"agents_list":      "List agent ids allowed for sessions_spawn",
 		"sessions_list":    "List other sessions (incl. sub-agents) with filters/last",
 		"sessions_history": "Fetch history for another session/sub-agent",
@@ -251,9 +262,20 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"read",
 		"write",
 		"edit",
+		"apply_patch",
+		"grep",
+		"find",
+		"ls",
+		"exec",
+		"process",
 		"web_search",
 		"web_fetch",
+		"browser",
+		"canvas",
+		"nodes",
+		"cron",
 		"message",
+		"gateway",
 		"agents_list",
 		"sessions_list",
 		"sessions_history",
@@ -357,6 +379,8 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 
 	hasGateway := availableTools["gateway"]
 	readToolName := resolveToolName("read")
+	execToolName := resolveToolName("exec")
+	processToolName := resolveToolName("process")
 	extraSystemPrompt := strings.TrimSpace(params.ExtraSystemPrompt)
 	ownerNumbers := make([]string, 0, len(params.OwnerNumbers))
 	for _, value := range params.OwnerNumbers {
@@ -432,8 +456,8 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	}{isMinimal: isMinimal, availableTool: availableTools})
 
 	docsSection := buildDocsSection(struct {
-		docsPath    string
-		isMinimal   bool
+		docsPath     string
+		isMinimal    bool
 		readToolName string
 	}{docsPath: params.DocsPath, isMinimal: isMinimal, readToolName: readToolName})
 
@@ -455,6 +479,16 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	} else {
 		toolingLines = strings.Join([]string{
 			"Pi lists the standard tools above. This runtime enables:",
+			"- grep: search file contents for patterns",
+			"- find: find files by glob pattern",
+			"- ls: list directory contents",
+			"- apply_patch: apply multi-file patches",
+			fmt.Sprintf("- %s: run shell commands (supports background via yieldMs/background)", execToolName),
+			fmt.Sprintf("- %s: manage background exec sessions", processToolName),
+			"- browser: control openclaw's dedicated browser",
+			"- canvas: present/eval/snapshot the Canvas",
+			"- nodes: list/describe/notify/camera/screen/invoke on paired nodes",
+			"- cron: manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
 			"- sessions_list: list sessions",
 			"- sessions_history: fetch session history",
 			"- sessions_send: send to another session",
