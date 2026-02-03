@@ -142,6 +142,10 @@ memory_search:
   experimental:
     session_memory: false
 
+# Memory configuration (OpenClaw-style).
+# memory:
+#   citations: "auto" # auto | on | off
+
   # Tool policy (OpenClaw-style). Controls allow/deny lists and profiles.
   # tool_policy:
   #   profile: "full"
@@ -157,6 +161,7 @@ memory_search:
   #     subagents:
   #       model: "anthropic/claude-sonnet-4.5"
   #       allowAgents: ["*"]
+  #     skip_bootstrap: false
   #     bootstrap_max_chars: 20000
   #     soul_evil:
   #       file: "SOUL_EVIL.md"

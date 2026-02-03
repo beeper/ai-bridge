@@ -162,7 +162,7 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 	if senderID == "" {
 		modelID := oc.effectiveModel(meta)
 		if agentID != "" {
-			senderID = agentModelUserID(agentID, modelID)
+			senderID = agentUserID(agentID)
 		} else {
 			senderID = modelUserID(modelID)
 		}
@@ -175,7 +175,7 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 		store := NewAgentStoreAdapter(oc)
 		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil {
 			displayName = oc.agentModelDisplayName(agent.Name, modelID)
-			oc.ensureAgentModelGhostDisplayName(ctx, agentID, modelID, agent.Name)
+			oc.ensureAgentGhostDisplayName(ctx, agentID, modelID, agent.Name)
 		} else {
 			displayName = agentID // Fallback to agent ID
 		}

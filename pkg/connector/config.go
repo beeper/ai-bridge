@@ -26,6 +26,7 @@ type Config struct {
 	// Global settings
 	DefaultSystemPrompt string              `yaml:"default_system_prompt"`
 	ModelCacheDuration  time.Duration       `yaml:"model_cache_duration"`
+	Memory              *MemoryConfig       `yaml:"memory"`
 	MemorySearch        *MemorySearchConfig `yaml:"memory_search"`
 
 	// Context pruning configuration (OpenClaw-style)
@@ -46,8 +47,14 @@ type AgentsConfig struct {
 // AgentDefaultsConfig defines default agent settings.
 type AgentDefaultsConfig struct {
 	Subagents         *agents.SubagentConfig `yaml:"subagents"`
+	SkipBootstrap     bool                   `yaml:"skip_bootstrap"`
 	BootstrapMaxChars int                    `yaml:"bootstrap_max_chars"`
 	SoulEvil          *agents.SoulEvilConfig `yaml:"soul_evil"`
+}
+
+// MemoryConfig configures memory behavior (OpenClaw-style).
+type MemoryConfig struct {
+	Citations string `yaml:"citations"`
 }
 
 // MemorySearchConfig configures semantic memory search (OpenClaw-style).

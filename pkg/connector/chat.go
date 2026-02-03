@@ -131,7 +131,7 @@ func (oc *AIClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.
 		}
 
 		modelID := oc.agentDefaultModel(agent)
-		userID := agentModelUserID(agent.ID, modelID)
+		userID := agentUserID(agent.ID)
 		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
 		if err != nil {
 			oc.log.Warn().Err(err).Str("agent", agent.ID).Msg("Failed to get ghost for search result")
@@ -139,7 +139,7 @@ func (oc *AIClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.
 		}
 
 		displayName := oc.agentModelDisplayName(agent.Name, modelID)
-		oc.ensureAgentModelGhostDisplayName(ctx, agent.ID, modelID, agent.Name)
+		oc.ensureAgentGhostDisplayName(ctx, agent.ID, modelID, agent.Name)
 
 		results = append(results, &bridgev2.ResolveIdentifierResponse{
 			UserID: userID,
@@ -174,7 +174,7 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 	for _, agent := range agentsMap {
 		// Get or create ghost for this agent
 		modelID := oc.agentDefaultModel(agent)
-		userID := agentModelUserID(agent.ID, modelID)
+		userID := agentUserID(agent.ID)
 		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
 		if err != nil {
 			oc.log.Warn().Err(err).Str("agent", agent.ID).Msg("Failed to get ghost for agent")
@@ -183,7 +183,7 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 
 		// Update ghost display name
 		displayName := oc.agentModelDisplayName(agent.Name, modelID)
-		oc.ensureAgentModelGhostDisplayName(ctx, agent.ID, modelID, agent.Name)
+		oc.ensureAgentGhostDisplayName(ctx, agent.ID, modelID, agent.Name)
 
 		contacts = append(contacts, &bridgev2.ResolveIdentifierResponse{
 			UserID: userID,
@@ -251,6 +251,15 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 		return oc.resolveAgentIdentifierWithModel(ctx, agent, modelID, createChat)
 	}
 
+	// Check if identifier is an agent ghost ID (agent-{id})
+	if agentID, ok := parseAgentFromGhostID(id); ok {
+		agent, err := store.GetAgentByID(ctx, agentID)
+		if err != nil || agent == nil {
+			return nil, fmt.Errorf("agent '%s' not found", agentID)
+		}
+		return oc.resolveAgentIdentifier(ctx, agent, createChat)
+	}
+
 	// Try to find as agent first (bare agent ID like "beeper", "boss")
 	agent, err := store.GetAgentByID(ctx, id)
 	if err == nil && agent != nil {
@@ -274,22 +283,23 @@ func (oc *AIClient) resolveAgentIdentifier(ctx context.Context, agent *agents.Ag
 }
 
 func (oc *AIClient) resolveAgentIdentifierWithModel(ctx context.Context, agent *agents.AgentDefinition, modelID string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
+	explicitModel := modelID != ""
 	if modelID == "" {
 		modelID = oc.agentDefaultModel(agent)
 	}
-	userID := agentModelUserID(agent.ID, modelID)
+	userID := agentUserID(agent.ID)
 	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ghost: %w", err)
 	}
 
 	displayName := oc.agentModelDisplayName(agent.Name, modelID)
-	oc.ensureAgentModelGhostDisplayName(ctx, agent.ID, modelID, agent.Name)
+	oc.ensureAgentGhostDisplayName(ctx, agent.ID, modelID, agent.Name)
 
 	var chatResp *bridgev2.CreateChatResponse
 	if createChat {
 		oc.log.Info().Str("agent", agent.ID).Msg("Creating new chat for agent")
-		chatResp, err = oc.createAgentChatWithModel(ctx, agent, modelID)
+		chatResp, err = oc.createAgentChatWithModel(ctx, agent, modelID, explicitModel)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create chat: %w", err)
 		}
@@ -343,10 +353,10 @@ func (oc *AIClient) resolveModelIdentifier(ctx context.Context, modelID string, 
 
 // createAgentChat creates a new chat room for an agent
 func (oc *AIClient) createAgentChat(ctx context.Context, agent *agents.AgentDefinition) (*bridgev2.CreateChatResponse, error) {
-	return oc.createAgentChatWithModel(ctx, agent, "")
+	return oc.createAgentChatWithModel(ctx, agent, "", false)
 }
 
-func (oc *AIClient) createAgentChatWithModel(ctx context.Context, agent *agents.AgentDefinition, modelID string) (*bridgev2.CreateChatResponse, error) {
+func (oc *AIClient) createAgentChatWithModel(ctx context.Context, agent *agents.AgentDefinition, modelID string, applyModelOverride bool) (*bridgev2.CreateChatResponse, error) {
 	if modelID == "" {
 		modelID = oc.agentDefaultModel(agent)
 	}
@@ -370,17 +380,20 @@ func (oc *AIClient) createAgentChatWithModel(ctx context.Context, agent *agents.
 	if agent.ReasoningEffort != "" {
 		pm.ReasoningEffort = agent.ReasoningEffort
 	}
+	if !applyModelOverride {
+		pm.Model = ""
+	}
 
-	agentGhostID := agentModelUserID(agent.ID, modelID)
+	agentGhostID := agentUserID(agent.ID)
 
-	// Update the OtherUserID to be the agent+model ghost
+	// Update the OtherUserID to be the agent ghost
 	portal.OtherUserID = agentGhostID
 
 	if err := portal.Save(ctx); err != nil {
 		return nil, fmt.Errorf("failed to save portal with agent config: %w", err)
 	}
 
-	// Update chat info members to use agent+model ghost only
+	// Update chat info members to use agent ghost only
 	oc.applyAgentChatInfo(chatInfo, agent.ID, agent.Name, modelID)
 
 	return &bridgev2.CreateChatResponse{
@@ -645,7 +658,7 @@ func (oc *AIClient) handleNewChat(
 			oc.sendSystemNotice(runCtx, portal, err.Error())
 			return
 		}
-		oc.createAndOpenAgentChat(runCtx, portal, agent, modelID)
+		oc.createAndOpenAgentChat(runCtx, portal, agent, modelID, false)
 		return
 	case "model":
 		if targetID == "" {
@@ -678,7 +691,8 @@ func (oc *AIClient) handleNewChat(
 				oc.sendSystemNotice(runCtx, portal, err.Error())
 				return
 			}
-			oc.createAndOpenAgentChat(runCtx, portal, agent, modelID)
+			modelOverride := meta != nil && meta.Model != ""
+			oc.createAndOpenAgentChat(runCtx, portal, agent, modelID, modelOverride)
 			return
 		}
 
@@ -733,8 +747,8 @@ func (oc *AIClient) resolveAgentModelForNewChat(ctx context.Context, agent *agen
 	return "", fmt.Errorf("no valid model available")
 }
 
-func (oc *AIClient) createAndOpenAgentChat(ctx context.Context, portal *bridgev2.Portal, agent *agents.AgentDefinition, modelID string) {
-	chatResp, err := oc.createAgentChatWithModel(ctx, agent, modelID)
+func (oc *AIClient) createAndOpenAgentChat(ctx context.Context, portal *bridgev2.Portal, agent *agents.AgentDefinition, modelID string, modelOverride bool) {
+	chatResp, err := oc.createAgentChatWithModel(ctx, agent, modelID, modelOverride)
 	if err != nil {
 		oc.sendSystemNotice(ctx, portal, "Failed to create chat: "+err.Error())
 		return
@@ -816,7 +830,7 @@ func (oc *AIClient) createForkedChat(
 		pm.DefaultAgentID = agentID
 
 		modelID := oc.effectiveModel(pm)
-		portal.OtherUserID = agentModelUserID(agentID, modelID)
+		portal.OtherUserID = agentUserID(agentID)
 
 		agentName := agentID
 		// Try preset first - guaranteed to work for built-in agents (like "beeper")
@@ -976,7 +990,6 @@ func (oc *AIClient) composeChatInfo(title, modelID string) *bridgev2.ChatInfo {
 			// This works because MemberEventContent.Displayname has omitempty
 			MemberEventExtra: map[string]any{
 				"displayname":            modelName,
-				"com.beeper.ai.model":    modelID,
 				"com.beeper.ai.model_id": modelID,
 			},
 		},
@@ -1017,7 +1030,7 @@ func (oc *AIClient) applyAgentChatInfo(chatInfo *bridgev2.ChatInfo, agentID, age
 		modelID = oc.effectiveModel(nil)
 	}
 
-	agentGhostID := agentModelUserID(agentID, modelID)
+	agentGhostID := agentUserID(agentID)
 	agentDisplayName := oc.agentModelDisplayName(agentName, modelID)
 
 	members := chatInfo.Members
@@ -1049,7 +1062,6 @@ func (oc *AIClient) applyAgentChatInfo(chatInfo *bridgev2.ChatInfo, agentID, age
 	}
 	agentMember.MemberEventExtra = map[string]any{
 		"displayname":            agentDisplayName,
-		"com.beeper.ai.model":    modelID,
 		"com.beeper.ai.model_id": modelID,
 		"com.beeper.ai.agent":    agentID,
 	}
@@ -1116,7 +1128,7 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 
 // handleModelSwitch generates membership change events when switching models
 // This creates leave/join events to show the model transition in the room timeline
-// For agent rooms, it swaps the agent+model ghost (display name stays the agent name).
+// For agent rooms, it updates the agent ghost metadata.
 func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Portal, oldModel, newModel string) {
 	if oldModel == newModel || oldModel == "" || newModel == "" {
 		return
@@ -1125,7 +1137,7 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 	meta := portalMeta(portal)
 	agentID := resolveAgentID(meta)
 
-	// Check if this is an agent room - use agent+model ghosts for swap
+	// Check if this is an agent room - update agent ghost metadata
 	if agentID != "" {
 		oc.handleAgentModelSwitch(ctx, portal, agentID, oldModel, newModel)
 		return
@@ -1178,7 +1190,6 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 				},
 				MemberEventExtra: map[string]any{
 					"displayname":            newModelName,
-					"com.beeper.ai.model":    newModel,
 					"com.beeper.ai.model_id": newModel,
 				},
 			},
@@ -1223,7 +1234,7 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 }
 
 // handleAgentModelSwitch handles model switching for agent rooms.
-// Swaps the agent+model ghost (display name stays the agent name).
+// Keeps a single agent ghost and updates member metadata.
 func (oc *AIClient) handleAgentModelSwitch(ctx context.Context, portal *bridgev2.Portal, agentID, oldModel, newModel string) {
 	// Get the agent to determine display name
 	store := NewAgentStoreAdapter(oc)
@@ -1240,48 +1251,47 @@ func (oc *AIClient) handleAgentModelSwitch(ctx context.Context, portal *bridgev2
 		Stringer("portal", portal.PortalKey).
 		Msg("Handling agent model switch")
 
-	oldGhostID := agentModelUserID(agentID, oldModel)
-	newGhostID := agentModelUserID(agentID, newModel)
-
-	oldDisplayName := oc.agentModelDisplayName(agent.Name, oldModel)
-	newDisplayName := oc.agentModelDisplayName(agent.Name, newModel)
+	ghostID := agentUserID(agentID)
+	displayName := oc.agentModelDisplayName(agent.Name, newModel)
 	oldModelName := modelContactName(oldModel, oc.findModelInfo(oldModel))
 	newModelName := modelContactName(newModel, oc.findModelInfo(newModel))
+	oldGhostID := portal.OtherUserID
 
-	// Create member changes: old agent+model leaves, new agent+model joins
-	memberChanges := &bridgev2.ChatMemberList{
-		MemberMap: bridgev2.ChatMemberMap{
-			oldGhostID: {
-				EventSender: bridgev2.EventSender{
-					Sender:      oldGhostID,
-					SenderLogin: oc.UserLogin.ID,
-				},
-				Membership:     event.MembershipLeave,
-				PrevMembership: event.MembershipJoin,
+	// Update member metadata for the agent ghost
+	memberMap := bridgev2.ChatMemberMap{
+		ghostID: {
+			EventSender: bridgev2.EventSender{
+				Sender:      ghostID,
+				SenderLogin: oc.UserLogin.ID,
 			},
-			newGhostID: {
-				EventSender: bridgev2.EventSender{
-					Sender:      newGhostID,
-					SenderLogin: oc.UserLogin.ID,
-				},
-				Membership: event.MembershipJoin,
-				UserInfo: &bridgev2.UserInfo{
-					Name:        ptr.Ptr(newDisplayName),
-					IsBot:       ptr.Ptr(true),
-					Identifiers: modelContactIdentifiers(newModel, oc.findModelInfo(newModel)),
-				},
-				MemberEventExtra: map[string]any{
-					"displayname":            newDisplayName,
-					"com.beeper.ai.model":    newModel,
-					"com.beeper.ai.model_id": newModel,
-					"com.beeper.ai.agent":    agentID,
-				},
+			Membership: event.MembershipJoin,
+			UserInfo: &bridgev2.UserInfo{
+				Name:        ptr.Ptr(displayName),
+				IsBot:       ptr.Ptr(true),
+				Identifiers: modelContactIdentifiers(newModel, oc.findModelInfo(newModel)),
+			},
+			MemberEventExtra: map[string]any{
+				"displayname":            displayName,
+				"com.beeper.ai.model_id": newModel,
+				"com.beeper.ai.agent":    agentID,
 			},
 		},
 	}
+	if oldGhostID != "" && oldGhostID != ghostID {
+		memberMap[oldGhostID] = bridgev2.ChatMember{
+			EventSender: bridgev2.EventSender{
+				Sender:      oldGhostID,
+				SenderLogin: oc.UserLogin.ID,
+			},
+			Membership:     event.MembershipLeave,
+			PrevMembership: event.MembershipJoin,
+		}
+	}
+	memberChanges := &bridgev2.ChatMemberList{MemberMap: memberMap}
 
-	// Update portal's OtherUserID to new agent+model ghost
-	portal.OtherUserID = newGhostID
+	// Update portal's OtherUserID to agent ghost
+	portal.OtherUserID = ghostID
+	oc.ensureAgentGhostDisplayName(ctx, agentID, newModel, agent.Name)
 
 	// Queue the ChatInfoChange event
 	evt := &simplevent.ChatInfoChange{
@@ -1328,7 +1338,7 @@ func (oc *AIClient) ensureSingleAIGhost(ctx context.Context, portal *bridgev2.Po
 
 	modelID := oc.effectiveModel(meta)
 	if agentID != "" {
-		expectedGhostID = agentModelUserID(agentID, modelID)
+		expectedGhostID = agentUserID(agentID)
 	} else {
 		expectedGhostID = modelUserID(modelID)
 	}
@@ -1764,9 +1774,8 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		pm.SystemPrompt = beeperAgent.SystemPrompt
 	}
 
-	// Update the OtherUserID to be the agent+model ghost
-	// This allows different model variants to have different ghosts
-	agentGhostID := agentModelUserID(beeperAgent.ID, modelID)
+	// Update the OtherUserID to be the agent ghost
+	agentGhostID := agentUserID(beeperAgent.ID)
 	portal.OtherUserID = agentGhostID
 
 	if err := portal.Save(ctx); err != nil {

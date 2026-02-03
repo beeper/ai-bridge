@@ -41,6 +41,7 @@ type SystemPromptParams struct {
 	MessageToolHints  []string
 	SandboxInfo       *SandboxInfo
 	ReactionGuidance  *ReactionGuidance
+	MemoryCitations   string
 }
 
 // RuntimeInfo contains runtime context for the LLM.

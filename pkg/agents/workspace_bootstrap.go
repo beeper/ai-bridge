@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"unicode"
 
 	"github.com/beeper/ai-bridge/pkg/textfs"
 )
@@ -23,6 +24,8 @@ const (
 	DefaultUserFilename      = "USER.md"
 	DefaultHeartbeatFilename = "HEARTBEAT.md"
 	DefaultBootstrapFilename = "BOOTSTRAP.md"
+	DefaultMemoryFilename    = "MEMORY.md"
+	DefaultMemoryAltFilename = "memory.md"
 )
 
 var coreBootstrapFiles = []string{
@@ -34,7 +37,7 @@ var coreBootstrapFiles = []string{
 	DefaultHeartbeatFilename,
 }
 
-var allBootstrapFiles = []string{
+var baseBootstrapFiles = []string{
 	DefaultAgentsFilename,
 	DefaultSoulFilename,
 	DefaultToolsFilename,
@@ -42,6 +45,11 @@ var allBootstrapFiles = []string{
 	DefaultUserFilename,
 	DefaultHeartbeatFilename,
 	DefaultBootstrapFilename,
+}
+
+var subagentBootstrapAllowlist = map[string]struct{}{
+	DefaultAgentsFilename: {},
+	DefaultToolsFilename:  {},
 }
 
 // WorkspaceBootstrapFile represents a bootstrapped workspace file.
@@ -97,8 +105,8 @@ func LoadBootstrapFiles(ctx context.Context, store *textfs.Store) ([]WorkspaceBo
 	if store == nil {
 		return nil, fmt.Errorf("textfs store is required")
 	}
-	files := make([]WorkspaceBootstrapFile, 0, len(allBootstrapFiles))
-	for _, name := range allBootstrapFiles {
+	files := make([]WorkspaceBootstrapFile, 0, len(baseBootstrapFiles)+2)
+	for _, name := range baseBootstrapFiles {
 		entry, found, err := store.Read(ctx, name)
 		if err != nil {
 			return nil, err
@@ -109,7 +117,46 @@ func LoadBootstrapFiles(ctx context.Context, store *textfs.Store) ([]WorkspaceBo
 		}
 		files = append(files, file)
 	}
+	memoryEntries, err := loadMemoryBootstrapEntries(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, memoryEntries...)
 	return files, nil
+}
+
+func loadMemoryBootstrapEntries(ctx context.Context, store *textfs.Store) ([]WorkspaceBootstrapFile, error) {
+	entries := []WorkspaceBootstrapFile{}
+	for _, name := range []string{DefaultMemoryFilename, DefaultMemoryAltFilename} {
+		entry, found, err := store.Read(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if !found || entry == nil {
+			continue
+		}
+		entries = append(entries, WorkspaceBootstrapFile{
+			Name:    name,
+			Path:    name,
+			Content: entry.Content,
+			Missing: false,
+		})
+	}
+	return entries, nil
+}
+
+// FilterBootstrapFilesForSession filters bootstrap files for subagent sessions.
+func FilterBootstrapFilesForSession(files []WorkspaceBootstrapFile, isSubagent bool) []WorkspaceBootstrapFile {
+	if !isSubagent {
+		return files
+	}
+	filtered := make([]WorkspaceBootstrapFile, 0, len(files))
+	for _, file := range files {
+		if _, ok := subagentBootstrapAllowlist[file.Name]; ok {
+			filtered = append(filtered, file)
+		}
+	}
+	return filtered
 }
 
 type TrimBootstrapResult struct {
@@ -124,7 +171,7 @@ func TrimBootstrapContent(content, fileName string, maxChars int) TrimBootstrapR
 	if maxChars <= 0 {
 		maxChars = DefaultBootstrapMaxChars
 	}
-	trimmed := strings.TrimRight(content, "\n\r\t ")
+	trimmed := strings.TrimRightFunc(content, unicode.IsSpace)
 	if len(trimmed) <= maxChars {
 		return TrimBootstrapResult{
 			Content:        trimmed,
@@ -136,29 +183,13 @@ func TrimBootstrapContent(content, fileName string, maxChars int) TrimBootstrapR
 
 	headChars := int(math.Floor(float64(maxChars) * bootstrapHeadRatio))
 	tailChars := int(math.Floor(float64(maxChars) * bootstrapTailRatio))
-	if headChars < 0 {
-		headChars = 0
-	}
-	if tailChars < 0 {
-		tailChars = 0
-	}
-	if headChars+tailChars > maxChars {
-		tailChars = maxChars - headChars
-		if tailChars < 0 {
-			tailChars = 0
-		}
-	}
-
 	head := trimmed[:headChars]
-	tail := ""
-	if tailChars > 0 && tailChars <= len(trimmed) {
-		tail = trimmed[len(trimmed)-tailChars:]
-	}
+	tail := trimmed[len(trimmed)-tailChars:]
 
 	marker := strings.Join([]string{
 		"",
 		fmt.Sprintf("[...truncated, read %s for full content...]", fileName),
-		fmt.Sprintf("...(truncated %s: kept %d+%d chars of %d)...", fileName, headChars, tailChars, len(trimmed)),
+		fmt.Sprintf("…(truncated %s: kept %d+%d chars of %d)…", fileName, headChars, tailChars, len(trimmed)),
 		"",
 	}, "\n")
 	contentWithMarker := strings.Join([]string{head, marker, tail}, "\n")

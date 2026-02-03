@@ -5,6 +5,7 @@ This plan reconstructs the requested work and tracks status.
 ## Part 1: OpenClaw Reference + Workspace Bootstrap
 - [x] Clone OpenClaw for reference (`/Users/batuhan/Projects/texts/openclaw`).
 - [x] Embed workspace templates (AGENTS.md, SOUL.md, TOOLS.md, IDENTITY.md, USER.md, HEARTBEAT.md, BOOTSTRAP.md).
+- [x] Sync template content exactly to OpenClaw (frontmatter, emojis, wording).
 - [x] Add template loader with frontmatter stripping.
 - [x] Ensure bootstrap files in textfs and load + trim for prompt injection.
 - [x] Add SOUL_Evil swap logic and config hooks.

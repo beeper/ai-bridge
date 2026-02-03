@@ -66,7 +66,7 @@ func (oc *AIClient) createPlaygroundChat(ctx context.Context, modelID string) (*
 	playgroundAgent := agents.GetPlaygroundAgent()
 
 	// Create the chat using createAgentChatWithModel
-	chatResp, err := oc.createAgentChatWithModel(ctx, playgroundAgent, modelID)
+	chatResp, err := oc.createAgentChatWithModel(ctx, playgroundAgent, modelID, true)
 	if err != nil {
 		return nil, err
 	}

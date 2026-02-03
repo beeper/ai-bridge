@@ -56,7 +56,7 @@ func TestBuildBootstrapContextFiles(t *testing.T) {
 		log:       zerolog.Nop(),
 	}
 
-	files := oc.buildBootstrapContextFiles(ctx, "beeper")
+	files := oc.buildBootstrapContextFiles(ctx, "beeper", nil)
 	if len(files) == 0 {
 		t.Fatal("expected bootstrap context files")
 	}

@@ -47,6 +47,7 @@ func buildSkillsSection(params struct {
 func buildMemorySection(params struct {
 	isMinimal     bool
 	availableTool map[string]bool
+	citationsMode string
 }) []string {
 	if params.isMinimal {
 		return nil
@@ -54,11 +55,17 @@ func buildMemorySection(params struct {
 	if !params.availableTool["memory_search"] && !params.availableTool["memory_get"] {
 		return nil
 	}
-	return []string{
+	lines := []string{
 		"## Memory Recall",
 		"Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md; then use memory_get to pull only the needed lines. If low confidence after search, say you checked.",
-		"",
 	}
+	if strings.EqualFold(strings.TrimSpace(params.citationsMode), "off") {
+		lines = append(lines, "Citations are disabled: do not mention file paths or line numbers in replies unless the user explicitly asks.")
+	} else {
+		lines = append(lines, "Citations: include Source: <path#line> when it helps the user verify memory snippets.")
+	}
+	lines = append(lines, "")
+	return lines
 }
 
 func buildUserIdentitySection(ownerLine string, isMinimal bool) []string {
@@ -75,7 +82,6 @@ func buildTimeSection(userTimezone string) []string {
 	return []string{
 		"## Current Date & Time",
 		fmt.Sprintf("Time zone: %s", userTimezone),
-		"If you need the current date, time, or day of week, use the session_status tool.",
 		"",
 	}
 }
@@ -144,7 +150,7 @@ func buildMessagingSection(params struct {
 		"## Messaging",
 		"- Reply in current session → automatically routes to the source channel (Signal, Telegram, etc.)",
 		"- Cross-session messaging → use sessions_send(sessionKey, message)",
-		"- Never use tools for provider messaging; Beep by Beeper handles all routing internally.",
+		"- Never use exec/curl for provider messaging; Beeper handles all routing internally.",
 		messageToolBlock,
 		"",
 	}
@@ -176,12 +182,12 @@ func buildDocsSection(params struct {
 	}
 	return []string{
 		"## Documentation",
-		fmt.Sprintf("Beep by Beeper docs: %s", docsPath),
+		fmt.Sprintf("Beeper docs: %s", docsPath),
 		"Mirror: https://docs.openclaw.ai",
 		"Source: https://github.com/openclaw/openclaw",
 		"Community: https://discord.com/invite/clawd",
 		"Find new skills: https://clawhub.com",
-		"For Beep by Beeper behavior, commands, config, or architecture: consult local docs first.",
+		"For Beeper behavior, commands, config, or architecture: consult local docs first.",
 		"When diagnosing issues, run `beep status` yourself when possible; only ask the user if you lack access (e.g., sandboxed).",
 		"",
 	}
@@ -250,10 +256,11 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"write":            "Create or overwrite files",
 		"edit":             "Make precise edits to files",
 		"apply_patch":      "Apply multi-file patches",
-		"stat":             "Get file or directory metadata",
 		"grep":             "Search file contents for patterns",
 		"find":             "Find files by glob pattern",
 		"ls":               "List directory contents",
+		"exec":             "Run shell commands (pty available for TTY-required CLIs)",
+		"process":          "Manage background exec sessions",
 		"web_search":       "Search the web (Brave API)",
 		"web_fetch":        "Fetch and extract readable content from a URL",
 		"browser":          "Control web browser",
@@ -261,7 +268,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"nodes":            "List/describe/notify/camera/screen/invoke on paired nodes",
 		"cron":             "Manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
 		"message":          "Send messages and channel actions",
-		"gateway":          "Restart, apply config, or run updates on the running Beep by Beeper process",
+		"gateway":          "Restart, apply config, or run updates on the running Beeper process",
 		"agents_list":      "List agent ids allowed for sessions_spawn",
 		"sessions_list":    "List other sessions (incl. sub-agents) with filters/last",
 		"sessions_history": "Fetch history for another session/sub-agent",
@@ -276,10 +283,11 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"write",
 		"edit",
 		"apply_patch",
-		"stat",
 		"grep",
 		"find",
 		"ls",
+		"exec",
+		"process",
 		"web_search",
 		"web_fetch",
 		"browser",
@@ -391,6 +399,8 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 
 	hasGateway := availableTools["gateway"]
 	readToolName := resolveToolName("read")
+	execToolName := resolveToolName("exec")
+	processToolName := resolveToolName("process")
 	extraSystemPrompt := strings.TrimSpace(params.ExtraSystemPrompt)
 	ownerNumbers := make([]string, 0, len(params.OwnerNumbers))
 	for _, value := range params.OwnerNumbers {
@@ -463,7 +473,8 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	memorySection := buildMemorySection(struct {
 		isMinimal     bool
 		availableTool map[string]bool
-	}{isMinimal: isMinimal, availableTool: availableTools})
+		citationsMode string
+	}{isMinimal: isMinimal, availableTool: availableTools, citationsMode: params.MemoryCitations})
 
 	docsSection := buildDocsSection(struct {
 		docsPath     string
@@ -480,7 +491,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	}
 
 	if promptMode == PromptModeNone {
-		return "You are a personal assistant called Beep. You run inside the Beeper app."
+		return "You are a personal assistant running inside Beeper."
 	}
 
 	toolingLines := ""
@@ -493,7 +504,8 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 			"- find: find files by glob pattern",
 			"- ls: list directory contents",
 			"- apply_patch: apply multi-file patches",
-			"- stat: get file or directory metadata",
+			fmt.Sprintf("- %s: run shell commands (supports background via yieldMs/background)", execToolName),
+			fmt.Sprintf("- %s: manage background exec sessions", processToolName),
 			"- browser: control Beeper's dedicated browser",
 			"- canvas: present/eval/snapshot the Canvas",
 			"- nodes: list/describe/notify/camera/screen/invoke on paired nodes",
@@ -505,8 +517,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	}
 
 	lines := []string{
-		"You are a personal assistant called Beep. You run inside the Beeper app.",
-		"Beeper is an all-in-one chat app by Automattic.",
+		"You are a personal assistant running inside Beeper.",
 		"",
 		"## Tooling",
 		"Tool availability (filtered by policy):",
@@ -524,8 +535,8 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	}
 	lines = append(lines, buildSafetySection()...)
 	lines = append(lines,
-		"## Beep by Beeper CLI Quick Reference",
-		"Beep by Beeper is controlled via subcommands. Do not invent commands.",
+		"## Beeper CLI Quick Reference",
+		"Beeper is controlled via subcommands. Do not invent commands.",
 		"To manage the Gateway daemon service (start/stop/restart):",
 		"- beep gateway status",
 		"- beep gateway start",
@@ -538,12 +549,12 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	lines = append(lines, memorySection...)
 	if hasGateway && !isMinimal {
 		lines = append(lines,
-			"## Beep by Beeper Self-Update",
+			"## Beeper Self-Update",
 			strings.Join([]string{
 				"Get Updates (self-update) is ONLY allowed when the user explicitly asks for it.",
 				"Do not run config.apply or update.run unless the user explicitly requests an update or config change; if it's not explicit, ask first.",
 				"Actions: config.get, config.schema, config.apply (validate + write full config, then restart), update.run (update deps or git, then restart).",
-				"After restart, Beep pings the last active session automatically.",
+				"After restart, Beeper pings the last active session automatically.",
 			}, "\n"),
 			"",
 		)
@@ -595,6 +606,14 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 				sandboxLines = append(sandboxLines, "Host browser control: blocked.")
 			}
 		}
+		if params.SandboxInfo.Elevated != nil && params.SandboxInfo.Elevated.Allowed {
+			sandboxLines = append(sandboxLines, "Elevated exec is available for this session.")
+			sandboxLines = append(sandboxLines, "User can toggle with /elevated on|off|ask|full.")
+			sandboxLines = append(sandboxLines, "You may also send /elevated on|off|ask|full when needed.")
+			if strings.TrimSpace(params.SandboxInfo.Elevated.DefaultLevel) != "" {
+				sandboxLines = append(sandboxLines, fmt.Sprintf("Current elevated level: %s (ask runs exec on host with approvals; full auto-approves).", params.SandboxInfo.Elevated.DefaultLevel))
+			}
+		}
 		lines = append(lines, strings.Join(sandboxLines, "\n"), "")
 	}
 
@@ -602,7 +621,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	lines = append(lines, buildTimeSection(userTimezone)...)
 	lines = append(lines,
 		"## Workspace Files (injected)",
-		"These user-editable files are loaded by Beep and included below in Project Context.",
+		"These user-editable files are loaded by Beeper and included below in Project Context.",
 		"",
 	)
 	lines = append(lines, buildReplyTagsSection(isMinimal)...)
@@ -711,7 +730,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 			heartbeatPromptLine,
 			"If you receive a heartbeat poll (a user message matching the heartbeat prompt above), and there is nothing that needs attention, reply exactly:",
 			HeartbeatToken,
-			"Beep by Beeper treats a leading/trailing \"HEARTBEAT_OK\" as a heartbeat ack (and may discard it).",
+			"Beeper treats a leading/trailing \"HEARTBEAT_OK\" as a heartbeat ack (and may discard it).",
 			"If something needs attention, do NOT include \"HEARTBEAT_OK\"; reply with the alert text instead.",
 			"",
 		)
