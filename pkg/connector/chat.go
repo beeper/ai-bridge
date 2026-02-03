@@ -47,82 +47,42 @@ func isBossPrivilegedTool(toolName string) bool {
 		toolName == toolspec.GravatarFetchName || toolName == toolspec.GravatarSetName
 }
 
-// buildAvailableTools returns a list of ToolInfo for all tools based on current config
+// buildAvailableTools returns a list of ToolInfo for all tools based on tool policy.
 func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
-	loginMeta := loginMetadata(oc.UserLogin)
-	provider := loginMeta.Provider
-	isOpenRouter := provider == ProviderOpenRouter || provider == ProviderBeeper
-
-	// Ensure tools config is initialized
-	ensureToolsConfig(meta, provider)
-
-	// Check if model supports tool calling
-	supportsTools := meta.Capabilities.SupportsToolCalling
-
-	// Get agent policy ONCE before the loop to avoid redundant lookups
-	var agentPolicy *tools.Policy
-	var agent *agents.AgentDefinition
-	var err error
-	store := NewAgentStoreAdapter(oc)
-	if hasAssignedAgent(meta) {
-		agent, err = store.GetAgentForRoom(context.Background(), meta)
-		if err == nil && agent != nil {
-			agentPolicy = agents.CreatePolicyFromProfile(agent, tools.DefaultRegistry())
-		}
-	}
-
+	names := oc.toolNamesForPortal(meta)
 	var toolsList []ToolInfo
 
-	for name, entry := range meta.ToolsConfig.Tools {
-		if entry == nil {
-			continue
-		}
-		if name == ToolNameMessage && !hasAssignedAgent(meta) {
-			continue
-		}
-		if tools.IsSessionTool(name) && !hasAssignedAgent(meta) {
-			continue
-		}
-		if (name == toolspec.GravatarFetchName || name == toolspec.GravatarSetName) && !hasBossAgent(meta) {
-			continue
-		}
-
-		// Get display name from MCP annotations or fall back to tool name
-		displayName := entry.Tool.Name
-		if entry.Tool.Annotations != nil && entry.Tool.Annotations.Title != "" {
-			displayName = entry.Tool.Annotations.Title
-		}
-
-		// Determine availability based on tool type
-		available := supportsTools
-		if entry.Type == "plugin" || entry.Type == "provider" {
-			available = true // Provider decides actual support
-		}
-
-		// Check agent policy first (if we have an agent)
-		var enabled bool
-		var source SettingSource
-		var reason string
-
-		if agentPolicy != nil {
-			// Boss agent with boss-only tools - skip policy check
-			isBossWithBossTool := agent != nil && agents.IsBossAgent(agent.ID) && isBossPrivilegedTool(name)
-			if !isBossWithBossTool && !agentPolicy.IsAllowed(name) {
-				enabled = false
-				source = SourceAgentPolicy
-				reason = "Disabled by agent policy"
-			} else {
-				enabled, source, reason = oc.getToolStateWithSource(meta, name, entry, isOpenRouter)
+	for _, name := range names {
+		metaTool := tools.GetTool(name)
+		displayName := name
+		description := ""
+		toolType := "builtin"
+		if metaTool != nil {
+			description = metaTool.Description
+			if metaTool.Annotations != nil && metaTool.Annotations.Title != "" {
+				displayName = metaTool.Annotations.Title
 			}
-		} else {
-			enabled, source, reason = oc.getToolStateWithSource(meta, name, entry, isOpenRouter)
+			if metaTool.Type != "" {
+				toolType = string(metaTool.Type)
+			}
+		}
+
+		available, source, reason := oc.isToolAvailable(meta, name)
+		allowed := oc.isToolAllowedByPolicy(meta, name)
+		enabled := available && allowed
+
+		if !allowed {
+			source = SourceAgentPolicy
+			if reason == "" {
+				reason = "Disabled by tool policy"
+			}
 		}
 
 		toolsList = append(toolsList, ToolInfo{
 			Name:        name,
 			DisplayName: displayName,
-			Description: entry.Tool.Description,
-			Type:        entry.Type,
+			Description: description,
+			Type:        toolType,
 			Enabled:     enabled,
 			Available:   available,
 			Source:      source,
@@ -131,91 +91,6 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	}
 
 	return toolsList
-}
-
-// getToolStateWithSource returns enabled state plus source and reason
-func (oc *AIClient) getToolStateWithSource(meta *PortalMetadata, toolName string, entry *ToolEntry, _ bool) (bool, SettingSource, string) {
-	// 1. Check room-level explicit setting
-	if entry.Enabled != nil {
-		return *entry.Enabled, SourceRoomOverride, ""
-	}
-
-	// 2. Check user-level defaults
-	loginMeta := loginMetadata(oc.UserLogin)
-	if loginMeta.Defaults != nil && loginMeta.Defaults.Tools != nil {
-		if enabled, ok := loginMeta.Defaults.Tools[toolName]; ok {
-			return enabled, SourceUserDefault, ""
-		}
-	}
-
-	// 3. Fall back to global default
-	return oc.getDefaultToolState(meta, toolName), SourceGlobalDefault, ""
-}
-
-// isToolEnabled checks if a specific tool is enabled
-// Priority: Agent Policy → Room → User → Provider/Model defaults
-func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
-	switch toolName {
-	case ToolNameAnalyzeImage:
-		toolName = ToolNameImage
-	}
-
-	if toolName == ToolNameMessage && !hasAssignedAgent(meta) {
-		return false
-	}
-	if tools.IsSessionTool(toolName) && !hasAssignedAgent(meta) {
-		return false
-	}
-	if (toolName == toolspec.GravatarFetchName || toolName == toolspec.GravatarSetName) && !hasBossAgent(meta) {
-		return false
-	}
-
-	// 0. Check agent policy first (if room has an agent assigned)
-	if hasAssignedAgent(meta) {
-		store := NewAgentStoreAdapter(oc)
-		agent, err := store.GetAgentForRoom(context.Background(), meta)
-		if err == nil && agent != nil {
-			// Boss agent has its own tools - always allow boss-only tools for Boss agent
-			if agents.IsBossAgent(agent.ID) && isBossPrivilegedTool(toolName) {
-				return true
-			}
-			// Use agent policy to check if tool is allowed
-			policy := agents.CreatePolicyFromProfile(agent, tools.DefaultRegistry())
-			if !policy.IsAllowed(toolName) {
-				return false
-			}
-		}
-	}
-
-	// 1. Check room-level explicit setting (can enable tools the agent allows)
-	if entry, ok := meta.ToolsConfig.Tools[toolName]; ok && entry != nil {
-		if entry.Enabled != nil {
-			return *entry.Enabled
-		}
-	}
-
-	// 2. Check user-level defaults
-	loginMeta := loginMetadata(oc.UserLogin)
-	if loginMeta.Defaults != nil && loginMeta.Defaults.Tools != nil {
-		if enabled, ok := loginMeta.Defaults.Tools[toolName]; ok {
-			return enabled
-		}
-	}
-
-	// 3. Fall back to provider/model defaults
-	return oc.getDefaultToolState(meta, toolName)
-}
-
-// getDefaultToolState returns the default enabled state for a tool
-// Most tools are enabled by default when the model supports them
-func (oc *AIClient) getDefaultToolState(meta *PortalMetadata, toolName string) bool {
-	if toolName == ToolNameWebSearch {
-		return true
-	}
-	if toolName == ToolNameImageGenerate {
-		return meta.Capabilities.SupportsToolCalling && oc.canUseImageGeneration()
-	}
-	return meta.Capabilities.SupportsToolCalling
 }
 
 func (oc *AIClient) canUseImageGeneration() bool {
