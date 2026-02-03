@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -480,24 +481,46 @@ var SessionsSendTool = &Tool{
 var SessionsSpawnTool = &Tool{
 	Tool: mcp.Tool{
 		Name:        "sessions_spawn",
-		Description: "Spawn a sub-agent session.",
+		Description: "Spawn a background sub-agent run in an isolated session and announce the result back to the requester chat.",
 		Annotations: &mcp.ToolAnnotations{Title: "Spawn Session"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"name": map[string]any{
+				"task": map[string]any{
 					"type":        "string",
-					"description": "Optional room name (auto-generated if omitted)",
+					"description": "Task description for the sub-agent.",
 				},
-				"agent_id": map[string]any{
+				"label": map[string]any{
 					"type":        "string",
-					"description": "Agent ID to assign to the new session (defaults to current room agent)",
+					"description": "Optional label for the sub-agent run.",
 				},
-				"system_prompt": map[string]any{
+				"agentId": map[string]any{
 					"type":        "string",
-					"description": "Optional system prompt override for the new session",
+					"description": "Agent ID override for the sub-agent run.",
+				},
+				"model": map[string]any{
+					"type":        "string",
+					"description": "Optional model override (provider/model).",
+				},
+				"thinking": map[string]any{
+					"type":        "string",
+					"description": "Optional thinking level override.",
+				},
+				"runTimeoutSeconds": map[string]any{
+					"type":        "number",
+					"description": "Optional run timeout in seconds.",
+				},
+				"timeoutSeconds": map[string]any{
+					"type":        "number",
+					"description": "Legacy alias for runTimeoutSeconds.",
+				},
+				"cleanup": map[string]any{
+					"type":        "string",
+					"enum":        []string{"delete", "keep"},
+					"description": "Cleanup policy for the spawned session.",
 				},
 			},
+			"required": []string{"task"},
 		},
 	},
 	Type:  ToolTypeBuiltin,
@@ -1040,29 +1063,56 @@ func (e *BossToolExecutor) ExecuteSessionsSend(ctx context.Context, input map[st
 
 // ExecuteSessionsSpawn handles the sessions_spawn tool.
 func (e *BossToolExecutor) ExecuteSessionsSpawn(ctx context.Context, input map[string]any) (*Result, error) {
-	name := ReadStringDefault(input, "name", "")
-	agentID, _ := ReadString(input, "agent_id", false)
-	systemPrompt := ReadStringDefault(input, "system_prompt", "")
+	task, err := ReadString(input, "task", true)
+	if err != nil {
+		return ErrorResult("sessions_spawn", err.Error()), nil
+	}
+	label := ReadStringDefault(input, "label", "")
+	agentID := ReadStringDefault(input, "agentId", "")
+	if agentID == "" {
+		agentID = ReadStringDefault(input, "agent_id", "")
+	}
+	requesterSession := ReadStringDefault(input, "requester_session_key", "")
+	requesterChannel := ReadStringDefault(input, "requester_channel", "")
 
 	if agentID == "" {
-		return ErrorResult("sessions_spawn", "agent_id is required"), nil
+		return ErrorResult("sessions_spawn", "agentId is required"), nil
 	}
 
+	name := strings.TrimSpace(label)
 	if name == "" {
-		name = fmt.Sprintf("Spawned Session %s", time.Now().Format("2006-01-02 15:04"))
+		trimmedTask := strings.TrimSpace(task)
+		if trimmedTask == "" {
+			name = fmt.Sprintf("Spawned Session %s", time.Now().Format("2006-01-02 15:04"))
+		} else {
+			const maxNameLen = 60
+			if len(trimmedTask) > maxNameLen {
+				trimmedTask = trimmedTask[:maxNameLen-3] + "..."
+			}
+			name = fmt.Sprintf("Subagent: %s", trimmedTask)
+		}
 	}
 
 	room := RoomData{
 		Name:           name,
 		AgentID:        agentID,
 		DefaultAgentID: agentID,
-		SystemPrompt:   systemPrompt,
 		CreatedAt:      time.Now().Unix(),
 	}
 
 	roomID, err := e.store.CreateRoom(ctx, room)
 	if err != nil {
 		return ErrorResult("sessions_spawn", fmt.Sprintf("failed to create session: %v", err)), nil
+	}
+	systemPrompt := buildSubagentSystemPrompt(subagentPromptParams{
+		RequesterSessionKey: requesterSession,
+		RequesterChannel:    requesterChannel,
+		ChildSessionKey:     roomID,
+		Label:               label,
+		Task:                task,
+	})
+	if err := e.store.ModifyRoom(ctx, roomID, RoomData{SystemPrompt: systemPrompt}); err != nil {
+		return ErrorResult("sessions_spawn", fmt.Sprintf("failed to configure session: %v", err)), nil
 	}
 
 	return JSONResult(map[string]any{

@@ -2,12 +2,14 @@ package connector
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
 	"maunium.net/go/mautrix/bridgev2/commands"
 
 	"github.com/beeper/ai-bridge/pkg/connector/commandregistry"
+	"github.com/beeper/ai-bridge/pkg/memory"
 	"github.com/beeper/ai-bridge/pkg/textfs"
 )
 
@@ -17,7 +19,7 @@ const memoryCommandMaxBytes = 256 * 1024
 var CommandMemory = registerAICommand(commandregistry.Definition{
 	Name:           "memory",
 	Description:    "Inspect and edit memory files/index",
-	Args:           "<status|reindex|get|set|append> [...]",
+	Args:           "<status|reindex|search|get|set|append> [...]",
 	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
@@ -34,7 +36,7 @@ func fnMemory(ce *commands.Event) {
 		return
 	}
 	if len(ce.Args) == 0 {
-		ce.Reply("Usage: !ai memory <status|reindex|get|set|append> ...")
+		ce.Reply("Usage: !ai memory <status|reindex|search|get|set|append> ...")
 		return
 	}
 
@@ -78,6 +80,60 @@ func fnMemory(ce *commands.Event) {
 			return
 		}
 		ce.Reply("Memory reindex queued.")
+		return
+	case "search":
+		if len(ce.Args) < 2 {
+			ce.Reply("Usage: !ai memory search <query> [maxResults] [minScore]")
+			return
+		}
+		manager, errMsg := getMemorySearchManager(client, resolveAgentID(meta))
+		if manager == nil {
+			ce.Reply("Memory search disabled: %s", errMsg)
+			return
+		}
+		query := ce.Args[1]
+		sessionKey := ""
+		if ce.Portal != nil {
+			sessionKey = ce.Portal.PortalKey.String()
+		}
+		opts := memory.SearchOptions{
+			SessionKey: sessionKey,
+			MinScore:   math.NaN(),
+		}
+		if len(ce.Args) > 2 {
+			if val, err := strconv.Atoi(ce.Args[2]); err == nil && val > 0 {
+				opts.MaxResults = val
+			}
+		}
+		if len(ce.Args) > 3 {
+			if val, err := strconv.ParseFloat(ce.Args[3], 64); err == nil {
+				opts.MinScore = val
+			}
+		}
+		results, err := manager.Search(ce.Ctx, query, opts)
+		if err != nil {
+			ce.Reply("Memory search failed: %v", err)
+			return
+		}
+		if len(results) == 0 {
+			ce.Reply("No matches.")
+			return
+		}
+		lines := make([]string, 0, len(results)*2)
+		for _, result := range results {
+			lines = append(lines, fmt.Sprintf("%.3f %s:%d-%d", result.Score, result.Path, result.StartLine, result.EndLine))
+			if result.Snippet != "" {
+				lines = append(lines, result.Snippet)
+			}
+			lines = append(lines, "")
+		}
+		output := strings.TrimSpace(strings.Join(lines, "\n"))
+		trunc := textfs.TruncateHead(output, textfs.DefaultMaxLines, textfs.DefaultMaxBytes)
+		reply := trunc.Content
+		if trunc.Truncated {
+			reply += "\n\n[truncated]"
+		}
+		ce.Reply(reply)
 		return
 	case "get":
 		if len(ce.Args) < 2 {
@@ -150,9 +206,17 @@ func fnMemory(ce *commands.Event) {
 				}
 			}
 		}
-		if _, err := store.Write(ce.Ctx, path, content); err != nil {
+		entry, err := store.Write(ce.Ctx, path, content)
+		if err != nil {
 			ce.Reply("Memory write failed: %v", err)
 			return
+		}
+		if entry != nil {
+			notifyMemoryFileChanged(WithBridgeToolContext(ce.Ctx, &BridgeToolContext{
+				Client: client,
+				Portal: ce.Portal,
+				Meta:   meta,
+			}), entry.Path)
 		}
 		ce.Reply("Memory file updated: %s", path)
 		return

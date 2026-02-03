@@ -155,7 +155,6 @@ var toolNameAliases = map[string]string{
 	"bash":          "exec",
 	"apply-patch":   "apply_patch",
 	"analyze_image": "image",
-	"agents_list":   "list_agents",
 }
 
 // NormalizeToolName converts to lowercase and resolves aliases.

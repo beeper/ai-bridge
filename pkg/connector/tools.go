@@ -1496,8 +1496,12 @@ func executeWriteFile(ctx context.Context, args map[string]any) (string, error) 
 	if len(content) > textFSMaxBytes {
 		return "", fmt.Errorf("content exceeds %s limit", textfs.FormatSize(textFSMaxBytes))
 	}
-	if _, err := store.Write(ctx, path, content); err != nil {
+	entry, err := store.Write(ctx, path, content)
+	if err != nil {
 		return "", err
+	}
+	if entry != nil {
+		notifyMemoryFileChanged(ctx, entry.Path)
 	}
 	return fmt.Sprintf("Successfully wrote %d bytes to %s", len([]byte(content)), path), nil
 }
@@ -1555,8 +1559,12 @@ func executeEditFile(ctx context.Context, args map[string]any) (string, error) {
 	if len(updated) > textFSMaxBytes {
 		return "", fmt.Errorf("content exceeds %s limit", textfs.FormatSize(textFSMaxBytes))
 	}
-	if _, err := store.Write(ctx, path, updated); err != nil {
+	entry, err = store.Write(ctx, path, updated)
+	if err != nil {
 		return "", err
+	}
+	if entry != nil {
+		notifyMemoryFileChanged(ctx, entry.Path)
 	}
 	return fmt.Sprintf("Successfully replaced text in %s.", path), nil
 }

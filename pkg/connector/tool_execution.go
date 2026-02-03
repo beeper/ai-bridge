@@ -320,7 +320,7 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 		}
 	}
 	if toolName == "sessions_spawn" {
-		if agentID, ok := args["agent_id"].(string); !ok || strings.TrimSpace(agentID) == "" {
+		if agentID, ok := args["agentId"].(string); !ok || strings.TrimSpace(agentID) == "" {
 			var resolved string
 			if meta != nil {
 				resolved = resolveAgentID(meta)
@@ -328,7 +328,15 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 			if resolved == "" {
 				resolved = agents.DefaultAgentID
 			}
-			args["agent_id"] = resolved
+			args["agentId"] = resolved
+		}
+		if _, ok := args["requester_session_key"].(string); !ok {
+			if portal != nil && portal.MXID != "" {
+				args["requester_session_key"] = portal.MXID.String()
+			}
+		}
+		if _, ok := args["requester_channel"].(string); !ok {
+			args["requester_channel"] = "matrix"
 		}
 	}
 
