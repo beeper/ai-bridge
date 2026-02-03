@@ -3,7 +3,6 @@ package connector
 import "testing"
 
 func TestClonePortalMetadataDeepCopiesConfig(t *testing.T) {
-	enabled := true
 	orig := &PortalMetadata{
 		PDFConfig: &PDFConfig{Engine: "mistral"},
 	}
