@@ -9,6 +9,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/commands"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
+	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 	"github.com/beeper/ai-bridge/pkg/connector/commandregistry"
 )
 
@@ -935,7 +936,7 @@ func fnCreateAgent(ce *commands.Event) {
 		ID:           agentID,
 		Name:         agentName,
 		SystemPrompt: systemPrompt,
-		ToolProfile:  agents.ProfileFull,
+		Tools:        &toolpolicy.ToolPolicyConfig{Profile: toolpolicy.ProfileFull},
 		IsPreset:     false,
 		CreatedAt:    time.Now().Unix(),
 		UpdatedAt:    time.Now().Unix(),

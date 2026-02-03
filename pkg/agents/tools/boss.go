@@ -2,11 +2,14 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 )
 
 // Boss tools for agent management.
@@ -37,18 +40,16 @@ type AgentStoreInterface interface {
 
 // AgentData represents agent data for boss tools (avoids import cycle).
 type AgentData struct {
-	ID            string          `json:"id"`
-	Name          string          `json:"name"`
-	Description   string          `json:"description,omitempty"`
-	Model         string          `json:"model,omitempty"`
-	SystemPrompt  string          `json:"system_prompt,omitempty"`
-	ToolProfile   string          `json:"tool_profile,omitempty"`
-	ToolOverrides map[string]bool `json:"tool_overrides,omitempty"`
-	ToolAlsoAllow []string        `json:"tool_also_allow,omitempty"`
-	Temperature   float64         `json:"temperature,omitempty"`
-	IsPreset      bool            `json:"is_preset,omitempty"`
-	CreatedAt     int64           `json:"created_at"`
-	UpdatedAt     int64           `json:"updated_at"`
+	ID           string                        `json:"id"`
+	Name         string                        `json:"name"`
+	Description  string                        `json:"description,omitempty"`
+	Model        string                        `json:"model,omitempty"`
+	SystemPrompt string                        `json:"system_prompt,omitempty"`
+	Tools        *toolpolicy.ToolPolicyConfig  `json:"tools,omitempty"`
+	Temperature  float64                       `json:"temperature,omitempty"`
+	IsPreset     bool                          `json:"is_preset,omitempty"`
+	CreatedAt    int64                         `json:"created_at"`
+	UpdatedAt    int64                         `json:"updated_at"`
 }
 
 // ModelData represents model data for boss tools.
@@ -107,15 +108,35 @@ var CreateAgentTool = &Tool{
 					"type":        "string",
 					"description": "Custom system prompt for the agent",
 				},
-				"tool_profile": map[string]any{
-					"type":        "string",
-					"enum":        []string{"minimal", "coding", "messaging", "full"},
-					"description": "Tool access level: minimal (web search + chat info), coding (calculator + web search + chat info), messaging (web search + chat info + messaging/session tools), full (all available tools)",
-				},
-				"tool_also_allow": map[string]any{
-					"type":        "array",
-					"items":       map[string]any{"type": "string"},
-					"description": "Additional tools to allow (supports wildcards like 'mcp_*')",
+				"tools": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"profile": map[string]any{
+							"type":        "string",
+							"enum":        []string{"minimal", "coding", "messaging", "full", "boss"},
+							"description": "Tool access profile (OpenClaw-style)",
+						},
+						"allow": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Explicit tool allowlist (supports wildcards like 'web_*' or group:... shorthands)",
+						},
+						"alsoAllow": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Additional allowlist entries merged into allow",
+						},
+						"deny": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Explicit tool denylist (deny wins)",
+						},
+						"byProvider": map[string]any{
+							"type":                 "object",
+							"additionalProperties": map[string]any{"type": "object"},
+							"description":          "Optional provider- or model-specific overrides keyed by provider or provider/model",
+						},
+					},
 				},
 			},
 			"required": []string{"name"},
@@ -179,15 +200,35 @@ var EditAgentTool = &Tool{
 					"type":        "string",
 					"description": "New system prompt",
 				},
-				"tool_profile": map[string]any{
-					"type":        "string",
-					"enum":        []string{"minimal", "coding", "messaging", "full"},
-					"description": "New tool access level: minimal (web search + chat info), coding (calculator + web search + chat info), messaging (web search + chat info + messaging/session tools), full (all available tools)",
-				},
-				"tool_also_allow": map[string]any{
-					"type":        "array",
-					"items":       map[string]any{"type": "string"},
-					"description": "Additional tools to allow (supports wildcards like 'mcp_*')",
+				"tools": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"profile": map[string]any{
+							"type":        "string",
+							"enum":        []string{"minimal", "coding", "messaging", "full", "boss"},
+							"description": "Tool access profile (OpenClaw-style)",
+						},
+						"allow": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Explicit tool allowlist (supports wildcards like 'web_*' or group:... shorthands)",
+						},
+						"alsoAllow": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Additional allowlist entries merged into allow",
+						},
+						"deny": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Explicit tool denylist (deny wins)",
+						},
+						"byProvider": map[string]any{
+							"type":                 "object",
+							"additionalProperties": map[string]any{"type": "object"},
+							"description":          "Optional provider- or model-specific overrides keyed by provider or provider/model",
+						},
+					},
 				},
 			},
 			"required": []string{"agent_id"},
@@ -487,6 +528,34 @@ func IsBossTool(toolName string) bool {
 	return false
 }
 
+func readToolPolicyConfig(input map[string]any) (*toolpolicy.ToolPolicyConfig, error) {
+	raw, err := ReadMap(input, "tools", false)
+	if err != nil || raw == nil {
+		return nil, err
+	}
+	bytes, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var cfg toolpolicy.ToolPolicyConfig
+	if err := json.Unmarshal(bytes, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+func legacyToolPolicyConfig(input map[string]any) *toolpolicy.ToolPolicyConfig {
+	profile := ReadStringDefault(input, "tool_profile", "")
+	alsoAllow := ReadStringArray(input, "tool_also_allow")
+	if profile == "" && len(alsoAllow) == 0 {
+		return nil
+	}
+	return &toolpolicy.ToolPolicyConfig{
+		Profile:   toolpolicy.ToolProfileID(profile),
+		AlsoAllow: alsoAllow,
+	}
+}
+
 // ExecuteCreateAgent handles the create_agent tool.
 func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[string]any) (*Result, error) {
 	name, err := ReadString(input, "name", true)
@@ -497,8 +566,16 @@ func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[str
 	description := ReadStringDefault(input, "description", "")
 	model := ReadStringDefault(input, "model", "")
 	systemPrompt := ReadStringDefault(input, "system_prompt", "")
-	toolProfile := ReadStringDefault(input, "tool_profile", "full")
-	toolAlsoAllow := ReadStringArray(input, "tool_also_allow")
+	toolsConfig, err := readToolPolicyConfig(input)
+	if err != nil {
+		return ErrorResult("create_agent", fmt.Sprintf("invalid tools config: %v", err)), nil
+	}
+	if toolsConfig == nil {
+		toolsConfig = legacyToolPolicyConfig(input)
+	}
+	if toolsConfig == nil {
+		toolsConfig = &toolpolicy.ToolPolicyConfig{Profile: toolpolicy.ProfileFull}
+	}
 
 	agentID := uuid.NewString()
 
@@ -510,8 +587,7 @@ func (e *BossToolExecutor) ExecuteCreateAgent(ctx context.Context, input map[str
 		Description:   description,
 		Model:         model,
 		SystemPrompt:  systemPrompt,
-		ToolProfile:   toolProfile,
-		ToolAlsoAllow: toolAlsoAllow,
+		Tools:        toolsConfig,
 		IsPreset:      false,
 		CreatedAt:     now,
 		UpdatedAt:     now,
@@ -557,9 +633,7 @@ func (e *BossToolExecutor) ExecuteForkAgent(ctx context.Context, input map[strin
 		Description:   source.Description,
 		Model:         source.Model,
 		SystemPrompt:  source.SystemPrompt,
-		ToolProfile:   source.ToolProfile,
-		ToolOverrides: source.ToolOverrides,
-		ToolAlsoAllow: source.ToolAlsoAllow,
+		Tools:         source.Tools.Clone(),
 		Temperature:   source.Temperature,
 		IsPreset:      false,
 		CreatedAt:     now,
@@ -612,11 +686,14 @@ func (e *BossToolExecutor) ExecuteEditAgent(ctx context.Context, input map[strin
 	if prompt, _ := ReadString(input, "system_prompt", false); prompt != "" {
 		agent.SystemPrompt = prompt
 	}
-	if profile, _ := ReadString(input, "tool_profile", false); profile != "" {
-		agent.ToolProfile = profile
-	}
-	if alsoAllow := ReadStringArray(input, "tool_also_allow"); len(alsoAllow) > 0 {
-		agent.ToolAlsoAllow = alsoAllow
+	if toolsConfig, err := readToolPolicyConfig(input); err == nil && toolsConfig != nil {
+		agent.Tools = toolsConfig
+	} else if toolsConfig == nil {
+		if legacy := legacyToolPolicyConfig(input); legacy != nil {
+			agent.Tools = legacy
+		}
+	} else if err != nil {
+		return ErrorResult("edit_agent", fmt.Sprintf("invalid tools config: %v", err)), nil
 	}
 
 	agent.UpdatedAt = time.Now().Unix()
@@ -674,12 +751,12 @@ func (e *BossToolExecutor) ExecuteListAgents(ctx context.Context, _ map[string]a
 	var agentList []map[string]any
 	for _, agent := range agents {
 		agentList = append(agentList, map[string]any{
-			"id":           agent.ID,
-			"name":         agent.Name,
-			"description":  agent.Description,
-			"model":        agent.Model,
-			"tool_profile": agent.ToolProfile,
-			"is_preset":    agent.IsPreset,
+			"id":          agent.ID,
+			"name":        agent.Name,
+			"description": agent.Description,
+			"model":       agent.Model,
+			"tools":       agent.Tools,
+			"is_preset":   agent.IsPreset,
 		})
 	}
 
@@ -731,10 +808,12 @@ func (e *BossToolExecutor) ExecuteListTools(ctx context.Context, _ map[string]an
 	}
 
 	// Add profile descriptions
-	profiles := map[string][]string{
-		"minimal": {GroupSearch, GroupMessaging, GroupStatus},
-		"coding":  {GroupFS, GroupCalc, GroupWeb, GroupMessaging, GroupMedia, GroupStatus, GroupMemory},
-		"full":    {GroupFS, GroupCalc, GroupWeb, GroupMessaging, GroupMedia, GroupStatus, GroupMemory},
+	profiles := map[string][]string{}
+	for profile, policy := range toolpolicy.ToolProfiles {
+		if len(policy.Allow) == 0 {
+			continue
+		}
+		profiles[string(profile)] = append([]string{}, policy.Allow...)
 	}
 
 	return JSONResult(map[string]any{

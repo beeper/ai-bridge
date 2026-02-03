@@ -24,7 +24,7 @@ const (
 	GroupMedia     = toolpolicy.GroupMedia
 	GroupStatus    = toolpolicy.GroupStatus
 	GroupOpenClaw  = toolpolicy.GroupOpenClaw
-	GroupFS        = "group:fs"
+	GroupFS        = toolpolicy.GroupFS
 )
 
 // BuiltinTools returns all locally-executable builtin tools.
