@@ -319,6 +319,21 @@ func (m *MemorySearchManager) getSessionFileHash(ctx context.Context, sessionKey
 }
 
 func (m *MemorySearchManager) upsertSessionFile(ctx context.Context, sessionKey, path, content, hash string) error {
+	var existingPath string
+	row := m.db.QueryRow(ctx,
+		`SELECT path FROM ai_memory_session_files
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND session_key=$4`,
+		m.bridgeID, m.loginID, m.agentID, sessionKey,
+	)
+	switch err := row.Scan(&existingPath); err {
+	case nil:
+		if existingPath != "" && existingPath != path {
+			m.purgeSessionPath(ctx, existingPath)
+		}
+	case sql.ErrNoRows:
+	default:
+		return err
+	}
 	size := len([]byte(content))
 	_, err := m.db.Exec(ctx,
 		`INSERT INTO ai_memory_session_files
@@ -342,24 +357,7 @@ func (m *MemorySearchManager) deleteSessionFile(ctx context.Context, sessionKey 
 	if err := row.Scan(&path); err != nil && err != sql.ErrNoRows {
 		return err
 	}
-	if path != "" {
-		if m.vectorReady {
-			ids := m.collectChunkIDs(ctx, path, "sessions", m.status.Model)
-			m.deleteVectorIDs(ctx, ids)
-		}
-		_, _ = m.db.Exec(ctx,
-			`DELETE FROM ai_memory_chunks
-             WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5`,
-			m.bridgeID, m.loginID, m.agentID, path, "sessions",
-		)
-		if m.ftsAvailable {
-			_, _ = m.db.Exec(ctx,
-				`DELETE FROM ai_memory_chunks_fts
-                 WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5`,
-				m.bridgeID, m.loginID, m.agentID, path, "sessions",
-			)
-		}
-	}
+	m.purgeSessionPath(ctx, path)
 	_, _ = m.db.Exec(ctx,
 		`DELETE FROM ai_memory_session_files
          WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND session_key=$4`,
@@ -387,24 +385,7 @@ func (m *MemorySearchManager) removeStaleSessions(ctx context.Context, active ma
 		if _, ok := active[sessionKey]; ok {
 			continue
 		}
-		if path != "" {
-			if m.vectorReady {
-				ids := m.collectChunkIDs(ctx, path, "sessions", m.status.Model)
-				m.deleteVectorIDs(ctx, ids)
-			}
-			_, _ = m.db.Exec(ctx,
-				`DELETE FROM ai_memory_chunks
-                 WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5`,
-				m.bridgeID, m.loginID, m.agentID, path, "sessions",
-			)
-			if m.ftsAvailable {
-				_, _ = m.db.Exec(ctx,
-					`DELETE FROM ai_memory_chunks_fts
-                     WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5`,
-					m.bridgeID, m.loginID, m.agentID, path, "sessions",
-				)
-			}
-		}
+		m.purgeSessionPath(ctx, path)
 		_, _ = m.db.Exec(ctx,
 			`DELETE FROM ai_memory_session_files
              WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND session_key=$4`,
@@ -469,7 +450,7 @@ func sessionPathForKey(sessionKey string) string {
 	if cleaned == "" {
 		cleaned = "session"
 	}
-	return "sessions/" + cleaned + ".md"
+	return "sessions/" + cleaned + ".jsonl"
 }
 
 func hashSessionContent(content string) string {
