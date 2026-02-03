@@ -397,6 +397,10 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		oc.api = provider.Client()
 	}
 
+	oc.heartbeatWake = &HeartbeatWake{}
+	oc.heartbeatRunner = NewHeartbeatRunner(oc)
+	oc.cronService = oc.buildCronService()
+
 	return oc, nil
 }
 
@@ -612,6 +616,15 @@ func (oc *AIClient) Connect(ctx context.Context) {
 		StateEvent: status.StateConnected,
 		Message:    "Connected",
 	})
+
+	if oc.heartbeatRunner != nil {
+		oc.heartbeatRunner.Start()
+	}
+	if oc.cronService != nil {
+		if err := oc.cronService.Start(); err != nil {
+			oc.log.Warn().Err(err).Msg("cron: failed to start scheduler")
+		}
+	}
 }
 
 func (oc *AIClient) Disconnect() {
@@ -621,6 +634,13 @@ func (oc *AIClient) Disconnect() {
 		oc.inboundDebouncer.FlushAll()
 	}
 	oc.loggedIn.Store(false)
+
+	if oc.cronService != nil {
+		oc.cronService.Stop()
+	}
+	if oc.heartbeatRunner != nil {
+		oc.heartbeatRunner.Stop()
+	}
 }
 
 func (oc *AIClient) IsLoggedIn() bool {
@@ -1006,7 +1026,7 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		ExtraSystemPrompt: extraSystemPrompt,
 		UserTimezone:      timezone,
 		PromptMode:        agent.PromptMode,
-		HeartbeatPrompt:   resolveHeartbeatPrompt(oc.connector.Config, resolveHeartbeatConfig(oc.connector.Config, agent.ID), agent),
+		HeartbeatPrompt:   resolveHeartbeatPrompt(&oc.connector.Config, resolveHeartbeatConfig(&oc.connector.Config, agent.ID), agent),
 	}
 	if oc.connector != nil && oc.connector.Config.Memory != nil {
 		params.MemoryCitations = strings.TrimSpace(oc.connector.Config.Memory.Citations)

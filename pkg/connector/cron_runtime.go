@@ -1,0 +1,90 @@
+package connector
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/beeper/ai-bridge/pkg/agents"
+	"github.com/beeper/ai-bridge/pkg/cron"
+)
+
+func resolveCronEnabled(cfg *Config) bool {
+	if cfg == nil || cfg.Cron == nil || cfg.Cron.Enabled == nil {
+		return true
+	}
+	return *cfg.Cron.Enabled
+}
+
+func resolveCronStorePath(cfg *Config) string {
+	raw := ""
+	if cfg != nil && cfg.Cron != nil {
+		raw = cfg.Cron.Store
+	}
+	return cron.ResolveCronStorePath(raw)
+}
+
+func (oc *AIClient) buildCronService() *cron.CronService {
+	if oc == nil {
+		return nil
+	}
+	storePath := resolveCronStorePath(&oc.connector.Config)
+	deps := cron.CronServiceDeps{
+		NowMs:               func() int64 { return time.Now().UnixMilli() },
+		Log:                 cronLogger{log: oc.log},
+		StorePath:           storePath,
+		CronEnabled:         resolveCronEnabled(&oc.connector.Config),
+		EnqueueSystemEvent:  oc.enqueueCronSystemEvent,
+		RequestHeartbeatNow: oc.requestHeartbeatNow,
+		RunHeartbeatOnce:    oc.runHeartbeatImmediate,
+		RunIsolatedAgentJob: oc.runCronIsolatedAgentJob,
+		OnEvent:             oc.onCronEvent,
+	}
+	return cron.NewCronService(deps)
+}
+
+func (oc *AIClient) enqueueCronSystemEvent(text string, agentID string) error {
+	if oc == nil {
+		return fmt.Errorf("missing client")
+	}
+	if strings.TrimSpace(agentID) == "" {
+		agentID = agents.DefaultAgentID
+	}
+	hb := resolveHeartbeatConfig(&oc.connector.Config, agentID)
+	portal, sessionKey, err := oc.resolveHeartbeatPortal(agentID, hb)
+	if err != nil || portal == nil || sessionKey == "" {
+		if err != nil {
+			oc.log.Warn().Err(err).Str("agent_id", agentID).Msg("cron: unable to resolve heartbeat session for system event")
+		}
+		return nil
+	}
+	enqueueSystemEvent(sessionKey, text, agentID)
+	return nil
+}
+
+func (oc *AIClient) requestHeartbeatNow(reason string) {
+	if oc == nil || oc.heartbeatWake == nil {
+		return
+	}
+	oc.heartbeatWake.Request(reason, 0)
+}
+
+func (oc *AIClient) runHeartbeatImmediate(reason string) cron.HeartbeatRunResult {
+	if oc == nil || oc.heartbeatRunner == nil {
+		return cron.HeartbeatRunResult{Status: "skipped", Reason: "disabled"}
+	}
+	return oc.heartbeatRunner.run(reason)
+}
+
+func (oc *AIClient) onCronEvent(evt cron.CronEvent) {
+	if oc == nil || strings.TrimSpace(evt.JobID) == "" {
+		return
+	}
+	if evt.Action != "finished" {
+		return
+	}
+	storePath := resolveCronStorePath(&oc.connector.Config)
+	path := cron.ResolveCronRunLogPath(storePath, evt.JobID)
+	entry := cronRunLogEntryFromEvent(evt)
+	_ = cron.AppendCronRunLog(path, entry, 0, 0)
+}

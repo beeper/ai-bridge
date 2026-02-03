@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -45,7 +46,7 @@ func (r *HeartbeatRunner) Start() {
 	if r == nil || r.client == nil {
 		return
 	}
-	r.updateConfig(r.client.connector.Config)
+	r.updateConfig(&r.client.connector.Config)
 	if r.client.heartbeatWake != nil {
 		r.client.heartbeatWake.SetHandler(func(reason string) cron.HeartbeatRunResult {
 			return r.run(reason)
@@ -215,7 +216,7 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	if oc == nil || oc.connector == nil {
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "disabled"}
 	}
-	cfg := oc.connector.Config
+	cfg := &oc.connector.Config
 	if !isHeartbeatEnabledForAgent(cfg, agentID) {
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "disabled"}
 	}
@@ -228,9 +229,13 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "quiet-hours"}
 	}
 
-	sessionPortal, sessionKey, err := oc.resolveHeartbeatSessionPortal(agentID, heartbeat)
+	sessionPortal, sessionKey, err := oc.resolveHeartbeatPortal(agentID, heartbeat)
 	if err != nil || sessionPortal == nil || sessionPortal.MXID == "" {
-		return cron.HeartbeatRunResult{Status: "skipped", Reason: "no-session"}
+		reason := "no-session"
+		if errors.Is(err, errHeartbeatNoTarget) || errors.Is(err, errHeartbeatTargetNotFound) {
+			reason = "no-target"
+		}
+		return cron.HeartbeatRunResult{Status: "skipped", Reason: reason}
 	}
 	if oc.isRoomBusy(sessionPortal.MXID) {
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "requests-in-flight"}
@@ -246,7 +251,6 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "empty-heartbeat-file"}
 	}
 
-	target := resolveHeartbeatTarget(cfg, heartbeat)
 	visibility := resolveHeartbeatVisibility(cfg, "matrix")
 	hbCfg := &HeartbeatRunConfig{
 		Reason:           reason,
@@ -260,11 +264,6 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		Channel:          "matrix",
 		SuppressSave:     true,
 	}
-	if strings.EqualFold(strings.TrimSpace(target), "none") {
-		hbCfg.ShowOk = false
-		hbCfg.ShowAlerts = false
-	}
-
 	var agentDef *agents.AgentDefinition
 	store := NewAgentStoreAdapter(oc)
 	if agent, err := store.GetAgentByID(context.Background(), agentID); err == nil {
@@ -309,6 +308,12 @@ func (oc *AIClient) buildPromptWithHeartbeat(ctx context.Context, portal *bridge
 	return append(base, openai.UserMessage(message)), nil
 }
 
+var (
+	errHeartbeatNoTarget       = errors.New("heartbeat target disabled")
+	errHeartbeatTargetNotFound = errors.New("heartbeat target not found")
+	errHeartbeatNoSession      = errors.New("heartbeat session not available")
+)
+
 func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, string, error) {
 	session := ""
 	if heartbeat != nil {
@@ -338,6 +343,42 @@ func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *Hea
 		return portal, portal.MXID.String(), nil
 	}
 	return nil, "", fmt.Errorf("no session")
+}
+
+func (oc *AIClient) resolveHeartbeatPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, string, error) {
+	if oc == nil || oc.UserLogin == nil {
+		return nil, "", errHeartbeatNoSession
+	}
+	cfg := &oc.connector.Config
+	target := resolveHeartbeatTarget(cfg, heartbeat)
+	if strings.EqualFold(strings.TrimSpace(target), "none") {
+		return nil, "", errHeartbeatNoTarget
+	}
+	if heartbeat != nil {
+		if strings.TrimSpace(heartbeat.To) != "" {
+			room := strings.TrimSpace(heartbeat.To)
+			if strings.HasPrefix(room, "!") {
+				if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(room)); err == nil && portal != nil {
+					return portal, portal.MXID.String(), nil
+				}
+			}
+			return nil, "", errHeartbeatTargetNotFound
+		}
+	}
+	trimmedTarget := strings.TrimSpace(target)
+	if trimmedTarget != "" && !strings.EqualFold(trimmedTarget, "last") {
+		if strings.HasPrefix(trimmedTarget, "!") {
+			if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(trimmedTarget)); err == nil && portal != nil {
+				return portal, portal.MXID.String(), nil
+			}
+		}
+		return nil, "", errHeartbeatTargetNotFound
+	}
+	portal, key, err := oc.resolveHeartbeatSessionPortal(agentID, heartbeat)
+	if err != nil || portal == nil || portal.MXID == "" {
+		return nil, "", errHeartbeatNoSession
+	}
+	return portal, key, nil
 }
 
 func (oc *AIClient) resolveHeartbeatDeliveryPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, id.RoomID) {

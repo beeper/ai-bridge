@@ -92,6 +92,9 @@ const ToolNameAnalyzeImage = toolspec.AnalyzeImageName
 // ToolNameSessionStatus is the name of the session status tool.
 const ToolNameSessionStatus = toolspec.SessionStatusName
 
+// ToolNameCron is the name of the cron tool.
+const ToolNameCron = toolspec.CronName
+
 // Memory tool names (matching OpenClaw interface)
 const (
 	ToolNameMemorySearch  = toolspec.MemorySearchName

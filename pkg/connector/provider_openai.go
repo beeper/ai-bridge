@@ -732,18 +732,20 @@ func MakeToolDedupMiddleware(log zerolog.Logger) option.Middleware {
 			return resp, err
 		}
 
-		respBytes, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
+		if resp.StatusCode >= http.StatusBadRequest {
+			respBytes, readErr := io.ReadAll(resp.Body)
+			if readErr != nil {
+				resp.Body = io.NopCloser(bytes.NewReader(respBytes))
+				return resp, err
+			}
 			resp.Body = io.NopCloser(bytes.NewReader(respBytes))
-			return resp, err
-		}
-		resp.Body = io.NopCloser(bytes.NewReader(respBytes))
 
-		if resp.StatusCode >= http.StatusBadRequest && bytes.Contains(respBytes, []byte("tools: Tool names must be unique")) {
-			log.Warn().
-				Str("request_json", string(bodyBytes)).
-				Str("response_json", string(respBytes)).
-				Msg("Responses request rejected: duplicate tools")
+			if bytes.Contains(respBytes, []byte("tools: Tool names must be unique")) {
+				log.Warn().
+					Str("request_json", string(bodyBytes)).
+					Str("response_json", string(respBytes)).
+					Msg("Responses request rejected: duplicate tools")
+			}
 		}
 
 		return resp, err

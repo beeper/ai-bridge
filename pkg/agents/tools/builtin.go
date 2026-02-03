@@ -33,6 +33,7 @@ func BuiltinTools() []*Tool {
 		Calculator,
 		WebSearch,
 		MessageTool,
+		CronTool,
 		WebFetchTool,
 		SessionStatusTool,
 		MemorySearchTool,

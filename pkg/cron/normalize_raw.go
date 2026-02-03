@@ -102,6 +102,19 @@ func coerceScheduleMap(schedule map[string]any) map[string]any {
 	for k, v := range schedule {
 		next[k] = v
 	}
+	if val, ok := schedule["every"]; ok {
+		if ms, ok := coerceEveryMs(val); ok {
+			next["everyMs"] = ms
+		}
+		if _, exists := next["everyMs"]; exists {
+			delete(next, "every")
+		}
+	}
+	if val, ok := schedule["everyMs"]; ok {
+		if ms, ok := coerceEveryMsExact(val); ok {
+			next["everyMs"] = ms
+		}
+	}
 	kind, _ := schedule["kind"].(string)
 	if strings.TrimSpace(kind) == "" {
 		if schedule["atMs"] != nil || schedule["at"] != nil {
@@ -127,7 +140,132 @@ func coerceScheduleMap(schedule map[string]any) map[string]any {
 	if _, ok := next["at"]; ok {
 		delete(next, "at")
 	}
+	if val, ok := schedule["anchorMs"]; ok {
+		if parsed, ok := coerceAbsoluteMs(val); ok {
+			next["anchorMs"] = parsed
+		}
+	}
+	if val, ok := schedule["anchor"]; ok {
+		if parsed, ok := coerceAbsoluteMs(val); ok {
+			next["anchorMs"] = parsed
+		}
+		delete(next, "anchor")
+	}
 	return next
+}
+
+func coerceEveryMs(val any) (int64, bool) {
+	switch v := val.(type) {
+	case float64:
+		if v <= 0 {
+			return 0, false
+		}
+		return int64(v * 60_000), true
+	case float32:
+		if v <= 0 {
+			return 0, false
+		}
+		return int64(float64(v) * 60_000), true
+	case int:
+		if v <= 0 {
+			return 0, false
+		}
+		return int64(v) * 60_000, true
+	case int64:
+		if v <= 0 {
+			return 0, false
+		}
+		return v * 60_000, true
+	case int32:
+		if v <= 0 {
+			return 0, false
+		}
+		return int64(v) * 60_000, true
+	case string:
+		ms, err := parseDurationMs(v, "m")
+		if err != nil || ms <= 0 {
+			return 0, false
+		}
+		return ms, true
+	default:
+		return 0, false
+	}
+}
+
+func coerceEveryMsExact(val any) (int64, bool) {
+	switch v := val.(type) {
+	case float64:
+		if v <= 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case float32:
+		if v <= 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case int:
+		if v <= 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case int64:
+		if v <= 0 {
+			return 0, false
+		}
+		return v, true
+	case int32:
+		if v <= 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case string:
+		ms, err := parseDurationMs(v, "ms")
+		if err != nil || ms <= 0 {
+			return 0, false
+		}
+		return ms, true
+	default:
+		return 0, false
+	}
+}
+
+func coerceAbsoluteMs(val any) (int64, bool) {
+	switch v := val.(type) {
+	case float64:
+		if v <= 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case float32:
+		if v <= 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case int:
+		if v <= 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case int64:
+		if v <= 0 {
+			return 0, false
+		}
+		return v, true
+	case int32:
+		if v <= 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case string:
+		ms, ok := parseAbsoluteTimeMs(v)
+		if !ok || ms <= 0 {
+			return 0, false
+		}
+		return ms, true
+	default:
+		return 0, false
+	}
 }
 
 func coercePayloadMap(payload map[string]any) map[string]any {
