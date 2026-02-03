@@ -476,6 +476,7 @@ func (oc *AIClient) dispatchOrQueue(
 			}()
 			oc.dispatchCompletionInternal(runCtx, evt, portal, metaSnapshot, promptMessages)
 		}(metaSnapshot)
+		oc.notifySessionMemoryChange(ctx, portal, meta, false)
 		return userMessage, false
 	}
 
@@ -489,6 +490,7 @@ func (oc *AIClient) dispatchOrQueue(
 
 	oc.queuePendingMessage(portal.MXID, pending)
 	oc.sendPendingStatus(ctx, portal, evt, "Waiting for previous response")
+	oc.notifySessionMemoryChange(ctx, portal, meta, false)
 	return nil, true
 }
 

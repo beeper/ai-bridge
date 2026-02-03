@@ -50,8 +50,8 @@ var ToolGroups = map[string][]string{
 	GroupAutomation: {"cron", "gateway"},
 	GroupNodes:      {"nodes"},
 	GroupStatus:     {"session_status"},
-	GroupOpenClaw:   {"browser", "canvas", "nodes", "cron", "message", "gateway", "agents_list", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_fetch", "image"},
-	GroupFS:         {"read", "write", "edit", "apply_patch"},
+	GroupOpenClaw:   {"browser", "canvas", "nodes", "cron", "message", "gateway", "agents_list", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_fetch", "image", "read", "write", "edit", "ls", "find", "grep"},
+	GroupFS:         {"read", "write", "edit", "ls", "find", "grep", "apply_patch"},
 }
 
 type toolProfilePolicy struct {

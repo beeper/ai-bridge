@@ -58,11 +58,18 @@ func fnMemory(ce *commands.Event) {
 			fmt.Sprintf("Model: %s", status.Model),
 			fmt.Sprintf("Sources: %s", strings.Join(status.Sources, ", ")),
 			fmt.Sprintf("Extra paths: %s", strings.Join(status.ExtraPaths, ", ")),
-			fmt.Sprintf("Vector enabled: %t", status.VectorEnabled),
+			fmt.Sprintf("Vector enabled: %t (ready=%t)", status.VectorEnabled, status.VectorReady),
 			fmt.Sprintf("FTS enabled: %t (available=%t)", status.FTSEnabled, status.FTSAvailable),
 			fmt.Sprintf("Cache enabled: %t (entries=%d)", status.CacheEnabled, status.CacheEntries),
+			fmt.Sprintf("Batch enabled: %t (failures=%d)", status.BatchEnabled, status.BatchFailures),
 			fmt.Sprintf("Files: %d", status.FileCount),
 			fmt.Sprintf("Chunks: %d", status.ChunkCount),
+		}
+		if status.VectorError != "" {
+			lines = append(lines, fmt.Sprintf("Vector error: %s", status.VectorError))
+		}
+		if status.BatchLastError != "" {
+			lines = append(lines, fmt.Sprintf("Batch error: %s", status.BatchLastError))
 		}
 		if status.Fallback != nil {
 			lines = append(lines, fmt.Sprintf("Fallback: %s (%s)", status.Fallback.From, status.Fallback.Reason))

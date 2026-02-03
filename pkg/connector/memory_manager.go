@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -35,26 +36,45 @@ type MemorySearchManager struct {
 	ftsError     string
 	log          zerolog.Logger
 
-	dirty        bool
-	sessionWarm  map[string]struct{}
-	watchTimer   *time.Timer
-	intervalOnce sync.Once
-	mu sync.Mutex
+	dirty             bool
+	sessionWarm       map[string]struct{}
+	watchTimer        *time.Timer
+	sessionWatchTimer *time.Timer
+	sessionWatchKey   string
+	intervalOnce      sync.Once
+	vectorConn        *sql.Conn
+	vectorReady       bool
+	vectorError       string
+	batchEnabled      bool
+	batchFailures     int
+	batchLastError    string
+	batchLastProvider string
+	mu                sync.Mutex
 }
 
 type MemorySearchStatus struct {
-	Provider      string
-	Model         string
-	Fallback      *memory.FallbackStatus
-	Sources       []string
-	ExtraPaths    []string
-	VectorEnabled bool
-	FTSEnabled    bool
-	FTSAvailable  bool
-	CacheEnabled  bool
-	CacheEntries  int
-	FileCount     int
-	ChunkCount    int
+	Provider            string
+	Model               string
+	Fallback            *memory.FallbackStatus
+	Sources             []string
+	ExtraPaths          []string
+	VectorEnabled       bool
+	VectorReady         bool
+	VectorError         string
+	FTSEnabled          bool
+	FTSAvailable        bool
+	CacheEnabled        bool
+	CacheEntries        int
+	FileCount           int
+	ChunkCount          int
+	BatchEnabled        bool
+	BatchFailures       int
+	BatchLastError      string
+	BatchLastProvider   string
+	BatchWait           bool
+	BatchConcurrency    int
+	BatchPollIntervalMs int
+	BatchTimeoutMinutes int
 }
 
 var memoryManagerCache = struct {
@@ -110,8 +130,10 @@ func getMemorySearchManager(client *AIClient, agentID string) (*MemorySearchMana
 	if hasSource(cfg.Sources, "memory") {
 		manager.dirty = true
 	}
+	manager.batchEnabled = cfg.Remote.Batch.Enabled
 
 	manager.ensureSchema(context.Background())
+	manager.ensureVectorConn(context.Background())
 	manager.ensureIntervalSync()
 	memoryManagerCache.managers[cacheKey] = manager
 	return manager, ""
@@ -126,15 +148,25 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 		return nil, fmt.Errorf("memory search unavailable")
 	}
 	status := &MemorySearchStatus{
-		Provider:      m.status.Provider,
-		Model:         m.status.Model,
-		Fallback:      m.status.Fallback,
-		Sources:       append([]string{}, m.cfg.Sources...),
-		ExtraPaths:    append([]string{}, m.cfg.ExtraPaths...),
-		VectorEnabled: m.cfg.Store.Vector.Enabled,
-		FTSEnabled:    m.cfg.Query.Hybrid.Enabled,
-		FTSAvailable:  m.ftsAvailable,
-		CacheEnabled:  m.cfg.Cache.Enabled,
+		Provider:            m.status.Provider,
+		Model:               m.status.Model,
+		Fallback:            m.status.Fallback,
+		Sources:             append([]string{}, m.cfg.Sources...),
+		ExtraPaths:          append([]string{}, m.cfg.ExtraPaths...),
+		VectorEnabled:       m.cfg.Store.Vector.Enabled,
+		VectorReady:         m.vectorReady,
+		VectorError:         m.vectorError,
+		FTSEnabled:          m.cfg.Query.Hybrid.Enabled,
+		FTSAvailable:        m.ftsAvailable,
+		CacheEnabled:        m.cfg.Cache.Enabled,
+		BatchEnabled:        m.batchEnabled && (m.status.Provider == "openai" || m.status.Provider == "gemini"),
+		BatchFailures:       m.batchFailures,
+		BatchLastError:      m.batchLastError,
+		BatchLastProvider:   m.batchLastProvider,
+		BatchWait:           m.cfg.Remote.Batch.Wait,
+		BatchConcurrency:    m.cfg.Remote.Batch.Concurrency,
+		BatchPollIntervalMs: m.cfg.Remote.Batch.PollIntervalMs,
+		BatchTimeoutMinutes: m.cfg.Remote.Batch.TimeoutMinutes,
 	}
 
 	if m.cfg.Cache.Enabled {
