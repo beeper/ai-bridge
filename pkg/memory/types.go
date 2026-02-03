@@ -118,5 +118,10 @@ type EmbeddingProvider interface {
 type ProviderStatus struct {
 	Provider string
 	Model    string
-	Fallback string
+	Fallback *FallbackStatus
+}
+
+type FallbackStatus struct {
+	From   string `json:"from,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }

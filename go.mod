@@ -8,6 +8,7 @@ tool go.mau.fi/util/cmd/maubuild
 
 require (
 	github.com/PuerkitoBio/goquery v1.11.0
+	github.com/bmatcuk/doublestar/v4 v4.6.1
 	github.com/dyatlov/go-opengraph/opengraph v0.0.0-20220524092352-606d7b1e5f8a
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.2.0

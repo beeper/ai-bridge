@@ -89,9 +89,6 @@ func (api *ProvisioningAPI) handleGetDefaults(w http.ResponseWriter, r *http.Req
 		if meta.Defaults.ReasoningEffort != "" {
 			resp["reasoning_effort"] = meta.Defaults.ReasoningEffort
 		}
-		if meta.Defaults.Tools != nil {
-			resp["tools"] = meta.Defaults.Tools
-		}
 	}
 	exhttp.WriteJSONResponse(w, http.StatusOK, resp)
 }
@@ -102,7 +99,6 @@ type ReqSetDefaults struct {
 	SystemPrompt    *string          `json:"system_prompt,omitempty"`
 	Temperature     *float64         `json:"temperature,omitempty"`
 	ReasoningEffort *string          `json:"reasoning_effort,omitempty"`
-	Tools           map[string]*bool `json:"tools,omitempty"`
 }
 
 // handleSetDefaults handles PUT /v1/defaults
@@ -142,17 +138,6 @@ func (api *ProvisioningAPI) handleSetDefaults(w http.ResponseWriter, r *http.Req
 	if req.ReasoningEffort != nil {
 		meta.Defaults.ReasoningEffort = *req.ReasoningEffort
 	}
-	if req.Tools != nil {
-		if meta.Defaults.Tools == nil {
-			meta.Defaults.Tools = make(map[string]bool)
-		}
-		for name, enabled := range req.Tools {
-			if enabled != nil {
-				meta.Defaults.Tools[name] = *enabled
-			}
-		}
-	}
-
 	if err := login.Save(r.Context()); err != nil {
 		mautrix.MUnknown.WithMessage("failed to save: %v", err).Write(w)
 		return
