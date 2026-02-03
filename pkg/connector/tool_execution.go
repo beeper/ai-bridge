@@ -343,6 +343,8 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 		result, err = executor.ExecuteDeleteAgent(ctx, args)
 	case "list_agents":
 		result, err = executor.ExecuteListAgents(ctx, args)
+	case "agents_list":
+		result, err = executor.ExecuteListAgents(ctx, args)
 	case "list_models":
 		result, err = executor.ExecuteListModels(ctx, args)
 	case "list_tools":

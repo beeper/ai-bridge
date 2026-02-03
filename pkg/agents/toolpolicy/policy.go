@@ -43,15 +43,15 @@ var ToolGroups = map[string][]string{
 	GroupMessaging:  {"message"},
 	GroupSessions:   {"sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status"},
 	GroupMemory:     {"memory_search", "memory_get"},
-	GroupWeb:        {"web_search", "web_search_openrouter", "web_fetch"},
+	GroupWeb:        {"web_search", "web_fetch"},
 	GroupMedia:      {"image", "image_generate", "tts"},
 	GroupRuntime:    {"exec", "process"},
 	GroupUI:         {"browser", "canvas"},
 	GroupAutomation: {"cron", "gateway"},
 	GroupNodes:      {"nodes"},
 	GroupStatus:     {"session_status"},
-	GroupOpenClaw:   {"message", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_search_openrouter", "web_fetch", "image"},
-	GroupFS:         {"read", "write", "edit", "ls", "find", "grep", "apply_patch"},
+	GroupOpenClaw:   {"browser", "canvas", "nodes", "cron", "message", "gateway", "agents_list", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_fetch", "image"},
+	GroupFS:         {"read", "write", "edit", "apply_patch"},
 }
 
 type toolProfilePolicy struct {
@@ -514,6 +514,7 @@ var defaultSubagentDeny = []string{
 	"edit_agent",
 	"delete_agent",
 	"list_agents",
+	"agents_list",
 	"list_models",
 	"list_tools",
 	"gateway",

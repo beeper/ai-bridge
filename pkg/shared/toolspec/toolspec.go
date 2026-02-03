@@ -7,30 +7,30 @@ const (
 	CalculatorDescription = "Perform basic arithmetic calculations. Supports addition, subtraction, multiplication, division, and modulo operations."
 
 	WebSearchName        = "web_search"
-	WebSearchDescription = "Search the web for information. Returns a summary of search results."
+	WebSearchDescription = "Search the web using Brave Search API. Supports region-specific and localized search via country and language parameters. Returns titles, URLs, and snippets for fast research."
 
 	WebSearchOpenRouterName        = "web_search_openrouter"
-	WebSearchOpenRouterDescription = "Search the web using OpenRouter's web plugin for synthesized answers and citations."
+	WebSearchOpenRouterDescription = "Search the web using Perplexity Sonar (direct or via OpenRouter). Returns AI-synthesized answers with citations from real-time web search."
 
 	WebFetchName        = "web_fetch"
-	WebFetchDescription = "Fetch a web page and extract its readable content as text or markdown."
+	WebFetchDescription = "Fetch and extract readable content from a URL (HTML \u2192 markdown/text). Use for lightweight page access without browser automation."
 
 	MessageName        = "message"
-	MessageDescription = "Send messages and perform channel actions in the current chat. Supports: send, sendWithEffect, broadcast, react, reactions, edit, delete/unsend, reply, pin, unpin, list-pins, thread-reply, search, read, member-info, channel-info, channel-edit."
+	MessageDescription = "Send, delete, and manage messages via channel plugins. Supports actions: send, delete, react, poll, pin, threads, and more."
 
 	SessionStatusName        = "session_status"
-	SessionStatusDescription = "Get current session status including time, date, model info, and context usage. Use this tool when asked about current time, date, day of week, or what model is being used."
+	SessionStatusDescription = "Show a /status-equivalent session status card (usage + time + cost when available). Use for model-use questions (\ud83d\udcca session_status). Optional: set per-session model override (model=default resets overrides)."
 
 	// ImageName matches OpenClaw's image analysis tool (vision).
 	ImageName        = "image"
-	ImageDescription = "Analyze an image with a custom prompt. Use this to examine image details, read text from images (OCR), identify objects, or get specific information about visual content."
+	ImageDescription = "Analyze an image with the configured image model (agents.defaults.imageModel). Provide a prompt and image path or URL."
 
 	// ImageGenerateName is an AI image generation tool (not in OpenClaw).
 	ImageGenerateName        = "image_generate"
 	ImageGenerateDescription = "Generate one or more images from a text prompt. Supports provider-specific controls such as size, quality, style, background, output format, resolution, and optional input images for editing/composition."
 
 	TTSName        = "tts"
-	TTSDescription = "Convert text to speech audio. Returns audio that will be sent as a voice message. Only available on Beeper and OpenAI providers."
+	TTSDescription = "Convert text to speech and return a MEDIA: path. Use when the user requests audio or TTS is enabled. Copy the MEDIA line exactly."
 
 	// AnalyzeImageName is a deprecated alias for ImageName.
 	AnalyzeImageName        = "analyze_image"

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,8 +22,6 @@ import (
 	"go.mau.fi/util/ptr"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
-	agenttools "github.com/beeper/ai-bridge/pkg/agents/tools"
-
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -945,37 +944,42 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		return ""
 	}
 
-	timezone, loc := oc.resolveUserTimezone()
+	timezone, _ := oc.resolveUserTimezone()
 
-	// Build params for prompt generation
-	params := agents.SystemPromptParams{
-		Agent:       agent,
-		ExtraPrompt: meta.SystemPrompt, // Room-level addition
-		Timezone:    timezone,
-		Date:        time.Now().In(loc),
+	workspaceDir := resolvePromptWorkspaceDir()
+	extraParts := []string{}
+	if strings.TrimSpace(agent.SystemPrompt) != "" {
+		extraParts = append(extraParts, strings.TrimSpace(agent.SystemPrompt))
 	}
+	if meta != nil && strings.TrimSpace(meta.SystemPrompt) != "" {
+		extraParts = append(extraParts, strings.TrimSpace(meta.SystemPrompt))
+	}
+	extraSystemPrompt := strings.Join(extraParts, "\n\n")
 
-	// Add room context if available
-	if portal != nil {
-		params.RoomInfo = &agents.RoomInfo{
-			Title:   portal.Name,
-			Topic:   portal.Topic,
-			Channel: "matrix",
-		}
+	// Build params for prompt generation (OpenClaw template)
+	params := agents.SystemPromptParams{
+		WorkspaceDir:      workspaceDir,
+		ExtraSystemPrompt: extraSystemPrompt,
+		UserTimezone:      timezone,
+		PromptMode:        agent.PromptMode,
+		HeartbeatPrompt:   agent.HeartbeatPrompt,
 	}
 
 	availableTools := oc.buildAvailableTools(meta)
 	if len(availableTools) > 0 {
-		params.Tools = make([]agenttools.ToolInfo, 0, len(availableTools))
+		toolNames := make([]string, 0, len(availableTools))
+		toolSummaries := make(map[string]string)
 		for _, tool := range availableTools {
-			params.Tools = append(params.Tools, agenttools.ToolInfo{
-				Name:        tool.Name,
-				Description: tool.Description,
-				Type:        agenttools.ToolType(tool.Type),
-				Group:       "",
-				Enabled:     tool.Enabled && tool.Available,
-			})
+			if !tool.Enabled {
+				continue
+			}
+			toolNames = append(toolNames, tool.Name)
+			if strings.TrimSpace(tool.Description) != "" {
+				toolSummaries[strings.ToLower(tool.Name)] = tool.Description
+			}
 		}
+		params.ToolNames = toolNames
+		params.ToolSummaries = toolSummaries
 	}
 
 	// Build capabilities list from metadata
@@ -996,56 +1000,34 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		caps = append(caps, "video")
 	}
 
+	host, _ := os.Hostname()
 	params.RuntimeInfo = &agents.RuntimeInfo{
 		AgentID:      agent.ID,
+		Host:         host,
+		OS:           runtime.GOOS,
+		Arch:         runtime.GOARCH,
+		Node:         runtime.Version(),
 		Model:        oc.effectiveModel(meta),
 		DefaultModel: oc.defaultModelForProvider(),
 		Channel:      "matrix",
 		Capabilities: caps,
+		RepoRoot:     resolvePromptRepoRoot(workspaceDir),
 	}
 
-	// clawdbot-parity: populate context flags
-	// Determine IsGroupChat from room member count (group = more than 2 members: user + bot + others)
-	params.IsGroupChat = oc.isGroupChat(ctx, portal)
-	params.IsSubagent = false // Set by caller when spawning subagents
-
-	// Reaction guidance - default to minimal
-	if portal != nil && params.RoomInfo != nil {
+	// Reaction guidance - default to minimal for group chats
+	if portal != nil && oc.isGroupChat(ctx, portal) {
 		params.ReactionGuidance = &agents.ReactionGuidance{
 			Level:   "minimal",
-			Channel: params.RoomInfo.Channel,
+			Channel: "matrix",
 		}
 	}
 
-	// Reasoning hints for models that support it
+	// Reasoning hints and level
 	params.ReasoningTagHint = meta.Capabilities.SupportsReasoning && meta.EmitThinking
+	params.ReasoningLevel = resolvePromptReasoningLevel(meta, oc.effectiveReasoningEffort(meta))
 
-	// Heartbeat prompt from agent config (clawdbot parity)
-	params.HeartbeatPrompt = agent.HeartbeatPrompt
-
-	// Messaging hints (OpenClaw parity - use defaults for now)
-	params.MessageChannels = ""
-	params.InlineButtons = false
-	params.SupportsSubagent = false
-	params.DefaultThink = "off"
-
-	// Check if session_status tool is available for time hints
-	for _, tool := range availableTools {
-		if tool.Name == "session_status" && tool.Enabled && tool.Available {
-			params.HasSessionStatus = true
-			break
-		}
-	}
-
-	// For boss agent, include agent list
-	if agent.ID == "boss" {
-		agentsMap, _ := store.LoadAgents(ctx)
-		var agentList []*agents.AgentDefinition
-		for _, a := range agentsMap {
-			agentList = append(agentList, a)
-		}
-		params.AgentList = agentList
-	}
+	// Default thinking level (OpenClaw prompt expects this value)
+	params.DefaultThinkLevel = "off"
 
 	base := agents.BuildSystemPrompt(params)
 	gravatarContext := oc.gravatarContext()
