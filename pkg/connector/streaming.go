@@ -51,17 +51,30 @@ type streamingState struct {
 
 	// Directive processing
 	sourceEventID id.EventID // The triggering user message event ID (for [[reply_to_current]])
+
+	// Heartbeat handling
+	heartbeat         *HeartbeatRunConfig
+	heartbeatResultCh chan HeartbeatRunOutcome
+	suppressSave      bool
 }
 
 // newStreamingState creates a new streaming state with initialized fields
-func newStreamingState(meta *PortalMetadata, sourceEventID id.EventID) *streamingState {
-	return &streamingState{
+func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID id.EventID) *streamingState {
+	state := &streamingState{
 		turnID:        NewTurnID(),
 		agentID:       meta.DefaultAgentID,
 		startedAtMs:   time.Now().UnixMilli(),
 		firstToken:    true,
 		sourceEventID: sourceEventID,
 	}
+	if hb := heartbeatRunFromContext(ctx); hb != nil {
+		state.heartbeat = hb.Config
+		state.heartbeatResultCh = hb.ResultCh
+		if hb.Config != nil && hb.Config.SuppressSave {
+			state.suppressSave = true
+		}
+	}
+	return state
 }
 
 // generatedImage tracks a pending image from image generation
