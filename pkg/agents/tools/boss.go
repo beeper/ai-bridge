@@ -410,7 +410,7 @@ var ListRoomsTool = &Tool{
 var SessionsListTool = &Tool{
 	Tool: mcp.Tool{
 		Name:        "sessions_list",
-		Description: "List all active chat sessions (rooms) with their agents and last activity",
+		Description: "List sessions with optional filters and last messages.",
 		Annotations: &mcp.ToolAnnotations{Title: "List Sessions"},
 		InputSchema: map[string]any{
 			"type": "object",
@@ -430,7 +430,7 @@ var SessionsListTool = &Tool{
 var SessionsHistoryTool = &Tool{
 	Tool: mcp.Tool{
 		Name:        "sessions_history",
-		Description: "Get message history from a specific chat session",
+		Description: "Fetch message history for a session.",
 		Annotations: &mcp.ToolAnnotations{Title: "Session History"},
 		InputSchema: map[string]any{
 			"type": "object",
@@ -455,7 +455,7 @@ var SessionsHistoryTool = &Tool{
 var SessionsSendTool = &Tool{
 	Tool: mcp.Tool{
 		Name:        "sessions_send",
-		Description: "Send a message to another chat session",
+		Description: "Send a message to another session.",
 		Annotations: &mcp.ToolAnnotations{Title: "Send to Session"},
 		InputSchema: map[string]any{
 			"type": "object",
@@ -480,7 +480,7 @@ var SessionsSendTool = &Tool{
 var SessionsSpawnTool = &Tool{
 	Tool: mcp.Tool{
 		Name:        "sessions_spawn",
-		Description: "Create a new chat session (room) for an agent",
+		Description: "Spawn a sub-agent session.",
 		Annotations: &mcp.ToolAnnotations{Title: "Spawn Session"},
 		InputSchema: map[string]any{
 			"type": "object",
@@ -531,6 +531,7 @@ func BossTools() []*Tool {
 // SessionTools returns the cross-session tools available to non-boss agents.
 func SessionTools() []*Tool {
 	return []*Tool{
+		AgentsListTool,
 		SessionsListTool,
 		SessionsHistoryTool,
 		SessionsSendTool,
