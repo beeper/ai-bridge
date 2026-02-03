@@ -49,6 +49,7 @@ func BuiltinTools() []*Tool {
 		LsTool,
 		FindTool,
 		GrepTool,
+		ApplyPatchTool,
 	}
 }
 

@@ -30,6 +30,7 @@ func builtinToolExecutors() map[string]toolExecutor {
 		ToolNameLs:                       executeLs,
 		ToolNameFind:                     executeFind,
 		ToolNameGrep:                     executeGrep,
+		toolspec.ApplyPatchName:          executeApplyPatch,
 		ToolNameGravatarFetch:            executeGravatarFetch,
 		ToolNameGravatarSet:              executeGravatarSet,
 	}

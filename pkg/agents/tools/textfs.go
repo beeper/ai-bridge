@@ -81,5 +81,15 @@ var (
 		Group:   GroupFS,
 		Execute: execUnavailable(toolspec.GrepName),
 	}
+	ApplyPatchTool = &Tool{
+		Tool: mcp.Tool{
+			Name:        toolspec.ApplyPatchName,
+			Description: toolspec.ApplyPatchDescription,
+			Annotations: &mcp.ToolAnnotations{Title: "Apply Patch"},
+			InputSchema: toolspec.ApplyPatchSchema(),
+		},
+		Type:    ToolTypeBuiltin,
+		Group:   GroupFS,
+		Execute: execUnavailable(toolspec.ApplyPatchName),
+	}
 )
-
