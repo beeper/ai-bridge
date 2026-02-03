@@ -58,18 +58,33 @@ func fnMemory(ce *commands.Event) {
 			fmt.Sprintf("Model: %s", status.Model),
 			fmt.Sprintf("Sources: %s", strings.Join(status.Sources, ", ")),
 			fmt.Sprintf("Extra paths: %s", strings.Join(status.ExtraPaths, ", ")),
-			fmt.Sprintf("Vector enabled: %t (ready=%t)", status.VectorEnabled, status.VectorReady),
-			fmt.Sprintf("FTS enabled: %t (available=%t)", status.FTSEnabled, status.FTSAvailable),
-			fmt.Sprintf("Cache enabled: %t (entries=%d)", status.CacheEnabled, status.CacheEntries),
-			fmt.Sprintf("Batch enabled: %t (failures=%d)", status.BatchEnabled, status.BatchFailures),
-			fmt.Sprintf("Files: %d", status.FileCount),
-			fmt.Sprintf("Chunks: %d", status.ChunkCount),
+			fmt.Sprintf("Files: %d", status.Files),
+			fmt.Sprintf("Chunks: %d", status.Chunks),
 		}
-		if status.VectorError != "" {
-			lines = append(lines, fmt.Sprintf("Vector error: %s", status.VectorError))
+		if status.Vector != nil {
+			ready := "unknown"
+			if status.Vector.Available != nil {
+				ready = fmt.Sprintf("%t", *status.Vector.Available)
+			}
+			lines = append(lines, fmt.Sprintf("Vector enabled: %t (available=%s)", status.Vector.Enabled, ready))
+			if status.Vector.LoadError != "" {
+				lines = append(lines, fmt.Sprintf("Vector error: %s", status.Vector.LoadError))
+			}
 		}
-		if status.BatchLastError != "" {
-			lines = append(lines, fmt.Sprintf("Batch error: %s", status.BatchLastError))
+		if status.FTS != nil {
+			lines = append(lines, fmt.Sprintf("FTS enabled: %t (available=%t)", status.FTS.Enabled, status.FTS.Available))
+			if status.FTS.Error != "" {
+				lines = append(lines, fmt.Sprintf("FTS error: %s", status.FTS.Error))
+			}
+		}
+		if status.Cache != nil {
+			lines = append(lines, fmt.Sprintf("Cache enabled: %t (entries=%d)", status.Cache.Enabled, status.Cache.Entries))
+		}
+		if status.Batch != nil {
+			lines = append(lines, fmt.Sprintf("Batch enabled: %t (failures=%d)", status.Batch.Enabled, status.Batch.Failures))
+			if status.Batch.LastError != "" {
+				lines = append(lines, fmt.Sprintf("Batch error: %s", status.Batch.LastError))
+			}
 		}
 		if status.Fallback != nil {
 			lines = append(lines, fmt.Sprintf("Fallback: %s (%s)", status.Fallback.From, status.Fallback.Reason))

@@ -37,7 +37,7 @@ func (r *Registry) Register(tool *Tool) {
 	}
 }
 
-// RegisterAlias creates an alias for a tool (e.g., "bash" -> "exec").
+// RegisterAlias creates an alias for a tool (e.g., "search" -> "web_search").
 func (r *Registry) RegisterAlias(alias, canonical string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

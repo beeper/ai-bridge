@@ -75,7 +75,7 @@ type SandboxInfo struct {
 	Elevated            *ElevatedInfo
 }
 
-// ElevatedInfo describes elevated exec availability.
+// ElevatedInfo describes elevated tool availability.
 type ElevatedInfo struct {
 	Allowed      bool
 	DefaultLevel string // "on" | "off" | "ask" | "full"

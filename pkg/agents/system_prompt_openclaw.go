@@ -144,7 +144,7 @@ func buildMessagingSection(params struct {
 		"## Messaging",
 		"- Reply in current session → automatically routes to the source channel (Signal, Telegram, etc.)",
 		"- Cross-session messaging → use sessions_send(sessionKey, message)",
-		"- Never use exec/curl for provider messaging; Beep by Beeper handles all routing internally.",
+		"- Never use tools for provider messaging; Beep by Beeper handles all routing internally.",
 		messageToolBlock,
 		"",
 	}
@@ -250,11 +250,10 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"write":            "Create or overwrite files",
 		"edit":             "Make precise edits to files",
 		"apply_patch":      "Apply multi-file patches",
+		"stat":             "Get file or directory metadata",
 		"grep":             "Search file contents for patterns",
 		"find":             "Find files by glob pattern",
 		"ls":               "List directory contents",
-		"exec":             "Run shell commands (pty available for TTY-required CLIs)",
-		"process":          "Manage background exec sessions",
 		"web_search":       "Search the web (Brave API)",
 		"web_fetch":        "Fetch and extract readable content from a URL",
 		"browser":          "Control web browser",
@@ -277,11 +276,10 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"write",
 		"edit",
 		"apply_patch",
+		"stat",
 		"grep",
 		"find",
 		"ls",
-		"exec",
-		"process",
 		"web_search",
 		"web_fetch",
 		"browser",
@@ -393,8 +391,6 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 
 	hasGateway := availableTools["gateway"]
 	readToolName := resolveToolName("read")
-	execToolName := resolveToolName("exec")
-	processToolName := resolveToolName("process")
 	extraSystemPrompt := strings.TrimSpace(params.ExtraSystemPrompt)
 	ownerNumbers := make([]string, 0, len(params.OwnerNumbers))
 	for _, value := range params.OwnerNumbers {
@@ -497,8 +493,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 			"- find: find files by glob pattern",
 			"- ls: list directory contents",
 			"- apply_patch: apply multi-file patches",
-			fmt.Sprintf("- %s: run shell commands (supports background via yieldMs/background)", execToolName),
-			fmt.Sprintf("- %s: manage background exec sessions", processToolName),
+			"- stat: get file or directory metadata",
 			"- browser: control Beeper's dedicated browser",
 			"- canvas: present/eval/snapshot the Canvas",
 			"- nodes: list/describe/notify/camera/screen/invoke on paired nodes",
@@ -599,14 +594,6 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 			} else {
 				sandboxLines = append(sandboxLines, "Host browser control: blocked.")
 			}
-		}
-		if params.SandboxInfo.Elevated != nil && params.SandboxInfo.Elevated.Allowed {
-			sandboxLines = append(sandboxLines,
-				"Elevated exec is available for this session.",
-				"User can toggle with /elevated on|off|ask|full.",
-				"You may also send /elevated on|off|ask|full when needed.",
-				fmt.Sprintf("Current elevated level: %s (ask runs exec on host with approvals; full auto-approves).", params.SandboxInfo.Elevated.DefaultLevel),
-			)
 		}
 		lines = append(lines, strings.Join(sandboxLines, "\n"), "")
 	}

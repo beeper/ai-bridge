@@ -304,7 +304,7 @@ var ListModelsTool = &Tool{
 		},
 	},
 	Type:  ToolTypeBuiltin,
-	Group: GroupBuilder,
+	Group: GroupSessions,
 }
 
 // ListToolsDef tool definition.
@@ -319,7 +319,7 @@ var ListToolsDef = &Tool{
 		},
 	},
 	Type:  ToolTypeBuiltin,
-	Group: GroupBuilder,
+	Group: GroupSessions,
 }
 
 // RunInternalCommandTool tool definition.
@@ -377,7 +377,7 @@ var ModifyRoomTool = &Tool{
 		},
 	},
 	Type:  ToolTypeBuiltin,
-	Group: GroupBuilder,
+	Group: GroupSessions,
 }
 
 // SessionsListTool tool definition.
@@ -537,16 +537,7 @@ func BossTools() []*Tool {
 		EditAgentTool,
 		DeleteAgentTool,
 		ListAgentsTool,
-		ListModelsTool,
-		ListToolsDef,
 		RunInternalCommandTool,
-		// Room management
-		ModifyRoomTool,
-		// Session management
-		SessionsListTool,
-		SessionsHistoryTool,
-		SessionsSendTool,
-		SessionsSpawnTool,
 	}
 }
 
@@ -554,6 +545,9 @@ func BossTools() []*Tool {
 func SessionTools() []*Tool {
 	return []*Tool{
 		AgentsListTool,
+		ListModelsTool,
+		ListToolsDef,
+		ModifyRoomTool,
 		SessionsListTool,
 		SessionsHistoryTool,
 		SessionsSendTool,

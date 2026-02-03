@@ -36,7 +36,7 @@ var BeeperAIAgent = &AgentDefinition{
 			ModelZAIGLM47,
 		},
 	},
-	Tools:        &toolpolicy.ToolPolicyConfig{Profile: toolpolicy.ProfileCoding},
+	Tools:        &toolpolicy.ToolPolicyConfig{Profile: toolpolicy.ProfileFull},
 	SystemPrompt: BeeperAIPrompt,
 	PromptMode:   PromptModeFull,
 	IsPreset:     true,

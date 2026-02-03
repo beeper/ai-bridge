@@ -26,7 +26,6 @@ const (
 	GroupMemory     = "group:memory"
 	GroupWeb        = "group:web"
 	GroupMedia      = "group:media"
-	GroupRuntime    = "group:runtime"
 	GroupUI         = "group:ui"
 	GroupAutomation = "group:automation"
 	GroupNodes      = "group:nodes"
@@ -39,19 +38,18 @@ const (
 var ToolGroups = map[string][]string{
 	GroupSearch:     {"web_search"},
 	GroupCalc:       {"calculator"},
-	GroupBuilder:    {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "list_models", "list_tools", "run_internal_command", "modify_room"},
+	GroupBuilder:    {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "run_internal_command"},
 	GroupMessaging:  {"message"},
-	GroupSessions:   {"sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status"},
+	GroupSessions:   {"agents_list", "list_models", "list_tools", "modify_room", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status"},
 	GroupMemory:     {"memory_search", "memory_get"},
 	GroupWeb:        {"web_search", "web_fetch"},
 	GroupMedia:      {"image", "image_generate", "tts"},
-	GroupRuntime:    {"exec", "process"},
 	GroupUI:         {"browser", "canvas"},
 	GroupAutomation: {"cron", "gateway"},
 	GroupNodes:      {"nodes"},
 	GroupStatus:     {"session_status"},
-	GroupOpenClaw:   {"message", "agents_list", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_fetch", "image", "gravatar_fetch"},
-	GroupFS:         {"read", "write", "edit", "apply_patch", "ls", "find", "grep"},
+	GroupOpenClaw:   {"message", "agents_list", "list_models", "list_tools", "modify_room", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_fetch", "image", "gravatar_fetch"},
+	GroupFS:         {"read", "write", "edit", "apply_patch", "stat", "ls", "find", "grep"},
 }
 
 type toolProfilePolicy struct {
@@ -62,8 +60,8 @@ type toolProfilePolicy struct {
 // ToolProfiles define which tool groups each profile allows.
 var ToolProfiles = map[ToolProfileID]toolProfilePolicy{
 	ProfileMinimal:   {Allow: []string{"session_status"}},
-	ProfileCoding:    {Allow: []string{GroupFS, GroupRuntime, GroupSessions, GroupMemory, "image", "gravatar_fetch"}},
-	ProfileMessaging: {Allow: []string{GroupMessaging, "sessions_list", "sessions_history", "sessions_send", "session_status", "gravatar_fetch"}},
+	ProfileCoding:    {Allow: []string{GroupFS, GroupOpenClaw}},
+	ProfileMessaging: {Allow: []string{GroupOpenClaw}},
 	ProfileFull:      {},
 	ProfileBoss:      {},
 }
@@ -152,7 +150,6 @@ func (c *ToolPolicyConfig) Clone() *ToolPolicyConfig {
 }
 
 var toolNameAliases = map[string]string{
-	"bash":          "exec",
 	"apply-patch":   "apply_patch",
 	"analyze_image": "image",
 }
@@ -353,8 +350,14 @@ func resolveProviderToolPolicy(base any, provider string, modelID string) *ToolP
 	var byProvider map[string]ToolPolicyConfig
 	switch cfg := base.(type) {
 	case *GlobalToolPolicyConfig:
+		if cfg == nil {
+			return nil
+		}
 		byProvider = cfg.ByProvider
 	case *ToolPolicyConfig:
+		if cfg == nil {
+			return nil
+		}
 		byProvider = cfg.ByProvider
 	}
 	if len(byProvider) == 0 {
@@ -460,9 +463,6 @@ func makeToolPolicyMatcher(policy *ToolPolicy) func(string) bool {
 			return true
 		}
 		if matchesAny(normalized, allow) {
-			return true
-		}
-		if normalized == "apply_patch" && matchesAny("exec", allow) {
 			return true
 		}
 		return false
