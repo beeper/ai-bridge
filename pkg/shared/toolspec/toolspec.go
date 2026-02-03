@@ -41,18 +41,20 @@ const (
 	MemoryGetName           = "memory_get"
 	MemoryGetDescription    = "Safe snippet read from MEMORY.md, memory/*.md, or configured memorySearch.extraPaths with optional from/lines; use after memory_search to pull only the needed lines and keep context small."
 
-	ReadName         = "read"
-	ReadDescription  = "Read a text file from the virtual workspace. Supports offset/limit for large files."
-	WriteName        = "write"
-	WriteDescription = "Write content to a text file in the virtual workspace. Creates or overwrites the file."
-	EditName         = "edit"
-	EditDescription  = "Edit a text file by replacing exact text (oldText -> newText)."
-	LsName           = "ls"
-	LsDescription    = "List directory contents in the virtual workspace."
-	FindName         = "find"
-	FindDescription  = "Search for files by glob pattern in the virtual workspace."
-	GrepName         = "grep"
-	GrepDescription  = "Search file contents for a pattern in the virtual workspace."
+	ReadName              = "read"
+	ReadDescription       = "Read a text file from the virtual workspace. Supports offset/limit for large files."
+	WriteName             = "write"
+	WriteDescription      = "Write content to a text file in the virtual workspace. Creates or overwrites the file."
+	EditName              = "edit"
+	EditDescription       = "Edit a text file by replacing exact text (oldText -> newText)."
+	LsName                = "ls"
+	LsDescription         = "List directory contents in the virtual workspace."
+	FindName              = "find"
+	FindDescription       = "Search for files by glob pattern in the virtual workspace."
+	GrepName              = "grep"
+	GrepDescription       = "Search file contents for a pattern in the virtual workspace."
+	ApplyPatchName        = "apply_patch"
+	ApplyPatchDescription = "Apply a patch to one or more files using the apply_patch format."
 
 	GravatarFetchName        = "gravatar_fetch"
 	GravatarFetchDescription = "Fetch a Gravatar profile for an email address."
@@ -293,6 +295,20 @@ func GrepSchema() map[string]any {
 			},
 		},
 		"required": []string{"pattern"},
+	}
+}
+
+// ApplyPatchSchema returns the JSON schema for the apply_patch tool.
+func ApplyPatchSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"input": map[string]any{
+				"type":        "string",
+				"description": "Patch content using the *** Begin Patch/End Patch format.",
+			},
+		},
+		"required": []string{"input"},
 	}
 }
 

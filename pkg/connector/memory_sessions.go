@@ -431,11 +431,22 @@ func parseSessionMetadata(raw []byte) *MessageMetadata {
 }
 
 func normalizeSessionText(text string) string {
-	fields := strings.Fields(text)
-	if len(fields) == 0 {
-		return ""
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	var b strings.Builder
+	prevSpace := false
+	for _, r := range text {
+		if r == '\n' || r == '\t' || r == ' ' || r == '\v' || r == '\f' || r == '\u00a0' || r == '\u2000' || r == '\u2001' || r == '\u2002' || r == '\u2003' || r == '\u2004' || r == '\u2005' || r == '\u2006' || r == '\u2007' || r == '\u2008' || r == '\u2009' || r == '\u200a' || r == '\u202f' || r == '\u205f' || r == '\u3000' {
+			if !prevSpace {
+				b.WriteByte(' ')
+				prevSpace = true
+			}
+			continue
+		}
+		b.WriteRune(r)
+		prevSpace = false
 	}
-	return strings.Join(fields, " ")
+	return strings.TrimSpace(b.String())
 }
 
 func sessionPathForKey(sessionKey string) string {
