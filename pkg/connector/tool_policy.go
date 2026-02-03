@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 	agenttools "github.com/beeper/ai-bridge/pkg/agents/tools"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
@@ -30,47 +29,14 @@ func (oc *AIClient) resolveToolPolicyModelContext(meta *PortalMetadata) (provide
 	return provider, modelID
 }
 
-func (oc *AIClient) resolveToolPolicies(meta *PortalMetadata) (*agents.AgentDefinition, []*toolpolicy.ToolPolicy) {
-	var agent *agents.AgentDefinition
-	if hasAssignedAgent(meta) {
-		store := NewAgentStoreAdapter(oc)
-		agent, _ = store.GetAgentForRoom(context.Background(), meta)
-	}
-	globalTools := oc.connector.Config.ToolPolicy
-	provider, modelID := oc.resolveToolPolicyModelContext(meta)
-
-	effective := toolpolicy.ResolveEffectiveToolPolicy(struct {
-		Global        *toolpolicy.GlobalToolPolicyConfig
-		Agent         *toolpolicy.ToolPolicyConfig
-		ModelProvider string
-		ModelID       string
-	}{
-		Global:        globalTools,
-		Agent:         func() *toolpolicy.ToolPolicyConfig { if agent != nil { return agent.Tools }; return nil }(),
-		ModelProvider: provider,
-		ModelID:       modelID,
-	})
-
-	profilePolicy := toolpolicy.ResolveToolProfilePolicy(effective.Profile)
-	providerProfilePolicy := toolpolicy.ResolveToolProfilePolicy(effective.ProviderProfile)
-	profilePolicy = toolpolicy.MergeAlsoAllow(profilePolicy, effective.ProfileAlsoAllow)
-	providerProfilePolicy = toolpolicy.MergeAlsoAllow(providerProfilePolicy, effective.ProviderAlsoAllow)
-
-	policies := []*toolpolicy.ToolPolicy{
-		effective.GlobalPolicy,
-		effective.GlobalProviderPolicy,
-		effective.AgentPolicy,
-		effective.AgentProviderPolicy,
-		profilePolicy,
-		providerProfilePolicy,
-	}
-
-	return agent, policies
-}
-
 func (oc *AIClient) isToolAllowedByPolicy(meta *PortalMetadata, toolName string) bool {
-	_, policies := oc.resolveToolPolicies(meta)
-	return toolpolicy.IsToolAllowedByPolicies(toolName, policies)
+	resolution := oc.resolveToolPolicies(meta)
+	normalized := toolpolicy.NormalizeToolName(toolName)
+	if normalized == "" {
+		return false
+	}
+	_, ok := resolution.allowed[normalized]
+	return ok
 }
 
 func (oc *AIClient) isToolAvailable(meta *PortalMetadata, toolName string) (bool, SettingSource, string) {
@@ -133,6 +99,9 @@ func (oc *AIClient) toolNamesForPortal(meta *PortalMetadata) []string {
 		nameSet[tool.Name] = struct{}{}
 	}
 	for _, tool := range agenttools.SessionTools() {
+		nameSet[tool.Name] = struct{}{}
+	}
+	for _, tool := range agenttools.ProviderTools() {
 		nameSet[tool.Name] = struct{}{}
 	}
 	if meta != nil && meta.IsBuilderRoom {
