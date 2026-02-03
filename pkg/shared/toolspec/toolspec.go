@@ -15,6 +15,9 @@ const (
 	MessageName        = "message"
 	MessageDescription = "Send messages and channel actions. Supports actions: send, delete, react, poll, pin, threads, and more."
 
+	CronName        = "cron"
+	CronDescription = "Manage cron jobs and wake events (OpenClaw-style). Use for reminders and scheduled tasks."
+
 	SessionStatusName        = "session_status"
 	SessionStatusDescription = "Show a /status-equivalent session status card (usage + time + cost when available). Use for model-use questions (📊 session_status). Optional: set per-session model override (model=default resets overrides)."
 
@@ -324,6 +327,26 @@ func MessageSchema() map[string]any {
 			"buttons": map[string]any{
 				"type":        "array",
 				"description": "Optional: inline keyboard buttons (ignored by bridge).",
+				"items": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"text": map[string]any{
+								"type":        "string",
+								"description": "Button label text.",
+							},
+							"callback_data": map[string]any{
+								"type":        "string",
+								"description": "Callback payload for button clicks.",
+							},
+							"url": map[string]any{
+								"type":        "string",
+								"description": "Optional URL to open when clicked.",
+							},
+						},
+					},
+				},
 			},
 			"card": map[string]any{
 				"type":        "object",
@@ -364,6 +387,9 @@ func MessageSchema() map[string]any {
 			"targets": map[string]any{
 				"type":        "array",
 				"description": "Optional: multi-target override (ignored by bridge; current room only).",
+				"items": map[string]any{
+					"type": "string",
+				},
 			},
 			"accountId": map[string]any{
 				"type":        "string",
@@ -372,6 +398,61 @@ func MessageSchema() map[string]any {
 			"dryRun": map[string]any{
 				"type":        "boolean",
 				"description": "Optional: dry run (ignored by bridge).",
+			},
+		},
+		"required": []string{"action"},
+	}
+}
+
+// CronSchema returns the JSON schema for the cron tool.
+func CronSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"action": map[string]any{
+				"type":        "string",
+				"enum":        []string{"status", "list", "add", "update", "remove", "run", "runs", "wake"},
+				"description": "Action to perform: status, list, add, update, remove, run, runs, wake.",
+			},
+			"id": map[string]any{
+				"type":        "string",
+				"description": "Cron job ID (for update/remove/run/runs).",
+			},
+			"jobId": map[string]any{
+				"type":        "string",
+				"description": "Alias for id.",
+			},
+			"job": map[string]any{
+				"type":        "object",
+				"description": "Cron job payload for add/update (OpenClaw-style).",
+			},
+			"data": map[string]any{
+				"type":        "object",
+				"description": "Alias for job (OpenClaw-style).",
+			},
+			"patch": map[string]any{
+				"type":        "object",
+				"description": "Patch object for update.",
+			},
+			"includeDisabled": map[string]any{
+				"type":        "boolean",
+				"description": "Include disabled jobs in list.",
+			},
+			"mode": map[string]any{
+				"type":        "string",
+				"description": "Run/wake mode (e.g., force, now, next-heartbeat).",
+			},
+			"text": map[string]any{
+				"type":        "string",
+				"description": "Text for wake action (system event).",
+			},
+			"message": map[string]any{
+				"type":        "string",
+				"description": "Alias for text in wake.",
+			},
+			"limit": map[string]any{
+				"type":        "number",
+				"description": "Max number of run log entries to return.",
 			},
 		},
 		"required": []string{"action"},

@@ -18,6 +18,7 @@ func builtinToolExecutors() map[string]toolExecutor {
 		ToolNameMessage:         executeMessage,
 		ToolNameTTS:             executeTTS,
 		ToolNameWebFetch:        executeWebFetch,
+		ToolNameCron:            executeCron,
 		ToolNameImage:           executeAnalyzeImage,
 		ToolNameImageGenerate:   executeImageGeneration,
 		ToolNameSessionStatus:   executeSessionStatus,
