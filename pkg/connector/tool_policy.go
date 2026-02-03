@@ -62,7 +62,7 @@ func (oc *AIClient) isToolAvailable(meta *PortalMetadata, toolName string) (bool
 	if agenttools.IsBossTool(toolName) && !(meta.IsBuilderRoom || hasBossAgent(meta)) {
 		return false, SourceGlobalDefault, "Builder room only"
 	}
-	if (toolName == toolspec.GravatarFetchName || toolName == toolspec.GravatarSetName) && !hasBossAgent(meta) {
+	if toolName == toolspec.GravatarSetName && !hasBossAgent(meta) {
 		return false, SourceGlobalDefault, "Boss agent only"
 	}
 

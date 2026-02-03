@@ -31,6 +31,11 @@ type streamingState struct {
 	firstTokenAtMs int64
 	completedAtMs  int64
 
+	promptTokens     int64
+	completionTokens int64
+	reasoningTokens  int64
+	totalTokens      int64
+
 	baseInput              responses.ResponseInputParam
 	accumulated            strings.Builder
 	reasoning              strings.Builder
@@ -118,6 +123,9 @@ func (oc *AIClient) saveAssistantMessage(
 			// Reasoning fields (only populated by Responses API)
 			ThinkingContent:    state.reasoning.String(),
 			ThinkingTokenCount: len(strings.Fields(state.reasoning.String())),
+			PromptTokens:       state.promptTokens,
+			CompletionTokens:   state.completionTokens,
+			ReasoningTokens:    state.reasoningTokens,
 		},
 	}
 	if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, assistantMsg); err != nil {
@@ -814,6 +822,13 @@ func (oc *AIClient) streamingResponse(
 		case "response.completed":
 			state.completedAtMs = time.Now().UnixMilli()
 
+			if streamEvent.Response.Usage.TotalTokens > 0 || streamEvent.Response.Usage.InputTokens > 0 || streamEvent.Response.Usage.OutputTokens > 0 {
+				state.promptTokens = streamEvent.Response.Usage.InputTokens
+				state.completionTokens = streamEvent.Response.Usage.OutputTokens
+				state.reasoningTokens = streamEvent.Response.Usage.OutputTokensDetails.ReasoningTokens
+				state.totalTokens = streamEvent.Response.Usage.TotalTokens
+			}
+
 			if streamEvent.Response.Status == "completed" {
 				state.finishReason = "stop"
 			} else {
@@ -1124,6 +1139,12 @@ func (oc *AIClient) streamingResponse(
 
 			case "response.completed":
 				state.completedAtMs = time.Now().UnixMilli()
+				if streamEvent.Response.Usage.TotalTokens > 0 || streamEvent.Response.Usage.InputTokens > 0 || streamEvent.Response.Usage.OutputTokens > 0 {
+					state.promptTokens = streamEvent.Response.Usage.InputTokens
+					state.completionTokens = streamEvent.Response.Usage.OutputTokens
+					state.reasoningTokens = streamEvent.Response.Usage.OutputTokensDetails.ReasoningTokens
+					state.totalTokens = streamEvent.Response.Usage.TotalTokens
+				}
 				if streamEvent.Response.Status == "completed" {
 					state.finishReason = "stop"
 				} else {
@@ -1307,6 +1328,9 @@ func (oc *AIClient) streamChatCompletions(
 		Model:    oc.effectiveModelForAPI(meta),
 		Messages: messages,
 	}
+	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
+		IncludeUsage: param.NewOpt(true),
+	}
 	if maxTokens := oc.effectiveMaxTokens(meta); maxTokens > 0 {
 		params.MaxCompletionTokens = openai.Int(int64(maxTokens))
 	}
@@ -1363,6 +1387,13 @@ func (oc *AIClient) streamChatCompletions(
 
 	for stream.Next() {
 		chunk := stream.Current()
+
+		if chunk.Usage.TotalTokens > 0 || chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 {
+			state.promptTokens = chunk.Usage.PromptTokens
+			state.completionTokens = chunk.Usage.CompletionTokens
+			state.reasoningTokens = chunk.Usage.CompletionTokensDetails.ReasoningTokens
+			state.totalTokens = chunk.Usage.TotalTokens
+		}
 
 		for _, choice := range chunk.Choices {
 			if choice.Delta.Content != "" {

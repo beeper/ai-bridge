@@ -9,9 +9,6 @@ const (
 	WebSearchName        = "web_search"
 	WebSearchDescription = "Search the web using Brave Search API. Supports region-specific and localized search via country and language parameters. Returns titles, URLs, and snippets for fast research."
 
-	WebSearchOpenRouterName        = "web_search_openrouter"
-	WebSearchOpenRouterDescription = "Search the web using Perplexity Sonar (direct or via OpenRouter). Returns AI-synthesized answers with citations from real-time web search."
-
 	WebFetchName        = "web_fetch"
 	WebFetchDescription = "Fetch and extract readable content from a URL (HTML \u2192 markdown/text). Use for lightweight page access without browser automation."
 
@@ -22,8 +19,9 @@ const (
 	SessionStatusDescription = "Show a /status-equivalent session status card (usage + time + cost when available). Use for model-use questions (📊 session_status). Optional: set per-session model override (model=default resets overrides)."
 
 	// ImageName matches OpenClaw's image analysis tool (vision).
-	ImageName        = "image"
-	ImageDescription = "Analyze an image with the configured image model (agents.defaults.imageModel). Provide a prompt and image path or URL."
+	ImageName                   = "image"
+	ImageDescription            = "Analyze an image with the configured image model (agents.defaults.imageModel). Provide a prompt and image path or URL."
+	ImageDescriptionVisionHint  = "Analyze an image with a vision model. Only use this tool when the image was NOT already provided in the user's message. Images mentioned in the prompt are automatically visible to you."
 
 	// ImageGenerateName is an AI image generation tool (not in OpenClaw).
 	ImageGenerateName        = "image_generate"
@@ -42,19 +40,11 @@ const (
 	MemoryGetDescription    = "Safe snippet read from MEMORY.md, memory/*.md, or configured memorySearch.extraPaths with optional from/lines; use after memory_search to pull only the needed lines and keep context small."
 
 	ReadName              = "read"
-	ReadDescription       = "Read a text file from the virtual workspace. Supports offset/limit for large files."
+	ReadDescription       = "Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files."
 	WriteName             = "write"
-	WriteDescription      = "Write content to a text file in the virtual workspace. Creates or overwrites the file."
+	WriteDescription      = "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories."
 	EditName              = "edit"
-	EditDescription       = "Edit a text file by replacing exact text (oldText -> newText)."
-	LsName                = "ls"
-	LsDescription         = "List directory contents in the virtual workspace."
-	FindName              = "find"
-	FindDescription       = "Search for files by glob pattern in the virtual workspace."
-	GrepName              = "grep"
-	GrepDescription       = "Search file contents for a pattern in the virtual workspace."
-	ApplyPatchName        = "apply_patch"
-	ApplyPatchDescription = "Apply a patch to one or more files using the apply_patch format."
+	EditDescription       = "Edit a file by replacing exact text. The oldText must match exactly (including whitespace). Use this for precise, surgical edits."
 
 	GravatarFetchName        = "gravatar_fetch"
 	GravatarFetchDescription = "Fetch a Gravatar profile for an email address."
@@ -83,29 +73,29 @@ func WebSearchSchema() map[string]any {
 		"properties": map[string]any{
 			"query": map[string]any{
 				"type":        "string",
-				"description": "The search query",
+				"description": "Search query string.",
 			},
 			"count": map[string]any{
 				"type":        "number",
-				"description": "Optional: max results to return (1-10). OpenClaw uses count.",
+				"description": "Number of results to return (1-10).",
 				"minimum":     1,
 				"maximum":     10,
 			},
 			"country": map[string]any{
 				"type":        "string",
-				"description": "Optional: 2-letter country code for region-specific results (e.g., 'US', 'DE', 'ALL').",
+				"description": "2-letter country code for region-specific results (e.g., 'DE', 'US', 'ALL'). Default: 'US'.",
 			},
 			"search_lang": map[string]any{
 				"type":        "string",
-				"description": "Optional: ISO language code for search results (e.g., 'en', 'de').",
+				"description": "ISO language code for search results (e.g., 'de', 'en', 'fr').",
 			},
 			"ui_lang": map[string]any{
 				"type":        "string",
-				"description": "Optional: ISO language code for UI elements.",
+				"description": "ISO language code for UI elements.",
 			},
 			"freshness": map[string]any{
 				"type":        "string",
-				"description": "Optional: time filter ('pd', 'pw', 'pm', 'py') or range 'YYYY-MM-DDtoYYYY-MM-DD'.",
+				"description": "Filter results by discovery time (Brave only). Values: 'pd' (past 24h), 'pw' (past week), 'pm' (past month), 'py' (past year), or date range 'YYYY-MM-DDtoYYYY-MM-DD'.",
 			},
 		},
 		"required": []string{"query"},
@@ -119,20 +109,17 @@ func WebFetchSchema() map[string]any {
 		"properties": map[string]any{
 			"url": map[string]any{
 				"type":        "string",
-				"description": "The URL to fetch (must be http or https)",
-			},
-			"max_chars": map[string]any{
-				"type":        "number",
-				"description": "Maximum characters to return (default: 50000)",
+				"description": "HTTP or HTTPS URL to fetch.",
 			},
 			"maxChars": map[string]any{
 				"type":        "number",
-				"description": "OpenClaw-style alias for max_chars",
+				"description": "Maximum characters to return (truncates when exceeded).",
+				"minimum":     100,
 			},
 			"extractMode": map[string]any{
 				"type":        "string",
 				"enum":        []string{"markdown", "text"},
-				"description": "Preferred extraction mode (alias only; markdown default)",
+				"description": "Extraction mode (\"markdown\" or \"text\").",
 			},
 		},
 		"required": []string{"url"},
@@ -146,11 +133,7 @@ func ReadSchema() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Path to the file to read (relative to the virtual workspace)",
-			},
-			"file_path": map[string]any{
-				"type":        "string",
-				"description": "OpenClaw/Claude-style alias for path",
+				"description": "Path to the file to read (relative or absolute)",
 			},
 			"offset": map[string]any{
 				"type":        "number",
@@ -172,11 +155,7 @@ func WriteSchema() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Path to the file to write (relative to the virtual workspace)",
-			},
-			"file_path": map[string]any{
-				"type":        "string",
-				"description": "OpenClaw/Claude-style alias for path",
+				"description": "Path to the file to write (relative or absolute)",
 			},
 			"content": map[string]any{
 				"type":        "string",
@@ -194,121 +173,18 @@ func EditSchema() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Path to the file to edit (relative to the virtual workspace)",
-			},
-			"file_path": map[string]any{
-				"type":        "string",
-				"description": "OpenClaw/Claude-style alias for path",
+				"description": "Path to the file to edit (relative or absolute)",
 			},
 			"oldText": map[string]any{
 				"type":        "string",
 				"description": "Exact text to find and replace (must match exactly)",
 			},
-			"old_string": map[string]any{
-				"type":        "string",
-				"description": "OpenClaw/Claude-style alias for oldText",
-			},
 			"newText": map[string]any{
 				"type":        "string",
-				"description": "Replacement text",
-			},
-			"new_string": map[string]any{
-				"type":        "string",
-				"description": "OpenClaw/Claude-style alias for newText",
+				"description": "New text to replace the old text with",
 			},
 		},
 		"required": []string{"path", "oldText", "newText"},
-	}
-}
-
-// LsSchema returns the JSON schema for the ls tool.
-func LsSchema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"path": map[string]any{
-				"type":        "string",
-				"description": "Directory to list (default: root)",
-			},
-			"limit": map[string]any{
-				"type":        "number",
-				"description": "Maximum number of entries to return (default: 500)",
-			},
-		},
-	}
-}
-
-// FindSchema returns the JSON schema for the find tool.
-func FindSchema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"pattern": map[string]any{
-				"type":        "string",
-				"description": "Glob pattern to match files (e.g. '*.md', '**/*.json')",
-			},
-			"path": map[string]any{
-				"type":        "string",
-				"description": "Directory to search in (default: root)",
-			},
-			"limit": map[string]any{
-				"type":        "number",
-				"description": "Maximum number of results (default: 1000)",
-			},
-		},
-		"required": []string{"pattern"},
-	}
-}
-
-// GrepSchema returns the JSON schema for the grep tool.
-func GrepSchema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"pattern": map[string]any{
-				"type":        "string",
-				"description": "Search pattern (regex or literal string)",
-			},
-			"path": map[string]any{
-				"type":        "string",
-				"description": "Directory or file to search (default: root)",
-			},
-			"glob": map[string]any{
-				"type":        "string",
-				"description": "Filter files by glob pattern, e.g. '*.ts' or '**/*.md'",
-			},
-			"ignoreCase": map[string]any{
-				"type":        "boolean",
-				"description": "Case-insensitive search (default: false)",
-			},
-			"literal": map[string]any{
-				"type":        "boolean",
-				"description": "Treat pattern as literal string instead of regex (default: false)",
-			},
-			"context": map[string]any{
-				"type":        "number",
-				"description": "Number of lines to show before and after each match (default: 0)",
-			},
-			"limit": map[string]any{
-				"type":        "number",
-				"description": "Maximum number of matches to return (default: 100)",
-			},
-		},
-		"required": []string{"pattern"},
-	}
-}
-
-// ApplyPatchSchema returns the JSON schema for the apply_patch tool.
-func ApplyPatchSchema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"input": map[string]any{
-				"type":        "string",
-				"description": "Patch content using the *** Begin Patch/End Patch format.",
-			},
-		},
-		"required": []string{"input"},
 	}
 }
 
@@ -507,17 +383,11 @@ func SessionStatusSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"set_model": map[string]any{
-				"type":        "string",
-				"description": "Optional: change the model for this session (e.g., 'gpt-4o', 'claude-sonnet-4-20250514')",
-			},
 			"model": map[string]any{
-				"type":        "string",
-				"description": "OpenClaw-style alias for set_model (use 'default' to reset override)",
+				"type": "string",
 			},
 			"sessionKey": map[string]any{
-				"type":        "string",
-				"description": "OpenClaw-style session key (ignored; current room only)",
+				"type": "string",
 			},
 		},
 	}
@@ -529,28 +399,16 @@ func ImageSchema() map[string]any {
 		"type": "object",
 		"properties": map[string]any{
 			"prompt": map[string]any{
-				"type":        "string",
-				"description": "Optional: what to analyze or look for in the image",
+				"type": "string",
 			},
 			"image": map[string]any{
-				"type":        "string",
-				"description": "Image URL or data URI (http/https, mxc://, or data:)",
-			},
-			"image_url": map[string]any{
-				"type":        "string",
-				"description": "Deprecated alias for image",
-			},
-			"imageUrl": map[string]any{
-				"type":        "string",
-				"description": "OpenClaw-style alias for image",
+				"type": "string",
 			},
 			"model": map[string]any{
-				"type":        "string",
-				"description": "Optional: model override (ignored in bridge)",
+				"type": "string",
 			},
 			"maxBytesMb": map[string]any{
-				"type":        "number",
-				"description": "Optional: max image size in MB (ignored in bridge)",
+				"type": "number",
 			},
 		},
 		"required": []string{"image"},
@@ -634,12 +492,11 @@ func TTSSchema() map[string]any {
 		"properties": map[string]any{
 			"text": map[string]any{
 				"type":        "string",
-				"description": "The text to convert to speech (max 4096 characters)",
+				"description": "Text to convert to speech.",
 			},
-			"voice": map[string]any{
+			"channel": map[string]any{
 				"type":        "string",
-				"enum":        []string{"alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"},
-				"description": "The voice to use for speech synthesis (default: alloy)",
+				"description": "Optional channel id to pick output format (e.g. telegram).",
 			},
 		},
 		"required": []string{"text"},

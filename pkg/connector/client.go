@@ -260,6 +260,10 @@ type AIClient struct {
 	pendingMessages   map[id.RoomID][]pendingMessage
 	pendingMessagesMu sync.Mutex
 
+	// Subagent runs (sessions_spawn)
+	subagentRuns   map[string]*subagentRun
+	subagentRunsMu sync.Mutex
+
 	// Compactor handles intelligent context compaction with LLM summarization
 	compactor     *Compactor
 	compactorOnce sync.Once
@@ -318,6 +322,7 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		log:             log,
 		activeRooms:     make(map[id.RoomID]bool),
 		pendingMessages: make(map[id.RoomID][]pendingMessage),
+		subagentRuns:    make(map[string]*subagentRun),
 	}
 
 	// Initialize inbound message processing with config values
@@ -965,6 +970,9 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		UserTimezone:      timezone,
 		PromptMode:        agent.PromptMode,
 		HeartbeatPrompt:   agent.HeartbeatPrompt,
+	}
+	if meta != nil && strings.TrimSpace(meta.SubagentParentRoomID) != "" {
+		params.PromptMode = agents.PromptModeMinimal
 	}
 
 	availableTools := oc.buildAvailableTools(meta)

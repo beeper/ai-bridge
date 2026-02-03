@@ -151,6 +151,13 @@ memory_search:
   #     tools:
   #       deny: ["sessions_list", "sessions_history", "sessions_send"]
 
+  # Agent defaults (OpenClaw-style).
+  # agents:
+  #   defaults:
+  #     subagents:
+  #       model: "anthropic/claude-sonnet-4.5"
+  #       allowAgents: ["*"]
+
 # Context pruning configuration (OpenClaw-style).
 # Reduces token usage by intelligently truncating old tool results.
 # Disabled by default - opt-in feature.

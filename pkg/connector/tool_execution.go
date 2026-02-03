@@ -62,8 +62,6 @@ func toolDisplayTitle(toolName string) string {
 	switch toolName {
 	case "web_search":
 		return "Web Search"
-	case "web_search_openrouter":
-		return "Web Search (OpenRouter)"
 	case "image_generation":
 		return "Image Generation"
 	case ToolNameImageGenerate:
@@ -320,24 +318,26 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 		}
 	}
 	if toolName == "sessions_spawn" {
-		if agentID, ok := args["agentId"].(string); !ok || strings.TrimSpace(agentID) == "" {
-			var resolved string
-			if meta != nil {
-				resolved = resolveAgentID(meta)
-			}
-			if resolved == "" {
-				resolved = agents.DefaultAgentID
-			}
-			args["agentId"] = resolved
+		result, err = oc.executeSessionsSpawn(ctx, portal, args)
+		if err != nil {
+			return &bossToolResult{Error: err}
 		}
-		if _, ok := args["requester_session_key"].(string); !ok {
-			if portal != nil && portal.MXID != "" {
-				args["requester_session_key"] = portal.MXID.String()
-			}
+		content := result.Text()
+		if result.Status == tools.ResultError {
+			return &bossToolResult{Error: fmt.Errorf("%s", content)}
 		}
-		if _, ok := args["requester_channel"].(string); !ok {
-			args["requester_channel"] = "matrix"
+		return &bossToolResult{Content: content}
+	}
+	if toolName == "agents_list" {
+		result, err = oc.executeAgentsList(ctx, portal, args)
+		if err != nil {
+			return &bossToolResult{Error: err}
 		}
+		content := result.Text()
+		if result.Status == tools.ResultError {
+			return &bossToolResult{Error: fmt.Errorf("%s", content)}
+		}
+		return &bossToolResult{Content: content}
 	}
 
 	switch toolName {
@@ -351,28 +351,20 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 		result, err = executor.ExecuteDeleteAgent(ctx, args)
 	case "list_agents":
 		result, err = executor.ExecuteListAgents(ctx, args)
-	case "agents_list":
-		result, err = executor.ExecuteListAgents(ctx, args)
 	case "list_models":
 		result, err = executor.ExecuteListModels(ctx, args)
 	case "list_tools":
 		result, err = executor.ExecuteListTools(ctx, args)
 	case "run_internal_command":
 		result, err = executor.ExecuteRunInternalCommand(ctx, args)
-	case "create_room":
-		result, err = executor.ExecuteCreateRoom(ctx, args)
 	case "modify_room":
 		result, err = executor.ExecuteModifyRoom(ctx, args)
-	case "list_rooms":
-		result, err = executor.ExecuteListRooms(ctx, args)
 	case "sessions_list":
 		result, err = executor.ExecuteSessionsList(ctx, args)
 	case "sessions_history":
 		result, err = executor.ExecuteSessionsHistory(ctx, args)
 	case "sessions_send":
 		result, err = executor.ExecuteSessionsSend(ctx, args)
-	case "sessions_spawn":
-		result, err = executor.ExecuteSessionsSpawn(ctx, args)
 	default:
 		return nil // Not a boss tool
 	}

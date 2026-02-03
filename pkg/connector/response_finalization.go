@@ -118,6 +118,14 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 		aiMetadata["agent_id"] = state.agentID
 	}
 
+	if state.promptTokens > 0 || state.completionTokens > 0 || state.reasoningTokens > 0 {
+		aiMetadata["usage"] = map[string]any{
+			"prompt_tokens":     state.promptTokens,
+			"completion_tokens": state.completionTokens,
+			"reasoning_tokens":  state.reasoningTokens,
+		}
+	}
+
 	// Include embedded thinking if present
 	if state.reasoning.Len() > 0 {
 		aiMetadata["thinking"] = map[string]any{
@@ -210,6 +218,14 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 
 	if state.agentID != "" {
 		aiMetadata["agent_id"] = state.agentID
+	}
+
+	if state.promptTokens > 0 || state.completionTokens > 0 || state.reasoningTokens > 0 {
+		aiMetadata["usage"] = map[string]any{
+			"prompt_tokens":     state.promptTokens,
+			"completion_tokens": state.completionTokens,
+			"reasoning_tokens":  state.reasoningTokens,
+		}
 	}
 
 	if state.reasoning.Len() > 0 {

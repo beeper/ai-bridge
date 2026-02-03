@@ -47,9 +47,7 @@ func executeWebFetchWithProviders(ctx context.Context, args map[string]any) (str
 	}
 
 	maxChars := 0
-	if mc, ok := args["max_chars"].(float64); ok && mc > 0 {
-		maxChars = int(mc)
-	} else if mc, ok := args["maxChars"].(float64); ok && mc > 0 {
+	if mc, ok := args["maxChars"].(float64); ok && mc > 0 {
 		maxChars = int(mc)
 	}
 

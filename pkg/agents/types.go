@@ -26,6 +26,9 @@ type AgentDefinition struct {
 	// Tool policy (OpenClaw-style)
 	Tools *toolpolicy.ToolPolicyConfig `json:"tools,omitempty"`
 
+	// Subagent defaults (OpenClaw-style)
+	Subagents *SubagentConfig `json:"subagents,omitempty"`
+
 	// Agent behavior
 	Temperature     float64      `json:"temperature,omitempty"`
 	ReasoningEffort string       `json:"reasoning_effort,omitempty"` // none, low, medium, high
@@ -87,6 +90,12 @@ type MemoryConfig struct {
 	EnableGlobal *bool    `json:"enable_global,omitempty"` // nil = true (access global memory)
 	MaxResults   int      `json:"max_results,omitempty"`   // default: 6
 	MinScore     float64  `json:"min_score,omitempty"`     // default: 0.35
+}
+
+// SubagentConfig configures default subagent behavior for an agent.
+type SubagentConfig struct {
+	Model       string   `json:"model,omitempty"`
+	AllowAgents []string `json:"allowAgents,omitempty"`
 }
 
 // MemorySearchConfig configures semantic memory search (OpenClaw-style).
@@ -240,6 +249,7 @@ func (a *AgentDefinition) Clone() *AgentDefinition {
 		SystemPrompt:    a.SystemPrompt,
 		PromptMode:      a.PromptMode,
 		Tools:           a.Tools.Clone(),
+		Subagents:       cloneSubagentConfig(a.Subagents),
 		Temperature:     a.Temperature,
 		ReasoningEffort: a.ReasoningEffort,
 		IsPreset:        a.IsPreset,
@@ -267,6 +277,19 @@ func (a *AgentDefinition) Clone() *AgentDefinition {
 	}
 
 	return clone
+}
+
+func cloneSubagentConfig(cfg *SubagentConfig) *SubagentConfig {
+	if cfg == nil {
+		return nil
+	}
+	out := &SubagentConfig{
+		Model: cfg.Model,
+	}
+	if len(cfg.AllowAgents) > 0 {
+		out.AllowAgents = append([]string{}, cfg.AllowAgents...)
+	}
+	return out
 }
 
 // Clone creates a copy of the model config.

@@ -602,21 +602,9 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 
 // ModifyRoom implements tools.AgentStoreInterface.
 func (b *BossStoreAdapter) ModifyRoom(ctx context.Context, roomID string, updates tools.RoomData) error {
-	// Find the portal by listing all and matching ID
-	portals, err := b.store.client.listAllChatPortals(ctx)
+	portal, err := b.resolvePortalByRoomID(ctx, roomID)
 	if err != nil {
-		return fmt.Errorf("failed to list portals: %w", err)
-	}
-
-	var portal *bridgev2.Portal
-	for _, p := range portals {
-		if string(p.PortalKey.ID) == roomID {
-			portal = p
-			break
-		}
-	}
-	if portal == nil {
-		return fmt.Errorf("room '%s' not found", roomID)
+		return err
 	}
 
 	pm := portalMeta(portal)
@@ -672,8 +660,12 @@ func (b *BossStoreAdapter) ListRooms(ctx context.Context) ([]tools.RoomData, err
 		if name == "" {
 			name = pm.Title
 		}
+		roomID := string(portal.PortalKey.ID)
+		if portal.MXID != "" {
+			roomID = portal.MXID.String()
+		}
 		rooms = append(rooms, tools.RoomData{
-			ID:      string(portal.PortalKey.ID),
+			ID:      roomID,
 			Name:    name,
 			AgentID: pm.AgentID,
 		})
@@ -684,31 +676,13 @@ func (b *BossStoreAdapter) ListRooms(ctx context.Context) ([]tools.RoomData, err
 
 // GetRoomHistory returns message history for a room.
 func (b *BossStoreAdapter) GetRoomHistory(ctx context.Context, roomID string, limit int) ([]tools.MessageData, error) {
-	// Parse room ID
-	roomIDParsed := id.RoomID(roomID)
-
-	// Find the portal for this room
-	allPortals, err := b.store.client.UserLogin.Bridge.DB.Portal.GetAll(ctx)
+	portal, err := b.resolvePortalByRoomID(ctx, roomID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list portals: %w", err)
-	}
-
-	var portalKey networkid.PortalKey
-	found := false
-	for _, portal := range allPortals {
-		if portal.MXID == roomIDParsed {
-			portalKey = portal.PortalKey
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return nil, fmt.Errorf("room not found: %s", roomID)
+		return nil, err
 	}
 
 	// Get messages from database
-	messages, err := b.store.client.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portalKey, limit)
+	messages, err := b.store.client.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get messages: %w", err)
 	}
@@ -734,8 +708,10 @@ func (b *BossStoreAdapter) GetRoomHistory(ctx context.Context, roomID string, li
 
 // SendToRoom sends a message to a room.
 func (b *BossStoreAdapter) SendToRoom(ctx context.Context, roomID string, message string) error {
-	// Get the portal for this room
-	roomIDParsed := id.RoomID(roomID)
+	portal, err := b.resolvePortalByRoomID(ctx, roomID)
+	if err != nil {
+		return err
+	}
 
 	// Get the bot to send the message
 	bot := b.store.client.UserLogin.Bridge.Bot
@@ -751,7 +727,7 @@ func (b *BossStoreAdapter) SendToRoom(ctx context.Context, roomID string, messag
 		},
 	}
 
-	_, err := bot.SendMessage(ctx, roomIDParsed, event.EventMessage, eventContent, nil)
+	_, err = bot.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
 	return err
 }
 
@@ -767,6 +743,7 @@ func agentToToolsData(agent *agents.AgentDefinition) tools.AgentData {
 		Model:        agent.Model.Primary,
 		SystemPrompt: agent.SystemPrompt,
 		Tools:        agent.Tools.Clone(),
+		Subagents:    subagentsToTools(agent.Subagents),
 		Temperature:  agent.Temperature,
 		IsPreset:     agent.IsPreset,
 		CreatedAt:    agent.CreatedAt,
@@ -785,6 +762,7 @@ func toolsDataToAgent(data tools.AgentData) *agents.AgentDefinition {
 		},
 		SystemPrompt: data.SystemPrompt,
 		Tools:        data.Tools.Clone(),
+		Subagents:    subagentsFromTools(data.Subagents),
 		Temperature:  data.Temperature,
 		IsPreset:     data.IsPreset,
 		CreatedAt:    data.CreatedAt,

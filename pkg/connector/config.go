@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 	"go.mau.fi/util/configupgrade"
 )
@@ -19,6 +20,7 @@ type Config struct {
 	Bridge     BridgeConfig                       `yaml:"bridge"`
 	Tools      ToolProvidersConfig                `yaml:"tools"`
 	ToolPolicy *toolpolicy.GlobalToolPolicyConfig `yaml:"tool_policy"`
+	Agents     *AgentsConfig                      `yaml:"agents"`
 
 	// Global settings
 	DefaultSystemPrompt string              `yaml:"default_system_prompt"`
@@ -33,6 +35,16 @@ type Config struct {
 
 	// Inbound message processing configuration
 	Inbound *InboundConfig `yaml:"inbound"`
+}
+
+// AgentsConfig configures agent defaults (OpenClaw-style).
+type AgentsConfig struct {
+	Defaults *AgentDefaultsConfig `yaml:"defaults"`
+}
+
+// AgentDefaultsConfig defines default agent settings.
+type AgentDefaultsConfig struct {
+	Subagents *agents.SubagentConfig `yaml:"subagents"`
 }
 
 // MemorySearchConfig configures semantic memory search (OpenClaw-style).
