@@ -3,9 +3,10 @@ package connector
 import (
 	"reflect"
 
+	"maunium.net/go/mautrix/event"
+
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
-	"maunium.net/go/mautrix/event"
 )
 
 // init registers custom AI event types with mautrix's TypeMap
@@ -618,16 +619,16 @@ type RoomCapabilitiesEventContent struct {
 // RoomSettingsEventContent represents user-editable room settings
 // This uses normal power levels (0) so users can modify
 type RoomSettingsEventContent struct {
-	Model               string      `json:"model,omitempty"`
-	SystemPrompt        string      `json:"system_prompt,omitempty"`
-	Temperature         *float64    `json:"temperature,omitempty"`
-	MaxContextMessages  int         `json:"max_context_messages,omitempty"`
-	MaxCompletionTokens int         `json:"max_completion_tokens,omitempty"`
-	ReasoningEffort     string      `json:"reasoning_effort,omitempty"`
-	ConversationMode    string      `json:"conversation_mode,omitempty"` // "messages" or "responses"
-	DefaultAgentID      string      `json:"default_agent_id,omitempty"`
-	EmitThinking        *bool       `json:"emit_thinking,omitempty"`
-	EmitToolArgs        *bool       `json:"emit_tool_args,omitempty"`
+	Model               string   `json:"model,omitempty"`
+	SystemPrompt        string   `json:"system_prompt,omitempty"`
+	Temperature         *float64 `json:"temperature,omitempty"`
+	MaxContextMessages  int      `json:"max_context_messages,omitempty"`
+	MaxCompletionTokens int      `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string   `json:"reasoning_effort,omitempty"`
+	ConversationMode    string   `json:"conversation_mode,omitempty"` // "messages" or "responses"
+	DefaultAgentID      string   `json:"default_agent_id,omitempty"`
+	EmitThinking        *bool    `json:"emit_thinking,omitempty"`
+	EmitToolArgs        *bool    `json:"emit_tool_args,omitempty"`
 }
 
 // ToolInfo describes a tool and its status for room state broadcasting
@@ -752,24 +753,24 @@ type AgentMemberContent struct {
 // AgentDefinitionContent stores agent configuration in Matrix state events.
 // This is the serialized form of agents.AgentDefinition for Matrix storage.
 type AgentDefinitionContent struct {
-	ID              string             `json:"id"`
-	Name            string             `json:"name"`
-	Description     string             `json:"description,omitempty"`
-	AvatarURL       string             `json:"avatar_url,omitempty"`
-	Model           string             `json:"model,omitempty"`
-	ModelFallback   []string           `json:"model_fallback,omitempty"`
-	SystemPrompt    string             `json:"system_prompt,omitempty"`
-	PromptMode      string             `json:"prompt_mode,omitempty"`
+	ID              string                       `json:"id"`
+	Name            string                       `json:"name"`
+	Description     string                       `json:"description,omitempty"`
+	AvatarURL       string                       `json:"avatar_url,omitempty"`
+	Model           string                       `json:"model,omitempty"`
+	ModelFallback   []string                     `json:"model_fallback,omitempty"`
+	SystemPrompt    string                       `json:"system_prompt,omitempty"`
+	PromptMode      string                       `json:"prompt_mode,omitempty"`
 	Tools           *toolpolicy.ToolPolicyConfig `json:"tools,omitempty"`
-	Temperature     float64            `json:"temperature,omitempty"`
-	ReasoningEffort string             `json:"reasoning_effort,omitempty"`
-	IdentityName    string             `json:"identity_name,omitempty"`
-	IdentityPersona string             `json:"identity_persona,omitempty"`
-	IsPreset        bool               `json:"is_preset,omitempty"`
-	MemoryConfig    *AgentMemoryConfig `json:"memory_config,omitempty"` // Memory configuration (matches OpenClaw)
-	MemorySearch    *agents.MemorySearchConfig `json:"memory_search,omitempty"`
-	CreatedAt       int64              `json:"created_at"`
-	UpdatedAt       int64              `json:"updated_at"`
+	Temperature     float64                      `json:"temperature,omitempty"`
+	ReasoningEffort string                       `json:"reasoning_effort,omitempty"`
+	IdentityName    string                       `json:"identity_name,omitempty"`
+	IdentityPersona string                       `json:"identity_persona,omitempty"`
+	IsPreset        bool                         `json:"is_preset,omitempty"`
+	MemoryConfig    *AgentMemoryConfig           `json:"memory_config,omitempty"` // Memory configuration (matches OpenClaw)
+	MemorySearch    *agents.MemorySearchConfig   `json:"memory_search,omitempty"`
+	CreatedAt       int64                        `json:"created_at"`
+	UpdatedAt       int64                        `json:"updated_at"`
 }
 
 // CustomAgentsEventContent stores user-created agent definitions in the Builder room.

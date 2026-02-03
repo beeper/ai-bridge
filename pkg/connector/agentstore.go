@@ -13,9 +13,10 @@ import (
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
+	"github.com/google/uuid"
+
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
-	"github.com/google/uuid"
 )
 
 // AgentStoreAdapter implements agents.AgentStore using Matrix state events.

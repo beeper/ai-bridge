@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -19,7 +20,7 @@ func resolveMemorySearchConfig(client *AIClient, agentID string) (*memory.Resolv
 
 	if agentID != "" {
 		store := NewAgentStoreAdapter(client)
-		agent, err := store.GetAgentByID(client.backgroundContext(client.backgroundContext(nil)), agentID)
+		agent, err := store.GetAgentByID(client.backgroundContext(context.TODO()), agentID)
 		if err == nil && agent != nil {
 			overrides = agent.MemorySearch
 			legacy = agent.Memory

@@ -45,7 +45,9 @@ type openAIBatchOutputLine struct {
 	Response struct {
 		StatusCode int `json:"status_code"`
 		Body       struct {
-			Data  []struct{ Embedding []float64 `json:"embedding"` } `json:"data"`
+			Data []struct {
+				Embedding []float64 `json:"embedding"`
+			} `json:"data"`
 			Error struct {
 				Message string `json:"message"`
 			} `json:"error"`
@@ -281,7 +283,9 @@ func buildGeminiRequests(relPath, source string, missing []missingChunk) ([]gemi
 			CustomID: customID,
 			TaskType: "RETRIEVAL_DOCUMENT",
 		}
-		req.Content.Parts = []struct{ Text string `json:"text"` }{{Text: item.chunk.Text}}
+		req.Content.Parts = []struct {
+			Text string `json:"text"`
+		}{{Text: item.chunk.Text}}
 		requests = append(requests, req)
 	}
 	return requests, mapping
@@ -358,16 +362,16 @@ func runOpenAIBatches(ctx context.Context, params openAIBatchParams) (map[string
 }
 
 type openAIBatchParams struct {
-	BaseURL       string
-	APIKey        string
-	Headers       map[string]string
-	AgentID       string
-	Requests      []openAIBatchRequest
-	Wait          bool
-	PollInterval  time.Duration
-	Timeout       time.Duration
-	Concurrency   int
-	Client        *http.Client
+	BaseURL      string
+	APIKey       string
+	Headers      map[string]string
+	AgentID      string
+	Requests     []openAIBatchRequest
+	Wait         bool
+	PollInterval time.Duration
+	Timeout      time.Duration
+	Concurrency  int
+	Client       *http.Client
 }
 
 func splitOpenAIRequests(requests []openAIBatchRequest) [][]openAIBatchRequest {

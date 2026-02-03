@@ -7,27 +7,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/agents"
-	"github.com/beeper/ai-bridge/pkg/agents/tools"
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/id"
-)
 
-type subagentSpawnParams struct {
-	Task             string
-	Label            string
-	AgentID          string
-	Model            string
-	Thinking         string
-	RunTimeout       time.Duration
-	Cleanup          string
-	ParentRoomID     id.RoomID
-	RequesterAgentID string
-}
+	"github.com/beeper/ai-bridge/pkg/agents"
+	"github.com/beeper/ai-bridge/pkg/agents/tools"
+)
 
 func normalizeAgentID(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))

@@ -7,11 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/agents/tools"
 	"github.com/google/uuid"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/id"
+
+	"github.com/beeper/ai-bridge/pkg/agents/tools"
 )
 
 type sessionListEntry struct {

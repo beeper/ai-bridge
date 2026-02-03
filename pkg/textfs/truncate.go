@@ -6,22 +6,22 @@ import (
 )
 
 const (
-	DefaultMaxLines      = 2000
-	DefaultMaxBytes      = 50 * 1024
-	GrepMaxLineLength    = 500
+	DefaultMaxLines   = 2000
+	DefaultMaxBytes   = 50 * 1024
+	GrepMaxLineLength = 500
 )
 
 type Truncation struct {
-	Content              string
-	Truncated            bool
-	TruncatedBy          string
-	TotalLines           int
-	TotalBytes           int
-	OutputLines          int
-	OutputBytes          int
+	Content               string
+	Truncated             bool
+	TruncatedBy           string
+	TotalLines            int
+	TotalBytes            int
+	OutputLines           int
+	OutputBytes           int
 	FirstLineExceedsLimit bool
-	MaxLines             int
-	MaxBytes             int
+	MaxLines              int
+	MaxBytes              int
 }
 
 func FormatSize(bytes int) string {

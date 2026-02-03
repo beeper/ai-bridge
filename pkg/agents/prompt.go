@@ -212,9 +212,6 @@ func StripHeartbeatToken(text string, maxAckChars int) (shouldSkip bool, strippe
 // DefaultSystemPrompt is the default prompt for general-purpose agents.
 const DefaultSystemPrompt = `You are a personal assistant called Beep. You run inside the Beeper app.`
 
-// Original OpenClaw system prompt (reference copy, do not edit).
-const originalOpenClawSystemPrompt = `You are a personal assistant running inside OpenClaw.`
-
 // BossSystemPrompt is the system prompt for the Boss agent.
 const BossSystemPrompt = `You are the Agent Builder, an AI that helps users manage their AI chats and create custom AI agents.
 

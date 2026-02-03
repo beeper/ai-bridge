@@ -95,10 +95,10 @@ func (api *ProvisioningAPI) handleGetDefaults(w http.ResponseWriter, r *http.Req
 
 // ReqSetDefaults is the request body for PUT /v1/defaults
 type ReqSetDefaults struct {
-	Model           *string          `json:"model,omitempty"`
-	SystemPrompt    *string          `json:"system_prompt,omitempty"`
-	Temperature     *float64         `json:"temperature,omitempty"`
-	ReasoningEffort *string          `json:"reasoning_effort,omitempty"`
+	Model           *string  `json:"model,omitempty"`
+	SystemPrompt    *string  `json:"system_prompt,omitempty"`
+	Temperature     *float64 `json:"temperature,omitempty"`
+	ReasoningEffort *string  `json:"reasoning_effort,omitempty"`
 }
 
 // handleSetDefaults handles PUT /v1/defaults

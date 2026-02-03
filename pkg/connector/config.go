@@ -4,9 +4,10 @@ import (
 	_ "embed"
 	"time"
 
+	"go.mau.fi/util/configupgrade"
+
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
-	"go.mau.fi/util/configupgrade"
 )
 
 //go:embed example-config.yaml

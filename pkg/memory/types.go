@@ -3,19 +3,19 @@ package memory
 import "context"
 
 type ResolvedConfig struct {
-	Enabled    bool
-	Sources    []string
-	ExtraPaths []string
-	Provider   string
-	Model      string
-	Fallback   string
-	Remote     RemoteConfig
-	Local      LocalConfig
-	Store      StoreConfig
-	Chunking   ChunkingConfig
-	Sync       SyncConfig
-	Query      QueryConfig
-	Cache      CacheConfig
+	Enabled      bool
+	Sources      []string
+	ExtraPaths   []string
+	Provider     string
+	Model        string
+	Fallback     string
+	Remote       RemoteConfig
+	Local        LocalConfig
+	Store        StoreConfig
+	Chunking     ChunkingConfig
+	Sync         SyncConfig
+	Query        QueryConfig
+	Cache        CacheConfig
 	Experimental ExperimentalConfig
 }
 
@@ -35,9 +35,9 @@ type BatchConfig struct {
 }
 
 type LocalConfig struct {
-	BaseURL      string
-	APIKey       string
-	ModelPath    string
+	BaseURL       string
+	APIKey        string
+	ModelPath     string
 	ModelCacheDir string
 }
 
@@ -58,12 +58,12 @@ type ChunkingConfig struct {
 }
 
 type SyncConfig struct {
-	OnSessionStart bool
-	OnSearch       bool
-	Watch          bool
+	OnSessionStart  bool
+	OnSearch        bool
+	Watch           bool
 	WatchDebounceMs int
 	IntervalMinutes int
-	Sessions       SessionSyncConfig
+	Sessions        SessionSyncConfig
 }
 
 type SessionSyncConfig struct {
@@ -78,9 +78,9 @@ type QueryConfig struct {
 }
 
 type HybridConfig struct {
-	Enabled            bool
-	VectorWeight       float64
-	TextWeight         float64
+	Enabled             bool
+	VectorWeight        float64
+	TextWeight          float64
 	CandidateMultiplier int
 }
 

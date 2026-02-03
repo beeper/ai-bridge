@@ -95,4 +95,3 @@ func TestApplyPatchAddUpdateDeleteMove(t *testing.T) {
 		t.Fatalf("expected file to be deleted")
 	}
 }
-

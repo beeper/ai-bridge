@@ -6,10 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/openai/openai-go/v3"
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
+
+	"github.com/beeper/ai-bridge/pkg/agents"
 )
 
 const (
