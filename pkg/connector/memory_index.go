@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/beeper/ai-bridge/pkg/memory"
+	"github.com/beeper/ai-bridge/pkg/memory/embedding"
 	"github.com/beeper/ai-bridge/pkg/textfs"
 	"github.com/google/uuid"
 )
@@ -112,6 +114,24 @@ func (m *MemorySearchManager) needsFullReindex(ctx context.Context, force bool) 
 }
 
 func (m *MemorySearchManager) clearIndex(ctx context.Context) error {
+	if m.vectorReady {
+		rows, err := m.db.Query(ctx,
+			`SELECT id FROM ai_memory_chunks
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
+			m.bridgeID, m.loginID, m.agentID,
+		)
+		if err == nil {
+			var ids []string
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err == nil {
+					ids = append(ids, id)
+				}
+			}
+			rows.Close()
+			m.deleteVectorIDs(ctx, ids)
+		}
+	}
 	_, err := m.db.Exec(ctx,
 		`DELETE FROM ai_memory_chunks WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
 		m.bridgeID, m.loginID, m.agentID,
@@ -218,10 +238,22 @@ func (m *MemorySearchManager) needsFileIndex(ctx context.Context, entry textfs.F
 func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, content string) error {
 	cleanContent := normalizeNewlines(content)
 	chunks := memory.ChunkMarkdown(cleanContent, m.cfg.Chunking.Tokens, m.cfg.Chunking.Overlap)
+	filtered := chunks[:0]
+	for _, chunk := range chunks {
+		if strings.TrimSpace(chunk.Text) == "" {
+			continue
+		}
+		filtered = append(filtered, chunk)
+	}
+	chunks = filtered
 	if len(chunks) == 0 {
 		return nil
 	}
 
+	if m.vectorReady {
+		ids := m.collectChunkIDs(ctx, path, source, m.status.Model)
+		m.deleteVectorIDs(ctx, ids)
+	}
 	if _, err := m.db.Exec(ctx,
 		`DELETE FROM ai_memory_chunks
          WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5 AND model=$6`,
@@ -240,7 +272,7 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 	var embeddings [][]float64
 	if m.cfg.Store.Vector.Enabled {
 		var err error
-		embeddings, err = m.embedChunks(ctx, chunks)
+		embeddings, err = m.embedChunks(ctx, chunks, path, source)
 		if err != nil {
 			return err
 		}
@@ -248,6 +280,7 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 		embeddings = make([][]float64, len(chunks))
 	}
 	now := time.Now().UnixMilli()
+	vectorReady := false
 	for i, chunk := range chunks {
 		embedding := []float64{}
 		if i < len(embeddings) {
@@ -255,6 +288,9 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 		}
 		if m.cfg.Store.Vector.Enabled && m.vectorDims == 0 && len(embedding) > 0 {
 			m.vectorDims = len(embedding)
+		}
+		if !vectorReady && m.cfg.Store.Vector.Enabled && len(embedding) > 0 {
+			vectorReady = m.ensureVectorTable(ctx, len(embedding))
 		}
 		embeddingJSON, _ := json.Marshal(embedding)
 		chunkID := uuid.NewString()
@@ -267,6 +303,13 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 		)
 		if err != nil {
 			return err
+		}
+		if vectorReady && len(embedding) > 0 {
+			_, _ = m.execVector(ctx, fmt.Sprintf("DELETE FROM %s WHERE id=?", memoryVectorTable), chunkID)
+			_, _ = m.execVector(ctx,
+				fmt.Sprintf("INSERT INTO %s (id, embedding) VALUES (?, ?)", memoryVectorTable),
+				chunkID, vectorToBlob(embedding),
+			)
 		}
 		if m.ftsAvailable {
 			_, _ = m.db.Exec(ctx,
@@ -307,6 +350,10 @@ func (m *MemorySearchManager) removeStaleMemoryChunks(ctx context.Context, activ
 	}
 
 	for _, path := range stalePaths {
+		if m.vectorReady {
+			ids := m.collectChunkIDs(ctx, path, "memory", m.status.Model)
+			m.deleteVectorIDs(ctx, ids)
+		}
 		_, _ = m.db.Exec(ctx,
 			`DELETE FROM ai_memory_chunks
              WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5`,
@@ -323,9 +370,14 @@ func (m *MemorySearchManager) removeStaleMemoryChunks(ctx context.Context, activ
 	return nil
 }
 
-func (m *MemorySearchManager) embedChunks(ctx context.Context, chunks []memory.Chunk) ([][]float64, error) {
+type missingChunk struct {
+	index int
+	chunk memory.Chunk
+}
+
+func (m *MemorySearchManager) embedChunks(ctx context.Context, chunks []memory.Chunk, relPath, source string) ([][]float64, error) {
 	embeddings := make([][]float64, len(chunks))
-	var missing []int
+	var missing []missingChunk
 	for i, chunk := range chunks {
 		if m.cfg.Cache.Enabled {
 			if cached, ok := m.lookupEmbeddingCache(ctx, chunk.Hash); ok {
@@ -333,26 +385,63 @@ func (m *MemorySearchManager) embedChunks(ctx context.Context, chunks []memory.C
 				continue
 			}
 		}
-		missing = append(missing, i)
+		missing = append(missing, missingChunk{index: i, chunk: chunk})
 	}
 	if len(missing) == 0 {
 		return embeddings, nil
 	}
 
-	texts := make([]string, len(missing))
-	for i, idx := range missing {
-		texts[i] = chunks[idx].Text
+	if m.shouldUseBatch(m.status.Provider) {
+		switch m.status.Provider {
+		case "openai":
+			batchResults, err := m.embedChunksWithOpenAIBatch(ctx, missing, relPath, source)
+			if err == nil {
+				for _, item := range missing {
+					customID := batchCustomID(source, relPath, item.chunk.Hash, item.chunk.StartLine, item.chunk.EndLine, item.index)
+					if embedding, ok := batchResults[customID]; ok {
+						embeddings[item.index] = embedding
+						if m.cfg.Cache.Enabled {
+							_ = m.storeEmbeddingCache(ctx, item.chunk.Hash, embedding)
+						}
+					}
+				}
+				m.resetBatchFailures()
+				return embeddings, nil
+			}
+			m.recordBatchFailure("openai", err, false)
+		case "gemini":
+			batchResults, err := m.embedChunksWithGeminiBatch(ctx, missing, relPath, source)
+			if err == nil {
+				for _, item := range missing {
+					customID := batchCustomID(source, relPath, item.chunk.Hash, item.chunk.StartLine, item.chunk.EndLine, item.index)
+					if embedding, ok := batchResults[customID]; ok {
+						embeddings[item.index] = embedding
+						if m.cfg.Cache.Enabled {
+							_ = m.storeEmbeddingCache(ctx, item.chunk.Hash, embedding)
+						}
+					}
+				}
+				m.resetBatchFailures()
+				return embeddings, nil
+			}
+			forceDisable := strings.Contains(strings.ToLower(err.Error()), "asyncbatchembedcontent not available")
+			m.recordBatchFailure("gemini", err, forceDisable)
+		}
 	}
 
+	texts := make([]string, len(missing))
+	for i, item := range missing {
+		texts[i] = item.chunk.Text
+	}
 	results, err := m.embedBatchWithRetry(ctx, texts)
 	if err != nil {
 		return nil, err
 	}
-	for i, idx := range missing {
+	for i, item := range missing {
 		if i < len(results) {
-			embeddings[idx] = results[i]
+			embeddings[item.index] = results[i]
 			if m.cfg.Cache.Enabled {
-				_ = m.storeEmbeddingCache(ctx, chunks[idx].Hash, results[i])
+				_ = m.storeEmbeddingCache(ctx, item.chunk.Hash, results[i])
 			}
 		}
 	}
@@ -390,6 +479,83 @@ func (m *MemorySearchManager) embedBatchWithRetry(ctx context.Context, texts []s
 		results = append(results, batchResult...)
 	}
 	return results, nil
+}
+
+func (m *MemorySearchManager) embedChunksWithOpenAIBatch(
+	ctx context.Context,
+	missing []missingChunk,
+	relPath string,
+	source string,
+) (map[string][]float64, error) {
+	if m == nil || m.client == nil {
+		return nil, fmt.Errorf("memory search unavailable")
+	}
+	apiKey, baseURL, headers := resolveOpenAIEmbeddingConfig(m.client, m.cfg)
+	if strings.TrimSpace(apiKey) == "" {
+		return nil, fmt.Errorf("openai embeddings require api_key")
+	}
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = embedding.DefaultOpenAIBaseURL
+	}
+	requests, _ := buildOpenAIRequests(relPath, source, m.status.Model, missing)
+	params := openAIBatchParams{
+		BaseURL:      baseURL,
+		APIKey:       apiKey,
+		Headers:      headers,
+		AgentID:      m.agentID,
+		Requests:     requests,
+		Wait:         m.cfg.Remote.Batch.Wait,
+		PollInterval: time.Duration(m.cfg.Remote.Batch.PollIntervalMs) * time.Millisecond,
+		Timeout:      time.Duration(m.cfg.Remote.Batch.TimeoutMinutes) * time.Minute,
+		Concurrency:  m.cfg.Remote.Batch.Concurrency,
+		Client:       &http.Client{Timeout: time.Duration(m.cfg.Remote.Batch.TimeoutMinutes) * time.Minute},
+	}
+	if params.PollInterval <= 0 {
+		params.PollInterval = 2 * time.Second
+	}
+	if params.Timeout <= 0 {
+		params.Timeout = 60 * time.Minute
+	}
+	return runOpenAIBatches(ctx, params)
+}
+
+func (m *MemorySearchManager) embedChunksWithGeminiBatch(
+	ctx context.Context,
+	missing []missingChunk,
+	relPath string,
+	source string,
+) (map[string][]float64, error) {
+	if m == nil {
+		return nil, fmt.Errorf("memory search unavailable")
+	}
+	apiKey, baseURL, headers := resolveGeminiEmbeddingConfig(m.client, m.cfg)
+	if strings.TrimSpace(apiKey) == "" {
+		return nil, fmt.Errorf("gemini embeddings require api_key")
+	}
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = embedding.DefaultGeminiBaseURL
+	}
+	requests, _ := buildGeminiRequests(relPath, source, missing)
+	params := geminiBatchParams{
+		BaseURL:      baseURL,
+		APIKey:       apiKey,
+		Headers:      headers,
+		AgentID:      m.agentID,
+		Model:        m.status.Model,
+		Requests:     requests,
+		Wait:         m.cfg.Remote.Batch.Wait,
+		PollInterval: time.Duration(m.cfg.Remote.Batch.PollIntervalMs) * time.Millisecond,
+		Timeout:      time.Duration(m.cfg.Remote.Batch.TimeoutMinutes) * time.Minute,
+		Concurrency:  m.cfg.Remote.Batch.Concurrency,
+		Client:       &http.Client{Timeout: time.Duration(m.cfg.Remote.Batch.TimeoutMinutes) * time.Minute},
+	}
+	if params.PollInterval <= 0 {
+		params.PollInterval = 2 * time.Second
+	}
+	if params.Timeout <= 0 {
+		params.Timeout = 60 * time.Minute
+	}
+	return runGeminiBatches(ctx, params)
 }
 
 func (m *MemorySearchManager) lookupEmbeddingCache(ctx context.Context, hash string) ([]float64, bool) {
@@ -466,6 +632,51 @@ func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float
 	if len(queryVec) == 0 || limit <= 0 {
 		return nil, nil
 	}
+	if m.ensureVectorTable(ctx, len(queryVec)) {
+		filterSQL, filterArgs := sourceFilterSQLQuestion(m.cfg.Sources)
+		args := []any{vectorToBlob(queryVec), m.bridgeID, m.loginID, m.agentID, m.status.Model}
+		args = append(args, filterArgs...)
+		args = append(args, limit)
+		rows, err := m.queryVector(ctx,
+			fmt.Sprintf(`SELECT c.id, c.path, c.start_line, c.end_line, c.text, c.source,
+               vec_distance_cosine(v.embedding, ?) AS dist
+             FROM %s v
+             JOIN ai_memory_chunks c ON c.id = v.id
+             WHERE c.bridge_id=? AND c.login_id=? AND c.agent_id=? AND c.model=?%s
+             ORDER BY dist ASC
+             LIMIT ?`, memoryVectorTable, filterSQL),
+			args...,
+		)
+		if err == nil {
+			defer rows.Close()
+			results := make([]memory.HybridVectorResult, 0, limit)
+			for rows.Next() {
+				var id, path, text, source string
+				var startLine, endLine int
+				var dist float64
+				if err := rows.Scan(&id, &path, &startLine, &endLine, &text, &source, &dist); err != nil {
+					return nil, err
+				}
+				results = append(results, memory.HybridVectorResult{
+					ID:          id,
+					Path:        path,
+					StartLine:   startLine,
+					EndLine:     endLine,
+					Source:      source,
+					Snippet:     truncateSnippet(text),
+					VectorScore: 1 - dist,
+				})
+			}
+			if err := rows.Err(); err == nil {
+				return results, nil
+			}
+		} else {
+			m.mu.Lock()
+			m.vectorError = err.Error()
+			m.mu.Unlock()
+		}
+	}
+
 	baseArgs := []any{m.bridgeID, m.loginID, m.agentID, m.status.Model}
 	filterSQL, filterArgs := sourceFilterSQL(5, m.cfg.Sources)
 	args := append(baseArgs, filterArgs...)
@@ -585,6 +796,19 @@ func sourceFilterSQL(startIndex int, sources []string) (string, []any) {
 	return " AND source IN (" + strings.Join(placeholders, ",") + ")", args
 }
 
+func sourceFilterSQLQuestion(sources []string) (string, []any) {
+	if len(sources) == 0 {
+		return "", nil
+	}
+	placeholders := make([]string, 0, len(sources))
+	args := make([]any, 0, len(sources))
+	for _, source := range sources {
+		placeholders = append(placeholders, "?")
+		args = append(args, source)
+	}
+	return " AND c.source IN (" + strings.Join(placeholders, ",") + ")", args
+}
+
 func parseEmbedding(raw string) []float64 {
 	var values []float64
 	if err := json.Unmarshal([]byte(raw), &values); err != nil {
@@ -613,6 +837,30 @@ func cosineSimilarity(a, b []float64) float64 {
 		return 0
 	}
 	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
+}
+
+func (m *MemorySearchManager) collectChunkIDs(ctx context.Context, path, source, model string) []string {
+	if m == nil {
+		return nil
+	}
+	rows, err := m.db.Query(ctx,
+		`SELECT id FROM ai_memory_chunks
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5 AND model=$6`,
+		m.bridgeID, m.loginID, m.agentID, path, source, model,
+	)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return ids
+		}
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 func hasSource(sources []string, target string) bool {

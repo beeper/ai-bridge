@@ -343,6 +343,10 @@ func (m *MemorySearchManager) deleteSessionFile(ctx context.Context, sessionKey 
 		return err
 	}
 	if path != "" {
+		if m.vectorReady {
+			ids := m.collectChunkIDs(ctx, path, "sessions", m.status.Model)
+			m.deleteVectorIDs(ctx, ids)
+		}
 		_, _ = m.db.Exec(ctx,
 			`DELETE FROM ai_memory_chunks
              WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5`,
@@ -384,6 +388,10 @@ func (m *MemorySearchManager) removeStaleSessions(ctx context.Context, active ma
 			continue
 		}
 		if path != "" {
+			if m.vectorReady {
+				ids := m.collectChunkIDs(ctx, path, "sessions", m.status.Model)
+				m.deleteVectorIDs(ctx, ids)
+			}
 			_, _ = m.db.Exec(ctx,
 				`DELETE FROM ai_memory_chunks
                  WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5`,
