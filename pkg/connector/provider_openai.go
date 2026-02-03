@@ -297,8 +297,9 @@ func (o *OpenAIProvider) GenerateStream(ctx context.Context, params GeneratePara
 
 // Generate performs a non-streaming generation using Responses API
 func (o *OpenAIProvider) Generate(ctx context.Context, params GenerateParams) (*GenerateResponse, error) {
-	// OpenRouter doesn't support multimodal inputs via Responses API.
-	if isOpenRouterBaseURL(o.baseURL) && hasMultimodalUnifiedMessages(params.Messages) {
+	// Responses input conversion currently drops multimodal content (audio/image/pdf/video),
+	// so force Chat Completions whenever multimodal input is present.
+	if hasMultimodalUnifiedMessages(params.Messages) {
 		return o.generateChatCompletions(ctx, params)
 	}
 
