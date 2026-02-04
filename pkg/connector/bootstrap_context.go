@@ -82,28 +82,41 @@ func (oc *AIClient) applySoulEvilToContextFiles(
 
 	entry, found, err := store.Read(ctx, decision.FileName)
 	if err != nil || !found {
-		oc.log.Warn().Msgf("SOUL_EVIL active (%s) but file missing: %s", decision.Reason, decision.FileName)
+		oc.log.Warn().
+			Str("reason", decision.Reason).
+			Str("file", decision.FileName).
+			Msg("SOUL_EVIL active but file missing")
 		return files
 	}
 	if strings.TrimSpace(entry.Content) == "" {
-		oc.log.Warn().Msgf("SOUL_EVIL active (%s) but file empty: %s", decision.Reason, decision.FileName)
+		oc.log.Warn().
+			Str("reason", decision.Reason).
+			Str("file", decision.FileName).
+			Msg("SOUL_EVIL active but file empty")
 		return files
 	}
 
 	soulIndex := findSoulFileIndex(files)
 	if soulIndex == -1 {
-		oc.log.Warn().Msgf("SOUL_EVIL active (%s) but SOUL.md not in bootstrap files", decision.Reason)
+		oc.log.Warn().
+			Str("reason", decision.Reason).
+			Msg("SOUL_EVIL active but SOUL.md not in bootstrap files")
 		return files
 	}
 
 	trimmed := agents.TrimBootstrapContent(entry.Content, agents.DefaultSoulFilename, maxChars)
 	if strings.TrimSpace(trimmed.Content) == "" {
-		oc.log.Warn().Msgf("SOUL_EVIL active (%s) but trimmed content empty", decision.Reason)
+		oc.log.Warn().
+			Str("reason", decision.Reason).
+			Msg("SOUL_EVIL active but trimmed content empty")
 		return files
 	}
 
 	files[soulIndex].Content = trimmed.Content
-	oc.log.Debug().Msgf("SOUL_EVIL active (%s) using %s", decision.Reason, decision.FileName)
+	oc.log.Debug().
+		Str("reason", decision.Reason).
+		Str("file", decision.FileName).
+		Msg("SOUL_EVIL active using file")
 	return files
 }
 

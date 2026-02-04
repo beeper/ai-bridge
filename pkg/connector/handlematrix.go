@@ -414,34 +414,11 @@ func (oc *AIClient) handleMediaMessage(
 		eventID = msg.Event.ID
 	}
 
-	var visionModel string
-	var visionFallback bool
-	if msgType == event.MsgImage {
-		visionModel, visionFallback = oc.resolveVisionModelForImage(ctx, meta)
-	}
-	var audioModel string
-	var audioFallback bool
-	if msgType == event.MsgAudio {
-		audioModel, audioFallback = oc.resolveAudioModelForInput(ctx, meta)
-	}
-
 	// Check capability (PDF has special OpenRouter handling via file-parser plugin)
 	modelCaps := oc.getModelCapabilitiesForMeta(meta)
-	capabilityOK := config.capabilityCheck(&modelCaps)
-	if msgType == event.MsgImage {
-		capabilityOK = visionModel != ""
-	} else if msgType == event.MsgAudio {
-		capabilityOK = audioModel != ""
-	}
-	if isPDF && !capabilityOK && oc.isOpenRouterProvider() {
-		capabilityOK = true // OpenRouter supports PDF via file-parser plugin
-	}
-	if !capabilityOK {
-		oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
-			"The current model (%s) does not support %s. Please switch to a capable model using /model.",
-			oc.effectiveModel(meta), config.capabilityName,
-		))
-		return &bridgev2.MatrixMessageResponse{}, nil
+	supportsMedia := config.capabilityCheck(&modelCaps)
+	if isPDF && !supportsMedia && oc.isOpenRouterProvider() {
+		supportsMedia = true // OpenRouter supports PDF via file-parser plugin
 	}
 
 	// Get caption (body is usually the filename or caption)
@@ -461,27 +438,11 @@ func (oc *AIClient) handleMediaMessage(
 		encryptedFile = msg.Content.File
 	}
 
-	// If model lacks vision but agent supports image understanding, analyze image first.
-	if msgType == event.MsgImage && visionFallback {
-		analysisPrompt := buildImageUnderstandingPrompt(caption, hasUserCaption)
-		description, err := oc.analyzeImageWithModel(ctx, visionModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
-		if err != nil {
-			oc.log.Warn().Err(err).Msg("Image understanding failed")
-			oc.sendSystemNotice(ctx, portal, "Image understanding failed. Please try again or switch to a vision-capable model using /model.")
-			return &bridgev2.MatrixMessageResponse{}, nil
-		}
-
-		combined := buildImageUnderstandingMessage(caption, hasUserCaption, description)
-		if combined == "" {
-			oc.sendSystemNotice(ctx, portal, "Image understanding failed. Please try again or switch to a vision-capable model using /model.")
-			return &bridgev2.MatrixMessageResponse{}, nil
-		}
-
-		promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined, eventID)
+	dispatchTextOnly := func(body string) (*bridgev2.MatrixMessageResponse, error) {
+		promptMessages, err := oc.buildPrompt(ctx, portal, meta, body, eventID)
 		if err != nil {
 			return nil, err
 		}
-
 		userMessage := &database.Message{
 			ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
 			MXID:     eventID,
@@ -489,70 +450,94 @@ func (oc *AIClient) handleMediaMessage(
 			SenderID: humanUserID(oc.UserLogin.ID),
 			Metadata: &MessageMetadata{
 				Role: "user",
-				Body: combined,
+				Body: body,
 			},
 			Timestamp: time.Now(),
 		}
-
 		dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
 			Event:       msg.Event,
 			Portal:      portal,
 			Meta:        meta,
 			Type:        pendingTypeText,
-			MessageBody: combined,
+			MessageBody: body,
 		}, promptMessages)
-
 		return &bridgev2.MatrixMessageResponse{
 			DB:      dbMsg,
 			Pending: isPending,
 		}, nil
 	}
 
-	// If model lacks audio but agent supports audio understanding, analyze audio first.
-	if msgType == event.MsgAudio && audioFallback {
-		analysisPrompt := buildAudioUnderstandingPrompt(caption, hasUserCaption)
-		transcript, err := oc.analyzeAudioWithModel(ctx, audioModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
-		if err != nil {
-			oc.log.Warn().Err(err).Msg("Audio understanding failed")
-			oc.sendSystemNotice(ctx, portal, "Audio understanding failed. Please try again or switch to an audio-capable model using /model.")
-			return &bridgev2.MatrixMessageResponse{}, nil
+	var understanding *mediaUnderstandingResult
+	if capability, ok := mediaCapabilityForMessage(msgType); ok {
+		attachments := []mediaAttachment{{
+			Index:         0,
+			URL:           string(mediaURL),
+			MimeType:      mimeType,
+			EncryptedFile: encryptedFile,
+			FileName:      strings.TrimSpace(msg.Content.FileName),
+		}}
+		if result, err := oc.applyMediaUnderstandingForAttachments(ctx, portal, meta, capability, attachments, rawCaption, hasUserCaption); err != nil {
+			oc.log.Warn().Err(err).Msg("Media understanding failed")
+		} else if result != nil {
+			understanding = result
+			if strings.TrimSpace(result.Body) != "" {
+				caption = result.Body
+			}
+		}
+	}
+
+	if !supportsMedia {
+		if understanding != nil && strings.TrimSpace(understanding.Body) != "" {
+			return dispatchTextOnly(understanding.Body)
 		}
 
-		combined := buildAudioUnderstandingMessage(caption, hasUserCaption, transcript)
-		if combined == "" {
-			oc.sendSystemNotice(ctx, portal, "Audio understanding failed. Please try again or switch to an audio-capable model using /model.")
-			return &bridgev2.MatrixMessageResponse{}, nil
+		// If model lacks vision but agent supports image understanding, analyze image first.
+		if msgType == event.MsgImage {
+			visionModel, visionFallback := oc.resolveVisionModelForImage(ctx, meta)
+			if visionFallback && visionModel != "" {
+				analysisPrompt := buildImageUnderstandingPrompt(caption, hasUserCaption)
+				description, err := oc.analyzeImageWithModel(ctx, visionModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
+				if err != nil {
+					oc.log.Warn().Err(err).Msg("Image understanding failed")
+					oc.sendSystemNotice(ctx, portal, "Image understanding failed. Please try again or switch to a vision-capable model using /model.")
+					return &bridgev2.MatrixMessageResponse{}, nil
+				}
+
+				combined := buildImageUnderstandingMessage(caption, hasUserCaption, description)
+				if combined == "" {
+					oc.sendSystemNotice(ctx, portal, "Image understanding failed. Please try again or switch to a vision-capable model using /model.")
+					return &bridgev2.MatrixMessageResponse{}, nil
+				}
+				return dispatchTextOnly(combined)
+			}
 		}
 
-		promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined, eventID)
-		if err != nil {
-			return nil, err
+		// If model lacks audio but agent supports audio understanding, analyze audio first.
+		if msgType == event.MsgAudio {
+			audioModel, audioFallback := oc.resolveAudioModelForInput(ctx, meta)
+			if audioFallback && audioModel != "" {
+				analysisPrompt := buildAudioUnderstandingPrompt(caption, hasUserCaption)
+				transcript, err := oc.analyzeAudioWithModel(ctx, audioModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
+				if err != nil {
+					oc.log.Warn().Err(err).Msg("Audio understanding failed")
+					oc.sendSystemNotice(ctx, portal, "Audio understanding failed. Please try again or switch to an audio-capable model using /model.")
+					return &bridgev2.MatrixMessageResponse{}, nil
+				}
+
+				combined := buildAudioUnderstandingMessage(caption, hasUserCaption, transcript)
+				if combined == "" {
+					oc.sendSystemNotice(ctx, portal, "Audio understanding failed. Please try again or switch to an audio-capable model using /model.")
+					return &bridgev2.MatrixMessageResponse{}, nil
+				}
+				return dispatchTextOnly(combined)
+			}
 		}
 
-		userMessage := &database.Message{
-			ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
-			MXID:     eventID,
-			Room:     portal.PortalKey,
-			SenderID: humanUserID(oc.UserLogin.ID),
-			Metadata: &MessageMetadata{
-				Role: "user",
-				Body: combined,
-			},
-			Timestamp: time.Now(),
-		}
-
-		dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
-			Event:       msg.Event,
-			Portal:      portal,
-			Meta:        meta,
-			Type:        pendingTypeText,
-			MessageBody: combined,
-		}, promptMessages)
-
-		return &bridgev2.MatrixMessageResponse{
-			DB:      dbMsg,
-			Pending: isPending,
-		}, nil
+		oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
+			"The current model (%s) does not support %s. Please switch to a capable model using /model.",
+			oc.effectiveModel(meta), config.capabilityName,
+		))
+		return &bridgev2.MatrixMessageResponse{}, nil
 	}
 
 	// Build prompt with media
@@ -561,15 +546,22 @@ func (oc *AIClient) handleMediaMessage(
 		return nil, err
 	}
 
+	userMeta := &MessageMetadata{
+		Role: "user",
+		Body: buildMediaMetadataBody(caption, config.bodySuffix, understanding),
+	}
+	if understanding != nil {
+		userMeta.MediaUnderstanding = understanding.Outputs
+		userMeta.MediaUnderstandingDecisions = understanding.Decisions
+		userMeta.Transcript = understanding.Transcript
+	}
+
 	userMessage := &database.Message{
-		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
-		MXID:     eventID,
-		Room:     portal.PortalKey,
-		SenderID: humanUserID(oc.UserLogin.ID),
-		Metadata: &MessageMetadata{
-			Role: "user",
-			Body: caption + config.bodySuffix,
-		},
+		ID:        networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
+		MXID:      eventID,
+		Room:      portal.PortalKey,
+		SenderID:  humanUserID(oc.UserLogin.ID),
+		Metadata:  userMeta,
 		Timestamp: time.Now(),
 	}
 

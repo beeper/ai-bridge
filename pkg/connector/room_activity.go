@@ -2,6 +2,7 @@ package connector
 
 import "maunium.net/go/mautrix/id"
 
+//lint:ignore U1000 Reserved for future UI/state integration.
 func (oc *AIClient) isRoomBusy(roomID id.RoomID) bool {
 	if oc == nil {
 		return false

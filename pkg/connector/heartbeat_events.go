@@ -11,15 +11,15 @@ const (
 )
 
 type HeartbeatEventPayload struct {
-	TS           int64                  `json:"ts"`
-	Status       string                 `json:"status"`
-	To           string                 `json:"to,omitempty"`
-	Preview      string                 `json:"preview,omitempty"`
-	DurationMs   int64                  `json:"durationMs,omitempty"`
-	HasMedia     bool                   `json:"hasMedia,omitempty"`
-	Reason       string                 `json:"reason,omitempty"`
-	Channel      string                 `json:"channel,omitempty"`
-	Silent       bool                   `json:"silent,omitempty"`
+	TS            int64                   `json:"ts"`
+	Status        string                  `json:"status"`
+	To            string                  `json:"to,omitempty"`
+	Preview       string                  `json:"preview,omitempty"`
+	DurationMs    int64                   `json:"durationMs,omitempty"`
+	HasMedia      bool                    `json:"hasMedia,omitempty"`
+	Reason        string                  `json:"reason,omitempty"`
+	Channel       string                  `json:"channel,omitempty"`
+	Silent        bool                    `json:"silent,omitempty"`
 	IndicatorType *HeartbeatIndicatorType `json:"indicatorType,omitempty"`
 }
 
@@ -40,10 +40,10 @@ func resolveIndicatorType(status string) *HeartbeatIndicatorType {
 }
 
 var heartbeatEvents struct {
-	mu       sync.Mutex
-	last     *HeartbeatEventPayload
+	mu        sync.Mutex
+	last      *HeartbeatEventPayload
 	listeners map[int]func(*HeartbeatEventPayload)
-	nextID   int
+	nextID    int
 }
 
 func emitHeartbeatEvent(evt *HeartbeatEventPayload) {
@@ -65,6 +65,7 @@ func emitHeartbeatEvent(evt *HeartbeatEventPayload) {
 	}
 }
 
+//lint:ignore U1000 OpenClaw parity: expose heartbeat event subscription for UI integrations.
 func onHeartbeatEvent(listener func(*HeartbeatEventPayload)) func() {
 	if listener == nil {
 		return func() {}
@@ -84,6 +85,7 @@ func onHeartbeatEvent(listener func(*HeartbeatEventPayload)) func() {
 	}
 }
 
+//lint:ignore U1000 OpenClaw parity: expose last heartbeat snapshot for status panels.
 func getLastHeartbeatEvent() *HeartbeatEventPayload {
 	heartbeatEvents.mu.Lock()
 	defer heartbeatEvents.mu.Unlock()

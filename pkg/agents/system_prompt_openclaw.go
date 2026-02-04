@@ -82,9 +82,7 @@ func buildUserIdentitySection(ownerLine string, supplement string, isMinimal boo
 		lines = append(lines, ownerLine)
 	}
 	if supplement != "" {
-		for _, line := range strings.Split(supplement, "\n") {
-			lines = append(lines, line)
-		}
+		lines = append(lines, strings.Split(supplement, "\n")...)
 	}
 	lines = append(lines, "")
 	return lines

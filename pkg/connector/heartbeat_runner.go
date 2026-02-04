@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -82,13 +81,11 @@ func (r *HeartbeatRunner) updateConfig(cfg *Config) {
 	now := time.Now().UnixMilli()
 	prev := r.agents
 	next := make(map[string]*heartbeatAgentState)
-	intervals := make([]int64, 0)
 	for _, agent := range resolveHeartbeatAgents(cfg) {
 		intervalMs := resolveHeartbeatIntervalMs(cfg, "", agent.heartbeat)
 		if intervalMs <= 0 {
 			continue
 		}
-		intervals = append(intervals, intervalMs)
 		prevState := prev[agent.agentID]
 		nextDue := now + intervalMs
 		lastRun := int64(0)
@@ -250,12 +247,22 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "empty-heartbeat-file"}
 	}
 
-	deliveryPortal, deliveryRoom, deliveryReason := oc.resolveHeartbeatDeliveryPortal(agentID, heartbeat)
+	sessionResolution := oc.resolveHeartbeatSession(agentID, heartbeat)
+	storeKey := strings.TrimSpace(sessionResolution.SessionKey)
+	entry := sessionResolution.Entry
+	prevUpdatedAt := int64(0)
+	if entry != nil {
+		prevUpdatedAt = entry.UpdatedAt
+	}
+
+	delivery := oc.resolveHeartbeatDeliveryTarget(agentID, heartbeat, entry)
+	deliveryPortal := delivery.Portal
+	deliveryRoom := delivery.RoomID
+	deliveryReason := delivery.Reason
+	channel := delivery.Channel
 	visibility := defaultHeartbeatVisibility
-	channel := ""
-	if deliveryPortal != nil && deliveryRoom != "" {
-		channel = "matrix"
-		visibility = resolveHeartbeatVisibility(cfg, "matrix")
+	if channel != "" {
+		visibility = resolveHeartbeatVisibility(cfg, channel)
 	}
 	if !visibility.ShowAlerts && !visibility.ShowOk && !visibility.UseIndicator {
 		emitHeartbeatEvent(&HeartbeatEventPayload{
@@ -265,21 +272,6 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 			Channel: channel,
 		})
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "alerts-disabled"}
-	}
-	suppressSend := deliveryPortal == nil || deliveryRoom == ""
-	hbCfg := &HeartbeatRunConfig{
-		Reason:           reason,
-		AckMaxChars:      resolveHeartbeatAckMaxChars(cfg, heartbeat),
-		ShowOk:           visibility.ShowOk,
-		ShowAlerts:       visibility.ShowAlerts,
-		UseIndicator:     visibility.UseIndicator,
-		IncludeReasoning: heartbeat != nil && heartbeat.IncludeReasoning != nil && *heartbeat.IncludeReasoning,
-		TargetRoom:       deliveryRoom,
-		TargetReason:     deliveryReason,
-		SuppressSend:     suppressSend,
-		AgentID:          agentID,
-		Channel:          channel,
-		SuppressSave:     true,
 	}
 	var agentDef *agents.AgentDefinition
 	store := NewAgentStoreAdapter(oc)
@@ -296,6 +288,37 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 			}
 		}
 	}
+	suppressSend := true
+	promptMeta := clonePortalMetadata(portalMeta(sessionPortal))
+	if promptMeta == nil {
+		promptMeta = &PortalMetadata{}
+	}
+	if heartbeat != nil && heartbeat.Model != nil {
+		if model := strings.TrimSpace(*heartbeat.Model); model != "" {
+			promptMeta.Model = model
+		}
+	}
+	responsePrefix := resolveResponsePrefixForHeartbeat(oc, cfg, agentID, promptMeta)
+	hbCfg := &HeartbeatRunConfig{
+		Reason:           reason,
+		AckMaxChars:      resolveHeartbeatAckMaxChars(cfg, heartbeat),
+		ShowOk:           visibility.ShowOk,
+		ShowAlerts:       visibility.ShowAlerts,
+		UseIndicator:     visibility.UseIndicator,
+		IncludeReasoning: heartbeat != nil && heartbeat.IncludeReasoning != nil && *heartbeat.IncludeReasoning,
+		ExecEvent:        hasExecCompletion,
+		ResponsePrefix:   responsePrefix,
+		SessionKey:       storeKey,
+		StoreAgentID:     sessionResolution.StoreRef.AgentID,
+		StorePath:        sessionResolution.StoreRef.Path,
+		PrevUpdatedAt:    prevUpdatedAt,
+		TargetRoom:       deliveryRoom,
+		TargetReason:     deliveryReason,
+		SuppressSend:     suppressSend,
+		AgentID:          agentID,
+		Channel:          channel,
+		SuppressSave:     true,
+	}
 	prompt := resolveHeartbeatPrompt(cfg, heartbeat, agentDef)
 	if hasExecCompletion {
 		prompt = execEventPrompt
@@ -305,7 +328,6 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		prompt = systemEvents + "\n\n" + prompt
 	}
 
-	promptMeta := portalMeta(sessionPortal)
 	promptMessages, err := oc.buildPromptWithHeartbeat(context.Background(), sessionPortal, promptMeta, prompt)
 	if err != nil {
 		return cron.HeartbeatRunResult{Status: "failed", Reason: err.Error()}
@@ -343,12 +365,6 @@ func (oc *AIClient) buildPromptWithHeartbeat(ctx context.Context, portal *bridge
 	return append(base, openai.UserMessage(message)), nil
 }
 
-var (
-	errHeartbeatNoTarget       = errors.New("heartbeat target disabled")
-	errHeartbeatTargetNotFound = errors.New("heartbeat target not found")
-	errHeartbeatNoSession      = errors.New("heartbeat session not available")
-)
-
 func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, string, error) {
 	session := ""
 	if heartbeat != nil {
@@ -356,18 +372,24 @@ func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *Hea
 			session = strings.TrimSpace(*heartbeat.Session)
 		}
 	}
+	mainKey := ""
+	if oc != nil && oc.connector != nil && oc.connector.Config.Session != nil {
+		mainKey = strings.TrimSpace(oc.connector.Config.Session.MainKey)
+	}
 	if session == "" {
-		portal := oc.lastActivePortal(agentID)
-		if portal != nil {
+		if portal := oc.defaultChatPortal(); portal != nil {
 			return portal, portal.MXID.String(), nil
 		}
-		if portal = oc.defaultChatPortal(); portal != nil {
+		if portal := oc.lastActivePortal(agentID); portal != nil {
 			return portal, portal.MXID.String(), nil
 		}
 		return nil, "", fmt.Errorf("no session")
 	}
-	if strings.EqualFold(session, "main") {
+	if strings.EqualFold(session, "main") || strings.EqualFold(session, "global") || (mainKey != "" && strings.EqualFold(session, mainKey)) {
 		if portal := oc.defaultChatPortal(); portal != nil {
+			return portal, portal.MXID.String(), nil
+		}
+		if portal := oc.lastActivePortal(agentID); portal != nil {
 			return portal, portal.MXID.String(), nil
 		}
 	}
@@ -376,73 +398,13 @@ func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *Hea
 			return portal, portal.MXID.String(), nil
 		}
 	}
+	if portal := oc.defaultChatPortal(); portal != nil {
+		return portal, portal.MXID.String(), nil
+	}
 	if portal := oc.lastActivePortal(agentID); portal != nil {
 		return portal, portal.MXID.String(), nil
 	}
 	return nil, "", fmt.Errorf("no session")
-}
-
-func (oc *AIClient) resolveHeartbeatPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, string, error) {
-	if oc == nil || oc.UserLogin == nil {
-		return nil, "", errHeartbeatNoSession
-	}
-	cfg := &oc.connector.Config
-	target := resolveHeartbeatTarget(cfg, heartbeat)
-	if strings.EqualFold(strings.TrimSpace(target), "none") {
-		return nil, "", errHeartbeatNoTarget
-	}
-	if heartbeat != nil {
-		if heartbeat.To != nil && strings.TrimSpace(*heartbeat.To) != "" {
-			room := strings.TrimSpace(*heartbeat.To)
-			if strings.HasPrefix(room, "!") {
-				if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(room)); err == nil && portal != nil {
-					return portal, portal.MXID.String(), nil
-				}
-			}
-			return nil, "", errHeartbeatTargetNotFound
-		}
-	}
-	trimmedTarget := strings.TrimSpace(target)
-	if trimmedTarget != "" && !strings.EqualFold(trimmedTarget, "last") {
-		if strings.HasPrefix(trimmedTarget, "!") {
-			if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(trimmedTarget)); err == nil && portal != nil {
-				return portal, portal.MXID.String(), nil
-			}
-		}
-		return nil, "", errHeartbeatTargetNotFound
-	}
-	portal, key, err := oc.resolveHeartbeatSessionPortal(agentID, heartbeat)
-	if err != nil || portal == nil || portal.MXID == "" {
-		return nil, "", errHeartbeatNoSession
-	}
-	return portal, key, nil
-}
-
-func (oc *AIClient) resolveHeartbeatDeliveryPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, id.RoomID, string) {
-	if heartbeat != nil {
-		if heartbeat.Target != nil && strings.TrimSpace(*heartbeat.Target) == "none" {
-			return nil, "", "target-none"
-		}
-		if heartbeat.To != nil && strings.TrimSpace(*heartbeat.To) != "" {
-			if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(strings.TrimSpace(*heartbeat.To))); err == nil && portal != nil {
-				return portal, portal.MXID, ""
-			}
-			return nil, "", "no-target"
-		}
-		if heartbeat.Target != nil && strings.TrimSpace(*heartbeat.Target) != "" && strings.ToLower(strings.TrimSpace(*heartbeat.Target)) != "last" {
-			target := strings.TrimSpace(*heartbeat.Target)
-			if strings.HasPrefix(target, "!") {
-				if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(target)); err == nil && portal != nil {
-					return portal, portal.MXID, ""
-				}
-			}
-			return nil, "", "no-target"
-		}
-	}
-	if portal := oc.lastActivePortal(agentID); portal != nil {
-		return portal, portal.MXID, ""
-	}
-	return nil, "", "no-target"
 }
 
 func (oc *AIClient) shouldRunHeartbeatForFile(agentID string, reason string) bool {
@@ -534,15 +496,51 @@ func formatSystemEvents(events []SystemEvent) string {
 	}
 	lines := make([]string, 0, len(events))
 	for _, evt := range events {
-		text := strings.TrimSpace(evt.Text)
+		text := compactSystemEvent(evt.Text)
 		if text == "" {
 			continue
 		}
-		ts := time.UnixMilli(evt.TS).UTC().Format(time.RFC3339)
+		ts := formatSystemEventTimestamp(evt.TS)
 		lines = append(lines, fmt.Sprintf("System: [%s] %s", ts, text))
 	}
 	if len(lines) == 0 {
 		return ""
 	}
 	return strings.Join(lines, "\n")
+}
+
+var nodeLastInputRe = regexp.MustCompile(`(?i)\s*·\s*last input [^·]+`)
+
+func compactSystemEvent(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return ""
+	}
+	lowered := strings.ToLower(trimmed)
+	if strings.Contains(lowered, "reason periodic") {
+		return ""
+	}
+	// Filter out the actual heartbeat prompt, but not cron jobs that mention "heartbeat".
+	if strings.HasPrefix(lowered, "read heartbeat.md") {
+		return ""
+	}
+	// Filter heartbeat poll/wake noise.
+	if strings.Contains(lowered, "heartbeat poll") || strings.Contains(lowered, "heartbeat wake") {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "Node:") {
+		trimmed = strings.TrimSpace(nodeLastInputRe.ReplaceAllString(trimmed, ""))
+	}
+	return trimmed
+}
+
+func formatSystemEventTimestamp(ts int64) string {
+	if ts <= 0 {
+		return "unknown-time"
+	}
+	date := time.UnixMilli(ts).In(time.Local)
+	if date.IsZero() {
+		return "unknown-time"
+	}
+	return date.Format("2006-01-02 15:04:05 MST")
 }

@@ -1,3 +1,4 @@
+//lint:file-ignore U1000 Tool execution event helpers are staged for future use.
 package connector
 
 import (

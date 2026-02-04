@@ -439,7 +439,7 @@ func (oc *AIClient) streamingResponse(
 	// Create typing controller with TTL and automatic refresh
 	var typingCtrl *TypingController
 	touchTyping := func() {}
-	if !state.suppressSend {
+	if !state.suppressSend && state.heartbeat == nil {
 		typingCtrl = NewTypingController(oc, ctx, portal)
 		typingCtrl.Start()
 		defer typingCtrl.Stop()
@@ -759,7 +759,7 @@ func (oc *AIClient) streamingResponse(
 			// Update status back to generating
 			oc.emitStatusEvent(ctx, portal, state, "generating", "Continuing generation...", nil)
 
-		case "response.web_search_call.searching":
+		case "response.web_search_call.searching", "response.web_search_call.in_progress":
 			touchTyping()
 			// Web search starting
 			callID := streamEvent.ItemID
@@ -958,8 +958,8 @@ func (oc *AIClient) streamingResponse(
 			}
 
 			oc.emitStreamEvent(ctx, portal, state, StreamEventSourceResponses, "complete", map[string]any{
-				"response_id":  state.responseID,
-				"usage":        streamEvent.Response.Usage,
+				"response_id":   state.responseID,
+				"usage":         streamEvent.Response.Usage,
 				"finish_reason": state.finishReason,
 			}, rawPayload)
 
@@ -1085,6 +1085,12 @@ func (oc *AIClient) streamingResponse(
 					}
 				}
 				oc.emitStreamEvent(ctx, portal, state, StreamEventSourceResponses, "reasoning_delta", map[string]any{
+					"text": streamEvent.Delta,
+				}, rawPayload)
+
+			case "response.refusal.delta":
+				touchTyping()
+				oc.emitStreamEvent(ctx, portal, state, StreamEventSourceResponses, "refusal_delta", map[string]any{
 					"text": streamEvent.Delta,
 				}, rawPayload)
 
@@ -1304,8 +1310,8 @@ func (oc *AIClient) streamingResponse(
 					state.responseID = streamEvent.Response.ID
 				}
 				oc.emitStreamEvent(ctx, portal, state, StreamEventSourceResponses, "complete", map[string]any{
-					"response_id":  state.responseID,
-					"usage":        streamEvent.Response.Usage,
+					"response_id":   state.responseID,
+					"usage":         streamEvent.Response.Usage,
 					"finish_reason": state.finishReason,
 				}, rawPayload)
 				log.Debug().Str("reason", state.finishReason).Str("response_id", state.responseID).Msg("Continuation stream completed")
@@ -1331,10 +1337,10 @@ func (oc *AIClient) streamingResponse(
 		typingCtrl.MarkRunComplete()
 	}
 
-	// Send final edit to persist complete content with metadata (including reasoning)
-	if state.initialEventID != "" {
+	// Send final message to persist complete content with metadata (including reasoning)
+	if state.initialEventID != "" || state.heartbeat != nil {
 		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
-		if !state.suppressSave {
+		if state.initialEventID != "" && !state.suppressSave {
 			oc.saveAssistantMessage(ctx, log, portal, state, meta)
 		}
 	}
@@ -1495,7 +1501,7 @@ func (oc *AIClient) streamChatCompletions(
 	// Create typing controller with TTL and automatic refresh
 	var typingCtrl *TypingController
 	touchTyping := func() {}
-	if !state.suppressSend {
+	if !state.suppressSend && state.heartbeat == nil {
 		typingCtrl = NewTypingController(oc, ctx, portal)
 		typingCtrl.Start()
 		defer typingCtrl.Stop()
@@ -1565,6 +1571,7 @@ func (oc *AIClient) streamChatCompletions(
 	for stream.Next() {
 		chunk := stream.Current()
 		rawPayload := &StreamEventRawPayload{Type: string(chunk.Object), JSON: chunk.RawJSON()}
+		emitted := false
 
 		if chunk.Usage.TotalTokens > 0 || chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 {
 			state.promptTokens = chunk.Usage.PromptTokens
@@ -1594,6 +1601,7 @@ func (oc *AIClient) streamChatCompletions(
 				oc.emitStreamEvent(ctx, portal, state, StreamEventSourceChatCompletions, "text_delta", map[string]any{
 					"text": choice.Delta.Content,
 				}, rawPayload)
+				emitted = true
 			}
 
 			if choice.Delta.Refusal != "" {
@@ -1601,6 +1609,7 @@ func (oc *AIClient) streamChatCompletions(
 				oc.emitStreamEvent(ctx, portal, state, StreamEventSourceChatCompletions, "refusal_delta", map[string]any{
 					"text": choice.Delta.Refusal,
 				}, rawPayload)
+				emitted = true
 			}
 
 			// Handle tool calls from Chat Completions API
@@ -1650,6 +1659,7 @@ func (oc *AIClient) streamChatCompletions(
 						"arguments_delta": toolDelta.Function.Arguments,
 						"call_id":         tool.callID,
 					}, rawPayload)
+					emitted = true
 				}
 			}
 
@@ -1673,6 +1683,7 @@ func (oc *AIClient) streamChatCompletions(
 					oc.emitStreamEvent(ctx, portal, state, StreamEventSourceChatCompletions, "tool_call_done", map[string]any{
 						"calls": calls,
 					}, rawPayload)
+					emitted = true
 				}
 			}
 		}
@@ -1682,6 +1693,11 @@ func (oc *AIClient) streamChatCompletions(
 				"usage":         chunk.Usage,
 				"finish_reason": state.finishReason,
 			}, rawPayload)
+			emitted = true
+		}
+
+		if !emitted {
+			oc.emitStreamEvent(ctx, portal, state, StreamEventSourceChatCompletions, "raw_only", nil, rawPayload)
 		}
 	}
 

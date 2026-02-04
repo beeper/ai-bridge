@@ -124,6 +124,37 @@ network:
       max_chars: 50000
       max_redirects: 3
 
+    # Media understanding/transcription (OpenClaw-style).
+    media:
+      concurrency: 2
+      image:
+        enabled: true
+        prompt: "Describe the image."
+        maxBytes: 10485760
+        maxChars: 500
+        timeoutSeconds: 60
+        models:
+          - provider: "openrouter"
+            model: "google/gemini-3-flash-preview"
+      audio:
+        enabled: true
+        prompt: "Transcribe the audio."
+        language: ""
+        # CLI transcription auto-detection (whisper/whisper.cpp) is not implemented yet.
+        maxBytes: 20971520
+        timeoutSeconds: 60
+        models:
+          - provider: "openai"
+            model: "gpt-4o-mini-transcribe"
+      video:
+        enabled: true
+        prompt: "Describe the video."
+        maxBytes: 52428800
+        timeoutSeconds: 120
+        models:
+          - provider: "openrouter"
+            model: "google/gemini-3-flash-preview"
+
   # Memory search configuration (OpenClaw-style).
   # Indexes MEMORY.md + memory/*.md stored in the bridge DB.
   # Per-agent overrides can be set via agent definitions.

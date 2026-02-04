@@ -3,8 +3,6 @@ package connector
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -61,7 +59,9 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 				"error":  err.Error(),
 			}).Text(), nil
 		}
-		return agenttools.JSONResult(jobs).Text(), nil
+		return agenttools.JSONResult(map[string]any{
+			"jobs": jobs,
+		}).Text(), nil
 	case "add":
 		normalizedArgs := coerceCronArgs(args)
 		jobInput, err := cron.NormalizeCronJobCreateRaw(normalizedArgs)
@@ -432,26 +432,30 @@ func (oc *AIClient) readCronRuns(jobID string, limit int) ([]cron.CronRunLogEntr
 	if err != nil {
 		return nil, err
 	}
+	backend := oc.cronStoreBackend()
+	if backend == nil {
+		return nil, fmt.Errorf("cron store not available")
+	}
 	trimmed := strings.TrimSpace(jobID)
 	if trimmed != "" {
 		path := cron.ResolveCronRunLogPath(storePath, trimmed)
-		return cron.ReadCronRunLogEntries(path, limit, trimmed)
+		return cron.ReadCronRunLogEntries(context.Background(), backend, path, limit, trimmed)
 	}
-	runDir := filepath.Join(filepath.Dir(storePath), "runs")
 	entries := make([]cron.CronRunLogEntry, 0)
-	files, err := os.ReadDir(runDir)
+	store, err := oc.cronTextFSStore()
+	if err != nil {
+		return entries, nil
+	}
+	runDir := cron.ResolveCronRunLogDir(storePath)
+	files, err := store.ListWithPrefix(context.Background(), runDir)
 	if err != nil {
 		return entries, nil
 	}
 	for _, file := range files {
-		if file.IsDir() {
+		if !strings.HasSuffix(strings.ToLower(file.Path), ".jsonl") {
 			continue
 		}
-		if !strings.HasSuffix(strings.ToLower(file.Name()), ".jsonl") {
-			continue
-		}
-		path := filepath.Join(runDir, file.Name())
-		list, _ := cron.ReadCronRunLogEntries(path, limit, "")
+		list := cron.ParseCronRunLogEntries(file.Content, limit, "")
 		if len(list) > 0 {
 			entries = append(entries, list...)
 		}

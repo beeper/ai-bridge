@@ -70,8 +70,8 @@ var StreamDeltaEventType = event.Type{
 	Class: event.MessageEventType,
 }
 
-// StreamEventEventType is the unified event type for AI streaming updates
-var StreamEventEventType = event.Type{
+// StreamEventMessageType is the unified event type for AI streaming updates
+var StreamEventMessageType = event.Type{
 	Type:  "com.beeper.ai.stream_event",
 	Class: event.MessageEventType,
 }
@@ -685,6 +685,7 @@ type ModelInfo struct {
 	ID                  string   `json:"id"`
 	Name                string   `json:"name"`
 	Provider            string   `json:"provider"`
+	API                 string   `json:"api,omitempty"`
 	Description         string   `json:"description,omitempty"`
 	SupportsVision      bool     `json:"supports_vision"`
 	SupportsToolCalling bool     `json:"supports_tool_calling"`

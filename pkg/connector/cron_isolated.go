@@ -9,6 +9,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 
+	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/cron"
 )
 
@@ -17,7 +18,7 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 		return "error", "", "", fmt.Errorf("missing client")
 	}
 	ctx := oc.backgroundContext(context.Background())
-	agentID := resolveCronAgentID(job.AgentID)
+	agentID := resolveCronAgentID(job.AgentID, &oc.connector.Config)
 	portal, err := oc.getOrCreateCronRoom(ctx, agentID, job.ID, job.Name)
 	if err != nil {
 		return "error", "", "", err
@@ -49,10 +50,22 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 		timeoutMs = int64(*job.Payload.TimeoutSeconds) * 1000
 	}
 
+	sessionKey := cronSessionKey(agentID, job.ID)
+	runID := newCronSessionID()
+	oc.updateCronSessionEntry(ctx, sessionKey, func(entry cronSessionEntry) cronSessionEntry {
+		entry.SessionID = runID
+		entry.UpdatedAt = cronSessionUpdatedAt()
+		return entry
+	})
+
+	userTimezone, _ := oc.resolveUserTimezone()
+	cronMessage := buildCronMessage(job.ID, job.Name, message, userTimezone)
+
 	// Capture last assistant message before dispatch.
 	lastID, lastTimestamp := oc.lastAssistantMessageInfo(ctx, portal)
 
-	eventID, _, dispatchErr := oc.dispatchInternalMessage(ctx, portal, metaSnapshot, message, "cron", false)
+	var toolCalls []ToolCallMetadata
+	eventID, _, dispatchErr := oc.dispatchInternalMessage(ctx, portal, metaSnapshot, cronMessage, "cron", false)
 	if dispatchErr != nil {
 		return "error", "", "", dispatchErr
 	}
@@ -66,15 +79,66 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 			if msg != nil {
 				if meta := messageMeta(msg); meta != nil {
 					body = strings.TrimSpace(meta.Body)
+					toolCalls = meta.ToolCalls
+					oc.updateCronSessionEntry(ctx, sessionKey, func(entry cronSessionEntry) cronSessionEntry {
+						entry.Model = strings.TrimSpace(meta.Model)
+						entry.PromptTokens = meta.PromptTokens
+						entry.CompletionTokens = meta.CompletionTokens
+						total := meta.PromptTokens + meta.CompletionTokens
+						if total > 0 {
+							entry.TotalTokens = total
+						}
+						entry.UpdatedAt = cronSessionUpdatedAt()
+						return entry
+					})
 				}
 			}
 			outputText = body
 			summary = truncateTextForCronSummary(body)
-			return "ok", summary, outputText, nil
+			break
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	return "error", "", "", fmt.Errorf("cron job timed out")
+	if outputText == "" {
+		return "error", "", "", fmt.Errorf("cron job timed out")
+	}
+
+	payload := job.Payload
+	deliveryMode := "off"
+	if payload.Deliver != nil {
+		if *payload.Deliver {
+			deliveryMode = "explicit"
+		} else {
+			deliveryMode = "off"
+		}
+	} else if strings.TrimSpace(payload.To) != "" {
+		deliveryMode = "auto"
+	}
+	deliveryRequested := deliveryMode == "explicit" || deliveryMode == "auto"
+	bestEffort := payload.BestEffortDeliver != nil && *payload.BestEffortDeliver
+
+	ackMax := resolveHeartbeatAckMaxChars(&oc.connector.Config, resolveHeartbeatConfig(&oc.connector.Config, agentID))
+	skipHeartbeatDelivery := deliveryRequested && isHeartbeatOnlyText(outputText, ackMax)
+
+	if deliveryRequested && !skipHeartbeatDelivery {
+		target := oc.resolveCronDeliveryTarget(agentID, payload)
+		if target.Portal == nil || target.RoomID == "" {
+			reason := strings.TrimSpace(target.Reason)
+			if reason == "" {
+				reason = "no-target"
+			}
+			if bestEffort {
+				return "skipped", fmt.Sprintf("Delivery skipped (%s).", reason), outputText, nil
+			}
+			return "error", summary, outputText, fmt.Errorf("cron delivery failed: %s", reason)
+		}
+		skipMessagingTool := deliveryMode == "auto" && hasMessagingToolDelivery(toolCalls, payload, target)
+		if strings.TrimSpace(outputText) != "" && !skipMessagingTool {
+			oc.sendPlainAssistantMessage(ctx, target.Portal, outputText)
+		}
+	}
+
+	return "ok", summary, outputText, nil
 }
 
 func (oc *AIClient) lastAssistantMessageInfo(ctx context.Context, portal *bridgev2.Portal) (string, int64) {
@@ -125,9 +189,49 @@ func truncateTextForCronSummary(text string) string {
 	if trimmed == "" {
 		return ""
 	}
-	const max = 200
+	const max = 2000
 	if len(trimmed) <= max {
 		return trimmed
 	}
 	return strings.TrimSpace(trimmed[:max]) + "…"
+}
+
+func isHeartbeatOnlyText(text string, ackMax int) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return true
+	}
+	shouldSkip, stripped, _ := agents.StripHeartbeatTokenWithMode(trimmed, agents.StripHeartbeatModeHeartbeat, ackMax)
+	if shouldSkip && strings.TrimSpace(stripped) == "" {
+		return true
+	}
+	return false
+}
+
+func hasMessagingToolDelivery(calls []ToolCallMetadata, payload cron.CronPayload, target cronDeliveryTarget) bool {
+	if len(calls) == 0 {
+		return false
+	}
+	desiredTo := strings.TrimSpace(payload.To)
+	if desiredTo == "" && target.RoomID != "" {
+		desiredTo = target.RoomID.String()
+	}
+	for _, call := range calls {
+		name := strings.ToLower(strings.TrimSpace(call.ToolName))
+		if name != "message" && !strings.HasPrefix(name, "message.") {
+			continue
+		}
+		rawTo, ok := call.Input["to"]
+		if !ok {
+			continue
+		}
+		to, ok := rawTo.(string)
+		if !ok {
+			continue
+		}
+		if desiredTo != "" && strings.TrimSpace(to) == desiredTo {
+			return true
+		}
+	}
+	return false
 }

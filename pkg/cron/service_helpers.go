@@ -1,27 +1,25 @@
 package cron
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 const stuckRunMs int64 = 2 * 60 * 60 * 1000
 
 func createJob(nowMs int64, input CronJobCreate) (CronJob, error) {
-	name := input.Name
-	if strings.TrimSpace(name) == "" {
-		name = inferLegacyName(&input)
-	}
-	normalizedName, err := normalizeRequiredName(name)
+	normalizedName, err := normalizeRequiredName(input.Name)
 	if err != nil {
 		return CronJob{}, err
 	}
-	enabled := true
+	enabled := false
 	if input.Enabled != nil {
 		enabled = *input.Enabled
+	} else {
+		enabled = true
 	}
 	deleteAfter := false
 	if input.DeleteAfterRun != nil {
@@ -188,16 +186,16 @@ func buildPayloadFromPatch(patch CronPayloadPatch) CronPayload {
 		panic("cron.update payload.kind=agentTurn requires message")
 	}
 	return CronPayload{
-		Kind:              "agentTurn",
-		Message:           msg,
-		Model:             derefString(patch.Model),
-		Thinking:          derefString(patch.Thinking),
-		TimeoutSeconds:    patch.TimeoutSeconds,
+		Kind:                "agentTurn",
+		Message:             msg,
+		Model:               derefString(patch.Model),
+		Thinking:            derefString(patch.Thinking),
+		TimeoutSeconds:      patch.TimeoutSeconds,
 		AllowUnsafeExternal: patch.AllowUnsafeExternal,
-		Deliver:           patch.Deliver,
-		Channel:           derefString(patch.Channel),
-		To:                derefString(patch.To),
-		BestEffortDeliver: patch.BestEffortDeliver,
+		Deliver:             patch.Deliver,
+		Channel:             derefString(patch.Channel),
+		To:                  derefString(patch.To),
+		BestEffortDeliver:   patch.BestEffortDeliver,
 	}
 }
 
@@ -304,9 +302,7 @@ func sortJobs(jobs []CronJob) {
 }
 
 func randomID() string {
-	buf := make([]byte, 16)
-	_, _ = rand.Read(buf)
-	return hex.EncodeToString(buf)
+	return uuid.NewString()
 }
 
 // helpers defined in normalize.go and utils.go

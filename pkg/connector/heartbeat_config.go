@@ -6,10 +6,6 @@ import (
 	"github.com/beeper/ai-bridge/pkg/agents"
 )
 
-const (
-	defaultHeartbeatTarget = "last"
-)
-
 func hasExplicitHeartbeatAgents(cfg *Config) bool {
 	if cfg == nil || cfg.Agents == nil {
 		return false
@@ -158,18 +154,4 @@ func resolveHeartbeatAckMaxChars(cfg *Config, heartbeat *HeartbeatConfig) int {
 		return *cfg.Agents.Defaults.Heartbeat.AckMaxChars
 	}
 	return agents.DefaultMaxAckChars
-}
-
-func resolveHeartbeatTarget(cfg *Config, heartbeat *HeartbeatConfig) string {
-	if heartbeat != nil && heartbeat.Target != nil {
-		if trimmed := strings.TrimSpace(*heartbeat.Target); trimmed != "" {
-			return trimmed
-		}
-	}
-	if cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil && cfg.Agents.Defaults.Heartbeat.Target != nil {
-		if trimmed := strings.TrimSpace(*cfg.Agents.Defaults.Heartbeat.Target); trimmed != "" {
-			return trimmed
-		}
-	}
-	return defaultHeartbeatTarget
 }

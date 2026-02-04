@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/ptr"
@@ -907,6 +908,7 @@ func (oc *AIClient) agentModelOverride(agentID string) string {
 	return strings.TrimSpace(loginMeta.AgentModelOverrides[agentID])
 }
 
+//lint:ignore U1000 Staged for future agent model override wiring.
 func (oc *AIClient) setAgentModelOverride(ctx context.Context, agentID, modelID string) error {
 	if agentID == "" || oc.UserLogin == nil {
 		return fmt.Errorf("missing agent ID")
@@ -1677,6 +1679,26 @@ func (oc *AIClient) buildPromptWithMedia(
 			return nil, fmt.Errorf("failed to download video: %w", err)
 		}
 		dataURL := buildDataURL(actualMimeType, b64Data)
+		if oc.isOpenRouterProvider() {
+			videoPart := param.Override[openai.ChatCompletionContentPartUnionParam](map[string]any{
+				"type": "video_url",
+				"video_url": map[string]any{
+					"url": dataURL,
+				},
+			})
+			userMsg := openai.ChatCompletionMessageParamUnion{
+				OfUser: &openai.ChatCompletionUserMessageParam{
+					Content: openai.ChatCompletionUserMessageParamContentUnion{
+						OfArrayOfContentParts: []openai.ChatCompletionContentPartUnionParam{
+							textContent,
+							videoPart,
+						},
+					},
+				},
+			}
+			prompt = append(prompt, userMsg)
+			return prompt, nil
+		}
 		videoPrompt := fmt.Sprintf("%s\n\nVideo data URL: %s", caption, dataURL)
 		videoPrompt = appendMessageIDHint(videoPrompt, eventID)
 		userMsg := openai.ChatCompletionMessageParamUnion{
