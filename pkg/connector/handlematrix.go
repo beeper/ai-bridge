@@ -43,6 +43,15 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		}
 	}
 
+	// Route OpenCode rooms to the OpenCode handler (no AI tools or prompt building).
+	if meta.IsOpenCodeRoom {
+		if oc.opencodeBridge == nil {
+			oc.sendSystemNotice(ctx, portal, "OpenCode integration is not available.")
+			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+		}
+		return oc.opencodeBridge.HandleMatrixMessage(ctx, msg, portal, oc.PortalMeta(portal))
+	}
+
 	// Send ack reaction if configured (like OpenClaw's ack reactions)
 	// This provides immediate visual feedback before AI processes the message
 	var ackReactionEventID id.EventID
@@ -170,6 +179,9 @@ func (oc *AIClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixE
 		return fmt.Errorf("portal is nil")
 	}
 	meta := portalMeta(portal)
+	if meta != nil && meta.IsOpenCodeRoom {
+		return fmt.Errorf("editing is not supported for OpenCode rooms")
+	}
 
 	// Get the new message body
 	newBody := strings.TrimSpace(edit.Content.Body)

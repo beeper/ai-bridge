@@ -75,7 +75,7 @@ func (oc *AIClient) emitStreamEvent(
 
 	eventContent := &event.Content{Raw: content}
 
-	if _, err := intent.SendMessage(ctx, portal.MXID, StreamEventType, eventContent, nil); err != nil {
+	if _, err := intent.SendMessage(ctx, portal.MXID, StreamEventEventType, eventContent, nil); err != nil {
 		oc.log.Warn().Err(err).
 			Str("kind", kind).
 			Int("seq", seq).
