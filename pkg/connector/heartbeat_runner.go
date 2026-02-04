@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -82,13 +81,11 @@ func (r *HeartbeatRunner) updateConfig(cfg *Config) {
 	now := time.Now().UnixMilli()
 	prev := r.agents
 	next := make(map[string]*heartbeatAgentState)
-	intervals := make([]int64, 0)
 	for _, agent := range resolveHeartbeatAgents(cfg) {
 		intervalMs := resolveHeartbeatIntervalMs(cfg, "", agent.heartbeat)
 		if intervalMs <= 0 {
 			continue
 		}
-		intervals = append(intervals, intervalMs)
 		prevState := prev[agent.agentID]
 		nextDue := now + intervalMs
 		lastRun := int64(0)
@@ -368,12 +365,6 @@ func (oc *AIClient) buildPromptWithHeartbeat(ctx context.Context, portal *bridge
 	return append(base, openai.UserMessage(message)), nil
 }
 
-var (
-	errHeartbeatNoTarget       = errors.New("heartbeat target disabled")
-	errHeartbeatTargetNotFound = errors.New("heartbeat target not found")
-	errHeartbeatNoSession      = errors.New("heartbeat session not available")
-)
-
 func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, string, error) {
 	session := ""
 	if heartbeat != nil {
@@ -414,69 +405,6 @@ func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *Hea
 		return portal, portal.MXID.String(), nil
 	}
 	return nil, "", fmt.Errorf("no session")
-}
-
-func (oc *AIClient) resolveHeartbeatPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, string, error) {
-	if oc == nil || oc.UserLogin == nil {
-		return nil, "", errHeartbeatNoSession
-	}
-	cfg := &oc.connector.Config
-	target := resolveHeartbeatTarget(cfg, heartbeat)
-	if strings.EqualFold(strings.TrimSpace(target), "none") {
-		return nil, "", errHeartbeatNoTarget
-	}
-	if heartbeat != nil {
-		if heartbeat.To != nil && strings.TrimSpace(*heartbeat.To) != "" {
-			room := strings.TrimSpace(*heartbeat.To)
-			if strings.HasPrefix(room, "!") {
-				if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(room)); err == nil && portal != nil {
-					return portal, portal.MXID.String(), nil
-				}
-			}
-			return nil, "", errHeartbeatTargetNotFound
-		}
-	}
-	trimmedTarget := strings.TrimSpace(target)
-	if trimmedTarget != "" && !strings.EqualFold(trimmedTarget, "last") {
-		if strings.HasPrefix(trimmedTarget, "!") {
-			if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(trimmedTarget)); err == nil && portal != nil {
-				return portal, portal.MXID.String(), nil
-			}
-		}
-		return nil, "", errHeartbeatTargetNotFound
-	}
-	portal, key, err := oc.resolveHeartbeatSessionPortal(agentID, heartbeat)
-	if err != nil || portal == nil || portal.MXID == "" {
-		return nil, "", errHeartbeatNoSession
-	}
-	return portal, key, nil
-}
-
-func (oc *AIClient) resolveHeartbeatDeliveryPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, id.RoomID, string) {
-	if heartbeat != nil {
-		if heartbeat.Target != nil && strings.TrimSpace(*heartbeat.Target) == "none" {
-			return nil, "", "target-none"
-		}
-		if heartbeat.To != nil && strings.TrimSpace(*heartbeat.To) != "" {
-			if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(strings.TrimSpace(*heartbeat.To))); err == nil && portal != nil {
-				return portal, portal.MXID, ""
-			}
-			return nil, "", "no-target"
-		}
-		if heartbeat.Target != nil && strings.TrimSpace(*heartbeat.Target) != "" && strings.ToLower(strings.TrimSpace(*heartbeat.Target)) != "last" {
-			target := strings.TrimSpace(*heartbeat.Target)
-			if strings.HasPrefix(target, "!") {
-				if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(target)); err == nil && portal != nil {
-					return portal, portal.MXID, ""
-				}
-			}
-			return nil, "", "no-target"
-		}
-	}
-	if portal := oc.lastActivePortal(agentID); portal != nil {
-		return portal, portal.MXID, ""
-	}
-	return nil, "", "no-target"
 }
 
 func (oc *AIClient) shouldRunHeartbeatForFile(agentID string, reason string) bool {

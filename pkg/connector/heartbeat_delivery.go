@@ -47,14 +47,6 @@ func (oc *AIClient) resolveHeartbeatDeliveryTarget(agentID string, heartbeat *He
 		}
 	}
 
-	if portal := oc.lastActivePortal(agentID); portal != nil {
-		return heartbeatDeliveryTarget{
-			Portal:  portal,
-			RoomID:  portal.MXID,
-			Channel: "matrix",
-		}
-	}
-
 	return heartbeatDeliveryTarget{Reason: "no-target"}
 }
 

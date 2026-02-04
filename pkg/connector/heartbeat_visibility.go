@@ -1,14 +1,14 @@
 package connector
 
 type ResolvedHeartbeatVisibility struct {
-	ShowOk      bool
-	ShowAlerts  bool
+	ShowOk       bool
+	ShowAlerts   bool
 	UseIndicator bool
 }
 
 var defaultHeartbeatVisibility = ResolvedHeartbeatVisibility{
-	ShowOk:      false,
-	ShowAlerts:  true,
+	ShowOk:       false,
+	ShowAlerts:   true,
 	UseIndicator: true,
 }
 
@@ -24,8 +24,8 @@ func resolveHeartbeatVisibility(cfg *Config, channel string) ResolvedHeartbeatVi
 	}
 
 	result := ResolvedHeartbeatVisibility{
-		ShowOk:      defaultHeartbeatVisibility.ShowOk,
-		ShowAlerts:  defaultHeartbeatVisibility.ShowAlerts,
+		ShowOk:       defaultHeartbeatVisibility.ShowOk,
+		ShowAlerts:   defaultHeartbeatVisibility.ShowAlerts,
 		UseIndicator: defaultHeartbeatVisibility.UseIndicator,
 	}
 

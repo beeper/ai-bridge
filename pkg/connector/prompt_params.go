@@ -14,6 +14,7 @@ func resolvePromptRepoRoot(workspaceDir string) string {
 	return ""
 }
 
+//lint:ignore U1000 Reserved for future prompt context wiring.
 func findGitRoot(startDir string) string {
 	current := startDir
 	for i := 0; i < 12; i++ {

@@ -200,6 +200,7 @@ func mergeSessionEntry(existing sessionEntry, patch sessionEntry) sessionEntry {
 	return next
 }
 
+//lint:ignore U1000 Reserved for future session store routing.
 func (oc *AIClient) resolveSessionStoreRef(agentID string) sessionStoreRef {
 	cfg := (*Config)(nil)
 	if oc != nil && oc.connector != nil {

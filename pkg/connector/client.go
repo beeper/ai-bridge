@@ -856,6 +856,7 @@ func (oc *AIClient) agentModelOverride(agentID string) string {
 	return strings.TrimSpace(loginMeta.AgentModelOverrides[agentID])
 }
 
+//lint:ignore U1000 Staged for future agent model override wiring.
 func (oc *AIClient) setAgentModelOverride(ctx context.Context, agentID, modelID string) error {
 	if agentID == "" || oc.UserLogin == nil {
 		return fmt.Errorf("missing agent ID")

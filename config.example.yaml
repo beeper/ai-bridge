@@ -136,12 +136,12 @@ network:
         models:
           - provider: "openrouter"
             model: "google/gemini-3-flash-preview"
-    audio:
-      enabled: true
-      prompt: "Transcribe the audio."
-      language: ""
-      # CLI transcription auto-detection (whisper/whisper.cpp) is not implemented yet.
-      maxBytes: 20971520
+      audio:
+        enabled: true
+        prompt: "Transcribe the audio."
+        language: ""
+        # CLI transcription auto-detection (whisper/whisper.cpp) is not implemented yet.
+        maxBytes: 20971520
         timeoutSeconds: 60
         models:
           - provider: "openai"

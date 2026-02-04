@@ -28,7 +28,7 @@ func parseDurationMs(raw string, defaultUnit string) (int64, error) {
 	}
 	switch unit {
 	case "ms":
-		value = value
+		// no-op
 	case "s":
 		value = value * 1000
 	case "m":

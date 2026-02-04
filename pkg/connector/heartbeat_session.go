@@ -8,7 +8,7 @@ import (
 )
 
 type heartbeatSessionResolution struct {
-	StoreRef  sessionStoreRef
+	StoreRef   sessionStoreRef
 	SessionKey string
 	Entry      *sessionEntry
 }
