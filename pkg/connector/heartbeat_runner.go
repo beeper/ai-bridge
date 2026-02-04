@@ -266,6 +266,21 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		})
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "alerts-disabled"}
 	}
+	var agentDef *agents.AgentDefinition
+	store := NewAgentStoreAdapter(oc)
+	if agent, err := store.GetAgentByID(context.Background(), agentID); err == nil {
+		agentDef = agent
+	}
+	isExecEvent := reason == "exec-event"
+	hasExecCompletion := false
+	if isExecEvent {
+		for _, evt := range peekSystemEvents(sessionKey) {
+			if strings.Contains(evt, "Exec finished") {
+				hasExecCompletion = true
+				break
+			}
+		}
+	}
 	suppressSend := deliveryPortal == nil || deliveryRoom == ""
 	hbCfg := &HeartbeatRunConfig{
 		Reason:           reason,
@@ -281,21 +296,6 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		AgentID:          agentID,
 		Channel:          channel,
 		SuppressSave:     true,
-	}
-	var agentDef *agents.AgentDefinition
-	store := NewAgentStoreAdapter(oc)
-	if agent, err := store.GetAgentByID(context.Background(), agentID); err == nil {
-		agentDef = agent
-	}
-	isExecEvent := reason == "exec-event"
-	hasExecCompletion := false
-	if isExecEvent {
-		for _, evt := range peekSystemEvents(sessionKey) {
-			if strings.Contains(evt, "Exec finished") {
-				hasExecCompletion = true
-				break
-			}
-		}
 	}
 	prompt := resolveHeartbeatPrompt(cfg, heartbeat, agentDef)
 	if hasExecCompletion {

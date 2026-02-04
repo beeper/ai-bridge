@@ -42,6 +42,7 @@ type streamingState struct {
 	toolCalls              []ToolCallMetadata
 	pendingImages          []generatedImage
 	pendingFunctionOutputs []functionCallOutput // Function outputs to send back to API for continuation
+	sourceCitations        []sourceCitation
 	initialEventID         id.EventID
 	finishReason           string
 	responseID             string
@@ -237,9 +238,9 @@ func (oc *AIClient) emitUIToolInputDelta(ctx context.Context, portal *bridgev2.P
 	if !state.uiToolStarted[toolCallID] {
 		state.uiToolStarted[toolCallID] = true
 		oc.emitStreamEvent(ctx, portal, state, map[string]any{
-			"type":            "tool-input-start",
-			"toolCallId":      toolCallID,
-			"toolName":        toolName,
+			"type":             "tool-input-start",
+			"toolCallId":       toolCallID,
+			"toolName":         toolName,
 			"providerExecuted": providerExecuted,
 		})
 	}
@@ -257,10 +258,10 @@ func (oc *AIClient) emitUIToolInputAvailable(ctx context.Context, portal *bridge
 		return
 	}
 	oc.emitStreamEvent(ctx, portal, state, map[string]any{
-		"type":            "tool-input-available",
-		"toolCallId":      toolCallID,
-		"toolName":        toolName,
-		"input":           input,
+		"type":             "tool-input-available",
+		"toolCallId":       toolCallID,
+		"toolName":         toolName,
+		"input":            input,
 		"providerExecuted": providerExecuted,
 	})
 }
@@ -270,9 +271,9 @@ func (oc *AIClient) emitUIToolOutputAvailable(ctx context.Context, portal *bridg
 		return
 	}
 	part := map[string]any{
-		"type":            "tool-output-available",
-		"toolCallId":      toolCallID,
-		"output":          output,
+		"type":             "tool-output-available",
+		"toolCallId":       toolCallID,
+		"output":           output,
 		"providerExecuted": providerExecuted,
 	}
 	if preliminary {
@@ -286,9 +287,9 @@ func (oc *AIClient) emitUIToolOutputError(ctx context.Context, portal *bridgev2.
 		return
 	}
 	oc.emitStreamEvent(ctx, portal, state, map[string]any{
-		"type":            "tool-output-error",
-		"toolCallId":      toolCallID,
-		"errorText":       errorText,
+		"type":             "tool-output-error",
+		"toolCallId":       toolCallID,
+		"errorText":        errorText,
 		"providerExecuted": providerExecuted,
 	})
 }
@@ -943,10 +944,6 @@ func (oc *AIClient) streamingResponse(
 				CompletedAtMs: time.Now().UnixMilli(),
 			})
 
-			toolStatus := ToolStatusCompleted
-			if resultStatus != ResultStatusSuccess {
-				toolStatus = ToolStatusFailed
-			}
 			if resultStatus == ResultStatusSuccess {
 				oc.emitUIToolOutputAvailable(ctx, portal, state, tool.callID, result, tool.toolType == ToolTypeProvider, false)
 			} else {
@@ -1060,6 +1057,9 @@ func (oc *AIClient) streamingResponse(
 			})
 
 		case "response.output_text.annotation.added":
+			if citation, ok := extractURLCitation(streamEvent.Annotation); ok {
+				state.sourceCitations = append(state.sourceCitations, citation)
+			}
 			oc.emitStreamEvent(ctx, portal, state, map[string]any{
 				"type":      "data-annotation",
 				"data":      map[string]any{"annotation": streamEvent.Annotation, "index": streamEvent.AnnotationIndex},
@@ -1225,6 +1225,16 @@ func (oc *AIClient) streamingResponse(
 			case "response.refusal.delta":
 				touchTyping()
 				oc.emitUITextDelta(ctx, portal, state, streamEvent.Delta)
+
+			case "response.output_text.annotation.added":
+				if citation, ok := extractURLCitation(streamEvent.Annotation); ok {
+					state.sourceCitations = append(state.sourceCitations, citation)
+				}
+				oc.emitStreamEvent(ctx, portal, state, map[string]any{
+					"type":      "data-annotation",
+					"data":      map[string]any{"annotation": streamEvent.Annotation, "index": streamEvent.AnnotationIndex},
+					"transient": true,
+				})
 
 			case "response.function_call_arguments.delta":
 				touchTyping()

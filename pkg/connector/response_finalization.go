@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -150,13 +151,6 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 		parts = append(parts, toolPart)
 	}
 
-	uiMessage := map[string]any{
-		"id":       state.turnID,
-		"role":     "assistant",
-		"metadata": oc.buildUIMessageMetadata(state, meta, true),
-		"parts":    parts,
-	}
-
 	// Build m.relates_to with replace relation
 	relatesTo := map[string]any{
 		"rel_type": RelReplace,
@@ -172,6 +166,16 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 
 	// Generate link previews for URLs in the response
 	linkPreviews := oc.generateOutboundLinkPreviews(ctx, cleanedContent, intent, portal)
+	if sourceParts := buildSourceParts(state.sourceCitations, linkPreviews); len(sourceParts) > 0 {
+		parts = append(parts, sourceParts...)
+	}
+
+	uiMessage := map[string]any{
+		"id":       state.turnID,
+		"role":     "assistant",
+		"metadata": oc.buildUIMessageMetadata(state, meta, true),
+		"parts":    parts,
+	}
 
 	// Send edit event with m.replace relation and m.new_content
 	eventRawContent := map[string]any{
@@ -419,6 +423,73 @@ func minInt(a, b int) int {
 	return b
 }
 
+func buildSourceParts(citations []sourceCitation, previews []*event.BeeperLinkPreview) []map[string]any {
+	if len(citations) == 0 && len(previews) == 0 {
+		return nil
+	}
+
+	parts := make([]map[string]any, 0, len(citations)+len(previews))
+	seen := make(map[string]struct{}, len(citations)+len(previews))
+
+	appendURL := func(url, title string, providerMetadata map[string]any) {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			return
+		}
+		if _, ok := seen[url]; ok {
+			return
+		}
+		seen[url] = struct{}{}
+
+		part := map[string]any{
+			"type":     "source-url",
+			"sourceId": fmt.Sprintf("source-%d", len(parts)+1),
+			"url":      url,
+		}
+		if title = strings.TrimSpace(title); title != "" {
+			part["title"] = title
+		}
+		if len(providerMetadata) > 0 {
+			part["providerMetadata"] = providerMetadata
+		}
+		parts = append(parts, part)
+	}
+
+	for _, citation := range citations {
+		appendURL(citation.URL, citation.Title, nil)
+	}
+
+	for _, preview := range previews {
+		if preview == nil {
+			continue
+		}
+		url := strings.TrimSpace(preview.CanonicalURL)
+		if url == "" {
+			url = strings.TrimSpace(preview.MatchedURL)
+		}
+		if url == "" {
+			continue
+		}
+		title := strings.TrimSpace(preview.Title)
+		if title == "" {
+			title = strings.TrimSpace(preview.SiteName)
+		}
+		meta := map[string]any{}
+		if desc := strings.TrimSpace(preview.Description); desc != "" {
+			meta["description"] = desc
+		}
+		if site := strings.TrimSpace(preview.SiteName); site != "" {
+			meta["site_name"] = site
+		}
+		if len(meta) == 0 {
+			meta = nil
+		}
+		appendURL(url, title, meta)
+	}
+
+	return parts
+}
+
 // sendFinalAssistantTurnContent is a helper for raw mode that sends content without directive processing.
 func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata, intent bridgev2.MatrixAPI, rendered event.MessageEventContent, replyToEventID *id.EventID) {
 	// Build AI metadata
@@ -461,13 +532,6 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 		parts = append(parts, toolPart)
 	}
 
-	uiMessage := map[string]any{
-		"id":       state.turnID,
-		"role":     "assistant",
-		"metadata": oc.buildUIMessageMetadata(state, meta, true),
-		"parts":    parts,
-	}
-
 	relatesTo := map[string]any{
 		"rel_type": RelReplace,
 		"event_id": state.initialEventID.String(),
@@ -481,6 +545,16 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 
 	// Generate link previews for URLs in the response
 	linkPreviews := oc.generateOutboundLinkPreviews(ctx, rendered.Body, intent, portal)
+	if sourceParts := buildSourceParts(state.sourceCitations, linkPreviews); len(sourceParts) > 0 {
+		parts = append(parts, sourceParts...)
+	}
+
+	uiMessage := map[string]any{
+		"id":       state.turnID,
+		"role":     "assistant",
+		"metadata": oc.buildUIMessageMetadata(state, meta, true),
+		"parts":    parts,
+	}
 
 	rawContent2 := map[string]any{
 		"msgtype":                       event.MsgText,
