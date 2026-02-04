@@ -43,6 +43,8 @@ type streamingState struct {
 	pendingImages          []generatedImage
 	pendingFunctionOutputs []functionCallOutput // Function outputs to send back to API for continuation
 	sourceCitations        []sourceCitation
+	sourceDocuments        []sourceDocument
+	generatedFiles         []generatedFilePart
 	initialEventID         id.EventID
 	finishReason           string
 	responseID             string
@@ -97,6 +99,11 @@ type generatedImage struct {
 	turnID   string
 }
 
+type generatedFilePart struct {
+	url       string
+	mediaType string
+}
+
 // functionCallOutput tracks a completed function call output for API continuation
 type functionCallOutput struct {
 	callID    string // The ItemID from the stream event (used as call_id in continuation)
@@ -116,6 +123,25 @@ func buildFunctionCallOutputItem(callID, output string, includeID bool) response
 		item.ID = param.NewOpt("fc_output_" + callID)
 	}
 	return responses.ResponseInputItemUnionParam{OfFunctionCallOutput: &item}
+}
+
+func recordGeneratedFile(state *streamingState, url, mediaType string) {
+	if state == nil {
+		return
+	}
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return
+	}
+	for _, file := range state.generatedFiles {
+		if file.url == url {
+			return
+		}
+	}
+	state.generatedFiles = append(state.generatedFiles, generatedFilePart{
+		url:       url,
+		mediaType: strings.TrimSpace(mediaType),
+	})
 }
 
 func (oc *AIClient) buildUIMessageMetadata(state *streamingState, meta *PortalMetadata, includeUsage bool) map[string]any {
@@ -849,11 +875,12 @@ func (oc *AIClient) streamingResponse(
 					resultStatus = ResultStatusError
 				} else {
 					// Send audio message
-					if _, err := oc.sendGeneratedAudio(ctx, portal, audioData, "audio/mpeg", state.turnID); err != nil {
+					if _, mediaURL, err := oc.sendGeneratedAudio(ctx, portal, audioData, "audio/mpeg", state.turnID); err != nil {
 						log.Warn().Err(err).Msg("Failed to send TTS audio")
 						displayResult = "Error: failed to send TTS audio"
 						resultStatus = ResultStatusError
 					} else {
+						recordGeneratedFile(state, mediaURL, "audio/mpeg")
 						displayResult = "Audio message sent successfully"
 					}
 				}
@@ -876,10 +903,12 @@ func (oc *AIClient) streamingResponse(
 							log.Warn().Err(err).Msg("Failed to decode generated image")
 							continue
 						}
-						if _, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); err != nil {
+						_, mediaURL, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID)
+						if err != nil {
 							log.Warn().Err(err).Msg("Failed to send generated image")
 							continue
 						}
+						recordGeneratedFile(state, mediaURL, mimeType)
 						success++
 					}
 					if success == len(images) && success > 0 {
@@ -902,11 +931,12 @@ func (oc *AIClient) streamingResponse(
 					resultStatus = ResultStatusError
 				} else {
 					// Send image message
-					if _, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); err != nil {
+					if _, mediaURL, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); err != nil {
 						log.Warn().Err(err).Msg("Failed to send generated image")
 						displayResult = "Error: failed to send generated image"
 						resultStatus = ResultStatusError
 					} else {
+						recordGeneratedFile(state, mediaURL, mimeType)
 						displayResult = "Image generated and sent successfully"
 					}
 				}
@@ -1059,6 +1089,9 @@ func (oc *AIClient) streamingResponse(
 		case "response.output_text.annotation.added":
 			if citation, ok := extractURLCitation(streamEvent.Annotation); ok {
 				state.sourceCitations = append(state.sourceCitations, citation)
+			}
+			if document, ok := extractDocumentCitation(streamEvent.Annotation); ok {
+				state.sourceDocuments = append(state.sourceDocuments, document)
 			}
 			oc.emitStreamEvent(ctx, portal, state, map[string]any{
 				"type":      "data-annotation",
@@ -1230,6 +1263,9 @@ func (oc *AIClient) streamingResponse(
 				if citation, ok := extractURLCitation(streamEvent.Annotation); ok {
 					state.sourceCitations = append(state.sourceCitations, citation)
 				}
+				if document, ok := extractDocumentCitation(streamEvent.Annotation); ok {
+					state.sourceDocuments = append(state.sourceDocuments, document)
+				}
 				oc.emitStreamEvent(ctx, portal, state, map[string]any{
 					"type":      "data-annotation",
 					"data":      map[string]any{"annotation": streamEvent.Annotation, "index": streamEvent.AnnotationIndex},
@@ -1325,11 +1361,12 @@ func (oc *AIClient) streamingResponse(
 						displayResult = "Error: failed to decode TTS audio"
 						resultStatus = ResultStatusError
 					} else {
-						if _, err := oc.sendGeneratedAudio(ctx, portal, audioData, "audio/mpeg", state.turnID); err != nil {
+						if _, mediaURL, err := oc.sendGeneratedAudio(ctx, portal, audioData, "audio/mpeg", state.turnID); err != nil {
 							log.Warn().Err(err).Msg("Failed to send TTS audio (continuation)")
 							displayResult = "Error: failed to send TTS audio"
 							resultStatus = ResultStatusError
 						} else {
+							recordGeneratedFile(state, mediaURL, "audio/mpeg")
 							displayResult = "Audio message sent successfully"
 						}
 					}
@@ -1352,10 +1389,12 @@ func (oc *AIClient) streamingResponse(
 								log.Warn().Err(err).Msg("Failed to decode generated image (continuation)")
 								continue
 							}
-							if _, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); err != nil {
+							_, mediaURL, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID)
+							if err != nil {
 								log.Warn().Err(err).Msg("Failed to send generated image (continuation)")
 								continue
 							}
+							recordGeneratedFile(state, mediaURL, mimeType)
 							success++
 						}
 						if success == len(images) && success > 0 {
@@ -1377,11 +1416,12 @@ func (oc *AIClient) streamingResponse(
 						displayResult = "Error: failed to decode generated image"
 						resultStatus = ResultStatusError
 					} else {
-						if _, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); err != nil {
+						if _, mediaURL, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); err != nil {
 							log.Warn().Err(err).Msg("Failed to send generated image (continuation)")
 							displayResult = "Error: failed to send generated image"
 							resultStatus = ResultStatusError
 						} else {
+							recordGeneratedFile(state, mediaURL, mimeType)
 							displayResult = "Image generated and sent successfully"
 						}
 					}
@@ -1470,14 +1510,6 @@ func (oc *AIClient) streamingResponse(
 	}
 	oc.emitUIFinish(ctx, portal, state, meta)
 
-	// Send final edit to persist complete content with metadata (including reasoning)
-	if state.initialEventID != "" {
-		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
-		if !state.suppressSave {
-			oc.saveAssistantMessage(ctx, log, portal, state, meta)
-		}
-	}
-
 	// Send any generated images as separate messages
 	for _, img := range state.pendingImages {
 		imageData, mimeType, err := decodeBase64Image(img.imageB64)
@@ -1485,12 +1517,21 @@ func (oc *AIClient) streamingResponse(
 			log.Warn().Err(err).Str("item_id", img.itemID).Msg("Failed to decode generated image")
 			continue
 		}
-		eventID, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, img.turnID)
+		eventID, mediaURL, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, img.turnID)
 		if err != nil {
 			log.Warn().Err(err).Str("item_id", img.itemID).Msg("Failed to send generated image to Matrix")
 			continue
 		}
+		recordGeneratedFile(state, mediaURL, mimeType)
 		log.Info().Stringer("event_id", eventID).Str("item_id", img.itemID).Msg("Sent generated image to Matrix")
+	}
+
+	// Send final edit to persist complete content with metadata (including reasoning)
+	if state.initialEventID != "" {
+		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
+		if !state.suppressSave {
+			oc.saveAssistantMessage(ctx, log, portal, state, meta)
+		}
 	}
 
 	log.Info().
@@ -1842,11 +1883,12 @@ func (oc *AIClient) streamChatCompletions(
 					result = "Error: failed to decode TTS audio"
 					resultStatus = ResultStatusError
 				} else {
-					if _, sendErr := oc.sendGeneratedAudio(ctx, portal, audioData, "audio/mpeg", state.turnID); sendErr != nil {
+					if _, mediaURL, sendErr := oc.sendGeneratedAudio(ctx, portal, audioData, "audio/mpeg", state.turnID); sendErr != nil {
 						log.Warn().Err(sendErr).Msg("Failed to send TTS audio (Chat Completions)")
 						result = "Error: failed to send TTS audio"
 						resultStatus = ResultStatusError
 					} else {
+						recordGeneratedFile(state, mediaURL, "audio/mpeg")
 						result = "Audio message sent successfully"
 					}
 				}
@@ -1868,10 +1910,12 @@ func (oc *AIClient) streamChatCompletions(
 							log.Warn().Err(decodeErr).Msg("Failed to decode generated image (Chat Completions)")
 							continue
 						}
-						if _, sendErr := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); sendErr != nil {
-							log.Warn().Err(sendErr).Msg("Failed to send generated image (Chat Completions)")
+						_, mediaURL, err := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID)
+						if err != nil {
+							log.Warn().Err(err).Msg("Failed to send generated image (Chat Completions)")
 							continue
 						}
+						recordGeneratedFile(state, mediaURL, mimeType)
 						success++
 					}
 					if success == len(images) && success > 0 {
@@ -1892,11 +1936,12 @@ func (oc *AIClient) streamChatCompletions(
 					result = "Error: failed to decode generated image"
 					resultStatus = ResultStatusError
 				} else {
-					if _, sendErr := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); sendErr != nil {
+					if _, mediaURL, sendErr := oc.sendGeneratedImage(ctx, portal, imageData, mimeType, state.turnID); sendErr != nil {
 						log.Warn().Err(sendErr).Msg("Failed to send generated image (Chat Completions)")
 						result = "Error: failed to send generated image"
 						resultStatus = ResultStatusError
 					} else {
+						recordGeneratedFile(state, mediaURL, mimeType)
 						result = "Image generated and sent successfully"
 					}
 				}

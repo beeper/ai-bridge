@@ -17,7 +17,7 @@ func (oc *AIClient) sendGeneratedAudio(
 	audioData []byte,
 	mimeType string,
 	turnID string,
-) (id.EventID, error) {
+) (id.EventID, string, error) {
 	// Determine file extension based on MIME type
 	ext := extensionForMIME(mimeType, "mp3", map[string]string{
 		"audio/wav":   "wav",
