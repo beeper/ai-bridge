@@ -12,6 +12,9 @@ func (oc *AIClient) recordAgentActivity(ctx context.Context, portal *bridgev2.Po
 	if oc == nil || portal == nil || portal.MXID == "" || meta == nil {
 		return
 	}
+	if meta.IsCronRoom || meta.IsAgentDataRoom || meta.IsGlobalMemoryRoom {
+		return
+	}
 	agentID := normalizeAgentID(resolveAgentID(meta))
 	if agentID == "" {
 		return
@@ -25,6 +28,21 @@ func (oc *AIClient) recordAgentActivity(ctx context.Context, portal *bridgev2.Po
 	}
 	loginMeta.LastActiveRoomByAgent[agentID] = portal.MXID.String()
 	_ = oc.UserLogin.Save(ctx)
+
+	storeKey := heartbeatStoreKey(agentID)
+	if storeKey != "" {
+		accountID := ""
+		if oc.UserLogin != nil {
+			accountID = string(oc.UserLogin.ID)
+		}
+		oc.updateHeartbeatSessionEntry(ctx, storeKey, func(entry heartbeatSessionEntry) heartbeatSessionEntry {
+			entry.LastChannel = "matrix"
+			entry.LastTo = portal.MXID.String()
+			entry.LastAccountID = accountID
+			entry.UpdatedAt = heartbeatUpdatedAtNow()
+			return entry
+		})
+	}
 }
 
 func (oc *AIClient) lastActivePortal(agentID string) *bridgev2.Portal {

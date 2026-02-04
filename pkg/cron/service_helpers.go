@@ -19,7 +19,7 @@ func createJob(nowMs int64, input CronJobCreate) (CronJob, error) {
 	if err != nil {
 		return CronJob{}, err
 	}
-	enabled := true
+	enabled := false
 	if input.Enabled != nil {
 		enabled = *input.Enabled
 	}
@@ -188,16 +188,16 @@ func buildPayloadFromPatch(patch CronPayloadPatch) CronPayload {
 		panic("cron.update payload.kind=agentTurn requires message")
 	}
 	return CronPayload{
-		Kind:              "agentTurn",
-		Message:           msg,
-		Model:             derefString(patch.Model),
-		Thinking:          derefString(patch.Thinking),
-		TimeoutSeconds:    patch.TimeoutSeconds,
+		Kind:                "agentTurn",
+		Message:             msg,
+		Model:               derefString(patch.Model),
+		Thinking:            derefString(patch.Thinking),
+		TimeoutSeconds:      patch.TimeoutSeconds,
 		AllowUnsafeExternal: patch.AllowUnsafeExternal,
-		Deliver:           patch.Deliver,
-		Channel:           derefString(patch.Channel),
-		To:                derefString(patch.To),
-		BestEffortDeliver: patch.BestEffortDeliver,
+		Deliver:             patch.Deliver,
+		Channel:             derefString(patch.Channel),
+		To:                  derefString(patch.To),
+		BestEffortDeliver:   patch.BestEffortDeliver,
 	}
 }
 

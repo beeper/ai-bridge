@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -23,15 +24,32 @@ func resolveCronStorePath(cfg *Config) string {
 	return cron.ResolveCronStorePath(raw)
 }
 
+func resolveCronMaxConcurrentRuns(cfg *Config) int {
+	if cfg == nil || cfg.Cron == nil {
+		return 1
+	}
+	if cfg.Cron.MaxConcurrentRuns > 0 {
+		return cfg.Cron.MaxConcurrentRuns
+	}
+	return 1
+}
+
 func (oc *AIClient) buildCronService() *cron.CronService {
 	if oc == nil {
 		return nil
 	}
 	storePath := resolveCronStorePath(&oc.connector.Config)
+	storeBackend := oc.cronStoreBackend()
+	if storeBackend == nil {
+		oc.log.Warn().Msg("cron: missing virtual store backend")
+		return nil
+	}
 	deps := cron.CronServiceDeps{
 		NowMs:               func() int64 { return time.Now().UnixMilli() },
 		Log:                 cronLogger{log: oc.log},
 		StorePath:           storePath,
+		Store:               storeBackend,
+		MaxConcurrentRuns:   resolveCronMaxConcurrentRuns(&oc.connector.Config),
 		CronEnabled:         resolveCronEnabled(&oc.connector.Config),
 		EnqueueSystemEvent:  oc.enqueueCronSystemEvent,
 		RequestHeartbeatNow: oc.requestHeartbeatNow,
@@ -83,5 +101,9 @@ func (oc *AIClient) onCronEvent(evt cron.CronEvent) {
 	storePath := resolveCronStorePath(&oc.connector.Config)
 	path := cron.ResolveCronRunLogPath(storePath, evt.JobID)
 	entry := cronRunLogEntryFromEvent(evt)
-	_ = cron.AppendCronRunLog(path, entry, 0, 0)
+	backend := oc.cronStoreBackend()
+	if backend == nil {
+		return
+	}
+	_ = cron.AppendCronRunLog(context.Background(), backend, path, entry, 0, 0)
 }

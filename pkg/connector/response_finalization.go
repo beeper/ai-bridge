@@ -238,7 +238,15 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		}
 		shouldSkip = false
 	}
+	responsePrefix := strings.TrimSpace(hb.ResponsePrefix)
+	if responsePrefix != "" && strings.TrimSpace(finalText) != "" && !shouldSkip {
+		if !strings.HasPrefix(finalText, responsePrefix) {
+			finalText = responsePrefix + " " + finalText
+		}
+	}
 	cleaned := strings.TrimSpace(finalText)
+	hasMedia := len(state.pendingImages) > 0
+	shouldSkipMain := shouldSkip && !hasMedia && !hb.ExecEvent
 	hasContent := cleaned != ""
 	includeReasoning := hb.IncludeReasoning && state.reasoning.Len() > 0
 	deliverable := hb.TargetRoom != "" && hb.TargetRoom == portal.MXID
@@ -256,13 +264,17 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		}
 	}
 
-	if shouldSkip && !hasContent {
+	if shouldSkipMain && !hasContent {
 		if includeReasoning && hb.ShowAlerts && deliverable {
 			oc.sendPlainAssistantMessage(ctx, portal, "Reasoning: "+state.reasoning.String())
 		}
 		silent := true
 		if hb.ShowOk && deliverable {
-			oc.sendPlainAssistantMessage(ctx, portal, agents.HeartbeatToken)
+			heartbeatOk := agents.HeartbeatToken
+			if responsePrefix != "" {
+				heartbeatOk = responsePrefix + " " + agents.HeartbeatToken
+			}
+			oc.sendPlainAssistantMessage(ctx, portal, heartbeatOk)
 			silent = false
 		}
 		oc.redactInitialStreamingMessage(ctx, portal, intent, state)
@@ -280,6 +292,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 			Reason:        hb.Reason,
 			Channel:       hb.Channel,
 			Silent:        silent,
+			HasMedia:      hasMedia,
 			IndicatorType: indicator,
 		})
 		sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: status, Silent: silent, Skipped: true})
@@ -287,9 +300,10 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	}
 
 	// Deduplicate identical heartbeat content within 24h
-	if hasContent && !shouldSkip {
-		if oc.isDuplicateHeartbeat(hb.AgentID, portal.MXID, cleaned) {
+	if hasContent && !shouldSkipMain && !hasMedia {
+		if oc.isDuplicateHeartbeat(hb.SessionKey, cleaned, state.startedAtMs) {
 			oc.redactInitialStreamingMessage(ctx, portal, intent, state)
+			state.pendingImages = nil
 			indicator := (*HeartbeatIndicatorType)(nil)
 			if hb.UseIndicator {
 				indicator = resolveIndicatorType("skipped")
@@ -300,6 +314,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 				Reason:        "duplicate",
 				Preview:       cleaned[:minInt(len(cleaned), 200)],
 				Channel:       hb.Channel,
+				HasMedia:      hasMedia,
 				IndicatorType: indicator,
 			})
 			sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: "duplicate", Skipped: true})
@@ -309,16 +324,18 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 
 	if !deliverable {
 		oc.redactInitialStreamingMessage(ctx, portal, intent, state)
+		state.pendingImages = nil
 		preview := cleaned
 		if preview == "" && state.reasoning.Len() > 0 {
 			preview = state.reasoning.String()
 		}
 		emitHeartbeatEvent(&HeartbeatEventPayload{
-			TS:      time.Now().UnixMilli(),
-			Status:  "skipped",
-			Reason:  targetReason,
-			Preview: preview[:minInt(len(preview), 200)],
-			Channel: hb.Channel,
+			TS:       time.Now().UnixMilli(),
+			Status:   "skipped",
+			Reason:   targetReason,
+			Preview:  preview[:minInt(len(preview), 200)],
+			Channel:  hb.Channel,
+			HasMedia: hasMedia,
 		})
 		sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: targetReason, Skipped: true})
 		return
@@ -326,6 +343,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 
 	if !hb.ShowAlerts {
 		oc.redactInitialStreamingMessage(ctx, portal, intent, state)
+		state.pendingImages = nil
 		indicator := (*HeartbeatIndicatorType)(nil)
 		if hb.UseIndicator {
 			indicator = resolveIndicatorType("sent")
@@ -336,6 +354,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 			Reason:        "alerts-disabled",
 			Preview:       cleaned[:minInt(len(cleaned), 200)],
 			Channel:       hb.Channel,
+			HasMedia:      hasMedia,
 			IndicatorType: indicator,
 		})
 		sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: "alerts-disabled", Skipped: true})
@@ -346,12 +365,18 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		oc.sendPlainAssistantMessage(ctx, portal, "Reasoning: "+state.reasoning.String())
 	}
 
-	rendered := format.RenderMarkdown(cleaned, true, true)
-	oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, intent, rendered, nil)
+	if cleaned != "" {
+		if state.initialEventID == "" {
+			oc.sendPlainAssistantMessage(ctx, portal, cleaned)
+		} else {
+			rendered := format.RenderMarkdown(cleaned, true, true)
+			oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, intent, rendered, nil)
+		}
+	}
 
 	// Record heartbeat for dedupe
-	if hb.AgentID != "" && cleaned != "" {
-		oc.recordHeartbeatText(hb.AgentID, portal.MXID, cleaned)
+	if hb.SessionKey != "" && cleaned != "" && !shouldSkipMain {
+		oc.recordHeartbeatText(hb.SessionKey, cleaned, state.startedAtMs)
 	}
 
 	indicator := (*HeartbeatIndicatorType)(nil)
@@ -364,6 +389,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		Reason:        hb.Reason,
 		Preview:       cleaned[:minInt(len(cleaned), 200)],
 		Channel:       hb.Channel,
+		HasMedia:      hasMedia,
 		IndicatorType: indicator,
 	})
 	sendOutcome(HeartbeatRunOutcome{Status: "ran", Text: cleaned, Sent: true})

@@ -250,12 +250,22 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "empty-heartbeat-file"}
 	}
 
-	deliveryPortal, deliveryRoom, deliveryReason := oc.resolveHeartbeatDeliveryPortal(agentID, heartbeat)
+	storeKey := heartbeatStoreKey(agentID)
+	sessionEntry, entryOk := oc.getHeartbeatSessionEntry(context.Background(), storeKey)
+	var entry *heartbeatSessionEntry
+	if entryOk {
+		entry = &sessionEntry
+	}
+	prevUpdatedAt := sessionEntry.UpdatedAt
+
+	delivery := oc.resolveHeartbeatDeliveryTarget(agentID, heartbeat, entry)
+	deliveryPortal := delivery.Portal
+	deliveryRoom := delivery.RoomID
+	deliveryReason := delivery.Reason
+	channel := delivery.Channel
 	visibility := defaultHeartbeatVisibility
-	channel := ""
-	if deliveryPortal != nil && deliveryRoom != "" {
-		channel = "matrix"
-		visibility = resolveHeartbeatVisibility(cfg, "matrix")
+	if channel != "" {
+		visibility = resolveHeartbeatVisibility(cfg, channel)
 	}
 	if !visibility.ShowAlerts && !visibility.ShowOk && !visibility.UseIndicator {
 		emitHeartbeatEvent(&HeartbeatEventPayload{
@@ -265,22 +275,6 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 			Channel: channel,
 		})
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "alerts-disabled"}
-	}
-	suppressSend := deliveryPortal == nil || deliveryRoom == ""
-	hbCfg := &HeartbeatRunConfig{
-		Reason:           reason,
-		AckMaxChars:      resolveHeartbeatAckMaxChars(cfg, heartbeat),
-		ShowOk:           visibility.ShowOk,
-		ShowAlerts:       visibility.ShowAlerts,
-		UseIndicator:     visibility.UseIndicator,
-		IncludeReasoning: heartbeat != nil && heartbeat.IncludeReasoning != nil && *heartbeat.IncludeReasoning,
-		ExecEvent:        hasExecCompletion,
-		TargetRoom:       deliveryRoom,
-		TargetReason:     deliveryReason,
-		SuppressSend:     suppressSend,
-		AgentID:          agentID,
-		Channel:          channel,
-		SuppressSave:     true,
 	}
 	var agentDef *agents.AgentDefinition
 	store := NewAgentStoreAdapter(oc)
@@ -296,6 +290,25 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 				break
 			}
 		}
+	}
+	suppressSend := true
+	hbCfg := &HeartbeatRunConfig{
+		Reason:           reason,
+		AckMaxChars:      resolveHeartbeatAckMaxChars(cfg, heartbeat),
+		ShowOk:           visibility.ShowOk,
+		ShowAlerts:       visibility.ShowAlerts,
+		UseIndicator:     visibility.UseIndicator,
+		IncludeReasoning: heartbeat != nil && heartbeat.IncludeReasoning != nil && *heartbeat.IncludeReasoning,
+		ExecEvent:        hasExecCompletion,
+		ResponsePrefix:   resolveResponsePrefix(cfg, agentID),
+		SessionKey:       storeKey,
+		PrevUpdatedAt:    prevUpdatedAt,
+		TargetRoom:       deliveryRoom,
+		TargetReason:     deliveryReason,
+		SuppressSend:     suppressSend,
+		AgentID:          agentID,
+		Channel:          channel,
+		SuppressSave:     true,
 	}
 	prompt := resolveHeartbeatPrompt(cfg, heartbeat, agentDef)
 	if hasExecCompletion {
