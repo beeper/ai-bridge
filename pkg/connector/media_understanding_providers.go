@@ -29,7 +29,7 @@ var mediaProviderCapabilities = map[string][]MediaUnderstandingCapability{
 	"openai":     {MediaCapabilityImage, MediaCapabilityAudio},
 	"groq":       {MediaCapabilityAudio},
 	"deepgram":   {MediaCapabilityAudio},
-	"google":     {MediaCapabilityAudio, MediaCapabilityVideo},
+	"google":     {MediaCapabilityImage, MediaCapabilityAudio, MediaCapabilityVideo},
 	"openrouter": {MediaCapabilityImage, MediaCapabilityVideo},
 }
 
@@ -474,6 +474,92 @@ func describeGeminiVideo(ctx context.Context, params mediaVideoRequest) (string,
 	return strings.Join(parts, "\n"), nil
 }
 
+func describeGeminiImage(ctx context.Context, params mediaImageRequest) (string, error) {
+	baseURL := normalizeMediaBaseURL(params.BaseURL, defaultGoogleBaseURL)
+	model := strings.TrimSpace(params.Model)
+	if model == "" {
+		model = defaultGoogleImageModel
+	}
+	endpoint := fmt.Sprintf("%s/models/%s:generateContent", baseURL, model)
+
+	prompt := strings.TrimSpace(params.Prompt)
+	if prompt == "" {
+		prompt = defaultPromptByCapability[MediaCapabilityImage]
+	}
+
+	body := map[string]any{
+		"contents": []map[string]any{
+			{
+				"role": "user",
+				"parts": []map[string]any{
+					{"text": prompt},
+					{
+						"inline_data": map[string]any{
+							"mime_type": params.MimeTypeOrDefault("image/jpeg"),
+							"data":      params.Base64Data(),
+						},
+					},
+				},
+			},
+		},
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	applyHeaderMap(req.Header, params.Headers)
+	if !headerExists(req.Header, "Content-Type") {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if !headerExists(req.Header, "X-Goog-Api-Key") && params.APIKey != "" {
+		req.Header.Set("X-Goog-Api-Key", params.APIKey)
+	}
+
+	client := &http.Client{Timeout: params.Timeout}
+	res, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		detail := readErrorResponse(res)
+		if detail != "" {
+			return "", fmt.Errorf("image description failed (HTTP %d): %s", res.StatusCode, detail)
+		}
+		return "", fmt.Errorf("image description failed (HTTP %d)", res.StatusCode)
+	}
+	defer res.Body.Close()
+	var payloadResp struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payloadResp); err != nil {
+		return "", err
+	}
+	if len(payloadResp.Candidates) == 0 {
+		return "", fmt.Errorf("image description response missing text")
+	}
+	var parts []string
+	for _, part := range payloadResp.Candidates[0].Content.Parts {
+		if trimmed := strings.TrimSpace(part.Text); trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	if len(parts) == 0 {
+		return "", fmt.Errorf("image description response missing text")
+	}
+	return strings.Join(parts, "\n"), nil
+}
+
 type mediaAudioRequest struct {
 	Provider string
 	APIKey   string
@@ -508,6 +594,28 @@ type mediaVideoRequest struct {
 	MimeType string
 	Data     []byte
 	Timeout  time.Duration
+}
+
+type mediaImageRequest struct {
+	APIKey   string
+	BaseURL  string
+	Headers  map[string]string
+	Model    string
+	Prompt   string
+	MimeType string
+	Data     []byte
+	Timeout  time.Duration
+}
+
+func (r mediaImageRequest) Base64Data() string {
+	return base64.StdEncoding.EncodeToString(r.Data)
+}
+
+func (r mediaImageRequest) MimeTypeOrDefault(fallback string) string {
+	if strings.TrimSpace(r.MimeType) != "" {
+		return r.MimeType
+	}
+	return fallback
 }
 
 func (r mediaVideoRequest) Base64Data() string {

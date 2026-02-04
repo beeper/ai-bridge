@@ -80,7 +80,7 @@ func resolveMediaEntries(cfg *MediaToolsConfig, capCfg *MediaUnderstandingConfig
 			entries = append(entries, entryWithSource{entry: entry, source: "capability"})
 		}
 	}
-	if len(entries) == 0 && cfg != nil {
+	if cfg != nil {
 		for _, entry := range cfg.Models {
 			entries = append(entries, entryWithSource{entry: entry, source: "shared"})
 		}

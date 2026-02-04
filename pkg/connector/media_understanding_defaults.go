@@ -34,6 +34,24 @@ var defaultPromptByCapability = map[MediaUnderstandingCapability]string{
 
 var defaultAudioModelsByProvider = map[string]string{
 	"groq":     "whisper-large-v3-turbo",
-	"openai":   "gpt-4o-mini-transcribe",
+	"openai":   "gpt-4o-transcribe",
 	"deepgram": "nova-3",
+}
+
+const defaultOpenRouterGoogleModel = "google/gemini-3-flash-preview"
+
+var defaultImageModelsByProvider = map[string]string{
+	"openai":     "gpt-5-mini",
+	"openrouter": defaultOpenRouterGoogleModel,
+}
+
+func resolveVideoMaxBase64Bytes(maxBytes int) int {
+	if maxBytes <= 0 {
+		return defaultVideoMaxBase64Bytes
+	}
+	expanded := int(float64(maxBytes) * (4.0 / 3.0))
+	if expanded > defaultVideoMaxBase64Bytes {
+		return defaultVideoMaxBase64Bytes
+	}
+	return expanded
 }

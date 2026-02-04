@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -122,8 +123,8 @@ func (oc *AIClient) applyMediaUnderstandingForAttachments(
 
 	entries := resolveMediaEntries(toolsCfg, capCfg, capability)
 	if len(entries) == 0 {
-		if auto := oc.resolveAutoMediaEntry(capability, capCfg); auto != nil {
-			entries = append(entries, *auto)
+		if auto := oc.resolveAutoMediaEntries(capability, capCfg, meta); len(auto) > 0 {
+			entries = append(entries, auto...)
 		}
 	}
 	if len(entries) == 0 {
@@ -247,31 +248,253 @@ func (oc *AIClient) resolveAutoAudioEntry(cfg *MediaUnderstandingConfig) *MediaU
 	return nil
 }
 
-func (oc *AIClient) resolveAutoMediaEntry(
+func (oc *AIClient) resolveAutoMediaEntries(
+	capability MediaUnderstandingCapability,
+	cfg *MediaUnderstandingConfig,
+	meta *PortalMetadata,
+) []MediaUnderstandingModelConfig {
+	if active := oc.resolveActiveMediaEntry(capability, cfg, meta); active != nil {
+		return []MediaUnderstandingModelConfig{*active}
+	}
+
+	if capability == MediaCapabilityAudio {
+		if local := resolveLocalAudioEntry(); local != nil {
+			return []MediaUnderstandingModelConfig{*local}
+		}
+	}
+
+	if gemini := resolveGeminiCliEntry(); gemini != nil {
+		return []MediaUnderstandingModelConfig{*gemini}
+	}
+
+	if keyEntry := oc.resolveKeyMediaEntry(capability, cfg); keyEntry != nil {
+		return []MediaUnderstandingModelConfig{*keyEntry}
+	}
+
+	return nil
+}
+
+func (oc *AIClient) resolveActiveMediaEntry(
+	capability MediaUnderstandingCapability,
+	cfg *MediaUnderstandingConfig,
+	meta *PortalMetadata,
+) *MediaUnderstandingModelConfig {
+	if oc == nil || meta == nil {
+		return nil
+	}
+	modelID := strings.TrimSpace(oc.effectiveModel(meta))
+	if modelID == "" {
+		return nil
+	}
+	providerID, model := splitModelProvider(modelID)
+	if providerID == "" {
+		providerID = normalizeMediaProviderID(loginMetadata(oc.UserLogin).Provider)
+	}
+	if providerID == "" {
+		return nil
+	}
+	if !providerSupportsCapability(providerID, capability) {
+		return nil
+	}
+	if !oc.hasMediaProviderAuth(providerID, cfg) {
+		return nil
+	}
+	return &MediaUnderstandingModelConfig{
+		Provider: providerID,
+		Model:    model,
+	}
+}
+
+func (oc *AIClient) resolveKeyMediaEntry(
 	capability MediaUnderstandingCapability,
 	cfg *MediaUnderstandingConfig,
 ) *MediaUnderstandingModelConfig {
 	switch capability {
+	case MediaCapabilityImage:
+		if oc.hasMediaProviderAuth("openrouter", cfg) {
+			return &MediaUnderstandingModelConfig{
+				Provider: "openrouter",
+				Model:    defaultOpenRouterGoogleModel,
+			}
+		}
+		if oc.hasMediaProviderAuth("openai", cfg) {
+			return &MediaUnderstandingModelConfig{
+				Provider: "openai",
+				Model:    defaultImageModelsByProvider["openai"],
+			}
+		}
+	case MediaCapabilityVideo:
+		if oc.hasMediaProviderAuth("openrouter", cfg) {
+			return &MediaUnderstandingModelConfig{
+				Provider: "openrouter",
+				Model:    defaultOpenRouterGoogleModel,
+			}
+		}
+		if oc.hasMediaProviderAuth("google", cfg) {
+			return &MediaUnderstandingModelConfig{
+				Provider: "google",
+				Model:    defaultGoogleVideoModel,
+			}
+		}
 	case MediaCapabilityAudio:
 		return oc.resolveAutoAudioEntry(cfg)
-	case MediaCapabilityImage, MediaCapabilityVideo:
-		if oc == nil || oc.UserLogin == nil {
-			return nil
+	}
+	return nil
+}
+
+func (oc *AIClient) hasMediaProviderAuth(providerID string, cfg *MediaUnderstandingConfig) bool {
+	headers := map[string]string{}
+	if cfg != nil && cfg.Headers != nil {
+		for key, value := range cfg.Headers {
+			headers[key] = value
 		}
-		provider := normalizeMediaProviderID(loginMetadata(oc.UserLogin).Provider)
-		if provider != "openrouter" {
-			return nil
+	}
+	if hasProviderAuthHeader(providerID, headers) {
+		return true
+	}
+	key := oc.resolveMediaProviderAPIKey(providerID, "", "")
+	return strings.TrimSpace(key) != ""
+}
+
+func providerSupportsCapability(providerID string, capability MediaUnderstandingCapability) bool {
+	caps, ok := mediaProviderCapabilities[providerID]
+	if !ok {
+		return false
+	}
+	for _, cap := range caps {
+		if cap == capability {
+			return true
 		}
-		model := defaultGoogleVideoModel
-		if capability == MediaCapabilityImage {
-			model = defaultGoogleImageModel
-		}
-		return &MediaUnderstandingModelConfig{
-			Provider: "openrouter",
-			Model:    model,
-		}
-	default:
+	}
+	return false
+}
+
+func splitModelProvider(modelID string) (string, string) {
+	trimmed := strings.TrimSpace(modelID)
+	if trimmed == "" {
+		return "", ""
+	}
+	parts := strings.SplitN(trimmed, "/", 2)
+	if len(parts) < 2 {
+		return "", trimmed
+	}
+	return strings.ToLower(strings.TrimSpace(parts[0])), strings.TrimSpace(parts[1])
+}
+
+func hasBinary(name string) bool {
+	if strings.TrimSpace(name) == "" {
+		return false
+	}
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+func fileExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	return false
+}
+
+func resolveLocalWhisperCPPEntry() *MediaUnderstandingModelConfig {
+	if !hasBinary("whisper-cli") {
 		return nil
+	}
+	envModel := strings.TrimSpace(os.Getenv("WHISPER_CPP_MODEL"))
+	defaultModel := "/opt/homebrew/share/whisper-cpp/for-tests-ggml-tiny.bin"
+	modelPath := defaultModel
+	if envModel != "" && fileExists(envModel) {
+		modelPath = envModel
+	}
+	if !fileExists(modelPath) {
+		return nil
+	}
+	return &MediaUnderstandingModelConfig{
+		Type:    "cli",
+		Command: "whisper-cli",
+		Args:    []string{"-m", modelPath, "-otxt", "-of", "{{OutputBase}}", "-np", "-nt", "{{MediaPath}}"},
+	}
+}
+
+func resolveLocalWhisperEntry() *MediaUnderstandingModelConfig {
+	if !hasBinary("whisper") {
+		return nil
+	}
+	return &MediaUnderstandingModelConfig{
+		Type:    "cli",
+		Command: "whisper",
+		Args: []string{
+			"--model",
+			"turbo",
+			"--output_format",
+			"txt",
+			"--output_dir",
+			"{{OutputDir}}",
+			"--verbose",
+			"False",
+			"{{MediaPath}}",
+		},
+	}
+}
+
+func resolveSherpaOnnxEntry() *MediaUnderstandingModelConfig {
+	if !hasBinary("sherpa-onnx-offline") {
+		return nil
+	}
+	modelDir := strings.TrimSpace(os.Getenv("SHERPA_ONNX_MODEL_DIR"))
+	if modelDir == "" {
+		return nil
+	}
+	tokens := filepath.Join(modelDir, "tokens.txt")
+	encoder := filepath.Join(modelDir, "encoder.onnx")
+	decoder := filepath.Join(modelDir, "decoder.onnx")
+	joiner := filepath.Join(modelDir, "joiner.onnx")
+	if !fileExists(tokens) || !fileExists(encoder) || !fileExists(decoder) || !fileExists(joiner) {
+		return nil
+	}
+	return &MediaUnderstandingModelConfig{
+		Type:    "cli",
+		Command: "sherpa-onnx-offline",
+		Args: []string{
+			"--tokens=" + tokens,
+			"--encoder=" + encoder,
+			"--decoder=" + decoder,
+			"--joiner=" + joiner,
+			"{{MediaPath}}",
+		},
+	}
+}
+
+func resolveLocalAudioEntry() *MediaUnderstandingModelConfig {
+	if entry := resolveSherpaOnnxEntry(); entry != nil {
+		return entry
+	}
+	if entry := resolveLocalWhisperCPPEntry(); entry != nil {
+		return entry
+	}
+	return resolveLocalWhisperEntry()
+}
+
+func resolveGeminiCliEntry() *MediaUnderstandingModelConfig {
+	if !hasBinary("gemini") {
+		return nil
+	}
+	return &MediaUnderstandingModelConfig{
+		Type:    "cli",
+		Command: "gemini",
+		Args: []string{
+			"--output-format",
+			"json",
+			"--allowed-tools",
+			"read_many_files",
+			"--include-directories",
+			"{{MediaDir}}",
+			"{{Prompt}}",
+			"Use read_many_files to read {{MediaPath}} and respond with only the text output.",
+		},
 	}
 }
 
@@ -442,7 +665,7 @@ func (oc *AIClient) runMediaUnderstandingEntry(
 
 		switch capability {
 		case MediaCapabilityImage:
-			return oc.describeImageWithEntry(ctx, entry, attachment.URL, attachment.MimeType, attachment.EncryptedFile, maxBytes, maxChars, prompt, attachment.Index)
+			return oc.describeImageWithEntry(ctx, entry, capCfg, attachment.URL, attachment.MimeType, attachment.EncryptedFile, maxBytes, maxChars, prompt, attachment.Index)
 		case MediaCapabilityAudio:
 			return oc.transcribeAudioWithEntry(ctx, entry, capCfg, attachment.URL, attachment.MimeType, attachment.EncryptedFile, attachment.FileName, maxBytes, maxChars, prompt, timeout, attachment.Index)
 		case MediaCapabilityVideo:
@@ -455,6 +678,7 @@ func (oc *AIClient) runMediaUnderstandingEntry(
 func (oc *AIClient) describeImageWithEntry(
 	ctx context.Context,
 	entry MediaUnderstandingModelConfig,
+	capCfg *MediaUnderstandingConfig,
 	mediaURL string,
 	mimeType string,
 	encryptedFile *event.EncryptedFileInfo,
@@ -467,12 +691,45 @@ func (oc *AIClient) describeImageWithEntry(
 	if modelID == "" {
 		return nil, fmt.Errorf("image understanding requires model id")
 	}
-	if entry.Provider != "" {
+	entryProvider := normalizeMediaProviderID(entry.Provider)
+	if entryProvider != "" {
 		currentProvider := normalizeMediaProviderID(loginMetadata(oc.UserLogin).Provider)
-		entryProvider := normalizeMediaProviderID(entry.Provider)
-		if entryProvider != "" && currentProvider != "" && entryProvider != currentProvider {
+		if entryProvider != "" && currentProvider != "" && entryProvider != currentProvider && entryProvider != "openrouter" && entryProvider != "google" {
 			return nil, fmt.Errorf("image provider %s not available for current login provider", entryProvider)
 		}
+	}
+
+	if entryProvider == "google" {
+		data, actualMime, err := oc.downloadMediaBytes(ctx, mediaURL, encryptedFile, maxBytes, mimeType)
+		if err != nil {
+			return nil, err
+		}
+		if actualMime == "" {
+			actualMime = mimeType
+		}
+		headers := mergeMediaHeaders(capCfg, entry)
+		apiKey := oc.resolveMediaProviderAPIKey("google", entry.Profile, entry.PreferredProfile)
+		if apiKey == "" && !hasProviderAuthHeader("google", headers) {
+			return nil, fmt.Errorf("missing API key for google image understanding")
+		}
+		request := mediaImageRequest{
+			APIKey:   apiKey,
+			BaseURL:  resolveMediaBaseURL(capCfg, entry),
+			Headers:  headers,
+			Model:    strings.TrimSpace(entry.Model),
+			Prompt:   prompt,
+			MimeType: actualMime,
+			Data:     data,
+			Timeout:  resolveMediaTimeoutSeconds(entry.TimeoutSeconds, capCfg, defaultTimeoutSecondsByCapability[MediaCapabilityImage]),
+		}
+		text, err := describeGeminiImage(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		if maxChars > 0 && len(text) > maxChars {
+			text = text[:maxChars]
+		}
+		return buildMediaOutput(MediaCapabilityImage, text, "google", entry.Model, attachmentIndex), nil
 	}
 
 	b64Data, actualMime, err := oc.downloadMediaBase64Bytes(ctx, mediaURL, encryptedFile, maxBytes, mimeType)
@@ -504,11 +761,16 @@ func (oc *AIClient) describeImageWithEntry(
 		},
 	}
 	modelIDForAPI := oc.modelIDForAPI(ResolveAlias(modelID))
-	resp, err := oc.provider.Generate(ctx, GenerateParams{
-		Model:               modelIDForAPI,
-		Messages:            messages,
-		MaxCompletionTokens: defaultImageUnderstandingLimit,
-	})
+	var resp *GenerateResponse
+	if entryProvider == "openrouter" && normalizeMediaProviderID(loginMetadata(oc.UserLogin).Provider) != "openrouter" {
+		resp, err = oc.generateWithOpenRouter(ctx, modelIDForAPI, messages)
+	} else {
+		resp, err = oc.provider.Generate(ctx, GenerateParams{
+			Model:               modelIDForAPI,
+			Messages:            messages,
+			MaxCompletionTokens: defaultImageUnderstandingLimit,
+		})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -610,10 +872,6 @@ func (oc *AIClient) describeVideoWithEntry(
 		if modelID == "" {
 			return nil, fmt.Errorf("video understanding requires model id")
 		}
-		currentProvider := normalizeMediaProviderID(loginMetadata(oc.UserLogin).Provider)
-		if currentProvider != "" && currentProvider != providerID {
-			return nil, fmt.Errorf("video provider %s not available for current login provider", providerID)
-		}
 
 		data, actualMime, err := oc.downloadMediaBytes(ctx, mediaURL, encryptedFile, maxBytes, mimeType)
 		if err != nil {
@@ -626,10 +884,11 @@ func (oc *AIClient) describeVideoWithEntry(
 			actualMime = "video/mp4"
 		}
 		base64Size := estimateBase64Size(len(data))
-		if base64Size > defaultVideoMaxBase64Bytes {
+		maxBase64 := resolveVideoMaxBase64Bytes(maxBytes)
+		if base64Size > maxBase64 {
 			oc.log.Warn().
 				Int("base64_bytes", base64Size).
-				Int("limit_bytes", defaultVideoMaxBase64Bytes).
+				Int("limit_bytes", maxBase64).
 				Msg("OpenRouter video payload exceeds base64 limit")
 			return nil, fmt.Errorf("video payload exceeds base64 limit")
 		}
@@ -652,11 +911,17 @@ func (oc *AIClient) describeVideoWithEntry(
 			},
 		}
 		modelIDForAPI := oc.modelIDForAPI(ResolveAlias(modelID))
-		resp, err := oc.provider.Generate(ctx, GenerateParams{
-			Model:               modelIDForAPI,
-			Messages:            messages,
-			MaxCompletionTokens: defaultImageUnderstandingLimit,
-		})
+		var resp *GenerateResponse
+		currentProvider := normalizeMediaProviderID(loginMetadata(oc.UserLogin).Provider)
+		if currentProvider != "" && currentProvider != providerID {
+			resp, err = oc.generateWithOpenRouter(ctx, modelIDForAPI, messages)
+		} else {
+			resp, err = oc.provider.Generate(ctx, GenerateParams{
+				Model:               modelIDForAPI,
+				Messages:            messages,
+				MaxCompletionTokens: defaultImageUnderstandingLimit,
+			})
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -678,10 +943,11 @@ func (oc *AIClient) describeVideoWithEntry(
 		actualMime = mimeType
 	}
 	base64Size := estimateBase64Size(len(data))
-	if base64Size > defaultVideoMaxBase64Bytes {
+	maxBase64 := resolveVideoMaxBase64Bytes(maxBytes)
+	if base64Size > maxBase64 {
 		oc.log.Warn().
 			Int("base64_bytes", base64Size).
-			Int("limit_bytes", defaultVideoMaxBase64Bytes).
+			Int("limit_bytes", maxBase64).
 			Msg("Google video payload exceeds base64 limit")
 		return nil, fmt.Errorf("video payload exceeds base64 limit")
 	}
@@ -713,6 +979,54 @@ func (oc *AIClient) describeVideoWithEntry(
 	return buildMediaOutput(MediaCapabilityVideo, text, providerID, entry.Model, attachmentIndex), nil
 }
 
+func (oc *AIClient) generateWithOpenRouter(
+	ctx context.Context,
+	modelID string,
+	messages []UnifiedMessage,
+) (*GenerateResponse, error) {
+	if oc == nil || oc.connector == nil {
+		return nil, fmt.Errorf("missing connector")
+	}
+	apiKey := strings.TrimSpace(oc.resolveMediaProviderAPIKey("openrouter", "", ""))
+	if apiKey == "" {
+		return nil, fmt.Errorf("missing API key for openrouter")
+	}
+	baseURL := resolveOpenRouterMediaBaseURL(oc)
+	headers := openRouterHeaders()
+	pdfEngine := oc.connector.Config.Providers.OpenRouter.DefaultPDFEngine
+	if pdfEngine == "" {
+		pdfEngine = "mistral-ocr"
+	}
+	userID := ""
+	if oc.UserLogin != nil && oc.UserLogin.User.MXID != "" {
+		userID = oc.UserLogin.User.MXID.String()
+	}
+	provider, err := NewOpenAIProviderWithPDFPlugin(apiKey, baseURL, userID, pdfEngine, headers, oc.log)
+	if err != nil {
+		return nil, err
+	}
+	return provider.Generate(ctx, GenerateParams{
+		Model:               modelID,
+		Messages:            messages,
+		MaxCompletionTokens: defaultImageUnderstandingLimit,
+	})
+}
+
+func resolveOpenRouterMediaBaseURL(oc *AIClient) string {
+	if oc == nil || oc.connector == nil {
+		return defaultOpenRouterBaseURL
+	}
+	services := oc.connector.resolveServiceConfig(loginMetadata(oc.UserLogin))
+	if svc, ok := services[serviceOpenRouter]; ok && strings.TrimSpace(svc.BaseURL) != "" {
+		return strings.TrimRight(svc.BaseURL, "/")
+	}
+	base := strings.TrimSpace(oc.connector.resolveOpenRouterBaseURL())
+	if base != "" {
+		return base
+	}
+	return defaultOpenRouterBaseURL
+}
+
 func resolveMediaBaseURL(cfg *MediaUnderstandingConfig, entry MediaUnderstandingModelConfig) string {
 	if strings.TrimSpace(entry.BaseURL) != "" {
 		return entry.BaseURL
@@ -740,7 +1054,7 @@ func hasProviderAuthHeader(providerID string, headers map[string]string) bool {
 	for key := range headers {
 		switch strings.ToLower(key) {
 		case "authorization":
-			if providerID == "openai" || providerID == "groq" || providerID == "deepgram" {
+			if providerID == "openai" || providerID == "groq" || providerID == "deepgram" || providerID == "openrouter" {
 				return true
 			}
 		case "x-goog-api-key":
@@ -813,6 +1127,19 @@ func (oc *AIClient) resolveMediaProviderAPIKey(providerID string, profile string
 			return key
 		}
 		return strings.TrimSpace(os.Getenv("GOOGLE_API_KEY"))
+	case "openrouter":
+		if key := resolveProfiledEnvKey("OPENROUTER_API_KEY", profile); key != "" {
+			return key
+		}
+		if key := resolveProfiledEnvKey("OPENROUTER_API_KEY", preferredProfile); key != "" {
+			return key
+		}
+		if oc.connector != nil {
+			if key := strings.TrimSpace(oc.connector.resolveOpenRouterAPIKey(loginMetadata(oc.UserLogin))); key != "" {
+				return key
+			}
+		}
+		return strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY"))
 	default:
 		return ""
 	}
