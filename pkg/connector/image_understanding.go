@@ -90,11 +90,6 @@ func (oc *AIClient) resolveUnderstandingModel(
 		}
 	}
 
-	// Fallback to manifest-only lookup.
-	if modelID := pickModelFromManifest(provider, supportsInfo); modelID != "" {
-		return modelID
-	}
-
 	return ""
 }
 
@@ -163,19 +158,6 @@ func (oc *AIClient) pickModelFromCache(cache *ModelCache, provider string, suppo
 
 func pickModelFromList(models []ModelInfo, provider string, supports modelInfoFilter) string {
 	for _, info := range models {
-		if !supports(info) {
-			continue
-		}
-		if !providerMatches(info, provider) {
-			continue
-		}
-		return info.ID
-	}
-	return ""
-}
-
-func pickModelFromManifest(provider string, supports modelInfoFilter) string {
-	for _, info := range ModelManifest.Models {
 		if !supports(info) {
 			continue
 		}

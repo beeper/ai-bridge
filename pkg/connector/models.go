@@ -70,7 +70,6 @@ func DefaultModelForProvider(provider string) string {
 }
 
 // FormatModelDisplay formats a prefixed model ID for display.
-// Delegates to GetModelDisplayName which uses the model manifest.
 func FormatModelDisplay(modelID string) string {
 	return GetModelDisplayName(modelID)
 }

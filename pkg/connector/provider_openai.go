@@ -456,9 +456,9 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	return models, nil
 }
 
-// defaultOpenAIModels returns known OpenAI models from the manifest
+// defaultOpenAIModels returns an empty list (model catalog is provided via VFS).
 func defaultOpenAIModels() []ModelInfo {
-	return GetOpenAIModels()
+	return nil
 }
 
 // PDFPluginConfig holds configuration for the PDF file-parser plugin
