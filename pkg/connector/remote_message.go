@@ -96,75 +96,69 @@ func (m *OpenAIRemoteMessage) ConvertMessage(ctx context.Context, portal *bridge
 		model = portalMeta.Model
 	}
 
-	// Build the com.beeper.ai content block
-	aiContent := map[string]any{}
-
-	if m.Metadata != nil {
-		// Core fields
-		if m.Metadata.TurnID != "" {
-			aiContent["turn_id"] = m.Metadata.TurnID
-		}
-		if m.Metadata.AgentID != "" {
-			aiContent["agent_id"] = m.Metadata.AgentID
-		}
-		if model != "" {
-			aiContent["model"] = model
-		}
-
-		// Status and completion info
-		aiContent["status"] = TurnStatusCompleted
-		if m.Metadata.FinishReason != "" {
-			aiContent["finish_reason"] = m.Metadata.FinishReason
-		}
-
-		// Embedded thinking
-		if m.Metadata.ThinkingContent != "" {
-			thinking := map[string]any{
-				"content": m.Metadata.ThinkingContent,
+	// Build AI SDK UIMessage payload
+	uiParts := make([]map[string]any, 0, 2)
+	if m.Metadata != nil && m.Metadata.ThinkingContent != "" {
+		uiParts = append(uiParts, map[string]any{
+			"type":  "reasoning",
+			"text":  m.Metadata.ThinkingContent,
+			"state": "done",
+		})
+	}
+	if m.Content != "" {
+		uiParts = append(uiParts, map[string]any{
+			"type":  "text",
+			"text":  m.Content,
+			"state": "done",
+		})
+	}
+	if m.Metadata != nil && len(m.Metadata.ToolCalls) > 0 {
+		for _, tc := range m.Metadata.ToolCalls {
+			toolPart := map[string]any{
+				"type":       "dynamic-tool",
+				"toolName":   tc.ToolName,
+				"toolCallId": tc.CallID,
+				"input":      tc.Input,
 			}
-			if m.Metadata.ThinkingTokenCount > 0 {
-				thinking["token_count"] = m.Metadata.ThinkingTokenCount
+			if tc.ToolType == string(ToolTypeProvider) {
+				toolPart["providerExecuted"] = true
 			}
-			aiContent["thinking"] = thinking
-		}
-
-		// Usage info
-		usage := map[string]any{}
-		if m.Metadata.PromptTokens > 0 {
-			usage["prompt_tokens"] = m.Metadata.PromptTokens
-		}
-		if m.Metadata.CompletionTokens > 0 {
-			usage["completion_tokens"] = m.Metadata.CompletionTokens
-		}
-		if m.Metadata.ReasoningTokens > 0 {
-			usage["reasoning_tokens"] = m.Metadata.ReasoningTokens
-		}
-		if len(usage) > 0 {
-			aiContent["usage"] = usage
-		}
-
-		// Tool call references
-		if len(m.ToolCallEventIDs) > 0 {
-			aiContent["tool_calls"] = m.ToolCallEventIDs
-		} else if m.Metadata.HasToolCalls && len(m.Metadata.ToolCalls) > 0 {
-			// Build tool call IDs from metadata
-			toolCallIDs := make([]string, 0, len(m.Metadata.ToolCalls))
-			for _, tc := range m.Metadata.ToolCalls {
-				if tc.CallEventID != "" {
-					toolCallIDs = append(toolCallIDs, tc.CallEventID)
+			if tc.ResultStatus == string(ResultStatusSuccess) {
+				toolPart["state"] = "output-available"
+				toolPart["output"] = tc.Output
+			} else {
+				toolPart["state"] = "output-error"
+				if tc.ErrorMessage != "" {
+					toolPart["errorText"] = tc.ErrorMessage
+				} else if result, ok := tc.Output["result"].(string); ok && result != "" {
+					toolPart["errorText"] = result
 				}
 			}
-			if len(toolCallIDs) > 0 {
-				aiContent["tool_calls"] = toolCallIDs
+			uiParts = append(uiParts, toolPart)
+		}
+	}
+
+	uiMetadata := map[string]any{}
+	if m.Metadata != nil {
+		if m.Metadata.TurnID != "" {
+			uiMetadata["turn_id"] = m.Metadata.TurnID
+		}
+		if m.Metadata.AgentID != "" {
+			uiMetadata["agent_id"] = m.Metadata.AgentID
+		}
+		if model != "" {
+			uiMetadata["model"] = model
+		}
+		if m.Metadata.FinishReason != "" {
+			uiMetadata["finish_reason"] = mapFinishReason(m.Metadata.FinishReason)
+		}
+		if m.Metadata.PromptTokens > 0 || m.Metadata.CompletionTokens > 0 || m.Metadata.ReasoningTokens > 0 {
+			uiMetadata["usage"] = map[string]any{
+				"prompt_tokens":     m.Metadata.PromptTokens,
+				"completion_tokens": m.Metadata.CompletionTokens,
+				"reasoning_tokens":  m.Metadata.ReasoningTokens,
 			}
 		}
-
-		// Image references
-		if len(m.ImageEventIDs) > 0 {
-			aiContent["images"] = m.ImageEventIDs
-		}
-
-		// Timing info
 		timing := map[string]any{}
 		if m.Metadata.StartedAtMs > 0 {
 			timing["started_at"] = m.Metadata.StartedAtMs
@@ -176,19 +170,20 @@ func (m *OpenAIRemoteMessage) ConvertMessage(ctx context.Context, portal *bridge
 			timing["completed_at"] = m.Metadata.CompletedAtMs
 		}
 		if len(timing) > 0 {
-			aiContent["timing"] = timing
+			uiMetadata["timing"] = timing
 		}
-
-		// Legacy fields for backwards compatibility
 		if m.Metadata.CompletionID != "" {
-			aiContent["completion_id"] = m.Metadata.CompletionID
+			uiMetadata["completion_id"] = m.Metadata.CompletionID
 		}
 	}
 
-	// Only add the block if we have content
-	if len(aiContent) > 0 {
-		extra[BeeperAIKey] = aiContent
+	uiMessage := map[string]any{
+		"id":       m.Metadata.TurnID,
+		"role":     "assistant",
+		"metadata": uiMetadata,
+		"parts":    uiParts,
 	}
+	extra[BeeperAIKey] = uiMessage
 
 	// Build m.relates_to for threading if we have a reply target
 	if m.ReplyToEventID != "" {
