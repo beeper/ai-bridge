@@ -102,6 +102,18 @@ func resolveCLIOutput(command string, args []string, stdout string, mediaPath st
 		}
 	}
 
+	if base == "gemini" {
+		if response := extractGeminiResponse(stdout); response != "" {
+			return response
+		}
+	}
+
+	if base == "sherpa-onnx-offline" {
+		if response := extractSherpaOnnxText(stdout); response != "" {
+			return response
+		}
+	}
+
 	return strings.TrimSpace(stdout)
 }
 
@@ -157,4 +169,74 @@ func hasArg(args []string, keys ...string) bool {
 		}
 	}
 	return false
+}
+
+func extractGeminiResponse(raw string) string {
+	payload := extractLastJSONObject(raw)
+	if payload == nil {
+		return ""
+	}
+	response, ok := payload["response"]
+	if !ok {
+		return ""
+	}
+	text, ok := response.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(text)
+}
+
+func extractSherpaOnnxText(raw string) string {
+	tryParse := func(value string) string {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return ""
+		}
+		head := trimmed[0]
+		if head != '{' && head != '"' {
+			return ""
+		}
+		var parsed any
+		if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+			return ""
+		}
+		switch value := parsed.(type) {
+		case string:
+			return extractSherpaOnnxText(value)
+		case map[string]any:
+			if text, ok := value["text"].(string); ok && strings.TrimSpace(text) != "" {
+				return strings.TrimSpace(text)
+			}
+		}
+		return ""
+	}
+
+	if direct := tryParse(raw); direct != "" {
+		return direct
+	}
+	lines := strings.Split(raw, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if parsed := tryParse(lines[i]); parsed != "" {
+			return parsed
+		}
+	}
+	return ""
+}
+
+func extractLastJSONObject(raw string) map[string]any {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	start := strings.LastIndex(trimmed, "{")
+	if start == -1 {
+		return nil
+	}
+	slice := trimmed[start:]
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(slice), &payload); err != nil {
+		return nil
+	}
+	return payload
 }
