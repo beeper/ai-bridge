@@ -2,6 +2,18 @@ package cron
 
 import "strings"
 
+const (
+	defaultCronPostPrefix   = "Cron"
+	defaultCronPostMaxChars = 8000
+)
+
+type CronIsolationMode string
+
+const (
+	CronIsolationSummary CronIsolationMode = "summary"
+	CronIsolationFull    CronIsolationMode = "full"
+)
+
 func maxInt64(a, b int64) int64 {
 	if a > b {
 		return a
@@ -44,4 +56,13 @@ func migrateLegacyPayload(payload *CronPayload) bool {
 		mutated = true
 	}
 	return mutated
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

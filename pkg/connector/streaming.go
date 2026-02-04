@@ -1337,10 +1337,10 @@ func (oc *AIClient) streamingResponse(
 		typingCtrl.MarkRunComplete()
 	}
 
-	// Send final edit to persist complete content with metadata (including reasoning)
-	if state.initialEventID != "" {
+	// Send final message to persist complete content with metadata (including reasoning)
+	if state.initialEventID != "" || state.heartbeat != nil {
 		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
-		if !state.suppressSave {
+		if state.initialEventID != "" && !state.suppressSave {
 			oc.saveAssistantMessage(ctx, log, portal, state, meta)
 		}
 	}

@@ -1,69 +1,52 @@
 package cron
 
 import (
+	"context"
+	"fmt"
 	"os"
-	"path/filepath"
+	"path"
 	"strings"
 
+	"github.com/beeper/ai-bridge/pkg/textfs"
 	json5 "github.com/yosuke-furukawa/json5/encoding/json5"
 )
 
 const (
-	defaultCronFileName = "jobs.json"
+	defaultCronDir       = "cron"
+	defaultCronFileName  = "jobs.json"
+	defaultCronStorePath = defaultCronDir + "/" + defaultCronFileName
 )
 
-// ResolveCronStorePath resolves the JSON store path.
+// ResolveCronStorePath resolves the virtual JSON store path.
 func ResolveCronStorePath(storePath string) string {
 	trimmed := strings.TrimSpace(storePath)
 	if trimmed != "" {
-		return resolveUserPath(trimmed)
+		if normalized, err := textfs.NormalizePath(trimmed); err == nil {
+			return normalized
+		}
 	}
-	stateDir := resolveConfigDir()
-	return filepath.Join(stateDir, "cron", defaultCronFileName)
-}
-
-func resolveConfigDir() string {
 	override := strings.TrimSpace(os.Getenv("OPENCLAW_STATE_DIR"))
 	if override == "" {
 		override = strings.TrimSpace(os.Getenv("CLAWDBOT_STATE_DIR"))
 	}
 	if override != "" {
-		resolved := resolveUserPath(override)
-		if strings.TrimSpace(resolved) != "" {
-			return resolved
-		}
-	}
-	home, err := os.UserHomeDir()
-	if err == nil && strings.TrimSpace(home) != "" {
-		return filepath.Join(home, ".openclaw")
-	}
-	return filepath.Join(os.TempDir(), "openclaw")
-}
-
-func resolveUserPath(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return ""
-	}
-	if strings.HasPrefix(trimmed, "~") {
-		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-			replaced := strings.Replace(trimmed, "~", home, 1)
-			if abs, err := filepath.Abs(replaced); err == nil {
-				return abs
+		if dir, err := textfs.NormalizeDir(override); err == nil {
+			if dir == "" {
+				return defaultCronStorePath
 			}
-			return filepath.Clean(replaced)
+			return path.Join(dir, defaultCronDir, defaultCronFileName)
 		}
 	}
-	if abs, err := filepath.Abs(trimmed); err == nil {
-		return abs
-	}
-	return filepath.Clean(trimmed)
+	return defaultCronStorePath
 }
 
-// LoadCronStore reads the JSON store, tolerating missing files.
-func LoadCronStore(storePath string) (CronStoreFile, error) {
-	data, err := os.ReadFile(storePath)
-	if err != nil {
+// LoadCronStore reads the JSON store, tolerating missing or invalid files.
+func LoadCronStore(ctx context.Context, backend StoreBackend, storePath string) (CronStoreFile, error) {
+	if backend == nil {
+		return CronStoreFile{Version: 1, Jobs: []CronJob{}}, fmt.Errorf("cron store backend not configured")
+	}
+	data, found, err := backend.Read(ctx, storePath)
+	if err != nil || !found {
 		return CronStoreFile{Version: 1, Jobs: []CronJob{}}, nil
 	}
 	var parsed CronStoreFile
@@ -79,25 +62,21 @@ func LoadCronStore(storePath string) (CronStoreFile, error) {
 	return parsed, nil
 }
 
-// SaveCronStore writes the JSON store atomically and keeps a .bak copy.
-func SaveCronStore(storePath string, store CronStoreFile) error {
+// SaveCronStore writes the JSON store and keeps a .bak copy in virtual storage.
+func SaveCronStore(ctx context.Context, backend StoreBackend, storePath string, store CronStoreFile) error {
+	if backend == nil {
+		return fmt.Errorf("cron store backend not configured")
+	}
 	if store.Version == 0 {
 		store.Version = 1
-	}
-	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
-		return err
 	}
 	payload, err := json5.MarshalIndent(store, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := storePath + ".tmp"
-	if err := os.WriteFile(tmp, payload, 0o644); err != nil {
+	if err := backend.Write(ctx, storePath, payload); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, storePath); err != nil {
-		return err
-	}
-	_ = os.WriteFile(storePath+".bak", payload, 0o644)
+	_ = backend.Write(ctx, storePath+".bak", payload)
 	return nil
 }
