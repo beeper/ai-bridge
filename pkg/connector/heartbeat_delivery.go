@@ -15,7 +15,7 @@ type heartbeatDeliveryTarget struct {
 	Reason  string
 }
 
-func (oc *AIClient) resolveHeartbeatDeliveryTarget(agentID string, heartbeat *HeartbeatConfig, entry *heartbeatSessionEntry) heartbeatDeliveryTarget {
+func (oc *AIClient) resolveHeartbeatDeliveryTarget(agentID string, heartbeat *HeartbeatConfig, entry *sessionEntry) heartbeatDeliveryTarget {
 	if oc == nil || oc.UserLogin == nil {
 		return heartbeatDeliveryTarget{Reason: "no-target"}
 	}

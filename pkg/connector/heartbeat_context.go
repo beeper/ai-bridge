@@ -16,6 +16,8 @@ type HeartbeatRunConfig struct {
 	ExecEvent        bool
 	ResponsePrefix   string
 	SessionKey       string
+	StoreAgentID     string
+	StorePath        string
 	PrevUpdatedAt    int64
 	TargetRoom       id.RoomID
 	TargetReason     string

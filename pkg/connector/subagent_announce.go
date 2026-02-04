@@ -128,13 +128,6 @@ func (oc *AIClient) runSubagentCompletion(
 	meta *PortalMetadata,
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) (bool, error) {
-	responseFn := oc.streamingResponseWithToolSchemaFallback
-	if hasAudioContent(prompt) {
-		responseFn = oc.streamChatCompletions
-	} else if oc.resolveModelAPI(meta) == ModelAPIChatCompletions {
-		responseFn = oc.streamChatCompletions
-	}
-
 	modelChain := oc.modelFallbackChain(ctx, meta)
 	if len(modelChain) == 0 {
 		modelChain = []string{oc.effectiveModel(meta)}
@@ -145,7 +138,8 @@ func (oc *AIClient) runSubagentCompletion(
 		if meta != nil {
 			effectiveMeta = oc.overrideModel(meta, modelID)
 		}
-		success, err := oc.responseWithRetryAndReasoningFallback(ctx, nil, portal, effectiveMeta, prompt, responseFn, "subagent")
+		responseFn, logLabel := oc.selectResponseFn(effectiveMeta, prompt)
+		success, err := oc.responseWithRetryAndReasoningFallback(ctx, nil, portal, effectiveMeta, prompt, responseFn, logLabel)
 		if success {
 			return true, nil
 		}

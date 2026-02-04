@@ -250,13 +250,13 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "empty-heartbeat-file"}
 	}
 
-	storeKey := heartbeatStoreKey(agentID)
-	sessionEntry, entryOk := oc.getHeartbeatSessionEntry(context.Background(), storeKey)
-	var entry *heartbeatSessionEntry
-	if entryOk {
-		entry = &sessionEntry
+	sessionResolution := oc.resolveHeartbeatSession(agentID, heartbeat)
+	storeKey := strings.TrimSpace(sessionResolution.SessionKey)
+	entry := sessionResolution.Entry
+	prevUpdatedAt := int64(0)
+	if entry != nil {
+		prevUpdatedAt = entry.UpdatedAt
 	}
-	prevUpdatedAt := sessionEntry.UpdatedAt
 
 	delivery := oc.resolveHeartbeatDeliveryTarget(agentID, heartbeat, entry)
 	deliveryPortal := delivery.Portal
@@ -292,6 +292,16 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		}
 	}
 	suppressSend := true
+	promptMeta := clonePortalMetadata(portalMeta(sessionPortal))
+	if promptMeta == nil {
+		promptMeta = &PortalMetadata{}
+	}
+	if heartbeat != nil && heartbeat.Model != nil {
+		if model := strings.TrimSpace(*heartbeat.Model); model != "" {
+			promptMeta.Model = model
+		}
+	}
+	responsePrefix := resolveResponsePrefixForHeartbeat(oc, cfg, agentID, promptMeta)
 	hbCfg := &HeartbeatRunConfig{
 		Reason:           reason,
 		AckMaxChars:      resolveHeartbeatAckMaxChars(cfg, heartbeat),
@@ -300,8 +310,10 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		UseIndicator:     visibility.UseIndicator,
 		IncludeReasoning: heartbeat != nil && heartbeat.IncludeReasoning != nil && *heartbeat.IncludeReasoning,
 		ExecEvent:        hasExecCompletion,
-		ResponsePrefix:   resolveResponsePrefix(cfg, agentID),
+		ResponsePrefix:   responsePrefix,
 		SessionKey:       storeKey,
+		StoreAgentID:     sessionResolution.StoreRef.AgentID,
+		StorePath:        sessionResolution.StoreRef.Path,
 		PrevUpdatedAt:    prevUpdatedAt,
 		TargetRoom:       deliveryRoom,
 		TargetReason:     deliveryReason,
@@ -319,15 +331,6 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		prompt = systemEvents + "\n\n" + prompt
 	}
 
-	promptMeta := clonePortalMetadata(portalMeta(sessionPortal))
-	if promptMeta == nil {
-		promptMeta = &PortalMetadata{}
-	}
-	if heartbeat != nil && heartbeat.Model != nil {
-		if model := strings.TrimSpace(*heartbeat.Model); model != "" {
-			promptMeta.Model = model
-		}
-	}
 	promptMessages, err := oc.buildPromptWithHeartbeat(context.Background(), sessionPortal, promptMeta, prompt)
 	if err != nil {
 		return cron.HeartbeatRunResult{Status: "failed", Reason: err.Error()}
@@ -378,6 +381,10 @@ func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *Hea
 			session = strings.TrimSpace(*heartbeat.Session)
 		}
 	}
+	mainKey := ""
+	if oc != nil && oc.connector != nil && oc.connector.Config.Session != nil {
+		mainKey = strings.TrimSpace(oc.connector.Config.Session.MainKey)
+	}
 	if session == "" {
 		if portal := oc.defaultChatPortal(); portal != nil {
 			return portal, portal.MXID.String(), nil
@@ -387,7 +394,7 @@ func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *Hea
 		}
 		return nil, "", fmt.Errorf("no session")
 	}
-	if strings.EqualFold(session, "main") || strings.EqualFold(session, "global") {
+	if strings.EqualFold(session, "main") || strings.EqualFold(session, "global") || (mainKey != "" && strings.EqualFold(session, mainKey)) {
 		if portal := oc.defaultChatPortal(); portal != nil {
 			return portal, portal.MXID.String(), nil
 		}
