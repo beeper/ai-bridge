@@ -366,7 +366,7 @@ func (o *OpenAIProvider) Generate(ctx context.Context, params GenerateParams) (*
 }
 
 func (o *OpenAIProvider) generateChatCompletions(ctx context.Context, params GenerateParams) (*GenerateResponse, error) {
-	chatMessages := toChatCompletionMessages(params.Messages)
+	chatMessages := toChatCompletionMessages(params.Messages, isOpenRouterBaseURL(o.baseURL))
 	if len(chatMessages) == 0 {
 		return nil, fmt.Errorf("no chat messages for completion")
 	}
@@ -435,6 +435,7 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 				ID:                  fullModelID,
 				Name:                GetModelDisplayName(fullModelID),
 				Provider:            "openai",
+				API:                 "openai-responses",
 				SupportsVision:      strings.Contains(model.ID, "vision") || strings.Contains(model.ID, "4o") || strings.Contains(model.ID, "4-turbo"),
 				SupportsToolCalling: true,
 				SupportsReasoning:   strings.HasPrefix(model.ID, "o1") || strings.HasPrefix(model.ID, "o3"),
@@ -455,9 +456,9 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	return models, nil
 }
 
-// defaultOpenAIModels returns known OpenAI models from the manifest
+// defaultOpenAIModels returns an empty list (model catalog is provided via VFS).
 func defaultOpenAIModels() []ModelInfo {
-	return GetOpenAIModels()
+	return nil
 }
 
 // PDFPluginConfig holds configuration for the PDF file-parser plugin
@@ -830,7 +831,7 @@ func hasMultimodalUnifiedMessages(messages []UnifiedMessage) bool {
 	return false
 }
 
-func toChatCompletionMessages(messages []UnifiedMessage) []openai.ChatCompletionMessageParamUnion {
+func toChatCompletionMessages(messages []UnifiedMessage, supportsVideoURL bool) []openai.ChatCompletionMessageParamUnion {
 	result := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
 	for _, msg := range messages {
 		switch msg.Role {
@@ -838,7 +839,7 @@ func toChatCompletionMessages(messages []UnifiedMessage) []openai.ChatCompletion
 			result = append(result, openai.SystemMessage(msg.Text()))
 		case RoleUser:
 			if msg.HasMultimodalContent() {
-				parts := toChatCompletionContentParts(msg.Content)
+				parts := toChatCompletionContentParts(msg.Content, supportsVideoURL)
 				result = append(result, openai.ChatCompletionMessageParamUnion{
 					OfUser: &openai.ChatCompletionUserMessageParam{
 						Content: openai.ChatCompletionUserMessageParamContentUnion{
@@ -858,7 +859,7 @@ func toChatCompletionMessages(messages []UnifiedMessage) []openai.ChatCompletion
 	return result
 }
 
-func toChatCompletionContentParts(parts []ContentPart) []openai.ChatCompletionContentPartUnionParam {
+func toChatCompletionContentParts(parts []ContentPart, supportsVideoURL bool) []openai.ChatCompletionContentPartUnionParam {
 	result := make([]openai.ChatCompletionContentPartUnionParam, 0, len(parts))
 	for _, part := range parts {
 		switch part.Type {
@@ -924,6 +925,26 @@ func toChatCompletionContentParts(parts []ContentPart) []openai.ChatCompletionCo
 				},
 			})
 		case ContentTypeVideo:
+			if supportsVideoURL {
+				url := strings.TrimSpace(part.VideoURL)
+				if url == "" && part.VideoB64 != "" {
+					mimeType := part.MimeType
+					if mimeType == "" {
+						mimeType = "video/mp4"
+					}
+					url = buildDataURL(mimeType, part.VideoB64)
+				}
+				if url == "" {
+					continue
+				}
+				result = append(result, param.Override[openai.ChatCompletionContentPartUnionParam](map[string]any{
+					"type": "video_url",
+					"video_url": map[string]any{
+						"url": url,
+					},
+				}))
+				continue
+			}
 			text := strings.TrimSpace(part.VideoURL)
 			if text == "" && part.VideoB64 != "" {
 				mimeType := part.MimeType

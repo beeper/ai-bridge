@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/ptr"
@@ -280,6 +281,11 @@ type AIClient struct {
 	cronService     *cron.CronService
 	heartbeatRunner *HeartbeatRunner
 	heartbeatWake   *HeartbeatWake
+
+	// Model catalog cache (VFS-backed)
+	modelCatalogMu     sync.Mutex
+	modelCatalogLoaded bool
+	modelCatalogCache  []ModelCatalogEntry
 }
 
 // pendingMessageType indicates what kind of pending message this is
@@ -855,6 +861,7 @@ func (oc *AIClient) agentModelOverride(agentID string) string {
 	return strings.TrimSpace(loginMeta.AgentModelOverrides[agentID])
 }
 
+//lint:ignore U1000 Staged for future agent model override wiring.
 func (oc *AIClient) setAgentModelOverride(ctx context.Context, agentID, modelID string) error {
 	if agentID == "" || oc.UserLogin == nil {
 		return fmt.Errorf("missing agent ID")
@@ -1217,15 +1224,7 @@ func (oc *AIClient) validateModel(ctx context.Context, modelID string) (bool, er
 			}
 		}
 	}
-
-	// Try to validate by making a minimal API call as last resort
-	timeoutCtx, cancel := context.WithTimeout(ctx, modelValidationTimeout)
-	defer cancel()
-
-	// Strip provider prefix for direct API validation (e.g., "openai/gpt-4o" -> "gpt-4o")
-	_, actualModel := ParseModelPrefix(modelID)
-	_, err = oc.api.Models.Get(timeoutCtx, actualModel)
-	return err == nil, nil
+	return false, nil
 }
 
 // resolveModelID tries to normalize a user-provided model to a known model ID.
@@ -1299,13 +1298,6 @@ func (oc *AIClient) resolveModelID(ctx context.Context, modelID string) (string,
 		}
 	}
 
-	valid, err := oc.validateModel(ctx, normalized)
-	if err != nil {
-		return "", false, err
-	}
-	if valid {
-		return normalized, true, nil
-	}
 	return "", false, nil
 }
 
@@ -1322,28 +1314,8 @@ func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) 
 		}
 	}
 
-	// Fetch models from provider
-	oc.log.Debug().Msg("Fetching available models from provider")
-
-	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	var allModels []ModelInfo
-
-	// List models from the provider
-	if oc.provider != nil {
-		// For OpenRouter/Beeper providers, use curated manifest models directly
-		// The API's ListModels filters for OpenAI prefixes which don't match OpenRouter model IDs
-		if oc.isOpenRouterProvider() {
-			allModels = GetOpenRouterModels()
-		} else {
-			models, err := oc.provider.ListModels(timeoutCtx)
-			if err != nil {
-				return nil, fmt.Errorf("failed to list models: %w", err)
-			}
-			allModels = models
-		}
-	}
+	oc.log.Debug().Msg("Loading model catalog from VFS")
+	allModels := oc.loadModelCatalogModels(ctx)
 
 	// Update cache
 	if meta.ModelCache == nil {
@@ -1367,21 +1339,15 @@ func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) 
 func (oc *AIClient) findModelInfo(modelID string) *ModelInfo {
 	meta := loginMetadata(oc.UserLogin)
 	if meta.ModelCache == nil {
-		goto fallback
+		goto catalogFallback
 	}
 	for i := range meta.ModelCache.Models {
 		if meta.ModelCache.Models[i].ID == modelID {
 			return &meta.ModelCache.Models[i]
 		}
 	}
-
-fallback:
-	resolved := ResolveAlias(modelID)
-	if info, ok := ModelManifest.Models[resolved]; ok {
-		infoCopy := info
-		return &infoCopy
-	}
-	return nil
+catalogFallback:
+	return oc.findModelInfoInCatalog(modelID)
 }
 
 // buildBasePrompt builds the system prompt and history portion of a prompt.
@@ -1625,6 +1591,26 @@ func (oc *AIClient) buildPromptWithMedia(
 			return nil, fmt.Errorf("failed to download video: %w", err)
 		}
 		dataURL := buildDataURL(actualMimeType, b64Data)
+		if oc.isOpenRouterProvider() {
+			videoPart := param.Override[openai.ChatCompletionContentPartUnionParam](map[string]any{
+				"type": "video_url",
+				"video_url": map[string]any{
+					"url": dataURL,
+				},
+			})
+			userMsg := openai.ChatCompletionMessageParamUnion{
+				OfUser: &openai.ChatCompletionUserMessageParam{
+					Content: openai.ChatCompletionUserMessageParamContentUnion{
+						OfArrayOfContentParts: []openai.ChatCompletionContentPartUnionParam{
+							textContent,
+							videoPart,
+						},
+					},
+				},
+			}
+			prompt = append(prompt, userMsg)
+			return prompt, nil
+		}
 		videoPrompt := fmt.Sprintf("%s\n\nVideo data URL: %s", caption, dataURL)
 		videoPrompt = appendMessageIDHint(videoPrompt, eventID)
 		userMsg := openai.ChatCompletionMessageParamUnion{
@@ -2019,27 +2005,11 @@ func ptrIfNotEmpty(value string) *string {
 	return ptr.Ptr(value)
 }
 
-// supportsReasoning checks if a model supports reasoning/thinking capabilities
-// These models can use reasoning_effort parameter and stream reasoning tokens via Responses API
-func supportsReasoning(modelID string) bool {
-	// O-series reasoning models
-	if strings.HasPrefix(modelID, "o1") || strings.HasPrefix(modelID, "o3") || strings.HasPrefix(modelID, "o4") {
-		return true
-	}
-	// GPT-5.x models with reasoning support
-	if strings.HasPrefix(modelID, "gpt-5") {
-		return true
-	}
-	return false
-}
-
 // getModelCapabilities computes capabilities for a model.
 // If info is provided, it uses the ModelInfo fields for accurate capability detection.
-// Otherwise, it falls back to heuristic detection based on modelID.
+// If info is missing, capabilities default to false (except tool calling).
 func getModelCapabilities(modelID string, info *ModelInfo) ModelCapabilities {
 	caps := ModelCapabilities{
-		SupportsVision:      detectVisionSupport(modelID),
-		SupportsReasoning:   supportsReasoning(modelID),
 		SupportsToolCalling: true, // Default true, overridden by ModelInfo if available
 	}
 
@@ -2054,31 +2024,10 @@ func getModelCapabilities(modelID string, info *ModelInfo) ModelCapabilities {
 		if info.SupportsReasoning {
 			caps.SupportsReasoning = true
 		}
+		caps.SupportsToolCalling = info.SupportsToolCalling
 	}
 
 	return caps
-}
-
-// detectVisionSupport checks if a model supports vision/images
-func detectVisionSupport(modelID string) bool {
-	// Known vision-capable models
-	visionModels := map[string]bool{
-		"gpt-4o":                    true,
-		"gpt-4o-mini":               true,
-		"gpt-4-turbo":               true,
-		"gpt-4-turbo-2024-04-09":    true,
-		"gpt-4-vision-preview":      true,
-		"gpt-4-1106-vision-preview": true,
-	}
-
-	if visionModels[modelID] {
-		return true
-	}
-
-	// Check by prefix/contains
-	return strings.HasPrefix(modelID, "gpt-4o") ||
-		strings.HasPrefix(modelID, "gpt-4-turbo") ||
-		strings.Contains(modelID, "vision")
 }
 
 // AgentState tracks the state of an active agent turn

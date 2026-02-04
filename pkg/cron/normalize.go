@@ -124,7 +124,7 @@ func normalizePayloadToSystemText(payload CronPayload) string {
 
 func resolveJobPayloadTextForMain(job CronJob) (string, string) {
 	if strings.EqualFold(job.Payload.Kind, "systemEvent") {
-		text := strings.TrimSpace(job.Payload.Text)
+		text := normalizePayloadToSystemText(job.Payload)
 		if text == "" {
 			return "", "main job requires non-empty systemEvent text"
 		}

@@ -16,7 +16,7 @@ const (
 	MessageDescription = "Send messages and channel actions. Supports actions: send, delete, react, poll, pin, threads, and more."
 
 	CronName        = "cron"
-	CronDescription = "Manage cron jobs and wake events (OpenClaw-style). Use for reminders and scheduled tasks."
+	CronDescription = "Manage cron jobs and wake events (OpenClaw-style). Use for reminders and scheduled tasks. For cron.add, enabled defaults to true."
 
 	SessionStatusName        = "session_status"
 	SessionStatusDescription = "Show a /status-equivalent session status card (usage + time + cost when available). Use for model-use questions (📊 session_status). Optional: set per-session model override (model=default resets overrides)."

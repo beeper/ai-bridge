@@ -70,6 +70,19 @@ func (oc *OpenAIConnector) Start(ctx context.Context) error {
 	return nil
 }
 
+// SetMatrixCredentials seeds Beeper provider config from the Matrix account, if unset.
+func (oc *OpenAIConnector) SetMatrixCredentials(accessToken, homeserver string) {
+	if oc == nil {
+		return
+	}
+	if oc.Config.Beeper.BaseURL == "" && strings.TrimSpace(homeserver) != "" {
+		oc.Config.Beeper.BaseURL = strings.TrimSpace(homeserver)
+	}
+	if oc.Config.Beeper.Token == "" && strings.TrimSpace(accessToken) != "" {
+		oc.Config.Beeper.Token = strings.TrimSpace(accessToken)
+	}
+}
+
 // registerCustomEventHandlers registers handlers for custom Matrix state events
 func (oc *OpenAIConnector) registerCustomEventHandlers() {
 	// Type assert the Matrix connector to get the concrete type with EventProcessor

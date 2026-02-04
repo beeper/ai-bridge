@@ -10,11 +10,12 @@ type normalizeOptions struct {
 
 func normalizeCronJobInput(raw CronJobCreate, opts normalizeOptions) CronJobCreate {
 	next := raw
-	if strings.TrimSpace(next.Name) == "" {
-		next.Name = inferLegacyName(&raw)
-	}
 
 	if opts.applyDefaults {
+		if next.Enabled == nil {
+			enabled := true
+			next.Enabled = &enabled
+		}
 		if next.WakeMode == "" {
 			next.WakeMode = CronWakeNextHeartbeat
 		}

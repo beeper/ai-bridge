@@ -4,63 +4,84 @@ import (
 	"context"
 	"strings"
 	"time"
-
-	"maunium.net/go/mautrix/id"
 )
 
 const heartbeatDedupeWindowMs = 24 * 60 * 60 * 1000
 
-func (oc *AIClient) isDuplicateHeartbeat(agentID string, roomID id.RoomID, text string) bool {
-	if oc == nil || oc.UserLogin == nil {
+func (oc *AIClient) isDuplicateHeartbeat(ref sessionStoreRef, sessionKey string, text string, nowMs int64) bool {
+	if oc == nil {
 		return false
 	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return false
 	}
-	meta := loginMetadata(oc.UserLogin)
-	if meta == nil || meta.HeartbeatState == nil {
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
 		return false
 	}
-	state, ok := meta.HeartbeatState[heartbeatDedupeKey(agentID, roomID)]
+	entry, ok := oc.getSessionEntry(context.Background(), ref, sessionKey)
 	if !ok {
 		return false
 	}
-	if strings.TrimSpace(state.LastHeartbeatText) == trimmed {
-		if time.Now().UnixMilli()-state.LastHeartbeatSentAt < heartbeatDedupeWindowMs {
-			return true
-		}
+	if strings.TrimSpace(entry.LastHeartbeatText) != trimmed {
+		return false
+	}
+	if entry.LastHeartbeatSentAt <= 0 {
+		return false
+	}
+	if nowMs-entry.LastHeartbeatSentAt < heartbeatDedupeWindowMs {
+		return true
 	}
 	return false
 }
 
-func (oc *AIClient) recordHeartbeatText(agentID string, roomID id.RoomID, text string) {
-	if oc == nil || oc.UserLogin == nil {
+func (oc *AIClient) recordHeartbeatText(ref sessionStoreRef, sessionKey string, text string, sentAt int64) {
+	if oc == nil {
 		return
 	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return
 	}
-	meta := loginMetadata(oc.UserLogin)
-	if meta == nil {
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
 		return
 	}
-	if meta.HeartbeatState == nil {
-		meta.HeartbeatState = make(map[string]HeartbeatState)
+	if sentAt <= 0 {
+		sentAt = time.Now().UnixMilli()
 	}
-	key := heartbeatDedupeKey(agentID, roomID)
-	meta.HeartbeatState[key] = HeartbeatState{
-		LastHeartbeatText:   trimmed,
-		LastHeartbeatSentAt: time.Now().UnixMilli(),
-	}
-	_ = oc.UserLogin.Save(oc.backgroundContext(context.Background()))
+	oc.updateSessionEntry(context.Background(), ref, sessionKey, func(entry sessionEntry) sessionEntry {
+		patch := sessionEntry{
+			LastHeartbeatText:   trimmed,
+			LastHeartbeatSentAt: sentAt,
+		}
+		return mergeSessionEntry(entry, patch)
+	})
 }
 
-func heartbeatDedupeKey(agentID string, roomID id.RoomID) string {
-	key := normalizeAgentID(agentID)
-	if roomID == "" {
-		return key
+func (oc *AIClient) restoreHeartbeatUpdatedAt(ref sessionStoreRef, sessionKey string, updatedAt int64) {
+	if oc == nil {
+		return
 	}
-	return key + ":" + roomID.String()
+	if updatedAt <= 0 {
+		return
+	}
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return
+	}
+	entry, ok := oc.getSessionEntry(context.Background(), ref, sessionKey)
+	if !ok {
+		return
+	}
+	if entry.UpdatedAt >= updatedAt {
+		return
+	}
+	oc.updateSessionEntry(context.Background(), ref, sessionKey, func(entry sessionEntry) sessionEntry {
+		if entry.UpdatedAt < updatedAt {
+			entry.UpdatedAt = updatedAt
+		}
+		return entry
+	})
 }

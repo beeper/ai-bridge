@@ -1526,10 +1526,10 @@ func (oc *AIClient) streamingResponse(
 		log.Info().Stringer("event_id", eventID).Str("item_id", img.itemID).Msg("Sent generated image to Matrix")
 	}
 
-	// Send final edit to persist complete content with metadata (including reasoning)
-	if state.initialEventID != "" {
+	// Send final message to persist complete content with metadata (including reasoning)
+	if state.initialEventID != "" || state.heartbeat != nil {
 		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
-		if !state.suppressSave {
+		if state.initialEventID != "" && !state.suppressSave {
 			oc.saveAssistantMessage(ctx, log, portal, state, meta)
 		}
 	}

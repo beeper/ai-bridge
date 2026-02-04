@@ -38,6 +38,20 @@ default_system_prompt: |
   Follow the user's intent and be accurate.
 model_cache_duration: 6h
 
+# Optional message rendering settings (OpenClaw-style).
+messages:
+  # Prefix applied to outbound replies (and heartbeat ok acks).
+  responsePrefix: ""
+
+# Session store configuration (OpenClaw-style).
+session:
+  # Scope for session state: per-sender (default) or global.
+  scope: "per-sender"
+  # Main session key alias (default: "main").
+  mainKey: "main"
+  # Optional virtual path for sessions.json (supports {agentId}).
+  store: ""
+
 # External tool providers (search + fetch). Proxy is recommended.
 tools:
   search:
@@ -87,6 +101,38 @@ tools:
       timeout_seconds: 30
       max_chars: 50000
       max_redirects: 3
+
+  # Media understanding/transcription (OpenClaw-style).
+  # Supports provider/CLI entries and per-capability defaults.
+  media:
+    concurrency: 2
+    image:
+      enabled: true
+      prompt: "Describe the image."
+      maxBytes: 10485760
+      maxChars: 500
+      timeoutSeconds: 60
+      models:
+        - provider: "openrouter"
+          model: "google/gemini-3-flash-preview"
+    audio:
+      enabled: true
+      prompt: "Transcribe the audio."
+      language: ""
+      # CLI transcription auto-detection (whisper/whisper.cpp) is not implemented yet.
+      maxBytes: 20971520
+      timeoutSeconds: 60
+      models:
+        - provider: "openai"
+          model: "gpt-4o-mini-transcribe"
+    video:
+      enabled: true
+      prompt: "Describe the video."
+      maxBytes: 52428800
+      timeoutSeconds: 120
+      models:
+        - provider: "openrouter"
+          model: "google/gemini-3-flash-preview"
 
 memory_search:
   enabled: true
