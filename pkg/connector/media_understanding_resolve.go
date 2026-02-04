@@ -6,8 +6,11 @@ import (
 	"time"
 )
 
-func resolveMediaTimeoutSeconds(value int, fallback int) time.Duration {
+func resolveMediaTimeoutSeconds(value int, cfg *MediaUnderstandingConfig, fallback int) time.Duration {
 	seconds := value
+	if seconds <= 0 && cfg != nil && cfg.TimeoutSeconds > 0 {
+		seconds = cfg.TimeoutSeconds
+	}
 	if seconds <= 0 {
 		seconds = fallback
 	}
@@ -17,8 +20,16 @@ func resolveMediaTimeoutSeconds(value int, fallback int) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-func resolveMediaPrompt(capability MediaUnderstandingCapability, prompt string, maxChars int) string {
-	base := strings.TrimSpace(prompt)
+func resolveMediaPrompt(
+	capability MediaUnderstandingCapability,
+	entryPrompt string,
+	cfg *MediaUnderstandingConfig,
+	maxChars int,
+) string {
+	base := strings.TrimSpace(entryPrompt)
+	if base == "" && cfg != nil {
+		base = strings.TrimSpace(cfg.Prompt)
+	}
 	if base == "" {
 		base = defaultPromptByCapability[capability]
 	}

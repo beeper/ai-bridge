@@ -457,11 +457,20 @@ func (oc *AIClient) handleMediaMessage(
 
 	var understanding *mediaUnderstandingResult
 	if capability, ok := mediaCapabilityForMessage(msgType); ok {
-		if result, err := oc.applyMediaUnderstandingForAttachment(ctx, portal, meta, capability, string(mediaURL), mimeType, encryptedFile, rawCaption, hasUserCaption); err != nil {
+		attachments := []mediaAttachment{{
+			Index:         0,
+			URL:           string(mediaURL),
+			MimeType:      mimeType,
+			EncryptedFile: encryptedFile,
+			FileName:      strings.TrimSpace(msg.Content.FileName),
+		}}
+		if result, err := oc.applyMediaUnderstandingForAttachments(ctx, portal, meta, capability, attachments, rawCaption, hasUserCaption); err != nil {
 			oc.log.Warn().Err(err).Msg("Media understanding failed")
-		} else if result != nil && strings.TrimSpace(result.Body) != "" {
+		} else if result != nil {
 			understanding = result
-			caption = result.Body
+			if strings.TrimSpace(result.Body) != "" {
+				caption = result.Body
+			}
 		}
 	}
 
@@ -525,15 +534,22 @@ func (oc *AIClient) handleMediaMessage(
 		return nil, err
 	}
 
+	userMeta := &MessageMetadata{
+		Role: "user",
+		Body: buildMediaMetadataBody(caption, config.bodySuffix, understanding),
+	}
+	if understanding != nil {
+		userMeta.MediaUnderstanding = understanding.Outputs
+		userMeta.MediaUnderstandingDecisions = understanding.Decisions
+		userMeta.Transcript = understanding.Transcript
+	}
+
 	userMessage := &database.Message{
-		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
-		MXID:     eventID,
-		Room:     portal.PortalKey,
-		SenderID: humanUserID(oc.UserLogin.ID),
-		Metadata: &MessageMetadata{
-			Role: "user",
-			Body: buildMediaMetadataBody(caption, config.bodySuffix, understanding),
-		},
+		ID:        networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
+		MXID:      eventID,
+		Room:      portal.PortalKey,
+		SenderID:  humanUserID(oc.UserLogin.ID),
+		Metadata:  userMeta,
 		Timestamp: time.Now(),
 	}
 

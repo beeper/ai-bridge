@@ -134,25 +134,26 @@ network:
         maxChars: 500
         timeoutSeconds: 60
         models:
-          - provider: "openai"
-            model: "openai/gpt-4o-mini"
-      audio:
-        enabled: true
-        prompt: "Transcribe the audio."
-        language: ""
-        maxBytes: 20971520
+          - provider: "openrouter"
+            model: "google/gemini-3-flash-preview"
+    audio:
+      enabled: true
+      prompt: "Transcribe the audio."
+      language: ""
+      # CLI transcription auto-detection (whisper/whisper.cpp) is not implemented yet.
+      maxBytes: 20971520
         timeoutSeconds: 60
         models:
           - provider: "openai"
             model: "gpt-4o-mini-transcribe"
       video:
-        enabled: false
+        enabled: true
         prompt: "Describe the video."
         maxBytes: 52428800
         timeoutSeconds: 120
         models:
-          - provider: "google"
-            model: "gemini-3-flash-preview"
+          - provider: "openrouter"
+            model: "google/gemini-3-flash-preview"
 
   # Memory search configuration (OpenClaw-style).
   # Indexes MEMORY.md + memory/*.md stored in the bridge DB.

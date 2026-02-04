@@ -21,14 +21,16 @@ const (
 	defaultDeepgramBaseURL            = "https://api.deepgram.com/v1"
 	defaultGoogleBaseURL              = "https://generativelanguage.googleapis.com/v1beta"
 	defaultGoogleAudioModel           = "gemini-3-flash-preview"
+	defaultGoogleImageModel           = "gemini-3-flash-preview"
 	defaultGoogleVideoModel           = "gemini-3-flash-preview"
 )
 
 var mediaProviderCapabilities = map[string][]MediaUnderstandingCapability{
-	"openai":   {MediaCapabilityImage, MediaCapabilityAudio},
-	"groq":     {MediaCapabilityAudio},
-	"deepgram": {MediaCapabilityAudio},
-	"google":   {MediaCapabilityAudio, MediaCapabilityVideo},
+	"openai":     {MediaCapabilityImage, MediaCapabilityAudio},
+	"groq":       {MediaCapabilityAudio},
+	"deepgram":   {MediaCapabilityAudio},
+	"google":     {MediaCapabilityAudio, MediaCapabilityVideo},
+	"openrouter": {MediaCapabilityImage, MediaCapabilityVideo},
 }
 
 func normalizeMediaProviderID(id string) string {
