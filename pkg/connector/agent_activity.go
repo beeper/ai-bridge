@@ -12,6 +12,9 @@ func (oc *AIClient) recordAgentActivity(ctx context.Context, portal *bridgev2.Po
 	if oc == nil || portal == nil || portal.MXID == "" || meta == nil {
 		return
 	}
+	if meta.IsCronRoom || meta.IsAgentDataRoom || meta.IsGlobalMemoryRoom {
+		return
+	}
 	agentID := normalizeAgentID(resolveAgentID(meta))
 	if agentID == "" {
 		return
@@ -25,6 +28,32 @@ func (oc *AIClient) recordAgentActivity(ctx context.Context, portal *bridgev2.Po
 	}
 	loginMeta.LastActiveRoomByAgent[agentID] = portal.MXID.String()
 	_ = oc.UserLogin.Save(ctx)
+
+	storeRef, mainKey := oc.resolveHeartbeatMainSessionRef(agentID)
+	accountID := ""
+	if oc.UserLogin != nil {
+		accountID = string(oc.UserLogin.ID)
+	}
+	if mainKey != "" {
+		oc.updateSessionEntry(ctx, storeRef, mainKey, func(entry sessionEntry) sessionEntry {
+			patch := sessionEntry{
+				LastChannel:   "matrix",
+				LastTo:        portal.MXID.String(),
+				LastAccountID: accountID,
+			}
+			return mergeSessionEntry(entry, patch)
+		})
+	}
+	if portal.MXID.String() != "" && portal.MXID.String() != mainKey {
+		oc.updateSessionEntry(ctx, storeRef, portal.MXID.String(), func(entry sessionEntry) sessionEntry {
+			patch := sessionEntry{
+				LastChannel:   "matrix",
+				LastTo:        portal.MXID.String(),
+				LastAccountID: accountID,
+			}
+			return mergeSessionEntry(entry, patch)
+		})
+	}
 }
 
 func (oc *AIClient) lastActivePortal(agentID string) *bridgev2.Portal {

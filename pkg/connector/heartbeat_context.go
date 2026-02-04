@@ -14,6 +14,11 @@ type HeartbeatRunConfig struct {
 	UseIndicator     bool
 	IncludeReasoning bool
 	ExecEvent        bool
+	ResponsePrefix   string
+	SessionKey       string
+	StoreAgentID     string
+	StorePath        string
+	PrevUpdatedAt    int64
 	TargetRoom       id.RoomID
 	TargetReason     string
 	SuppressSend     bool

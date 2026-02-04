@@ -24,6 +24,8 @@ type Config struct {
 	Agents     *AgentsConfig                      `yaml:"agents"`
 	Channels   *ChannelsConfig                    `yaml:"channels"`
 	Cron       *CronConfig                        `yaml:"cron"`
+	Messages   *MessagesConfig                    `yaml:"messages"`
+	Session    *SessionConfig                     `yaml:"session"`
 
 	// Global settings
 	DefaultSystemPrompt string              `yaml:"default_system_prompt"`
@@ -43,8 +45,8 @@ type Config struct {
 
 // AgentsConfig configures agent defaults (OpenClaw-style).
 type AgentsConfig struct {
-	Defaults *AgentDefaultsConfig  `yaml:"defaults"`
-	List     []AgentEntryConfig    `yaml:"list"`
+	Defaults *AgentDefaultsConfig `yaml:"defaults"`
+	List     []AgentEntryConfig   `yaml:"list"`
 }
 
 // AgentDefaultsConfig defines default agent settings.
@@ -64,15 +66,15 @@ type AgentEntryConfig struct {
 
 // HeartbeatConfig configures periodic heartbeat runs (OpenClaw-style).
 type HeartbeatConfig struct {
-	Every            *string                    `yaml:"every"`
+	Every            *string                     `yaml:"every"`
 	ActiveHours      *HeartbeatActiveHoursConfig `yaml:"activeHours"`
-	Model            *string                    `yaml:"model"`
-	Session          *string                    `yaml:"session"`
-	Target           *string                    `yaml:"target"`
-	To               *string                    `yaml:"to"`
-	Prompt           *string                    `yaml:"prompt"`
-	AckMaxChars      *int                       `yaml:"ackMaxChars"`
-	IncludeReasoning *bool                      `yaml:"includeReasoning"`
+	Model            *string                     `yaml:"model"`
+	Session          *string                     `yaml:"session"`
+	Target           *string                     `yaml:"target"`
+	To               *string                     `yaml:"to"`
+	Prompt           *string                     `yaml:"prompt"`
+	AckMaxChars      *int                        `yaml:"ackMaxChars"`
+	IncludeReasoning *bool                       `yaml:"includeReasoning"`
 }
 
 type HeartbeatActiveHoursConfig struct {
@@ -103,9 +105,21 @@ type ChannelConfig struct {
 }
 
 type ChannelHeartbeatVisibilityConfig struct {
-	ShowOk      *bool `yaml:"showOk"`
-	ShowAlerts  *bool `yaml:"showAlerts"`
+	ShowOk       *bool `yaml:"showOk"`
+	ShowAlerts   *bool `yaml:"showAlerts"`
 	UseIndicator *bool `yaml:"useIndicator"`
+}
+
+// MessagesConfig defines message rendering settings (OpenClaw-style).
+type MessagesConfig struct {
+	ResponsePrefix string `yaml:"responsePrefix"`
+}
+
+// SessionConfig configures session store behavior (OpenClaw-style).
+type SessionConfig struct {
+	Scope   string `yaml:"scope"`
+	MainKey string `yaml:"mainKey"`
+	Store   string `yaml:"store"`
 }
 
 // MemoryConfig configures memory behavior (OpenClaw-style).
@@ -207,8 +221,89 @@ type MemorySearchExperimentalConfig struct {
 
 // ToolProvidersConfig configures external tool providers like search and fetch.
 type ToolProvidersConfig struct {
-	Search *SearchConfig `yaml:"search"`
-	Fetch  *FetchConfig  `yaml:"fetch"`
+	Search *SearchConfig     `yaml:"search"`
+	Fetch  *FetchConfig      `yaml:"fetch"`
+	Media  *MediaToolsConfig `yaml:"media"`
+}
+
+// MediaUnderstandingScopeMatch defines match criteria for media understanding scope rules.
+type MediaUnderstandingScopeMatch struct {
+	Channel   string `yaml:"channel"`
+	ChatType  string `yaml:"chatType"`
+	KeyPrefix string `yaml:"keyPrefix"`
+}
+
+// MediaUnderstandingScopeRule defines a single allow/deny rule.
+type MediaUnderstandingScopeRule struct {
+	Action string                        `yaml:"action"`
+	Match  *MediaUnderstandingScopeMatch `yaml:"match"`
+}
+
+// MediaUnderstandingScopeConfig controls allow/deny gating for media understanding.
+type MediaUnderstandingScopeConfig struct {
+	Default string                        `yaml:"default"`
+	Rules   []MediaUnderstandingScopeRule `yaml:"rules"`
+}
+
+// MediaUnderstandingAttachmentsConfig controls how media attachments are selected.
+type MediaUnderstandingAttachmentsConfig struct {
+	Mode           string `yaml:"mode"`
+	MaxAttachments int    `yaml:"maxAttachments"`
+	Prefer         string `yaml:"prefer"`
+}
+
+// MediaUnderstandingDeepgramConfig is a deprecated compatibility shim for Deepgram settings.
+type MediaUnderstandingDeepgramConfig struct {
+	DetectLanguage *bool `yaml:"detectLanguage"`
+	Punctuate      *bool `yaml:"punctuate"`
+	SmartFormat    *bool `yaml:"smartFormat"`
+}
+
+// MediaUnderstandingModelConfig defines a single media understanding model entry.
+type MediaUnderstandingModelConfig struct {
+	Provider         string                            `yaml:"provider"`
+	Model            string                            `yaml:"model"`
+	Capabilities     []string                          `yaml:"capabilities"`
+	Type             string                            `yaml:"type"`
+	Command          string                            `yaml:"command"`
+	Args             []string                          `yaml:"args"`
+	Prompt           string                            `yaml:"prompt"`
+	MaxChars         int                               `yaml:"maxChars"`
+	MaxBytes         int                               `yaml:"maxBytes"`
+	TimeoutSeconds   int                               `yaml:"timeoutSeconds"`
+	Language         string                            `yaml:"language"`
+	ProviderOptions  map[string]map[string]any         `yaml:"providerOptions"`
+	Deepgram         *MediaUnderstandingDeepgramConfig `yaml:"deepgram"`
+	BaseURL          string                            `yaml:"baseUrl"`
+	Headers          map[string]string                 `yaml:"headers"`
+	Profile          string                            `yaml:"profile"`
+	PreferredProfile string                            `yaml:"preferredProfile"`
+}
+
+// MediaUnderstandingConfig defines defaults for media understanding of a capability.
+type MediaUnderstandingConfig struct {
+	Enabled         *bool                                `yaml:"enabled"`
+	Scope           *MediaUnderstandingScopeConfig       `yaml:"scope"`
+	MaxBytes        int                                  `yaml:"maxBytes"`
+	MaxChars        int                                  `yaml:"maxChars"`
+	Prompt          string                               `yaml:"prompt"`
+	TimeoutSeconds  int                                  `yaml:"timeoutSeconds"`
+	Language        string                               `yaml:"language"`
+	ProviderOptions map[string]map[string]any            `yaml:"providerOptions"`
+	Deepgram        *MediaUnderstandingDeepgramConfig    `yaml:"deepgram"`
+	BaseURL         string                               `yaml:"baseUrl"`
+	Headers         map[string]string                    `yaml:"headers"`
+	Attachments     *MediaUnderstandingAttachmentsConfig `yaml:"attachments"`
+	Models          []MediaUnderstandingModelConfig      `yaml:"models"`
+}
+
+// MediaToolsConfig configures media understanding/transcription.
+type MediaToolsConfig struct {
+	Models      []MediaUnderstandingModelConfig `yaml:"models"`
+	Concurrency int                             `yaml:"concurrency"`
+	Image       *MediaUnderstandingConfig       `yaml:"image"`
+	Audio       *MediaUnderstandingConfig       `yaml:"audio"`
+	Video       *MediaUnderstandingConfig       `yaml:"video"`
 }
 
 type SearchConfig struct {
@@ -421,6 +516,14 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Bool, "cron", "enabled")
 	helper.Copy(configupgrade.Str, "cron", "store")
 	helper.Copy(configupgrade.Int, "cron", "maxConcurrentRuns")
+
+	// Messages configuration
+	helper.Copy(configupgrade.Str, "messages", "responsePrefix")
+
+	// Session configuration (OpenClaw-style)
+	helper.Copy(configupgrade.Str, "session", "scope")
+	helper.Copy(configupgrade.Str, "session", "mainKey")
+	helper.Copy(configupgrade.Str, "session", "store")
 
 	// Agents heartbeat configuration
 	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "every")

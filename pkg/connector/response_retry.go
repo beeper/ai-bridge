@@ -143,18 +143,24 @@ func (oc *AIClient) streamingResponseWithRetry(
 	meta *PortalMetadata,
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) {
+	selector := func(meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (responseFunc, string) {
+		return oc.selectResponseFn(meta, prompt)
+	}
+	oc.responseWithModelFallbackDynamic(ctx, evt, portal, meta, prompt, selector)
+}
+
+func (oc *AIClient) selectResponseFn(meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (responseFunc, string) {
 	// Use Chat Completions API for audio (native support)
 	// SDK v3.16.0 has ResponseInputAudioParam but it's not wired into the union
 	if hasAudioContent(prompt) {
-		oc.responseWithModelFallback(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
-		return
+		return oc.streamChatCompletions, "chat_completions"
 	}
 	switch oc.resolveModelAPI(meta) {
 	case ModelAPIChatCompletions:
-		oc.responseWithModelFallback(ctx, evt, portal, meta, prompt, oc.streamChatCompletions, "chat_completions")
+		return oc.streamChatCompletions, "chat_completions"
 	default:
 		// Use Responses API for other content (images, files, text)
-		oc.responseWithModelFallback(ctx, evt, portal, meta, prompt, oc.streamingResponseWithToolSchemaFallback, "responses")
+		return oc.streamingResponseWithToolSchemaFallback, "responses"
 	}
 }
 

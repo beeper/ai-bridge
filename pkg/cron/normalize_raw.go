@@ -137,9 +137,7 @@ func coerceScheduleMap(schedule map[string]any) map[string]any {
 			next["atMs"] = parsed
 		}
 	}
-	if _, ok := next["at"]; ok {
-		delete(next, "at")
-	}
+	delete(next, "at")
 	if val, ok := schedule["anchorMs"]; ok {
 		if parsed, ok := coerceAbsoluteMs(val); ok {
 			next["anchorMs"] = parsed
@@ -282,9 +280,7 @@ func coercePayloadMap(payload map[string]any) map[string]any {
 	if channel != "" {
 		next["channel"] = channel
 	}
-	if _, ok := next["provider"]; ok {
-		delete(next, "provider")
-	}
+	delete(next, "provider")
 	return next
 }
 

@@ -191,6 +191,11 @@ type MessageMetadata struct {
 	Model            string `json:"model,omitempty"`
 	ReasoningTokens  int64  `json:"reasoning_tokens,omitempty"`
 	HasToolCalls     bool   `json:"has_tool_calls,omitempty"`
+	Transcript       string `json:"transcript,omitempty"`
+
+	// Media understanding (OpenClaw-style)
+	MediaUnderstanding          []MediaUnderstandingOutput   `json:"media_understanding,omitempty"`
+	MediaUnderstandingDecisions []MediaUnderstandingDecision `json:"media_understanding_decisions,omitempty"`
 
 	// Turn tracking for the new schema
 	TurnID  string `json:"turn_id,omitempty"`  // Unique identifier for this assistant turn
