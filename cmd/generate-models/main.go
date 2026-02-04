@@ -294,6 +294,13 @@ func availableToolsJSON(caps ModelCapabilities) []string {
 	return tools
 }
 
+func resolveModelAPIForManifest(modelID string, provider string) string {
+	if provider == "openai" || strings.HasPrefix(modelID, "openai/") {
+		return "openai-responses"
+	}
+	return "openai-completions"
+}
+
 func generateGoFile(apiModels map[string]OpenRouterModel, outputPath string) error {
 	var buf strings.Builder
 
@@ -322,11 +329,13 @@ var ModelManifest = struct {
 			displayName = apiModel.Name
 		}
 		caps := detectCapabilities(modelID, apiModel, hasAPIData)
+		apiLabel := resolveModelAPIForManifest(modelID, "openrouter")
 
 		buf.WriteString(fmt.Sprintf(`		%q: {
 			ID:                  %q,
 			Name:                %q,
 			Provider:            "openrouter",
+			API:                 %q,
 			SupportsVision:      %t,
 			SupportsToolCalling: %t,
 			SupportsReasoning:   %t,
@@ -343,6 +352,7 @@ var ModelManifest = struct {
 			modelID,
 			modelID,
 			displayName,
+			apiLabel,
 			caps.Vision,
 			caps.ToolCalling,
 			caps.Reasoning,
@@ -365,10 +375,12 @@ var ModelManifest = struct {
 			Reasoning:   model.SupportsReasoning,
 			WebSearch:   model.SupportsWebSearch,
 		}
+		apiLabel := resolveModelAPIForManifest(model.ID, "openai")
 		buf.WriteString(fmt.Sprintf(`		%q: {
 			ID:                  %q,
 			Name:                %q,
 			Provider:            "openai",
+			API:                 %q,
 			Description:         %q,
 			SupportsVision:      %t,
 			SupportsToolCalling: %t,
@@ -386,6 +398,7 @@ var ModelManifest = struct {
 			model.ID,
 			model.ID,
 			model.Name,
+			apiLabel,
 			model.Description,
 			model.SupportsVision,
 			model.SupportsToolCalling,
@@ -425,6 +438,7 @@ type JSONModelInfo struct {
 	ID                  string   `json:"id"`
 	Name                string   `json:"name"`
 	Provider            string   `json:"provider"`
+	API                 string   `json:"api,omitempty"`
 	Description         string   `json:"description,omitempty"`
 	SupportsVision      bool     `json:"supports_vision"`
 	SupportsToolCalling bool     `json:"supports_tool_calling"`
@@ -458,11 +472,13 @@ func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) e
 			displayName = apiModel.Name
 		}
 		caps := detectCapabilities(modelID, apiModel, hasAPIData)
+		apiLabel := resolveModelAPIForManifest(modelID, "openrouter")
 
 		models = append(models, JSONModelInfo{
 			ID:                  modelID,
 			Name:                displayName,
 			Provider:            "openrouter",
+			API:                 apiLabel,
 			SupportsVision:      caps.Vision,
 			SupportsToolCalling: caps.ToolCalling,
 			SupportsReasoning:   caps.Reasoning,
@@ -485,10 +501,12 @@ func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) e
 			Reasoning:   model.SupportsReasoning,
 			WebSearch:   model.SupportsWebSearch,
 		}
+		apiLabel := resolveModelAPIForManifest(model.ID, "openai")
 		models = append(models, JSONModelInfo{
 			ID:                  model.ID,
 			Name:                model.Name,
 			Provider:            "openai",
+			API:                 apiLabel,
 			Description:         model.Description,
 			SupportsVision:      model.SupportsVision,
 			SupportsToolCalling: model.SupportsToolCalling,

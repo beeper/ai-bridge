@@ -217,6 +217,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	}
 
 	hb := state.heartbeat
+	storeRef := sessionStoreRef{AgentID: hb.StoreAgentID, Path: hb.StorePath}
 	rawContent := state.accumulated.String()
 	ackMax := hb.AckMaxChars
 	if ackMax < 0 {
@@ -265,6 +266,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	}
 
 	if shouldSkipMain && !hasContent {
+		oc.restoreHeartbeatUpdatedAt(storeRef, hb.SessionKey, hb.PrevUpdatedAt)
 		if includeReasoning && hb.ShowAlerts && deliverable {
 			oc.sendPlainAssistantMessage(ctx, portal, "Reasoning: "+state.reasoning.String())
 		}
@@ -301,7 +303,8 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 
 	// Deduplicate identical heartbeat content within 24h
 	if hasContent && !shouldSkipMain && !hasMedia {
-		if oc.isDuplicateHeartbeat(hb.SessionKey, cleaned, state.startedAtMs) {
+		if oc.isDuplicateHeartbeat(storeRef, hb.SessionKey, cleaned, state.startedAtMs) {
+			oc.restoreHeartbeatUpdatedAt(storeRef, hb.SessionKey, hb.PrevUpdatedAt)
 			oc.redactInitialStreamingMessage(ctx, portal, intent, state)
 			state.pendingImages = nil
 			indicator := (*HeartbeatIndicatorType)(nil)
@@ -342,6 +345,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	}
 
 	if !hb.ShowAlerts {
+		oc.restoreHeartbeatUpdatedAt(storeRef, hb.SessionKey, hb.PrevUpdatedAt)
 		oc.redactInitialStreamingMessage(ctx, portal, intent, state)
 		state.pendingImages = nil
 		indicator := (*HeartbeatIndicatorType)(nil)
@@ -376,7 +380,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 
 	// Record heartbeat for dedupe
 	if hb.SessionKey != "" && cleaned != "" && !shouldSkipMain {
-		oc.recordHeartbeatText(hb.SessionKey, cleaned, state.startedAtMs)
+		oc.recordHeartbeatText(storeRef, hb.SessionKey, cleaned, state.startedAtMs)
 	}
 
 	indicator := (*HeartbeatIndicatorType)(nil)

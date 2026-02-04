@@ -29,18 +29,29 @@ func (oc *AIClient) recordAgentActivity(ctx context.Context, portal *bridgev2.Po
 	loginMeta.LastActiveRoomByAgent[agentID] = portal.MXID.String()
 	_ = oc.UserLogin.Save(ctx)
 
-	storeKey := heartbeatStoreKey(agentID)
-	if storeKey != "" {
-		accountID := ""
-		if oc.UserLogin != nil {
-			accountID = string(oc.UserLogin.ID)
-		}
-		oc.updateHeartbeatSessionEntry(ctx, storeKey, func(entry heartbeatSessionEntry) heartbeatSessionEntry {
-			entry.LastChannel = "matrix"
-			entry.LastTo = portal.MXID.String()
-			entry.LastAccountID = accountID
-			entry.UpdatedAt = heartbeatUpdatedAtNow()
-			return entry
+	storeRef, mainKey := oc.resolveHeartbeatMainSessionRef(agentID)
+	accountID := ""
+	if oc.UserLogin != nil {
+		accountID = string(oc.UserLogin.ID)
+	}
+	if mainKey != "" {
+		oc.updateSessionEntry(ctx, storeRef, mainKey, func(entry sessionEntry) sessionEntry {
+			patch := sessionEntry{
+				LastChannel:   "matrix",
+				LastTo:        portal.MXID.String(),
+				LastAccountID: accountID,
+			}
+			return mergeSessionEntry(entry, patch)
+		})
+	}
+	if portal.MXID.String() != "" && portal.MXID.String() != mainKey {
+		oc.updateSessionEntry(ctx, storeRef, portal.MXID.String(), func(entry sessionEntry) sessionEntry {
+			patch := sessionEntry{
+				LastChannel:   "matrix",
+				LastTo:        portal.MXID.String(),
+				LastAccountID: accountID,
+			}
+			return mergeSessionEntry(entry, patch)
 		})
 	}
 }

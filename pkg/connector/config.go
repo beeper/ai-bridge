@@ -25,6 +25,7 @@ type Config struct {
 	Channels   *ChannelsConfig                    `yaml:"channels"`
 	Cron       *CronConfig                        `yaml:"cron"`
 	Messages   *MessagesConfig                    `yaml:"messages"`
+	Session    *SessionConfig                     `yaml:"session"`
 
 	// Global settings
 	DefaultSystemPrompt string              `yaml:"default_system_prompt"`
@@ -112,6 +113,13 @@ type ChannelHeartbeatVisibilityConfig struct {
 // MessagesConfig defines message rendering settings (OpenClaw-style).
 type MessagesConfig struct {
 	ResponsePrefix string `yaml:"responsePrefix"`
+}
+
+// SessionConfig configures session store behavior (OpenClaw-style).
+type SessionConfig struct {
+	Scope   string `yaml:"scope"`
+	MainKey string `yaml:"mainKey"`
+	Store   string `yaml:"store"`
 }
 
 // MemoryConfig configures memory behavior (OpenClaw-style).
@@ -511,6 +519,11 @@ func upgradeConfig(helper configupgrade.Helper) {
 
 	// Messages configuration
 	helper.Copy(configupgrade.Str, "messages", "responsePrefix")
+
+	// Session configuration (OpenClaw-style)
+	helper.Copy(configupgrade.Str, "session", "scope")
+	helper.Copy(configupgrade.Str, "session", "mainKey")
+	helper.Copy(configupgrade.Str, "session", "store")
 
 	// Agents heartbeat configuration
 	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "every")
