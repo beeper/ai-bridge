@@ -166,8 +166,11 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 
 	// Generate link previews for URLs in the response
 	linkPreviews := oc.generateOutboundLinkPreviews(ctx, cleanedContent, intent, portal)
-	if sourceParts := buildSourceParts(state.sourceCitations, linkPreviews); len(sourceParts) > 0 {
+	if sourceParts := buildSourceParts(state.sourceCitations, state.sourceDocuments, linkPreviews); len(sourceParts) > 0 {
 		parts = append(parts, sourceParts...)
+	}
+	if fileParts := generatedFilesToParts(state.generatedFiles); len(fileParts) > 0 {
+		parts = append(parts, fileParts...)
 	}
 
 	uiMessage := map[string]any{
@@ -423,13 +426,13 @@ func minInt(a, b int) int {
 	return b
 }
 
-func buildSourceParts(citations []sourceCitation, previews []*event.BeeperLinkPreview) []map[string]any {
-	if len(citations) == 0 && len(previews) == 0 {
+func buildSourceParts(citations []sourceCitation, documents []sourceDocument, previews []*event.BeeperLinkPreview) []map[string]any {
+	if len(citations) == 0 && len(documents) == 0 && len(previews) == 0 {
 		return nil
 	}
 
-	parts := make([]map[string]any, 0, len(citations)+len(previews))
-	seen := make(map[string]struct{}, len(citations)+len(previews))
+	parts := make([]map[string]any, 0, len(citations)+len(documents)+len(previews))
+	seen := make(map[string]struct{}, len(citations)+len(documents)+len(previews))
 
 	appendURL := func(url, title string, providerMetadata map[string]any) {
 		url = strings.TrimSpace(url)
@@ -457,6 +460,33 @@ func buildSourceParts(citations []sourceCitation, previews []*event.BeeperLinkPr
 
 	for _, citation := range citations {
 		appendURL(citation.URL, citation.Title, nil)
+	}
+
+	for _, doc := range documents {
+		key := strings.TrimSpace(doc.ID)
+		if key == "" {
+			key = strings.TrimSpace(doc.Filename)
+		}
+		if key == "" {
+			key = strings.TrimSpace(doc.Title)
+		}
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		part := map[string]any{
+			"type":      "source-document",
+			"sourceId":  fmt.Sprintf("source-%d", len(parts)+1),
+			"mediaType": doc.MediaType,
+			"title":     doc.Title,
+		}
+		if filename := strings.TrimSpace(doc.Filename); filename != "" {
+			part["filename"] = filename
+		}
+		parts = append(parts, part)
 	}
 
 	for _, preview := range previews {
@@ -487,6 +517,25 @@ func buildSourceParts(citations []sourceCitation, previews []*event.BeeperLinkPr
 		appendURL(url, title, meta)
 	}
 
+	return parts
+}
+
+func generatedFilesToParts(files []generatedFilePart) []map[string]any {
+	if len(files) == 0 {
+		return nil
+	}
+	parts := make([]map[string]any, 0, len(files))
+	for _, file := range files {
+		if strings.TrimSpace(file.url) == "" {
+			continue
+		}
+		part := map[string]any{
+			"type":      "file",
+			"url":       file.url,
+			"mediaType": strings.TrimSpace(file.mediaType),
+		}
+		parts = append(parts, part)
+	}
 	return parts
 }
 
@@ -545,8 +594,11 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 
 	// Generate link previews for URLs in the response
 	linkPreviews := oc.generateOutboundLinkPreviews(ctx, rendered.Body, intent, portal)
-	if sourceParts := buildSourceParts(state.sourceCitations, linkPreviews); len(sourceParts) > 0 {
+	if sourceParts := buildSourceParts(state.sourceCitations, state.sourceDocuments, linkPreviews); len(sourceParts) > 0 {
 		parts = append(parts, sourceParts...)
+	}
+	if fileParts := generatedFilesToParts(state.generatedFiles); len(fileParts) > 0 {
+		parts = append(parts, fileParts...)
 	}
 
 	uiMessage := map[string]any{

@@ -33,7 +33,7 @@ func (oc *AIClient) sendGeneratedImage(
 	imageData []byte,
 	mimeType string,
 	turnID string,
-) (id.EventID, error) {
+) (id.EventID, string, error) {
 	// Generate filename based on timestamp and mime type
 	ext := extensionForMIME(mimeType, "png", map[string]string{
 		"image/jpeg": "jpg",
