@@ -95,8 +95,7 @@ func (oc *AIClient) applyMediaUnderstandingForAttachments(
 
 	// Skip image understanding when the primary model supports vision.
 	if capability == MediaCapabilityImage {
-		caps := oc.getModelCapabilitiesForMeta(meta)
-		if caps.SupportsVision {
+		if oc.modelSupportsVision(ctx, meta) {
 			attachmentDecisions := make([]MediaUnderstandingAttachmentDecision, 0, len(selected))
 			for _, attachment := range selected {
 				attempt := MediaUnderstandingModelDecision{

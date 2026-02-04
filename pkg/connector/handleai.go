@@ -464,9 +464,9 @@ func (oc *AIClient) getModelContextWindow(meta *PortalMetadata) int {
 		}
 	}
 
-	// Fallback: check built-in model manifest
-	if m, ok := ModelManifest.Models[modelID]; ok {
-		return m.ContextWindow
+	// Fallback: check model catalog
+	if info := oc.findModelInfoInCatalog(modelID); info != nil {
+		return info.ContextWindow
 	}
 
 	// Default for unknown models
