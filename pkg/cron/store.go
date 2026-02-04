@@ -7,8 +7,9 @@ import (
 	"path"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/textfs"
 	json5 "github.com/yosuke-furukawa/json5/encoding/json5"
+
+	"github.com/beeper/ai-bridge/pkg/textfs"
 )
 
 const (

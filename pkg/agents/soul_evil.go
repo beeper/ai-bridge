@@ -110,16 +110,16 @@ func isWithinDailyPurgeWindow(at string, duration string, now time.Time, loc *ti
 	if !ok {
 		return false
 	}
-	durationMs, err := parseDurationWithDefaultUnit(duration)
-	if err != nil || durationMs <= 0 {
+	durationValue, err := parseDurationWithDefaultUnit(duration)
+	if err != nil || durationValue <= 0 {
 		return false
 	}
 	dayMs := int64(24 * time.Hour / time.Millisecond)
-	if durationMs.Milliseconds() >= dayMs {
+	if durationValue.Milliseconds() >= dayMs {
 		return true
 	}
 	startMs := int64(startMinutes) * 60 * 1000
-	endMs := startMs + durationMs.Milliseconds()
+	endMs := startMs + durationValue.Milliseconds()
 	nowMs := timeOfDayMs(now, loc)
 	if endMs < dayMs {
 		return nowMs >= startMs && nowMs < endMs

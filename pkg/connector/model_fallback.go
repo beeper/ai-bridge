@@ -106,6 +106,7 @@ func (oc *AIClient) overrideModel(meta *PortalMetadata, modelID string) *PortalM
 	return &metaCopy
 }
 
+//lint:ignore U1000 Legacy fallback preserved for reference.
 func (oc *AIClient) responseWithModelFallback(
 	ctx context.Context,
 	evt *event.Event,

@@ -250,6 +250,14 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	shouldSkipMain := shouldSkip && !hasMedia && !hb.ExecEvent
 	hasContent := cleaned != ""
 	includeReasoning := hb.IncludeReasoning && state.reasoning.Len() > 0
+	reasoningText := ""
+	if includeReasoning {
+		reasoningText = strings.TrimSpace(state.reasoning.String())
+		if reasoningText != "" {
+			reasoningText = "Reasoning: " + reasoningText
+		}
+	}
+	hasReasoning := reasoningText != ""
 	deliverable := hb.TargetRoom != "" && hb.TargetRoom == portal.MXID
 	targetReason := strings.TrimSpace(hb.TargetReason)
 	if targetReason == "" {
@@ -265,11 +273,8 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		}
 	}
 
-	if shouldSkipMain && !hasContent {
+	if shouldSkipMain && !hasContent && !hasReasoning {
 		oc.restoreHeartbeatUpdatedAt(storeRef, hb.SessionKey, hb.PrevUpdatedAt)
-		if includeReasoning && hb.ShowAlerts && deliverable {
-			oc.sendPlainAssistantMessage(ctx, portal, "Reasoning: "+state.reasoning.String())
-		}
 		silent := true
 		if hb.ShowOk && deliverable {
 			heartbeatOk := agents.HeartbeatToken
@@ -329,8 +334,8 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		oc.redactInitialStreamingMessage(ctx, portal, intent, state)
 		state.pendingImages = nil
 		preview := cleaned
-		if preview == "" && state.reasoning.Len() > 0 {
-			preview = state.reasoning.String()
+		if preview == "" && hasReasoning {
+			preview = reasoningText
 		}
 		emitHeartbeatEvent(&HeartbeatEventPayload{
 			TS:       time.Now().UnixMilli(),
@@ -352,11 +357,15 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		if hb.UseIndicator {
 			indicator = resolveIndicatorType("sent")
 		}
+		preview := cleaned
+		if preview == "" && hasReasoning {
+			preview = reasoningText
+		}
 		emitHeartbeatEvent(&HeartbeatEventPayload{
 			TS:            time.Now().UnixMilli(),
 			Status:        "skipped",
 			Reason:        "alerts-disabled",
-			Preview:       cleaned[:minInt(len(cleaned), 200)],
+			Preview:       preview[:minInt(len(preview), 200)],
 			Channel:       hb.Channel,
 			HasMedia:      hasMedia,
 			IndicatorType: indicator,
@@ -365,8 +374,8 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		return
 	}
 
-	if includeReasoning {
-		oc.sendPlainAssistantMessage(ctx, portal, "Reasoning: "+state.reasoning.String())
+	if hasReasoning {
+		oc.sendPlainAssistantMessage(ctx, portal, reasoningText)
 	}
 
 	if cleaned != "" {
@@ -387,11 +396,15 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	if hb.UseIndicator {
 		indicator = resolveIndicatorType("sent")
 	}
+	preview := cleaned
+	if preview == "" && hasReasoning {
+		preview = reasoningText
+	}
 	emitHeartbeatEvent(&HeartbeatEventPayload{
 		TS:            time.Now().UnixMilli(),
 		Status:        "sent",
 		Reason:        hb.Reason,
-		Preview:       cleaned[:minInt(len(cleaned), 200)],
+		Preview:       preview[:minInt(len(preview), 200)],
 		Channel:       hb.Channel,
 		HasMedia:      hasMedia,
 		IndicatorType: indicator,

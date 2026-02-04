@@ -80,9 +80,7 @@ func applyMediaTemplate(value string, ctx map[string]string) string {
 
 func resolveCLIOutput(command string, args []string, stdout string, mediaPath string) string {
 	base := strings.ToLower(filepath.Base(command))
-	if strings.HasSuffix(base, ".exe") {
-		base = strings.TrimSuffix(base, ".exe")
-	}
+	base = strings.TrimSuffix(base, ".exe")
 
 	if base == "whisper" {
 		if outputPath := resolveWhisperOutputPath(args, mediaPath); outputPath != "" {

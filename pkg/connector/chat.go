@@ -1378,6 +1378,7 @@ func (oc *AIClient) ensureSingleAIGhost(ctx context.Context, portal *bridgev2.Po
 	return nil
 }
 
+//lint:ignore U1000 Staged for future agent model override wiring.
 func (oc *AIClient) applyAgentModelChange(ctx context.Context, agentID, oldModel, newModel string) {
 	if agentID == "" || oldModel == "" || newModel == "" || oldModel == newModel {
 		return

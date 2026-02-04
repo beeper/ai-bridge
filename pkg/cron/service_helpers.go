@@ -11,17 +11,15 @@ import (
 const stuckRunMs int64 = 2 * 60 * 60 * 1000
 
 func createJob(nowMs int64, input CronJobCreate) (CronJob, error) {
-	name := input.Name
-	if strings.TrimSpace(name) == "" {
-		name = inferLegacyName(&input)
-	}
-	normalizedName, err := normalizeRequiredName(name)
+	normalizedName, err := normalizeRequiredName(input.Name)
 	if err != nil {
 		return CronJob{}, err
 	}
 	enabled := false
 	if input.Enabled != nil {
 		enabled = *input.Enabled
+	} else {
+		enabled = true
 	}
 	deleteAfter := false
 	if input.DeleteAfterRun != nil {
