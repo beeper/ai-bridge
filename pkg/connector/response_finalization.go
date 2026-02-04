@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -29,15 +30,21 @@ func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridge
 		}
 	}
 
+	uiMessage := map[string]any{
+		"id":   turnID,
+		"role": "assistant",
+		"metadata": map[string]any{
+			"turn_id": turnID,
+		},
+		"parts": []any{},
+	}
+
 	eventContent := &event.Content{
 		Raw: map[string]any{
 			"msgtype":      event.MsgText,
 			"body":         content,
 			"m.relates_to": relatesTo,
-			BeeperAIKey: map[string]any{
-				"turn_id": turnID,
-				"status":  string(TurnStatusGenerating),
-			},
+			BeeperAIKey:    uiMessage,
 		},
 	}
 	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
@@ -104,51 +111,44 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	cleanedContent := stripMessageIDHintLines(directives.Text)
 	rendered := format.RenderMarkdown(cleanedContent, true, true)
 
-	// Build AI metadata following the new schema
-	aiMetadata := map[string]any{
-		"turn_id":       state.turnID,
-		"model":         oc.effectiveModel(meta),
-		"status":        string(TurnStatusCompleted),
-		"finish_reason": state.finishReason,
-		"timing": map[string]any{
-			"started_at":     state.startedAtMs,
-			"first_token_at": state.firstTokenAtMs,
-			"completed_at":   state.completedAtMs,
-		},
-	}
-
-	// Add agent_id if set
-	if state.agentID != "" {
-		aiMetadata["agent_id"] = state.agentID
-	}
-
-	if state.promptTokens > 0 || state.completionTokens > 0 || state.reasoningTokens > 0 {
-		aiMetadata["usage"] = map[string]any{
-			"prompt_tokens":     state.promptTokens,
-			"completion_tokens": state.completionTokens,
-			"reasoning_tokens":  state.reasoningTokens,
-		}
-	}
-
-	// Include embedded thinking if present
+	// Build AI SDK UIMessage payload
+	parts := make([]map[string]any, 0, 2+len(state.toolCalls))
 	if state.reasoning.Len() > 0 {
-		aiMetadata["thinking"] = map[string]any{
-			"content":     state.reasoning.String(),
-			"token_count": len(strings.Fields(state.reasoning.String())), // Approximate
-		}
+		parts = append(parts, map[string]any{
+			"type":  "reasoning",
+			"text":  state.reasoning.String(),
+			"state": "done",
+		})
 	}
-
-	// Include tool call event IDs
-	if len(state.toolCalls) > 0 {
-		toolCallIDs := make([]string, 0, len(state.toolCalls))
-		for _, tc := range state.toolCalls {
-			if tc.CallEventID != "" {
-				toolCallIDs = append(toolCallIDs, tc.CallEventID)
+	if cleanedContent != "" {
+		parts = append(parts, map[string]any{
+			"type":  "text",
+			"text":  cleanedContent,
+			"state": "done",
+		})
+	}
+	for _, tc := range state.toolCalls {
+		toolPart := map[string]any{
+			"type":       "dynamic-tool",
+			"toolName":   tc.ToolName,
+			"toolCallId": tc.CallID,
+			"input":      tc.Input,
+		}
+		if tc.ToolType == string(ToolTypeProvider) {
+			toolPart["providerExecuted"] = true
+		}
+		if tc.ResultStatus == string(ResultStatusSuccess) {
+			toolPart["state"] = "output-available"
+			toolPart["output"] = tc.Output
+		} else {
+			toolPart["state"] = "output-error"
+			if tc.ErrorMessage != "" {
+				toolPart["errorText"] = tc.ErrorMessage
+			} else if result, ok := tc.Output["result"].(string); ok && result != "" {
+				toolPart["errorText"] = result
 			}
 		}
-		if len(toolCallIDs) > 0 {
-			aiMetadata["tool_calls"] = toolCallIDs
-		}
+		parts = append(parts, toolPart)
 	}
 
 	// Build m.relates_to with replace relation
@@ -166,6 +166,19 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 
 	// Generate link previews for URLs in the response
 	linkPreviews := oc.generateOutboundLinkPreviews(ctx, cleanedContent, intent, portal)
+	if sourceParts := buildSourceParts(state.sourceCitations, state.sourceDocuments, linkPreviews); len(sourceParts) > 0 {
+		parts = append(parts, sourceParts...)
+	}
+	if fileParts := generatedFilesToParts(state.generatedFiles); len(fileParts) > 0 {
+		parts = append(parts, fileParts...)
+	}
+
+	uiMessage := map[string]any{
+		"id":       state.turnID,
+		"role":     "assistant",
+		"metadata": oc.buildUIMessageMetadata(state, meta, true),
+		"parts":    parts,
+	}
 
 	// Send edit event with m.replace relation and m.new_content
 	eventRawContent := map[string]any{
@@ -180,7 +193,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 			"formatted_body": rendered.FormattedBody,
 		},
 		"m.relates_to":                  relatesTo,
-		BeeperAIKey:                     aiMetadata,
+		BeeperAIKey:                     uiMessage,
 		"com.beeper.dont_render_edited": true, // Don't show "edited" indicator for streaming updates
 	}
 
@@ -456,50 +469,159 @@ func minInt(a, b int) int {
 	return b
 }
 
+func buildSourceParts(citations []sourceCitation, documents []sourceDocument, previews []*event.BeeperLinkPreview) []map[string]any {
+	if len(citations) == 0 && len(documents) == 0 && len(previews) == 0 {
+		return nil
+	}
+
+	parts := make([]map[string]any, 0, len(citations)+len(documents)+len(previews))
+	seen := make(map[string]struct{}, len(citations)+len(documents)+len(previews))
+
+	appendURL := func(url, title string, providerMetadata map[string]any) {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			return
+		}
+		if _, ok := seen[url]; ok {
+			return
+		}
+		seen[url] = struct{}{}
+
+		part := map[string]any{
+			"type":     "source-url",
+			"sourceId": fmt.Sprintf("source-%d", len(parts)+1),
+			"url":      url,
+		}
+		if title = strings.TrimSpace(title); title != "" {
+			part["title"] = title
+		}
+		if len(providerMetadata) > 0 {
+			part["providerMetadata"] = providerMetadata
+		}
+		parts = append(parts, part)
+	}
+
+	for _, citation := range citations {
+		appendURL(citation.URL, citation.Title, nil)
+	}
+
+	for _, doc := range documents {
+		key := strings.TrimSpace(doc.ID)
+		if key == "" {
+			key = strings.TrimSpace(doc.Filename)
+		}
+		if key == "" {
+			key = strings.TrimSpace(doc.Title)
+		}
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		part := map[string]any{
+			"type":      "source-document",
+			"sourceId":  fmt.Sprintf("source-%d", len(parts)+1),
+			"mediaType": doc.MediaType,
+			"title":     doc.Title,
+		}
+		if filename := strings.TrimSpace(doc.Filename); filename != "" {
+			part["filename"] = filename
+		}
+		parts = append(parts, part)
+	}
+
+	for _, preview := range previews {
+		if preview == nil {
+			continue
+		}
+		url := strings.TrimSpace(preview.CanonicalURL)
+		if url == "" {
+			url = strings.TrimSpace(preview.MatchedURL)
+		}
+		if url == "" {
+			continue
+		}
+		title := strings.TrimSpace(preview.Title)
+		if title == "" {
+			title = strings.TrimSpace(preview.SiteName)
+		}
+		meta := map[string]any{}
+		if desc := strings.TrimSpace(preview.Description); desc != "" {
+			meta["description"] = desc
+		}
+		if site := strings.TrimSpace(preview.SiteName); site != "" {
+			meta["site_name"] = site
+		}
+		if len(meta) == 0 {
+			meta = nil
+		}
+		appendURL(url, title, meta)
+	}
+
+	return parts
+}
+
+func generatedFilesToParts(files []generatedFilePart) []map[string]any {
+	if len(files) == 0 {
+		return nil
+	}
+	parts := make([]map[string]any, 0, len(files))
+	for _, file := range files {
+		if strings.TrimSpace(file.url) == "" {
+			continue
+		}
+		part := map[string]any{
+			"type":      "file",
+			"url":       file.url,
+			"mediaType": strings.TrimSpace(file.mediaType),
+		}
+		parts = append(parts, part)
+	}
+	return parts
+}
+
 // sendFinalAssistantTurnContent is a helper for raw mode that sends content without directive processing.
 func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata, intent bridgev2.MatrixAPI, rendered event.MessageEventContent, replyToEventID *id.EventID) {
 	// Build AI metadata
-	aiMetadata := map[string]any{
-		"turn_id":       state.turnID,
-		"model":         oc.effectiveModel(meta),
-		"status":        string(TurnStatusCompleted),
-		"finish_reason": state.finishReason,
-		"timing": map[string]any{
-			"started_at":     state.startedAtMs,
-			"first_token_at": state.firstTokenAtMs,
-			"completed_at":   state.completedAtMs,
-		},
-	}
-
-	if state.agentID != "" {
-		aiMetadata["agent_id"] = state.agentID
-	}
-
-	if state.promptTokens > 0 || state.completionTokens > 0 || state.reasoningTokens > 0 {
-		aiMetadata["usage"] = map[string]any{
-			"prompt_tokens":     state.promptTokens,
-			"completion_tokens": state.completionTokens,
-			"reasoning_tokens":  state.reasoningTokens,
-		}
-	}
-
+	parts := make([]map[string]any, 0, 2+len(state.toolCalls))
 	if state.reasoning.Len() > 0 {
-		aiMetadata["thinking"] = map[string]any{
-			"content":     state.reasoning.String(),
-			"token_count": len(strings.Fields(state.reasoning.String())),
-		}
+		parts = append(parts, map[string]any{
+			"type":  "reasoning",
+			"text":  state.reasoning.String(),
+			"state": "done",
+		})
 	}
-
-	if len(state.toolCalls) > 0 {
-		toolCallIDs := make([]string, 0, len(state.toolCalls))
-		for _, tc := range state.toolCalls {
-			if tc.CallEventID != "" {
-				toolCallIDs = append(toolCallIDs, tc.CallEventID)
+	if rendered.Body != "" {
+		parts = append(parts, map[string]any{
+			"type":  "text",
+			"text":  rendered.Body,
+			"state": "done",
+		})
+	}
+	for _, tc := range state.toolCalls {
+		toolPart := map[string]any{
+			"type":       "dynamic-tool",
+			"toolName":   tc.ToolName,
+			"toolCallId": tc.CallID,
+			"input":      tc.Input,
+		}
+		if tc.ToolType == string(ToolTypeProvider) {
+			toolPart["providerExecuted"] = true
+		}
+		if tc.ResultStatus == string(ResultStatusSuccess) {
+			toolPart["state"] = "output-available"
+			toolPart["output"] = tc.Output
+		} else {
+			toolPart["state"] = "output-error"
+			if tc.ErrorMessage != "" {
+				toolPart["errorText"] = tc.ErrorMessage
+			} else if result, ok := tc.Output["result"].(string); ok && result != "" {
+				toolPart["errorText"] = result
 			}
 		}
-		if len(toolCallIDs) > 0 {
-			aiMetadata["tool_calls"] = toolCallIDs
-		}
+		parts = append(parts, toolPart)
 	}
 
 	relatesTo := map[string]any{
@@ -515,6 +637,19 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 
 	// Generate link previews for URLs in the response
 	linkPreviews := oc.generateOutboundLinkPreviews(ctx, rendered.Body, intent, portal)
+	if sourceParts := buildSourceParts(state.sourceCitations, state.sourceDocuments, linkPreviews); len(sourceParts) > 0 {
+		parts = append(parts, sourceParts...)
+	}
+	if fileParts := generatedFilesToParts(state.generatedFiles); len(fileParts) > 0 {
+		parts = append(parts, fileParts...)
+	}
+
+	uiMessage := map[string]any{
+		"id":       state.turnID,
+		"role":     "assistant",
+		"metadata": oc.buildUIMessageMetadata(state, meta, true),
+		"parts":    parts,
+	}
 
 	rawContent2 := map[string]any{
 		"msgtype":                       event.MsgText,
@@ -523,7 +658,7 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 		"formatted_body":                "* " + rendered.FormattedBody,
 		"m.new_content":                 map[string]any{"msgtype": event.MsgText, "body": rendered.Body, "format": rendered.Format, "formatted_body": rendered.FormattedBody},
 		"m.relates_to":                  relatesTo,
-		BeeperAIKey:                     aiMetadata,
+		BeeperAIKey:                     uiMessage,
 		"com.beeper.dont_render_edited": true,
 	}
 

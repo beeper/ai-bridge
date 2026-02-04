@@ -39,16 +39,19 @@ func (oc *AIClient) emitToolProgress(ctx context.Context, portal *bridgev2.Porta
 	if state == nil || tool == nil {
 		return
 	}
-	data := map[string]any{
-		"call_id":   tool.callID,
-		"tool_name": tool.toolName,
-		"status":    string(status),
-		"progress": map[string]any{
-			"message": message,
-			"percent": percent,
+	oc.emitStreamEvent(ctx, portal, state, map[string]any{
+		"type": "data-tool-progress",
+		"data": map[string]any{
+			"call_id":   tool.callID,
+			"tool_name": tool.toolName,
+			"status":    string(status),
+			"progress": map[string]any{
+				"message": message,
+				"percent": percent,
+			},
 		},
-	}
-	oc.emitStreamEvent(ctx, portal, state, StreamEventSourceInternal, "tool_progress", data, nil)
+		"transient": true,
+	})
 }
 
 func toolDisplayTitle(toolName string) string {

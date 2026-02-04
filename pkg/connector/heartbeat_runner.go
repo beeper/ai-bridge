@@ -288,7 +288,7 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 			}
 		}
 	}
-	suppressSend := true
+	suppressSend := deliveryPortal == nil || deliveryRoom == ""
 	promptMeta := clonePortalMetadata(portalMeta(sessionPortal))
 	if promptMeta == nil {
 		promptMeta = &PortalMetadata{}

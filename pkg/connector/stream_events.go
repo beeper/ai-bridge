@@ -2,33 +2,24 @@ package connector
 
 import (
 	"context"
+	"fmt"
 
+	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 )
 
-type StreamEventSource string
-
-const (
-	StreamEventSourceResponses       StreamEventSource = "responses"
-	StreamEventSourceChatCompletions StreamEventSource = "chat_completions"
-	StreamEventSourceInternal        StreamEventSource = "internal"
-)
-
-type StreamEventRawPayload struct {
-	Type string
-	JSON string
+type matrixEphemeralSender interface {
+	SendEphemeral(ctx context.Context, roomID id.RoomID, eventType event.Type, content *event.Content, txnID string) (*mautrix.RespSendEvent, error)
 }
 
-// emitStreamEvent sends a unified streaming event to the room.
+// emitStreamEvent sends an AI SDK UIMessageChunk streaming event to the room.
 func (oc *AIClient) emitStreamEvent(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	state *streamingState,
-	source StreamEventSource,
-	kind string,
-	data map[string]any,
-	raw *StreamEventRawPayload,
+	part map[string]any,
 ) {
 	if portal == nil || portal.MXID == "" {
 		return
@@ -50,8 +41,7 @@ func (oc *AIClient) emitStreamEvent(
 	content := map[string]any{
 		"turn_id": state.turnID,
 		"seq":     seq,
-		"source":  string(source),
-		"kind":    kind,
+		"part":    part,
 	}
 	if state.initialEventID != "" {
 		content["target_event"] = state.initialEventID.String()
@@ -63,55 +53,31 @@ func (oc *AIClient) emitStreamEvent(
 	if state.agentID != "" {
 		content["agent_id"] = state.agentID
 	}
-	if data != nil {
-		content["data"] = data
-	}
-	if raw != nil {
-		content["raw"] = map[string]any{
-			"type": raw.Type,
-			"json": raw.JSON,
-		}
-	}
 
 	eventContent := &event.Content{Raw: content}
+	ephemeralSender, ok := intent.(matrixEphemeralSender)
+	if !ok {
+		partType, _ := part["type"].(string)
+		oc.log.Warn().
+			Str("part_type", partType).
+			Int("seq", seq).
+			Msg("Matrix intent does not support ephemeral events; dropping stream event")
+		return
+	}
 
-	if _, err := intent.SendMessage(ctx, portal.MXID, StreamEventMessageType, eventContent, nil); err != nil {
+	txnID := buildStreamEventTxnID(state.turnID, seq)
+	if _, err := ephemeralSender.SendEphemeral(ctx, portal.MXID, StreamEventMessageType, eventContent, txnID); err != nil {
+		partType, _ := part["type"].(string)
 		oc.log.Warn().Err(err).
-			Str("kind", kind).
+			Str("part_type", partType).
 			Int("seq", seq).
 			Msg("Failed to emit stream event")
 	}
 }
 
-func (oc *AIClient) emitStatusEvent(
-	ctx context.Context,
-	portal *bridgev2.Portal,
-	state *streamingState,
-	statusType string,
-	message string,
-	details *GenerationDetails,
-) {
-	data := map[string]any{
-		"status": statusType,
+func buildStreamEventTxnID(turnID string, seq int) string {
+	if turnID == "" {
+		return fmt.Sprintf("ai_stream_%d", seq)
 	}
-	if message != "" {
-		data["message"] = message
-	}
-	if details != nil {
-		detailsMap := map[string]any{}
-		if details.CurrentTool != "" {
-			detailsMap["current_tool"] = details.CurrentTool
-		}
-		if details.CallID != "" {
-			detailsMap["call_id"] = details.CallID
-		}
-		if details.ToolsCompleted > 0 || details.ToolsTotal > 0 {
-			detailsMap["tools_completed"] = details.ToolsCompleted
-			detailsMap["tools_total"] = details.ToolsTotal
-		}
-		if len(detailsMap) > 0 {
-			data["details"] = detailsMap
-		}
-	}
-	oc.emitStreamEvent(ctx, portal, state, StreamEventSourceInternal, "status", data, nil)
+	return fmt.Sprintf("ai_stream_%s_%d", turnID, seq)
 }
