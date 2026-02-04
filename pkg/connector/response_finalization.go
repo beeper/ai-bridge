@@ -29,15 +29,21 @@ func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridge
 		}
 	}
 
+	uiMessage := map[string]any{
+		"id":   turnID,
+		"role": "assistant",
+		"metadata": map[string]any{
+			"turn_id": turnID,
+		},
+		"parts": []any{},
+	}
+
 	eventContent := &event.Content{
 		Raw: map[string]any{
 			"msgtype":      event.MsgText,
 			"body":         content,
 			"m.relates_to": relatesTo,
-			BeeperAIKey: map[string]any{
-				"turn_id": turnID,
-				"status":  string(TurnStatusGenerating),
-			},
+			BeeperAIKey:    uiMessage,
 		},
 	}
 	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
@@ -104,51 +110,51 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	cleanedContent := stripMessageIDHintLines(directives.Text)
 	rendered := format.RenderMarkdown(cleanedContent, true, true)
 
-	// Build AI metadata following the new schema
-	aiMetadata := map[string]any{
-		"turn_id":       state.turnID,
-		"model":         oc.effectiveModel(meta),
-		"status":        string(TurnStatusCompleted),
-		"finish_reason": state.finishReason,
-		"timing": map[string]any{
-			"started_at":     state.startedAtMs,
-			"first_token_at": state.firstTokenAtMs,
-			"completed_at":   state.completedAtMs,
-		},
-	}
-
-	// Add agent_id if set
-	if state.agentID != "" {
-		aiMetadata["agent_id"] = state.agentID
-	}
-
-	if state.promptTokens > 0 || state.completionTokens > 0 || state.reasoningTokens > 0 {
-		aiMetadata["usage"] = map[string]any{
-			"prompt_tokens":     state.promptTokens,
-			"completion_tokens": state.completionTokens,
-			"reasoning_tokens":  state.reasoningTokens,
-		}
-	}
-
-	// Include embedded thinking if present
+	// Build AI SDK UIMessage payload
+	parts := make([]map[string]any, 0, 2+len(state.toolCalls))
 	if state.reasoning.Len() > 0 {
-		aiMetadata["thinking"] = map[string]any{
-			"content":     state.reasoning.String(),
-			"token_count": len(strings.Fields(state.reasoning.String())), // Approximate
-		}
+		parts = append(parts, map[string]any{
+			"type":  "reasoning",
+			"text":  state.reasoning.String(),
+			"state": "done",
+		})
 	}
-
-	// Include tool call event IDs
-	if len(state.toolCalls) > 0 {
-		toolCallIDs := make([]string, 0, len(state.toolCalls))
-		for _, tc := range state.toolCalls {
-			if tc.CallEventID != "" {
-				toolCallIDs = append(toolCallIDs, tc.CallEventID)
+	if cleanedContent != "" {
+		parts = append(parts, map[string]any{
+			"type":  "text",
+			"text":  cleanedContent,
+			"state": "done",
+		})
+	}
+	for _, tc := range state.toolCalls {
+		toolPart := map[string]any{
+			"type":       "dynamic-tool",
+			"toolName":   tc.ToolName,
+			"toolCallId": tc.CallID,
+			"input":      tc.Input,
+		}
+		if tc.ToolType == string(ToolTypeProvider) {
+			toolPart["providerExecuted"] = true
+		}
+		if tc.ResultStatus == string(ResultStatusSuccess) {
+			toolPart["state"] = "output-available"
+			toolPart["output"] = tc.Output
+		} else {
+			toolPart["state"] = "output-error"
+			if tc.ErrorMessage != "" {
+				toolPart["errorText"] = tc.ErrorMessage
+			} else if result, ok := tc.Output["result"].(string); ok && result != "" {
+				toolPart["errorText"] = result
 			}
 		}
-		if len(toolCallIDs) > 0 {
-			aiMetadata["tool_calls"] = toolCallIDs
-		}
+		parts = append(parts, toolPart)
+	}
+
+	uiMessage := map[string]any{
+		"id":       state.turnID,
+		"role":     "assistant",
+		"metadata": oc.buildUIMessageMetadata(state, meta, true),
+		"parts":    parts,
 	}
 
 	// Build m.relates_to with replace relation
@@ -180,7 +186,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 			"formatted_body": rendered.FormattedBody,
 		},
 		"m.relates_to":                  relatesTo,
-		BeeperAIKey:                     aiMetadata,
+		BeeperAIKey:                     uiMessage,
 		"com.beeper.dont_render_edited": true, // Don't show "edited" indicator for streaming updates
 	}
 
@@ -416,47 +422,50 @@ func minInt(a, b int) int {
 // sendFinalAssistantTurnContent is a helper for raw mode that sends content without directive processing.
 func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata, intent bridgev2.MatrixAPI, rendered event.MessageEventContent, replyToEventID *id.EventID) {
 	// Build AI metadata
-	aiMetadata := map[string]any{
-		"turn_id":       state.turnID,
-		"model":         oc.effectiveModel(meta),
-		"status":        string(TurnStatusCompleted),
-		"finish_reason": state.finishReason,
-		"timing": map[string]any{
-			"started_at":     state.startedAtMs,
-			"first_token_at": state.firstTokenAtMs,
-			"completed_at":   state.completedAtMs,
-		},
-	}
-
-	if state.agentID != "" {
-		aiMetadata["agent_id"] = state.agentID
-	}
-
-	if state.promptTokens > 0 || state.completionTokens > 0 || state.reasoningTokens > 0 {
-		aiMetadata["usage"] = map[string]any{
-			"prompt_tokens":     state.promptTokens,
-			"completion_tokens": state.completionTokens,
-			"reasoning_tokens":  state.reasoningTokens,
-		}
-	}
-
+	parts := make([]map[string]any, 0, 2+len(state.toolCalls))
 	if state.reasoning.Len() > 0 {
-		aiMetadata["thinking"] = map[string]any{
-			"content":     state.reasoning.String(),
-			"token_count": len(strings.Fields(state.reasoning.String())),
-		}
+		parts = append(parts, map[string]any{
+			"type":  "reasoning",
+			"text":  state.reasoning.String(),
+			"state": "done",
+		})
 	}
-
-	if len(state.toolCalls) > 0 {
-		toolCallIDs := make([]string, 0, len(state.toolCalls))
-		for _, tc := range state.toolCalls {
-			if tc.CallEventID != "" {
-				toolCallIDs = append(toolCallIDs, tc.CallEventID)
+	if rendered.Body != "" {
+		parts = append(parts, map[string]any{
+			"type":  "text",
+			"text":  rendered.Body,
+			"state": "done",
+		})
+	}
+	for _, tc := range state.toolCalls {
+		toolPart := map[string]any{
+			"type":       "dynamic-tool",
+			"toolName":   tc.ToolName,
+			"toolCallId": tc.CallID,
+			"input":      tc.Input,
+		}
+		if tc.ToolType == string(ToolTypeProvider) {
+			toolPart["providerExecuted"] = true
+		}
+		if tc.ResultStatus == string(ResultStatusSuccess) {
+			toolPart["state"] = "output-available"
+			toolPart["output"] = tc.Output
+		} else {
+			toolPart["state"] = "output-error"
+			if tc.ErrorMessage != "" {
+				toolPart["errorText"] = tc.ErrorMessage
+			} else if result, ok := tc.Output["result"].(string); ok && result != "" {
+				toolPart["errorText"] = result
 			}
 		}
-		if len(toolCallIDs) > 0 {
-			aiMetadata["tool_calls"] = toolCallIDs
-		}
+		parts = append(parts, toolPart)
+	}
+
+	uiMessage := map[string]any{
+		"id":       state.turnID,
+		"role":     "assistant",
+		"metadata": oc.buildUIMessageMetadata(state, meta, true),
+		"parts":    parts,
 	}
 
 	relatesTo := map[string]any{
@@ -480,7 +489,7 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 		"formatted_body":                "* " + rendered.FormattedBody,
 		"m.new_content":                 map[string]any{"msgtype": event.MsgText, "body": rendered.Body, "format": rendered.Format, "formatted_body": rendered.FormattedBody},
 		"m.relates_to":                  relatesTo,
-		BeeperAIKey:                     aiMetadata,
+		BeeperAIKey:                     uiMessage,
 		"com.beeper.dont_render_edited": true,
 	}
 
