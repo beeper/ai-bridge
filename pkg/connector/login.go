@@ -280,11 +280,19 @@ func serviceTokensEmpty(tokens *ServiceTokens) bool {
 	if tokens == nil {
 		return true
 	}
+	if len(tokens.DesktopAPIInstances) > 0 {
+		for _, instance := range tokens.DesktopAPIInstances {
+			if strings.TrimSpace(instance.Token) != "" || strings.TrimSpace(instance.BaseURL) != "" {
+				return false
+			}
+		}
+	}
 	return strings.TrimSpace(tokens.OpenAI) == "" &&
 		strings.TrimSpace(tokens.OpenRouter) == "" &&
 		strings.TrimSpace(tokens.Exa) == "" &&
 		strings.TrimSpace(tokens.Brave) == "" &&
-		strings.TrimSpace(tokens.Perplexity) == ""
+		strings.TrimSpace(tokens.Perplexity) == "" &&
+		strings.TrimSpace(tokens.DesktopAPI) == ""
 }
 
 func beeperBaseURLFromDomain(domain string) string {

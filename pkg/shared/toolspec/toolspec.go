@@ -13,7 +13,7 @@ const (
 	WebFetchDescription = "Fetch and extract readable content from a URL (HTML \u2192 markdown/text). Use for lightweight page access without browser automation."
 
 	MessageName        = "message"
-	MessageDescription = "Send messages and channel actions. Supports actions: send, delete, react, poll, pin, threads, and more."
+	MessageDescription = "Send messages and channel actions. Supports actions: send, delete, react, poll, pin, threads, focus, and more."
 
 	CronName        = "cron"
 	CronDescription = "Manage cron jobs and wake events (OpenClaw-style). Use for reminders and scheduled tasks. For cron.add, enabled defaults to true."
@@ -225,7 +225,7 @@ func MessageSchema() map[string]any {
 		"properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"enum":        []string{"send", "sendWithEffect", "broadcast", "react", "reactions", "edit", "delete", "unsend", "reply", "pin", "unpin", "list-pins", "thread-reply", "search", "read", "member-info", "channel-info", "channel-edit"},
+				"enum":        []string{"send", "sendWithEffect", "broadcast", "react", "reactions", "edit", "delete", "unsend", "reply", "pin", "unpin", "list-pins", "thread-reply", "search", "read", "member-info", "channel-info", "channel-edit", "focus"},
 				"description": "The action to perform",
 			},
 			"message": map[string]any{
@@ -359,6 +359,34 @@ func MessageSchema() map[string]any {
 			"limit": map[string]any{
 				"type":        "number",
 				"description": "For action=search: max results to return (default: 20)",
+			},
+			"sessionKey": map[string]any{
+				"type":        "string",
+				"description": "For action=focus: session key (desktop-api:<instance>:<chatID> or desktop-api:<chatID> for default)",
+			},
+			"instance": map[string]any{
+				"type":        "string",
+				"description": "For action=focus: desktop API instance name (default if omitted)",
+			},
+			"label": map[string]any{
+				"type":        "string",
+				"description": "For action=focus: chat title label (desktop API lookup)",
+			},
+			"chatId": map[string]any{
+				"type":        "string",
+				"description": "For action=focus: desktop chat ID",
+			},
+			"chatID": map[string]any{
+				"type":        "string",
+				"description": "Alias for chatId",
+			},
+			"draftText": map[string]any{
+				"type":        "string",
+				"description": "For action=focus: draft text to prefill",
+			},
+			"draftAttachmentPath": map[string]any{
+				"type":        "string",
+				"description": "For action=focus: attachment file path to prefill",
 			},
 			"name": map[string]any{
 				"type":        "string",

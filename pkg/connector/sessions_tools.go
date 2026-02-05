@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	beeperdesktopapi "github.com/beeper/desktop-api-go"
 	"github.com/google/uuid"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -131,6 +132,31 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 		entries = append(entries, sessionListEntry{updatedAt: updatedAt, data: entry})
 	}
 
+	if oc != nil {
+		instances := oc.desktopAPIInstanceNames()
+		for _, instance := range instances {
+			accounts := map[string]beeperdesktopapi.Account{}
+			if accountMap, err := oc.listDesktopAccounts(ctx, instance); err == nil && accountMap != nil {
+				accounts = accountMap
+			} else if err != nil {
+				oc.log.Warn().Err(err).Str("instance", instance).Msg("Desktop API account listing failed")
+			}
+			desktopEntries, err := oc.listDesktopSessions(ctx, instance, desktopSessionListOptions{
+				Limit:         limit,
+				ActiveMinutes: activeMinutes,
+				MessageLimit:  messageLimit,
+				AllowedKinds:  allowedKinds,
+			}, accounts)
+			if err == nil {
+				if len(desktopEntries) > 0 {
+					entries = append(entries, desktopEntries...)
+				}
+			} else {
+				oc.log.Warn().Err(err).Str("instance", instance).Msg("Desktop API session listing failed")
+			}
+		}
+	}
+
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].updatedAt > entries[j].updatedAt
 	})
@@ -160,6 +186,92 @@ func (oc *AIClient) executeSessionsHistory(ctx context.Context, portal *bridgev2
 	limit := 50
 	if v, err := tools.ReadInt(args, "limit", false); err == nil && v > 0 {
 		limit = v
+	}
+
+	if instance, chatID, ok := parseDesktopSessionKey(sessionKey); ok {
+		client, clientErr := oc.desktopAPIClient(instance)
+		if clientErr != nil || client == nil {
+			if clientErr == nil {
+				clientErr = fmt.Errorf("desktop API token is not set")
+			}
+			return tools.JSONResult(map[string]any{
+				"status": "error",
+				"error":  clientErr.Error(),
+			}), nil
+		}
+		chat, chatErr := client.Chats.Get(ctx, chatID, beeperdesktopapi.ChatGetParams{})
+		if chatErr != nil {
+			oc.log.Warn().Err(chatErr).Str("instance", instance).Msg("Desktop API chat lookup failed")
+		}
+		accounts := map[string]beeperdesktopapi.Account{}
+		if accountMap, err := oc.listDesktopAccounts(ctx, instance); err == nil && accountMap != nil {
+			accounts = accountMap
+		} else if err != nil {
+			oc.log.Warn().Err(err).Str("instance", instance).Msg("Desktop API account listing failed")
+		}
+		messages, msgErr := oc.listDesktopMessages(ctx, client, chatID, limit)
+		if msgErr != nil {
+			return tools.JSONResult(map[string]any{
+				"status": "error",
+				"error":  msgErr.Error(),
+			}), nil
+		}
+		baseURL := ""
+		if config, ok := oc.desktopAPIInstanceConfig(instance); ok {
+			baseURL = strings.TrimSpace(config.BaseURL)
+		}
+		isGroup := true
+		if chat != nil && chat.Type == beeperdesktopapi.ChatTypeSingle {
+			isGroup = false
+		}
+		payload := map[string]any{
+			"sessionKey": normalizeDesktopSessionKeyWithInstance(instance, chatID),
+			"messages": buildDesktopSessionMessages(messages, desktopMessageBuildOptions{
+				IsGroup:  isGroup,
+				Instance: instance,
+				BaseURL:  baseURL,
+				Accounts: accounts,
+			}),
+			"channel":  channelDesktopAPI,
+			"instance": instance,
+			"chatId":   chatID,
+		}
+		if baseURL != "" {
+			payload["baseUrl"] = baseURL
+		}
+		if chat != nil {
+			payload["chat"] = chat
+			if title := strings.TrimSpace(chat.Title); title != "" {
+				payload["label"] = title
+				payload["displayName"] = title
+			}
+			if accountID := strings.TrimSpace(chat.AccountID); accountID != "" {
+				payload["accountId"] = accountID
+				if account, ok := accounts[accountID]; ok {
+					payload["account"] = account
+					if network := strings.TrimSpace(account.Network); network != "" {
+						payload["network"] = network
+					}
+					payload["accountUser"] = account.User
+				}
+			}
+			if chat.Type != "" {
+				payload["chatType"] = string(chat.Type)
+			}
+		} else if len(messages) > 0 {
+			accountID := strings.TrimSpace(messages[len(messages)-1].AccountID)
+			if accountID != "" {
+				payload["accountId"] = accountID
+				if account, ok := accounts[accountID]; ok {
+					payload["account"] = account
+					if network := strings.TrimSpace(account.Network); network != "" {
+						payload["network"] = network
+					}
+					payload["accountUser"] = account.User
+				}
+			}
+		}
+		return tools.JSONResult(payload), nil
 	}
 
 	resolvedPortal, displayKey, resolveErr := oc.resolveSessionPortal(ctx, portal, sessionKey)
@@ -202,11 +314,38 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 	sessionKey := tools.ReadStringDefault(args, "sessionKey", "")
 	label := tools.ReadStringDefault(args, "label", "")
 	agentID := tools.ReadStringDefault(args, "agentId", "")
+	instance := tools.ReadStringDefault(args, "instance", "")
 	if sessionKey != "" && label != "" {
 		return tools.JSONResult(map[string]any{
 			"status": "error",
 			"error":  "Provide either sessionKey or label (not both).",
 		}), nil
+	}
+
+	if instance, chatID, ok := parseDesktopSessionKey(sessionKey); ok {
+		pendingID, sendErr := oc.sendDesktopMessage(ctx, instance, chatID, message)
+		if sendErr != nil {
+			return tools.JSONResult(map[string]any{
+				"status": "error",
+				"error":  sendErr.Error(),
+			}), nil
+		}
+		baseURL := ""
+		if config, ok := oc.desktopAPIInstanceConfig(instance); ok {
+			baseURL = strings.TrimSpace(config.BaseURL)
+		}
+		result := map[string]any{
+			"runId":            uuid.NewString(),
+			"status":           "ok",
+			"sessionKey":       normalizeDesktopSessionKeyWithInstance(instance, chatID),
+			"pendingMessageId": pendingID,
+			"instance":         instance,
+			"chatId":           chatID,
+		}
+		if baseURL != "" {
+			result["baseUrl"] = baseURL
+		}
+		return tools.JSONResult(result), nil
 	}
 
 	var targetPortal *bridgev2.Portal
@@ -230,6 +369,47 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 		}
 		target, display, resolveErr := oc.resolveSessionPortalByLabel(ctx, label, agentID)
 		if resolveErr != nil {
+			var desktopInstance string
+			var chatID string
+			var desktopKey string
+			var desktopErr error
+			if strings.TrimSpace(instance) != "" {
+				chatID, desktopKey, desktopErr = oc.resolveDesktopSessionByLabel(ctx, instance, label)
+				desktopInstance = instance
+			} else {
+				desktopInstance, chatID, desktopKey, desktopErr = oc.resolveDesktopSessionByLabelAnyInstance(ctx, label)
+			}
+			if desktopErr == nil {
+				pendingID, sendErr := oc.sendDesktopMessage(ctx, desktopInstance, chatID, message)
+				if sendErr != nil {
+					return tools.JSONResult(map[string]any{
+						"status": "error",
+						"error":  sendErr.Error(),
+					}), nil
+				}
+				baseURL := ""
+				if config, ok := oc.desktopAPIInstanceConfig(desktopInstance); ok {
+					baseURL = strings.TrimSpace(config.BaseURL)
+				}
+				result := map[string]any{
+					"runId":            uuid.NewString(),
+					"status":           "ok",
+					"sessionKey":       desktopKey,
+					"pendingMessageId": pendingID,
+					"instance":         desktopInstance,
+					"chatId":           chatID,
+				}
+				if baseURL != "" {
+					result["baseUrl"] = baseURL
+				}
+				return tools.JSONResult(result), nil
+			}
+			if desktopErr != nil {
+				return tools.JSONResult(map[string]any{
+					"status": "error",
+					"error":  desktopErr.Error(),
+				}), nil
+			}
 			return tools.JSONResult(map[string]any{
 				"status": "error",
 				"error":  resolveErr.Error(),

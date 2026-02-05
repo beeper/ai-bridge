@@ -234,3 +234,102 @@ func executeMessageReactRemove(ctx context.Context, args map[string]any, btc *Br
 		"status":     "removed",
 	})
 }
+
+// executeMessageFocus handles the focus action - focuses the desktop app and optionally a chat/message.
+func executeMessageFocus(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	if btc == nil || btc.Client == nil {
+		return "", fmt.Errorf("bridge context not available")
+	}
+
+	sessionKey := firstNonEmptyString(args["sessionKey"])
+	label := firstNonEmptyString(args["label"])
+	chatID := firstNonEmptyString(args["chatId"], args["chatID"])
+	instance := firstNonEmptyString(args["instance"])
+	messageID := firstNonEmptyString(args["message_id"])
+	draftText := firstNonEmptyString(args["draftText"], args["message"])
+	draftAttachmentPath := firstNonEmptyString(args["draftAttachmentPath"])
+
+	if sessionKey != "" && label != "" {
+		return "", fmt.Errorf("action=focus requires only one of 'sessionKey' or 'label'")
+	}
+	if chatID != "" && (sessionKey != "" || label != "") {
+		return "", fmt.Errorf("action=focus requires only one of 'chatId', 'sessionKey', or 'label'")
+	}
+
+	if sessionKey != "" {
+		parsedInstance, parsedChatID, ok := parseDesktopSessionKey(sessionKey)
+		if !ok {
+			return "", fmt.Errorf("action=focus requires a desktop-api sessionKey")
+		}
+		chatID = parsedChatID
+		instance = parsedInstance
+	} else if label != "" {
+		if instance != "" {
+			resolvedID, resolvedKey, err := btc.Client.resolveDesktopSessionByLabel(ctx, instance, label)
+			if err != nil {
+				return "", err
+			}
+			chatID = resolvedID
+			sessionKey = resolvedKey
+		} else {
+			resolvedInstance, resolvedID, resolvedKey, err := btc.Client.resolveDesktopSessionByLabelAnyInstance(ctx, label)
+			if err != nil {
+				return "", err
+			}
+			chatID = resolvedID
+			sessionKey = resolvedKey
+			instance = resolvedInstance
+		}
+	} else if chatID != "" && instance == "" {
+		instance = desktopDefaultInstance
+	}
+
+	if messageID != "" && chatID == "" {
+		return "", fmt.Errorf("action=focus requires chatId or sessionKey when message_id is set")
+	}
+
+	if draftAttachmentPath != "" {
+		draftAttachmentPath = expandUserPath(draftAttachmentPath)
+	}
+
+	_, err := btc.Client.focusDesktop(ctx, instance, desktopFocusParams{
+		ChatID:              chatID,
+		MessageID:           messageID,
+		DraftText:           draftText,
+		DraftAttachmentPath: draftAttachmentPath,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to focus desktop: %w", err)
+	}
+
+	result := map[string]any{
+		"status": "ok",
+	}
+	if chatID != "" {
+		result["chatId"] = chatID
+	}
+	if sessionKey != "" {
+		result["sessionKey"] = sessionKey
+	} else if chatID != "" {
+		result["sessionKey"] = normalizeDesktopSessionKeyWithInstance(instance, chatID)
+	}
+	if instance != "" {
+		result["instance"] = instance
+		if config, ok := btc.Client.desktopAPIInstanceConfig(instance); ok {
+			if baseURL := strings.TrimSpace(config.BaseURL); baseURL != "" {
+				result["baseUrl"] = baseURL
+			}
+		}
+	}
+	if messageID != "" {
+		result["message_id"] = messageID
+	}
+	if draftText != "" {
+		result["draftText"] = draftText
+	}
+	if draftAttachmentPath != "" {
+		result["draftAttachmentPath"] = draftAttachmentPath
+	}
+
+	return jsonActionResult("focus", result)
+}

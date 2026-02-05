@@ -150,6 +150,8 @@ func normalizeMessageAction(action string) string {
 	switch action {
 	case "unsend":
 		return "delete"
+	case "open", "select":
+		return "focus"
 	case "sendWithEffect", "broadcast":
 		return "send"
 	default:
@@ -202,6 +204,11 @@ func normalizeMessageArgs(args map[string]any) {
 	if _, ok := args["mimeType"]; !ok {
 		if v, ok := args["contentType"]; ok {
 			args["mimeType"] = v
+		}
+	}
+	if _, ok := args["chatId"]; !ok {
+		if v, ok := args["chatID"]; ok {
+			args["chatId"] = v
 		}
 	}
 }
@@ -381,6 +388,8 @@ func executeMessage(ctx context.Context, args map[string]any) (string, error) {
 		return executeMessageChannelInfo(ctx, args, btc)
 	case "channel-edit":
 		return executeMessageChannelEdit(ctx, args, btc)
+	case "focus":
+		return executeMessageFocus(ctx, args, btc)
 	default:
 		return "", fmt.Errorf("unknown action: %s", action)
 	}
