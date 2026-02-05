@@ -414,6 +414,9 @@ func TestSmartTruncatePrompt(t *testing.T) {
 func TestDefaultPruningConfig(t *testing.T) {
 	config := DefaultPruningConfig()
 
+	if !config.Enabled {
+		t.Errorf("Expected Enabled true, got %v", config.Enabled)
+	}
 	if config.SoftTrimRatio != 0.3 {
 		t.Errorf("Expected SoftTrimRatio 0.3, got %f", config.SoftTrimRatio)
 	}

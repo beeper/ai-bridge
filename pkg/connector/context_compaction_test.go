@@ -140,8 +140,8 @@ func TestCompactionConfig(t *testing.T) {
 		t.Errorf("Expected MaxHistoryShare 0.5, got %f", config.MaxHistoryShare)
 	}
 
-	if config.ReserveTokens != 2000 {
-		t.Errorf("Expected ReserveTokens 2000, got %d", config.ReserveTokens)
+	if config.ReserveTokens != 20000 {
+		t.Errorf("Expected ReserveTokens 20000, got %d", config.ReserveTokens)
 	}
 }
 

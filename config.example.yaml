@@ -235,10 +235,9 @@ default_system_prompt: |
 
   # Context pruning configuration (OpenClaw-style).
   # Reduces token usage by intelligently truncating old tool results.
-  # Disabled by default - opt-in feature.
   pruning:
     # Enable proactive context pruning
-    enabled: false
+    enabled: true
 
     # Ratio of context window usage that triggers soft trimming (0.0-1.0)
     # At 30% usage, large tool results start getting truncated
@@ -292,7 +291,7 @@ default_system_prompt: |
     max_history_share: 0.5
 
     # Token budget reserved for compaction output
-    reserve_tokens: 2000
+    reserve_tokens: 20000
 
     # Additional instructions for the summarization model
     # custom_instructions: "Focus on preserving code decisions and TODOs"

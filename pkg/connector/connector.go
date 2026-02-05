@@ -22,7 +22,7 @@ import (
 
 const (
 	defaultTemperature        = 0.4
-	defaultMaxContextMessages = 12
+	defaultMaxContextMessages = 20
 	defaultMaxTokens          = 512
 	defaultReasoningEffort    = "low"
 )
