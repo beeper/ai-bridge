@@ -8,6 +8,7 @@ tool go.mau.fi/util/cmd/maubuild
 
 require (
 	github.com/PuerkitoBio/goquery v1.11.0
+	github.com/beeper/desktop-api-go v0.2.0
 	github.com/dyatlov/go-opengraph/opengraph v0.0.0-20220524092352-606d7b1e5f8a
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-sqlite3 v1.14.33
@@ -56,3 +57,5 @@ require (
 )
 
 replace maunium.net/go/mautrix => /Users/batuhan/Projects/texts/mautrix-go
+
+replace github.com/beeper/desktop-api-go => /Users/batuhan/Projects/texts/desktop-api-go

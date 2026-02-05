@@ -458,6 +458,10 @@ var SessionsSendTool = &Tool{
 					"type":        "string",
 					"description": "Session label to target (alternative to sessionKey)",
 				},
+				"instance": map[string]any{
+					"type":        "string",
+					"description": "Desktop API instance name when targeting a desktop label",
+				},
 				"agentId": map[string]any{
 					"type":        "string",
 					"description": "Agent id filter for label lookups",

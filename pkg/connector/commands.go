@@ -351,6 +351,46 @@ var CommandConfig = registerAICommand(commandregistry.Definition{
 	Handler:        fnConfig,
 })
 
+// CommandSetDesktopAPIToken handles the !ai set-desktop-api-token command
+var CommandSetDesktopAPIToken = registerAICommand(commandregistry.Definition{
+	Name:           "set-desktop-api-token",
+	Description:    "Set the Beeper Desktop API access token for desktop sessions",
+	Args:           "<token|clear>",
+	Section:        HelpSectionAI,
+	RequiresPortal: false,
+	RequiresLogin:  true,
+	Handler:        fnSetDesktopAPIToken,
+})
+
+var CommandAddDesktopAPIInstance = registerAICommand(commandregistry.Definition{
+	Name:           "add-desktop-api-instance",
+	Description:    "Add or update a Beeper Desktop API instance",
+	Args:           "<name> <token> [baseURL]",
+	Section:        HelpSectionAI,
+	RequiresPortal: false,
+	RequiresLogin:  true,
+	Handler:        fnAddDesktopAPIInstance,
+})
+
+var CommandRemoveDesktopAPIInstance = registerAICommand(commandregistry.Definition{
+	Name:           "remove-desktop-api-instance",
+	Description:    "Remove a Beeper Desktop API instance",
+	Args:           "<name>",
+	Section:        HelpSectionAI,
+	RequiresPortal: false,
+	RequiresLogin:  true,
+	Handler:        fnRemoveDesktopAPIInstance,
+})
+
+var CommandListDesktopAPIInstances = registerAICommand(commandregistry.Definition{
+	Name:           "list-desktop-api-instances",
+	Description:    "List configured Beeper Desktop API instances",
+	Section:        HelpSectionAI,
+	RequiresPortal: false,
+	RequiresLogin:  true,
+	Handler:        fnListDesktopAPIInstances,
+})
+
 func fnConfig(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
 	if !ok {
@@ -368,6 +408,214 @@ func fnConfig(ce *commands.Event) {
 		client.effectiveModel(meta), client.effectiveTemperature(meta), client.historyLimit(meta),
 		client.effectiveMaxTokens(meta), roomCaps.SupportsVision, mode)
 	ce.Reply(config)
+}
+
+func fnSetDesktopAPIToken(ce *commands.Event) {
+	client, ok := requireClient(ce)
+	if !ok {
+		return
+	}
+	login := client.UserLogin
+	if login == nil {
+		ce.Reply("No active login found")
+		return
+	}
+	meta := loginMetadata(login)
+	if meta == nil {
+		ce.Reply("Failed to access login metadata")
+		return
+	}
+
+	if len(ce.Args) == 0 {
+		instances := client.desktopAPIInstances()
+		if len(instances) == 0 {
+			ce.Reply("Desktop API instances: none configured")
+			return
+		}
+		lines := make([]string, 0, len(instances))
+		for _, name := range client.desktopAPIInstanceNames() {
+			config := instances[name]
+			status := "set"
+			if strings.TrimSpace(config.Token) == "" {
+				status = "missing token"
+			}
+			if strings.TrimSpace(config.BaseURL) != "" {
+				lines = append(lines, fmt.Sprintf("- %s: %s (base URL %s)", name, status, strings.TrimSpace(config.BaseURL)))
+			} else {
+				lines = append(lines, fmt.Sprintf("- %s: %s", name, status))
+			}
+		}
+		ce.Reply("Desktop API instances:\n%s", strings.Join(lines, "\n"))
+		return
+	}
+
+	token := strings.TrimSpace(strings.Join(ce.Args, " "))
+	if token == "" {
+		ce.Reply("Usage: !ai set-desktop-api-token <token|clear>")
+		return
+	}
+	if strings.EqualFold(token, "clear") || strings.EqualFold(token, "none") || strings.EqualFold(token, "unset") {
+		if meta.ServiceTokens == nil {
+			meta.ServiceTokens = &ServiceTokens{}
+		}
+		meta.ServiceTokens.DesktopAPI = ""
+		if meta.ServiceTokens.DesktopAPIInstances != nil {
+			delete(meta.ServiceTokens.DesktopAPIInstances, desktopDefaultInstance)
+		}
+		if err := login.Save(ce.Ctx); err != nil {
+			ce.Reply("Failed to clear Desktop API token: %s", err)
+			return
+		}
+		ce.Reply("Desktop API token cleared")
+		return
+	}
+
+	if meta.ServiceTokens == nil {
+		meta.ServiceTokens = &ServiceTokens{}
+	}
+	meta.ServiceTokens.DesktopAPI = token
+	if meta.ServiceTokens.DesktopAPIInstances == nil {
+		meta.ServiceTokens.DesktopAPIInstances = map[string]DesktopAPIInstance{}
+	}
+	defaultConfig := meta.ServiceTokens.DesktopAPIInstances[desktopDefaultInstance]
+	defaultConfig.Token = token
+	meta.ServiceTokens.DesktopAPIInstances[desktopDefaultInstance] = defaultConfig
+	if err := login.Save(ce.Ctx); err != nil {
+		ce.Reply("Failed to set Desktop API token: %s", err)
+		return
+	}
+	ce.Reply("Desktop API token saved")
+}
+
+func fnAddDesktopAPIInstance(ce *commands.Event) {
+	client, ok := requireClient(ce)
+	if !ok {
+		return
+	}
+	login := client.UserLogin
+	if login == nil {
+		ce.Reply("No active login found")
+		return
+	}
+	meta := loginMetadata(login)
+	if meta == nil {
+		ce.Reply("Failed to access login metadata")
+		return
+	}
+	if len(ce.Args) < 2 {
+		ce.Reply("Usage: !ai add-desktop-api-instance <name> <token> [baseURL]")
+		return
+	}
+	name := normalizeDesktopInstanceName(ce.Args[0])
+	if name == "" {
+		ce.Reply("Instance name is required")
+		return
+	}
+	token := strings.TrimSpace(ce.Args[1])
+	if token == "" {
+		ce.Reply("Token is required")
+		return
+	}
+	baseURL := ""
+	if len(ce.Args) > 2 {
+		baseURL = strings.TrimSpace(strings.Join(ce.Args[2:], " "))
+	}
+	if meta.ServiceTokens == nil {
+		meta.ServiceTokens = &ServiceTokens{}
+	}
+	if meta.ServiceTokens.DesktopAPIInstances == nil {
+		meta.ServiceTokens.DesktopAPIInstances = map[string]DesktopAPIInstance{}
+	}
+	config := meta.ServiceTokens.DesktopAPIInstances[name]
+	config.Token = token
+	if baseURL != "" {
+		config.BaseURL = baseURL
+	}
+	meta.ServiceTokens.DesktopAPIInstances[name] = config
+	if name == desktopDefaultInstance {
+		meta.ServiceTokens.DesktopAPI = token
+	}
+	if err := login.Save(ce.Ctx); err != nil {
+		ce.Reply("Failed to save Desktop API instance: %s", err)
+		return
+	}
+	if baseURL != "" {
+		ce.Reply("Desktop API instance '%s' saved (base URL %s)", name, baseURL)
+		return
+	}
+	ce.Reply("Desktop API instance '%s' saved", name)
+}
+
+func fnRemoveDesktopAPIInstance(ce *commands.Event) {
+	client, ok := requireClient(ce)
+	if !ok {
+		return
+	}
+	login := client.UserLogin
+	if login == nil {
+		ce.Reply("No active login found")
+		return
+	}
+	meta := loginMetadata(login)
+	if meta == nil {
+		ce.Reply("Failed to access login metadata")
+		return
+	}
+	if len(ce.Args) == 0 {
+		ce.Reply("Usage: !ai remove-desktop-api-instance <name>")
+		return
+	}
+	name := normalizeDesktopInstanceName(strings.Join(ce.Args, " "))
+	if name == "" {
+		ce.Reply("Instance name is required")
+		return
+	}
+	if meta.ServiceTokens == nil || meta.ServiceTokens.DesktopAPIInstances == nil {
+		ce.Reply("Desktop API instance '%s' not found", name)
+		return
+	}
+	if _, ok := meta.ServiceTokens.DesktopAPIInstances[name]; !ok {
+		ce.Reply("Desktop API instance '%s' not found", name)
+		return
+	}
+	delete(meta.ServiceTokens.DesktopAPIInstances, name)
+	if name == desktopDefaultInstance {
+		meta.ServiceTokens.DesktopAPI = ""
+	}
+	if len(meta.ServiceTokens.DesktopAPIInstances) == 0 {
+		meta.ServiceTokens.DesktopAPIInstances = nil
+	}
+	if err := login.Save(ce.Ctx); err != nil {
+		ce.Reply("Failed to remove Desktop API instance: %s", err)
+		return
+	}
+	ce.Reply("Desktop API instance '%s' removed", name)
+}
+
+func fnListDesktopAPIInstances(ce *commands.Event) {
+	client, ok := requireClient(ce)
+	if !ok {
+		return
+	}
+	instances := client.desktopAPIInstances()
+	if len(instances) == 0 {
+		ce.Reply("Desktop API instances: none configured")
+		return
+	}
+	lines := make([]string, 0, len(instances))
+	for _, name := range client.desktopAPIInstanceNames() {
+		config := instances[name]
+		status := "set"
+		if strings.TrimSpace(config.Token) == "" {
+			status = "missing token"
+		}
+		if strings.TrimSpace(config.BaseURL) != "" {
+			lines = append(lines, fmt.Sprintf("- %s: %s (base URL %s)", name, status, strings.TrimSpace(config.BaseURL)))
+		} else {
+			lines = append(lines, fmt.Sprintf("- %s: %s", name, status))
+		}
+	}
+	ce.Reply("Desktop API instances:\n%s", strings.Join(lines, "\n"))
 }
 
 // CommandDebounce handles the !ai debounce command
