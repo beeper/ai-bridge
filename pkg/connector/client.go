@@ -1339,14 +1339,25 @@ func (oc *AIClient) isOpenRouterProvider() bool {
 	return loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper || loginMeta.Provider == ProviderMagicProxy
 }
 
-// isGroupChat determines if the portal is a group chat based on member count.
-// Returns true when there are more than 2 members (user + bot + others = group).
+// isGroupChat determines if the portal is a group chat.
+// Prefer explicit portal metadata over member count to avoid misclassifying DMs
+// that include extra ghosts (e.g. AI model users).
 func (oc *AIClient) isGroupChat(ctx context.Context, portal *bridgev2.Portal) bool {
 	if portal == nil || portal.MXID == "" {
 		return false
 	}
 
-	// Get member count
+	switch portal.RoomType {
+	case database.RoomTypeDM:
+		return false
+	case database.RoomTypeGroupDM, database.RoomTypeSpace:
+		return true
+	}
+	if portal.OtherUserID != "" {
+		return false
+	}
+
+	// Fallback to member count when portal type is unknown.
 	matrixConn := oc.UserLogin.Bridge.Matrix
 	if matrixConn == nil {
 		return false

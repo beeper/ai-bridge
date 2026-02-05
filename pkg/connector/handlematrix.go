@@ -36,8 +36,11 @@ func messageSendStatusError(err error, message string, reason event.MessageStatu
 		}
 	}
 	status := bridgev2.WrapErrorInStatus(err).WithSendNotice(true)
+	status = status.WithStatus(messageStatusForError(err))
 	if reason != "" {
 		status = status.WithErrorReason(reason)
+	} else {
+		status = status.WithErrorReason(messageStatusReasonForError(err))
 	}
 	if message != "" {
 		status = status.WithMessage(message)
@@ -334,7 +337,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 
 	promptMessages, err := oc.buildPromptWithLinkContext(ctx, portal, meta, body, rawEventContent, eventID)
 	if err != nil {
-		return nil, err
+		return nil, messageSendStatusError(err, "Failed to prepare message. Please try again.", "")
 	}
 	userMessage := &database.Message{
 		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
@@ -346,6 +349,9 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 			Body: body,
 		},
 		Timestamp: time.Now(),
+	}
+	if msg.InputTransactionID != "" {
+		userMessage.SendTxnID = networkid.RawTransactionID(msg.InputTransactionID)
 	}
 
 	pending := pendingMessage{
@@ -659,7 +665,7 @@ func (oc *AIClient) handleMediaMessage(
 		body := oc.buildMatrixInboundBody(ctx, portal, meta, msg.Event, rawBody, senderName, roomName, isGroup)
 		promptMessages, err := oc.buildPrompt(ctx, portal, meta, body, eventID)
 		if err != nil {
-			return nil, err
+			return nil, messageSendStatusError(err, "Failed to prepare message. Please try again.", "")
 		}
 		userMessage := &database.Message{
 			ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
@@ -671,6 +677,9 @@ func (oc *AIClient) handleMediaMessage(
 				Body: body,
 			},
 			Timestamp: time.Now(),
+		}
+		if msg.InputTransactionID != "" {
+			userMessage.SendTxnID = networkid.RawTransactionID(msg.InputTransactionID)
 		}
 		pending := pendingMessage{
 			Event:       msg.Event,
@@ -764,7 +773,7 @@ func (oc *AIClient) handleMediaMessage(
 	captionForPrompt := oc.buildMatrixInboundBody(ctx, portal, meta, msg.Event, caption, senderName, roomName, isGroup)
 	promptMessages, err := oc.buildPromptWithMedia(ctx, portal, meta, captionForPrompt, string(mediaURL), mimeType, encryptedFile, config.msgType, eventID)
 	if err != nil {
-		return nil, err
+		return nil, messageSendStatusError(err, "Failed to prepare media message. Please try again.", "")
 	}
 
 	userMeta := &MessageMetadata{
@@ -784,6 +793,9 @@ func (oc *AIClient) handleMediaMessage(
 		SenderID:  humanUserID(oc.UserLogin.ID),
 		Metadata:  userMeta,
 		Timestamp: time.Now(),
+	}
+	if msg.InputTransactionID != "" {
+		userMessage.SendTxnID = networkid.RawTransactionID(msg.InputTransactionID)
 	}
 
 	pending := pendingMessage{
@@ -861,7 +873,7 @@ func (oc *AIClient) handleTextFileMessage(
 
 	promptMessages, err := oc.buildPrompt(ctx, portal, meta, combined, eventID)
 	if err != nil {
-		return nil, err
+		return nil, messageSendStatusError(err, "Failed to prepare message. Please try again.", "")
 	}
 
 	userMessage := &database.Message{
@@ -874,6 +886,9 @@ func (oc *AIClient) handleTextFileMessage(
 			Body: combined,
 		},
 		Timestamp: time.Now(),
+	}
+	if msg.InputTransactionID != "" {
+		userMessage.SendTxnID = networkid.RawTransactionID(msg.InputTransactionID)
 	}
 
 	pending := pendingMessage{

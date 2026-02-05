@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
@@ -38,17 +39,21 @@ type openCodeInstance struct {
 }
 
 type openCodePartState struct {
-	role                  string
-	messageID             string
-	partType              string
-	callStatus            string
-	statusReaction        string
-	callSent              bool
-	resultSent            bool
-	streamInputStarted    bool
-	streamInputAvailable  bool
-	streamOutputAvailable bool
-	streamOutputError     bool
+	role                   string
+	messageID              string
+	partType               string
+	callStatus             string
+	statusReaction         string
+	callSent               bool
+	resultSent             bool
+	textStreamStarted      bool
+	textStreamEnded        bool
+	reasoningStreamStarted bool
+	reasoningStreamEnded   bool
+	streamInputStarted     bool
+	streamInputAvailable   bool
+	streamOutputAvailable  bool
+	streamOutputError      bool
 }
 
 func NewOpenCodeManager(bridge *Bridge) *OpenCodeManager {
@@ -279,23 +284,64 @@ func (m *OpenCodeManager) startEventLoop(inst *openCodeInstance) {
 	inst.cancel = cancel
 
 	go func() {
-		events, errs := inst.client.StreamEvents(ctx)
+		backoff := 2 * time.Second
+		maxBackoff := 2 * time.Minute
 		for {
-			select {
-			case evt, ok := <-events:
-				if !ok {
-					m.setConnected(inst, false)
+			if ctx.Err() != nil {
+				return
+			}
+			connectStart := time.Now()
+			events, errs := inst.client.StreamEvents(ctx)
+
+			sessions, err := inst.client.ListSessions(ctx)
+			if err == nil {
+				if _, syncErr := m.syncSessions(ctx, inst, sessions); syncErr != nil {
+					m.log().Warn().Err(syncErr).Str("instance", inst.cfg.ID).Msg("Failed to sync OpenCode sessions after reconnect")
+				}
+			} else {
+				m.log().Warn().Err(err).Str("instance", inst.cfg.ID).Msg("Failed to list OpenCode sessions after reconnect")
+			}
+			m.setConnected(inst, true)
+
+			streamEnded := false
+			for !streamEnded {
+				select {
+				case evt, ok := <-events:
+					if !ok {
+						streamEnded = true
+						break
+					}
+					m.handleEvent(ctx, inst, evt)
+				case err, ok := <-errs:
+					if ok && err != nil {
+						m.log().Warn().Err(err).Str("instance", inst.cfg.ID).Msg("OpenCode event stream error")
+					}
+					streamEnded = true
+				case <-ctx.Done():
 					return
 				}
-				m.handleEvent(ctx, inst, evt)
-			case err, ok := <-errs:
-				if ok && err != nil {
-					m.log().Warn().Err(err).Str("instance", inst.cfg.ID).Msg("OpenCode event stream error")
-					m.setConnected(inst, false)
+			}
+
+			m.setConnected(inst, false)
+			if ctx.Err() != nil {
+				return
+			}
+
+			if time.Since(connectStart) > 10*time.Second {
+				backoff = 2 * time.Second
+			} else if backoff < maxBackoff {
+				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
 				}
-				return
+			}
+
+			timer := time.NewTimer(backoff)
+			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return
+			case <-timer.C:
 			}
 		}
 	}()
@@ -391,6 +437,9 @@ func (m *OpenCodeManager) handleMessageEvent(ctx context.Context, inst *openCode
 		return
 	}
 	m.handleMessageParts(ctx, inst, portal, msg.Role, full)
+	if msg.Time.Completed != 0 {
+		m.bridge.finishOpenCodeStream(opencodeMessageStreamTurnID(msg.SessionID, msg.ID))
+	}
 }
 
 func (m *OpenCodeManager) handleMessageParts(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, role string, msg *opencode.MessageWithParts) {
@@ -423,9 +472,6 @@ func (m *OpenCodeManager) handlePartUpdated(ctx context.Context, inst *openCodeI
 	if portal == nil {
 		return
 	}
-	if part.Type == "tool" && strings.TrimSpace(delta) != "" {
-		m.emitToolStreamDelta(ctx, inst, portal, part, delta)
-	}
 	inst.upsertPart(part.SessionID, part.MessageID, part)
 	role := inst.seenRole(part.SessionID, part.MessageID)
 	if role == "user" && inst.isSeen(part.SessionID, part.MessageID) {
@@ -448,6 +494,16 @@ func (m *OpenCodeManager) handlePartUpdated(ctx context.Context, inst *openCodeI
 		}
 		return
 	}
+	if part.Type == "tool" && delta != "" {
+		m.emitToolStreamDelta(ctx, inst, portal, part, delta)
+	}
+	if part.Type == "text" && delta != "" {
+		m.emitTextStreamDelta(ctx, inst, portal, part, delta)
+	}
+	if part.Type == "reasoning" && delta != "" {
+		m.emitReasoningStreamDelta(ctx, inst, portal, part, delta)
+	}
+	m.emitTextStreamEnd(ctx, inst, portal, part)
 	m.handlePart(ctx, inst, portal, role, part, true)
 }
 
@@ -489,6 +545,9 @@ func (m *OpenCodeManager) handlePart(ctx context.Context, inst *openCodeInstance
 	}
 	if allowEdit && (part.Type == "text" || part.Type == "reasoning") {
 		m.bridge.emitOpenCodePartEdit(ctx, portal, inst.cfg.ID, part, role == "user")
+	}
+	if part.Type == "text" || part.Type == "reasoning" {
+		m.emitTextStreamEnd(ctx, inst, portal, part)
 	}
 }
 
@@ -714,6 +773,23 @@ func (inst *openCodeInstance) partStreamFlags(sessionID, partID string) (bool, b
 	return state.streamInputStarted, state.streamInputAvailable, state.streamOutputAvailable, state.streamOutputError
 }
 
+func (inst *openCodeInstance) partTextStreamFlags(sessionID, partID string) (bool, bool, bool, bool) {
+	inst.seenMu.Lock()
+	defer inst.seenMu.Unlock()
+	if inst.seenPart == nil {
+		return false, false, false, false
+	}
+	parts, ok := inst.seenPart[sessionID]
+	if !ok {
+		return false, false, false, false
+	}
+	state, ok := parts[partID]
+	if !ok || state == nil {
+		return false, false, false, false
+	}
+	return state.textStreamStarted, state.textStreamEnded, state.reasoningStreamStarted, state.reasoningStreamEnded
+}
+
 func (inst *openCodeInstance) partCallStatus(sessionID, partID string) string {
 	inst.seenMu.Lock()
 	defer inst.seenMu.Unlock()
@@ -757,6 +833,40 @@ func (inst *openCodeInstance) setPartCallSent(sessionID, partID string) {
 	if parts, ok := inst.seenPart[sessionID]; ok {
 		if state, ok := parts[partID]; ok && state != nil {
 			state.callSent = true
+		}
+	}
+}
+
+func (inst *openCodeInstance) setPartTextStreamStarted(sessionID, partID, kind string) {
+	inst.seenMu.Lock()
+	defer inst.seenMu.Unlock()
+	if inst.seenPart == nil {
+		return
+	}
+	if parts, ok := inst.seenPart[sessionID]; ok {
+		if state, ok := parts[partID]; ok && state != nil {
+			if kind == "reasoning" {
+				state.reasoningStreamStarted = true
+			} else {
+				state.textStreamStarted = true
+			}
+		}
+	}
+}
+
+func (inst *openCodeInstance) setPartTextStreamEnded(sessionID, partID, kind string) {
+	inst.seenMu.Lock()
+	defer inst.seenMu.Unlock()
+	if inst.seenPart == nil {
+		return
+	}
+	if parts, ok := inst.seenPart[sessionID]; ok {
+		if state, ok := parts[partID]; ok && state != nil {
+			if kind == "reasoning" {
+				state.reasoningStreamEnded = true
+			} else {
+				state.textStreamEnded = true
+			}
 		}
 	}
 }
