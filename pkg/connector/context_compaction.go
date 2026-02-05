@@ -50,7 +50,7 @@ func DefaultCompactionConfig() *CompactionConfig {
 		SummarizationEnabled: &enabled,
 		MaxSummaryTokens:     500,
 		MaxHistoryShare:      0.5,
-		ReserveTokens:        2000,
+		ReserveTokens:        20000,
 	}
 }
 

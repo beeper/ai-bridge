@@ -563,6 +563,52 @@ func (oc *AIClient) queuePendingMessage(roomID id.RoomID, item pendingQueueItem,
 	return enqueued
 }
 
+func queueStatusEvents(primary *event.Event, extras []*event.Event) []*event.Event {
+	events := make([]*event.Event, 0, 1+len(extras))
+	seen := make(map[id.EventID]struct{}, 1+len(extras))
+	appendEvent := func(evt *event.Event) {
+		if evt == nil || evt.ID == "" {
+			return
+		}
+		if _, exists := seen[evt.ID]; exists {
+			return
+		}
+		seen[evt.ID] = struct{}{}
+		events = append(events, evt)
+	}
+	appendEvent(primary)
+	for _, evt := range extras {
+		appendEvent(evt)
+	}
+	return events
+}
+
+func (oc *AIClient) sendQueueAcceptedSuccess(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, extras []*event.Event) {
+	for _, statusEvt := range queueStatusEvents(evt, extras) {
+		oc.sendSuccessStatus(ctx, portal, statusEvt)
+	}
+}
+
+func (oc *AIClient) sendQueueRejectedStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, extras []*event.Event, reason string) {
+	if portal == nil || portal.Bridge == nil {
+		return
+	}
+	message := strings.TrimSpace(reason)
+	if message == "" {
+		message = "Request was not accepted by queue. Please retry."
+	}
+	err := fmt.Errorf("%s", message)
+	msgStatus := bridgev2.WrapErrorInStatus(err).
+		WithStatus(event.MessageStatusRetriable).
+		WithErrorReason(event.MessageStatusGenericError).
+		WithMessage(message).
+		WithIsCertain(true).
+		WithSendNotice(false)
+	for _, statusEvt := range queueStatusEvents(evt, extras) {
+		portal.Bridge.Matrix.SendMessageStatus(ctx, &msgStatus, bridgev2.StatusEventInfoFromEvent(statusEvt))
+	}
+}
+
 // dispatchOrQueue handles the common room acquisition pattern for message processing.
 // If the room is available, it dispatches the completion immediately and returns Pending=true
 // so message status can be flipped to SUCCESS on first response bytes.
@@ -681,16 +727,22 @@ func (oc *AIClient) dispatchOrQueue(
 		}
 	}
 
-	queueItem.pending.PendingSent = true
 	if queueSettings.Mode == QueueModeSteerBacklog {
 		queueItem.backlogAfter = true
 	}
 	if trace {
 		oc.log.Debug().Str("room_id", roomID.String()).Msg("Room busy; queued message")
 	}
-	oc.queuePendingMessage(roomID, queueItem, queueSettings)
+	enqueued := oc.queuePendingMessage(roomID, queueItem, queueSettings)
+	if !enqueued {
+		if trace {
+			oc.log.Warn().Str("room_id", roomID.String()).Msg("Room busy queue rejected message")
+		}
+		oc.sendQueueRejectedStatus(ctx, portal, evt, queueItem.pending.StatusEvents, "Request was not accepted by queue. Please retry.")
+		return userMessage, false
+	}
 	if evt != nil && !pendingSent {
-		oc.sendPendingStatus(ctx, portal, evt, "Waiting for previous response")
+		oc.sendQueueAcceptedSuccess(ctx, portal, evt, queueItem.pending.StatusEvents)
 	}
 	oc.notifySessionMemoryChange(ctx, portal, meta, false)
 	return userMessage, true
@@ -773,9 +825,16 @@ func (oc *AIClient) dispatchOrQueueWithStatus(
 	if trace {
 		oc.log.Debug().Str("room_id", roomID.String()).Msg("Room busy; queued message")
 	}
-	oc.queuePendingMessage(roomID, queueItem, queueSettings)
+	enqueued := oc.queuePendingMessage(roomID, queueItem, queueSettings)
+	if !enqueued {
+		if trace {
+			oc.log.Warn().Str("room_id", roomID.String()).Msg("Room busy queue rejected message")
+		}
+		oc.sendQueueRejectedStatus(ctx, portal, evt, queueItem.pending.StatusEvents, "Request was not accepted by queue. Please retry.")
+		return
+	}
 	if evt != nil && !pendingSent {
-		oc.sendPendingStatus(ctx, portal, evt, "Waiting for previous response")
+		oc.sendQueueAcceptedSuccess(ctx, portal, evt, queueItem.pending.StatusEvents)
 	}
 }
 

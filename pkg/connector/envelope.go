@@ -77,14 +77,14 @@ func resolveEnvelopeTimezone(opts EnvelopeFormatOptions) envelopeTimezone {
 }
 
 func formatUtcTimestamp(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04Z")
+	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
 func formatZonedTimestamp(t time.Time, loc *time.Location) string {
 	if loc != nil {
 		t = t.In(loc)
 	}
-	return t.Format("2006-01-02 15:04 MST")
+	return t.Format("2006-01-02 15:04:05.000 MST")
 }
 
 func formatElapsedTime(current, previous time.Time) string {

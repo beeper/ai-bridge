@@ -7,6 +7,7 @@ import (
 )
 
 type statusEventsKey struct{}
+type queueAcceptedStatusKey struct{}
 
 func withStatusEvents(ctx context.Context, events []*event.Event) context.Context {
 	if len(events) == 0 {
@@ -25,4 +26,17 @@ func statusEventsFromContext(ctx context.Context) []*event.Event {
 		}
 	}
 	return nil
+}
+
+func withQueueAcceptedStatus(ctx context.Context) context.Context {
+	return context.WithValue(ctx, queueAcceptedStatusKey{}, true)
+}
+
+func queueAcceptedStatusFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	raw := ctx.Value(queueAcceptedStatusKey{})
+	accepted, ok := raw.(bool)
+	return ok && accepted
 }

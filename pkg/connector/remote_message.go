@@ -15,6 +15,7 @@ import (
 var (
 	_ bridgev2.RemoteMessage                  = (*OpenAIRemoteMessage)(nil)
 	_ bridgev2.RemoteEventWithTimestamp       = (*OpenAIRemoteMessage)(nil)
+	_ bridgev2.RemoteEventWithStreamOrder     = (*OpenAIRemoteMessage)(nil)
 	_ bridgev2.RemoteMessageWithTransactionID = (*OpenAIRemoteMessage)(nil)
 )
 
@@ -58,6 +59,10 @@ func (m *OpenAIRemoteMessage) GetTimestamp() time.Time {
 		return time.Now()
 	}
 	return m.Timestamp
+}
+
+func (m *OpenAIRemoteMessage) GetStreamOrder() int64 {
+	return m.GetTimestamp().UnixMilli()
 }
 
 // GetTransactionID implements RemoteMessageWithTransactionID

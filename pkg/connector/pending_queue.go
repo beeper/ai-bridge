@@ -201,6 +201,7 @@ func (oc *AIClient) dispatchQueuedPrompt(
 		roomID = item.pending.Portal.MXID
 	}
 	runCtx := oc.attachRoomRun(ctx, roomID)
+	runCtx = withQueueAcceptedStatus(runCtx)
 	if item.pending.Typing != nil {
 		runCtx = WithTypingContext(runCtx, item.pending.Typing)
 	}

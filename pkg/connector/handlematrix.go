@@ -51,6 +51,13 @@ func messageSendStatusError(err error, message string, reason event.MessageStatu
 	return status
 }
 
+func matrixEventTimestamp(evt *event.Event) time.Time {
+	if evt != nil && evt.Timestamp > 0 {
+		return time.UnixMilli(evt.Timestamp)
+	}
+	return time.Now()
+}
+
 // HandleMatrixMessage processes incoming Matrix messages and dispatches them to the AI
 func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (*bridgev2.MatrixMessageResponse, error) {
 	if msg.Content == nil {
@@ -623,10 +630,6 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 	}
 
 	pendingSent := false
-	if msg.Event != nil {
-		oc.sendPendingStatus(ctx, portal, msg.Event, "Processing...")
-		pendingSent = true
-	}
 
 	// Ack reaction (OpenClaw-style scope gating)
 	ackReaction := strings.TrimSpace(meta.AckReactionEmoji)
@@ -736,7 +739,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 			Role: "user",
 			Body: body,
 		},
-		Timestamp: time.Now(),
+		Timestamp: matrixEventTimestamp(msg.Event),
 	}
 	if msg.InputTransactionID != "" {
 		userMessage.SendTxnID = networkid.RawTransactionID(msg.InputTransactionID)
@@ -1156,7 +1159,7 @@ func (oc *AIClient) handleMediaMessage(
 				Role: "user",
 				Body: body,
 			},
-			Timestamp: time.Now(),
+			Timestamp: matrixEventTimestamp(msg.Event),
 		}
 		if msg.InputTransactionID != "" {
 			userMessage.SendTxnID = networkid.RawTransactionID(msg.InputTransactionID)
@@ -1274,7 +1277,7 @@ func (oc *AIClient) handleMediaMessage(
 		Room:      portal.PortalKey,
 		SenderID:  humanUserID(oc.UserLogin.ID),
 		Metadata:  userMeta,
-		Timestamp: time.Now(),
+		Timestamp: matrixEventTimestamp(msg.Event),
 	}
 	if msg.InputTransactionID != "" {
 		userMessage.SendTxnID = networkid.RawTransactionID(msg.InputTransactionID)
@@ -1395,7 +1398,7 @@ func (oc *AIClient) handleTextFileMessage(
 			Role: "user",
 			Body: combined,
 		},
-		Timestamp: time.Now(),
+		Timestamp: matrixEventTimestamp(msg.Event),
 	}
 	if msg.InputTransactionID != "" {
 		userMessage.SendTxnID = networkid.RawTransactionID(msg.InputTransactionID)

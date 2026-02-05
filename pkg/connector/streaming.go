@@ -135,6 +135,9 @@ func (oc *AIClient) markMessageSendSuccess(ctx context.Context, portal *bridgev2
 	if state == nil || state.suppressSend {
 		return
 	}
+	if queueAcceptedStatusFromContext(ctx) {
+		return
+	}
 	if state.statusSentIDs == nil {
 		state.statusSentIDs = make(map[id.EventID]bool)
 	}
@@ -240,16 +243,30 @@ func mapFinishReason(reason string) string {
 	switch reason {
 	case "stop":
 		return "stop"
+	case "end_turn", "end-turn":
+		return "stop"
 	case "length":
 		return "length"
 	case "content_filter", "content-filter":
 		return "content-filter"
-	case "tool_calls", "tool-calls":
+	case "tool_calls", "tool-calls", "tool_use", "tool-use", "toolUse":
 		return "tool-calls"
 	case "error":
 		return "error"
 	default:
 		return "other"
+	}
+}
+
+func shouldContinueChatToolLoop(finishReason string, toolCallCount int) bool {
+	if toolCallCount <= 0 {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(finishReason)) {
+	case "", "tool_calls", "tool-calls", "tool_use", "tool-use", "tooluse":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -2097,19 +2114,6 @@ func (oc *AIClient) streamChatCompletions(
 
 				if choice.FinishReason != "" {
 					state.finishReason = string(choice.FinishReason)
-					if choice.FinishReason == "tool_calls" {
-						for _, tool := range activeTools {
-							args := strings.TrimSpace(tool.input.String())
-							if args == "" {
-								args = "{}"
-							}
-							var input any
-							if err := json.Unmarshal([]byte(args), &input); err != nil {
-								input = args
-							}
-							oc.emitUIToolInputAvailable(ctx, portal, state, tool.callID, tool.toolName, input, false)
-						}
-					}
 				}
 			}
 
@@ -2283,6 +2287,7 @@ func (oc *AIClient) streamChatCompletions(
 				} else if raw, ok := inputMap.(string); ok && raw != "" {
 					inputMapForMeta = map[string]any{"_raw": raw}
 				}
+				oc.emitUIToolInputAvailable(ctx, portal, state, tool.callID, toolName, inputMap, false)
 
 				// Track tool call in metadata
 				state.toolCalls = append(state.toolCalls, ToolCallMetadata{
@@ -2308,7 +2313,9 @@ func (oc *AIClient) streamChatCompletions(
 		}
 
 		// Continue if tools were requested.
-		if state.finishReason == "tool_calls" && len(toolCallParams) > 0 {
+		// Some Anthropic-compatible adapters may emit `tool_use` (or omit finish reason)
+		// even when tool calls are present.
+		if shouldContinueChatToolLoop(state.finishReason, len(toolCallParams)) {
 			if round >= maxToolRounds {
 				log.Warn().Int("rounds", round+1).Msg("Max tool call rounds reached; stopping chat completions continuation")
 				break

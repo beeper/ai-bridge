@@ -95,6 +95,20 @@ func (ol *OpenAILogin) SubmitUserInput(ctx context.Context, input map[string]str
 		if err != nil {
 			return nil, err
 		}
+		if ol.Connector != nil && ol.Connector.br != nil {
+			event := ol.Connector.br.Log.Info().
+				Str("component", "ai-login").
+				Str("provider", ProviderMagicProxy).
+				Int("token_length", len(apiKey))
+			if parsed, parseErr := url.Parse(baseURL); parseErr == nil {
+				event = event.
+					Str("base_url_host", parsed.Host).
+					Str("base_url_path", parsed.Path)
+			} else {
+				event = event.Str("base_url", baseURL)
+			}
+			event.Msg("Resolved magic proxy login URL")
+		}
 		return ol.finishLogin(ctx, ProviderMagicProxy, apiKey, baseURL, nil)
 	case FlowCustom:
 		provider, apiKey, serviceTokens, err := ol.resolveCustomLogin(input)

@@ -80,7 +80,7 @@ func NewOpenAIProviderWithUserID(apiKey, baseURL, userID string, log zerolog.Log
 			return next(req)
 		}))
 	}
-	opts = append(opts, makeRequestTraceMiddleware(log))
+	opts = append(opts, option.WithMiddleware(makeRequestTraceMiddleware(log)))
 
 	client := openai.NewClient(opts...)
 
@@ -204,7 +204,7 @@ func NewOpenAIProviderWithPDFPlugin(apiKey, baseURL, userID, pdfEngine string, h
 	opts = append(opts, option.WithMiddleware(MakePDFPluginMiddleware(pdfEngine)))
 	// Deduplicate tools in the final request payload (OpenRouter/Anthropic requires unique names)
 	opts = append(opts, option.WithMiddleware(MakeToolDedupMiddleware(log)))
-	opts = append(opts, makeRequestTraceMiddleware(log))
+	opts = append(opts, option.WithMiddleware(makeRequestTraceMiddleware(log)))
 
 	client := openai.NewClient(opts...)
 

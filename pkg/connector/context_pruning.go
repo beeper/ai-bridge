@@ -104,7 +104,7 @@ type MemoryFlushConfig struct {
 func DefaultPruningConfig() *PruningConfig {
 	enabled := true
 	return &PruningConfig{
-		Enabled:              false, // Off by default, user must opt-in
+		Enabled:              true,
 		SoftTrimRatio:        0.3,
 		HardClearRatio:       0.5,
 		KeepLastAssistants:   3,
