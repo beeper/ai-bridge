@@ -97,8 +97,9 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 			}
 		}
 
+		sessionKey := candidate.MXID.String()
 		entry := map[string]any{
-			"key":     candidate.MXID.String(),
+			"key":     sessionKey,
 			"kind":    kind,
 			"channel": "matrix",
 		}
@@ -129,7 +130,10 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 				}
 			}
 		}
-		entry["sessionId"] = string(candidate.PortalKey.ID)
+		entry["sessionId"] = sessionKey
+		if portalID := string(candidate.PortalKey.ID); portalID != "" && portalID != sessionKey {
+			entry["portalId"] = portalID
+		}
 
 		if messageLimit > 0 {
 			messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, candidate.PortalKey, messageLimit)

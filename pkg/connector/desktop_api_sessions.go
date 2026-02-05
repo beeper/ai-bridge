@@ -227,11 +227,12 @@ func (oc *AIClient) listDesktopSessions(ctx context.Context, instance string, op
 			updatedAt = chat.LastActivity.UnixMilli()
 		}
 
+		sessionKey := normalizeDesktopSessionKeyWithInstance(instance, chat.ID)
 		entry := map[string]any{
-			"key":       normalizeDesktopSessionKeyWithInstance(instance, chat.ID),
+			"key":       sessionKey,
 			"kind":      kind,
 			"channel":   channelDesktopAPI,
-			"sessionId": chat.ID,
+			"sessionId": sessionKey,
 			"chatId":    chat.ID,
 			"instance":  instance,
 			"chat":      chat,
