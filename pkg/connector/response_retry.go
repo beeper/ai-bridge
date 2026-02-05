@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/openai/openai-go/v3"
@@ -36,6 +37,9 @@ func (oc *AIClient) responseWithRetry(
 			return true, nil
 		}
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return true, nil
+			}
 			return false, err
 		}
 
