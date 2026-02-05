@@ -93,7 +93,6 @@ func registerProviders(registry *Registry, cfg *Config) {
 		return
 	}
 
-	}
 	if p := newExaProvider(cfg); p != nil {
 		registry.Register(p)
 	}
