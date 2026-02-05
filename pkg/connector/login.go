@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/rs/xid"
@@ -12,10 +13,11 @@ import (
 
 // Provider constants - all use OpenAI SDK with different base URLs
 const (
-	ProviderBeeper     = "beeper"     // Beeper's OpenRouter proxy
-	ProviderOpenAI     = "openai"     // Direct OpenAI API
-	ProviderOpenRouter = "openrouter" // Direct OpenRouter API
-	FlowCustom         = "custom"     // Custom login flow (provider resolved during login)
+	ProviderBeeper     = "beeper"      // Beeper's OpenRouter proxy
+	ProviderOpenAI     = "openai"      // Direct OpenAI API
+	ProviderOpenRouter = "openrouter"  // Direct OpenRouter API
+	ProviderMagicProxy = "magic_proxy" // Magic Proxy (OpenRouter-compatible)
+	FlowCustom         = "custom"      // Custom login flow (provider resolved during login)
 )
 
 const beeperBasePath = "/_matrix/client/unstable/com.beeper.ai"
@@ -53,6 +55,8 @@ func (ol *OpenAILogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
 			return nil, &ErrBaseURLRequired
 		}
 		return ol.finishLogin(ctx, ProviderBeeper, apiKey, baseURL, nil)
+	case ProviderMagicProxy:
+		return nil, &ErrBaseURLRequired
 	case FlowCustom:
 		provider, apiKey, serviceTokens, err := ol.resolveCustomLogin(nil)
 		if err != nil {
@@ -86,6 +90,13 @@ func (ol *OpenAILogin) SubmitUserInput(ctx context.Context, input map[string]str
 			return nil, &ErrAPIKeyRequired
 		}
 		return ol.finishLogin(ctx, ProviderBeeper, apiKey, baseURL, nil)
+	case ProviderMagicProxy:
+		link := strings.TrimSpace(input["magic_proxy_link"])
+		baseURL, apiKey, err := parseMagicProxyLink(link)
+		if err != nil {
+			return nil, err
+		}
+		return ol.finishLogin(ctx, ProviderMagicProxy, apiKey, baseURL, nil)
 	case FlowCustom:
 		provider, apiKey, serviceTokens, err := ol.resolveCustomLogin(input)
 		if err != nil {
@@ -119,6 +130,12 @@ func (ol *OpenAILogin) credentialsStep() *bridgev2.LoginStep {
 				Description: "Beeper AI needs a key to connect to Beeper servers. Requires Beeper Plus.",
 			})
 		}
+	case ProviderMagicProxy:
+		fields = append(fields, bridgev2.LoginInputDataField{
+			Type: bridgev2.LoginInputFieldTypeURL,
+			ID:   "magic_proxy_link",
+			Name: "Magic Proxy link",
+		})
 	case FlowCustom:
 		if !ol.configHasOpenRouterKey() {
 			fields = append(fields, bridgev2.LoginInputDataField{
@@ -343,6 +360,34 @@ func beeperBaseURLFromDomain(domain string) string {
 	return "https://" + domain + beeperBasePath
 }
 
+func parseMagicProxyLink(raw string) (string, string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", "", &ErrBaseURLRequired
+	}
+	if !strings.Contains(trimmed, "://") {
+		trimmed = "https://" + trimmed
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || strings.TrimSpace(parsed.Host) == "" {
+		return "", "", &ErrBaseURLRequired
+	}
+	token := strings.TrimSpace(parsed.Fragment)
+	if token == "" {
+		return "", "", &ErrAPIKeyRequired
+	}
+	scheme := strings.TrimSpace(parsed.Scheme)
+	if scheme == "" {
+		scheme = "https"
+	}
+	baseURL := scheme + "://" + strings.TrimSpace(parsed.Host)
+	baseURL = normalizeMagicProxyBaseURL(baseURL)
+	if baseURL == "" {
+		return "", "", &ErrBaseURLRequired
+	}
+	return baseURL, token, nil
+}
+
 func (ol *OpenAILogin) configHasOpenRouterKey() bool {
 	return strings.TrimSpace(ol.Connector.Config.Providers.OpenRouter.APIKey) != ""
 }
@@ -384,6 +429,8 @@ func formatRemoteName(provider, apiKey string) string {
 		return fmt.Sprintf("OpenAI (%s)", maskAPIKey(apiKey))
 	case ProviderOpenRouter:
 		return fmt.Sprintf("OpenRouter (%s)", maskAPIKey(apiKey))
+	case ProviderMagicProxy:
+		return fmt.Sprintf("Magic Proxy (%s)", maskAPIKey(apiKey))
 	default:
 		return "AI Bridge"
 	}

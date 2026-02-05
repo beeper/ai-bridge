@@ -225,7 +225,7 @@ func explicitModelCatalogEntries(cfg *ModelsConfig) []ModelCatalogEntry {
 					providerID = parsedProvider
 					id = parsedID
 				}
-			} else if providerID != ProviderOpenRouter && providerID != ProviderBeeper {
+			} else if providerID != ProviderOpenRouter && providerID != ProviderBeeper && providerID != ProviderMagicProxy {
 				if parsedProvider, parsedID := splitModelProvider(id); parsedProvider != "" && parsedID != "" && parsedProvider == providerID {
 					id = parsedID
 				}
@@ -490,7 +490,13 @@ func (oc *AIClient) modelSupportsVision(ctx context.Context, meta *PortalMetadat
 }
 
 func normalizeCatalogProvider(provider string) string {
-	return strings.ToLower(strings.TrimSpace(provider))
+	normalized := strings.ToLower(strings.TrimSpace(provider))
+	switch normalized {
+	case ProviderMagicProxy:
+		return ProviderOpenRouter
+	default:
+		return normalized
+	}
 }
 
 func normalizeCatalogModelID(entry ModelCatalogEntry) string {
@@ -505,7 +511,7 @@ func normalizeCatalogModelID(entry ModelCatalogEntry) string {
 	if provider == ProviderOpenAI {
 		return ProviderOpenAI + "/" + id
 	}
-	if provider == ProviderOpenRouter || provider == ProviderBeeper {
+	if provider == ProviderOpenRouter || provider == ProviderBeeper || provider == ProviderMagicProxy {
 		return id
 	}
 	if provider != "" {

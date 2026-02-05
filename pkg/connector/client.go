@@ -423,6 +423,28 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		oc.provider = provider
 		oc.api = provider.Client()
 
+	case ProviderMagicProxy:
+		// Magic Proxy: OpenRouter-compatible proxy with per-login base URL
+		baseURL := normalizeMagicProxyBaseURL(meta.BaseURL)
+		if baseURL == "" {
+			return nil, fmt.Errorf("magic proxy base_url is required")
+		}
+		openrouterURL := strings.TrimRight(baseURL, "/") + "/openrouter/v1"
+
+		// Get PDF engine from provider config
+		pdfEngine := connector.Config.Providers.OpenRouter.DefaultPDFEngine
+		if pdfEngine == "" {
+			pdfEngine = "mistral-ocr" // Default
+		}
+
+		headers := openRouterHeaders()
+		provider, err := NewOpenAIProviderWithPDFPlugin(key, openrouterURL, "", pdfEngine, headers, log)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Magic Proxy provider: %w", err)
+		}
+		oc.provider = provider
+		oc.api = provider.Client()
+
 	default:
 		// OpenAI (default) or Custom OpenAI-compatible provider
 		openaiURL := connector.resolveOpenAIBaseURL()
@@ -1040,7 +1062,7 @@ func (oc *AIClient) effectiveModelForAPI(meta *PortalMetadata) string {
 
 	// OpenRouter and Beeper route through a gateway that expects the full model ID
 	loginMeta := loginMetadata(oc.UserLogin)
-	if loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper {
+	if loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper || loginMeta.Provider == ProviderMagicProxy {
 		return modelID
 	}
 
@@ -1054,7 +1076,7 @@ func (oc *AIClient) effectiveModelForAPI(meta *PortalMetadata) string {
 // For direct providers, strips the prefix (e.g., "openai/gpt-5.2" → "gpt-5.2").
 func (oc *AIClient) modelIDForAPI(modelID string) string {
 	loginMeta := loginMetadata(oc.UserLogin)
-	if loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper {
+	if loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper || loginMeta.Provider == ProviderMagicProxy {
 		return modelID
 	}
 	_, actualModel := ParseModelPrefix(modelID)
@@ -1072,7 +1094,7 @@ func (oc *AIClient) defaultModelForProvider() string {
 			return providers.OpenAI.DefaultModel
 		}
 		return DefaultModelOpenAI
-	case ProviderOpenRouter:
+	case ProviderOpenRouter, ProviderMagicProxy:
 		if providers.OpenRouter.DefaultModel != "" {
 			return providers.OpenRouter.DefaultModel
 		}
@@ -1314,7 +1336,7 @@ func (oc *AIClient) effectiveMaxTokens(meta *PortalMetadata) int {
 // isOpenRouterProvider checks if the current provider is OpenRouter or Beeper (which uses OpenRouter)
 func (oc *AIClient) isOpenRouterProvider() bool {
 	loginMeta := loginMetadata(oc.UserLogin)
-	return loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper
+	return loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper || loginMeta.Provider == ProviderMagicProxy
 }
 
 // isGroupChat determines if the portal is a group chat based on member count.

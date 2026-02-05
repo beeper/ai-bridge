@@ -270,7 +270,7 @@ func (oc *AIClient) maybeGenerateTitle(ctx context.Context, portal *bridgev2.Por
 func (oc *AIClient) getTitleGenerationModel() string {
 	meta := loginMetadata(oc.UserLogin)
 
-	if meta.Provider != ProviderOpenRouter && meta.Provider != ProviderBeeper {
+	if meta.Provider != ProviderOpenRouter && meta.Provider != ProviderBeeper && meta.Provider != ProviderMagicProxy {
 		return ""
 	}
 
@@ -281,7 +281,7 @@ func (oc *AIClient) getTitleGenerationModel() string {
 
 	// Provider-specific defaults for title generation
 	switch meta.Provider {
-	case ProviderOpenRouter, ProviderBeeper:
+	case ProviderOpenRouter, ProviderBeeper, ProviderMagicProxy:
 		return "google/gemini-2.5-flash"
 	default:
 		// For non-OpenRouter providers, title generation is disabled.
