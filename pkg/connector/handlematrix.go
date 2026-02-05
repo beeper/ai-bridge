@@ -85,11 +85,6 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 	default:
 		return nil, unsupportedMessageStatus(fmt.Errorf("%s messages are not supported", msgType))
 	}
-<<<<<<< ours
-	body := strings.TrimSpace(msg.Content.Body)
-	if body == "" {
-		return nil, unsupportedMessageStatus(fmt.Errorf("empty messages are not supported"))
-=======
 	if msg.Content.RelatesTo != nil && msg.Content.RelatesTo.GetReplaceID() != "" {
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 	}
@@ -101,8 +96,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		}
 	}
 	if rawBody == "" {
-		return nil, fmt.Errorf("empty messages are not supported")
->>>>>>> theirs
+		return nil, unsupportedMessageStatus(fmt.Errorf("empty messages are not supported"))
 	}
 
 	isGroup := oc.isGroupChat(ctx, portal)
@@ -194,31 +188,17 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 			IsGroup:    isGroup,
 			AckEventID: ackReactionEventID,
 		}
-		oc.inboundDebouncer.EnqueueWithDelay(debounceKey, entry, true, debounceDelay)
-
-<<<<<<< ours
-		// Enqueue to debouncer - processing happens after delay
-		// Use per-room debounce delay if configured (0 = default, -1 = disabled)
-		debounceKey := BuildDebounceKey(portal.MXID, msg.Event.Sender)
-		oc.inboundDebouncer.EnqueueWithDelay(debounceKey, entry, true, meta.DebounceMs)
-
 		// Let the client know the message is pending due to debounce.
-		if meta.DebounceMs >= 0 {
+		if debounceDelay >= 0 {
 			oc.sendPendingStatus(ctx, portal, msg.Event, "Combining messages...")
 			entry.PendingSent = true
 		}
-
-		// Return Pending=true since we're handling this asynchronously
-		return &bridgev2.MatrixMessageResponse{
-			Pending: true,
-		}, nil
-=======
+		oc.inboundDebouncer.EnqueueWithDelay(debounceKey, entry, true, debounceDelay)
 		return &bridgev2.MatrixMessageResponse{Pending: true}, nil
 	}
 	if debounceKey != "" {
 		// Flush any pending debounced messages for this room+sender before immediate processing
 		oc.inboundDebouncer.FlushKey(debounceKey)
->>>>>>> theirs
 	}
 
 	// Not debouncing - process immediately

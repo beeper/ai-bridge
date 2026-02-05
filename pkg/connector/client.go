@@ -2079,7 +2079,12 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 		oc.log.Info().Int("count", count).Msg("Combined debounced messages")
 	}
 
-<<<<<<< ours
+	combinedBody := oc.buildMatrixInboundBody(ctx, last.Portal, last.Meta, last.Event, combinedRaw, last.SenderName, last.RoomName, last.IsGroup)
+	rawEventContent := map[string]any(nil)
+	if last.Event != nil && last.Event.Content.Raw != nil {
+		rawEventContent = last.Event.Content.Raw
+	}
+
 	extraStatusEvents := make([]*event.Event, 0, len(entries)-1)
 	if len(entries) > 1 {
 		for _, entry := range entries[:len(entries)-1] {
@@ -2091,17 +2096,7 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 	statusCtx := withStatusEvents(ctx, extraStatusEvents)
 
 	// Build prompt with combined body
-	promptMessages, err := oc.buildPromptWithLinkContext(statusCtx, last.Portal, last.Meta, combinedBody, nil, last.Event.ID)
-=======
-	combinedBody := oc.buildMatrixInboundBody(ctx, last.Portal, last.Meta, last.Event, combinedRaw, last.SenderName, last.RoomName, last.IsGroup)
-	rawEventContent := map[string]any(nil)
-	if last.Event != nil && last.Event.Content.Raw != nil {
-		rawEventContent = last.Event.Content.Raw
-	}
-
-	// Build prompt with combined body
-	promptMessages, err := oc.buildPromptWithLinkContext(ctx, last.Portal, last.Meta, combinedBody, rawEventContent, last.Event.ID)
->>>>>>> theirs
+	promptMessages, err := oc.buildPromptWithLinkContext(statusCtx, last.Portal, last.Meta, combinedBody, rawEventContent, last.Event.ID)
 	if err != nil {
 		oc.log.Err(err).Msg("Failed to build prompt for debounced messages")
 		oc.notifyMatrixSendFailure(statusCtx, last.Portal, last.Event, err)
