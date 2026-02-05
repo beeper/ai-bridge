@@ -1578,12 +1578,15 @@ func (oc *AIClient) validateModel(ctx context.Context, modelID string) (bool, er
 
 	// First check local model cache
 	models, err := oc.listAvailableModels(ctx, false)
-	if err == nil {
+	if err == nil && len(models) > 0 {
 		for _, model := range models {
 			if model.ID == modelID {
 				return true, nil
 			}
 		}
+	}
+	if resolveModelIDFromManifest(modelID) != "" {
+		return true, nil
 	}
 	return false, nil
 }
@@ -1599,7 +1602,7 @@ func (oc *AIClient) resolveModelID(ctx context.Context, modelID string) (string,
 	normalized = ResolveAlias(normalized)
 
 	models, err := oc.listAvailableModels(ctx, false)
-	if err == nil {
+	if err == nil && len(models) > 0 {
 		for _, model := range models {
 			if model.ID == normalized {
 				return model.ID, true, nil
@@ -1659,7 +1662,74 @@ func (oc *AIClient) resolveModelID(ctx context.Context, modelID string) (string,
 		}
 	}
 
+	if fallback := resolveModelIDFromManifest(normalized); fallback != "" {
+		return fallback, true, nil
+	}
+
 	return "", false, nil
+}
+
+func resolveModelIDFromManifest(modelID string) string {
+	normalized := strings.TrimSpace(modelID)
+	if normalized == "" {
+		return ""
+	}
+
+	normalized = ResolveAlias(normalized)
+	if _, ok := ModelManifest.Models[normalized]; ok {
+		return normalized
+	}
+
+	lower := strings.ToLower(normalized)
+	for id, info := range ModelManifest.Models {
+		if strings.ToLower(id) == lower {
+			return id
+		}
+		if strings.EqualFold(info.Name, normalized) {
+			return id
+		}
+	}
+
+	if strings.Contains(normalized, "/") {
+		parts := strings.SplitN(normalized, "/", 2)
+		providerPart := strings.TrimSpace(parts[0])
+		rest := strings.TrimSpace(parts[1])
+		if providerPart != "" && rest != "" {
+			if strings.EqualFold(providerPart, ProviderOpenRouter) ||
+				strings.EqualFold(providerPart, ProviderBeeper) ||
+				strings.EqualFold(providerPart, ProviderMagicProxy) {
+				if _, ok := ModelManifest.Models[rest]; ok {
+					return rest
+				}
+				restLower := strings.ToLower(rest)
+				for id, info := range ModelManifest.Models {
+					if strings.EqualFold(id, rest) ||
+						strings.EqualFold(info.Name, rest) ||
+						strings.HasSuffix(strings.ToLower(id), "/"+restLower) {
+						return id
+					}
+				}
+			}
+		}
+	}
+
+	if !strings.Contains(normalized, "/") {
+		var match string
+		needle := strings.ToLower(normalized)
+		for id := range ModelManifest.Models {
+			if strings.HasSuffix(strings.ToLower(id), "/"+needle) {
+				if match != "" && match != id {
+					return ""
+				}
+				match = id
+			}
+		}
+		if match != "" {
+			return match
+		}
+	}
+
+	return ""
 }
 
 // listAvailableModels fetches models from OpenAI API and caches them
