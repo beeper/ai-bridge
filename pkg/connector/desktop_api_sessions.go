@@ -41,10 +41,6 @@ type desktopMessageBuildOptions struct {
 	Accounts map[string]beeperdesktopapi.Account
 }
 
-func normalizeDesktopSessionKey(chatID string) string {
-	return normalizeDesktopSessionKeyWithInstance(desktopDefaultInstance, chatID)
-}
-
 func normalizeDesktopInstanceName(name string) string {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
