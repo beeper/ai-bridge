@@ -2,6 +2,7 @@ package connector
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -169,6 +170,12 @@ func ShouldDebounce(evt *event.Event, body string) bool {
 	if strings.HasPrefix(trimmed, "!") || strings.HasPrefix(trimmed, "/") {
 		return false
 	}
+	if isAbortTrigger(trimmed) {
+		return false
+	}
+	if inlineCommandTokenRE.MatchString(trimmed) {
+		return false
+	}
 
 	// Don't debounce empty messages
 	if trimmed == "" {
@@ -177,6 +184,8 @@ func ShouldDebounce(evt *event.Event, body string) bool {
 
 	return true
 }
+
+var inlineCommandTokenRE = regexp.MustCompile(`(?i)(^|\s)[/!][a-z]`)
 
 // CombineDebounceEntries combines multiple entries into a single body.
 // Returns the combined body and the count of combined messages.

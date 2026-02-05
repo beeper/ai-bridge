@@ -96,7 +96,7 @@ type CronConfig struct {
 	MaxConcurrentRuns int    `yaml:"maxConcurrentRuns"`
 }
 
-// ChannelsConfig defines per-channel settings (limited to heartbeat visibility for Matrix).
+// ChannelsConfig defines per-channel settings (OpenClaw-style subset for Matrix).
 type ChannelsConfig struct {
 	Defaults *ChannelDefaultsConfig `yaml:"defaults"`
 	Matrix   *ChannelConfig         `yaml:"matrix"`
@@ -110,6 +110,8 @@ type ChannelDefaultsConfig struct {
 type ChannelConfig struct {
 	Heartbeat      *ChannelHeartbeatVisibilityConfig `yaml:"heartbeat"`
 	ResponsePrefix string                           `yaml:"responsePrefix"`
+	ReplyToMode   string                            `yaml:"replyToMode"`   // off|first|all (Matrix)
+	ThreadReplies string                            `yaml:"threadReplies"` // off|inbound|always (Matrix)
 }
 
 type ChannelHeartbeatVisibilityConfig struct {
@@ -137,6 +139,8 @@ type CommandsConfig struct {
 // GroupChatConfig mirrors OpenClaw's group chat settings.
 type GroupChatConfig struct {
 	MentionPatterns []string `yaml:"mentionPatterns"`
+	Activation      string   `yaml:"activation"` // mention|always
+	HistoryLimit    int      `yaml:"historyLimit"`
 }
 
 // InboundDebounceConfig mirrors OpenClaw's inbound debounce config.
@@ -603,6 +607,8 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Bool, "channels", "matrix", "heartbeat", "showAlerts")
 	helper.Copy(configupgrade.Bool, "channels", "matrix", "heartbeat", "useIndicator")
 	helper.Copy(configupgrade.Str, "channels", "matrix", "responsePrefix")
+	helper.Copy(configupgrade.Str, "channels", "matrix", "replyToMode")
+	helper.Copy(configupgrade.Str, "channels", "matrix", "threadReplies")
 
 	// Tools (search + fetch)
 	helper.Copy(configupgrade.Str, "tools", "search", "provider")

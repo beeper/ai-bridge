@@ -57,6 +57,7 @@ type streamingState struct {
 	// Directive processing
 	sourceEventID id.EventID // The triggering user message event ID (for [[reply_to_current]])
 	senderID      string     // The triggering sender ID (for owner-only tool gating)
+	replyTarget   ReplyTarget
 
 	// Heartbeat handling
 	heartbeat         *HeartbeatRunConfig
@@ -78,14 +79,21 @@ type streamingState struct {
 
 // newStreamingState creates a new streaming state with initialized fields
 func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID id.EventID, senderID string) *streamingState {
+	agentID := ""
+	if meta != nil {
+		agentID = meta.DefaultAgentID
+	}
 	state := &streamingState{
 		turnID:        NewTurnID(),
-		agentID:       meta.DefaultAgentID,
+		agentID:       agentID,
 		startedAtMs:   time.Now().UnixMilli(),
 		firstToken:    true,
 		sourceEventID: sourceEventID,
 		senderID:      senderID,
 		uiToolStarted: make(map[string]bool),
+	}
+	if meta != nil && normalizeSendPolicyMode(meta.SendPolicy) == "deny" {
+		state.suppressSend = true
 	}
 	if hb := heartbeatRunFromContext(ctx); hb != nil {
 		state.heartbeat = hb.Config
@@ -698,6 +706,7 @@ func (oc *AIClient) streamingResponse(
 		}
 	}
 	state := newStreamingState(ctx, meta, sourceEventID, senderID)
+	state.replyTarget = oc.resolveInitialReplyTarget(evt)
 
 	// Ensure model ghost is in the room before any operations
 	if !state.suppressSend {
@@ -768,7 +777,7 @@ func (oc *AIClient) streamingResponse(
 				if !state.suppressSend {
 					// Ensure ghost display name is set before sending the first message
 					oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
-					state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID, state.sourceEventID)
+					state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID, state.replyTarget)
 					if state.initialEventID == "" {
 						errText := "failed to send initial streaming message"
 						log.Error().Msg("Failed to send initial streaming message")
@@ -793,7 +802,7 @@ func (oc *AIClient) streamingResponse(
 				if !state.suppressSend {
 					oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
 					// Send empty initial message - will be replaced with content later
-					state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID, state.sourceEventID)
+					state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID, state.replyTarget)
 					if state.initialEventID == "" {
 						errText := "failed to send initial streaming message"
 						log.Error().Msg("Failed to send initial streaming message")
@@ -1267,7 +1276,7 @@ func (oc *AIClient) streamingResponse(
 					state.firstTokenAtMs = time.Now().UnixMilli()
 					if !state.suppressSend {
 						oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
-						state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID, state.sourceEventID)
+						state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID, state.replyTarget)
 						if state.initialEventID == "" {
 							errText := "failed to send initial streaming message (continuation)"
 							log.Error().Msg("Failed to send initial streaming message (continuation)")
@@ -1288,7 +1297,7 @@ func (oc *AIClient) streamingResponse(
 					state.firstTokenAtMs = time.Now().UnixMilli()
 					if !state.suppressSend {
 						oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
-						state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID, state.sourceEventID)
+						state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID, state.replyTarget)
 						if state.initialEventID == "" {
 							errText := "failed to send initial streaming message (continuation)"
 							log.Error().Msg("Failed to send initial streaming message (continuation)")
@@ -1823,7 +1832,7 @@ func (oc *AIClient) streamChatCompletions(
 						state.firstTokenAtMs = time.Now().UnixMilli()
 						if !state.suppressSend {
 							oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
-							state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID, state.sourceEventID)
+							state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.accumulated.String(), state.turnID, state.replyTarget)
 							if state.initialEventID == "" {
 								errText := "failed to send initial streaming message"
 								log.Error().Msg("Failed to send initial streaming message")

@@ -5,18 +5,10 @@ import (
 	"strings"
 )
 
-const queueDirectiveSystemMark = "⚙️"
-
 const queueDirectiveOptionsHint = "modes steer, followup, collect, steer+backlog, interrupt; debounce:<ms|s|m>, cap:<n>, drop:old|new|summarize"
 
 func formatQueueDirectiveAck(text string) string {
-	if text == "" {
-		return text
-	}
-	if strings.HasPrefix(text, queueDirectiveSystemMark) {
-		return text
-	}
-	return queueDirectiveSystemMark + " " + text
+	return formatSystemAck(text)
 }
 
 func buildQueueDirectiveAck(directive QueueDirective) string {
