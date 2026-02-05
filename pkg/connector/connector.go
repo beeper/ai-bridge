@@ -272,7 +272,7 @@ func (oc *OpenAIConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilitie
 func (oc *OpenAIConnector) GetBridgeInfoVersion() (info, capabilities int) {
 	// Bump capabilities version when room features change.
 	// v2: Added UpdateBridgeInfo call on model switch to properly broadcast capability changes
-	return 1, 2
+	return 1, 3
 }
 
 // FillPortalBridgeInfo sets custom room type for AI rooms

@@ -16,10 +16,6 @@ func init() {
 	event.TypeMap[RoomSettingsEventType] = reflect.TypeOf(RoomSettingsEventContent{})
 	event.TypeMap[ModelCapabilitiesEventType] = reflect.TypeOf(ModelCapabilitiesEventContent{})
 	event.TypeMap[AgentsEventType] = reflect.TypeOf(AgentsEventContent{})
-	event.TypeMap[CustomAgentsEventType] = reflect.TypeOf(CustomAgentsEventContent{})
-	event.TypeMap[AgentDataEventType] = reflect.TypeOf(AgentDataEventContent{})
-	event.TypeMap[MemoryFactEventType] = reflect.TypeOf(MemoryFactContent{})
-	event.TypeMap[MemoryIndexEventType] = reflect.TypeOf(MemoryIndexContent{})
 }
 
 // AssistantTurnEventType is the container event for an assistant's response
@@ -123,30 +119,6 @@ var ModelCapabilitiesEventType = event.Type{
 // AgentsEventType configures active agents in a room
 var AgentsEventType = event.Type{
 	Type:  "com.beeper.ai.agents",
-	Class: event.StateEventType,
-}
-
-// CustomAgentsEventType stores user-created agent definitions in the Builder room
-var CustomAgentsEventType = event.Type{
-	Type:  "com.beeper.ai.custom_agents",
-	Class: event.StateEventType,
-}
-
-// AgentDataEventType stores agent configuration in the agent's hidden room
-var AgentDataEventType = event.Type{
-	Type:  "com.beeper.ai.agent_data",
-	Class: event.StateEventType,
-}
-
-// MemoryFactEventType stores individual memory facts in timeline events
-var MemoryFactEventType = event.Type{
-	Type:  "com.beeper.ai.memory_fact",
-	Class: event.MessageEventType,
-}
-
-// MemoryIndexEventType stores the memory search index as state events
-var MemoryIndexEventType = event.Type{
-	Type:  "com.beeper.ai.memory_index",
 	Class: event.StateEventType,
 }
 
@@ -781,22 +753,6 @@ type AgentDefinitionContent struct {
 	UpdatedAt       int64                        `json:"updated_at"`
 }
 
-// CustomAgentsEventContent stores user-created agent definitions in the Builder room.
-// This is a single state event that contains all custom (non-preset) agents.
-type CustomAgentsEventContent struct {
-	Agents map[string]*AgentDefinitionContent `json:"agents"`
-}
-
-// AgentDataEventContent stores agent configuration in the agent's hidden room.
-// Each custom agent has its own hidden room that contains this state event.
-type AgentDataEventContent struct {
-	Agent *AgentDefinitionContent `json:"agent"`
-	// Extensible for future use:
-	// Memory      map[string]any         `json:"memory,omitempty"`      // Persistent agent memory
-	// Preferences map[string]any         `json:"preferences,omitempty"` // Learned preferences
-	// SessionRefs []string               `json:"session_refs,omitempty"` // Refs to conversations
-}
-
 // AgentMemoryConfig configures memory behavior for an agent (matches OpenClaw memorySearch config)
 type AgentMemoryConfig struct {
 	Enabled      *bool    `json:"enabled,omitempty"`       // nil = true (enabled by default)
@@ -817,14 +773,6 @@ type MemoryFactContent struct {
 	SourceRoom string   `json:"source_room,omitempty"` // Room where the memory was created
 	CreatedAt  int64    `json:"created_at"`
 	UpdatedAt  int64    `json:"updated_at,omitempty"`
-}
-
-// MemoryIndexContent stores a chunk of the memory search index as a state event
-type MemoryIndexContent struct {
-	ChunkID     int                `json:"chunk_id"`
-	TotalChunks int                `json:"total_chunks"`
-	Entries     []MemoryIndexEntry `json:"entries"`
-	UpdatedAt   int64              `json:"updated_at"`
 }
 
 // MemoryIndexEntry represents a single entry in the memory index

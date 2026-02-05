@@ -12,39 +12,24 @@ import (
 	"github.com/beeper/ai-bridge/pkg/opencodebridge"
 )
 
+const (
+	opencodeManageUsage = "`!ai opencode add [http_url] [password] [username]` | `!ai opencode list` | `!ai opencode new [instance_id_or_url] [title]` | `!ai opencode remove [instance_id_or_url]`."
+)
+
 // CommandOpenCode handles the !ai opencode command.
 var CommandOpenCode = registerAICommand(commandregistry.Definition{
 	Name:          "opencode",
+	Aliases:       []string{"openconnect"},
 	Description:   "Manage OpenCode connections",
-	Args:          "<add|list|remove> [args]",
+	Args:          "<add|list|new|remove> [args]",
 	Section:       HelpSectionAI,
 	RequiresLogin: true,
 	Handler:       fnOpenCodeCommand,
 })
 
-// CommandOpenCodeConnect handles the !ai opencode-connect command.
-var CommandOpenCodeConnect = registerAICommand(commandregistry.Definition{
-	Name:          "opencode-connect",
-	Description:   "Connect to an OpenCode server and sync sessions",
-	Args:          "[http_url] [password] [username]",
-	Section:       HelpSectionAI,
-	RequiresLogin: true,
-	Handler:       fnOpenCodeConnect,
-})
-
-// CommandOpenCodeNew handles the !ai opencode-new command.
-var CommandOpenCodeNew = registerAICommand(commandregistry.Definition{
-	Name:          "opencode-new",
-	Description:   "Create a new OpenCode session",
-	Args:          "[instance_id_or_url] [title]",
-	Section:       HelpSectionAI,
-	RequiresLogin: true,
-	Handler:       fnOpenCodeNew,
-})
-
 func fnOpenCodeCommand(ce *commands.Event) {
 	if len(ce.Args) == 0 {
-		ce.Reply("Usage: `!ai opencode add [http_url] [password] [username]` | `!ai opencode list` | `!ai opencode remove <instance_id_or_url>`.")
+		ce.Reply("Usage: %s", opencodeManageUsage)
 		return
 	}
 	sub := strings.ToLower(strings.TrimSpace(ce.Args[0]))
@@ -64,7 +49,7 @@ func fnOpenCodeCommand(ce *commands.Event) {
 		fnOpenCodeNew(ce)
 		return
 	default:
-		ce.Reply("Usage: `!ai opencode add [http_url] [password] [username]` | `!ai opencode list` | `!ai opencode remove <instance_id_or_url>`.")
+		ce.Reply("Usage: %s", opencodeManageUsage)
 	}
 }
 
@@ -79,7 +64,7 @@ func fnOpenCodeConnect(ce *commands.Event) {
 		url = strings.TrimSpace(ce.Args[0])
 	}
 	if url == "" {
-		ce.Reply("Usage: `!ai opencode add [http_url] [password] [username]` (or `!ai opencode-connect ...`). Default http_url: http://127.0.0.1:4096")
+		ce.Reply("Usage: `!ai opencode add [http_url] [password] [username]`. Default http_url: http://127.0.0.1:4096")
 		return
 	}
 
@@ -127,7 +112,7 @@ func fnOpenCodeNew(ce *commands.Event) {
 
 	instances := loginMetadata(client.UserLogin)
 	if instances == nil || len(instances.OpenCodeInstances) == 0 {
-		ce.Reply("No OpenCode instances are connected. Use `!ai opencode add` (or `!ai opencode-connect`) first.")
+		ce.Reply("No OpenCode instances are connected. Use `!ai opencode add` first.")
 		return
 	}
 
@@ -242,19 +227,32 @@ func fnOpenCodeRemove(ce *commands.Event) {
 	if !ok {
 		return
 	}
-	if len(ce.Args) < 2 {
-		ce.Reply("Usage: `!ai opencode remove <instance_id_or_url>`.")
-		return
+	candidate := ""
+	if len(ce.Args) >= 2 {
+		candidate = strings.TrimSpace(strings.Join(ce.Args[1:], " "))
 	}
-	candidate := strings.TrimSpace(strings.Join(ce.Args[1:], " "))
+	instanceID := ""
 	if candidate == "" {
-		ce.Reply("Usage: `!ai opencode remove <instance_id_or_url>`.")
-		return
-	}
-	instanceID, ok := resolveOpenCodeInstanceArg(client, candidate)
-	if !ok {
-		ce.Reply("Unknown OpenCode instance. Provide an instance ID or URL.")
-		return
+		meta := loginMetadata(client.UserLogin)
+		if meta == nil || len(meta.OpenCodeInstances) == 0 {
+			ce.Reply("No OpenCode instances are connected. Use `!ai opencode add` first.")
+			return
+		}
+		if len(meta.OpenCodeInstances) > 1 {
+			ce.Reply("Multiple OpenCode instances connected. Provide an instance ID or URL. Use `!ai opencode list`.")
+			return
+		}
+		for id := range meta.OpenCodeInstances {
+			instanceID = id
+			break
+		}
+	} else {
+		var ok bool
+		instanceID, ok = resolveOpenCodeInstanceArg(client, candidate)
+		if !ok {
+			ce.Reply("Unknown OpenCode instance. Provide an instance ID or URL. Use `!ai opencode list`.")
+			return
+		}
 	}
 	if client.opencodeBridge == nil {
 		ce.Reply("OpenCode integration is not available.")

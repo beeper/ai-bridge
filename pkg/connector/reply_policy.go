@@ -90,14 +90,22 @@ func (oc *AIClient) resolveMatrixThreadReplies() string {
 
 func (oc *AIClient) resolveInitialReplyTarget(evt *event.Event) ReplyTarget {
 	mode := oc.resolveMatrixThreadReplies()
-	if mode == "off" || evt == nil {
+	if evt == nil {
 		return ReplyTarget{}
 	}
 	ctx := extractInboundReplyContext(evt)
 	switch mode {
+	case "off":
+		if ctx.ReplyTo != "" {
+			return ReplyTarget{ReplyTo: ctx.ReplyTo}
+		}
+		return ReplyTarget{}
 	case "inbound":
 		if ctx.ThreadRoot != "" {
 			return ReplyTarget{ReplyTo: ctx.ThreadRoot, ThreadRoot: ctx.ThreadRoot}
+		}
+		if ctx.ReplyTo != "" {
+			return ReplyTarget{ReplyTo: ctx.ReplyTo}
 		}
 	case "always":
 		root := ctx.ThreadRoot

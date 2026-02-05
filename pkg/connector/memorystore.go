@@ -2,17 +2,16 @@ package connector
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/networkid"
-	"maunium.net/go/mautrix/event"
-	"maunium.net/go/mautrix/id"
+
+	"github.com/beeper/ai-bridge/pkg/agents"
 )
 
 // Memory configuration defaults (matching OpenClaw)
@@ -20,7 +19,6 @@ const (
 	DefaultMemoryMaxResults = 6
 	DefaultMemoryMinScore   = 0.35
 	DefaultMemoryImportance = 0.5
-	MaxIndexEntriesPerChunk = 100
 	MemoryPreviewLength     = 100
 )
 
@@ -84,6 +82,7 @@ type MemoryForgetResult struct {
 // MemoryStore handles memory operations for an AI client
 type MemoryStore struct {
 	client *AIClient
+	mu     sync.Mutex // protects metadata memory read-modify-write sequences
 }
 
 // NewMemoryStore creates a new memory store for the given client
@@ -204,32 +203,15 @@ func (m *MemoryStore) Search(ctx context.Context, portal *bridgev2.Portal, input
 
 // searchAgentMemory searches the agent's memory room
 func (m *MemoryStore) searchAgentMemory(ctx context.Context, query string, agentID string, minScore float64) ([]MemorySearchResult, error) {
-	// Get agent data room
-	agentDataPortal, err := m.getAgentDataRoom(ctx, agentID)
-	if err != nil || agentDataPortal == nil {
-		return nil, err
-	}
-
-	entries, err := m.loadMemoryIndex(ctx, agentDataPortal)
-	if err != nil {
-		return nil, err
-	}
-
-	return m.searchByKeywords(entries, query, minScore, MemoryScopeAgent, agentID), nil
+	resolvedAgentID := m.resolveAgentID(nil, agentID)
+	entries := m.loadMemoryIndexByScope(MemoryScopeAgent, resolvedAgentID)
+	return m.searchByKeywords(entries, query, minScore, MemoryScopeAgent, resolvedAgentID), nil
 }
 
 // searchGlobalMemory searches the global memory room
 func (m *MemoryStore) searchGlobalMemory(ctx context.Context, query string, minScore float64) ([]MemorySearchResult, error) {
-	globalPortal, err := m.getGlobalMemoryRoom(ctx)
-	if err != nil || globalPortal == nil {
-		return nil, err
-	}
-
-	entries, err := m.loadMemoryIndex(ctx, globalPortal)
-	if err != nil {
-		return nil, err
-	}
-
+	_ = ctx
+	entries := m.loadMemoryIndexByScope(MemoryScopeGlobal, "")
 	return m.searchByKeywords(entries, query, minScore, MemoryScopeGlobal, ""), nil
 }
 
@@ -257,41 +239,22 @@ func (m *MemoryStore) searchByKeywords(entries []MemoryIndexEntry, query string,
 
 // Get retrieves a specific memory by path
 func (m *MemoryStore) Get(ctx context.Context, portal *bridgev2.Portal, input MemoryGetInput) (*MemoryGetResult, error) {
+	_ = ctx
 	scope, factID, agentID, ok := parseMemoryPath(input.Path)
 	if !ok {
 		return nil, fmt.Errorf("invalid memory path: %s", input.Path)
 	}
 
-	var memoryPortal *bridgev2.Portal
-	var err error
-
 	switch scope {
 	case MemoryScopeGlobal:
-		memoryPortal, err = m.getGlobalMemoryRoom(ctx)
 	case MemoryScopeAgent:
-		if agentID == "" {
-			meta := portalMeta(portal)
-			if meta != nil {
-				agentID = meta.AgentID
-			}
-		}
-		memoryPortal, err = m.getAgentDataRoom(ctx, agentID)
+		agentID = m.resolveAgentID(portal, agentID)
 	default:
 		return nil, fmt.Errorf("unknown memory scope: %s", scope)
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to get memory room: %w", err)
-	}
-	if memoryPortal == nil {
-		return nil, fmt.Errorf("memory room not found")
-	}
-
 	// Look up the fact in the index to get the event ID
-	entries, err := m.loadMemoryIndex(ctx, memoryPortal)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load memory index: %w", err)
-	}
+	entries := m.loadMemoryIndexByScope(scope, agentID)
 
 	var targetEntry *MemoryIndexEntry
 	for i := range entries {
@@ -305,20 +268,22 @@ func (m *MemoryStore) Get(ctx context.Context, portal *bridgev2.Portal, input Me
 		return nil, fmt.Errorf("memory not found: %s", factID)
 	}
 
-	// Fetch the actual memory event
-	content, err := m.fetchMemoryEvent(ctx, memoryPortal, id.EventID(targetEntry.EventID))
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch memory event: %w", err)
+	fact := m.loadMemoryFactFromMetadata(scope, agentID, factID)
+	if fact == nil {
+		return nil, fmt.Errorf("memory content not found: %s", factID)
 	}
 
 	return &MemoryGetResult{
-		Text: content,
+		Text: fact.Content,
 		Path: input.Path,
 	}, nil
 }
 
 // Store creates a new memory
 func (m *MemoryStore) Store(ctx context.Context, portal *bridgev2.Portal, input MemoryStoreInput) (*MemoryStoreResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	config := m.getEffectiveConfig(portal)
 
 	// Determine scope
@@ -335,27 +300,12 @@ func (m *MemoryStore) Store(ctx context.Context, portal *bridgev2.Portal, input 
 		}, fmt.Errorf("memory is disabled for scope: %s", scope)
 	}
 
-	// Get or create memory room
-	var memoryPortal *bridgev2.Portal
 	var agentID string
-	var err error
 
 	switch scope {
 	case MemoryScopeGlobal:
-		memoryPortal, err = m.getOrCreateGlobalMemoryRoom(ctx)
 	case MemoryScopeAgent:
-		meta := portalMeta(portal)
-		if meta != nil {
-			agentID = meta.AgentID
-		}
-		memoryPortal, err = m.getOrCreateAgentDataRoom(ctx, agentID)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get memory room: %w", err)
-	}
-	if memoryPortal == nil {
-		return nil, fmt.Errorf("memory room not available")
+		agentID = m.resolveAgentID(portal, "")
 	}
 
 	// Generate fact ID
@@ -390,14 +340,14 @@ func (m *MemoryStore) Store(ctx context.Context, portal *bridgev2.Portal, input 
 		Category:   category,
 		Importance: importance,
 		Source:     "assistant",
-		SourceRoom: string(portal.MXID),
+		SourceRoom: "",
 		CreatedAt:  now,
 	}
-
-	// Send the memory event
-	eventID, err := m.sendMemoryEvent(ctx, memoryPortal, factContent)
-	if err != nil {
-		return nil, fmt.Errorf("failed to store memory: %w", err)
+	if portal != nil {
+		factContent.SourceRoom = string(portal.MXID)
+	}
+	if err := m.saveMemoryFactToMetadata(ctx, scope, agentID, factContent); err != nil {
+		return nil, fmt.Errorf("failed to store memory fact: %w", err)
 	}
 
 	// Update the index
@@ -408,7 +358,7 @@ func (m *MemoryStore) Store(ctx context.Context, portal *bridgev2.Portal, input 
 
 	indexEntry := MemoryIndexEntry{
 		FactID:     factID,
-		EventID:    string(eventID),
+		EventID:    "",
 		Keywords:   keywords,
 		Category:   category,
 		Importance: importance,
@@ -416,7 +366,7 @@ func (m *MemoryStore) Store(ctx context.Context, portal *bridgev2.Portal, input 
 		CreatedAt:  now,
 	}
 
-	if err := m.updateMemoryIndex(ctx, memoryPortal, indexEntry, false); err != nil {
+	if err := m.updateMemoryIndex(ctx, scope, agentID, indexEntry, false); err != nil {
 		m.client.log.Warn().Err(err).Msg("Failed to update memory index")
 	}
 
@@ -430,42 +380,22 @@ func (m *MemoryStore) Store(ctx context.Context, portal *bridgev2.Portal, input 
 
 // Forget removes a memory
 func (m *MemoryStore) Forget(ctx context.Context, portal *bridgev2.Portal, input MemoryForgetInput) (*MemoryForgetResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	scope, factID, agentID, ok := parseMemoryPath(input.ID)
 	if !ok {
 		return nil, fmt.Errorf("invalid memory path: %s", input.ID)
 	}
 
-	var memoryPortal *bridgev2.Portal
-	var err error
-
 	switch scope {
 	case MemoryScopeGlobal:
-		memoryPortal, err = m.getGlobalMemoryRoom(ctx)
 	case MemoryScopeAgent:
-		if agentID == "" {
-			meta := portalMeta(portal)
-			if meta != nil {
-				agentID = meta.AgentID
-			}
-		}
-		memoryPortal, err = m.getAgentDataRoom(ctx, agentID)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get memory room: %w", err)
-	}
-	if memoryPortal == nil {
-		return &MemoryForgetResult{
-			Success: false,
-			Message: "memory room not found",
-		}, nil
+		agentID = m.resolveAgentID(portal, agentID)
 	}
 
 	// Find the entry in the index
-	entries, err := m.loadMemoryIndex(ctx, memoryPortal)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load memory index: %w", err)
-	}
+	entries := m.loadMemoryIndexByScope(scope, agentID)
 
 	var targetEntry *MemoryIndexEntry
 	for i := range entries {
@@ -483,8 +413,11 @@ func (m *MemoryStore) Forget(ctx context.Context, portal *bridgev2.Portal, input
 	}
 
 	// Remove from index (create an entry with empty EventID to mark as removed)
-	if err := m.updateMemoryIndex(ctx, memoryPortal, *targetEntry, true); err != nil {
+	if err := m.updateMemoryIndex(ctx, scope, agentID, *targetEntry, true); err != nil {
 		return nil, fmt.Errorf("failed to update memory index: %w", err)
+	}
+	if err := m.deleteMemoryFactFromMetadata(ctx, scope, agentID, factID); err != nil {
+		m.client.log.Warn().Err(err).Str("fact_id", factID).Msg("Failed to delete memory fact from metadata")
 	}
 
 	return &MemoryForgetResult{
@@ -493,191 +426,58 @@ func (m *MemoryStore) Forget(ctx context.Context, portal *bridgev2.Portal, input
 	}, nil
 }
 
-// Room management helpers
-
-func (m *MemoryStore) getAgentDataRoom(ctx context.Context, agentID string) (*bridgev2.Portal, error) {
-	if agentID == "" {
-		return nil, nil
-	}
-
-	loginID := m.client.UserLogin.ID
-	portalKey := agentDataPortalKey(loginID, agentID)
-
-	portal, err := m.client.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
-	if err != nil {
-		return nil, err
-	}
-
-	return portal, nil
-}
-
-func (m *MemoryStore) getOrCreateAgentDataRoom(ctx context.Context, agentID string) (*bridgev2.Portal, error) {
-	if agentID == "" {
-		return nil, nil
-	}
-
-	// First try to get existing room
-	portal, err := m.getAgentDataRoom(ctx, agentID)
-	if err != nil {
-		return nil, err
-	}
-	if portal != nil && portal.MXID != "" {
-		return portal, nil
-	}
-
-	// Create agent memory room on demand
-	loginID := m.client.UserLogin.ID
-	portalKey := agentDataPortalKey(loginID, agentID)
-
-	portal, err = m.client.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get portal: %w", err)
-	}
-
-	if portal.MXID == "" {
-		// Need to create the Matrix room
-		roomName := fmt.Sprintf("Agent Memory: %s", agentID)
-		chatInfo := &bridgev2.ChatInfo{
-			Name:  &roomName,
-			Topic: strPtr(fmt.Sprintf("Memory storage for agent %s", agentID)),
-		}
-
-		err = portal.CreateMatrixRoom(ctx, m.client.UserLogin, chatInfo)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create agent memory room: %w", err)
-		}
-
-		// Set metadata
-		meta := portalMeta(portal)
-		meta.IsAgentDataRoom = true
-		meta.AgentID = agentID
-		if err := portal.Save(ctx); err != nil {
-			m.client.log.Warn().Err(err).Str("agent_id", agentID).Msg("Failed to save agent memory room metadata")
-		}
-
-		m.client.log.Info().Str("agent_id", agentID).Msg("Created agent memory room on demand")
-	}
-
-	return portal, nil
-}
-
-func (m *MemoryStore) getGlobalMemoryRoom(ctx context.Context) (*bridgev2.Portal, error) {
-	loginMeta := loginMetadata(m.client.UserLogin)
-	if loginMeta.GlobalMemoryRoomID == "" {
-		return nil, nil
-	}
-
-	portalKey := networkid.PortalKey{
-		ID:       loginMeta.GlobalMemoryRoomID,
-		Receiver: m.client.UserLogin.ID,
-	}
-
-	portal, err := m.client.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
-	if err != nil {
-		return nil, err
-	}
-
-	return portal, nil
-}
-
-func (m *MemoryStore) getOrCreateGlobalMemoryRoom(ctx context.Context) (*bridgev2.Portal, error) {
-	// First try to get existing room
-	portal, err := m.getGlobalMemoryRoom(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if portal != nil && portal.MXID != "" {
-		return portal, nil
-	}
-
-	// Create new global memory room
-	loginID := m.client.UserLogin.ID
-	portalKey := globalMemoryPortalKey(loginID)
-
-	portal, err = m.client.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
-	if err != nil {
-		return nil, err
-	}
-
-	if portal.MXID == "" {
-		// Need to create the Matrix room
-		chatInfo := &bridgev2.ChatInfo{
-			Name:  strPtr("Global Memory"),
-			Topic: strPtr("Shared memory storage for all agents"),
-		}
-
-		err = portal.CreateMatrixRoom(ctx, m.client.UserLogin, chatInfo)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create global memory room: %w", err)
-		}
-
-		// Set metadata
-		meta := portalMeta(portal)
-		meta.IsGlobalMemoryRoom = true
-		if err := portal.Save(ctx); err != nil {
-			m.client.log.Warn().Err(err).Msg("Failed to save global memory room metadata")
-		}
-
-		// Update login metadata with room ID
-		loginMeta := loginMetadata(m.client.UserLogin)
-		loginMeta.GlobalMemoryRoomID = portalKey.ID
-		if err := m.client.UserLogin.Save(ctx); err != nil {
-			m.client.log.Warn().Err(err).Msg("Failed to save login metadata with global memory room ID")
-		}
-	}
-
-	return portal, nil
-}
-
 // Index management helpers
 
-func (m *MemoryStore) loadMemoryIndex(ctx context.Context, portal *bridgev2.Portal) ([]MemoryIndexEntry, error) {
-	if portal == nil || portal.MXID == "" {
-		return nil, nil
+func (m *MemoryStore) memoryScopeKey(scope MemoryScope, agentID string) string {
+	if scope == MemoryScopeGlobal {
+		return "global"
 	}
-
-	matrixConn := m.client.UserLogin.Bridge.Matrix
-	stateConn, ok := matrixConn.(bridgev2.MatrixConnectorWithArbitraryRoomState)
-	if !ok {
-		return nil, fmt.Errorf("matrix connector does not support state access")
-	}
-
-	var allEntries []MemoryIndexEntry
-
-	// Load all index chunks (state key format: "0", "1", "2", etc.)
-	for chunkID := 0; ; chunkID++ {
-		stateKey := fmt.Sprintf("%d", chunkID)
-		evt, err := stateConn.GetStateEvent(ctx, portal.MXID, MemoryIndexEventType, stateKey)
-		if err != nil || evt == nil {
-			break
-		}
-
-		var indexContent MemoryIndexContent
-		if err := json.Unmarshal(evt.Content.VeryRaw, &indexContent); err != nil {
-			m.client.log.Warn().Err(err).Int("chunk", chunkID).Msg("Failed to parse memory index chunk")
-			continue
-		}
-
-		allEntries = append(allEntries, indexContent.Entries...)
-
-		if chunkID >= indexContent.TotalChunks-1 {
-			break
-		}
-	}
-
-	return allEntries, nil
+	return "agent:" + m.resolveAgentID(nil, agentID)
 }
 
-func (m *MemoryStore) updateMemoryIndex(ctx context.Context, portal *bridgev2.Portal, entry MemoryIndexEntry, remove bool) error {
-	if portal == nil || portal.MXID == "" {
-		return fmt.Errorf("portal not available")
+func (m *MemoryStore) resolveAgentID(portal *bridgev2.Portal, agentID string) string {
+	if strings.TrimSpace(agentID) != "" {
+		return strings.TrimSpace(agentID)
 	}
+	if portal != nil {
+		meta := portalMeta(portal)
+		if meta != nil && strings.TrimSpace(meta.AgentID) != "" {
+			return strings.TrimSpace(meta.AgentID)
+		}
+	}
+	return agents.DefaultAgentID
+}
 
-	// Load existing index
-	entries, err := m.loadMemoryIndex(ctx, portal)
-	if err != nil {
-		return err
+func (m *MemoryStore) loadMemoryIndexByScope(scope MemoryScope, agentID string) []MemoryIndexEntry {
+	meta := loginMetadata(m.client.UserLogin)
+	if meta == nil || len(meta.MemoryIndexes) == 0 {
+		return nil
 	}
+	key := m.memoryScopeKey(scope, agentID)
+	entries := meta.MemoryIndexes[key]
+	if len(entries) == 0 {
+		return nil
+	}
+	copied := make([]MemoryIndexEntry, len(entries))
+	copy(copied, entries)
+	return copied
+}
+
+func (m *MemoryStore) saveMemoryIndexByScope(ctx context.Context, scope MemoryScope, agentID string, entries []MemoryIndexEntry) error {
+	meta := loginMetadata(m.client.UserLogin)
+	if meta.MemoryIndexes == nil {
+		meta.MemoryIndexes = make(map[string][]MemoryIndexEntry)
+	}
+	key := m.memoryScopeKey(scope, agentID)
+	copied := make([]MemoryIndexEntry, len(entries))
+	copy(copied, entries)
+	meta.MemoryIndexes[key] = copied
+	return m.client.UserLogin.Save(ctx)
+}
+
+func (m *MemoryStore) updateMemoryIndex(ctx context.Context, scope MemoryScope, agentID string, entry MemoryIndexEntry, remove bool) error {
+	// Load existing index
+	entries := m.loadMemoryIndexByScope(scope, agentID)
 
 	if remove {
 		// Remove the entry
@@ -703,83 +503,53 @@ func (m *MemoryStore) updateMemoryIndex(ctx context.Context, portal *bridgev2.Po
 		}
 	}
 
-	// Save the index (chunked if necessary)
-	return m.saveMemoryIndex(ctx, portal, entries)
+	return m.saveMemoryIndexByScope(ctx, scope, agentID, entries)
 }
 
-func (m *MemoryStore) saveMemoryIndex(ctx context.Context, portal *bridgev2.Portal, entries []MemoryIndexEntry) error {
-	bot := m.client.UserLogin.Bridge.Bot
-
-	totalChunks := (len(entries) + MaxIndexEntriesPerChunk - 1) / MaxIndexEntriesPerChunk
-	if totalChunks == 0 {
-		totalChunks = 1
+func (m *MemoryStore) loadMemoryFactFromMetadata(scope MemoryScope, agentID, factID string) *MemoryFactContent {
+	meta := loginMetadata(m.client.UserLogin)
+	if meta == nil || len(meta.MemoryFacts) == 0 {
+		return nil
 	}
-
-	now := time.Now().UnixMilli()
-
-	for chunkID := 0; chunkID < totalChunks; chunkID++ {
-		start := chunkID * MaxIndexEntriesPerChunk
-		end := start + MaxIndexEntriesPerChunk
-		if end > len(entries) {
-			end = len(entries)
-		}
-
-		chunkEntries := entries[start:end]
-		if start >= len(entries) {
-			chunkEntries = nil
-		}
-
-		indexContent := MemoryIndexContent{
-			ChunkID:     chunkID,
-			TotalChunks: totalChunks,
-			Entries:     chunkEntries,
-			UpdatedAt:   now,
-		}
-
-		stateKey := fmt.Sprintf("%d", chunkID)
-		_, err := bot.SendState(ctx, portal.MXID, MemoryIndexEventType, stateKey, &event.Content{
-			Parsed: &indexContent,
-		}, time.Time{})
-		if err != nil {
-			return fmt.Errorf("failed to save memory index chunk %d: %w", chunkID, err)
-		}
+	scopeKey := m.memoryScopeKey(scope, agentID)
+	facts := meta.MemoryFacts[scopeKey]
+	if len(facts) == 0 {
+		return nil
 	}
-
-	return nil
+	return facts[factID]
 }
 
-// Event helpers
-
-func (m *MemoryStore) sendMemoryEvent(ctx context.Context, portal *bridgev2.Portal, content *MemoryFactContent) (id.EventID, error) {
-	bot := m.client.UserLogin.Bridge.Bot
-
-	resp, err := bot.SendMessage(ctx, portal.MXID, MemoryFactEventType, &event.Content{
-		Parsed: content,
-	}, nil)
-	if err != nil {
-		return "", err
+func (m *MemoryStore) saveMemoryFactToMetadata(ctx context.Context, scope MemoryScope, agentID string, fact *MemoryFactContent) error {
+	if fact == nil || fact.FactID == "" {
+		return fmt.Errorf("memory fact is required")
 	}
-
-	return resp.EventID, nil
+	meta := loginMetadata(m.client.UserLogin)
+	if meta.MemoryFacts == nil {
+		meta.MemoryFacts = make(map[string]map[string]*MemoryFactContent)
+	}
+	scopeKey := m.memoryScopeKey(scope, agentID)
+	if meta.MemoryFacts[scopeKey] == nil {
+		meta.MemoryFacts[scopeKey] = make(map[string]*MemoryFactContent)
+	}
+	meta.MemoryFacts[scopeKey][fact.FactID] = fact
+	return m.client.UserLogin.Save(ctx)
 }
 
-func (m *MemoryStore) fetchMemoryEvent(ctx context.Context, portal *bridgev2.Portal, eventID id.EventID) (string, error) {
-	bot := m.client.UserLogin.Bridge.Bot
-	if bot == nil {
-		return "", fmt.Errorf("matrix bot not available")
+func (m *MemoryStore) deleteMemoryFactFromMetadata(ctx context.Context, scope MemoryScope, agentID, factID string) error {
+	meta := loginMetadata(m.client.UserLogin)
+	if meta == nil || meta.MemoryFacts == nil {
+		return nil
 	}
-
-	evt, err := bot.GetEvent(ctx, portal.MXID, eventID)
-	if err != nil {
-		return "", err
+	scopeKey := m.memoryScopeKey(scope, agentID)
+	facts := meta.MemoryFacts[scopeKey]
+	if facts == nil {
+		return nil
 	}
-
-	var factContent MemoryFactContent
-	if err := json.Unmarshal(evt.Content.VeryRaw, &factContent); err != nil {
-		return "", fmt.Errorf("failed to parse memory event: %w", err)
+	if _, ok := facts[factID]; !ok {
+		return nil
 	}
-
-	return factContent.Content, nil
+	delete(facts, factID)
+	return m.client.UserLogin.Save(ctx)
 }
 
 // Keyword extraction and search helpers
@@ -884,9 +654,4 @@ func calculateScore(queryWords, keywords []string, importance float64) float64 {
 	// Base score from keyword matches, boosted by importance
 	baseScore := float64(matches) / float64(len(queryWords))
 	return baseScore * (0.5 + importance*0.5) // importance affects score by up to 50%
-}
-
-// strPtr is a helper to create pointers to strings
-func strPtr(v string) *string {
-	return &v
 }

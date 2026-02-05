@@ -76,7 +76,7 @@ const (
 )
 
 func aiCapID() string {
-	return "com.beeper.ai.capabilities.2025_01_31"
+	return "com.beeper.ai.capabilities.2026_02_05"
 }
 
 // aiBaseCaps defines the base capabilities for AI chat rooms
@@ -128,9 +128,15 @@ var aiBaseCaps = &event.RoomFeatures{
 	},
 }
 
-// buildCapabilityID constructs a deterministic capability ID based on model modalities.
-// Suffixes are sorted alphabetically to ensure the same capabilities produce the same ID.
-func buildCapabilityID(caps ModelCapabilities) string {
+type capabilityIDOptions struct {
+	SupportsPDF       bool
+	SupportsTextFiles bool
+}
+
+// buildCapabilityID constructs a deterministic capability ID based on model modalities
+// and effective room file capabilities. Suffixes are sorted alphabetically to ensure
+// the same capabilities produce the same ID.
+func buildCapabilityID(caps ModelCapabilities, opts capabilityIDOptions) string {
 	var suffixes []string
 
 	// Add suffixes in alphabetical order for determinism
@@ -140,8 +146,11 @@ func buildCapabilityID(caps ModelCapabilities) string {
 	if caps.SupportsImageGen {
 		suffixes = append(suffixes, "imagegen")
 	}
-	if caps.SupportsPDF {
+	if opts.SupportsPDF || caps.SupportsPDF {
 		suffixes = append(suffixes, "pdf")
+	}
+	if opts.SupportsTextFiles {
+		suffixes = append(suffixes, "textfiles")
 	}
 	if caps.SupportsVideo {
 		suffixes = append(suffixes, "video")
@@ -1083,7 +1092,8 @@ func updateGhostLastSync(_ context.Context, ghost *bridgev2.Ghost) bool {
 func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
 	meta := portalMeta(portal)
 	if meta != nil && meta.IsOpenCodeRoom {
-		caps := ptr.Clone(aiBaseCaps)
+		caps := aiBaseCaps.Clone()
+		caps.ID = aiCapID() + "+opencode"
 		caps.File[event.MsgImage] = openCodeFileFeatures()
 		caps.File[event.MsgVideo] = openCodeFileFeatures()
 		caps.File[event.MsgAudio] = openCodeFileFeatures()
@@ -1103,12 +1113,16 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 	// (includes image-understanding union for agent rooms)
 	modelCaps := oc.getRoomCapabilities(ctx, meta)
 	allowTextFiles := oc.canUseMediaUnderstanding(meta)
+	supportsPDF := modelCaps.SupportsPDF || oc.isOpenRouterProvider()
 
 	// Clone base capabilities
-	caps := ptr.Clone(aiBaseCaps)
+	caps := aiBaseCaps.Clone()
 
 	// Build dynamic capability ID from modalities
-	caps.ID = buildCapabilityID(modelCaps)
+	caps.ID = buildCapabilityID(modelCaps, capabilityIDOptions{
+		SupportsPDF:       supportsPDF,
+		SupportsTextFiles: allowTextFiles,
+	})
 
 	// Apply file capabilities based on modalities
 	if modelCaps.SupportsVision {
@@ -1122,7 +1136,7 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 
 	// OpenRouter/Beeper: all models support PDF via file-parser plugin
 	// For other providers, check model's native PDF support
-	if modelCaps.SupportsPDF || oc.isOpenRouterProvider() {
+	if supportsPDF {
 		for mime := range pdfFileFeatures().MimeTypes {
 			fileFeatures.MimeTypes[mime] = event.CapLevelFullySupported
 		}

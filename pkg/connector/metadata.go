@@ -96,12 +96,16 @@ type UserLoginMetadata struct {
 
 	// Agent Builder room for managing agents
 	BuilderRoomID networkid.PortalID `json:"builder_room_id,omitempty"`
+	// Custom agents store (source of truth for user-created agents).
+	CustomAgents map[string]*AgentDefinitionContent `json:"custom_agents,omitempty"`
+	// Memory index fallback store for connectors without arbitrary Matrix state access.
+	MemoryIndexes map[string][]MemoryIndexEntry `json:"memory_indexes,omitempty"`
+	// Memory facts keyed by scope key then fact ID.
+	MemoryFacts map[string]map[string]*MemoryFactContent `json:"memory_facts,omitempty"`
 	// Last active room per agent (used for heartbeat delivery).
 	LastActiveRoomByAgent map[string]string `json:"last_active_room_by_agent,omitempty"`
 	// Heartbeat dedupe state per agent.
 	HeartbeatState map[string]HeartbeatState `json:"heartbeat_state,omitempty"`
-	// Note: Custom agents are now stored in Matrix state events (CustomAgentsEventType)
-	// in the Builder room, not in UserLoginMetadata
 
 	// Global Memory room for shared agent memories
 	GlobalMemoryRoomID networkid.PortalID `json:"global_memory_room_id,omitempty"`

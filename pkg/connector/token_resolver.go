@@ -217,6 +217,14 @@ func (oc *OpenAIConnector) resolveServiceConfig(meta *UserLoginMetadata) Service
 				BaseURL: base + "/openrouter/v1",
 				APIKey:  token,
 			}
+			services[serviceOpenAI] = ServiceConfig{
+				BaseURL: base + "/openai/v1",
+				APIKey:  token,
+			}
+			services[serviceExa] = ServiceConfig{
+				BaseURL: base + "/exa",
+				APIKey:  token,
+			}
 			services[servicePerplexity] = ServiceConfig{
 				BaseURL: base + "/openrouter/v1",
 				APIKey:  token,

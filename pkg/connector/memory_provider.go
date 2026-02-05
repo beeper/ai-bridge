@@ -150,12 +150,17 @@ func resolveOpenAIEmbeddingConfig(client *AIClient, cfg *memory.ResolvedConfig) 
 	} else if client != nil && client.connector != nil {
 		meta := loginMetadata(client.UserLogin)
 		apiKey = strings.TrimSpace(client.connector.resolveOpenAIAPIKey(meta))
-		if apiKey == "" && meta != nil && meta.Provider == ProviderBeeper {
-			services := client.connector.resolveServiceConfig(meta)
-			if svc, ok := services[serviceOpenAI]; ok {
-				apiKey = strings.TrimSpace(svc.APIKey)
-				if baseURL == "" {
-					baseURL = strings.TrimSpace(svc.BaseURL)
+		if meta != nil {
+			if apiKey == "" && meta.Provider == ProviderMagicProxy {
+				apiKey = strings.TrimSpace(meta.APIKey)
+			}
+			if apiKey == "" && meta.Provider == ProviderBeeper {
+				services := client.connector.resolveServiceConfig(meta)
+				if svc, ok := services[serviceOpenAI]; ok {
+					apiKey = strings.TrimSpace(svc.APIKey)
+					if baseURL == "" {
+						baseURL = strings.TrimSpace(svc.BaseURL)
+					}
 				}
 			}
 		}
@@ -164,10 +169,17 @@ func resolveOpenAIEmbeddingConfig(client *AIClient, cfg *memory.ResolvedConfig) 
 		baseURL = strings.TrimSpace(cfg.Remote.BaseURL)
 	}
 	if baseURL == "" && client != nil && client.connector != nil {
-		if meta := loginMetadata(client.UserLogin); meta != nil && meta.Provider == ProviderBeeper {
-			services := client.connector.resolveServiceConfig(meta)
-			if svc, ok := services[serviceOpenAI]; ok && strings.TrimSpace(svc.BaseURL) != "" {
-				baseURL = strings.TrimSpace(svc.BaseURL)
+		if meta := loginMetadata(client.UserLogin); meta != nil {
+			if meta.Provider == ProviderMagicProxy {
+				base := normalizeMagicProxyBaseURL(meta.BaseURL)
+				if base != "" {
+					baseURL = strings.TrimRight(base, "/") + "/openai/v1"
+				}
+			} else if meta.Provider == ProviderBeeper {
+				services := client.connector.resolveServiceConfig(meta)
+				if svc, ok := services[serviceOpenAI]; ok && strings.TrimSpace(svc.BaseURL) != "" {
+					baseURL = strings.TrimSpace(svc.BaseURL)
+				}
 			}
 		}
 		if baseURL == "" {

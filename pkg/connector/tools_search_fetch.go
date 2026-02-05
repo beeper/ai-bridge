@@ -248,7 +248,7 @@ func shouldForceExaSearchProvider(meta *UserLoginMetadata) bool {
 		return false
 	}
 	switch meta.Provider {
-	case ProviderBeeper, ProviderOpenAI, ProviderOpenRouter:
+	case ProviderBeeper, ProviderOpenAI, ProviderOpenRouter, ProviderMagicProxy:
 		return true
 	default:
 		return false
@@ -278,7 +278,11 @@ func applyExaProxyDefaults(cfg *search.Config, meta *UserLoginMetadata, connecto
 		}
 	}
 	if cfg.Exa.APIKey == "" {
-		if token := connector.resolveBeeperToken(meta); token != "" {
+		if meta != nil && meta.Provider == ProviderMagicProxy {
+			if token := strings.TrimSpace(meta.APIKey); token != "" {
+				cfg.Exa.APIKey = token
+			}
+		} else if token := connector.resolveBeeperToken(meta); token != "" {
 			cfg.Exa.APIKey = token
 		}
 	}
@@ -300,7 +304,11 @@ func applyFetchExaProxyDefaults(cfg *fetch.Config, meta *UserLoginMetadata, conn
 		}
 	}
 	if cfg.Exa.APIKey == "" {
-		if token := connector.resolveBeeperToken(meta); token != "" {
+		if meta != nil && meta.Provider == ProviderMagicProxy {
+			if token := strings.TrimSpace(meta.APIKey); token != "" {
+				cfg.Exa.APIKey = token
+			}
+		} else if token := connector.resolveBeeperToken(meta); token != "" {
 			cfg.Exa.APIKey = token
 		}
 	}
