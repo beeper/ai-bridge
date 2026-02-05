@@ -117,8 +117,29 @@ func addOpenAIErrorFields(event *zerolog.Event, err error) {
 			if requestID := apiErr.Response.Header.Get("x-openai-request-id"); requestID != "" {
 				event.Str("openai_request_id", requestID)
 			}
+			if provider := apiErr.Response.Header.Get("x-ai-proxy-provider"); provider != "" {
+				event.Str("proxy_provider", provider)
+			}
+			if upstreamRay := apiErr.Response.Header.Get("x-ai-proxy-upstream-ray"); upstreamRay != "" {
+				event.Str("proxy_upstream_ray", upstreamRay)
+			}
+			if cfRay := apiErr.Response.Header.Get("cf-ray"); cfRay != "" {
+				event.Str("cf_ray", cfRay)
+			}
+			if server := apiErr.Response.Header.Get("server"); server != "" {
+				event.Str("response_server", server)
+			}
 			if contentType := apiErr.Response.Header.Get("Content-Type"); contentType != "" {
 				event.Str("response_content_type", contentType)
+			}
+		}
+		if apiErr.Request != nil && apiErr.Request.URL != nil {
+			event.
+				Str("request_method", apiErr.Request.Method).
+				Str("request_url", apiErr.Request.URL.String()).
+				Str("request_host", apiErr.Request.URL.Host)
+			if requestID := apiErr.Request.Header.Get("x-request-id"); requestID != "" {
+				event.Str("client_request_id", requestID)
 			}
 		}
 		if raw := apiErr.RawJSON(); raw != "" {

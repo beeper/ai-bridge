@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -16,6 +17,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared/constant"
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/random"
 )
 
 // OpenAIProvider implements AIProvider for OpenAI's API
@@ -78,6 +80,7 @@ func NewOpenAIProviderWithUserID(apiKey, baseURL, userID string, log zerolog.Log
 			return next(req)
 		}))
 	}
+	opts = append(opts, makeRequestTraceMiddleware(log))
 
 	client := openai.NewClient(opts...)
 
@@ -97,6 +100,81 @@ func appendHeaderOptions(opts []option.RequestOption, headers map[string]string)
 		opts = append(opts, option.WithHeader(key, trimmed))
 	}
 	return opts
+}
+
+func newOutboundRequestID() string {
+	return "abr_" + random.String(12)
+}
+
+func makeRequestTraceMiddleware(log zerolog.Logger) option.Middleware {
+	traceLog := log.With().Str("component", "openai_http").Logger()
+	return func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+		start := time.Now()
+		requestID := strings.TrimSpace(req.Header.Get("x-request-id"))
+		if requestID == "" {
+			requestID = newOutboundRequestID()
+			req.Header.Set("x-request-id", requestID)
+		}
+
+		reqMethod := req.Method
+		reqHost := ""
+		reqPath := ""
+		if req.URL != nil {
+			reqHost = req.URL.Host
+			reqPath = req.URL.Path
+		}
+
+		traceLog.Debug().
+			Str("request_id", requestID).
+			Str("request_method", reqMethod).
+			Str("request_host", reqHost).
+			Str("request_path", reqPath).
+			Msg("Dispatching provider HTTP request")
+
+		resp, err := next(req)
+		elapsedMs := time.Since(start).Milliseconds()
+		if err != nil {
+			traceLog.Error().
+				Err(err).
+				Str("request_id", requestID).
+				Str("request_method", reqMethod).
+				Str("request_host", reqHost).
+				Str("request_path", reqPath).
+				Int64("duration_ms", elapsedMs).
+				Msg("Provider HTTP request failed")
+			return nil, err
+		}
+
+		upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
+		if upstreamRequestID == "" {
+			upstreamRequestID = strings.TrimSpace(resp.Header.Get("x-openai-request-id"))
+		}
+
+		event := traceLog.Debug().
+			Str("request_id", requestID).
+			Str("request_method", reqMethod).
+			Str("request_host", reqHost).
+			Str("request_path", reqPath).
+			Int("status_code", resp.StatusCode).
+			Int64("duration_ms", elapsedMs)
+
+		if upstreamRequestID != "" {
+			event = event.Str("upstream_request_id", upstreamRequestID)
+		}
+		if cfRay := strings.TrimSpace(resp.Header.Get("cf-ray")); cfRay != "" {
+			event = event.Str("cf_ray", cfRay)
+		}
+		if server := strings.TrimSpace(resp.Header.Get("server")); server != "" {
+			event = event.Str("response_server", server)
+		}
+
+		if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
+			event.Msg("Provider HTTP response error")
+		} else {
+			event.Msg("Provider HTTP response")
+		}
+		return resp, nil
+	}
 }
 
 // NewOpenAIProviderWithPDFPlugin creates an OpenAI provider with PDF plugin middleware.
@@ -126,6 +204,7 @@ func NewOpenAIProviderWithPDFPlugin(apiKey, baseURL, userID, pdfEngine string, h
 	opts = append(opts, option.WithMiddleware(MakePDFPluginMiddleware(pdfEngine)))
 	// Deduplicate tools in the final request payload (OpenRouter/Anthropic requires unique names)
 	opts = append(opts, option.WithMiddleware(MakeToolDedupMiddleware(log)))
+	opts = append(opts, makeRequestTraceMiddleware(log))
 
 	client := openai.NewClient(opts...)
 
