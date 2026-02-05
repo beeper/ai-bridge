@@ -55,6 +55,16 @@ model_cache_duration: 6h
 messages:
   # Prefix applied to outbound replies (and heartbeat ok acks).
   responsePrefix: ""
+  # Queue behavior while the agent is busy (OpenClaw-style).
+  queue:
+    # Modes: collect, followup, steer, steer-backlog, interrupt
+    mode: "collect"
+    # Debounce time before draining queued messages (ms).
+    debounceMs: 1000
+    # Maximum queued messages before drop policy applies.
+    cap: 20
+    # Drop policy when cap is exceeded: summarize, old, new
+    drop: "summarize"
 
 # Session store configuration (OpenClaw-style).
 session:

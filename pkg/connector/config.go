@@ -122,6 +122,7 @@ type MessagesConfig struct {
 	AckReactionScope string                 `yaml:"ackReactionScope"` // group-mentions|group-all|direct|all|off|none
 	RemoveAckAfter   bool                   `yaml:"removeAckAfterReply"`
 	GroupChat        *GroupChatConfig       `yaml:"groupChat"`
+	Queue            *QueueConfig           `yaml:"queue"`
 	InboundDebounce  *InboundDebounceConfig `yaml:"inbound"`
 }
 
@@ -134,6 +135,16 @@ type GroupChatConfig struct {
 type InboundDebounceConfig struct {
 	DebounceMs int            `yaml:"debounceMs"`
 	ByChannel  map[string]int `yaml:"byChannel"`
+}
+
+// QueueConfig mirrors OpenClaw's queue settings.
+type QueueConfig struct {
+	Mode                string            `yaml:"mode"`
+	ByChannel           map[string]string `yaml:"byChannel"`
+	DebounceMs          *int              `yaml:"debounceMs"`
+	DebounceMsByChannel map[string]int    `yaml:"debounceMsByChannel"`
+	Cap                 *int              `yaml:"cap"`
+	Drop                string            `yaml:"drop"`
 }
 
 // SessionConfig configures session store behavior (OpenClaw-style).
@@ -548,6 +559,12 @@ func upgradeConfig(helper configupgrade.Helper) {
 
 	// Messages configuration
 	helper.Copy(configupgrade.Str, "messages", "responsePrefix")
+	helper.Copy(configupgrade.Str, "messages", "queue", "mode")
+	helper.Copy(configupgrade.Map, "messages", "queue", "byChannel")
+	helper.Copy(configupgrade.Int, "messages", "queue", "debounceMs")
+	helper.Copy(configupgrade.Map, "messages", "queue", "debounceMsByChannel")
+	helper.Copy(configupgrade.Int, "messages", "queue", "cap")
+	helper.Copy(configupgrade.Str, "messages", "queue", "drop")
 
 	// Session configuration (OpenClaw-style)
 	helper.Copy(configupgrade.Str, "session", "scope")

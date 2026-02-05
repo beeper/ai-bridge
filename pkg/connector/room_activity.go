@@ -11,9 +11,10 @@ func (oc *AIClient) isRoomBusy(roomID id.RoomID) bool {
 	active := oc.activeRooms[roomID]
 	oc.activeRoomsMu.Unlock()
 
-	oc.pendingMessagesMu.Lock()
-	pending := len(oc.pendingMessages[roomID]) > 0
-	oc.pendingMessagesMu.Unlock()
+	oc.pendingQueuesMu.Lock()
+	queue := oc.pendingQueues[roomID]
+	pending := queue != nil && (len(queue.items) > 0 || queue.droppedCount > 0)
+	oc.pendingQueuesMu.Unlock()
 
 	return active || pending
 }
@@ -33,14 +34,14 @@ func (oc *AIClient) hasInflightRequests() bool {
 	oc.activeRoomsMu.Unlock()
 
 	pending := false
-	oc.pendingMessagesMu.Lock()
-	for _, queue := range oc.pendingMessages {
-		if len(queue) > 0 {
+	oc.pendingQueuesMu.Lock()
+	for _, queue := range oc.pendingQueues {
+		if queue != nil && (len(queue.items) > 0 || queue.droppedCount > 0) {
 			pending = true
 			break
 		}
 	}
-	oc.pendingMessagesMu.Unlock()
+	oc.pendingQueuesMu.Unlock()
 
 	return active || pending
 }
