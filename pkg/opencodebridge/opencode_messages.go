@@ -21,6 +21,10 @@ func (b *Bridge) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMe
 	if msg.Content == nil || msg.Event == nil {
 		return nil, errMissingMessageContent
 	}
+	if msg.Content.RelatesTo != nil && msg.Content.RelatesTo.GetReplaceID() != "" {
+		// Ignore edits from Matrix to avoid echo loops; OpenCode updates via SSE.
+		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+	}
 	if b == nil || b.manager == nil {
 		b.host.SendSystemNotice(ctx, portal, "OpenCode integration is not available.")
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil

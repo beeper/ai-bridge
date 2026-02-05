@@ -376,6 +376,11 @@ func (m *OpenCodeManager) handleMessageEvent(ctx context.Context, inst *openCode
 		m.log().Warn().Err(err).Str("message", msg.ID).Msg("Failed to fetch OpenCode message")
 		return
 	}
+	if msg.Role == "user" {
+		// Do not echo user-role messages back into Matrix.
+		inst.markSeen(msg.SessionID, msg.ID, msg.Role)
+		return
+	}
 	inst.markSeen(msg.SessionID, msg.ID, msg.Role)
 	portal := m.bridge.findOpenCodePortal(ctx, inst.cfg.ID, msg.SessionID)
 	if portal == nil {
@@ -386,6 +391,12 @@ func (m *OpenCodeManager) handleMessageEvent(ctx context.Context, inst *openCode
 
 func (m *OpenCodeManager) handleMessageParts(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, role string, msg *opencode.MessageWithParts) {
 	if msg == nil || portal == nil {
+		return
+	}
+	if role == "user" {
+		if msg.Info.ID != "" && msg.Info.SessionID != "" {
+			inst.markSeen(msg.Info.SessionID, msg.Info.ID, role)
+		}
 		return
 	}
 	inst.upsertMessage(msg.Info.SessionID, *msg)
@@ -423,6 +434,12 @@ func (m *OpenCodeManager) handlePartUpdated(ctx context.Context, inst *openCodeI
 	}
 	if role == "" {
 		role = "assistant"
+	}
+	if role == "user" {
+		if part.MessageID != "" {
+			inst.markSeen(part.SessionID, part.MessageID, role)
+		}
+		return
 	}
 	m.handlePart(ctx, inst, portal, role, part, true)
 }
