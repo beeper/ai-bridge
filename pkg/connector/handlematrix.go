@@ -105,6 +105,95 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 			rawBody = loc.Text
 		}
 	}
+	queueDirective := extractQueueDirective(rawBody)
+	if queueDirective.HasDirective {
+		rawBody = strings.TrimSpace(queueDirective.Cleaned)
+	}
+	rawBodyOriginal := rawBody
+	inlineMode := QueueMode("")
+	inlineOpts := QueueInlineOptions{}
+	if !queueDirective.QueueReset {
+		if queueDirective.QueueMode != "" {
+			inlineMode = queueDirective.QueueMode
+		}
+		inlineOpts = QueueInlineOptions{
+			DebounceMs: queueDirective.DebounceMs,
+			Cap:        queueDirective.Cap,
+			DropPolicy: queueDirective.DropPolicy,
+		}
+	}
+	queueSettings, _, storeRef, sessionKey := oc.resolveQueueSettingsForPortal(ctx, portal, meta, inlineMode, inlineOpts)
+	if queueDirective.HasDirective {
+		queueErrors := []string{}
+		if queueDirective.HasDebounce && queueDirective.DebounceMs == nil {
+			queueErrors = append(queueErrors, fmt.Sprintf(
+				"Invalid debounce \"%s\". Use ms/s/m (e.g. debounce:1500ms, debounce:2s).",
+				queueDirective.RawDebounce,
+			))
+		}
+		if queueDirective.HasCap && queueDirective.Cap == nil {
+			queueErrors = append(queueErrors, fmt.Sprintf(
+				"Invalid cap \"%s\". Use a positive integer (e.g. cap:10).",
+				queueDirective.RawCap,
+			))
+		}
+		if queueDirective.HasDrop && queueDirective.DropPolicy == nil {
+			queueErrors = append(queueErrors, fmt.Sprintf(
+				"Invalid drop policy \"%s\". Use drop:old, drop:new, or drop:summarize.",
+				queueDirective.RawDrop,
+			))
+		}
+		if len(queueErrors) > 0 {
+			oc.sendSystemNotice(ctx, portal, strings.Join(queueErrors, " "))
+			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+		}
+	}
+	if queueDirective.HasDirective {
+		if queueDirective.QueueReset {
+			if sessionKey != "" {
+				oc.updateSessionEntry(ctx, storeRef, sessionKey, func(entry sessionEntry) sessionEntry {
+					entry.QueueMode = ""
+					entry.QueueDebounceMs = nil
+					entry.QueueCap = nil
+					entry.QueueDrop = ""
+					entry.UpdatedAt = time.Now().UnixMilli()
+					return entry
+				})
+			}
+			oc.clearPendingQueue(portal.MXID)
+			queueSettings, _, _, _ = oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
+		} else if sessionKey != "" {
+			oc.updateSessionEntry(ctx, storeRef, sessionKey, func(entry sessionEntry) sessionEntry {
+				if queueDirective.QueueMode != "" {
+					entry.QueueMode = string(queueDirective.QueueMode)
+				}
+				if queueDirective.DebounceMs != nil {
+					entry.QueueDebounceMs = queueDirective.DebounceMs
+				}
+				if queueDirective.Cap != nil {
+					entry.QueueCap = queueDirective.Cap
+				}
+				if queueDirective.DropPolicy != nil {
+					entry.QueueDrop = string(*queueDirective.DropPolicy)
+				}
+				entry.UpdatedAt = time.Now().UnixMilli()
+				return entry
+			})
+		}
+		if rawBody == "" {
+			wantsStatus := queueDirective.QueueMode == "" && !queueDirective.QueueReset && !queueDirective.HasOptions
+			if wantsStatus {
+				oc.sendSystemNotice(ctx, portal, buildQueueStatusLine(queueSettings))
+			} else {
+				ack := buildQueueDirectiveAck(queueDirective)
+				if strings.TrimSpace(ack) == "" {
+					ack = "OK."
+				}
+				oc.sendSystemNotice(ctx, portal, ack)
+			}
+			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+		}
+	}
 	if rawBody == "" {
 		return nil, unsupportedMessageStatus(fmt.Errorf("empty messages are not supported"))
 	}
@@ -239,13 +328,23 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		Timestamp: time.Now(),
 	}
 
-	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
-		Event:       msg.Event,
-		Portal:      portal,
-		Meta:        meta,
-		Type:        pendingTypeText,
-		MessageBody: body,
-	}, promptMessages)
+	pending := pendingMessage{
+		Event:           msg.Event,
+		Portal:          portal,
+		Meta:            meta,
+		Type:            pendingTypeText,
+		MessageBody:     body,
+		RawEventContent: rawEventContent,
+		AckEventIDs:     []id.EventID{msg.Event.ID},
+	}
+	queueItem := pendingQueueItem{
+		pending:         pending,
+		messageID:       string(eventID),
+		summaryLine:     rawBodyOriginal,
+		enqueuedAt:      time.Now().UnixMilli(),
+		rawEventContent: rawEventContent,
+	}
+	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, queueItem, queueSettings, promptMessages)
 
 	return &bridgev2.MatrixMessageResponse{
 		DB:      dbMsg,
@@ -376,14 +475,22 @@ func (oc *AIClient) regenerateFromEdit(
 		oc.notifySessionMemoryChange(ctx, portal, meta, true)
 	}
 
-	oc.dispatchOrQueueWithStatus(ctx, evt, portal, meta, pendingMessage{
+	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
+	pending := pendingMessage{
 		Event:       evt,
 		Portal:      portal,
 		Meta:        meta,
 		Type:        pendingTypeEditRegenerate,
 		MessageBody: newBody,
 		TargetMsgID: editedMessage.ID,
-	}, promptMessages)
+	}
+	queueItem := pendingQueueItem{
+		pending:     pending,
+		messageID:   string(evt.ID),
+		summaryLine: newBody,
+		enqueuedAt:  time.Now().UnixMilli(),
+	}
+	oc.dispatchOrQueueWithStatus(ctx, evt, portal, meta, queueItem, queueSettings, promptMessages)
 
 	return nil
 }
@@ -511,6 +618,7 @@ func (oc *AIClient) handleMediaMessage(
 	if isPDF && !supportsMedia && oc.isOpenRouterProvider() {
 		supportsMedia = true // OpenRouter supports PDF via file-parser plugin
 	}
+	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
 
 	// Get caption (body is usually the filename or caption)
 	rawCaption := strings.TrimSpace(msg.Content.Body)
@@ -546,13 +654,20 @@ func (oc *AIClient) handleMediaMessage(
 			},
 			Timestamp: time.Now(),
 		}
-		dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
+		pending := pendingMessage{
 			Event:       msg.Event,
 			Portal:      portal,
 			Meta:        meta,
 			Type:        pendingTypeText,
 			MessageBody: body,
-		}, promptMessages)
+		}
+		queueItem := pendingQueueItem{
+			pending:     pending,
+			messageID:   string(eventID),
+			summaryLine: rawBody,
+			enqueuedAt:  time.Now().UnixMilli(),
+		}
+		dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, queueItem, queueSettings, promptMessages)
 		return &bridgev2.MatrixMessageResponse{
 			DB:      dbMsg,
 			Pending: isPending,
@@ -658,7 +773,7 @@ func (oc *AIClient) handleMediaMessage(
 		Timestamp: time.Now(),
 	}
 
-	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
+	pending := pendingMessage{
 		Event:         msg.Event,
 		Portal:        portal,
 		Meta:          meta,
@@ -667,7 +782,14 @@ func (oc *AIClient) handleMediaMessage(
 		MediaURL:      string(mediaURL),
 		MimeType:      mimeType,
 		EncryptedFile: encryptedFile,
-	}, promptMessages)
+	}
+	queueItem := pendingQueueItem{
+		pending:     pending,
+		messageID:   string(eventID),
+		summaryLine: rawCaption,
+		enqueuedAt:  time.Now().UnixMilli(),
+	}
+	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, queueItem, queueSettings, promptMessages)
 
 	return &bridgev2.MatrixMessageResponse{
 		DB:      dbMsg,
@@ -686,6 +808,7 @@ func (oc *AIClient) handleTextFileMessage(
 	if msg == nil || msg.Event == nil {
 		return nil, fmt.Errorf("missing matrix event for text file message")
 	}
+	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
 
 	rawCaption := strings.TrimSpace(msg.Content.Body)
 	fileName := strings.TrimSpace(msg.Content.FileName)
@@ -742,13 +865,20 @@ func (oc *AIClient) handleTextFileMessage(
 		Timestamp: time.Now(),
 	}
 
-	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, pendingMessage{
+	pending := pendingMessage{
 		Event:       msg.Event,
 		Portal:      portal,
 		Meta:        meta,
 		Type:        pendingTypeText,
 		MessageBody: combined,
-	}, promptMessages)
+	}
+	queueItem := pendingQueueItem{
+		pending:     pending,
+		messageID:   string(eventID),
+		summaryLine: strings.TrimSpace(rawCaption),
+		enqueuedAt:  time.Now().UnixMilli(),
+	}
+	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, queueItem, queueSettings, promptMessages)
 
 	return &bridgev2.MatrixMessageResponse{
 		DB:      dbMsg,
@@ -1016,14 +1146,22 @@ func (oc *AIClient) handleRegenerate(
 		return
 	}
 
-	oc.dispatchOrQueueWithStatus(runCtx, evt, portal, meta, pendingMessage{
+	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(runCtx, portal, meta, "", QueueInlineOptions{})
+	pending := pendingMessage{
 		Event:         evt,
 		Portal:        portal,
 		Meta:          meta,
 		Type:          pendingTypeRegenerate,
 		MessageBody:   userMeta.Body,
 		SourceEventID: lastUserMessage.MXID,
-	}, prompt)
+	}
+	queueItem := pendingQueueItem{
+		pending:     pending,
+		messageID:   string(evt.ID),
+		summaryLine: userMeta.Body,
+		enqueuedAt:  time.Now().UnixMilli(),
+	}
+	oc.dispatchOrQueueWithStatus(runCtx, evt, portal, meta, queueItem, queueSettings, prompt)
 }
 
 // handleRegenerateTitle regenerates the current room title from recent messages.
