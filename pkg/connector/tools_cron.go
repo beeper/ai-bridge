@@ -220,9 +220,6 @@ func readCronJobID(args map[string]any) string {
 	if val := strings.TrimSpace(agenttools.ReadStringDefault(args, "jobId", "")); val != "" {
 		return val
 	}
-	if val := strings.TrimSpace(agenttools.ReadStringDefault(args, "job_id", "")); val != "" {
-		return val
-	}
 	return ""
 }
 
@@ -257,15 +254,6 @@ func coerceCronArgs(args map[string]any) map[string]any {
 				jobCopy["schedule"] = schedule
 			}
 			clone["job"] = jobCopy
-		} else if raw, ok := clone["data"].(map[string]any); ok {
-			dataCopy := map[string]any{}
-			for k, v := range raw {
-				dataCopy[k] = v
-			}
-			if _, ok := dataCopy["schedule"]; !ok {
-				dataCopy["schedule"] = schedule
-			}
-			clone["data"] = dataCopy
 		} else if _, ok := clone["schedule"]; !ok {
 			clone["schedule"] = schedule
 		}
@@ -278,7 +266,7 @@ func extractScheduleFields(args map[string]any) map[string]any {
 		return nil
 	}
 	schedule := map[string]any{}
-	for _, key := range []string{"kind", "at", "atMs", "every", "everyMs", "anchor", "anchorMs", "expr", "tz"} {
+	for _, key := range []string{"kind", "at", "everyMs", "anchorMs", "expr", "tz"} {
 		if val, ok := args[key]; ok {
 			schedule[key] = val
 		}

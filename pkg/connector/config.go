@@ -26,6 +26,7 @@ type Config struct {
 	Channels   *ChannelsConfig                    `yaml:"channels"`
 	Cron       *CronConfig                        `yaml:"cron"`
 	Messages   *MessagesConfig                    `yaml:"messages"`
+	Commands   *CommandsConfig                    `yaml:"commands"`
 	Session    *SessionConfig                     `yaml:"session"`
 
 	// Global settings
@@ -102,11 +103,13 @@ type ChannelsConfig struct {
 }
 
 type ChannelDefaultsConfig struct {
-	Heartbeat *ChannelHeartbeatVisibilityConfig `yaml:"heartbeat"`
+	Heartbeat      *ChannelHeartbeatVisibilityConfig `yaml:"heartbeat"`
+	ResponsePrefix string                           `yaml:"responsePrefix"`
 }
 
 type ChannelConfig struct {
-	Heartbeat *ChannelHeartbeatVisibilityConfig `yaml:"heartbeat"`
+	Heartbeat      *ChannelHeartbeatVisibilityConfig `yaml:"heartbeat"`
+	ResponsePrefix string                           `yaml:"responsePrefix"`
 }
 
 type ChannelHeartbeatVisibilityConfig struct {
@@ -124,6 +127,11 @@ type MessagesConfig struct {
 	GroupChat        *GroupChatConfig       `yaml:"groupChat"`
 	Queue            *QueueConfig           `yaml:"queue"`
 	InboundDebounce  *InboundDebounceConfig `yaml:"inbound"`
+}
+
+// CommandsConfig defines command authorization settings (OpenClaw-style).
+type CommandsConfig struct {
+	OwnerAllowFrom []string `yaml:"ownerAllowFrom"`
 }
 
 // GroupChatConfig mirrors OpenClaw's group chat settings.
@@ -559,6 +567,7 @@ func upgradeConfig(helper configupgrade.Helper) {
 
 	// Messages configuration
 	helper.Copy(configupgrade.Str, "messages", "responsePrefix")
+	helper.Copy(configupgrade.List, "commands", "ownerAllowFrom")
 	helper.Copy(configupgrade.Str, "messages", "queue", "mode")
 	helper.Copy(configupgrade.Map, "messages", "queue", "byChannel")
 	helper.Copy(configupgrade.Int, "messages", "queue", "debounceMs")
@@ -589,9 +598,11 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Bool, "channels", "defaults", "heartbeat", "showOk")
 	helper.Copy(configupgrade.Bool, "channels", "defaults", "heartbeat", "showAlerts")
 	helper.Copy(configupgrade.Bool, "channels", "defaults", "heartbeat", "useIndicator")
+	helper.Copy(configupgrade.Str, "channels", "defaults", "responsePrefix")
 	helper.Copy(configupgrade.Bool, "channels", "matrix", "heartbeat", "showOk")
 	helper.Copy(configupgrade.Bool, "channels", "matrix", "heartbeat", "showAlerts")
 	helper.Copy(configupgrade.Bool, "channels", "matrix", "heartbeat", "useIndicator")
+	helper.Copy(configupgrade.Str, "channels", "matrix", "responsePrefix")
 
 	// Tools (search + fetch)
 	helper.Copy(configupgrade.Str, "tools", "search", "provider")

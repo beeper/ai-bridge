@@ -48,6 +48,7 @@ type BridgeToolContext struct {
 	Portal        *bridgev2.Portal
 	Meta          *PortalMetadata
 	SourceEventID id.EventID // The triggering message's event ID (for reactions/replies)
+	SenderID      string     // The triggering sender ID (owner-only tool gating)
 }
 
 // bridgeToolContextKey is the context key for BridgeToolContext
@@ -116,6 +117,7 @@ type memorySearchOutput struct {
 	Provider string                 `json:"provider,omitempty"`
 	Model    string                 `json:"model,omitempty"`
 	Fallback *memory.FallbackStatus `json:"fallback,omitempty"`
+	Citations string                `json:"citations,omitempty"`
 	Disabled bool                   `json:"disabled,omitempty"`
 	Error    string                 `json:"error,omitempty"`
 }
@@ -257,11 +259,16 @@ func resolveMessageMedia(ctx context.Context, btc *BridgeToolContext, bufferInpu
 	if mediaInput == "" {
 		return nil, "", fmt.Errorf("missing media input")
 	}
-	if strings.HasPrefix(mediaInput, "data:") {
-		return media.DecodeBase64(mediaInput)
+	trimmed := strings.TrimSpace(mediaInput)
+	if strings.HasPrefix(trimmed, "data:") {
+		return nil, "", fmt.Errorf("data URLs are not supported for media; use buffer instead")
 	}
 
-	resolved := expandUserPath(mediaInput)
+	resolved, err := resolveSandboxedMediaPath(trimmed)
+	if err != nil {
+		return nil, "", err
+	}
+
 	b64Data, mimeType, err := btc.Client.downloadAndEncodeMedia(ctx, resolved, nil, 50)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to load media: %w", err)
@@ -271,6 +278,54 @@ func resolveMessageMedia(ctx context.Context, btc *BridgeToolContext, bufferInpu
 		return nil, "", fmt.Errorf("failed to decode media: %w", err)
 	}
 	return data, mimeType, nil
+}
+
+func resolveSandboxedMediaPath(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", fmt.Errorf("missing media input")
+	}
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") || strings.HasPrefix(trimmed, "mxc://") {
+		return trimmed, nil
+	}
+	if strings.HasPrefix(trimmed, "~") {
+		return "", fmt.Errorf("media path must be relative to the workspace (no ~)")
+	}
+
+	pathValue := trimmed
+	if strings.HasPrefix(trimmed, "file://") {
+		parsed, err := fileURLToPath(trimmed)
+		if err != nil {
+			return "", err
+		}
+		pathValue = parsed
+	}
+
+	workspaceRoot := resolvePromptWorkspaceDir()
+	if strings.TrimSpace(workspaceRoot) == "" {
+		return "", fmt.Errorf("workspace root is not configured for local media access")
+	}
+	rootAbs, err := filepath.Abs(workspaceRoot)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve workspace root: %w", err)
+	}
+	rootAbs = filepath.Clean(rootAbs)
+
+	resolved := pathValue
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(rootAbs, resolved)
+	}
+	resolved = filepath.Clean(resolved)
+	absResolved, err := filepath.Abs(resolved)
+	if err == nil {
+		resolved = absResolved
+	}
+
+	rel, err := filepath.Rel(rootAbs, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("media path must be within the workspace")
+	}
+	return resolved, nil
 }
 
 func resolveMessageFilename(args map[string]any, mediaInput, mimeType string) string {
@@ -1685,11 +1740,15 @@ func executeMemorySearch(ctx context.Context, args map[string]any) (string, erro
 	}
 
 	status := manager.Status()
+	citationsMode := resolveMemoryCitationsMode(btc.Client)
+	includeCitations := shouldIncludeMemoryCitations(ctx, btc.Client, btc.Portal, citationsMode)
+	decorated := decorateMemorySearchResults(results, includeCitations)
 	payload := memorySearchOutput{
-		Results:  results,
-		Provider: status.Provider,
-		Model:    status.Model,
-		Fallback: status.Fallback,
+		Results:   decorated,
+		Provider:  status.Provider,
+		Model:     status.Model,
+		Fallback:  status.Fallback,
+		Citations: citationsMode,
 	}
 	output, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
@@ -1767,6 +1826,67 @@ func executeMemoryGet(ctx context.Context, args map[string]any) (string, error) 
 	}
 
 	return string(output), nil
+}
+
+func resolveMemoryCitationsMode(client *AIClient) string {
+	if client == nil || client.connector == nil || client.connector.Config.Memory == nil {
+		return "auto"
+	}
+	mode := strings.ToLower(strings.TrimSpace(client.connector.Config.Memory.Citations))
+	switch mode {
+	case "on", "off", "auto":
+		return mode
+	default:
+		return "auto"
+	}
+}
+
+func shouldIncludeMemoryCitations(ctx context.Context, client *AIClient, portal *bridgev2.Portal, mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "on":
+		return true
+	case "off":
+		return false
+	default:
+	}
+	if client == nil || portal == nil {
+		return true
+	}
+	return !client.isGroupChat(ctx, portal)
+}
+
+func decorateMemorySearchResults(results []memory.SearchResult, include bool) []memory.SearchResult {
+	if !include || len(results) == 0 {
+		return results
+	}
+	out := make([]memory.SearchResult, 0, len(results))
+	for _, entry := range results {
+		next := entry
+		citation := formatMemoryCitation(entry)
+		if citation != "" {
+			snippet := strings.TrimSpace(entry.Snippet)
+			if snippet != "" {
+				next.Snippet = fmt.Sprintf("%s\n\nSource: %s", snippet, citation)
+			} else {
+				next.Snippet = fmt.Sprintf("Source: %s", citation)
+			}
+		}
+		out = append(out, next)
+	}
+	return out
+}
+
+func formatMemoryCitation(entry memory.SearchResult) string {
+	if strings.TrimSpace(entry.Path) == "" {
+		return ""
+	}
+	if entry.StartLine > 0 && entry.EndLine > 0 {
+		if entry.StartLine == entry.EndLine {
+			return fmt.Sprintf("%s#L%d", entry.Path, entry.StartLine)
+		}
+		return fmt.Sprintf("%s#L%d-L%d", entry.Path, entry.StartLine, entry.EndLine)
+	}
+	return entry.Path
 }
 
 func readNumberArg(raw any) (float64, bool) {

@@ -64,7 +64,6 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 	// Capture last assistant message before dispatch.
 	lastID, lastTimestamp := oc.lastAssistantMessageInfo(ctx, portal)
 
-	var toolCalls []ToolCallMetadata
 	eventID, _, dispatchErr := oc.dispatchInternalMessage(ctx, portal, metaSnapshot, cronMessage, "cron", false)
 	if dispatchErr != nil {
 		return "error", "", "", dispatchErr
@@ -79,7 +78,6 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 			if msg != nil {
 				if meta := messageMeta(msg); meta != nil {
 					body = strings.TrimSpace(meta.Body)
-					toolCalls = meta.ToolCalls
 					oc.updateCronSessionEntry(ctx, sessionKey, func(entry cronSessionEntry) cronSessionEntry {
 						entry.Model = strings.TrimSpace(meta.Model)
 						entry.PromptTokens = meta.PromptTokens
@@ -103,25 +101,22 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 		return "error", "", "", fmt.Errorf("cron job timed out")
 	}
 
-	payload := job.Payload
-	deliveryMode := "off"
-	if payload.Deliver != nil {
-		if *payload.Deliver {
-			deliveryMode = "explicit"
-		} else {
-			deliveryMode = "off"
-		}
-	} else if strings.TrimSpace(payload.To) != "" {
-		deliveryMode = "auto"
+	delivery := job.Delivery
+	deliveryMode := cron.CronDeliveryAnnounce
+	if delivery != nil && strings.TrimSpace(string(delivery.Mode)) != "" {
+		deliveryMode = delivery.Mode
 	}
-	deliveryRequested := deliveryMode == "explicit" || deliveryMode == "auto"
-	bestEffort := payload.BestEffortDeliver != nil && *payload.BestEffortDeliver
+	if delivery == nil {
+		delivery = &cron.CronDelivery{Mode: deliveryMode}
+	}
+	deliveryRequested := deliveryMode == cron.CronDeliveryAnnounce
+	bestEffort := delivery != nil && delivery.BestEffort != nil && *delivery.BestEffort
 
 	ackMax := resolveHeartbeatAckMaxChars(&oc.connector.Config, resolveHeartbeatConfig(&oc.connector.Config, agentID))
 	skipHeartbeatDelivery := deliveryRequested && isHeartbeatOnlyText(outputText, ackMax)
 
 	if deliveryRequested && !skipHeartbeatDelivery {
-		target := oc.resolveCronDeliveryTarget(agentID, payload)
+		target := oc.resolveCronDeliveryTarget(agentID, delivery)
 		if target.Portal == nil || target.RoomID == "" {
 			reason := strings.TrimSpace(target.Reason)
 			if reason == "" {
@@ -132,8 +127,7 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 			}
 			return "error", summary, outputText, fmt.Errorf("cron delivery failed: %s", reason)
 		}
-		skipMessagingTool := deliveryMode == "auto" && hasMessagingToolDelivery(toolCalls, payload, target)
-		if strings.TrimSpace(outputText) != "" && !skipMessagingTool {
+		if strings.TrimSpace(outputText) != "" {
 			oc.sendPlainAssistantMessage(ctx, target.Portal, outputText)
 		}
 	}
@@ -204,34 +198,6 @@ func isHeartbeatOnlyText(text string, ackMax int) bool {
 	shouldSkip, stripped, _ := agents.StripHeartbeatTokenWithMode(trimmed, agents.StripHeartbeatModeHeartbeat, ackMax)
 	if shouldSkip && strings.TrimSpace(stripped) == "" {
 		return true
-	}
-	return false
-}
-
-func hasMessagingToolDelivery(calls []ToolCallMetadata, payload cron.CronPayload, target cronDeliveryTarget) bool {
-	if len(calls) == 0 {
-		return false
-	}
-	desiredTo := strings.TrimSpace(payload.To)
-	if desiredTo == "" && target.RoomID != "" {
-		desiredTo = target.RoomID.String()
-	}
-	for _, call := range calls {
-		name := strings.ToLower(strings.TrimSpace(call.ToolName))
-		if name != "message" && !strings.HasPrefix(name, "message.") {
-			continue
-		}
-		rawTo, ok := call.Input["to"]
-		if !ok {
-			continue
-		}
-		to, ok := rawTo.(string)
-		if !ok {
-			continue
-		}
-		if desiredTo != "" && strings.TrimSpace(to) == desiredTo {
-			return true
-		}
 	}
 	return false
 }

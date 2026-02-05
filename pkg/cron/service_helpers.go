@@ -24,6 +24,8 @@ func createJob(nowMs int64, input CronJobCreate) (CronJob, error) {
 	deleteAfter := false
 	if input.DeleteAfterRun != nil {
 		deleteAfter = *input.DeleteAfterRun
+	} else if strings.EqualFold(strings.TrimSpace(input.Schedule.Kind), "at") {
+		deleteAfter = true
 	}
 	wakeMode := input.WakeMode
 	if wakeMode == "" {
@@ -43,13 +45,19 @@ func createJob(nowMs int64, input CronJobCreate) (CronJob, error) {
 		SessionTarget:  input.SessionTarget,
 		WakeMode:       wakeMode,
 		Payload:        input.Payload,
-		Isolation:      input.Isolation,
+		Delivery:       input.Delivery,
 		State:          CronJobState{},
 	}
 	if input.State != nil {
 		job.State = *input.State
 	}
+	if job.SessionTarget == CronSessionMain {
+		job.Delivery = nil
+	}
 	if err := assertSupportedJobSpec(job.SessionTarget, job.Payload); err != nil {
+		return CronJob{}, err
+	}
+	if err := assertDeliverySupport(job.SessionTarget, job.Delivery); err != nil {
 		return CronJob{}, err
 	}
 	job.State.NextRunAtMs = computeJobNextRunAtMs(job, nowMs)
@@ -88,8 +96,11 @@ func applyJobPatch(job *CronJob, patch CronJobPatch) error {
 	if patch.Payload != nil {
 		job.Payload = mergeCronPayload(job.Payload, *patch.Payload)
 	}
-	if patch.Isolation != nil {
-		job.Isolation = patch.Isolation
+	if patch.Delivery != nil {
+		job.Delivery = mergeCronDelivery(job.Delivery, *patch.Delivery)
+	}
+	if job.SessionTarget == CronSessionMain {
+		job.Delivery = nil
 	}
 	if patch.State != nil {
 		job.State = mergeCronState(job.State, *patch.State)
@@ -97,7 +108,10 @@ func applyJobPatch(job *CronJob, patch CronJobPatch) error {
 	if patch.AgentID != nil {
 		job.AgentID = normalizeOptionalAgentID(patch.AgentID)
 	}
-	return assertSupportedJobSpec(job.SessionTarget, job.Payload)
+	if err := assertSupportedJobSpec(job.SessionTarget, job.Payload); err != nil {
+		return err
+	}
+	return assertDeliverySupport(job.SessionTarget, job.Delivery)
 }
 
 func mergeCronState(existing CronJobState, patch CronJobState) CronJobState {
@@ -151,18 +165,6 @@ func mergeCronPayload(existing CronPayload, patch CronPayloadPatch) CronPayload 
 	if patch.AllowUnsafeExternal != nil {
 		next.AllowUnsafeExternal = patch.AllowUnsafeExternal
 	}
-	if patch.Deliver != nil {
-		next.Deliver = patch.Deliver
-	}
-	if patch.Channel != nil {
-		next.Channel = *patch.Channel
-	}
-	if patch.To != nil {
-		next.To = *patch.To
-	}
-	if patch.BestEffortDeliver != nil {
-		next.BestEffortDeliver = patch.BestEffortDeliver
-	}
 	return next
 }
 
@@ -192,11 +194,31 @@ func buildPayloadFromPatch(patch CronPayloadPatch) CronPayload {
 		Thinking:            derefString(patch.Thinking),
 		TimeoutSeconds:      patch.TimeoutSeconds,
 		AllowUnsafeExternal: patch.AllowUnsafeExternal,
-		Deliver:             patch.Deliver,
-		Channel:             derefString(patch.Channel),
-		To:                  derefString(patch.To),
-		BestEffortDeliver:   patch.BestEffortDeliver,
 	}
+}
+
+func mergeCronDelivery(existing *CronDelivery, patch CronDeliveryPatch) *CronDelivery {
+	if existing == nil {
+		existing = &CronDelivery{Mode: CronDeliveryNone}
+	}
+	next := *existing
+	if patch.Mode != nil {
+		if strings.TrimSpace(string(*patch.Mode)) != "" {
+			next.Mode = *patch.Mode
+		}
+	}
+	if patch.Channel != nil {
+		trimmed := strings.TrimSpace(*patch.Channel)
+		next.Channel = trimmed
+	}
+	if patch.To != nil {
+		trimmed := strings.TrimSpace(*patch.To)
+		next.To = trimmed
+	}
+	if patch.BestEffort != nil {
+		next.BestEffort = patch.BestEffort
+	}
+	return &next
 }
 
 func derefString(ptr *string) string {
@@ -216,6 +238,13 @@ func assertSupportedJobSpec(target CronSessionTarget, payload CronPayload) error
 	return nil
 }
 
+func assertDeliverySupport(target CronSessionTarget, delivery *CronDelivery) error {
+	if delivery != nil && target != CronSessionIsolated {
+		return fmt.Errorf("cron delivery config is only supported for sessionTarget=isolated")
+	}
+	return nil
+}
+
 func computeJobNextRunAtMs(job CronJob, nowMs int64) *int64 {
 	if !job.Enabled {
 		return nil
@@ -224,10 +253,11 @@ func computeJobNextRunAtMs(job CronJob, nowMs int64) *int64 {
 		if job.State.LastStatus == "ok" && job.State.LastRunAtMs != nil {
 			return nil
 		}
-		if job.Schedule.AtMs <= 0 {
+		atMs, ok := parseAbsoluteTimeMs(job.Schedule.At)
+		if !ok || atMs <= 0 {
 			return nil
 		}
-		return &job.Schedule.AtMs
+		return &atMs
 	}
 	return ComputeNextRunAtMs(job.Schedule, nowMs)
 }

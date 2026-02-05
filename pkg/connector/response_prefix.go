@@ -7,7 +7,39 @@ import (
 	"github.com/beeper/ai-bridge/pkg/agents"
 )
 
-func resolveResponsePrefixRaw(cfg *Config) string {
+func resolveChannelResponsePrefix(cfg *Config) string {
+	if cfg == nil || cfg.Channels == nil {
+		return ""
+	}
+	if cfg.Channels.Matrix != nil {
+		if trimmed := strings.TrimSpace(cfg.Channels.Matrix.ResponsePrefix); trimmed != "" {
+			return trimmed
+		}
+	}
+	if cfg.Channels.Defaults != nil {
+		if trimmed := strings.TrimSpace(cfg.Channels.Defaults.ResponsePrefix); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func resolveResponsePrefixRaw(oc *AIClient, cfg *Config, meta *PortalMetadata) string {
+	if meta != nil {
+		if trimmed := strings.TrimSpace(meta.ResponsePrefix); trimmed != "" {
+			return trimmed
+		}
+	}
+	if oc != nil && oc.UserLogin != nil {
+		if login := loginMetadata(oc.UserLogin); login != nil {
+			if trimmed := strings.TrimSpace(login.ResponsePrefix); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	if channelPrefix := resolveChannelResponsePrefix(cfg); channelPrefix != "" {
+		return channelPrefix
+	}
 	if cfg == nil || cfg.Messages == nil {
 		return ""
 	}
@@ -60,7 +92,7 @@ func buildResponsePrefixContext(oc *AIClient, agentID string, meta *PortalMetada
 }
 
 func resolveResponsePrefixForHeartbeat(oc *AIClient, cfg *Config, agentID string, meta *PortalMetadata) string {
-	raw := resolveResponsePrefixRaw(cfg)
+	raw := resolveResponsePrefixRaw(oc, cfg, meta)
 	if raw == "" {
 		return ""
 	}
@@ -76,7 +108,7 @@ func resolveResponsePrefixForHeartbeat(oc *AIClient, cfg *Config, agentID string
 }
 
 func resolveResponsePrefixForReply(oc *AIClient, cfg *Config, meta *PortalMetadata) string {
-	raw := resolveResponsePrefixRaw(cfg)
+	raw := resolveResponsePrefixRaw(oc, cfg, meta)
 	if raw == "" {
 		return ""
 	}

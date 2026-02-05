@@ -55,6 +55,7 @@ type streamingState struct {
 
 	// Directive processing
 	sourceEventID id.EventID // The triggering user message event ID (for [[reply_to_current]])
+	senderID      string     // The triggering sender ID (for owner-only tool gating)
 
 	// Heartbeat handling
 	heartbeat         *HeartbeatRunConfig
@@ -75,13 +76,14 @@ type streamingState struct {
 }
 
 // newStreamingState creates a new streaming state with initialized fields
-func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID id.EventID) *streamingState {
+func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID id.EventID, senderID string) *streamingState {
 	state := &streamingState{
 		turnID:        NewTurnID(),
 		agentID:       meta.DefaultAgentID,
 		startedAtMs:   time.Now().UnixMilli(),
 		firstToken:    true,
 		sourceEventID: sourceEventID,
+		senderID:      senderID,
 		uiToolStarted: make(map[string]bool),
 	}
 	if hb := heartbeatRunFromContext(ctx); hb != nil {
@@ -687,10 +689,14 @@ func (oc *AIClient) streamingResponse(
 	// Initialize streaming state with turn tracking
 	// Pass source event ID for [[reply_to_current]] directive support
 	var sourceEventID id.EventID
+	senderID := ""
 	if evt != nil {
 		sourceEventID = evt.ID
+		if evt.Sender != "" {
+			senderID = evt.Sender.String()
+		}
 	}
-	state := newStreamingState(ctx, meta, sourceEventID)
+	state := newStreamingState(ctx, meta, sourceEventID, senderID)
 
 	// Ensure model ghost is in the room before any operations
 	if !state.suppressSend {
@@ -884,6 +890,7 @@ func (oc *AIClient) streamingResponse(
 					Portal:        portal,
 					Meta:          meta,
 					SourceEventID: state.sourceEventID,
+					SenderID:      state.senderID,
 				})
 				var err error
 				result, err = oc.executeBuiltinTool(toolCtx, portal, toolName, argsJSON)
@@ -1379,6 +1386,7 @@ func (oc *AIClient) streamingResponse(
 						Portal:        portal,
 						Meta:          meta,
 						SourceEventID: state.sourceEventID,
+						SenderID:      state.senderID,
 					})
 					var err error
 					result, err = oc.executeBuiltinTool(toolCtx, portal, toolName, argsJSON)
@@ -1697,10 +1705,14 @@ func (oc *AIClient) streamChatCompletions(
 
 	// Initialize streaming state with source event ID for [[reply_to_current]] support
 	var sourceEventID id.EventID
+	senderID := ""
 	if evt != nil {
 		sourceEventID = evt.ID
+		if evt.Sender != "" {
+			senderID = evt.Sender.String()
+		}
 	}
-	state := newStreamingState(ctx, meta, sourceEventID)
+	state := newStreamingState(ctx, meta, sourceEventID, senderID)
 
 	// Ensure model ghost is in the room before any operations
 	if !state.suppressSend {
@@ -1902,6 +1914,7 @@ func (oc *AIClient) streamChatCompletions(
 				Portal:        portal,
 				Meta:          meta,
 				SourceEventID: state.sourceEventID,
+				SenderID:      state.senderID,
 			})
 			argsJSON := normalizeToolArgsJSON(tool.input.String())
 			result, err := oc.executeBuiltinTool(toolCtx, portal, tool.toolName, argsJSON)

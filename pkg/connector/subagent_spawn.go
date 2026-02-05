@@ -70,6 +70,23 @@ func resolveSubagentModel(override string, agent *agents.AgentDefinition, defaul
 	return ""
 }
 
+func resolveSubagentThinking(override string, agent *agents.AgentDefinition, defaults *agents.SubagentConfig) string {
+	if trimmed := strings.TrimSpace(override); trimmed != "" {
+		return trimmed
+	}
+	if agent != nil && agent.Subagents != nil {
+		if trimmed := strings.TrimSpace(agent.Subagents.Thinking); trimmed != "" {
+			return trimmed
+		}
+	}
+	if defaults != nil {
+		if trimmed := strings.TrimSpace(defaults.Thinking); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
 func normalizeThinkingLevel(raw string) (string, bool) {
 	if strings.TrimSpace(raw) == "" {
 		return "", true
@@ -240,19 +257,20 @@ func (oc *AIClient) executeSessionsSpawn(ctx context.Context, portal *bridgev2.P
 		}), nil
 	}
 
-	thinkingLevel, ok := normalizeThinkingLevel(thinkingOverride)
-	if !ok {
-		return tools.JSONResult(map[string]any{
-			"status": "error",
-			"error":  fmt.Sprintf("Invalid thinking level %q. Use one of: off, minimal, low, medium, high, xhigh.", thinkingOverride),
-		}), nil
-	}
-	reasoningEffort := mapThinkingToReasoningEffort(thinkingLevel)
-
 	defaultSubagents := (*agents.SubagentConfig)(nil)
 	if oc.connector != nil && oc.connector.Config.Agents != nil && oc.connector.Config.Agents.Defaults != nil {
 		defaultSubagents = oc.connector.Config.Agents.Defaults.Subagents
 	}
+	thinkingCandidate := resolveSubagentThinking(thinkingOverride, targetAgent, defaultSubagents)
+	thinkingLevel, ok := normalizeThinkingLevel(thinkingCandidate)
+	if !ok {
+		return tools.JSONResult(map[string]any{
+			"status": "error",
+			"error":  fmt.Sprintf("Invalid thinking level %q. Use one of: off, minimal, low, medium, high, xhigh.", thinkingCandidate),
+		}), nil
+	}
+	reasoningEffort := mapThinkingToReasoningEffort(thinkingLevel)
+
 	modelCandidate := resolveSubagentModel(modelOverride, targetAgent, defaultSubagents)
 
 	resolvedModel := ""

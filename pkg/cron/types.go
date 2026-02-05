@@ -5,7 +5,7 @@ import "encoding/json"
 // CronSchedule defines when a cron job should run.
 type CronSchedule struct {
 	Kind     string `json:"kind"`
-	AtMs     int64  `json:"atMs,omitempty"`
+	At       string `json:"at,omitempty"`
 	EveryMs  int64  `json:"everyMs,omitempty"`
 	AnchorMs *int64 `json:"anchorMs,omitempty"`
 	Expr     string `json:"expr,omitempty"`
@@ -28,23 +28,39 @@ const (
 	CronWakeNow           CronWakeMode = "now"
 )
 
-// CronMessageChannel defines delivery channel hints for isolated jobs.
-type CronMessageChannel string
+// CronDeliveryMode defines isolated job delivery behavior.
+type CronDeliveryMode string
+
+const (
+	CronDeliveryNone     CronDeliveryMode = "none"
+	CronDeliveryAnnounce CronDeliveryMode = "announce"
+)
+
+// CronDelivery controls how isolated runs announce results.
+type CronDelivery struct {
+	Mode       CronDeliveryMode `json:"mode"`
+	Channel    string           `json:"channel,omitempty"`
+	To         string           `json:"to,omitempty"`
+	BestEffort *bool            `json:"bestEffort,omitempty"`
+}
+
+// CronDeliveryPatch defines partial delivery updates.
+type CronDeliveryPatch struct {
+	Mode       *CronDeliveryMode `json:"mode,omitempty"`
+	Channel    *string           `json:"channel,omitempty"`
+	To         *string           `json:"to,omitempty"`
+	BestEffort *bool             `json:"bestEffort,omitempty"`
+}
 
 // CronPayload defines the job action.
 type CronPayload struct {
-	Kind                     string `json:"kind"`
-	Text                     string `json:"text,omitempty"`
-	Message                  string `json:"message,omitempty"`
-	Model                    string `json:"model,omitempty"`
-	Thinking                 string `json:"thinking,omitempty"`
-	TimeoutSeconds           *int   `json:"timeoutSeconds,omitempty"`
-	AllowUnsafeExternal      *bool  `json:"allowUnsafeExternalContent,omitempty"`
-	Deliver                  *bool  `json:"deliver,omitempty"`
-	Channel                  string `json:"channel,omitempty"`
-	To                       string `json:"to,omitempty"`
-	BestEffortDeliver        *bool  `json:"bestEffortDeliver,omitempty"`
-	LegacyProviderDeprecated string `json:"provider,omitempty"`
+	Kind                string `json:"kind"`
+	Text                string `json:"text,omitempty"`
+	Message             string `json:"message,omitempty"`
+	Model               string `json:"model,omitempty"`
+	Thinking            string `json:"thinking,omitempty"`
+	TimeoutSeconds      *int   `json:"timeoutSeconds,omitempty"`
+	AllowUnsafeExternal *bool  `json:"allowUnsafeExternalContent,omitempty"`
 }
 
 // CronPayloadPatch defines partial payload updates.
@@ -56,17 +72,6 @@ type CronPayloadPatch struct {
 	Thinking            *string `json:"thinking,omitempty"`
 	TimeoutSeconds      *int    `json:"timeoutSeconds,omitempty"`
 	AllowUnsafeExternal *bool   `json:"allowUnsafeExternalContent,omitempty"`
-	Deliver             *bool   `json:"deliver,omitempty"`
-	Channel             *string `json:"channel,omitempty"`
-	To                  *string `json:"to,omitempty"`
-	BestEffortDeliver   *bool   `json:"bestEffortDeliver,omitempty"`
-}
-
-// CronIsolation controls how isolated runs report back to main.
-type CronIsolation struct {
-	PostToMainPrefix   string `json:"postToMainPrefix,omitempty"`
-	PostToMainMode     string `json:"postToMainMode,omitempty"` // summary|full
-	PostToMainMaxChars *int   `json:"postToMainMaxChars,omitempty"`
 }
 
 // CronJobState tracks runtime state.
@@ -93,7 +98,7 @@ type CronJob struct {
 	SessionTarget  CronSessionTarget `json:"sessionTarget"`
 	WakeMode       CronWakeMode      `json:"wakeMode"`
 	Payload        CronPayload       `json:"payload"`
-	Isolation      *CronIsolation    `json:"isolation,omitempty"`
+	Delivery       *CronDelivery     `json:"delivery,omitempty"`
 	State          CronJobState      `json:"state"`
 }
 
@@ -114,7 +119,7 @@ type CronJobCreate struct {
 	SessionTarget  CronSessionTarget `json:"sessionTarget"`
 	WakeMode       CronWakeMode      `json:"wakeMode,omitempty"`
 	Payload        CronPayload       `json:"payload"`
-	Isolation      *CronIsolation    `json:"isolation,omitempty"`
+	Delivery       *CronDelivery     `json:"delivery,omitempty"`
 	State          *CronJobState     `json:"state,omitempty"`
 }
 
@@ -129,7 +134,7 @@ type CronJobPatch struct {
 	SessionTarget  *CronSessionTarget `json:"sessionTarget,omitempty"`
 	WakeMode       *CronWakeMode      `json:"wakeMode,omitempty"`
 	Payload        *CronPayloadPatch  `json:"payload,omitempty"`
-	Isolation      *CronIsolation     `json:"isolation,omitempty"`
+	Delivery       *CronDeliveryPatch `json:"delivery,omitempty"`
 	State          *CronJobState      `json:"state,omitempty"`
 }
 

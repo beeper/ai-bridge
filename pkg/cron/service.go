@@ -454,42 +454,21 @@ func (c *CronService) executeJobLocked(jobID string, forced bool) (bool, error) 
 		c.armTimerLocked()
 
 		if !shouldDelete && job.SessionTarget == CronSessionIsolated {
-			prefix := strings.TrimSpace(defaultCronPostPrefix)
-			if job.Isolation != nil && strings.TrimSpace(job.Isolation.PostToMainPrefix) != "" {
-				prefix = strings.TrimSpace(job.Isolation.PostToMainPrefix)
+			summaryText := strings.TrimSpace(summaryVal)
+			deliveryMode := CronDeliveryAnnounce
+			if job.Delivery != nil && strings.TrimSpace(string(job.Delivery.Mode)) != "" {
+				deliveryMode = job.Delivery.Mode
 			}
-			mode := CronIsolationSummary
-			if job.Isolation != nil && strings.TrimSpace(job.Isolation.PostToMainMode) != "" {
-				mode = CronIsolationMode(strings.TrimSpace(job.Isolation.PostToMainMode))
-			}
-			body := strings.TrimSpace(firstNonEmpty(summaryVal, errVal, statusVal))
-			if mode == CronIsolationFull {
-				maxChars := defaultCronPostMaxChars
-				if job.Isolation != nil && job.Isolation.PostToMainMaxChars != nil {
-					if *job.Isolation.PostToMainMaxChars < 0 {
-						maxChars = 0
-					} else {
-						maxChars = *job.Isolation.PostToMainMaxChars
-					}
+			if summaryText != "" && deliveryMode != CronDeliveryNone && c.deps.EnqueueSystemEvent != nil {
+				prefix := "Cron"
+				label := fmt.Sprintf("%s: %s", prefix, summaryText)
+				if statusVal != "ok" {
+					label = fmt.Sprintf("%s (%s): %s", prefix, statusVal, summaryText)
 				}
-				if strings.TrimSpace(outputVal) != "" {
-					body = strings.TrimSpace(outputVal)
-					if maxChars > 0 && len(body) > maxChars {
-						body = strings.TrimSpace(body[:maxChars]) + "…"
-					} else if maxChars == 0 {
-						body = ""
-					}
+				_ = c.deps.EnqueueSystemEvent(strings.TrimSpace(label), job.AgentID)
+				if job.WakeMode == CronWakeNow && c.deps.RequestHeartbeatNow != nil {
+					c.deps.RequestHeartbeatNow("cron:" + job.ID + ":post")
 				}
-			}
-			statusPrefix := prefix
-			if statusVal != "ok" {
-				statusPrefix = fmt.Sprintf("%s (%s)", prefix, statusVal)
-			}
-			if c.deps.EnqueueSystemEvent != nil {
-				_ = c.deps.EnqueueSystemEvent(strings.TrimSpace(fmt.Sprintf("%s: %s", statusPrefix, body)), job.AgentID)
-			}
-			if job.WakeMode == CronWakeNow && c.deps.RequestHeartbeatNow != nil {
-				c.deps.RequestHeartbeatNow("cron:" + job.ID + ":post")
 			}
 		}
 	}
@@ -592,9 +571,6 @@ func (c *CronService) ensureLoaded() error {
 		job.Name = name
 		if strings.TrimSpace(job.Description) != job.Description {
 			job.Description = strings.TrimSpace(job.Description)
-			mutated = true
-		}
-		if migrated := migrateLegacyPayload(&job.Payload); migrated {
 			mutated = true
 		}
 		c.store.Jobs[i] = job
