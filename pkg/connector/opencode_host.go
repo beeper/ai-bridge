@@ -58,6 +58,76 @@ func (oc *AIClient) SendSuccessStatus(ctx context.Context, portal *bridgev2.Port
 	oc.sendSuccessStatus(ctx, portal, evt)
 }
 
+func (oc *AIClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *bridgev2.Portal, turnID, agentID, targetEventID string, part map[string]any) {
+	if oc == nil || portal == nil || portal.MXID == "" || turnID == "" {
+		return
+	}
+	if part == nil {
+		return
+	}
+	intent := oc.getModelIntent(ctx, portal)
+	if intent == nil {
+		return
+	}
+	ephemeralSender, ok := intent.(matrixEphemeralSender)
+	if !ok {
+		partType, _ := part["type"].(string)
+		oc.log.Warn().
+			Str("part_type", partType).
+			Msg("Matrix intent does not support ephemeral events; OpenCode stream updates will be dropped")
+		return
+	}
+	seq := oc.nextOpenCodeStreamSeq(turnID)
+	content := map[string]any{
+		"turn_id": turnID,
+		"seq":     seq,
+		"part":    part,
+	}
+	if targetEventID != "" {
+		content["target_event"] = targetEventID
+		content["m.relates_to"] = map[string]any{
+			"rel_type": RelReference,
+			"event_id": targetEventID,
+		}
+	}
+	if agentID != "" {
+		content["agent_id"] = agentID
+	}
+	eventContent := &event.Content{Raw: content}
+	txnID := buildStreamEventTxnID(turnID, seq)
+	if _, err := ephemeralSender.SendEphemeralEvent(ctx, portal.MXID, StreamEventMessageType, eventContent, txnID); err != nil {
+		partType, _ := part["type"].(string)
+		oc.log.Warn().Err(err).
+			Str("part_type", partType).
+			Int("seq", seq).
+			Msg("Failed to emit OpenCode stream event")
+	}
+}
+
+func (oc *AIClient) FinishOpenCodeStream(turnID string) {
+	if oc == nil || turnID == "" {
+		return
+	}
+	oc.openCodeStreamMu.Lock()
+	defer oc.openCodeStreamMu.Unlock()
+	if oc.openCodeStreamSeq != nil {
+		delete(oc.openCodeStreamSeq, turnID)
+	}
+}
+
+func (oc *AIClient) nextOpenCodeStreamSeq(turnID string) int {
+	if oc == nil || turnID == "" {
+		return 0
+	}
+	oc.openCodeStreamMu.Lock()
+	defer oc.openCodeStreamMu.Unlock()
+	if oc.openCodeStreamSeq == nil {
+		oc.openCodeStreamSeq = make(map[string]int)
+	}
+	oc.openCodeStreamSeq[turnID]++
+	return oc.openCodeStreamSeq[turnID]
+}
+
 func (oc *AIClient) DownloadAndEncodeMedia(ctx context.Context, mediaURL string, file *event.EncryptedFileInfo, maxMB int) (string, string, error) {
 	if oc == nil {
 		return "", "", fmt.Errorf("missing message content")

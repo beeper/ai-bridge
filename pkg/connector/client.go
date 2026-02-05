@@ -296,6 +296,10 @@ type AIClient struct {
 	// OpenCode bridge (optional)
 	opencodeBridge *opencodebridge.Bridge
 
+	// OpenCode stream event sequencing
+	openCodeStreamMu  sync.Mutex
+	openCodeStreamSeq map[string]int
+
 	// Cron + heartbeat
 	cronService     *cron.CronService
 	heartbeatRunner *HeartbeatRunner

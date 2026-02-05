@@ -27,6 +27,26 @@ func unsupportedMessageStatus(err error) error {
 		WithErrorAsMessage()
 }
 
+func messageSendStatusError(err error, message string, reason event.MessageStatusReason) error {
+	if err == nil {
+		if message == "" {
+			err = fmt.Errorf("message send failed")
+		} else {
+			err = fmt.Errorf(message)
+		}
+	}
+	status := bridgev2.WrapErrorInStatus(err).WithSendNotice(true)
+	if reason != "" {
+		status = status.WithErrorReason(reason)
+	}
+	if message != "" {
+		status = status.WithMessage(message)
+	} else {
+		status = status.WithErrorAsMessage()
+	}
+	return status
+}
+
 // HandleMatrixMessage processes incoming Matrix messages and dispatches them to the AI
 func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (*bridgev2.MatrixMessageResponse, error) {
 	if msg.Content == nil {
@@ -586,14 +606,12 @@ func (oc *AIClient) handleMediaMessage(
 			ok = true
 		case isTextFileMime(mimeType):
 			if !oc.canUseMediaUnderstanding(meta) {
-				oc.sendSystemNotice(ctx, portal, "Text file understanding is only available when an agent is assigned and raw mode is off.")
-				return &bridgev2.MatrixMessageResponse{}, nil
+				return nil, unsupportedMessageStatus(fmt.Errorf("Text file understanding is only available when an agent is assigned and raw mode is off."))
 			}
 			return oc.handleTextFileMessage(ctx, msg, portal, meta, string(mediaURL), mimeType)
 		case mimeType == "" || mimeType == "application/octet-stream":
 			if !oc.canUseMediaUnderstanding(meta) {
-				oc.sendSystemNotice(ctx, portal, "Text file understanding is only available when an agent is assigned and raw mode is off.")
-				return &bridgev2.MatrixMessageResponse{}, nil
+				return nil, unsupportedMessageStatus(fmt.Errorf("Text file understanding is only available when an agent is assigned and raw mode is off."))
 			}
 			return oc.handleTextFileMessage(ctx, msg, portal, meta, string(mediaURL), mimeType)
 		}
@@ -706,14 +724,12 @@ func (oc *AIClient) handleMediaMessage(
 				description, err := oc.analyzeImageWithModel(ctx, visionModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
 				if err != nil {
 					oc.log.Warn().Err(err).Msg("Image understanding failed")
-					oc.sendSystemNotice(ctx, portal, "Image understanding failed. Please try again or switch to a vision-capable model using /model.")
-					return &bridgev2.MatrixMessageResponse{}, nil
+					return nil, messageSendStatusError(err, "Image understanding failed. Please try again or switch to a vision-capable model using /model.", "")
 				}
 
 				combined := buildImageUnderstandingMessage(caption, hasUserCaption, description)
 				if combined == "" {
-					oc.sendSystemNotice(ctx, portal, "Image understanding failed. Please try again or switch to a vision-capable model using /model.")
-					return &bridgev2.MatrixMessageResponse{}, nil
+					return nil, messageSendStatusError(fmt.Errorf("image understanding produced empty result"), "Image understanding failed. Please try again or switch to a vision-capable model using /model.", "")
 				}
 				return dispatchTextOnly(combined)
 			}
@@ -727,24 +743,21 @@ func (oc *AIClient) handleMediaMessage(
 				transcript, err := oc.analyzeAudioWithModel(ctx, audioModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
 				if err != nil {
 					oc.log.Warn().Err(err).Msg("Audio understanding failed")
-					oc.sendSystemNotice(ctx, portal, "Audio understanding failed. Please try again or switch to an audio-capable model using /model.")
-					return &bridgev2.MatrixMessageResponse{}, nil
+					return nil, messageSendStatusError(err, "Audio understanding failed. Please try again or switch to an audio-capable model using /model.", "")
 				}
 
 				combined := buildAudioUnderstandingMessage(caption, hasUserCaption, transcript)
 				if combined == "" {
-					oc.sendSystemNotice(ctx, portal, "Audio understanding failed. Please try again or switch to an audio-capable model using /model.")
-					return &bridgev2.MatrixMessageResponse{}, nil
+					return nil, messageSendStatusError(fmt.Errorf("audio understanding produced empty result"), "Audio understanding failed. Please try again or switch to an audio-capable model using /model.", "")
 				}
 				return dispatchTextOnly(combined)
 			}
 		}
 
-		oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
+		return nil, unsupportedMessageStatus(fmt.Errorf(
 			"The current model (%s) does not support %s. Please switch to a capable model using /model.",
 			oc.effectiveModel(meta), config.capabilityName,
 		))
-		return &bridgev2.MatrixMessageResponse{}, nil
 	}
 
 	// Build prompt with media
@@ -833,14 +846,12 @@ func (oc *AIClient) handleTextFileMessage(
 	content, truncated, err := oc.downloadTextFile(ctx, mediaURL, encryptedFile, mimeType)
 	if err != nil {
 		oc.log.Warn().Err(err).Msg("Text file understanding failed")
-		oc.sendSystemNotice(ctx, portal, "Text file understanding failed. Please upload a UTF-8 text file under 5 MB.")
-		return &bridgev2.MatrixMessageResponse{}, nil
+		return nil, messageSendStatusError(err, "Text file understanding failed. Please upload a UTF-8 text file under 5 MB.", "")
 	}
 
 	combined := buildTextFileMessage(caption, hasUserCaption, fileName, mimeType, content, truncated)
 	if combined == "" {
-		oc.sendSystemNotice(ctx, portal, "Text file understanding failed. Please upload a UTF-8 text file under 5 MB.")
-		return &bridgev2.MatrixMessageResponse{}, nil
+		return nil, messageSendStatusError(fmt.Errorf("text file understanding produced empty result"), "Text file understanding failed. Please upload a UTF-8 text file under 5 MB.", "")
 	}
 
 	eventID := id.EventID("")

@@ -162,7 +162,7 @@ func ParseContextLengthError(err error) *ContextLengthError {
 		return nil
 	}
 
-	cle = &ContextLengthError{OriginalError: err}
+	cle := &ContextLengthError{OriginalError: err}
 
 	// Parse token counts from message
 	// Pattern: "maximum context length is X tokens"
