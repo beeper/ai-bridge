@@ -15,15 +15,24 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
-// makeUserLoginID creates a unique login ID for each account.
-// The ID includes the provider and a hash of the API key to ensure
-// multiple accounts of the same provider have distinct login IDs.
+// makeUserLoginID creates a stable login ID for a provider+API key pair.
+// Use makeUserLoginIDWithSuffix to disambiguate duplicates of the same config.
 func makeUserLoginID(mxid id.UserID, provider, apiKey string) networkid.UserLoginID {
+	return makeUserLoginIDWithSuffix(mxid, provider, apiKey, "")
+}
+
+// makeUserLoginIDWithSuffix creates a login ID with an extra suffix for duplicate accounts.
+// The suffix is appended verbatim and should be URL-safe.
+func makeUserLoginIDWithSuffix(mxid id.UserID, provider, apiKey, suffix string) networkid.UserLoginID {
 	escaped := url.PathEscape(string(mxid))
 	// Hash the API key to create unique but stable identifier per account
 	keyHash := sha256.Sum256([]byte(apiKey))
 	keyHashShort := hex.EncodeToString(keyHash[:8]) // First 8 bytes = 16 hex chars
-	return networkid.UserLoginID(fmt.Sprintf("openai:%s:%s:%s", escaped, provider, keyHashShort))
+	base := fmt.Sprintf("openai:%s:%s:%s", escaped, provider, keyHashShort)
+	if suffix == "" {
+		return networkid.UserLoginID(base)
+	}
+	return networkid.UserLoginID(fmt.Sprintf("%s:%s", base, suffix))
 }
 
 func portalKeyForChat(loginID networkid.UserLoginID) networkid.PortalKey {

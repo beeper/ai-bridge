@@ -140,6 +140,11 @@ func ParseContextLengthError(err error) *ContextLengthError {
 		return nil
 	}
 
+	var cle *ContextLengthError
+	if errors.As(err, &cle) {
+		return cle
+	}
+
 	var apiErr *openai.Error
 	if !errors.As(err, &apiErr) {
 		return nil

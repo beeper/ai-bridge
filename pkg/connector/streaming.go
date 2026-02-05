@@ -1906,7 +1906,7 @@ func (oc *AIClient) streamChatCompletions(
 			callID string
 			output string
 		}
-		toolCallParams := make([]openai.ChatCompletionMessageToolCallParam, 0, len(activeTools))
+		toolCallParams := make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(activeTools))
 		toolResults := make([]chatToolResult, 0, len(activeTools))
 
 		if len(activeTools) > 0 {
@@ -1929,13 +1929,15 @@ func (oc *AIClient) streamChatCompletions(
 				}
 
 				argsJSON := normalizeToolArgsJSON(tool.input.String())
-				toolCallParams = append(toolCallParams, openai.ChatCompletionMessageToolCallParam{
-					ID: tool.callID,
-					Function: openai.ChatCompletionMessageToolCallFunctionParam{
-						Name:      toolName,
-						Arguments: argsJSON,
+				toolCallParams = append(toolCallParams, openai.ChatCompletionMessageToolCallUnionParam{
+					OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+						ID: tool.callID,
+						Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+							Name:      toolName,
+							Arguments: argsJSON,
+						},
+						Type: constant.ValueOf[constant.Function](),
 					},
-					Type: constant.ValueOf[constant.Function](),
 				})
 
 				touchTyping()

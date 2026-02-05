@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/rs/xid"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 )
@@ -181,6 +182,22 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, provider, apiKey, baseUR
 	apiKey = strings.TrimSpace(apiKey)
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	loginID := makeUserLoginID(ol.User.MXID, provider, apiKey)
+	if ol.Connector != nil && ol.Connector.br != nil {
+		if existing, _ := ol.Connector.br.GetExistingUserLoginByID(ctx, loginID); existing != nil {
+			foundUnique := false
+			for i := 0; i < 5; i++ {
+				candidate := makeUserLoginIDWithSuffix(ol.User.MXID, provider, apiKey, xid.New().String())
+				if existing, _ := ol.Connector.br.GetExistingUserLoginByID(ctx, candidate); existing == nil {
+					loginID = candidate
+					foundUnique = true
+					break
+				}
+			}
+			if !foundUnique {
+				loginID = makeUserLoginIDWithSuffix(ol.User.MXID, provider, apiKey, xid.New().String())
+			}
+		}
+	}
 	meta := &UserLoginMetadata{
 		Provider: provider,
 		APIKey:   apiKey,

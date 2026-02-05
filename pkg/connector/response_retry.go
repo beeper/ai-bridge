@@ -116,8 +116,7 @@ func (oc *AIClient) responseWithRetry(
 			// Fall back to reactive truncation
 			truncated := oc.truncatePrompt(currentPrompt)
 			if len(truncated) <= 2 {
-				oc.notifyContextLengthExceeded(ctx, portal, cle, false)
-				return false, nil
+				return false, cle
 			}
 
 			oc.notifyContextLengthExceeded(ctx, portal, cle, true)

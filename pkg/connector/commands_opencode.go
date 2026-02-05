@@ -15,7 +15,7 @@ import (
 var CommandOpenCodeConnect = registerAICommand(commandregistry.Definition{
 	Name:          "opencode-connect",
 	Description:   "Connect to an OpenCode server and sync sessions",
-	Args:          "<http_url> <password> [username]",
+	Args:          "[http_url] [password] [username]",
 	Section:       HelpSectionAI,
 	RequiresLogin: true,
 	Handler:       fnOpenCodeConnect,
@@ -37,13 +37,22 @@ func fnOpenCodeConnect(ce *commands.Event) {
 		return
 	}
 
-	if len(ce.Args) < 2 {
-		ce.Reply("Usage: !ai opencode-connect <http_url> <password> [username]")
+	url := "http://127.0.0.1:4096"
+	if len(ce.Args) >= 1 {
+		url = strings.TrimSpace(ce.Args[0])
+	}
+	if url == "" {
+		ce.Reply("Usage: !ai opencode-connect [http_url] [password] [username]\nDefault http_url: http://127.0.0.1:4096")
 		return
 	}
 
-	url := strings.TrimSpace(ce.Args[0])
-	password := strings.TrimSpace(ce.Args[1])
+	password := ""
+	if len(ce.Args) >= 2 {
+		candidate := strings.TrimSpace(ce.Args[1])
+		if candidate != "" && candidate != "-" {
+			password = candidate
+		}
+	}
 	username := "opencode"
 	if len(ce.Args) >= 3 {
 		username = strings.TrimSpace(ce.Args[2])
