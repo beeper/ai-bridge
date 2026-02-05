@@ -182,6 +182,26 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, provider, apiKey, baseUR
 	apiKey = strings.TrimSpace(apiKey)
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	loginID := makeUserLoginID(ol.User.MXID, provider, apiKey)
+	remoteName := formatRemoteName(provider, apiKey)
+	if ol.User != nil {
+		dupCount := 0
+		for _, existing := range ol.User.GetUserLogins() {
+			if existing == nil || existing.Metadata == nil {
+				continue
+			}
+			meta, ok := existing.Metadata.(*UserLoginMetadata)
+			if !ok || meta == nil {
+				continue
+			}
+			existingBase := strings.TrimRight(strings.TrimSpace(meta.BaseURL), "/")
+			if meta.Provider == provider && meta.APIKey == apiKey && existingBase == baseURL {
+				dupCount++
+			}
+		}
+		if dupCount > 0 {
+			remoteName = fmt.Sprintf("%s (%d)", remoteName, dupCount+1)
+		}
+	}
 	if ol.Connector != nil && ol.Connector.br != nil {
 		if existing, _ := ol.Connector.br.GetExistingUserLoginByID(ctx, loginID); existing != nil {
 			foundUnique := false
@@ -208,7 +228,7 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, provider, apiKey, baseUR
 	}
 	login, err := ol.User.NewLogin(ctx, &database.UserLogin{
 		ID:         loginID,
-		RemoteName: formatRemoteName(provider, apiKey),
+		RemoteName: remoteName,
 		Metadata:   meta,
 	}, nil)
 	if err != nil {
