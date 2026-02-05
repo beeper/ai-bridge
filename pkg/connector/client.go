@@ -279,6 +279,10 @@ type AIClient struct {
 	activeRoomCancels   map[id.RoomID]context.CancelFunc
 	activeRoomCancelsMu sync.Mutex
 
+	// Pending group history buffers (mention-gated group context).
+	groupHistoryBuffers map[id.RoomID]*groupHistoryBuffer
+	groupHistoryMu      sync.Mutex
+
 	// Subagent runs (sessions_spawn)
 	subagentRuns   map[string]*subagentRun
 	subagentRunsMu sync.Mutex
@@ -351,14 +355,15 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 
 	// Create base client struct
 	oc := &AIClient{
-		UserLogin:         login,
-		connector:         connector,
-		apiKey:            key,
-		log:               log,
-		activeRooms:       make(map[id.RoomID]bool),
-		pendingQueues:     make(map[id.RoomID]*pendingQueue),
-		activeRoomCancels: make(map[id.RoomID]context.CancelFunc),
-		subagentRuns:      make(map[string]*subagentRun),
+		UserLogin:           login,
+		connector:           connector,
+		apiKey:              key,
+		log:                 log,
+		activeRooms:         make(map[id.RoomID]bool),
+		pendingQueues:       make(map[id.RoomID]*pendingQueue),
+		activeRoomCancels:   make(map[id.RoomID]context.CancelFunc),
+		subagentRuns:        make(map[string]*subagentRun),
+		groupHistoryBuffers: make(map[id.RoomID]*groupHistoryBuffer),
 	}
 
 	// Initialize inbound message processing with config values
@@ -649,7 +654,17 @@ func (oc *AIClient) processPendingQueue(ctx context.Context, roomID id.RoomID) {
 		var err error
 
 		if actionSnapshot.mode == QueueModeCollect && len(actionSnapshot.items) > 0 {
-			items := oc.popQueueItems(roomID, len(actionSnapshot.items))
+			count := len(actionSnapshot.items)
+			if count > 1 {
+				firstKey := oc.queueThreadKey(actionSnapshot.items[0].pending.Event)
+				for i := 1; i < count; i++ {
+					if oc.queueThreadKey(actionSnapshot.items[i].pending.Event) != firstKey {
+						count = i
+						break
+					}
+				}
+			}
+			items := oc.popQueueItems(roomID, count)
 			if len(items) == 0 {
 				oc.releaseRoom(roomID)
 				return
@@ -1521,9 +1536,14 @@ func (oc *AIClient) buildBasePrompt(
 	if systemPrompt != "" {
 		prompt = append(prompt, openai.SystemMessage(systemPrompt))
 	}
+	prompt = append(prompt, oc.buildAdditionalSystemPrompts(ctx, portal, meta)...)
 
 	// Add history
 	historyLimit := oc.historyLimit(meta)
+	resetAt := int64(0)
+	if meta != nil {
+		resetAt = meta.SessionResetAt
+	}
 	if historyLimit > 0 {
 		history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, historyLimit)
 		if err != nil {
@@ -1532,6 +1552,9 @@ func (oc *AIClient) buildBasePrompt(
 		for i := len(history) - 1; i >= 0; i-- {
 			msgMeta := messageMeta(history[i])
 			if !shouldIncludeInHistory(msgMeta) {
+				continue
+			}
+			if resetAt > 0 && history[i].Timestamp.UnixMilli() < resetAt {
 				continue
 			}
 			// Include message ID so the AI can reference specific messages for reactions/replies.
@@ -1557,6 +1580,21 @@ func (oc *AIClient) buildPrompt(ctx context.Context, portal *bridgev2.Portal, me
 	return oc.buildPromptWithLinkContext(ctx, portal, meta, latest, nil, eventID)
 }
 
+func (oc *AIClient) applyAbortHint(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, body string) string {
+	if meta == nil || !meta.AbortedLastRun {
+		return body
+	}
+	meta.AbortedLastRun = false
+	if portal != nil {
+		oc.savePortalQuiet(ctx, portal, "abort hint")
+	}
+	note := "Note: The previous agent run was aborted by the user. Resume carefully or ask for clarification."
+	if strings.TrimSpace(body) == "" {
+		return note
+	}
+	return note + "\n\n" + body
+}
+
 // buildPromptWithLinkContext builds a prompt with the latest user message and optional link context.
 // If rawEventContent is provided, it will extract existing link previews from it.
 // URLs in the message will be auto-fetched if no preview exists.
@@ -1575,10 +1613,10 @@ func (oc *AIClient) buildPromptWithLinkContext(
 	prompt = oc.injectMemoryContext(ctx, portal, meta, prompt)
 
 	// Build final message with link context
-	finalMessage := latest
+	finalMessage := oc.applyAbortHint(ctx, portal, meta, latest)
 	linkContext := oc.buildLinkContext(ctx, latest, rawEventContent)
 	if linkContext != "" {
-		finalMessage = latest + linkContext
+		finalMessage = finalMessage + linkContext
 	}
 
 	// Include reaction feedback from users (like OpenClaw's system events)
@@ -1677,6 +1715,7 @@ func (oc *AIClient) buildPromptWithMedia(
 	}
 	prompt = oc.injectMemoryContext(ctx, portal, meta, prompt)
 
+	caption = oc.applyAbortHint(ctx, portal, meta, caption)
 	captionWithID := appendMessageIDHint(caption, eventID)
 	textContent := openai.ChatCompletionContentPartUnionParam{
 		OfText: &openai.ChatCompletionContentPartTextParam{
@@ -1811,9 +1850,14 @@ func (oc *AIClient) buildPromptUpToMessage(
 	if systemPrompt != "" {
 		prompt = append(prompt, openai.SystemMessage(systemPrompt))
 	}
+	prompt = append(prompt, oc.buildAdditionalSystemPrompts(ctx, portal, meta)...)
 
 	// Get history
 	historyLimit := oc.historyLimit(meta)
+	resetAt := int64(0)
+	if meta != nil {
+		resetAt = meta.SessionResetAt
+	}
 	if historyLimit > 0 {
 		history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, historyLimit)
 		if err != nil {
@@ -1838,6 +1882,9 @@ func (oc *AIClient) buildPromptUpToMessage(
 
 			// Skip commands and non-conversation messages
 			if !shouldIncludeInHistory(msgMeta) {
+				continue
+			}
+			if resetAt > 0 && msg.Timestamp.UnixMilli() < resetAt {
 				continue
 			}
 
@@ -2121,6 +2168,11 @@ func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal)
 
 	// Fall back to model ghost
 	modelID := oc.effectiveModel(meta)
+	if agentID == "" {
+		if override, ok := modelOverrideFromContext(ctx); ok {
+			modelID = override
+		}
+	}
 	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, modelUserID(modelID))
 	if err != nil {
 		oc.log.Warn().Err(err).Str("model", modelID).Msg("Failed to get model ghost")
@@ -2143,12 +2195,20 @@ func (oc *AIClient) ensureModelInRoom(ctx context.Context, portal *bridgev2.Port
 	return intent.EnsureJoined(ctx, portal.MXID)
 }
 
-func (oc *AIClient) backgroundContext(_ context.Context) context.Context {
+func (oc *AIClient) backgroundContext(ctx context.Context) context.Context {
 	// Always prefer BackgroundCtx for long-running operations that outlive request context
 	if oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.BackgroundCtx != nil {
-		return oc.UserLogin.Bridge.BackgroundCtx
+		base := oc.UserLogin.Bridge.BackgroundCtx
+		if model, ok := modelOverrideFromContext(ctx); ok {
+			return withModelOverride(base, model)
+		}
+		return base
 	}
-	return context.Background()
+	base := context.Background()
+	if model, ok := modelOverrideFromContext(ctx); ok {
+		return withModelOverride(base, model)
+	}
+	return base
 }
 
 func ptrIfNotEmpty(value string) *string {
@@ -2209,6 +2269,11 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 
 	last := entries[len(entries)-1]
 	ctx := oc.backgroundContext(context.Background())
+	if last.Meta != nil {
+		if override := oc.effectiveModel(last.Meta); strings.TrimSpace(override) != "" {
+			ctx = withModelOverride(ctx, override)
+		}
+	}
 
 	// Combine raw bodies if multiple
 	combinedRaw, count := CombineDebounceEntries(entries)

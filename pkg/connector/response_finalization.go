@@ -15,17 +15,27 @@ import (
 )
 
 // sendInitialStreamMessage sends the first message in a streaming session and returns its event ID
-func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string, turnID string, replyTo id.EventID) id.EventID {
+func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string, turnID string, replyTarget ReplyTarget) id.EventID {
 	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return ""
 	}
 
 	var relatesTo map[string]any
-	if replyTo != "" {
+	if replyTarget.ThreadRoot != "" {
+		replyTo := replyTarget.EffectiveReplyTo()
 		relatesTo = map[string]any{
+			"rel_type":        RelThread,
+			"event_id":        replyTarget.ThreadRoot.String(),
+			"is_falling_back": true,
 			"m.in_reply_to": map[string]any{
 				"event_id": replyTo.String(),
+			},
+		}
+	} else if replyTarget.ReplyTo != "" {
+		relatesTo = map[string]any{
+			"m.in_reply_to": map[string]any{
+				"event_id": replyTarget.ReplyTo.String(),
 			},
 		}
 	}
@@ -67,6 +77,9 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 		oc.sendFinalHeartbeatTurn(ctx, portal, state, meta)
 		return
 	}
+	if state != nil && state.suppressSend {
+		return
+	}
 	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
 		return
@@ -79,7 +92,15 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	if responseMode == agents.ResponseModeRaw {
 		// Raw mode: send content directly without directive processing
 		rendered := format.RenderMarkdown(rawContent, true, true)
-		oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, intent, rendered, nil)
+		replyTo := id.EventID("")
+		if state != nil {
+			replyTo = state.replyTarget.EffectiveReplyTo()
+		}
+		if replyTo != "" {
+			oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, intent, rendered, &replyTo)
+		} else {
+			oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, intent, rendered, nil)
+		}
 		return
 	}
 
@@ -109,6 +130,8 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 
 	// Use cleaned content (directives stripped)
 	cleanedContent := stripMessageIDHintLines(directives.Text)
+
+	finalReplyTarget := oc.resolveFinalReplyTarget(meta, state, directives)
 	responsePrefix := resolveResponsePrefixForReply(oc, &oc.connector.Config, meta)
 	if responsePrefix != "" && strings.TrimSpace(cleanedContent) != "" {
 		if !strings.HasPrefix(cleanedContent, responsePrefix) {
@@ -163,10 +186,10 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 		"event_id": state.initialEventID.String(),
 	}
 
-	// Add reply relation if directive specifies one
-	if directives.ReplyToEventID != "" {
+	// Add reply relation if enabled
+	if finalReplyTarget.EffectiveReplyTo() != "" {
 		relatesTo["m.in_reply_to"] = map[string]any{
-			"event_id": directives.ReplyToEventID.String(),
+			"event_id": finalReplyTarget.EffectiveReplyTo().String(),
 		}
 	}
 

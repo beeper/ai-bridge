@@ -17,6 +17,42 @@ type subagentRun struct {
 	Timeout      time.Duration
 }
 
+func (oc *AIClient) listSubagentRunsForParent(parent id.RoomID) []*subagentRun {
+	if oc == nil || parent == "" {
+		return nil
+	}
+	oc.subagentRunsMu.Lock()
+	defer oc.subagentRunsMu.Unlock()
+	runs := make([]*subagentRun, 0)
+	for _, run := range oc.subagentRuns {
+		if run != nil && run.ParentRoomID == parent {
+			runs = append(runs, run)
+		}
+	}
+	return runs
+}
+
+func (oc *AIClient) stopSubagentRuns(parent id.RoomID) int {
+	if oc == nil || parent == "" {
+		return 0
+	}
+	runs := oc.listSubagentRunsForParent(parent)
+	stopped := 0
+	for _, run := range runs {
+		if run == nil || run.ChildRoomID == "" {
+			continue
+		}
+		canceled := oc.cancelRoomRun(run.ChildRoomID)
+		queueSnapshot := oc.getQueueSnapshot(run.ChildRoomID)
+		hasQueued := queueSnapshot != nil && (len(queueSnapshot.items) > 0 || queueSnapshot.droppedCount > 0)
+		oc.clearPendingQueue(run.ChildRoomID)
+		if canceled || hasQueued {
+			stopped++
+		}
+	}
+	return stopped
+}
+
 func (oc *AIClient) registerSubagentRun(run *subagentRun) {
 	if oc == nil || run == nil || run.RunID == "" {
 		return

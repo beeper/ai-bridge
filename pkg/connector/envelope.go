@@ -154,6 +154,15 @@ func formatAgentEnvelope(params struct {
 
 var senderMetaLineRE = regexp.MustCompile(`(?i)(^|\n)\[from:\s*[^\]]+\]`)
 
+func hasSenderPrefix(body string, senderLabel string) bool {
+	label := strings.TrimSpace(senderLabel)
+	if label == "" || strings.TrimSpace(body) == "" {
+		return false
+	}
+	pattern := regexp.MustCompile(`(?i)(^|\n|\]\s*)` + regexp.QuoteMeta(label) + `:\s`)
+	return pattern.MatchString(body)
+}
+
 func formatInboundBodyWithSenderMeta(body string, senderLabel string, isGroup bool) string {
 	if !isGroup || strings.TrimSpace(body) == "" {
 		return body
@@ -166,8 +175,7 @@ func formatInboundBodyWithSenderMeta(body string, senderLabel string, isGroup bo
 		return body
 	}
 	// Treat "Alice: hi" as already containing sender meta.
-	pattern := regexp.MustCompile(`(?i)(^|\n|\]\s*)` + regexp.QuoteMeta(label) + `:\s`)
-	if pattern.MatchString(body) {
+	if hasSenderPrefix(body, label) {
 		return body
 	}
 	return body + "\n[from: " + label + "]"

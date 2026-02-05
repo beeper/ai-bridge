@@ -109,3 +109,14 @@ func matchesMentionPatterns(text string, mentionRegexes []*regexp.Regexp) bool {
 	}
 	return false
 }
+
+func stripMentionPatterns(text string, mentionRegexes []*regexp.Regexp) string {
+	if text == "" || len(mentionRegexes) == 0 {
+		return strings.TrimSpace(text)
+	}
+	cleaned := text
+	for _, re := range mentionRegexes {
+		cleaned = re.ReplaceAllString(cleaned, " ")
+	}
+	return strings.TrimSpace(strings.Join(strings.Fields(cleaned), " "))
+}

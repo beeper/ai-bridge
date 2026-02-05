@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -105,11 +104,49 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 			rawBody = loc.Text
 		}
 	}
-	queueDirective := extractQueueDirective(rawBody)
-	if queueDirective.HasDirective {
-		rawBody = strings.TrimSpace(queueDirective.Cleaned)
-	}
 	rawBodyOriginal := rawBody
+	commandAuthorized := oc.isCommandAuthorizedSender(msg.Event.Sender)
+
+	isGroup := oc.isGroupChat(ctx, portal)
+	roomName := ""
+	if isGroup {
+		roomName = oc.matrixRoomDisplayName(ctx, portal)
+	}
+	senderName := oc.matrixDisplayName(ctx, portal.MXID, msg.Event.Sender)
+
+	var agentDef *agents.AgentDefinition
+	if agentID := resolveAgentID(meta); agentID != "" {
+		store := NewAgentStoreAdapter(oc)
+		if agent, err := store.GetAgentByID(ctx, agentID); err == nil {
+			agentDef = agent
+		}
+	}
+	mentionRegexes := buildMentionRegexes(&oc.connector.Config, agentDef)
+
+	commandBody := rawBody
+	if isGroup {
+		commandBody = stripMentionPatterns(commandBody, mentionRegexes)
+	}
+	if !commandAuthorized && isControlCommandMessage(commandBody) {
+		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+	}
+
+	inlineDirs := inlineDirectives{cleaned: rawBody}
+	if commandAuthorized {
+		inlineDirs = parseInlineDirectives(rawBody)
+	}
+	rawBody = strings.TrimSpace(inlineDirs.cleaned)
+
+	directiveBody := rawBody
+	if isGroup {
+		directiveBody = stripMentionPatterns(directiveBody, mentionRegexes)
+	}
+	directiveOnly := commandAuthorized && inlineDirs.hasAnyDirective() && strings.TrimSpace(directiveBody) == ""
+
+	queueDirective := inlineDirs.queue
+	if !commandAuthorized {
+		queueDirective = QueueDirective{Cleaned: rawBody}
+	}
 	inlineMode := QueueMode("")
 	inlineOpts := QueueInlineOptions{}
 	if !queueDirective.QueueReset {
@@ -123,7 +160,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		}
 	}
 	queueSettings, _, storeRef, sessionKey := oc.resolveQueueSettingsForPortal(ctx, portal, meta, inlineMode, inlineOpts)
-	if queueDirective.HasDirective {
+	if commandAuthorized && queueDirective.HasDirective {
 		queueErrors := []string{}
 		if queueDirective.HasDebounce && queueDirective.DebounceMs == nil {
 			queueErrors = append(queueErrors, fmt.Sprintf(
@@ -145,67 +182,343 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		}
 		if len(queueErrors) > 0 {
 			oc.sendSystemNotice(ctx, portal, strings.Join(queueErrors, " "))
-			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+			if directiveOnly {
+				return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+			}
 		}
 	}
-	if queueDirective.HasDirective {
-		if queueDirective.QueueReset {
-			if sessionKey != "" {
-				oc.updateSessionEntry(ctx, storeRef, sessionKey, func(entry sessionEntry) sessionEntry {
-					entry.QueueMode = ""
-					entry.QueueDebounceMs = nil
-					entry.QueueCap = nil
-					entry.QueueDrop = ""
-					entry.UpdatedAt = time.Now().UnixMilli()
-					return entry
-				})
-			}
-			oc.clearPendingQueue(portal.MXID)
-			queueSettings, _, _, _ = oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
-		} else if sessionKey != "" {
-			oc.updateSessionEntry(ctx, storeRef, sessionKey, func(entry sessionEntry) sessionEntry {
-				if queueDirective.QueueMode != "" {
-					entry.QueueMode = string(queueDirective.QueueMode)
-				}
-				if queueDirective.DebounceMs != nil {
-					entry.QueueDebounceMs = queueDirective.DebounceMs
-				}
-				if queueDirective.Cap != nil {
-					entry.QueueCap = queueDirective.Cap
-				}
-				if queueDirective.DropPolicy != nil {
-					entry.QueueDrop = string(*queueDirective.DropPolicy)
-				}
-				entry.UpdatedAt = time.Now().UnixMilli()
-				return entry
-			})
+	if directiveOnly {
+		responseLines := []string{}
+		metaChanged := false
+
+		if inlineDirs.invalidThink {
+			oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
+				"Unrecognized thinking level \"%s\". Valid: off|minimal|low|medium|high|xhigh.",
+				inlineDirs.rawThink,
+			))
+			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 		}
-		if rawBody == "" {
+		if inlineDirs.hasThink {
+			if inlineDirs.thinkLevel == "" {
+				current := meta.ThinkingLevel
+				if current == "" {
+					if meta.EmitThinking {
+						current = "on"
+					} else {
+						current = "off"
+					}
+				}
+				responseLines = append(responseLines, fmt.Sprintf("Thinking: %s", current))
+			} else {
+				applyThinkingLevel(meta, inlineDirs.thinkLevel)
+				metaChanged = true
+				responseLines = append(responseLines, formatThinkingAck(inlineDirs.thinkLevel))
+			}
+		}
+
+		if inlineDirs.invalidVerbose {
+			oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
+				"Unrecognized verbose level \"%s\". Valid: on|off|full.",
+				inlineDirs.rawVerbose,
+			))
+			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+		}
+		if inlineDirs.hasVerbose {
+			if inlineDirs.verboseLevel == "" {
+				current := meta.VerboseLevel
+				if current == "" {
+					current = "off"
+				}
+				responseLines = append(responseLines, fmt.Sprintf("Verbosity: %s", current))
+			} else {
+				meta.VerboseLevel = inlineDirs.verboseLevel
+				metaChanged = true
+				responseLines = append(responseLines, formatVerboseAck(inlineDirs.verboseLevel))
+			}
+		}
+
+		if inlineDirs.invalidReasoning {
+			oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
+				"Unrecognized reasoning level \"%s\". Valid: off|on|low|medium|high|xhigh.",
+				inlineDirs.rawReasoning,
+			))
+			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+		}
+		if inlineDirs.hasReasoning {
+			if inlineDirs.reasoningLevel == "" {
+				current := meta.ReasoningEffort
+				if current == "" {
+					if meta.EmitThinking {
+						current = "on"
+					} else {
+						current = "off"
+					}
+				}
+				responseLines = append(responseLines, fmt.Sprintf("Reasoning: %s", current))
+			} else {
+				applyReasoningLevel(meta, inlineDirs.reasoningLevel)
+				metaChanged = true
+				responseLines = append(responseLines, formatReasoningAck(inlineDirs.reasoningLevel))
+			}
+		}
+
+		if inlineDirs.invalidElevated {
+			oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
+				"Unrecognized elevated level \"%s\". Valid: off|on|ask|full.",
+				inlineDirs.rawElevated,
+			))
+			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+		}
+		if inlineDirs.hasElevated {
+			if inlineDirs.elevatedLevel == "" {
+				current := meta.ElevatedLevel
+				if current == "" {
+					current = "off"
+				}
+				responseLines = append(responseLines, fmt.Sprintf("Elevated access: %s", current))
+			} else {
+				meta.ElevatedLevel = inlineDirs.elevatedLevel
+				metaChanged = true
+				responseLines = append(responseLines, formatElevatedAck(inlineDirs.elevatedLevel))
+			}
+		}
+
+		if inlineDirs.hasModel {
+			modelAck, modelChanged, modelErr := oc.applyModelDirective(ctx, portal, meta, inlineDirs.rawModel, true)
+			if modelErr != "" {
+				oc.sendSystemNotice(ctx, portal, modelErr)
+				return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+			}
+			if modelAck != "" {
+				responseLines = append(responseLines, modelAck)
+			}
+			metaChanged = metaChanged || modelChanged
+		}
+
+		if queueDirective.HasDirective {
 			wantsStatus := queueDirective.QueueMode == "" && !queueDirective.QueueReset && !queueDirective.HasOptions
 			if wantsStatus {
-				oc.sendSystemNotice(ctx, portal, buildQueueStatusLine(queueSettings))
+				responseLines = append(responseLines, buildQueueStatusLine(queueSettings))
 			} else {
+				if queueDirective.QueueReset {
+					if sessionKey != "" {
+						oc.updateSessionEntry(ctx, storeRef, sessionKey, func(entry sessionEntry) sessionEntry {
+							entry.QueueMode = ""
+							entry.QueueDebounceMs = nil
+							entry.QueueCap = nil
+							entry.QueueDrop = ""
+							entry.UpdatedAt = time.Now().UnixMilli()
+							return entry
+						})
+					}
+					oc.clearPendingQueue(portal.MXID)
+				} else if sessionKey != "" {
+					oc.updateSessionEntry(ctx, storeRef, sessionKey, func(entry sessionEntry) sessionEntry {
+						if queueDirective.QueueMode != "" {
+							entry.QueueMode = string(queueDirective.QueueMode)
+						}
+						if queueDirective.DebounceMs != nil {
+							entry.QueueDebounceMs = queueDirective.DebounceMs
+						}
+						if queueDirective.Cap != nil {
+							entry.QueueCap = queueDirective.Cap
+						}
+						if queueDirective.DropPolicy != nil {
+							entry.QueueDrop = string(*queueDirective.DropPolicy)
+						}
+						entry.UpdatedAt = time.Now().UnixMilli()
+						return entry
+					})
+				}
+				queueSettings, _, _, _ = oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
 				ack := buildQueueDirectiveAck(queueDirective)
 				if strings.TrimSpace(ack) == "" {
 					ack = "OK."
 				}
-				oc.sendSystemNotice(ctx, portal, ack)
+				responseLines = append(responseLines, ack)
 			}
+		}
+
+		if metaChanged {
+			oc.savePortalQuiet(ctx, portal, "directive change")
+		}
+
+		statusText := ""
+		if inlineDirs.hasStatus {
+			statusText = oc.buildStatusText(ctx, portal, meta, isGroup, queueSettings)
+		}
+		if statusText != "" {
+			if len(responseLines) == 0 {
+				responseLines = append(responseLines, statusText)
+			} else {
+				responseLines = append(responseLines, statusText)
+			}
+		}
+		if len(responseLines) == 0 && inlineDirs.hasAnyDirective() {
+			responseLines = append(responseLines, "OK.")
+		}
+		if len(responseLines) > 0 {
+			oc.sendSystemNotice(ctx, portal, strings.Join(responseLines, "\n"))
+		}
+		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+	}
+
+	runMeta := meta
+	runCtx := ctx
+	inlineResponses := []string{}
+	if commandAuthorized && inlineDirs.hasAnyDirective() {
+		if inlineDirs.invalidThink {
+			inlineResponses = append(inlineResponses, fmt.Sprintf(
+				"Unrecognized thinking level \"%s\". Valid: off|minimal|low|medium|high|xhigh.",
+				inlineDirs.rawThink,
+			))
+		} else if inlineDirs.hasThink && inlineDirs.thinkLevel != "" {
+			if runMeta == meta {
+				runMeta = clonePortalMetadata(meta)
+			}
+			applyThinkingLevel(runMeta, inlineDirs.thinkLevel)
+			inlineResponses = append(inlineResponses, formatThinkingAck(inlineDirs.thinkLevel))
+		}
+
+		if inlineDirs.invalidVerbose {
+			inlineResponses = append(inlineResponses, fmt.Sprintf(
+				"Unrecognized verbose level \"%s\". Valid: on|off|full.",
+				inlineDirs.rawVerbose,
+			))
+		} else if inlineDirs.hasVerbose && inlineDirs.verboseLevel != "" {
+			if runMeta == meta {
+				runMeta = clonePortalMetadata(meta)
+			}
+			runMeta.VerboseLevel = inlineDirs.verboseLevel
+			inlineResponses = append(inlineResponses, formatVerboseAck(inlineDirs.verboseLevel))
+		}
+
+		if inlineDirs.invalidReasoning {
+			inlineResponses = append(inlineResponses, fmt.Sprintf(
+				"Unrecognized reasoning level \"%s\". Valid: off|on|low|medium|high|xhigh.",
+				inlineDirs.rawReasoning,
+			))
+		} else if inlineDirs.hasReasoning && inlineDirs.reasoningLevel != "" {
+			if runMeta == meta {
+				runMeta = clonePortalMetadata(meta)
+			}
+			applyReasoningLevel(runMeta, inlineDirs.reasoningLevel)
+			inlineResponses = append(inlineResponses, formatReasoningAck(inlineDirs.reasoningLevel))
+		}
+
+		if inlineDirs.invalidElevated {
+			inlineResponses = append(inlineResponses, fmt.Sprintf(
+				"Unrecognized elevated level \"%s\". Valid: off|on|ask|full.",
+				inlineDirs.rawElevated,
+			))
+		} else if inlineDirs.hasElevated && inlineDirs.elevatedLevel != "" {
+			if runMeta == meta {
+				runMeta = clonePortalMetadata(meta)
+			}
+			runMeta.ElevatedLevel = inlineDirs.elevatedLevel
+			inlineResponses = append(inlineResponses, formatElevatedAck(inlineDirs.elevatedLevel))
+		}
+
+		if inlineDirs.hasModel && strings.TrimSpace(inlineDirs.rawModel) != "" {
+			if runMeta == meta {
+				runMeta = clonePortalMetadata(meta)
+			}
+			ack, modelChanged, modelErr := oc.applyModelDirective(ctx, portal, runMeta, inlineDirs.rawModel, false)
+			if modelErr != "" {
+				inlineResponses = append(inlineResponses, modelErr)
+			} else {
+				if ack != "" {
+					inlineResponses = append(inlineResponses, ack)
+				}
+				if modelChanged {
+					runCtx = withModelOverride(runCtx, oc.effectiveModel(runMeta))
+				}
+			}
+		}
+
+		if queueDirective.HasDirective {
+			wantsStatus := queueDirective.QueueMode == "" && !queueDirective.QueueReset && !queueDirective.HasOptions
+			if wantsStatus {
+				inlineResponses = append(inlineResponses, buildQueueStatusLine(queueSettings))
+			} else if !queueDirective.QueueReset {
+				ack := buildQueueDirectiveAck(queueDirective)
+				if strings.TrimSpace(ack) == "" {
+					ack = "OK."
+				}
+				inlineResponses = append(inlineResponses, ack)
+			}
+		}
+
+		if inlineDirs.hasStatus {
+			inlineResponses = append(inlineResponses, oc.buildStatusText(ctx, portal, meta, isGroup, queueSettings))
+		}
+	}
+
+	commandBody = rawBody
+	if isGroup {
+		commandBody = stripMentionPatterns(commandBody, mentionRegexes)
+	}
+	if commandAuthorized {
+		if cmd, ok := parseInboundCommand(commandBody); ok {
+			switch cmd.Name {
+			case "stop", "abort", "interrupt", "exit", "wait", "esc":
+				stopped := oc.abortRoom(ctx, portal, meta)
+				oc.sendSystemNotice(ctx, portal, formatAbortNotice(stopped))
+				return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+			default:
+				result := oc.handleInboundCommand(ctx, portal, meta, isGroup, queueSettings, cmd)
+				if result.handled {
+					if strings.TrimSpace(result.response) != "" {
+						oc.sendSystemNotice(ctx, portal, result.response)
+					}
+					return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+				}
+				if strings.TrimSpace(result.newBody) != "" {
+					rawBody = strings.TrimSpace(result.newBody)
+				}
+			}
+		} else if isAbortTrigger(commandBody) {
+			stopped := oc.abortRoom(ctx, portal, meta)
+			oc.sendSystemNotice(ctx, portal, formatAbortNotice(stopped))
 			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 		}
 	}
+
+	if commandAuthorized {
+		cleaned := rawBody
+		foundHelp := false
+		cleaned, foundHelp = extractInlineShortcut(cleaned, []string{"help"})
+		foundCommands := false
+		if cleaned != "" {
+			cleaned, foundCommands = extractInlineShortcut(cleaned, []string{"commands"})
+		}
+		foundWhoami := false
+		if cleaned != "" {
+			cleaned, foundWhoami = extractInlineShortcut(cleaned, []string{"whoami", "id"})
+		}
+		rawBody = strings.TrimSpace(cleaned)
+		if foundHelp || foundCommands {
+			helpText := "Commands: /status, /context, /model, /think, /verbose, /reasoning, /elevated, /activation, /send, /queue, /tools, /new, /reset, /stop"
+			inlineResponses = append(inlineResponses, helpText)
+		}
+		if foundWhoami {
+			inlineResponses = append(inlineResponses, fmt.Sprintf("You are %s.", msg.Event.Sender.String()))
+		}
+	}
+
+	if len(inlineResponses) > 0 {
+		oc.sendSystemNotice(ctx, portal, strings.Join(inlineResponses, "\n"))
+	}
+
 	if rawBody == "" {
+		if len(inlineResponses) > 0 {
+			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+		}
 		return nil, unsupportedMessageStatus(fmt.Errorf("empty messages are not supported"))
 	}
 
-	isGroup := oc.isGroupChat(ctx, portal)
-	roomName := ""
-	if isGroup {
-		roomName = oc.matrixRoomDisplayName(ctx, portal)
-	}
-	senderName := oc.matrixDisplayName(ctx, portal.MXID, msg.Event.Sender)
-
 	// Mention detection (OpenClaw-style)
+	replyCtx := extractInboundReplyContext(msg.Event)
 	botMXID := oc.resolveBotMXID(ctx, portal, meta)
 	explicitMention := false
 	hasExplicit := false
@@ -215,19 +528,22 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 			explicitMention = true
 		}
 	}
-	var agentDef *agents.AgentDefinition
-	if agentID := resolveAgentID(meta); agentID != "" {
-		store := NewAgentStoreAdapter(oc)
-		if agent, err := store.GetAgentByID(ctx, agentID); err == nil {
-			agentDef = agent
+	if !explicitMention && replyCtx.ReplyTo != "" {
+		if oc.isReplyToBot(ctx, portal, replyCtx.ReplyTo) {
+			explicitMention = true
 		}
 	}
-	mentionRegexes := buildMentionRegexes(&oc.connector.Config, agentDef)
 	wasMentioned := explicitMention || matchesMentionPatterns(rawBody, mentionRegexes)
-	requireMention := isGroup
+	groupActivation := oc.resolveGroupActivation(meta)
+	requireMention := isGroup && groupActivation != "always"
 	canDetectMention := len(mentionRegexes) > 0 || hasExplicit
-	shouldBypassMention := false
+	shouldBypassMention := groupActivation == "always"
 	if isGroup && requireMention && !wasMentioned && !shouldBypassMention {
+		historyLimit := oc.resolveGroupHistoryLimit()
+		if historyLimit > 0 {
+			historyBody := oc.buildMatrixInboundBody(ctx, portal, meta, msg.Event, rawBodyOriginal, senderName, roomName, isGroup)
+			oc.recordPendingGroupHistory(portal.MXID, historyBody, historyLimit)
+		}
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 	}
 
@@ -264,6 +580,9 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 	}
 
 	body := oc.buildMatrixInboundBody(ctx, portal, meta, msg.Event, rawBody, senderName, roomName, isGroup)
+	if isGroup && requireMention {
+		body = oc.buildGroupHistoryContext(portal.MXID, body, oc.resolveGroupHistoryLimit())
+	}
 
 	// Check if this message should be debounced
 	debounceDelay := meta.DebounceMs
@@ -280,7 +599,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		entry := DebounceEntry{
 			Event:      msg.Event,
 			Portal:     portal,
-			Meta:       meta,
+			Meta:       runMeta,
 			RawBody:    rawBody,
 			SenderName: senderName,
 			RoomName:   roomName,
@@ -312,7 +631,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		eventID = msg.Event.ID
 	}
 
-	promptMessages, err := oc.buildPromptWithLinkContext(ctx, portal, meta, body, rawEventContent, eventID)
+	promptMessages, err := oc.buildPromptWithLinkContext(runCtx, portal, runMeta, body, rawEventContent, eventID)
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +650,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 	pending := pendingMessage{
 		Event:           msg.Event,
 		Portal:          portal,
-		Meta:            meta,
+		Meta:            runMeta,
 		Type:            pendingTypeText,
 		MessageBody:     body,
 		RawEventContent: rawEventContent,
@@ -344,7 +663,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		enqueuedAt:      time.Now().UnixMilli(),
 		rawEventContent: rawEventContent,
 	}
-	dbMsg, isPending := oc.dispatchOrQueue(ctx, msg.Event, portal, meta, userMessage, queueItem, queueSettings, promptMessages)
+	dbMsg, isPending := oc.dispatchOrQueue(runCtx, msg.Event, portal, runMeta, userMessage, queueItem, queueSettings, promptMessages)
 
 	return &bridgev2.MatrixMessageResponse{
 		DB:      dbMsg,
@@ -1067,36 +1386,7 @@ func (oc *AIClient) handleToolsCommand(
 
 // showToolsStatus displays the current status of all tools
 func (oc *AIClient) showToolsStatus(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) {
-	var sb strings.Builder
-	sb.WriteString("Tool Status:\n\n")
-
-	toolsList := oc.buildAvailableTools(meta)
-	sort.Slice(toolsList, func(i, j int) bool {
-		return toolsList[i].Name < toolsList[j].Name
-	})
-
-	sb.WriteString("Tools:\n")
-	for _, tool := range toolsList {
-		status := "✗"
-		if tool.Enabled {
-			status = "✓"
-		}
-		desc := tool.Description
-		if desc == "" {
-			desc = tool.DisplayName
-		}
-		reason := ""
-		if !tool.Enabled && tool.Reason != "" {
-			reason = fmt.Sprintf(" (%s)", tool.Reason)
-		}
-		sb.WriteString(fmt.Sprintf("  [%s] %s: %s%s\n", status, tool.Name, desc, reason))
-	}
-
-	if meta != nil && !meta.Capabilities.SupportsToolCalling {
-		sb.WriteString(fmt.Sprintf("\nNote: Current model (%s) may not support tool calling.\n", oc.effectiveModel(meta)))
-	}
-
-	oc.sendSystemNotice(ctx, portal, sb.String())
+	oc.sendSystemNotice(ctx, portal, oc.buildToolsStatusText(meta))
 }
 
 // handleRegenerate regenerates the last AI response
@@ -1250,8 +1540,13 @@ func (oc *AIClient) buildPromptForRegenerate(
 	if systemPrompt != "" {
 		prompt = append(prompt, openai.SystemMessage(systemPrompt))
 	}
+	prompt = append(prompt, oc.buildAdditionalSystemPrompts(ctx, portal, meta)...)
 
 	historyLimit := oc.historyLimit(meta)
+	resetAt := int64(0)
+	if meta != nil {
+		resetAt = meta.SessionResetAt
+	}
 	if historyLimit > 0 {
 		history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, historyLimit+2)
 		if err != nil {
@@ -1265,6 +1560,9 @@ func (oc *AIClient) buildPromptForRegenerate(
 			msgMeta := messageMeta(msg)
 			// Skip commands and non-conversation messages
 			if !shouldIncludeInHistory(msgMeta) {
+				continue
+			}
+			if resetAt > 0 && msg.Timestamp.UnixMilli() < resetAt {
 				continue
 			}
 

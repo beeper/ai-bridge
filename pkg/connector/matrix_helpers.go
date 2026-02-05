@@ -58,6 +58,16 @@ func (oc *AIClient) resolveBotMXID(ctx context.Context, portal *bridgev2.Portal,
 	return ""
 }
 
+func (oc *AIClient) isCommandAuthorizedSender(sender id.UserID) bool {
+	if oc == nil || oc.UserLogin == nil {
+		return false
+	}
+	if oc.UserLogin.UserMXID != "" && sender == oc.UserLogin.UserMXID {
+		return true
+	}
+	return false
+}
+
 func (oc *AIClient) buildMatrixInboundBody(
 	ctx context.Context,
 	portal *bridgev2.Portal,
@@ -72,16 +82,30 @@ func (oc *AIClient) buildMatrixInboundBody(
 	if body == "" {
 		return ""
 	}
-	if evt != nil && evt.ID != "" && portal != nil && portal.MXID != "" {
-		body = body + "\n[matrix event id: " + evt.ID.String() + " room: " + portal.MXID.String() + "]"
+	if isGroup && senderName != "" && !hasSenderPrefix(body, senderName) {
+		body = senderName + ": " + body
 	}
-	from := senderName
+	if evt != nil && evt.ID != "" {
+		body = appendMessageIDHint(body, evt.ID)
+	}
+	from := strings.TrimSpace(senderName)
 	if isGroup {
-		if roomName != "" {
-			from = roomName
-		} else if portal != nil {
-			from = portal.MXID.String()
+		label := strings.TrimSpace(roomName)
+		if label == "" && portal != nil {
+			label = portal.MXID.String()
 		}
+		if label == "" {
+			label = "Group"
+		}
+		if portal != nil && portal.MXID != "" {
+			from = label + " id:" + portal.MXID.String()
+		} else {
+			from = label
+		}
+	} else if evt != nil && evt.Sender != "" && from != "" && from != evt.Sender.String() {
+		from = from + " id:" + evt.Sender.String()
+	} else if from == "" && evt != nil {
+		from = evt.Sender.String()
 	}
 	opts := oc.resolveEnvelopeFormatOptions()
 	timestamp := time.Time{}
@@ -101,7 +125,7 @@ func (oc *AIClient) buildMatrixInboundBody(
 		HasPreviousTime bool
 		Envelope        EnvelopeFormatOptions
 	}{
-		Channel:         "Matrix",
+		Channel:         "Desktop API",
 		From:            from,
 		Body:            body,
 		Timestamp:       timestamp,
