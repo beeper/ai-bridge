@@ -25,8 +25,9 @@ Memory is DB-only (SQLite) and modeled after OpenClaw:
 
 ## Login flows
 
-There are two login flows:
+There are three login flows:
 - **Beeper**: Select a Beeper domain (or set `network.beeper.base_url` in config) and provide a **Beeper AI key** unless it is already in `config.yaml`.
+- **Magic Proxy**: Provide a Magic Proxy link (the token is taken from the URL fragment after `#`).
 - **Custom**: Provide API keys for the services you want to use (OpenRouter/OpenAI plus optional search/fetch providers). Base URLs are configured only in `config.yaml`.
 
 Base URL overrides live in config:

@@ -195,7 +195,7 @@ func resolveImageGenProvider(req imageGenRequest, btc *BridgeToolContext) (image
 			return "", fmt.Errorf("openai image generation is not available for this login")
 		}
 		return imageGenProviderOpenAI, nil
-	case ProviderOpenRouter:
+	case ProviderOpenRouter, ProviderMagicProxy:
 		if !supportsOpenRouterImageGen(btc) {
 			return "", fmt.Errorf("openrouter image generation is not available for this login")
 		}
@@ -316,7 +316,7 @@ func supportsOpenRouterImageGen(btc *BridgeToolContext) bool {
 	}
 	loginMeta := loginMetadata(btc.Client.UserLogin)
 	switch loginMeta.Provider {
-	case ProviderOpenRouter, ProviderBeeper:
+	case ProviderOpenRouter, ProviderBeeper, ProviderMagicProxy:
 		if loginMeta.Provider == ProviderBeeper {
 			return btc.Client.connector.resolveBeeperToken(loginMeta) != ""
 		}

@@ -52,6 +52,29 @@ func normalizeBeeperBaseURL(raw string) string {
 	return scheme + "://" + host + beeperBasePath
 }
 
+func normalizeMagicProxyBaseURL(raw string) string {
+	base := strings.TrimSpace(raw)
+	if base == "" {
+		return ""
+	}
+	if !strings.Contains(base, "://") {
+		base = "https://" + base
+	}
+	parsed, err := url.Parse(base)
+	if err != nil {
+		return ""
+	}
+	host := strings.TrimRight(parsed.Host, "/")
+	if host == "" {
+		return ""
+	}
+	scheme := parsed.Scheme
+	if scheme == "" {
+		scheme = "https"
+	}
+	return scheme + "://" + host
+}
+
 func (oc *OpenAIConnector) resolveOpenAIBaseURL() string {
 	base := strings.TrimSpace(oc.Config.Providers.OpenAI.BaseURL)
 	if base == "" {
@@ -116,6 +139,23 @@ func (oc *OpenAIConnector) resolveServiceConfig(meta *UserLoginMetadata) Service
 		return services
 	}
 
+	if meta.Provider == ProviderMagicProxy {
+		base := normalizeMagicProxyBaseURL(meta.BaseURL)
+		if base != "" {
+			base = strings.TrimRight(base, "/")
+			token := trimToken(meta.APIKey)
+			services[serviceOpenRouter] = ServiceConfig{
+				BaseURL: base + "/openrouter/v1",
+				APIKey:  token,
+			}
+			services[servicePerplexity] = ServiceConfig{
+				BaseURL: base + "/openrouter/v1",
+				APIKey:  token,
+			}
+		}
+		return services
+	}
+
 	services[serviceOpenAI] = ServiceConfig{
 		BaseURL: oc.resolveOpenAIBaseURL(),
 		APIKey:  oc.resolveOpenAIAPIKey(meta),
@@ -143,6 +183,13 @@ func (oc *OpenAIConnector) resolveProviderAPIKey(meta *UserLoginMetadata) string
 	switch meta.Provider {
 	case ProviderBeeper:
 		return oc.resolveBeeperToken(meta)
+	case ProviderMagicProxy:
+		if key := trimToken(meta.APIKey); key != "" {
+			return key
+		}
+		if meta.ServiceTokens != nil {
+			return trimToken(meta.ServiceTokens.OpenRouter)
+		}
 	case ProviderOpenRouter:
 		if key := trimToken(oc.Config.Providers.OpenRouter.APIKey); key != "" {
 			return key
@@ -199,6 +246,9 @@ func (oc *OpenAIConnector) resolveOpenRouterAPIKey(meta *UserLoginMetadata) stri
 			return key
 		}
 	}
+	if meta.Provider == ProviderMagicProxy {
+		return trimToken(meta.APIKey)
+	}
 	if meta.ServiceTokens != nil {
 		return trimToken(meta.ServiceTokens.OpenRouter)
 	}
@@ -222,7 +272,7 @@ func loginTokenForService(meta *UserLoginMetadata, service string) string {
 			return trimToken(meta.ServiceTokens.OpenAI)
 		}
 	case serviceOpenRouter:
-		if meta.Provider == ProviderOpenRouter {
+		if meta.Provider == ProviderOpenRouter || meta.Provider == ProviderMagicProxy {
 			return trimToken(meta.APIKey)
 		}
 		if meta.ServiceTokens != nil {

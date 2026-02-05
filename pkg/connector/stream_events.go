@@ -14,6 +14,12 @@ type matrixEphemeralSender interface {
 	SendEphemeralEvent(ctx context.Context, roomID id.RoomID, eventType event.Type, content *event.Content, txnID string) (*mautrix.RespSendEvent, error)
 }
 
+// matrixEphemeralSenderLegacy supports older/local intents that expose SendEphemeral
+// instead of SendEphemeralEvent.
+type matrixEphemeralSenderLegacy interface {
+	SendEphemeral(ctx context.Context, roomID id.RoomID, eventType event.Type, content *event.Content, txnID string) (*mautrix.RespSendEvent, error)
+}
+
 // emitStreamEvent sends an AI SDK UIMessageChunk streaming event to the room (ephemeral).
 func (oc *AIClient) emitStreamEvent(
 	ctx context.Context,
@@ -22,21 +28,28 @@ func (oc *AIClient) emitStreamEvent(
 	part map[string]any,
 ) {
 	if portal == nil || portal.MXID == "" {
+		oc.log.Debug().Msg("Stream event skipped: missing portal/room")
 		return
 	}
 	if state == nil {
+		oc.log.Debug().Msg("Stream event skipped: missing state")
 		return
 	}
 	if state != nil && state.suppressSend {
+		oc.log.Debug().
+			Str("turn_id", state.turnID).
+			Msg("Stream event suppressed (suppressSend)")
 		return
 	}
 	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
+		oc.log.Warn().Msg("Stream event skipped: missing intent")
 		return
 	}
 
 	ephemeralSender, ok := intent.(matrixEphemeralSender)
-	if !ok {
+	legacySender, legacyOK := intent.(matrixEphemeralSenderLegacy)
+	if !ok && !legacyOK {
 		if !state.streamEphemeralUnsupported {
 			state.streamEphemeralUnsupported = true
 			partType, _ := part["type"].(string)
@@ -49,6 +62,8 @@ func (oc *AIClient) emitStreamEvent(
 
 	state.sequenceNum++
 	seq := state.sequenceNum
+
+	partType, _ := part["type"].(string)
 
 	content := map[string]any{
 		"turn_id": state.turnID,
@@ -69,8 +84,21 @@ func (oc *AIClient) emitStreamEvent(
 	eventContent := &event.Content{Raw: content}
 
 	txnID := buildStreamEventTxnID(state.turnID, seq)
-	if _, err := ephemeralSender.SendEphemeralEvent(ctx, portal.MXID, StreamEventMessageType, eventContent, txnID); err != nil {
-		partType, _ := part["type"].(string)
+	oc.log.Debug().
+		Stringer("room_id", portal.MXID).
+		Str("turn_id", state.turnID).
+		Int("seq", seq).
+		Str("part_type", partType).
+		Bool("legacy", !ok && legacyOK).
+		Msg("Sending stream event (ephemeral)")
+
+	var err error
+	if ok {
+		_, err = ephemeralSender.SendEphemeralEvent(ctx, portal.MXID, StreamEventMessageType, eventContent, txnID)
+	} else {
+		_, err = legacySender.SendEphemeral(ctx, portal.MXID, StreamEventMessageType, eventContent, txnID)
+	}
+	if err != nil {
 		oc.log.Warn().Err(err).
 			Str("part_type", partType).
 			Int("seq", seq).

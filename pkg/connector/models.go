@@ -64,6 +64,8 @@ func DefaultModelForProvider(provider string) string {
 		return DefaultModelOpenRouter
 	case ProviderBeeper:
 		return DefaultModelBeeper
+	case ProviderMagicProxy:
+		return DefaultModelOpenRouter
 	default:
 		return DefaultModelOpenRouter
 	}

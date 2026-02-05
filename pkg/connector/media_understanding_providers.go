@@ -40,6 +40,8 @@ func normalizeMediaProviderID(id string) string {
 		return "google"
 	case "beeper":
 		return "openrouter"
+	case "magic_proxy":
+		return "openrouter"
 	default:
 		return normalized
 	}

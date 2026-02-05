@@ -99,7 +99,7 @@ func (oc *AIClient) canUseImageGeneration() bool {
 		return false
 	}
 	switch loginMeta.Provider {
-	case ProviderOpenAI, ProviderOpenRouter, ProviderBeeper:
+	case ProviderOpenAI, ProviderOpenRouter, ProviderBeeper, ProviderMagicProxy:
 		return true
 	default:
 		return false
