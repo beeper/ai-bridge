@@ -18,6 +18,8 @@ type Host interface {
 	SendSystemNotice(ctx context.Context, portal *bridgev2.Portal, msg string)
 	SendPendingStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, msg string)
 	SendSuccessStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event)
+	EmitOpenCodeStreamEvent(ctx context.Context, portal *bridgev2.Portal, turnID, agentID, targetEventID string, part map[string]any)
+	FinishOpenCodeStream(turnID string)
 	DownloadAndEncodeMedia(ctx context.Context, mediaURL string, file *event.EncryptedFileInfo, maxMB int) (string, string, error)
 	SetRoomName(ctx context.Context, portal *bridgev2.Portal, name string) error
 	SenderForOpenCode(instanceID string, fromMe bool) bridgev2.EventSender

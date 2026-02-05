@@ -17,6 +17,20 @@ func (b *Bridge) queueRemoteEvent(ev bridgev2.RemoteEvent) {
 	login.QueueRemoteEvent(ev)
 }
 
+func (b *Bridge) emitOpenCodeStreamEvent(ctx context.Context, portal *bridgev2.Portal, turnID, agentID string, part map[string]any) {
+	if b == nil || b.host == nil {
+		return
+	}
+	b.host.EmitOpenCodeStreamEvent(ctx, portal, turnID, agentID, "", part)
+}
+
+func (b *Bridge) finishOpenCodeStream(turnID string) {
+	if b == nil || b.host == nil {
+		return
+	}
+	b.host.FinishOpenCodeStream(turnID)
+}
+
 func (b *Bridge) portalMeta(portal *bridgev2.Portal) *PortalMeta {
 	if b == nil || b.host == nil || portal == nil {
 		return nil

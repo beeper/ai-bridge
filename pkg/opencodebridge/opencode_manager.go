@@ -38,13 +38,17 @@ type openCodeInstance struct {
 }
 
 type openCodePartState struct {
-	role           string
-	messageID      string
-	partType       string
-	callStatus     string
-	statusReaction string
-	callSent       bool
-	resultSent     bool
+	role                  string
+	messageID             string
+	partType              string
+	callStatus            string
+	statusReaction        string
+	callSent              bool
+	resultSent            bool
+	streamInputStarted    bool
+	streamInputAvailable  bool
+	streamOutputAvailable bool
+	streamOutputError     bool
 }
 
 func NewOpenCodeManager(bridge *Bridge) *OpenCodeManager {
@@ -349,7 +353,7 @@ func (m *OpenCodeManager) handleEvent(ctx context.Context, inst *openCodeInstanc
 				}
 			}
 		}
-		m.handlePartUpdated(ctx, inst, part)
+		m.handlePartUpdated(ctx, inst, part, payload.Delta)
 	case "message.part.removed":
 		var payload struct {
 			SessionID string `json:"sessionID"`
@@ -411,13 +415,16 @@ func (m *OpenCodeManager) handleMessageParts(ctx context.Context, inst *openCode
 	}
 }
 
-func (m *OpenCodeManager) handlePartUpdated(ctx context.Context, inst *openCodeInstance, part opencode.Part) {
+func (m *OpenCodeManager) handlePartUpdated(ctx context.Context, inst *openCodeInstance, part opencode.Part, delta string) {
 	if part.ID == "" || part.SessionID == "" {
 		return
 	}
 	portal := m.bridge.findOpenCodePortal(ctx, inst.cfg.ID, part.SessionID)
 	if portal == nil {
 		return
+	}
+	if part.Type == "tool" && strings.TrimSpace(delta) != "" {
+		m.emitToolStreamDelta(ctx, inst, portal, part, delta)
 	}
 	inst.upsertPart(part.SessionID, part.MessageID, part)
 	role := inst.seenRole(part.SessionID, part.MessageID)
@@ -494,6 +501,7 @@ func (m *OpenCodeManager) handleToolPart(ctx context.Context, inst *openCodeInst
 	if part.State != nil {
 		status = part.State.Status
 	}
+	m.emitToolStreamState(ctx, inst, portal, part, status)
 	callSent, resultSent := inst.partFlags(part.SessionID, part.ID)
 	callStatus := inst.partCallStatus(part.SessionID, part.ID)
 	if !callSent && status != "" {
@@ -689,6 +697,23 @@ func (inst *openCodeInstance) partFlags(sessionID, partID string) (bool, bool) {
 	return state.callSent, state.resultSent
 }
 
+func (inst *openCodeInstance) partStreamFlags(sessionID, partID string) (bool, bool, bool, bool) {
+	inst.seenMu.Lock()
+	defer inst.seenMu.Unlock()
+	if inst.seenPart == nil {
+		return false, false, false, false
+	}
+	parts, ok := inst.seenPart[sessionID]
+	if !ok {
+		return false, false, false, false
+	}
+	state, ok := parts[partID]
+	if !ok || state == nil {
+		return false, false, false, false
+	}
+	return state.streamInputStarted, state.streamInputAvailable, state.streamOutputAvailable, state.streamOutputError
+}
+
 func (inst *openCodeInstance) partCallStatus(sessionID, partID string) string {
 	inst.seenMu.Lock()
 	defer inst.seenMu.Unlock()
@@ -732,6 +757,58 @@ func (inst *openCodeInstance) setPartCallSent(sessionID, partID string) {
 	if parts, ok := inst.seenPart[sessionID]; ok {
 		if state, ok := parts[partID]; ok && state != nil {
 			state.callSent = true
+		}
+	}
+}
+
+func (inst *openCodeInstance) setPartStreamInputStarted(sessionID, partID string) {
+	inst.seenMu.Lock()
+	defer inst.seenMu.Unlock()
+	if inst.seenPart == nil {
+		return
+	}
+	if parts, ok := inst.seenPart[sessionID]; ok {
+		if state, ok := parts[partID]; ok && state != nil {
+			state.streamInputStarted = true
+		}
+	}
+}
+
+func (inst *openCodeInstance) setPartStreamInputAvailable(sessionID, partID string) {
+	inst.seenMu.Lock()
+	defer inst.seenMu.Unlock()
+	if inst.seenPart == nil {
+		return
+	}
+	if parts, ok := inst.seenPart[sessionID]; ok {
+		if state, ok := parts[partID]; ok && state != nil {
+			state.streamInputAvailable = true
+		}
+	}
+}
+
+func (inst *openCodeInstance) setPartStreamOutputAvailable(sessionID, partID string) {
+	inst.seenMu.Lock()
+	defer inst.seenMu.Unlock()
+	if inst.seenPart == nil {
+		return
+	}
+	if parts, ok := inst.seenPart[sessionID]; ok {
+		if state, ok := parts[partID]; ok && state != nil {
+			state.streamOutputAvailable = true
+		}
+	}
+}
+
+func (inst *openCodeInstance) setPartStreamOutputError(sessionID, partID string) {
+	inst.seenMu.Lock()
+	defer inst.seenMu.Unlock()
+	if inst.seenPart == nil {
+		return
+	}
+	if parts, ok := inst.seenPart[sessionID]; ok {
+		if state, ok := parts[partID]; ok && state != nil {
+			state.streamOutputError = true
 		}
 	}
 }
