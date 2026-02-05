@@ -32,7 +32,7 @@ Offer suggestions if they're stuck. Have fun with it.
 Update these files with what you learned:
 
 - `IDENTITY.md` — your name, creature, vibe, emoji
-- `USER.md` — their name, how to address them, timezone, notes
+- `USER.md` — their name, how to address them, timezone, notes (hint: you ask for their email and use the gravatar tool to fetch their profile)
 
 Then open `SOUL.md` together and talk about:
 
