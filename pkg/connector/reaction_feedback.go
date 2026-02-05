@@ -101,7 +101,7 @@ func DrainReactionFeedback(roomID id.RoomID) []ReactionFeedback {
 }
 
 // FormatReactionFeedback formats reaction feedback as context for the AI.
-// Matches OpenClaw's system event format: "System: [timestamp] Beeper/Matrix reaction added: :emoji: by user in #room msg ts"
+// Matches OpenClaw's system event format: "System: [timestamp] Desktop API reaction added: :emoji: by user in #room msg ts"
 func FormatReactionFeedback(feedback []ReactionFeedback) string {
 	if len(feedback) == 0 {
 		return ""
@@ -115,9 +115,9 @@ func FormatReactionFeedback(feedback []ReactionFeedback) string {
 			roomLabel = "chat"
 		}
 		if f.Action == "removed" {
-			lines = append(lines, fmt.Sprintf("System: [%s] Beeper/Matrix reaction removed: %s by %s in %s msg %s", ts, f.Emoji, f.Sender, roomLabel, f.MessageID))
+			lines = append(lines, fmt.Sprintf("System: [%s] Desktop API reaction removed: %s by %s in %s msg %s", ts, f.Emoji, f.Sender, roomLabel, f.MessageID))
 		} else {
-			lines = append(lines, fmt.Sprintf("System: [%s] Beeper/Matrix reaction added: %s by %s in %s msg %s", ts, f.Emoji, f.Sender, roomLabel, f.MessageID))
+			lines = append(lines, fmt.Sprintf("System: [%s] Desktop API reaction added: %s by %s in %s msg %s", ts, f.Emoji, f.Sender, roomLabel, f.MessageID))
 		}
 	}
 	return strings.Join(lines, "\n")

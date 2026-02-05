@@ -141,6 +141,15 @@ type PortalMetadata struct {
 	LastResponseID             string           `json:"last_response_id,omitempty"`
 	EmitThinking               bool             `json:"emit_thinking,omitempty"`
 	EmitToolArgs               bool             `json:"emit_tool_args,omitempty"`
+	ThinkingLevel              string           `json:"thinking_level,omitempty"`   // off|minimal|low|medium|high|xhigh
+	VerboseLevel               string           `json:"verbose_level,omitempty"`    // off|on|full
+	ElevatedLevel              string           `json:"elevated_level,omitempty"`   // off|on|ask|full
+	GroupActivation            string           `json:"group_activation,omitempty"` // mention|always
+	GroupActivationNeedsIntro  bool             `json:"group_activation_needs_intro,omitempty"`
+	GroupIntroSent             bool             `json:"group_intro_sent,omitempty"`
+	SendPolicy                 string           `json:"send_policy,omitempty"` // allow|deny
+	SessionResetAt             int64            `json:"session_reset_at,omitempty"`
+	AbortedLastRun             bool             `json:"aborted_last_run,omitempty"`
 	CompactionCount            int              `json:"compaction_count,omitempty"`
 	MemoryFlushAt              int64            `json:"memory_flush_at,omitempty"`
 	MemoryFlushCompactionCount int              `json:"memory_flush_compaction_count,omitempty"`
