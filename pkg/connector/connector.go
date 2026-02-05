@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -14,6 +15,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/matrix"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
@@ -34,10 +36,18 @@ var (
 type OpenAIConnector struct {
 	br     *bridgev2.Bridge
 	Config Config
+
+	clientsMu sync.Mutex
+	clients   map[networkid.UserLoginID]*AIClient
 }
 
 func (oc *OpenAIConnector) Init(bridge *bridgev2.Bridge) {
 	oc.br = bridge
+	oc.clientsMu.Lock()
+	if oc.clients == nil {
+		oc.clients = make(map[networkid.UserLoginID]*AIClient)
+	}
+	oc.clientsMu.Unlock()
 }
 
 func (oc *OpenAIConnector) Stop(ctx context.Context) {
@@ -331,10 +341,41 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 	if key == "" {
 		return fmt.Errorf("no API key available for this login; please login again")
 	}
+	oc.clientsMu.Lock()
+	if existing := oc.clients[login.ID]; existing != nil {
+		existingMeta := loginMetadata(existing.UserLogin)
+		needsRebuild := existing.apiKey != key ||
+			!strings.EqualFold(strings.TrimSpace(existingMeta.Provider), strings.TrimSpace(meta.Provider)) ||
+			strings.TrimRight(strings.TrimSpace(existingMeta.BaseURL), "/") != strings.TrimRight(strings.TrimSpace(meta.BaseURL), "/")
+		if needsRebuild {
+			oc.clientsMu.Unlock()
+			client, err := newAIClient(login, oc, key)
+			if err != nil {
+				return err
+			}
+			oc.clientsMu.Lock()
+			oc.clients[login.ID] = client
+			oc.clientsMu.Unlock()
+			login.Client = client
+			client.scheduleBootstrap()
+			return nil
+		}
+		// Keep using one client instance per login ID when provider settings have not changed.
+		existing.UserLogin = login
+		login.Client = existing
+		oc.clientsMu.Unlock()
+		existing.scheduleBootstrap()
+		return nil
+	}
+	oc.clientsMu.Unlock()
+
 	client, err := newAIClient(login, oc, key)
 	if err != nil {
 		return err
 	}
+	oc.clientsMu.Lock()
+	oc.clients[login.ID] = client
+	oc.clientsMu.Unlock()
 	login.Client = client
 	client.scheduleBootstrap()
 	return nil

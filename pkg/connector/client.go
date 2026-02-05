@@ -422,6 +422,11 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		userID := login.User.MXID.String()
 
 		openrouterURL := beeperBaseURL + "/openrouter/v1"
+		log.Info().
+			Str("provider", ProviderBeeper).
+			Str("base_url", beeperBaseURL).
+			Str("openrouter_url", openrouterURL).
+			Msg("Initializing AI provider endpoint")
 
 		// Get PDF engine from provider config
 		pdfEngine := connector.Config.Providers.Beeper.DefaultPDFEngine
@@ -440,6 +445,10 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 	case ProviderOpenRouter:
 		// OpenRouter direct access
 		openrouterURL := connector.resolveOpenRouterBaseURL()
+		log.Info().
+			Str("provider", ProviderOpenRouter).
+			Str("openrouter_url", openrouterURL).
+			Msg("Initializing AI provider endpoint")
 
 		// Get PDF engine from provider config
 		pdfEngine := connector.Config.Providers.OpenRouter.DefaultPDFEngine
@@ -461,7 +470,12 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		if baseURL == "" {
 			return nil, fmt.Errorf("magic proxy base_url is required")
 		}
-		openrouterURL := strings.TrimRight(baseURL, "/") + "/openrouter/v1"
+		openrouterURL := joinProxyPath(baseURL, "/openrouter/v1")
+		log.Info().
+			Str("provider", ProviderMagicProxy).
+			Str("base_url", baseURL).
+			Str("openrouter_url", openrouterURL).
+			Msg("Initializing AI provider endpoint")
 
 		// Get PDF engine from provider config
 		pdfEngine := connector.Config.Providers.OpenRouter.DefaultPDFEngine
@@ -480,6 +494,10 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 	default:
 		// OpenAI (default) or Custom OpenAI-compatible provider
 		openaiURL := connector.resolveOpenAIBaseURL()
+		log.Info().
+			Str("provider", meta.Provider).
+			Str("openai_url", openaiURL).
+			Msg("Initializing AI provider endpoint")
 		provider, err := NewOpenAIProviderWithBaseURL(key, openaiURL, log)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OpenAI provider: %w", err)

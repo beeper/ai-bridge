@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/rs/xid"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 )
@@ -211,7 +210,7 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, provider, apiKey, baseUR
 				continue
 			}
 			existingBase := strings.TrimRight(strings.TrimSpace(meta.BaseURL), "/")
-			if meta.Provider == provider && meta.APIKey == apiKey && existingBase == baseURL {
+			if meta.Provider == provider && meta.APIKey == apiKey && existingBase == baseURL && existing.ID != loginID {
 				dupCount++
 			}
 		}
@@ -221,18 +220,42 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, provider, apiKey, baseUR
 	}
 	if ol.Connector != nil && ol.Connector.br != nil {
 		if existing, _ := ol.Connector.br.GetExistingUserLoginByID(ctx, loginID); existing != nil {
-			foundUnique := false
-			for i := 0; i < 5; i++ {
-				candidate := makeUserLoginIDWithSuffix(ol.User.MXID, provider, apiKey, xid.New().String())
-				if existing, _ := ol.Connector.br.GetExistingUserLoginByID(ctx, candidate); existing == nil {
-					loginID = candidate
-					foundUnique = true
-					break
-				}
+			// Reuse the existing login for the same provider+key instead of creating duplicates.
+			existingMeta, ok := existing.Metadata.(*UserLoginMetadata)
+			if !ok || existingMeta == nil {
+				existingMeta = &UserLoginMetadata{}
 			}
-			if !foundUnique {
-				loginID = makeUserLoginIDWithSuffix(ol.User.MXID, provider, apiKey, xid.New().String())
+			existingMeta.Provider = provider
+			existingMeta.APIKey = apiKey
+			existingMeta.BaseURL = baseURL
+			if serviceTokens != nil && !serviceTokensEmpty(serviceTokens) {
+				existingMeta.ServiceTokens = serviceTokens
+			} else {
+				existingMeta.ServiceTokens = nil
 			}
+			existing.Metadata = existingMeta
+			existing.RemoteName = remoteName
+			if err := existing.Save(ctx); err != nil {
+				return nil, fmt.Errorf("failed to update existing login: %w", err)
+			}
+
+			// Load login (which validates and caches the client internally)
+			if err := ol.Connector.LoadUserLogin(ctx, existing); err != nil {
+				return nil, fmt.Errorf("failed to load client: %w", err)
+			}
+
+			// Trigger connection in background with a long-lived context
+			// (the request context gets cancelled after login returns)
+			go existing.Client.Connect(existing.Log.WithContext(context.Background()))
+
+			return &bridgev2.LoginStep{
+				Type:   bridgev2.LoginStepTypeComplete,
+				StepID: "io.ai-bridge.openai.complete",
+				CompleteParams: &bridgev2.LoginCompleteParams{
+					UserLoginID: existing.ID,
+					UserLogin:   existing,
+				},
+			}, nil
 		}
 	}
 	meta := &UserLoginMetadata{
@@ -381,6 +404,9 @@ func parseMagicProxyLink(raw string) (string, string, error) {
 		scheme = "https"
 	}
 	baseURL := scheme + "://" + strings.TrimSpace(parsed.Host)
+	if parsed.Path != "" {
+		baseURL += parsed.Path
+	}
 	baseURL = normalizeMagicProxyBaseURL(baseURL)
 	if baseURL == "" {
 		return "", "", &ErrBaseURLRequired

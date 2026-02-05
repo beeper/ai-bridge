@@ -1,10 +1,88 @@
 package connector
 
 import (
+	"encoding/json"
 	"strings"
 
 	"maunium.net/go/mautrix/bridgev2/status"
 )
+
+// ProxyError represents a structured error from the hungryserv proxy
+type ProxyError struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Details   string `json:"details"`
+	Provider  string `json:"provider"`
+	Retryable bool   `json:"retryable"`
+	Type      string `json:"type"`
+	Status    int    `json:"status"`
+}
+
+// ProxyErrorResponse is the wrapper for proxy errors
+type ProxyErrorResponse struct {
+	Error ProxyError `json:"error"`
+}
+
+// ParseProxyError attempts to parse a structured proxy error from an error message
+func ParseProxyError(err error) *ProxyError {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+
+	// Try to find JSON in the error message
+	startIdx := strings.Index(msg, "{")
+	if startIdx == -1 {
+		return nil
+	}
+
+	var resp ProxyErrorResponse
+	if jsonErr := json.Unmarshal([]byte(msg[startIdx:]), &resp); jsonErr == nil {
+		if resp.Error.Type == "proxy_error" {
+			return &resp.Error
+		}
+	}
+
+	// Try parsing directly as ProxyError
+	var proxyErr ProxyError
+	if jsonErr := json.Unmarshal([]byte(msg[startIdx:]), &proxyErr); jsonErr == nil {
+		if proxyErr.Type == "proxy_error" {
+			return &proxyErr
+		}
+	}
+
+	return nil
+}
+
+// IsProxyError checks if the error is a structured proxy error
+func IsProxyError(err error) bool {
+	return ParseProxyError(err) != nil
+}
+
+// FormatProxyError formats a proxy error for user display
+func FormatProxyError(proxyErr *ProxyError) string {
+	if proxyErr == nil {
+		return ""
+	}
+
+	switch proxyErr.Code {
+	case "timeout", "connection_timeout":
+		return "Request timed out waiting for AI provider. Please try again."
+	case "connection_refused":
+		return "Could not connect to AI provider. The service may be down."
+	case "connection_reset", "connection_closed":
+		return "Connection to AI provider was lost. Please try again."
+	case "dns_error":
+		return "Could not reach AI provider. Please check your connection."
+	case "request_cancelled":
+		return "Request was cancelled."
+	default:
+		if proxyErr.Message != "" {
+			return proxyErr.Message
+		}
+		return "Failed to reach AI provider. Please try again."
+	}
+}
 
 // Extended bridge state error codes for AI-specific errors
 const (
@@ -227,6 +305,11 @@ func FormatUserFacingError(err error) string {
 
 	if IsModelNotFound(err) {
 		return "The requested model is not available. Please select a different model."
+	}
+
+	// Check for structured proxy errors (from hungryserv)
+	if proxyErr := ParseProxyError(err); proxyErr != nil {
+		return FormatProxyError(proxyErr)
 	}
 
 	if IsServerError(err) {

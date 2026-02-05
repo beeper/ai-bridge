@@ -22,7 +22,7 @@ type CompactionConfig struct {
 	SummarizationEnabled *bool `yaml:"summarization_enabled" json:"summarization_enabled,omitempty"`
 
 	// SummarizationModel is the model to use for generating summaries
-	// Default: same as conversation model, or a strong model like anthropic/claude-opus-4.5
+	// Default: same as conversation model, or openai/gpt-5.2
 	SummarizationModel string `yaml:"summarization_model" json:"summarization_model,omitempty"`
 
 	// MaxSummaryTokens is the maximum tokens for generated summaries
@@ -472,7 +472,7 @@ Be concise but preserve critical context. Format the summary as bullet points.`
 		model = c.config.SummarizationModel
 	}
 	if model == "" {
-		model = "anthropic/claude-opus-4.5"
+		model = "openai/gpt-5.2"
 	}
 
 	maxTokens := c.config.MaxSummaryTokens

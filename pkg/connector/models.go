@@ -16,7 +16,7 @@ const (
 // Default models for each provider
 const (
 	DefaultModelOpenAI     = "openai/gpt-5.2"
-	DefaultModelOpenRouter = "anthropic/claude-opus-4.5"
+	DefaultModelOpenRouter = "openai/gpt-5.2"
 	DefaultModelBeeper     = "anthropic/claude-opus-4.5"
 )
 

@@ -173,7 +173,7 @@ func resolveOpenAIEmbeddingConfig(client *AIClient, cfg *memory.ResolvedConfig) 
 			if meta.Provider == ProviderMagicProxy {
 				base := normalizeMagicProxyBaseURL(meta.BaseURL)
 				if base != "" {
-					baseURL = strings.TrimRight(base, "/") + "/openai/v1"
+					baseURL = joinProxyPath(base, "/openai/v1")
 				}
 			} else if meta.Provider == ProviderBeeper {
 				services := client.connector.resolveServiceConfig(meta)

@@ -53,26 +53,7 @@ func normalizeBeeperBaseURL(raw string) string {
 }
 
 func normalizeMagicProxyBaseURL(raw string) string {
-	base := strings.TrimSpace(raw)
-	if base == "" {
-		return ""
-	}
-	if !strings.Contains(base, "://") {
-		base = "https://" + base
-	}
-	parsed, err := url.Parse(base)
-	if err != nil {
-		return ""
-	}
-	host := strings.TrimRight(parsed.Host, "/")
-	if host == "" {
-		return ""
-	}
-	scheme := parsed.Scheme
-	if scheme == "" {
-		scheme = "https"
-	}
-	return scheme + "://" + host
+	return normalizeProxyBaseURL(raw)
 }
 
 func normalizeProxyBaseURL(raw string) string {
@@ -211,22 +192,21 @@ func (oc *OpenAIConnector) resolveServiceConfig(meta *UserLoginMetadata) Service
 	if meta.Provider == ProviderMagicProxy {
 		base := normalizeMagicProxyBaseURL(meta.BaseURL)
 		if base != "" {
-			base = strings.TrimRight(base, "/")
 			token := trimToken(meta.APIKey)
 			services[serviceOpenRouter] = ServiceConfig{
-				BaseURL: base + "/openrouter/v1",
+				BaseURL: joinProxyPath(base, "/openrouter/v1"),
 				APIKey:  token,
 			}
 			services[serviceOpenAI] = ServiceConfig{
-				BaseURL: base + "/openai/v1",
+				BaseURL: joinProxyPath(base, "/openai/v1"),
 				APIKey:  token,
 			}
 			services[serviceExa] = ServiceConfig{
-				BaseURL: base + "/exa",
+				BaseURL: joinProxyPath(base, "/exa"),
 				APIKey:  token,
 			}
 			services[servicePerplexity] = ServiceConfig{
-				BaseURL: base + "/openrouter/v1",
+				BaseURL: joinProxyPath(base, "/openrouter/v1"),
 				APIKey:  token,
 			}
 		}
