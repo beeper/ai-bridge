@@ -11,6 +11,7 @@ import (
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
+	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
 )
 
@@ -277,6 +278,16 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 	// Normalize deprecated tool aliases
 	if toolName == ToolNameAnalyzeImage {
 		toolName = ToolNameImage
+	}
+
+	if toolpolicy.IsOwnerOnlyToolName(toolName) {
+		senderID := ""
+		if btc := GetBridgeToolContext(ctx); btc != nil {
+			senderID = btc.SenderID
+		}
+		if !isOwnerAllowed(&oc.connector.Config, senderID) {
+			return "", fmt.Errorf("tool restricted to owner senders")
+		}
 	}
 
 	var meta *PortalMetadata

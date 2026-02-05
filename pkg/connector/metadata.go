@@ -79,6 +79,7 @@ type UserLoginMetadata struct {
 	ChatsSynced          bool           `json:"chats_synced,omitempty"` // True after initial bootstrap completed successfully
 	Gravatar             *GravatarState `json:"gravatar,omitempty"`
 	Timezone             string         `json:"timezone,omitempty"`
+	ResponsePrefix       string         `json:"response_prefix,omitempty"`
 
 	// FileAnnotationCache stores parsed PDF content from OpenRouter's file-parser plugin
 	// Key is the file hash (SHA256), pruned after 7 days
@@ -132,6 +133,7 @@ type GravatarState struct {
 type PortalMetadata struct {
 	Model               string            `json:"model,omitempty"`                 // Set from room state
 	SystemPrompt        string            `json:"system_prompt,omitempty"`         // Set from room state
+	ResponsePrefix      string            `json:"response_prefix,omitempty"`       // Per-room response prefix override
 	Temperature         float64           `json:"temperature,omitempty"`           // Set from room state
 	MaxContextMessages  int               `json:"max_context_messages,omitempty"`  // Set from room state
 	MaxCompletionTokens int               `json:"max_completion_tokens,omitempty"` // Set from room state

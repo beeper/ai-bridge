@@ -442,18 +442,6 @@ func CronSchema() map[string]any {
 				"enum":        []string{"status", "list", "add", "update", "remove", "run", "runs", "wake"},
 				"description": "Action to perform: status, list, add, update, remove, run, runs, wake.",
 			},
-			"gatewayUrl": map[string]any{
-				"type":        "string",
-				"description": "Optional: gateway URL (ignored by bridge; accepted for compatibility).",
-			},
-			"gatewayToken": map[string]any{
-				"type":        "string",
-				"description": "Optional: gateway token (ignored by bridge; accepted for compatibility).",
-			},
-			"timeoutMs": map[string]any{
-				"type":        "number",
-				"description": "Optional: timeout in ms (ignored by bridge; accepted for compatibility).",
-			},
 			"id": map[string]any{
 				"type":        "string",
 				"description": "Cron job ID (for update/remove/run/runs).",
@@ -465,10 +453,6 @@ func CronSchema() map[string]any {
 			"job": map[string]any{
 				"type":        "object",
 				"description": "Cron job payload for add/update (OpenClaw-style).",
-			},
-			"data": map[string]any{
-				"type":        "object",
-				"description": "Alias for job (OpenClaw-style).",
 			},
 			"patch": map[string]any{
 				"type":        "object",
