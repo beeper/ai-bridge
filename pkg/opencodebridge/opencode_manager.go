@@ -87,7 +87,7 @@ func (m *OpenCodeManager) RestoreConnections(ctx context.Context) error {
 		return nil
 	}
 	meta := m.bridge.host.OpenCodeInstances()
-	if meta == nil || len(meta) == 0 {
+	if len(meta) == 0 {
 		return nil
 	}
 	for _, cfg := range meta {
