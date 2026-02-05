@@ -27,6 +27,16 @@ func normalizeCronJobInput(raw CronJobCreate, opts normalizeOptions) CronJobCrea
 				next.SessionTarget = CronSessionIsolated
 			}
 		}
+		if next.DeleteAfterRun == nil && strings.EqualFold(strings.TrimSpace(next.Schedule.Kind), "at") {
+			deleteAfter := true
+			next.DeleteAfterRun = &deleteAfter
+		}
+		if next.Delivery == nil {
+			payloadKind := strings.ToLower(strings.TrimSpace(next.Payload.Kind))
+			if next.SessionTarget == CronSessionIsolated || (next.SessionTarget == "" && payloadKind == "agentturn") {
+				next.Delivery = &CronDelivery{Mode: CronDeliveryAnnounce}
+			}
+		}
 	}
 
 	return next
@@ -42,13 +52,13 @@ func NormalizeCronJobPatch(raw CronJobPatch) CronJobPatch {
 	return raw
 }
 
-// CoerceSchedule fills kind/atMs based on fields.
+// CoerceSchedule fills kind based on fields.
 func CoerceSchedule(schedule CronSchedule) CronSchedule {
 	next := schedule
 	kind := strings.TrimSpace(schedule.Kind)
 	if kind == "" {
 		switch {
-		case schedule.AtMs > 0:
+		case strings.TrimSpace(schedule.At) != "":
 			next.Kind = "at"
 		case schedule.EveryMs > 0:
 			next.Kind = "every"
@@ -59,13 +69,11 @@ func CoerceSchedule(schedule CronSchedule) CronSchedule {
 	return next
 }
 
-// CoerceScheduleFromInput supports at/atMs string parsing.
+// CoerceScheduleFromInput supports at string parsing.
 func CoerceScheduleFromInput(schedule CronSchedule, atRaw string) CronSchedule {
 	next := schedule
-	if next.AtMs == 0 && strings.TrimSpace(atRaw) != "" {
-		if parsed, ok := parseAbsoluteTimeMs(atRaw); ok {
-			next.AtMs = parsed
-		}
+	if strings.TrimSpace(next.At) == "" && strings.TrimSpace(atRaw) != "" {
+		next.At = strings.TrimSpace(atRaw)
 	}
 	return CoerceSchedule(next)
 }

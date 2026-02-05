@@ -17,26 +17,22 @@ type cronDeliveryTarget struct {
 	Reason  string
 }
 
-func (oc *AIClient) resolveCronDeliveryTarget(agentID string, payload cron.CronPayload) cronDeliveryTarget {
-	channel := strings.TrimSpace(payload.Channel)
+func (oc *AIClient) resolveCronDeliveryTarget(agentID string, delivery *cron.CronDelivery) cronDeliveryTarget {
+	if delivery == nil {
+		return cronDeliveryTarget{Reason: "no-delivery"}
+	}
+
+	channel := strings.TrimSpace(delivery.Channel)
 	if channel == "" {
 		channel = "last"
 	}
-	trimmedChannel := strings.TrimSpace(channel)
-	if strings.HasPrefix(trimmedChannel, "!") {
-		if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(trimmedChannel)); err == nil && portal != nil {
-			return cronDeliveryTarget{Portal: portal, RoomID: portal.MXID, Channel: "matrix"}
-		}
-		return cronDeliveryTarget{Channel: "matrix", Reason: "no-target"}
-	}
-
-	lowered := strings.ToLower(trimmedChannel)
+	lowered := strings.ToLower(channel)
 	if lowered != "last" && lowered != "matrix" {
 		return cronDeliveryTarget{Channel: lowered, Reason: "unsupported-channel"}
 	}
 
-	target := strings.TrimSpace(payload.To)
-	if target == "" {
+	target := strings.TrimSpace(delivery.To)
+	if target == "" && lowered == "last" {
 		storeRef, mainKey := oc.resolveHeartbeatMainSessionRef(agentID)
 		if entry, ok := oc.getSessionEntry(context.Background(), storeRef, mainKey); ok {
 			lastChannel := strings.TrimSpace(entry.LastChannel)

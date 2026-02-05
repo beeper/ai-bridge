@@ -12,8 +12,12 @@ func ComputeNextRunAtMs(schedule CronSchedule, nowMs int64) *int64 {
 	kind := strings.TrimSpace(schedule.Kind)
 	switch kind {
 	case "at":
-		if schedule.AtMs > nowMs {
-			return &schedule.AtMs
+		atMs, ok := parseAbsoluteTimeMs(schedule.At)
+		if !ok {
+			return nil
+		}
+		if atMs > nowMs {
+			return &atMs
 		}
 		return nil
 	case "every":

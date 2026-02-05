@@ -278,7 +278,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"web_fetch":        "Fetch and extract readable content from a URL",
 		"browser":          "Control web browser",
 		"canvas":           "Present/eval/snapshot the Canvas",
-		"nodes":            "List/describe/notify/camera/screen/invoke on paired nodes",
+		"nodes":            "List/describe/notify/camera/screen on paired nodes",
 		"cron":             "Manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
 		"message":          "Send messages and channel actions",
 		"gateway":          "Restart, apply config, or run updates on the running Beeper process",
@@ -521,7 +521,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 			fmt.Sprintf("- %s: manage background exec sessions", processToolName),
 			"- browser: control Beeper's dedicated browser",
 			"- canvas: present/eval/snapshot the Canvas",
-			"- nodes: list/describe/notify/camera/screen/invoke on paired nodes",
+			"- nodes: list/describe/notify/camera/screen on paired nodes",
 			"- cron: manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
 			"- sessions_list: list sessions",
 			"- sessions_history: fetch session history",
@@ -546,7 +546,9 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"Use plain human language for narration unless in a technical context.",
 		"",
 	}
-	lines = append(lines, buildSafetySection()...)
+	if !isMinimal {
+		lines = append(lines, buildSafetySection()...)
+	}
 	lines = append(lines,
 		"## Beeper CLI Quick Reference",
 		"Beeper is controlled via subcommands. Do not invent commands.",
@@ -581,6 +583,9 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		)
 	}
 
+	if strings.TrimSpace(params.UserTimezone) != "" {
+		lines = append(lines, "If you need the current date, time, or day of week, run session_status (📊 session_status).")
+	}
 	lines = append(lines,
 		"## Workspace",
 		fmt.Sprintf("Your working directory is: %s", params.WorkspaceDir),

@@ -52,6 +52,10 @@ var ToolGroups = map[string][]string{
 	GroupFS:         {"read", "write", "edit", "apply_patch", "stat", "ls", "find", "grep"},
 }
 
+var ownerOnlyToolNames = map[string]struct{}{
+	"whatsapp_login": {},
+}
+
 type toolProfilePolicy struct {
 	Allow []string
 	Deny  []string
@@ -164,6 +168,30 @@ func NormalizeToolName(name string) string {
 		return alias
 	}
 	return normalized
+}
+
+// IsOwnerOnlyToolName reports whether the tool is restricted to owners.
+func IsOwnerOnlyToolName(name string) bool {
+	normalized := NormalizeToolName(name)
+	if normalized == "" {
+		return false
+	}
+	_, ok := ownerOnlyToolNames[normalized]
+	return ok
+}
+
+// ApplyOwnerOnlyToolPolicy filters owner-only tools when senderIsOwner is false.
+func ApplyOwnerOnlyToolPolicy(names []string, senderIsOwner bool) []string {
+	if senderIsOwner || len(names) == 0 {
+		return names
+	}
+	filtered := make([]string, 0, len(names))
+	for _, name := range names {
+		if !IsOwnerOnlyToolName(name) {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered
 }
 
 // NormalizeToolList normalizes each tool name in a list.

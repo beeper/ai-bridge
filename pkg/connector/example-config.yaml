@@ -66,6 +66,17 @@ messages:
     # Drop policy when cap is exceeded: summarize, old, new
     drop: "summarize"
 
+# Command authorization settings (OpenClaw-style).
+commands:
+  # Optional allowlist for owner-only tools/commands (Matrix IDs, or "matrix:@user:server").
+  ownerAllowFrom: []
+
+# Optional per-channel overrides.
+channels:
+  matrix:
+    # Response prefix override for Matrix rooms.
+    responsePrefix: ""
+
 # Session store configuration (OpenClaw-style).
 session:
   # Scope for session state: per-sender (default) or global.

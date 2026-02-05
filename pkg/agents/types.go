@@ -95,6 +95,7 @@ type MemoryConfig struct {
 // SubagentConfig configures default subagent behavior for an agent.
 type SubagentConfig struct {
 	Model       string   `json:"model,omitempty"`
+	Thinking    string   `json:"thinking,omitempty"`
 	AllowAgents []string `json:"allowAgents,omitempty"`
 }
 
