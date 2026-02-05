@@ -25,6 +25,10 @@ type sessionEntry struct {
 	LastTo              string `json:"lastTo,omitempty"`
 	LastAccountID       string `json:"lastAccountId,omitempty"`
 	LastThreadID        string `json:"lastThreadId,omitempty"`
+	QueueMode           string `json:"queueMode,omitempty"`
+	QueueDebounceMs     *int   `json:"queueDebounceMs,omitempty"`
+	QueueCap            *int   `json:"queueCap,omitempty"`
+	QueueDrop           string `json:"queueDrop,omitempty"`
 }
 
 type sessionStore struct {
@@ -194,6 +198,18 @@ func mergeSessionEntry(existing sessionEntry, patch sessionEntry) sessionEntry {
 	}
 	if patch.LastThreadID != "" {
 		next.LastThreadID = patch.LastThreadID
+	}
+	if patch.QueueMode != "" {
+		next.QueueMode = patch.QueueMode
+	}
+	if patch.QueueDebounceMs != nil {
+		next.QueueDebounceMs = patch.QueueDebounceMs
+	}
+	if patch.QueueCap != nil {
+		next.QueueCap = patch.QueueCap
+	}
+	if patch.QueueDrop != "" {
+		next.QueueDrop = patch.QueueDrop
 	}
 	next.SessionID = sessionID
 	next.UpdatedAt = updatedAt

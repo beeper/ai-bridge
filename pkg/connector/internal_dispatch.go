@@ -71,14 +71,21 @@ func (oc *AIClient) dispatchInternalMessage(
 		Type:        pendingTypeText,
 		MessageBody: trimmed,
 	}
+	queueItem := pendingQueueItem{
+		pending:     pending,
+		messageID:   string(eventID),
+		summaryLine: trimmed,
+		enqueuedAt:  time.Now().UnixMilli(),
+	}
+	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
 
 	if oc.acquireRoom(portal.MXID) {
 		metaSnapshot := clonePortalMetadata(meta)
-		runCtx := oc.backgroundContext(ctx)
+		runCtx := oc.attachRoomRun(oc.backgroundContext(ctx), portal.MXID)
 		go func(metaSnapshot *PortalMetadata) {
 			defer func() {
 				oc.releaseRoom(portal.MXID)
-				oc.processNextPending(oc.backgroundContext(ctx), portal.MXID)
+				oc.processPendingQueue(oc.backgroundContext(ctx), portal.MXID)
 			}()
 			oc.dispatchCompletionInternal(runCtx, nil, portal, metaSnapshot, promptMessages)
 		}(metaSnapshot)
@@ -86,7 +93,17 @@ func (oc *AIClient) dispatchInternalMessage(
 		return eventID, false, nil
 	}
 
-	oc.queuePendingMessage(portal.MXID, pending)
+	shouldSteer := queueSettings.Mode == QueueModeSteer || queueSettings.Mode == QueueModeSteerBacklog
+	if queueSettings.Mode == QueueModeInterrupt {
+		oc.cancelRoomRun(portal.MXID)
+		oc.clearPendingQueue(portal.MXID)
+	} else if shouldSteer {
+		oc.cancelRoomRun(portal.MXID)
+	}
+	if queueSettings.Mode == QueueModeSteerBacklog {
+		queueItem.backlogAfter = true
+	}
+	oc.queuePendingMessage(portal.MXID, queueItem, queueSettings)
 	oc.notifySessionMemoryChange(ctx, portal, meta, false)
 	return eventID, true, nil
 }
