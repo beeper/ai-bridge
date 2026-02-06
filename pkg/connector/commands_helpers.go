@@ -35,7 +35,7 @@ func requirePortal(ce *commands.Event) (*bridgev2.Portal, bool) {
 }
 
 func rejectBossOverrides(ce *commands.Event, meta *PortalMetadata, message string) bool {
-	if agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID) {
+	if agents.IsBossAgent(resolveAgentID(meta)) {
 		ce.Reply(message)
 		return true
 	}

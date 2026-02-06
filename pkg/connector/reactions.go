@@ -19,7 +19,7 @@ func (oc *AIClient) sendReaction(ctx context.Context, portal *bridgev2.Portal, t
 		return ""
 	}
 	if err := oc.ensureModelInRoom(ctx, portal); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to ensure ghost is in room for reaction")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure ghost is in room for reaction")
 		return ""
 	}
 	intent := oc.getModelIntent(ctx, portal)
@@ -29,19 +29,19 @@ func (oc *AIClient) sendReaction(ctx context.Context, portal *bridgev2.Portal, t
 
 	targetPart, err := oc.UserLogin.Bridge.DB.Message.GetPartByMXID(ctx, targetEventID)
 	if err != nil {
-		oc.log.Warn().Err(err).
+		oc.loggerForContext(ctx).Warn().Err(err).
 			Stringer("target_event", targetEventID).
 			Msg("Failed to load reaction target from database")
 		return ""
 	}
 	if targetPart == nil {
-		oc.log.Warn().
+		oc.loggerForContext(ctx).Warn().
 			Stringer("target_event", targetEventID).
 			Msg("Reaction target message not found in database")
 		return ""
 	}
 	if targetPart.Room != portal.PortalKey {
-		oc.log.Warn().
+		oc.loggerForContext(ctx).Warn().
 			Stringer("target_event", targetEventID).
 			Stringer("target_room", targetPart.Room).
 			Stringer("portal_room", portal.PortalKey).
@@ -51,7 +51,7 @@ func (oc *AIClient) sendReaction(ctx context.Context, portal *bridgev2.Portal, t
 
 	senderID := oc.reactionSenderID(ctx, portal)
 	if senderID == "" {
-		oc.log.Warn().
+		oc.loggerForContext(ctx).Warn().
 			Stringer("target_event", targetEventID).
 			Msg("Failed to resolve reaction sender ID")
 		return ""
@@ -85,13 +85,13 @@ func (oc *AIClient) sendReaction(ctx context.Context, portal *bridgev2.Portal, t
 		ReactionMeta: dbReaction,
 	})
 	if err != nil {
-		oc.log.Warn().Err(err).
+		oc.loggerForContext(ctx).Warn().Err(err).
 			Stringer("target_event", targetEventID).
 			Str("emoji", emoji).
 			Msg("Failed to send reaction")
 		return ""
 	} else {
-		oc.log.Debug().
+		oc.loggerForContext(ctx).Debug().
 			Stringer("target_event", targetEventID).
 			Str("emoji", emoji).
 			Stringer("reaction_event", resp.EventID).
@@ -100,7 +100,7 @@ func (oc *AIClient) sendReaction(ctx context.Context, portal *bridgev2.Portal, t
 
 	dbReaction.MXID = resp.EventID
 	if err := oc.UserLogin.Bridge.DB.Reaction.Upsert(ctx, dbReaction); err != nil {
-		oc.log.Warn().Err(err).
+		oc.loggerForContext(ctx).Warn().Err(err).
 			Stringer("reaction_event", resp.EventID).
 			Msg("Failed to store reaction in database")
 	}

@@ -68,7 +68,7 @@ func (oc *AIClient) HandleMatrixReactionRemove(ctx context.Context, msg *bridgev
 	}
 
 	if err := oc.UserLogin.Bridge.DB.Reaction.Delete(ctx, msg.TargetReaction); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to delete reaction from database")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to delete reaction from database")
 	}
 
 	emoji := msg.TargetReaction.Emoji

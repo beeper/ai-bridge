@@ -8,7 +8,7 @@ import (
 )
 
 func TestNexusAuthorizationHeaderValue(t *testing.T) {
-	header, err := nexusAuthorizationHeaderValue("", "abc123")
+	header, err := mcpAuthorizationHeaderValue("", "abc123")
 	if err != nil {
 		t.Fatalf("unexpected error for default auth type: %v", err)
 	}
@@ -16,7 +16,7 @@ func TestNexusAuthorizationHeaderValue(t *testing.T) {
 		t.Fatalf("unexpected bearer header: %q", header)
 	}
 
-	apiHeader, err := nexusAuthorizationHeaderValue("apikey", "k1")
+	apiHeader, err := mcpAuthorizationHeaderValue("apikey", "k1")
 	if err != nil {
 		t.Fatalf("unexpected error for apikey auth type: %v", err)
 	}

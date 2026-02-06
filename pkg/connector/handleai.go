@@ -25,7 +25,6 @@ func (oc *AIClient) dispatchCompletionInternal(
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) {
 	runCtx := oc.backgroundContext(ctx)
-	runCtx = oc.log.WithContext(runCtx)
 
 	// Always use streaming responses
 	oc.streamingResponseWithRetry(runCtx, sourceEvent, portal, meta, prompt)
@@ -110,7 +109,7 @@ func (oc *AIClient) setModelTyping(ctx context.Context, portal *bridgev2.Portal,
 		timeout = 0 // Zero timeout stops typing
 	}
 	if err := intent.MarkTyping(ctx, portal.MXID, bridgev2.TypingTypeText, timeout); err != nil {
-		oc.log.Warn().Err(err).Bool("typing", typing).Msg("Failed to set typing indicator")
+		oc.loggerForContext(ctx).Warn().Err(err).Bool("typing", typing).Msg("Failed to set typing indicator")
 	}
 }
 
@@ -141,33 +140,13 @@ func (oc *AIClient) sendSuccessStatus(ctx context.Context, portal *bridgev2.Port
 
 const autoGreetingDelay = 5 * time.Second
 
-func (oc *AIClient) resolveWelcomeDisplayName(ctx context.Context, meta *PortalMetadata) (displayName, agentID, modelID string) {
-	agentID = resolveAgentID(meta)
-	modelID = oc.effectiveModel(meta)
-	if agentID != "" {
-		store := NewAgentStoreAdapter(oc)
-		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil {
-			agentName := oc.resolveAgentDisplayName(ctx, agent)
-			displayName = oc.agentModelDisplayName(agentName, modelID)
-			oc.ensureAgentGhostDisplayName(ctx, agentID, modelID, agentName)
-		} else {
-			displayName = agentID
-		}
-		return displayName, agentID, modelID
-	}
-
-	displayName = modelContactName(modelID, oc.findModelInfo(modelID))
-	oc.ensureGhostDisplayName(ctx, modelID)
-	return displayName, agentID, modelID
-}
-
 func (oc *AIClient) hasPortalMessages(ctx context.Context, portal *bridgev2.Portal) bool {
 	if oc == nil || portal == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.DB == nil {
 		return true
 	}
 	history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, 1)
 	if err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to check portal message history")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to check portal message history")
 		return true
 	}
 	return len(history) > 0
@@ -181,7 +160,7 @@ func (oc *AIClient) scheduleAutoGreeting(ctx context.Context, portal *bridgev2.P
 	if meta == nil || meta.AutoGreetingSent {
 		return
 	}
-	if meta.IsBuilderRoom || meta.IsCronRoom || meta.IsAgentDataRoom || meta.IsGlobalMemoryRoom || meta.IsOpenCodeRoom {
+	if meta.IsBuilderRoom || meta.IsCronRoom || meta.IsOpenCodeRoom {
 		return
 	}
 	if normalizeSendPolicyMode(meta.SendPolicy) == "deny" {
@@ -219,7 +198,7 @@ func (oc *AIClient) scheduleAutoGreeting(ctx context.Context, portal *bridgev2.P
 			if currentMeta == nil || currentMeta.AutoGreetingSent {
 				return
 			}
-			if currentMeta.IsBuilderRoom || currentMeta.IsCronRoom || currentMeta.IsAgentDataRoom || currentMeta.IsGlobalMemoryRoom || currentMeta.IsOpenCodeRoom {
+			if currentMeta.IsBuilderRoom || currentMeta.IsCronRoom || currentMeta.IsOpenCodeRoom {
 				return
 			}
 			if normalizeSendPolicyMode(currentMeta.SendPolicy) == "deny" {
@@ -237,11 +216,11 @@ func (oc *AIClient) scheduleAutoGreeting(ctx context.Context, portal *bridgev2.P
 
 			currentMeta.AutoGreetingSent = true
 			if err := current.Save(bgCtx); err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to persist auto greeting state")
+				oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to persist auto greeting state")
 				return
 			}
 			if _, _, err := oc.dispatchInternalMessage(bgCtx, current, currentMeta, autoGreetingPrompt, "auto-greeting", true); err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to dispatch auto greeting")
+				oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to dispatch auto greeting")
 			}
 			return
 		}
@@ -258,7 +237,7 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 	// Mark as sent BEFORE queuing to prevent duplicate welcome messages on race
 	meta.WelcomeSent = true
 	if err := portal.Save(ctx); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to persist welcome message state")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to persist welcome message state")
 		return // Don't send if we can't persist state
 	}
 
@@ -288,7 +267,7 @@ func (oc *AIClient) maybeGenerateTitle(ctx context.Context, portal *bridgev2.Por
 		// Fetch the last user message from database
 		messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(bgCtx, portal.PortalKey, 10)
 		if err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to get messages for title generation")
+			oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to get messages for title generation")
 			return
 		}
 
@@ -302,13 +281,13 @@ func (oc *AIClient) maybeGenerateTitle(ctx context.Context, portal *bridgev2.Por
 		}
 
 		if userMessage == "" {
-			oc.log.Debug().Msg("No user message found for title generation")
+			oc.loggerForContext(ctx).Debug().Msg("No user message found for title generation")
 			return
 		}
 
 		title, err := oc.generateRoomTitle(bgCtx, userMessage, assistantResponse)
 		if err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to generate room title")
+			oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to generate room title")
 			return
 		}
 
@@ -317,7 +296,7 @@ func (oc *AIClient) maybeGenerateTitle(ctx context.Context, portal *bridgev2.Por
 		}
 
 		if err := oc.setRoomName(bgCtx, portal, title); err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to set room name")
+			oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to set room name")
 		}
 	}()
 }
@@ -355,7 +334,7 @@ func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistan
 		return "", fmt.Errorf("title generation disabled for this provider")
 	}
 
-	oc.log.Debug().Str("model", model).Msg("Generating room title")
+	oc.loggerForContext(ctx).Debug().Str("model", model).Msg("Generating room title")
 
 	params := responses.ResponseNewParams{
 		Model: shared.ResponsesModel(model),
@@ -378,19 +357,19 @@ func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistan
 	// Use Responses API for OpenRouter compatibility (plugins field is only valid here)
 	resp, err := oc.api.Responses.New(ctx, params)
 	if err != nil && params.Reasoning.Effort != "" {
-		oc.log.Warn().Err(err).Str("model", model).Msg("Title generation failed with reasoning disabled; retrying without reasoning param")
+		oc.loggerForContext(ctx).Warn().Err(err).Str("model", model).Msg("Title generation failed with reasoning disabled; retrying without reasoning param")
 		params.Reasoning = shared.ReasoningParam{}
 		resp, err = oc.api.Responses.New(ctx, params)
 	}
 	if err != nil {
-		oc.log.Warn().Err(err).Str("model", model).Msg("Title generation API call failed")
+		oc.loggerForContext(ctx).Warn().Err(err).Str("model", model).Msg("Title generation API call failed")
 		return "", err
 	}
 
 	title := extractTitleFromResponse(resp)
 
 	if title == "" {
-		oc.log.Warn().
+		oc.loggerForContext(ctx).Warn().
 			Str("model", model).
 			Int("output_items", len(resp.Output)).
 			Str("status", string(resp.Status)).
@@ -475,11 +454,11 @@ func (oc *AIClient) setRoomNameInternal(ctx context.Context, portal *bridgev2.Po
 	meta.TitleGenerated = true
 	if save {
 		if err := portal.Save(ctx); err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to save portal after setting room name")
+			oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to save portal after setting room name")
 		}
 	}
 
-	oc.log.Debug().Str("name", name).Msg("Set Matrix room name")
+	oc.loggerForContext(ctx).Debug().Str("name", name).Msg("Set Matrix room name")
 	return nil
 }
 
@@ -500,10 +479,10 @@ func (oc *AIClient) setRoomTopic(ctx context.Context, portal *bridgev2.Portal, t
 
 	portal.Topic = topic
 	if err := portal.Save(ctx); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to save portal after setting room topic")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to save portal after setting room topic")
 	}
 
-	oc.log.Debug().Str("topic", topic).Msg("Set Matrix room topic")
+	oc.loggerForContext(ctx).Debug().Str("topic", topic).Msg("Set Matrix room topic")
 	return nil
 }
 
@@ -552,7 +531,7 @@ func (oc *AIClient) setRoomSystemPromptInternal(ctx context.Context, portal *bri
 		if err := portal.Save(ctx); err != nil {
 			return fmt.Errorf("failed to save portal: %w", err)
 		}
-		oc.log.Debug().Str("prompt_len", fmt.Sprintf("%d", len(prompt))).Msg("Set room system prompt")
+		oc.loggerForContext(ctx).Debug().Str("prompt_len", fmt.Sprintf("%d", len(prompt))).Msg("Set room system prompt")
 	}
 	return nil
 }

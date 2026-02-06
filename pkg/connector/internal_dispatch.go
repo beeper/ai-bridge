@@ -33,7 +33,7 @@ func (oc *AIClient) dispatchInternalMessage(
 	trace := traceEnabled(meta)
 	traceFull := traceFull(meta)
 	if trace {
-		oc.log.Debug().
+		oc.loggerForContext(ctx).Debug().
 			Stringer("portal", portal.PortalKey).
 			Str("source", strings.TrimSpace(source)).
 			Msg("Dispatching internal message")
@@ -43,7 +43,7 @@ func (oc *AIClient) dispatchInternalMessage(
 			return "", false, fmt.Errorf("OpenCode integration is not available")
 		}
 		if trace {
-			oc.log.Debug().Stringer("portal", portal.PortalKey).Msg("Routing internal message to OpenCode")
+			oc.loggerForContext(ctx).Debug().Stringer("portal", portal.PortalKey).Msg("Routing internal message to OpenCode")
 		}
 		return oc.opencodeBridge.DispatchInternalMessage(ctx, portal, oc.PortalMeta(portal), body)
 	}
@@ -52,7 +52,7 @@ func (oc *AIClient) dispatchInternalMessage(
 		return "", false, fmt.Errorf("message body is required")
 	}
 	if traceFull {
-		oc.log.Debug().Stringer("portal", portal.PortalKey).Str("body", trimmed).Msg("Internal message body")
+		oc.loggerForContext(ctx).Debug().Stringer("portal", portal.PortalKey).Str("body", trimmed).Msg("Internal message body")
 	}
 
 	prefix := "internal"
@@ -79,10 +79,10 @@ func (oc *AIClient) dispatchInternalMessage(
 		Timestamp: time.Now(),
 	}
 	if _, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userMessage.SenderID); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to ensure user ghost before saving internal message")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure user ghost before saving internal message")
 	}
 	if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, userMessage); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to save internal message to database")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to save internal message to database")
 	}
 
 	isGroup := oc.isGroupChat(ctx, portal)
@@ -132,7 +132,7 @@ func (oc *AIClient) dispatchInternalMessage(
 		if oc.enqueueSteerQueue(portal.MXID, queueItem) {
 			if queueSettings.Mode != QueueModeSteerBacklog {
 				if trace {
-					oc.log.Debug().Stringer("portal", portal.PortalKey).Msg("Steered internal message into active run")
+					oc.loggerForContext(ctx).Debug().Stringer("portal", portal.PortalKey).Msg("Steered internal message into active run")
 				}
 				return eventID, true, nil
 			}
@@ -142,7 +142,7 @@ func (oc *AIClient) dispatchInternalMessage(
 		queueItem.backlogAfter = true
 	}
 	if trace {
-		oc.log.Debug().Stringer("portal", portal.PortalKey).Msg("Queued internal message")
+		oc.loggerForContext(ctx).Debug().Stringer("portal", portal.PortalKey).Msg("Queued internal message")
 	}
 	oc.queuePendingMessage(portal.MXID, queueItem, queueSettings)
 	oc.notifySessionMemoryChange(ctx, portal, meta, false)

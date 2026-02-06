@@ -59,10 +59,10 @@ func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridge
 	}
 	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
 	if err != nil {
-		oc.log.Error().Err(err).Msg("Failed to send initial streaming message")
+		oc.loggerForContext(ctx).Error().Err(err).Msg("Failed to send initial streaming message")
 		return ""
 	}
-	oc.log.Info().Stringer("event_id", resp.EventID).Str("turn_id", turnID).Msg("Initial streaming message sent")
+	oc.loggerForContext(ctx).Info().Stringer("event_id", resp.EventID).Str("turn_id", turnID).Msg("Initial streaming message sent")
 	return resp.EventID
 }
 
@@ -109,7 +109,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 
 	// Handle silent replies - redact the streaming message
 	if directives.IsSilent {
-		oc.log.Debug().
+		oc.loggerForContext(ctx).Debug().
 			Str("turn_id", state.turnID).
 			Str("initial_event_id", state.initialEventID.String()).
 			Msg("Silent reply detected, redacting streaming message")
@@ -122,7 +122,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 				},
 			}, nil)
 			if err != nil {
-				oc.log.Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact silent reply message")
+				oc.loggerForContext(ctx).Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact silent reply message")
 			}
 		}
 		return
@@ -234,10 +234,10 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	eventContent := &event.Content{Raw: eventRawContent}
 
 	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {
-		oc.log.Warn().Err(err).Stringer("initial_event_id", state.initialEventID).Msg("Failed to send final assistant turn")
+		oc.loggerForContext(ctx).Warn().Err(err).Stringer("initial_event_id", state.initialEventID).Msg("Failed to send final assistant turn")
 	} else {
 		oc.recordAgentActivity(ctx, portal, meta)
-		oc.log.Debug().
+		oc.loggerForContext(ctx).Debug().
 			Str("initial_event_id", state.initialEventID.String()).
 			Str("turn_id", state.turnID).
 			Bool("has_thinking", state.reasoning.Len() > 0).
@@ -467,7 +467,7 @@ func (oc *AIClient) redactInitialStreamingMessage(ctx context.Context, portal *b
 		},
 	}, nil)
 	if err != nil {
-		oc.log.Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact heartbeat reply message")
+		oc.loggerForContext(ctx).Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact heartbeat reply message")
 	}
 }
 
@@ -721,10 +721,10 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 	eventContent := &event.Content{Raw: rawContent2}
 
 	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {
-		oc.log.Warn().Err(err).Stringer("initial_event_id", state.initialEventID).Msg("Failed to send final assistant turn (raw mode)")
+		oc.loggerForContext(ctx).Warn().Err(err).Stringer("initial_event_id", state.initialEventID).Msg("Failed to send final assistant turn (raw mode)")
 	} else {
 		oc.recordAgentActivity(ctx, portal, meta)
-		oc.log.Debug().
+		oc.loggerForContext(ctx).Debug().
 			Str("initial_event_id", state.initialEventID.String()).
 			Str("turn_id", state.turnID).
 			Str("mode", "raw").

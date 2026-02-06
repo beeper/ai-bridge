@@ -604,7 +604,7 @@ type RoomSettingsEventContent struct {
 	MaxCompletionTokens int      `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string   `json:"reasoning_effort,omitempty"`
 	ConversationMode    string   `json:"conversation_mode,omitempty"` // "messages" or "responses"
-	DefaultAgentID      string   `json:"default_agent_id,omitempty"`
+	AgentID             string   `json:"agent_id,omitempty"`
 	EmitThinking        *bool    `json:"emit_thinking,omitempty"`
 	EmitToolArgs        *bool    `json:"emit_tool_args,omitempty"`
 }

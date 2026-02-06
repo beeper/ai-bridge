@@ -41,7 +41,7 @@ func (oc *AIClient) buildCronService() *cron.CronService {
 	storePath := resolveCronStorePath(&oc.connector.Config)
 	storeBackend := oc.cronStoreBackend()
 	if storeBackend == nil {
-		oc.log.Warn().Msg("cron: missing virtual store backend")
+		oc.loggerForContext(context.Background()).Warn().Msg("cron: missing virtual store backend")
 		return nil
 	}
 	deps := cron.CronServiceDeps{
@@ -69,7 +69,7 @@ func (oc *AIClient) enqueueCronSystemEvent(text string, agentID string) error {
 	portal, sessionKey, err := oc.resolveHeartbeatSessionPortal(agentID, hb)
 	if err != nil || portal == nil || sessionKey == "" {
 		if err != nil {
-			oc.log.Warn().Err(err).Str("agent_id", agentID).Msg("cron: unable to resolve heartbeat session for system event")
+			oc.loggerForContext(context.Background()).Warn().Err(err).Str("agent_id", agentID).Msg("cron: unable to resolve heartbeat session for system event")
 		}
 		// Fallback to logical session key so the event isn't lost if room resolution is temporarily unavailable.
 		sessionKey = strings.TrimSpace(oc.resolveHeartbeatSession(agentID, hb).SessionKey)

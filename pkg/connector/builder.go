@@ -31,14 +31,14 @@ func (oc *AIClient) ensureBuilderRoom(ctx context.Context) error {
 			Receiver: oc.UserLogin.ID,
 		})
 		if err == nil && portal != nil && portal.MXID != "" {
-			oc.log.Debug().Str("room_id", string(meta.BuilderRoomID)).Msg("Manage AI Chats room already exists")
+			oc.loggerForContext(ctx).Debug().Str("room_id", string(meta.BuilderRoomID)).Msg("Manage AI Chats room already exists")
 			return nil
 		}
 		// Room doesn't exist anymore, clear the reference
 		meta.BuilderRoomID = ""
 	}
 
-	oc.log.Info().Msg("Creating Manage AI Chats room")
+	oc.loggerForContext(ctx).Info().Msg("Creating Manage AI Chats room")
 
 	// Create the Builder room with Boss agent as the ghost
 	portal, chatInfo, err := oc.createBuilderRoom(ctx)
@@ -63,7 +63,7 @@ func (oc *AIClient) ensureBuilderRoom(ctx context.Context) error {
 		return fmt.Errorf("failed to save BuilderRoomID: %w", err)
 	}
 
-	oc.log.Info().
+	oc.loggerForContext(ctx).Info().
 		Str("portal_id", string(portal.PortalKey.ID)).
 		Str("mxid", string(portal.MXID)).
 		Msg("Manage AI Chats room created")
@@ -89,7 +89,6 @@ func (oc *AIClient) createBuilderRoom(ctx context.Context) (*bridgev2.Portal, *b
 	pm := portalMeta(portal)
 	pm.Slug = BuilderRoomSlug // Override slug to "builder"
 	pm.AgentID = bossAgent.ID
-	pm.DefaultAgentID = bossAgent.ID
 	pm.SystemPrompt = agents.BossSystemPrompt
 	pm.Model = bossAgent.Model.Primary // Explicit model - always use Boss agent's model
 	pm.IsBuilderRoom = true            // Mark as protected from overrides

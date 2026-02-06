@@ -48,7 +48,7 @@ func (m *OpenCodeManager) emitToolStreamDelta(ctx context.Context, inst *openCod
 	meta := m.bridge.portalMeta(portal)
 	agentID := ""
 	if meta != nil {
-		agentID = meta.DefaultAgentID
+		agentID = meta.AgentID
 	}
 	started, _, _, _ := inst.partStreamFlags(part.SessionID, part.ID)
 	if !started {
@@ -86,7 +86,7 @@ func (m *OpenCodeManager) emitToolStreamState(ctx context.Context, inst *openCod
 	meta := m.bridge.portalMeta(portal)
 	agentID := ""
 	if meta != nil {
-		agentID = meta.DefaultAgentID
+		agentID = meta.AgentID
 	}
 	started, inputAvailable, outputAvailable, outputError := inst.partStreamFlags(part.SessionID, part.ID)
 

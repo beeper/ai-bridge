@@ -70,12 +70,15 @@ type DesktopAPIInstance struct {
 // MCPServerConfig stores one MCP server connection for a login.
 // The map key in ServiceTokens.MCPServers is the server name.
 type MCPServerConfig struct {
-	Endpoint  string `json:"endpoint,omitempty"`
-	AuthType  string `json:"auth_type,omitempty"` // bearer|apikey|none
-	Token     string `json:"token,omitempty"`
-	AuthURL   string `json:"auth_url,omitempty"` // Optional browser auth URL for manual token retrieval.
-	Connected bool   `json:"connected,omitempty"`
-	Kind      string `json:"kind,omitempty"` // nexus (default)
+	Transport string   `json:"transport,omitempty"` // streamable_http|stdio
+	Endpoint  string   `json:"endpoint,omitempty"`  // streamable HTTP endpoint
+	Command   string   `json:"command,omitempty"`   // stdio command path/binary
+	Args      []string `json:"args,omitempty"`      // stdio command args
+	AuthType  string   `json:"auth_type,omitempty"` // bearer|apikey|none
+	Token     string   `json:"token,omitempty"`
+	AuthURL   string   `json:"auth_url,omitempty"` // Optional browser auth URL for manual token retrieval.
+	Connected bool     `json:"connected,omitempty"`
+	Kind      string   `json:"kind,omitempty"` // generic|nexus
 }
 
 // UserLoginMetadata is stored on each login row to keep per-user settings.
@@ -110,17 +113,10 @@ type UserLoginMetadata struct {
 	BuilderRoomID networkid.PortalID `json:"builder_room_id,omitempty"`
 	// Custom agents store (source of truth for user-created agents).
 	CustomAgents map[string]*AgentDefinitionContent `json:"custom_agents,omitempty"`
-	// Memory index fallback store for connectors without arbitrary Matrix state access.
-	MemoryIndexes map[string][]MemoryIndexEntry `json:"memory_indexes,omitempty"`
-	// Memory facts keyed by scope key then fact ID.
-	MemoryFacts map[string]map[string]*MemoryFactContent `json:"memory_facts,omitempty"`
 	// Last active room per agent (used for heartbeat delivery).
 	LastActiveRoomByAgent map[string]string `json:"last_active_room_by_agent,omitempty"`
 	// Heartbeat dedupe state per agent.
 	HeartbeatState map[string]HeartbeatState `json:"heartbeat_state,omitempty"`
-
-	// Global Memory room for shared agent memories
-	GlobalMemoryRoomID networkid.PortalID `json:"global_memory_room_id,omitempty"`
 
 	// OpenCode instances connected for this login (keyed by instance ID).
 	OpenCodeInstances map[string]*opencodebridge.OpenCodeInstance `json:"opencode_instances,omitempty"`
@@ -184,13 +180,10 @@ type PortalMetadata struct {
 	SessionBootstrapByAgent    map[string]int64 `json:"session_bootstrap_by_agent,omitempty"`
 
 	// Agent-related metadata
-	DefaultAgentID       string `json:"default_agent_id,omitempty"`        // Agent assigned to this room (legacy name, same as AgentID)
 	AgentID              string `json:"agent_id,omitempty"`                // Which agent is the ghost for this room
 	AgentPrompt          string `json:"agent_prompt,omitempty"`            // Cached prompt for the assigned agent
 	IsBuilderRoom        bool   `json:"is_builder_room,omitempty"`         // True if this is the Manage AI Chats room (protected from overrides)
 	IsRawMode            bool   `json:"is_raw_mode,omitempty"`             // True if this is a playground/raw mode room (no directive processing)
-	IsAgentDataRoom      bool   `json:"is_agent_data_room,omitempty"`      // True if this is a hidden room for storing agent data
-	IsGlobalMemoryRoom   bool   `json:"is_global_memory_room,omitempty"`   // True if this is the global memory room
 	IsCronRoom           bool   `json:"is_cron_room,omitempty"`            // True if this is a hidden cron room
 	CronJobID            string `json:"cron_job_id,omitempty"`             // Cron job ID for cron rooms
 	SubagentParentRoomID string `json:"subagent_parent_room_id,omitempty"` // Parent room ID for subagent sessions

@@ -11,8 +11,6 @@ func TestShouldExcludeModelVisiblePortal(t *testing.T) {
 		name string
 		meta PortalMetadata
 	}{
-		{name: "agent data", meta: PortalMetadata{IsAgentDataRoom: true}},
-		{name: "global memory", meta: PortalMetadata{IsGlobalMemoryRoom: true}},
 		{name: "cron", meta: PortalMetadata{IsCronRoom: true}},
 		{name: "builder", meta: PortalMetadata{IsBuilderRoom: true}},
 		{name: "opencode", meta: PortalMetadata{IsOpenCodeRoom: true}},

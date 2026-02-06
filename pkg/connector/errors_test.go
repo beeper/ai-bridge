@@ -46,4 +46,3 @@ func TestParseContextLengthError_NonContextError(t *testing.T) {
 		t.Fatal("expected nil for non-context error")
 	}
 }
-

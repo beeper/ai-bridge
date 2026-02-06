@@ -18,20 +18,20 @@ const (
 // TypingController manages typing indicators with TTL and refresh.
 // Similar to OpenClaw's TypingController pattern.
 type TypingController struct {
-	client *AIClient
-	portal *bridgev2.Portal
-	ctx    context.Context
+	client   *AIClient
+	portal   *bridgev2.Portal
+	ctx      context.Context
 	interval time.Duration
 	ttl      time.Duration
 
-	mu          sync.Mutex
-	active      bool
-	sealed      bool // Once sealed, typing cannot be restarted
-	runComplete bool
+	mu           sync.Mutex
+	active       bool
+	sealed       bool // Once sealed, typing cannot be restarted
+	runComplete  bool
 	dispatchIdle bool
-	ticker      *time.Ticker
-	ttlTimer    *time.Timer
-	stopChan    chan struct{}
+	ticker       *time.Ticker
+	ttlTimer     *time.Timer
+	stopChan     chan struct{}
 }
 
 type TypingControllerOptions struct {

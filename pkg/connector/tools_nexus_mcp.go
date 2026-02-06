@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -40,31 +41,37 @@ func (rt *nexusAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 	return base.RoundTrip(cloned)
 }
 
-func normalizeNexusAuthType(authType string) string {
+func normalizeMCPAuthType(authType string) string {
 	value := strings.ToLower(strings.TrimSpace(authType))
 	if value == "" {
 		return "bearer"
 	}
 	switch value {
-	case "bearer", "apikey", "api_key", "api-key":
+	case "bearer", "apikey", "api_key", "api-key", "none":
 		return value
 	default:
 		return value
 	}
 }
 
-func nexusAuthorizationHeaderValue(authType, token string) (string, error) {
+func mcpAuthorizationHeaderValue(authType, token string) (string, error) {
+	authType = normalizeMCPAuthType(authType)
 	token = strings.TrimSpace(token)
-	if token == "" {
-		return "", errors.New("missing Nexus token")
-	}
-	switch normalizeNexusAuthType(authType) {
+	switch authType {
+	case "none":
+		return "", nil
 	case "bearer":
+		if token == "" {
+			return "", errors.New("missing MCP token")
+		}
 		return "Bearer " + token, nil
 	case "apikey", "api_key", "api-key":
+		if token == "" {
+			return "", errors.New("missing MCP token")
+		}
 		return "ApiKey " + token, nil
 	default:
-		return "", fmt.Errorf("unsupported network.tools.nexus.auth_type %q", authType)
+		return "", fmt.Errorf("unsupported MCP auth_type %q", authType)
 	}
 }
 
@@ -94,6 +101,17 @@ func copyToolDefinitions(defs []ToolDefinition) []ToolDefinition {
 	return out
 }
 
+func copyStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
+
 func (oc *AIClient) nexusRequestTimeout() time.Duration {
 	timeoutSeconds := defaultNexusTimeoutSeconds
 	if oc != nil && oc.connector != nil && oc.connector.Config.Tools.Nexus != nil && oc.connector.Config.Tools.Nexus.TimeoutSeconds > 0 {
@@ -102,8 +120,8 @@ func (oc *AIClient) nexusRequestTimeout() time.Duration {
 	return time.Duration(timeoutSeconds) * time.Second
 }
 
-func (oc *AIClient) nexusMCPHTTPClient(cfg *NexusToolsConfig) (*http.Client, error) {
-	headerValue, err := nexusAuthorizationHeaderValue(cfg.AuthType, cfg.Token)
+func (oc *AIClient) mcpHTTPClientForServer(server namedMCPServer) (*http.Client, error) {
+	headerValue, err := mcpAuthorizationHeaderValue(server.Config.AuthType, server.Config.Token)
 	if err != nil {
 		return nil, err
 	}
@@ -117,41 +135,51 @@ func (oc *AIClient) nexusMCPHTTPClient(cfg *NexusToolsConfig) (*http.Client, err
 	return client, nil
 }
 
-func (oc *AIClient) newNexusMCPSession(ctx context.Context) (*mcp.ClientSession, error) {
-	if oc == nil || oc.connector == nil {
-		return nil, fmt.Errorf("nexus mcp requires bridge context")
+func (oc *AIClient) newNexusMCPSession(ctx context.Context, server namedMCPServer) (*mcp.ClientSession, error) {
+	if oc == nil {
+		return nil, fmt.Errorf("mcp requires bridge context")
 	}
-	cfg := oc.connector.Config.Tools.Nexus
-	if !nexusConfigured(cfg) {
-		return nil, fmt.Errorf("nexus tools are not configured (set network.tools.nexus.base_url or mcp_endpoint and token)")
+	server.Config = normalizeMCPServerConfig(server.Config)
+	if !mcpServerHasTarget(server.Config) {
+		return nil, fmt.Errorf("MCP server %q has no target", server.Name)
 	}
-
-	endpoint := nexusMCPEndpoint(cfg)
-	if endpoint == "" {
-		return nil, fmt.Errorf("nexus MCP endpoint is empty")
-	}
-	httpClient, err := oc.nexusMCPHTTPClient(cfg)
-	if err != nil {
-		return nil, err
+	if !server.Config.Connected {
+		return nil, fmt.Errorf("MCP server %q is disconnected", server.Name)
 	}
 
 	client := mcp.NewClient(&mcp.Implementation{
 		Name:    "ai-bridge",
 		Version: "1.0.0",
 	}, nil)
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint:   endpoint,
-		HTTPClient: httpClient,
-		MaxRetries: 1,
-	}, nil)
+	var (
+		session *mcp.ClientSession
+		err     error
+	)
+	switch server.Config.Transport {
+	case mcpTransportStdio:
+		cmd := exec.CommandContext(ctx, server.Config.Command, server.Config.Args...)
+		session, err = client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
+	case mcpTransportStreamableHTTP:
+		httpClient, clientErr := oc.mcpHTTPClientForServer(server)
+		if clientErr != nil {
+			return nil, clientErr
+		}
+		session, err = client.Connect(ctx, &mcp.StreamableClientTransport{
+			Endpoint:   server.Config.Endpoint,
+			HTTPClient: httpClient,
+			MaxRetries: 1,
+		}, nil)
+	default:
+		return nil, fmt.Errorf("unsupported MCP transport %q", server.Config.Transport)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to Nexus MCP endpoint %q: %w", endpoint, err)
+		return nil, fmt.Errorf("failed to connect MCP server %q (%s): %w", server.Name, mcpServerTargetLabel(server.Config), err)
 	}
 	return session, nil
 }
 
-func (oc *AIClient) fetchNexusMCPToolDefinitions(ctx context.Context) ([]ToolDefinition, error) {
-	session, err := oc.newNexusMCPSession(ctx)
+func (oc *AIClient) fetchNexusMCPToolDefinitionsForServer(ctx context.Context, server namedMCPServer) ([]ToolDefinition, error) {
+	session, err := oc.newNexusMCPSession(ctx, server)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +187,7 @@ func (oc *AIClient) fetchNexusMCPToolDefinitions(ctx context.Context) ([]ToolDef
 
 	toolsResult, err := session.ListTools(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list Nexus MCP tools: %w", err)
+		return nil, fmt.Errorf("failed to list MCP tools from %s: %w", server.Name, err)
 	}
 	if toolsResult == nil || len(toolsResult.Tools) == 0 {
 		return nil, nil
@@ -199,7 +227,7 @@ func (oc *AIClient) fetchNexusMCPToolDefinitions(ctx context.Context) ([]ToolDef
 }
 
 func (oc *AIClient) nexusMCPToolDefinitions(ctx context.Context) ([]ToolDefinition, error) {
-	if !oc.isNexusConfigured() {
+	if !oc.isMCPConfigured() {
 		return nil, nil
 	}
 	if ctx == nil {
@@ -228,23 +256,46 @@ func (oc *AIClient) nexusMCPToolDefinitions(ctx context.Context) ([]ToolDefiniti
 		defer cancel()
 	}
 
-	defs, err := oc.fetchNexusMCPToolDefinitions(callCtx)
-	if err != nil {
-		return nil, err
+	servers := oc.activeMCPServers()
+	combined := make([]ToolDefinition, 0)
+	toolSet := make(map[string]struct{})
+	toolServer := make(map[string]string)
+	var firstErr error
+
+	for _, server := range servers {
+		defs, err := oc.fetchNexusMCPToolDefinitionsForServer(callCtx, server)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			oc.loggerForContext(ctx).Debug().Err(err).Str("mcp_server", server.Name).Msg("Failed to discover MCP tools from server")
+			continue
+		}
+		for _, def := range defs {
+			if _, exists := toolSet[def.Name]; exists {
+				continue
+			}
+			toolSet[def.Name] = struct{}{}
+			toolServer[def.Name] = server.Name
+			combined = append(combined, def)
+		}
 	}
 
-	toolSet := make(map[string]struct{}, len(defs))
-	for _, def := range defs {
-		toolSet[def.Name] = struct{}{}
-	}
+	sort.Slice(combined, func(i, j int) bool {
+		return combined[i].Name < combined[j].Name
+	})
 
 	oc.nexusMCPToolsMu.Lock()
-	oc.nexusMCPTools = copyToolDefinitions(defs)
+	oc.nexusMCPTools = copyToolDefinitions(combined)
 	oc.nexusMCPToolSet = toolSet
+	oc.nexusMCPToolServer = copyStringMap(toolServer)
 	oc.nexusMCPToolsFetchedAt = time.Now()
 	oc.nexusMCPToolsMu.Unlock()
 
-	return defs, nil
+	if len(combined) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	return combined, nil
 }
 
 func (oc *AIClient) nexusDiscoveredToolNames(ctx context.Context) []string {
@@ -273,6 +324,19 @@ func (oc *AIClient) hasCachedNexusMCPTool(name string) bool {
 	return ok
 }
 
+func (oc *AIClient) cachedNexusMCPServerForTool(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || oc == nil {
+		return ""
+	}
+	oc.nexusMCPToolsMu.Lock()
+	defer oc.nexusMCPToolsMu.Unlock()
+	if oc.nexusMCPToolServer == nil {
+		return ""
+	}
+	return strings.TrimSpace(oc.nexusMCPToolServer[name])
+}
+
 func (oc *AIClient) lookupNexusMCPToolDefinition(ctx context.Context, name string) (ToolDefinition, bool) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -290,16 +354,76 @@ func (oc *AIClient) lookupNexusMCPToolDefinition(ctx context.Context, name strin
 	return ToolDefinition{}, false
 }
 
-func (oc *AIClient) isNexusMCPToolName(name string) bool {
+func (oc *AIClient) nexusMCPServerByName(name string) (namedMCPServer, bool) {
+	name = normalizeMCPServerName(name)
+	for _, server := range oc.activeMCPServers() {
+		if server.Name == name {
+			return server, true
+		}
+	}
+	return namedMCPServer{}, false
+}
+
+func (oc *AIClient) nexusMCPServerForTool(ctx context.Context, toolName string) (namedMCPServer, bool) {
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "" {
+		return namedMCPServer{}, false
+	}
+	if isNexusToolName(toolName) {
+		servers := oc.activeNexusMCPServers()
+		if len(servers) == 0 {
+			return namedMCPServer{}, false
+		}
+		return servers[0], true
+	}
+	if serverName := oc.cachedNexusMCPServerForTool(toolName); serverName != "" {
+		if server, ok := oc.nexusMCPServerByName(serverName); ok {
+			return server, true
+		}
+	}
+	if _, ok := oc.lookupNexusMCPToolDefinition(ctx, toolName); ok {
+		if serverName := oc.cachedNexusMCPServerForTool(toolName); serverName != "" {
+			if server, ok := oc.nexusMCPServerByName(serverName); ok {
+				return server, true
+			}
+		}
+	}
+	servers := oc.activeMCPServers()
+	if len(servers) == 0 {
+		return namedMCPServer{}, false
+	}
+	return servers[0], true
+}
+
+func (oc *AIClient) isMCPToolName(name string) bool {
 	if isNexusToolName(name) {
 		return true
 	}
 	return oc.hasCachedNexusMCPTool(name)
 }
 
+func (oc *AIClient) isNexusScopedMCPTool(name string) bool {
+	if isNexusToolName(name) {
+		return true
+	}
+	serverName := oc.cachedNexusMCPServerForTool(name)
+	if serverName == "" {
+		return false
+	}
+	server, ok := oc.configuredMCPServerByName(serverName)
+	if !ok {
+		return false
+	}
+	return normalizeMCPServerKind(server.Config.Kind) == mcpServerKindNexus
+}
+
+func (oc *AIClient) isNexusMCPToolName(name string) bool {
+	return oc.isMCPToolName(name)
+}
+
 func (oc *AIClient) shouldUseNexusMCPTool(ctx context.Context, toolName string) bool {
 	toolName = strings.TrimSpace(toolName)
-	if toolName == "" || !oc.isNexusConfigured() {
+	if toolName == "" || !oc.isMCPConfigured() {
 		return false
 	}
 	if ctx == nil {
@@ -365,9 +489,32 @@ func formatNexusMCPToolResult(result *mcp.CallToolResult) (string, error) {
 	return trimmed, nil
 }
 
+func mcpCallLikelyAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(text, "401") ||
+		strings.Contains(text, "403") ||
+		strings.Contains(text, "unauthorized") ||
+		strings.Contains(text, "forbidden") ||
+		strings.Contains(text, "missing mcp token")
+}
+
+func (oc *AIClient) notifyMCPAuthURL(ctx context.Context, server namedMCPServer) {
+	if strings.TrimSpace(server.Config.AuthURL) == "" {
+		return
+	}
+	btc := GetBridgeToolContext(ctx)
+	if btc == nil || btc.Client == nil || btc.Portal == nil {
+		return
+	}
+	btc.Client.sendSystemNotice(ctx, btc.Portal, fmt.Sprintf("MCP authentication required for server '%s'. Open this URL: %s", server.Name, server.Config.AuthURL))
+}
+
 func (oc *AIClient) executeNexusMCPTool(ctx context.Context, toolName string, args map[string]any) (string, error) {
-	if !oc.isNexusConfigured() {
-		return "", fmt.Errorf("nexus tools are not configured (set network.tools.nexus.base_url or mcp_endpoint and token)")
+	if !oc.isMCPConfigured() {
+		return "", fmt.Errorf("MCP tools are not configured (add an MCP server with !ai mcp add/connect)")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -382,8 +529,16 @@ func (oc *AIClient) executeNexusMCPTool(ctx context.Context, toolName string, ar
 		defer cancel()
 	}
 
-	session, err := oc.newNexusMCPSession(callCtx)
+	server, ok := oc.nexusMCPServerForTool(callCtx, toolName)
+	if !ok {
+		return "", fmt.Errorf("no connected MCP server available for tool %s", toolName)
+	}
+
+	session, err := oc.newNexusMCPSession(callCtx, server)
 	if err != nil {
+		if mcpCallLikelyAuthError(err) {
+			oc.notifyMCPAuthURL(callCtx, server)
+		}
 		return "", err
 	}
 	defer session.Close()
@@ -393,7 +548,10 @@ func (oc *AIClient) executeNexusMCPTool(ctx context.Context, toolName string, ar
 		Arguments: args,
 	})
 	if err != nil {
-		return "", fmt.Errorf("Nexus MCP call failed for %s: %w", toolName, err)
+		if mcpCallLikelyAuthError(err) {
+			oc.notifyMCPAuthURL(callCtx, server)
+		}
+		return "", fmt.Errorf("MCP call failed for %s on %s: %w", toolName, server.Name, err)
 	}
 	return formatNexusMCPToolResult(result)
 }
@@ -401,7 +559,7 @@ func (oc *AIClient) executeNexusMCPTool(ctx context.Context, toolName string, ar
 func (oc *AIClient) enabledBuiltinToolsForModel(ctx context.Context, meta *PortalMetadata) []ToolDefinition {
 	mcpTools, err := oc.nexusMCPToolDefinitions(ctx)
 	if err != nil {
-		oc.log.Debug().Err(err).Msg("Failed to discover Nexus MCP tools")
+		oc.loggerForContext(ctx).Debug().Err(err).Msg("Failed to discover Nexus MCP tools")
 		mcpTools = nil
 	}
 

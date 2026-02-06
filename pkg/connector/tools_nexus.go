@@ -49,10 +49,10 @@ func makeNexusExecutor(route string) toolExecutor {
 }
 
 func (oc *AIClient) isNexusConfigured() bool {
-	if oc == nil || oc.connector == nil {
+	if oc == nil {
 		return false
 	}
-	return nexusConfigured(oc.connector.Config.Tools.Nexus)
+	return len(oc.activeNexusMCPServers()) > 0
 }
 
 func nexusConfigured(cfg *NexusToolsConfig) bool {
@@ -99,7 +99,7 @@ func executeNexusRoute(ctx context.Context, route string, args map[string]any) (
 		return "", fmt.Errorf("failed to build nexus request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	headerValue, err := nexusAuthorizationHeaderValue(cfg.AuthType, cfg.Token)
+	headerValue, err := mcpAuthorizationHeaderValue(cfg.AuthType, cfg.Token)
 	if err != nil {
 		return "", err
 	}

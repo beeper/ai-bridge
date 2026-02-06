@@ -177,8 +177,7 @@ func (c *ToolPolicyConfig) Clone() *ToolPolicyConfig {
 }
 
 var toolNameAliases = map[string]string{
-	"apply-patch":   "apply_patch",
-	"analyze_image": "image",
+	"apply-patch": "apply_patch",
 }
 
 // NormalizeToolName converts to lowercase and resolves aliases.

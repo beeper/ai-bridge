@@ -72,7 +72,7 @@ func (oc *AIClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *bridgev
 	ephemeralSender, ok := intent.(matrixEphemeralSender)
 	if !ok {
 		partType, _ := part["type"].(string)
-		oc.log.Warn().
+		oc.loggerForContext(ctx).Warn().
 			Str("part_type", partType).
 			Msg("Matrix intent does not support ephemeral events; OpenCode stream updates will be dropped")
 		return
@@ -97,7 +97,7 @@ func (oc *AIClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *bridgev
 	txnID := buildStreamEventTxnID(turnID, seq)
 	if _, err := ephemeralSender.SendEphemeralEvent(ctx, portal.MXID, StreamEventMessageType, eventContent, txnID); err != nil {
 		partType, _ := part["type"].(string)
-		oc.log.Warn().Err(err).
+		oc.loggerForContext(ctx).Warn().Err(err).
 			Str("part_type", partType).
 			Int("seq", seq).
 			Msg("Failed to emit OpenCode stream event")
@@ -185,7 +185,7 @@ func (oc *AIClient) PortalMeta(portal *bridgev2.Portal) *opencodebridge.PortalMe
 		TitlePending:   meta.OpenCodeTitlePending,
 		Title:          meta.Title,
 		TitleGenerated: meta.TitleGenerated,
-		DefaultAgentID: meta.DefaultAgentID,
+		AgentID:        meta.AgentID,
 		VerboseLevel:   meta.VerboseLevel,
 	}
 }
@@ -206,8 +206,8 @@ func (oc *AIClient) SetPortalMeta(portal *bridgev2.Portal, meta *opencodebridge.
 		existing.OpenCodeTitlePending = meta.TitlePending
 		existing.Title = meta.Title
 		existing.TitleGenerated = meta.TitleGenerated
-		if meta.DefaultAgentID != "" {
-			existing.DefaultAgentID = meta.DefaultAgentID
+		if meta.AgentID != "" {
+			existing.AgentID = meta.AgentID
 		}
 		if meta.VerboseLevel != "" {
 			existing.VerboseLevel = meta.VerboseLevel

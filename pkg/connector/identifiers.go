@@ -95,15 +95,12 @@ func portalMeta(portal *bridgev2.Portal) *PortalMetadata {
 	return portal.Metadata.(*PortalMetadata)
 }
 
-// resolveAgentID returns the configured agent ID, falling back to DefaultAgentID.
+// resolveAgentID returns the configured agent ID.
 func resolveAgentID(meta *PortalMetadata) string {
 	if meta == nil {
 		return ""
 	}
-	if meta.AgentID != "" {
-		return meta.AgentID
-	}
-	return meta.DefaultAgentID
+	return meta.AgentID
 }
 
 func messageMeta(msg *database.Message) *MessageMetadata {
@@ -157,104 +154,11 @@ func MakeMessageID(eventID id.EventID) networkid.MessageID {
 	return networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID)))
 }
 
-// agentDataPortalKey creates a deterministic portal key for an agent's hidden data room.
-// Format: "openai:{loginID}:agent-data:{agentID}"
-func agentDataPortalKey(loginID networkid.UserLoginID, agentID string) networkid.PortalKey {
-	return networkid.PortalKey{
-		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:agent-data:%s", loginID, url.PathEscape(agentID))),
-		Receiver: loginID,
-	}
-}
-
-// parseAgentIDFromDataRoom extracts the agent ID from an agent data room portal ID.
-// Returns the agent ID and true if successful, empty string and false otherwise.
-func parseAgentIDFromDataRoom(portalID networkid.PortalID) (string, bool) {
-	parts := strings.Split(string(portalID), ":agent-data:")
-	if len(parts) != 2 {
-		return "", false
-	}
-	agentID, err := url.PathUnescape(parts[1])
-	if err != nil {
-		return "", false
-	}
-	return agentID, true
-}
-
-// globalMemoryPortalKey creates a deterministic portal key for the global memory room.
-// Format: "openai:{loginID}:global-memory"
-func globalMemoryPortalKey(loginID networkid.UserLoginID) networkid.PortalKey {
-	return networkid.PortalKey{
-		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:global-memory", loginID)),
-		Receiver: loginID,
-	}
-}
-
 // cronPortalKey creates a deterministic portal key for a cron job room.
 // Format: "openai:{loginID}:cron:{agentID}:{jobID}"
 func cronPortalKey(loginID networkid.UserLoginID, agentID, jobID string) networkid.PortalKey {
 	return networkid.PortalKey{
 		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:cron:%s:%s", loginID, url.PathEscape(agentID), url.PathEscape(jobID))),
 		Receiver: loginID,
-	}
-}
-
-// MemoryScope represents where a memory is stored
-type MemoryScope string
-
-const (
-	MemoryScopeAgent  MemoryScope = "agent"
-	MemoryScopeGlobal MemoryScope = "global"
-)
-
-// parseMemoryPath parses a memory path into scope and fact ID.
-// Supported formats:
-//   - "agent:{agentID}/fact:{factID}" → (MemoryScopeAgent, factID, agentID)
-//   - "global/fact:{factID}" → (MemoryScopeGlobal, factID, "")
-//   - "{factID}" (legacy) → (MemoryScopeAgent, factID, "")
-//
-// Returns scope, factID, agentID (for agent scope), and ok.
-func parseMemoryPath(path string) (scope MemoryScope, factID string, agentID string, ok bool) {
-	if path == "" {
-		return "", "", "", false
-	}
-
-	// Format: "global/fact:{factID}"
-	if factID, ok := strings.CutPrefix(path, "global/fact:"); ok {
-		if factID == "" {
-			return "", "", "", false
-		}
-		return MemoryScopeGlobal, factID, "", true
-	}
-
-	// Format: "agent:{agentID}/fact:{factID}"
-	if remainder, ok := strings.CutPrefix(path, "agent:"); ok {
-		parts := strings.SplitN(remainder, "/fact:", 2)
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			return "", "", "", false
-		}
-		agentID, err := url.PathUnescape(parts[0])
-		if err != nil {
-			return "", "", "", false
-		}
-		return MemoryScopeAgent, parts[1], agentID, true
-	}
-
-	// Legacy format: just a fact ID (assume agent scope)
-	return MemoryScopeAgent, path, "", true
-}
-
-// formatMemoryPath creates a memory path from scope, factID, and optional agentID.
-func formatMemoryPath(scope MemoryScope, factID string, agentID string) string {
-	switch scope {
-	case MemoryScopeGlobal:
-		return "global/fact:" + factID
-	case MemoryScopeAgent:
-		if agentID != "" {
-			return "agent:" + url.PathEscape(agentID) + "/fact:" + factID
-		}
-		// Default agent scope without explicit agent ID
-		return "agent/fact:" + factID
-	default:
-		return factID
 	}
 }

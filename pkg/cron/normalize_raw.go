@@ -67,7 +67,6 @@ func normalizeCronJobInputRaw(raw any, applyDefaults bool) rawRecord {
 				nextPayload[k] = v
 			}
 			next["payload"] = nextPayload
-			coerceLegacyPayloadDelivery(next, nextPayload)
 		}
 	}
 	if _, ok := base["isolation"]; ok {
@@ -107,77 +106,6 @@ func normalizeCronJobInputRaw(raw any, applyDefaults bool) rawRecord {
 		}
 	}
 
-	return next
-}
-
-func coerceLegacyPayloadDelivery(next rawRecord, payload map[string]any) {
-	kind, _ := payload["kind"].(string)
-	if strings.ToLower(strings.TrimSpace(kind)) != "agentturn" {
-		return
-	}
-	legacyDelivery, ok := legacyDeliveryFromPayload(payload)
-	if !ok {
-		return
-	}
-	if existingRaw, ok := next["delivery"]; ok {
-		if existing, ok := existingRaw.(map[string]any); ok {
-			next["delivery"] = mergeDeliveryMap(existing, legacyDelivery)
-		}
-	} else {
-		next["delivery"] = legacyDelivery
-	}
-	delete(payload, "deliver")
-	delete(payload, "channel")
-	delete(payload, "to")
-	delete(payload, "bestEffortDeliver")
-}
-
-func legacyDeliveryFromPayload(payload map[string]any) (map[string]any, bool) {
-	deliver, hasDeliver := payload["deliver"].(bool)
-	bestEffort, hasBestEffort := payload["bestEffortDeliver"].(bool)
-	toRaw, hasTo := payload["to"].(string)
-	to := strings.TrimSpace(toRaw)
-	if !hasDeliver && !hasBestEffort && (!hasTo || to == "") {
-		return nil, false
-	}
-	next := map[string]any{}
-	if hasDeliver && !deliver {
-		next["mode"] = string(CronDeliveryNone)
-	} else {
-		next["mode"] = string(CronDeliveryAnnounce)
-	}
-	if channelRaw, ok := payload["channel"].(string); ok {
-		channel := strings.ToLower(strings.TrimSpace(channelRaw))
-		if channel != "" {
-			next["channel"] = channel
-		}
-	}
-	if to != "" {
-		next["to"] = to
-	}
-	if hasBestEffort {
-		next["bestEffort"] = bestEffort
-	}
-	return next, true
-}
-
-func mergeDeliveryMap(existing map[string]any, patch map[string]any) map[string]any {
-	next := map[string]any{}
-	for k, v := range existing {
-		next[k] = v
-	}
-	if mode, ok := patch["mode"]; ok {
-		next["mode"] = mode
-	}
-	if channel, ok := patch["channel"]; ok {
-		next["channel"] = channel
-	}
-	if to, ok := patch["to"]; ok {
-		next["to"] = to
-	}
-	if bestEffort, ok := patch["bestEffort"]; ok {
-		next["bestEffort"] = bestEffort
-	}
 	return next
 }
 

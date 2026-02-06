@@ -121,7 +121,7 @@ func (oc *AIClient) maybeRunMemoryFlush(
 		return
 	}
 	if err := oc.runMemoryFlushToolLoop(ctx, portal, meta, model, flushPrompt); err != nil {
-		oc.log.Warn().Err(err).Msg("memory flush failed")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("memory flush failed")
 		return
 	}
 

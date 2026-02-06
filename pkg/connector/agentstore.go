@@ -36,9 +36,13 @@ func (s *AgentStoreAdapter) LoadAgents(ctx context.Context) (map[string]*agents.
 	_ = ctx
 	// Start with preset agents
 	result := make(map[string]*agents.AgentDefinition)
+	showBexus := s.client != nil && s.client.hasConnectedClayMCP()
 
 	// Add all presets
 	for _, preset := range agents.PresetAgents {
+		if preset != nil && agents.IsNexusAI(preset.ID) && !showBexus {
+			continue
+		}
 		result[preset.ID] = preset.Clone()
 	}
 
@@ -618,7 +622,6 @@ func (b *BossStoreAdapter) ModifyRoom(ctx context.Context, roomID string, update
 			return fmt.Errorf("agent '%s' not found: %w", updates.AgentID, err)
 		}
 		pm.AgentID = agent.ID
-		pm.DefaultAgentID = agent.ID
 		pm.Model = ""
 		modelID := b.store.client.effectiveModel(pm)
 		pm.Capabilities = getModelCapabilities(modelID, b.store.client.findModelInfo(modelID))

@@ -51,9 +51,6 @@ func (oc *AIClient) modelFallbackChain(ctx context.Context, meta *PortalMetadata
 	agentID := ""
 	if meta != nil {
 		agentID = meta.AgentID
-		if agentID == "" {
-			agentID = meta.DefaultAgentID
-		}
 	}
 
 	if agentID != "" {
@@ -138,7 +135,7 @@ func (oc *AIClient) responseWithModelFallback(
 			oc.notifyMatrixSendFailure(ctx, portal, evt, err)
 			return
 		}
-		oc.log.Warn().
+		oc.loggerForContext(ctx).Warn().
 			Err(err).
 			Str("failed_model", modelID).
 			Str("next_model", modelChain[idx+1]).
@@ -179,7 +176,7 @@ func (oc *AIClient) responseWithModelFallbackDynamic(
 			oc.notifyMatrixSendFailure(ctx, portal, evt, err)
 			return
 		}
-		oc.log.Warn().
+		oc.loggerForContext(ctx).Warn().
 			Err(err).
 			Str("failed_model", modelID).
 			Str("next_model", modelChain[idx+1]).

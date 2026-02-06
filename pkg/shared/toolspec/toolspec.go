@@ -33,10 +33,6 @@ const (
 	TTSName        = "tts"
 	TTSDescription = "Convert text to speech and return a MEDIA: path. Use when the user requests audio or TTS is enabled. Copy the MEDIA line exactly."
 
-	// AnalyzeImageName is a deprecated alias for ImageName.
-	AnalyzeImageName        = "analyze_image"
-	AnalyzeImageDescription = "Deprecated alias for image (vision analysis)."
-
 	MemorySearchName        = "memory_search"
 	MemorySearchDescription = "Mandatory recall step: semantically search MEMORY.md + memory/*.md (and optional session transcripts) before answering questions about prior work, decisions, dates, people, preferences, or todos; returns top snippets with path + lines."
 	MemoryGetName           = "memory_get"
@@ -223,22 +219,14 @@ func MessageSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-				"action": map[string]any{
-					"type":        "string",
-					"enum":        []string{"send", "sendWithEffect", "broadcast", "react", "reactions", "edit", "delete", "unsend", "reply", "pin", "unpin", "list-pins", "thread-reply", "search", "read", "member-info", "channel-info", "channel-edit", "focus", "desktop-list-chats", "desktop-search-chats", "desktop-search-messages", "desktop-create-chat", "desktop-archive-chat", "desktop-set-reminder", "desktop-clear-reminder", "desktop-upload-asset", "desktop-download-asset"},
-					"description": "The action to perform",
-				},
+			"action": map[string]any{
+				"type":        "string",
+				"enum":        []string{"send", "react", "reactions", "edit", "delete", "reply", "pin", "unpin", "list-pins", "thread-reply", "search", "read", "member-info", "channel-info", "channel-edit", "focus", "desktop-list-chats", "desktop-search-chats", "desktop-search-messages", "desktop-create-chat", "desktop-archive-chat", "desktop-set-reminder", "desktop-clear-reminder", "desktop-upload-asset", "desktop-download-asset"},
+				"description": "The action to perform",
+			},
 			"message": map[string]any{
 				"type":        "string",
 				"description": "For send/edit/reply/thread-reply: the message text",
-			},
-			"effectId": map[string]any{
-				"type":        "string",
-				"description": "Optional: message effect name/id for sendWithEffect (ignored by bridge).",
-			},
-			"effect": map[string]any{
-				"type":        "string",
-				"description": "OpenClaw-style alias for effectId (ignored by bridge).",
 			},
 			"media": map[string]any{
 				"type":        "string",
@@ -252,10 +240,6 @@ func MessageSchema() map[string]any {
 				"type":        "string",
 				"description": "Optional: base64 payload for attachments (optionally a data: URL).",
 			},
-			"contentType": map[string]any{
-				"type":        "string",
-				"description": "Optional: content type override for attachments (alias for mimeType).",
-			},
 			"mimeType": map[string]any{
 				"type":        "string",
 				"description": "Optional: content type override for attachments.",
@@ -268,17 +252,9 @@ func MessageSchema() map[string]any {
 				"type":        "string",
 				"description": "Optional: file path to upload (alias for media).",
 			},
-			"filePath": map[string]any{
-				"type":        "string",
-				"description": "OpenClaw-style alias for path.",
-			},
 			"message_id": map[string]any{
 				"type":        "string",
 				"description": "Target message ID for react/reactions/edit/delete/reply/pin/unpin/thread-reply/read",
-			},
-			"messageId": map[string]any{
-				"type":        "string",
-				"description": "OpenClaw-style alias for message_id",
 			},
 			"emoji": map[string]any{
 				"type":        "string",
@@ -295,14 +271,6 @@ func MessageSchema() map[string]any {
 			"thread_id": map[string]any{
 				"type":        "string",
 				"description": "For action=thread-reply: the thread root message ID",
-			},
-			"threadId": map[string]any{
-				"type":        "string",
-				"description": "OpenClaw-style alias for thread_id",
-			},
-			"replyTo": map[string]any{
-				"type":        "string",
-				"description": "OpenClaw-style alias for message_id when replying",
 			},
 			"asVoice": map[string]any{
 				"type":        "boolean",
@@ -362,67 +330,63 @@ func MessageSchema() map[string]any {
 			},
 			"sessionKey": map[string]any{
 				"type":        "string",
-				"description": "Preferred canonical target key (from sessions_list). For desktop: desktop-api:<instance>:<chatID> or desktop-api:<chatID>.",
+				"description": "Preferred canonical target key (from sessions_list). For desktop: desktop-api:<instance>:<chatId> or desktop-api:<chatId>.",
 			},
-				"instance": map[string]any{
-					"type":        "string",
-					"description": "For desktop actions: desktop API instance name (default if omitted)",
-				},
-					"label": map[string]any{
-						"type":        "string",
-						"description": "Fallback desktop target by label/title (can be ambiguous; sessionKey is preferred)",
-					},
+			"instance": map[string]any{
+				"type":        "string",
+				"description": "For desktop actions: desktop API instance name (default if omitted)",
+			},
+			"label": map[string]any{
+				"type":        "string",
+				"description": "Fallback desktop target by label/title (can be ambiguous; sessionKey is preferred)",
+			},
 			"chatId": map[string]any{
 				"type":        "string",
 				"description": "For action=focus: desktop chat ID",
 			},
-				"chatID": map[string]any{
-					"type":        "string",
-					"description": "Alias for chatId",
+			"accountId": map[string]any{
+				"type":        "string",
+				"description": "For desktop targeting: account ID filter; for desktop-create-chat: source account ID",
+			},
+			"network": map[string]any{
+				"type":        "string",
+				"description": "For desktop targeting: network filter (e.g. whatsapp, instagram, imessage)",
+			},
+			"participantIds": map[string]any{
+				"type":        "array",
+				"description": "For desktop-create-chat: participant user IDs",
+				"items": map[string]any{
+					"type": "string",
 				},
-					"accountId": map[string]any{
-						"type":        "string",
-						"description": "For desktop targeting: account ID filter; for desktop-create-chat: source account ID",
-					},
-					"network": map[string]any{
-						"type":        "string",
-						"description": "For desktop targeting: network filter (e.g. whatsapp, instagram, imessage)",
-					},
-				"participantIds": map[string]any{
-					"type":        "array",
-					"description": "For desktop-create-chat: participant user IDs",
-					"items": map[string]any{
-						"type": "string",
-					},
-				},
-				"type": map[string]any{
-					"type":        "string",
-					"description": "For desktop-create-chat: chat type (single|group)",
-				},
-				"archived": map[string]any{
-					"type":        "boolean",
-					"description": "For desktop-archive-chat: true to archive, false to unarchive",
-				},
-				"remindAtMs": map[string]any{
-					"type":        "number",
-					"description": "For desktop-set-reminder: unix timestamp in milliseconds",
-				},
-				"dismissOnIncomingMessage": map[string]any{
-					"type":        "boolean",
-					"description": "For desktop-set-reminder: dismiss reminder if new message arrives",
-				},
-				"uploadID": map[string]any{
-					"type":        "string",
-					"description": "For desktop send action: upload ID from desktop-upload-asset",
-				},
-				"attachmentType": map[string]any{
-					"type":        "string",
-					"description": "For desktop send action: attachment type override (gif|voiceNote|sticker)",
-				},
-				"url": map[string]any{
-					"type":        "string",
-					"description": "For desktop-download-asset: mxc:// or localmxc:// URL",
-				},
+			},
+			"type": map[string]any{
+				"type":        "string",
+				"description": "For desktop-create-chat: chat type (single|group)",
+			},
+			"archived": map[string]any{
+				"type":        "boolean",
+				"description": "For desktop-archive-chat: true to archive, false to unarchive",
+			},
+			"remindAtMs": map[string]any{
+				"type":        "number",
+				"description": "For desktop-set-reminder: unix timestamp in milliseconds",
+			},
+			"dismissOnIncomingMessage": map[string]any{
+				"type":        "boolean",
+				"description": "For desktop-set-reminder: dismiss reminder if new message arrives",
+			},
+			"uploadID": map[string]any{
+				"type":        "string",
+				"description": "For desktop send action: upload ID from desktop-upload-asset",
+			},
+			"attachmentType": map[string]any{
+				"type":        "string",
+				"description": "For desktop send action: attachment type override (gif|voiceNote|sticker)",
+			},
+			"url": map[string]any{
+				"type":        "string",
+				"description": "For desktop-download-asset: mxc:// or localmxc:// URL",
+			},
 			"draftText": map[string]any{
 				"type":        "string",
 				"description": "For action=focus: draft text to prefill",
@@ -433,19 +397,11 @@ func MessageSchema() map[string]any {
 			},
 			"name": map[string]any{
 				"type":        "string",
-				"description": "For action=channel-edit: new channel/room name",
-			},
-			"title": map[string]any{
-				"type":        "string",
-				"description": "For action=channel-edit: alias for name",
+				"description": "For action=channel-edit: new channel/room name; for action=desktop-create-chat: optional chat title",
 			},
 			"topic": map[string]any{
 				"type":        "string",
 				"description": "For action=channel-edit: new channel/room topic",
-			},
-			"description": map[string]any{
-				"type":        "string",
-				"description": "For action=channel-edit: alias for topic",
 			},
 			"channel": map[string]any{
 				"type":        "string",
@@ -462,7 +418,7 @@ func MessageSchema() map[string]any {
 					"type": "string",
 				},
 			},
-				"dryRun": map[string]any{
+			"dryRun": map[string]any{
 				"type":        "boolean",
 				"description": "Optional: dry run (ignored by bridge).",
 			},
@@ -655,11 +611,6 @@ func TTSSchema() map[string]any {
 		},
 		"required": []string{"text"},
 	}
-}
-
-// AnalyzeImageSchema returns the JSON schema for the analyze_image tool.
-func AnalyzeImageSchema() map[string]any {
-	return ImageSchema()
 }
 
 // MemorySearchSchema returns the JSON schema for the memory_search tool.

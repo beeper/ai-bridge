@@ -93,7 +93,7 @@ type streamingState struct {
 func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID id.EventID, senderID string, roomID id.RoomID) *streamingState {
 	agentID := ""
 	if meta != nil {
-		agentID = meta.DefaultAgentID
+		agentID = resolveAgentID(meta)
 	}
 	state := &streamingState{
 		turnID:                 NewTurnID(),
@@ -1546,13 +1546,13 @@ func (oc *AIClient) streamingResponseWithToolSchemaFallback(
 		return success, cle, err
 	}
 	if IsToolUniquenessError(err) {
-		oc.log.Warn().Err(err).Msg("Duplicate tool names rejected; retrying with chat completions")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Duplicate tool names rejected; retrying with chat completions")
 		success, cle, chatErr := oc.streamChatCompletions(ctx, evt, portal, meta, messages)
 		if success || cle != nil || chatErr == nil {
 			return success, cle, chatErr
 		}
 		if IsToolSchemaError(chatErr) || IsToolUniquenessError(chatErr) {
-			oc.log.Warn().Err(chatErr).Msg("Chat completions tools rejected; retrying without tools")
+			oc.loggerForContext(ctx).Warn().Err(chatErr).Msg("Chat completions tools rejected; retrying without tools")
 			if meta != nil {
 				metaCopy := *meta
 				metaCopy.Capabilities = meta.Capabilities
@@ -1563,13 +1563,13 @@ func (oc *AIClient) streamingResponseWithToolSchemaFallback(
 		return success, cle, chatErr
 	}
 	if IsToolSchemaError(err) {
-		oc.log.Warn().Err(err).Msg("Responses tool schema rejected; falling back to chat completions")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Responses tool schema rejected; falling back to chat completions")
 		success, cle, chatErr := oc.streamChatCompletions(ctx, evt, portal, meta, messages)
 		if success || cle != nil || chatErr == nil {
 			return success, cle, chatErr
 		}
 		if IsToolSchemaError(chatErr) {
-			oc.log.Warn().Err(chatErr).Msg("Chat completions tool schema rejected; retrying without tools")
+			oc.loggerForContext(ctx).Warn().Err(chatErr).Msg("Chat completions tool schema rejected; retrying without tools")
 			if meta != nil {
 				metaCopy := *meta
 				metaCopy.Capabilities = meta.Capabilities
@@ -1580,7 +1580,7 @@ func (oc *AIClient) streamingResponseWithToolSchemaFallback(
 		return success, cle, chatErr
 	}
 	if IsNoResponseChunksError(err) {
-		oc.log.Warn().Err(err).Msg("Responses streaming returned no chunks; retrying without tools")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Responses streaming returned no chunks; retrying without tools")
 		if meta != nil && meta.Capabilities.SupportsToolCalling {
 			metaCopy := *meta
 			metaCopy.Capabilities = meta.Capabilities
@@ -1591,7 +1591,7 @@ func (oc *AIClient) streamingResponseWithToolSchemaFallback(
 			}
 			err = retryErr
 		}
-		oc.log.Warn().Err(err).Msg("Responses retry failed; falling back to chat completions")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Responses retry failed; falling back to chat completions")
 		return oc.streamChatCompletions(ctx, evt, portal, meta, messages)
 	}
 	return success, cle, err

@@ -202,11 +202,11 @@ func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Port
 
 	resp, err := intent.SendMessage(ctx, portal.MXID, ToolCallEventType, eventContent, nil)
 	if err != nil {
-		oc.log.Warn().Err(err).Str("tool", tool.toolName).Msg("Failed to send tool call event")
+		oc.loggerForContext(ctx).Warn().Err(err).Str("tool", tool.toolName).Msg("Failed to send tool call event")
 		return ""
 	}
 
-	oc.log.Debug().
+	oc.loggerForContext(ctx).Debug().
 		Stringer("event_id", resp.EventID).
 		Str("call_id", tool.callID).
 		Str("tool", tool.toolName).
@@ -282,11 +282,11 @@ func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Po
 
 	resp, err := intent.SendMessage(ctx, portal.MXID, ToolResultEventType, eventContent, nil)
 	if err != nil {
-		oc.log.Warn().Err(err).Str("tool", tool.toolName).Msg("Failed to send tool result event")
+		oc.loggerForContext(ctx).Warn().Err(err).Str("tool", tool.toolName).Msg("Failed to send tool result event")
 		return ""
 	}
 
-	oc.log.Debug().
+	oc.loggerForContext(ctx).Debug().
 		Stringer("event_id", resp.EventID).
 		Str("call_id", tool.callID).
 		Str("tool", tool.toolName).
@@ -307,11 +307,6 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 
 	toolName = normalizeToolAlias(toolName)
 
-	// Normalize deprecated tool aliases
-	if toolName == ToolNameAnalyzeImage {
-		toolName = ToolNameImage
-	}
-
 	if toolpolicy.IsOwnerOnlyToolName(toolName) {
 		senderID := ""
 		if btc := GetBridgeToolContext(ctx); btc != nil {
@@ -331,9 +326,9 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 		return "", fmt.Errorf("tool %s is restricted to the Nexus agent", toolName)
 	}
 
-	// Route Nexus tools through MCP when configured.
+	// Route MCP tools through the MCP bridge when configured.
 	if oc.shouldUseNexusMCPTool(ctx, toolName) {
-		if !canUseNexusToolsForAgent(meta) {
+		if oc.isNexusScopedMCPTool(toolName) && !canUseNexusToolsForAgent(meta) {
 			return "", fmt.Errorf("tool %s is restricted to the Nexus agent", toolName)
 		}
 		return oc.executeNexusMCPTool(ctx, toolName, args)

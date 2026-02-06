@@ -79,18 +79,18 @@ func TestLoadCronStoreMigratesLegacyJobFields(t *testing.T) {
 		t.Fatalf("expected default wakeMode=%q, got %q", CronWakeNextHeartbeat, job.WakeMode)
 	}
 	if job.Delivery == nil {
-		t.Fatalf("expected delivery to be migrated from legacy payload hints")
+		t.Fatalf("expected default delivery for isolated agentTurn job")
 	}
 	if job.Delivery.Mode != CronDeliveryAnnounce {
-		t.Fatalf("expected delivery.mode=announce, got %q", job.Delivery.Mode)
+		t.Fatalf("expected default delivery.mode=announce, got %q", job.Delivery.Mode)
 	}
-	if job.Delivery.Channel != "telegram" {
-		t.Fatalf("expected delivery.channel=telegram, got %q", job.Delivery.Channel)
+	if job.Delivery.Channel != "" {
+		t.Fatalf("expected legacy payload channel to be ignored, got %q", job.Delivery.Channel)
 	}
-	if job.Delivery.To != "7200373102" {
-		t.Fatalf("expected delivery.to to be migrated, got %q", job.Delivery.To)
+	if job.Delivery.To != "" {
+		t.Fatalf("expected legacy payload recipient to be ignored, got %q", job.Delivery.To)
 	}
-	if job.Delivery.BestEffort == nil || !*job.Delivery.BestEffort {
-		t.Fatalf("expected delivery.bestEffort=true")
+	if job.Delivery.BestEffort != nil {
+		t.Fatalf("expected legacy payload bestEffort to be ignored")
 	}
 }

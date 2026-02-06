@@ -518,8 +518,8 @@ func (oc *AIClient) resolveDesktopSessionByLabelWithOptions(ctx context.Context,
 		accounts = accountMap
 	}
 	exactMatches, partialMatches := matchDesktopChatsByLabel(chats, trimmed, accounts)
-	exactMatches = filterDesktopChatsByResolveOptions(exactMatches, accounts, opts)
-	partialMatches = filterDesktopChatsByResolveOptions(partialMatches, accounts, opts)
+	exactMatches = filterDesktopChatsByResolveOptions(exactMatches, accounts, instance, opts)
+	partialMatches = filterDesktopChatsByResolveOptions(partialMatches, accounts, instance, opts)
 	if len(exactMatches) == 1 {
 		key := normalizeDesktopSessionKeyWithInstance(instance, exactMatches[0].ID)
 		return exactMatches[0].ID, key, nil
@@ -948,7 +948,7 @@ func matchDesktopChatsByLabel(chats []beeperdesktopapi.Chat, label string, accou
 	return exact, partial
 }
 
-func filterDesktopChatsByResolveOptions(chats []beeperdesktopapi.Chat, accounts map[string]beeperdesktopapi.Account, opts desktopLabelResolveOptions) []beeperdesktopapi.Chat {
+func filterDesktopChatsByResolveOptions(chats []beeperdesktopapi.Chat, accounts map[string]beeperdesktopapi.Account, instance string, opts desktopLabelResolveOptions) []beeperdesktopapi.Chat {
 	accountID := strings.TrimSpace(opts.AccountID)
 	network := strings.TrimSpace(opts.Network)
 	if accountID == "" && network == "" {
@@ -961,11 +961,18 @@ func filterDesktopChatsByResolveOptions(chats []beeperdesktopapi.Chat, accounts 
 	filtered := make([]beeperdesktopapi.Chat, 0, len(chats))
 	for _, chat := range chats {
 		chatAccountID := strings.TrimSpace(chat.AccountID)
-		if accountID != "" && chatAccountID != accountID {
-			continue
+		account := accounts[chatAccountID]
+		if accountID != "" {
+			// Accept raw account IDs and canonical account IDs from sessions_list/account hints.
+			if chatAccountID != accountID {
+				single := formatDesktopAccountID(false, instance, account.Network, chatAccountID)
+				multi := formatDesktopAccountID(true, instance, account.Network, chatAccountID)
+				if accountID != single && accountID != multi {
+					continue
+				}
+			}
 		}
 		if network != "" {
-			account := accounts[chatAccountID]
 			if !desktopNetworkFilterMatches(networkFilter, account.Network) {
 				continue
 			}

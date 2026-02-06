@@ -24,7 +24,7 @@ func (oc *AIClient) applyModelDirective(
 	if trimmed == "" {
 		return fmt.Sprintf("Current model: %s", oc.effectiveModel(meta)), false, ""
 	}
-	if agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID) {
+	if agents.IsBossAgent(resolveAgentID(meta)) {
 		return "", false, "Cannot change model in a room managed by the Boss agent."
 	}
 	if agentID := resolveAgentID(meta); agentID != "" {

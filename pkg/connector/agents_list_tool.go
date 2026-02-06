@@ -27,7 +27,7 @@ func (oc *AIClient) executeAgentsList(ctx context.Context, portal *bridgev2.Port
 	store := NewAgentStoreAdapter(oc)
 	agentsMap, err := store.LoadAgents(ctx)
 	if err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to load agents for agents_list")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to load agents for agents_list")
 		agentsMap = map[string]*agents.AgentDefinition{}
 	}
 

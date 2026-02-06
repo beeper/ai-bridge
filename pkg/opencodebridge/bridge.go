@@ -44,7 +44,7 @@ type PortalMeta struct {
 	TitlePending   bool
 	Title          string
 	TitleGenerated bool
-	DefaultAgentID string
+	AgentID        string
 	VerboseLevel   string
 }
 

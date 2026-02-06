@@ -62,15 +62,6 @@ func executeMessageChannelEdit(ctx context.Context, args map[string]any, btc *Br
 			return "", fmt.Errorf("action=channel-edit requires 'name' to be a string")
 		}
 	}
-	if title == "" {
-		if raw, ok := args["title"]; ok {
-			if s, ok := raw.(string); ok {
-				title = strings.TrimSpace(s)
-			} else {
-				return "", fmt.Errorf("action=channel-edit requires 'title' to be a string")
-			}
-		}
-	}
 
 	descProvided := false
 	description := ""
@@ -80,13 +71,6 @@ func executeMessageChannelEdit(ctx context.Context, args map[string]any, btc *Br
 			description = strings.TrimSpace(s)
 		} else {
 			return "", fmt.Errorf("action=channel-edit requires 'topic' to be a string")
-		}
-	} else if raw, ok := args["description"]; ok {
-		descProvided = true
-		if s, ok := raw.(string); ok {
-			description = strings.TrimSpace(s)
-		} else {
-			return "", fmt.Errorf("action=channel-edit requires 'description' to be a string")
 		}
 	}
 
@@ -127,10 +111,10 @@ func executeMessageChannelEdit(ctx context.Context, args map[string]any, btc *Br
 		"updates": updates,
 	}
 	if title != "" {
-		result["title"] = title
+		result["name"] = title
 	}
 	if descProvided {
-		result["description"] = description
+		result["topic"] = description
 	}
 
 	return jsonActionResult("channel-edit", result)
@@ -243,7 +227,7 @@ func executeMessageFocus(ctx context.Context, args map[string]any, btc *BridgeTo
 
 	sessionKey := firstNonEmptyString(args["sessionKey"])
 	label := firstNonEmptyString(args["label"])
-	chatID := firstNonEmptyString(args["chatId"], args["chatID"])
+	chatID := firstNonEmptyString(args["chatId"])
 	instance := firstNonEmptyString(args["instance"])
 	messageID := firstNonEmptyString(args["message_id"])
 	draftText := firstNonEmptyString(args["draftText"], args["message"])

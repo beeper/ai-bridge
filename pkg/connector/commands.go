@@ -378,6 +378,8 @@ func fnCommands(ce *commands.Event) {
 			"- `!ai manage`\n" +
 			"- `!ai playground <model>`\n\n" +
 			"Integrations:\n" +
+			"- MCP: `!ai mcp ...`\n" +
+			"- Clay: `!ai clay ...`\n" +
 			"- Desktop API: `!ai desktop-api ...`\n" +
 			"- OpenCode: `!ai opencode ...` (alias: `!ai openconnect ...`)\n" +
 			"- Gravatar: `!ai gravatar ...`\n" +
@@ -1261,7 +1263,6 @@ func fnAgent(ce *commands.Event) {
 	// Special case: "none" clears the agent
 	if agentID == "none" || agentID == "clear" {
 		meta.AgentID = ""
-		meta.DefaultAgentID = ""
 		meta.AgentPrompt = ""
 		modelID := client.effectiveModel(meta)
 		ce.Portal.OtherUserID = modelUserID(modelID)
@@ -1278,7 +1279,6 @@ func fnAgent(ce *commands.Event) {
 	}
 
 	meta.AgentID = agent.ID
-	meta.DefaultAgentID = agent.ID
 	meta.AgentPrompt = agent.SystemPrompt
 	meta.Model = ""
 	modelID := client.effectiveModel(meta)

@@ -24,7 +24,7 @@ func shouldExcludeModelVisiblePortal(meta *PortalMetadata) bool {
 	if meta == nil {
 		return false
 	}
-	if meta.IsAgentDataRoom || meta.IsGlobalMemoryRoom || meta.IsCronRoom || meta.IsBuilderRoom || meta.IsOpenCodeRoom {
+	if meta.IsCronRoom || meta.IsBuilderRoom || meta.IsOpenCodeRoom {
 		return true
 	}
 	return strings.TrimSpace(meta.SubagentParentRoomID) != ""
@@ -56,7 +56,7 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 	}
 	trace := traceEnabled(portalMeta(portal))
 	if trace {
-		oc.log.Debug().
+		oc.loggerForContext(ctx).Debug().
 			Int("limit", limit).
 			Int("active_minutes", activeMinutes).
 			Int("message_limit", messageLimit).
@@ -166,7 +166,7 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 			if accountMap, err := oc.listDesktopAccounts(ctx, instance); err == nil && accountMap != nil {
 				accounts = accountMap
 			} else if err != nil {
-				oc.log.Warn().Err(err).Str("instance", instance).Msg("Desktop API account listing failed")
+				oc.loggerForContext(ctx).Warn().Err(err).Str("instance", instance).Msg("Desktop API account listing failed")
 			}
 			desktopEntries, err := oc.listDesktopSessions(ctx, instance, desktopSessionListOptions{
 				Limit:         limit,
@@ -180,7 +180,7 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 					entries = append(entries, desktopEntries...)
 				}
 			} else {
-				oc.log.Warn().Err(err).Str("instance", instance).Msg("Desktop API session listing failed")
+				oc.loggerForContext(ctx).Warn().Err(err).Str("instance", instance).Msg("Desktop API session listing failed")
 			}
 		}
 	}
@@ -197,7 +197,7 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 		result = append(result, entry.data)
 	}
 	if trace {
-		oc.log.Debug().Int("count", len(result)).Msg("Sessions list completed")
+		oc.loggerForContext(ctx).Debug().Int("count", len(result)).Msg("Sessions list completed")
 	}
 
 	return tools.JSONResult(map[string]any{
@@ -227,12 +227,12 @@ func (oc *AIClient) executeSessionsHistory(ctx context.Context, portal *bridgev2
 	}
 	trace := traceEnabled(portalMeta(portal))
 	if trace {
-		oc.log.Debug().Str("session_key", sessionKey).Int("limit", limit).Msg("Sessions history requested")
+		oc.loggerForContext(ctx).Debug().Str("session_key", sessionKey).Int("limit", limit).Msg("Sessions history requested")
 	}
 
 	if instance, chatID, ok := parseDesktopSessionKey(sessionKey); ok {
 		if trace {
-			oc.log.Debug().Str("instance", instance).Str("chat_id", chatID).Msg("Fetching desktop session history")
+			oc.loggerForContext(ctx).Debug().Str("instance", instance).Str("chat_id", chatID).Msg("Fetching desktop session history")
 		}
 		client, clientErr := oc.desktopAPIClient(instance)
 		if clientErr != nil || client == nil {
@@ -246,13 +246,13 @@ func (oc *AIClient) executeSessionsHistory(ctx context.Context, portal *bridgev2
 		}
 		chat, chatErr := client.Chats.Get(ctx, escapeDesktopPathSegment(chatID), beeperdesktopapi.ChatGetParams{})
 		if chatErr != nil {
-			oc.log.Warn().Err(chatErr).Str("instance", instance).Msg("Desktop API chat lookup failed")
+			oc.loggerForContext(ctx).Warn().Err(chatErr).Str("instance", instance).Msg("Desktop API chat lookup failed")
 		}
 		accounts := map[string]beeperdesktopapi.Account{}
 		if accountMap, err := oc.listDesktopAccounts(ctx, instance); err == nil && accountMap != nil {
 			accounts = accountMap
 		} else if err != nil {
-			oc.log.Warn().Err(err).Str("instance", instance).Msg("Desktop API account listing failed")
+			oc.loggerForContext(ctx).Warn().Err(err).Str("instance", instance).Msg("Desktop API account listing failed")
 		}
 		messages, msgErr := oc.listDesktopMessages(ctx, client, chatID, limit)
 		if msgErr != nil {
@@ -299,7 +299,7 @@ func (oc *AIClient) executeSessionsHistory(ctx context.Context, portal *bridgev2
 		}), nil
 	}
 	if trace {
-		oc.log.Debug().Int("count", len(messages)).Msg("Sessions history fetched from Matrix")
+		oc.loggerForContext(ctx).Debug().Int("count", len(messages)).Msg("Sessions history fetched from Matrix")
 	}
 
 	openClawMessages := buildOpenClawSessionMessages(messages, true)
@@ -330,14 +330,14 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 	traceFull := traceFull(meta)
 	if trace {
 		if portal != nil {
-			oc.log.Debug().Stringer("portal", portal.PortalKey).Msg("Sessions send requested")
+			oc.loggerForContext(ctx).Debug().Stringer("portal", portal.PortalKey).Msg("Sessions send requested")
 		} else {
-			oc.log.Debug().Msg("Sessions send requested")
+			oc.loggerForContext(ctx).Debug().Msg("Sessions send requested")
 		}
-		oc.log.Debug().Int("message_len", len(strings.TrimSpace(message))).Msg("Sessions send message length")
+		oc.loggerForContext(ctx).Debug().Int("message_len", len(strings.TrimSpace(message))).Msg("Sessions send message length")
 	}
 	if traceFull {
-		oc.log.Debug().Str("message", strings.TrimSpace(message)).Msg("Sessions send body")
+		oc.loggerForContext(ctx).Debug().Str("message", strings.TrimSpace(message)).Msg("Sessions send body")
 	}
 	sessionKey := tools.ReadStringDefault(args, "sessionKey", "")
 	label := tools.ReadStringDefault(args, "label", "")
@@ -358,7 +358,7 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 
 	if instance, chatID, ok := parseDesktopSessionKey(sessionKey); ok {
 		if trace {
-			oc.log.Debug().Str("instance", instance).Str("chat_id", chatID).Msg("Sending to desktop session by key")
+			oc.loggerForContext(ctx).Debug().Str("instance", instance).Str("chat_id", chatID).Msg("Sending to desktop session by key")
 		}
 		_, sendErr := oc.sendDesktopMessage(ctx, instance, chatID, desktopSendMessageRequest{
 			Text: message,
@@ -394,7 +394,7 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 		targetPortal = target
 		displayKey = display
 		if trace {
-			oc.log.Debug().Stringer("portal", targetPortal.PortalKey).Msg("Resolved session key to Matrix portal")
+			oc.loggerForContext(ctx).Debug().Stringer("portal", targetPortal.PortalKey).Msg("Resolved session key to Matrix portal")
 		}
 	} else {
 		if strings.TrimSpace(label) == "" {
@@ -417,7 +417,7 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 			}
 			if desktopErr == nil {
 				if trace {
-					oc.log.Debug().Str("instance", desktopInstance).Str("chat_id", chatID).Msg("Sending to desktop session by label")
+					oc.loggerForContext(ctx).Debug().Str("instance", desktopInstance).Str("chat_id", chatID).Msg("Sending to desktop session by label")
 				}
 				_, sendErr := oc.sendDesktopMessage(ctx, desktopInstance, chatID, desktopSendMessageRequest{
 					Text: message,
@@ -453,7 +453,7 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 		targetPortal = target
 		displayKey = display
 		if trace {
-			oc.log.Debug().Stringer("portal", targetPortal.PortalKey).Msg("Resolved session label to Matrix portal")
+			oc.loggerForContext(ctx).Debug().Stringer("portal", targetPortal.PortalKey).Msg("Resolved session label to Matrix portal")
 		}
 	}
 
@@ -484,7 +484,7 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 		queued = queuedFlag
 	}
 	if trace {
-		oc.log.Debug().Bool("queued", queued).Msg("Sessions send dispatched")
+		oc.loggerForContext(ctx).Debug().Bool("queued", queued).Msg("Sessions send dispatched")
 	}
 
 	delivery := map[string]any{
@@ -520,7 +520,7 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 	}
 
 	if trace {
-		oc.log.Debug().Bool("queued", queued).Str("session_key", displayKey).Msg("Sessions send timed out waiting for assistant reply")
+		oc.loggerForContext(ctx).Debug().Bool("queued", queued).Str("session_key", displayKey).Msg("Sessions send timed out waiting for assistant reply")
 	}
 	result["status"] = "timeout"
 	result["error"] = "timeout waiting for assistant reply"

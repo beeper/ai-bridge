@@ -60,12 +60,11 @@ type ModelData struct {
 
 // RoomData represents room data for boss tools.
 type RoomData struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	AgentID        string `json:"agent_id,omitempty"`
-	DefaultAgentID string `json:"default_agent_id,omitempty"`
-	SystemPrompt   string `json:"system_prompt,omitempty"`
-	CreatedAt      int64  `json:"created_at"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	AgentID      string `json:"agent_id,omitempty"`
+	SystemPrompt string `json:"system_prompt,omitempty"`
+	CreatedAt    int64  `json:"created_at"`
 }
 
 // NewBossToolExecutor creates a new boss tool executor.

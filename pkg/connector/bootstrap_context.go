@@ -30,13 +30,13 @@ func (oc *AIClient) buildBootstrapContextFiles(ctx context.Context, agentID stri
 	}
 	if !skipBootstrap {
 		if _, err := agents.EnsureBootstrapFiles(ctx, store); err != nil {
-			oc.log.Warn().Err(err).Msg("failed to ensure workspace bootstrap files")
+			oc.loggerForContext(ctx).Warn().Err(err).Msg("failed to ensure workspace bootstrap files")
 		}
 	}
 
 	files, err := agents.LoadBootstrapFiles(ctx, store)
 	if err != nil {
-		oc.log.Warn().Err(err).Msg("failed to load workspace bootstrap files")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("failed to load workspace bootstrap files")
 		return nil
 	}
 	if meta != nil && strings.TrimSpace(meta.SubagentParentRoomID) != "" {
@@ -51,7 +51,7 @@ func (oc *AIClient) buildBootstrapContextFiles(ctx context.Context, agentID stri
 	}
 
 	warn := func(message string) {
-		oc.log.Warn().Msg(message)
+		oc.loggerForContext(ctx).Warn().Msg(message)
 	}
 	contextFiles := agents.BuildBootstrapContextFiles(files, maxChars, warn)
 	return oc.applySoulEvilToContextFiles(ctx, store, contextFiles, maxChars)
@@ -82,14 +82,14 @@ func (oc *AIClient) applySoulEvilToContextFiles(
 
 	entry, found, err := store.Read(ctx, decision.FileName)
 	if err != nil || !found {
-		oc.log.Warn().
+		oc.loggerForContext(ctx).Warn().
 			Str("reason", decision.Reason).
 			Str("file", decision.FileName).
 			Msg("SOUL_EVIL active but file missing")
 		return files
 	}
 	if strings.TrimSpace(entry.Content) == "" {
-		oc.log.Warn().
+		oc.loggerForContext(ctx).Warn().
 			Str("reason", decision.Reason).
 			Str("file", decision.FileName).
 			Msg("SOUL_EVIL active but file empty")
@@ -98,7 +98,7 @@ func (oc *AIClient) applySoulEvilToContextFiles(
 
 	soulIndex := findSoulFileIndex(files)
 	if soulIndex == -1 {
-		oc.log.Warn().
+		oc.loggerForContext(ctx).Warn().
 			Str("reason", decision.Reason).
 			Msg("SOUL_EVIL active but SOUL.md not in bootstrap files")
 		return files
@@ -106,14 +106,14 @@ func (oc *AIClient) applySoulEvilToContextFiles(
 
 	trimmed := agents.TrimBootstrapContent(entry.Content, agents.DefaultSoulFilename, maxChars)
 	if strings.TrimSpace(trimmed.Content) == "" {
-		oc.log.Warn().
+		oc.loggerForContext(ctx).Warn().
 			Str("reason", decision.Reason).
 			Msg("SOUL_EVIL active but trimmed content empty")
 		return files
 	}
 
 	files[soulIndex].Content = trimmed.Content
-	oc.log.Debug().
+	oc.loggerForContext(ctx).Debug().
 		Str("reason", decision.Reason).
 		Str("file", decision.FileName).
 		Msg("SOUL_EVIL active using file")

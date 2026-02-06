@@ -57,8 +57,8 @@ func (b *Bridge) ensureOpenCodeSessionPortalWithRoom(ctx context.Context, inst *
 	meta.SessionID = session.ID
 	meta.ReadOnly = !inst.connected
 	meta.TitlePending = false
-	if meta.DefaultAgentID == "" {
-		meta.DefaultAgentID = b.host.DefaultAgentID()
+	if meta.AgentID == "" {
+		meta.AgentID = b.host.DefaultAgentID()
 	}
 	meta.Title = title
 

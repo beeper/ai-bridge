@@ -346,7 +346,7 @@ func (oc *AIClient) executeSessionsSpawn(ctx context.Context, portal *bridgev2.P
 	oc.sendWelcomeMessage(ctx, childPortal)
 	if roomName != "" {
 		if err := oc.setRoomNameNoSave(ctx, childPortal, roomName); err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to set subagent room name")
+			oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to set subagent room name")
 		}
 	}
 
@@ -371,10 +371,10 @@ func (oc *AIClient) executeSessionsSpawn(ctx context.Context, portal *bridgev2.P
 		Timestamp: time.Now(),
 	}
 	if _, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userMessage.SenderID); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to ensure user ghost before saving subagent task message")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure user ghost before saving subagent task message")
 	}
 	if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, userMessage); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to store subagent task message")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to store subagent task message")
 	}
 
 	runID := uuid.NewString()

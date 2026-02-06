@@ -12,7 +12,7 @@ func (oc *AIClient) recordAgentActivity(ctx context.Context, portal *bridgev2.Po
 	if oc == nil || portal == nil || portal.MXID == "" || meta == nil {
 		return
 	}
-	if meta.IsCronRoom || meta.IsAgentDataRoom || meta.IsGlobalMemoryRoom {
+	if meta.IsCronRoom {
 		return
 	}
 	agentID := normalizeAgentID(resolveAgentID(meta))

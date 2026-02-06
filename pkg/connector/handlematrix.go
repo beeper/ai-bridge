@@ -76,13 +76,13 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 
 	trace := traceEnabled(meta)
 	traceFull := traceFull(meta)
-	logCtx := zerolog.Nop()
+	logCtx := oc.loggerForContext(ctx).With().
+		Stringer("event_id", msg.Event.ID).
+		Stringer("sender", msg.Event.Sender).
+		Stringer("portal", portal.PortalKey).
+		Logger()
+	ctx = logCtx.WithContext(ctx)
 	if trace {
-		logCtx = oc.log.With().
-			Stringer("event_id", msg.Event.ID).
-			Stringer("sender", msg.Event.Sender).
-			Stringer("portal", portal.PortalKey).
-			Logger()
 		logCtx.Debug().
 			Str("msg_type", string(msg.Content.MsgType)).
 			Str("event_type", msg.Event.Type.Type).
@@ -794,7 +794,7 @@ func (oc *AIClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixE
 	traceFull := traceFull(meta)
 	logCtx := zerolog.Nop()
 	if trace {
-		logCtx = oc.log.With().
+		logCtx = oc.loggerForContext(ctx).With().
 			Stringer("portal", portal.PortalKey).
 			Logger()
 		if edit.Event != nil {
@@ -827,7 +827,7 @@ func (oc *AIClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixE
 
 	// Persist the updated metadata
 	if err := oc.UserLogin.Bridge.DB.Message.Update(ctx, edit.EditTarget); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to persist edited message metadata")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to persist edited message metadata")
 	}
 	oc.notifySessionMemoryChange(ctx, portal, meta, true)
 
@@ -838,7 +838,7 @@ func (oc *AIClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixE
 		return nil
 	}
 
-	oc.log.Info().
+	oc.loggerForContext(ctx).Info().
 		Str("message_id", string(edit.EditTarget.ID)).
 		Int("new_body_len", len(newBody)).
 		Msg("User edited message, regenerating response")
@@ -847,7 +847,7 @@ func (oc *AIClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixE
 	// We'll delete it and regenerate
 	err := oc.regenerateFromEdit(ctx, edit.Event, portal, meta, edit.EditTarget, newBody)
 	if err != nil {
-		oc.log.Err(err).Msg("Failed to regenerate response after edit")
+		oc.loggerForContext(ctx).Err(err).Msg("Failed to regenerate response after edit")
 		oc.sendSystemNotice(ctx, portal, fmt.Sprintf("Failed to regenerate response: %v", err))
 	}
 
@@ -915,7 +915,7 @@ func (oc *AIClient) regenerateFromEdit(
 		}
 		// Clean up database record to prevent orphaned messages
 		if err := oc.UserLogin.Bridge.DB.Message.Delete(ctx, assistantResponse.RowID); err != nil {
-			oc.log.Warn().Err(err).Str("msg_id", string(assistantResponse.ID)).Msg("Failed to delete redacted message from database")
+			oc.loggerForContext(ctx).Warn().Err(err).Str("msg_id", string(assistantResponse.ID)).Msg("Failed to delete redacted message from database")
 		}
 		oc.notifySessionMemoryChange(ctx, portal, meta, true)
 	}
@@ -1006,7 +1006,7 @@ func (oc *AIClient) handleMediaMessage(
 	traceFull := traceFull(meta)
 	logCtx := zerolog.Nop()
 	if trace {
-		logCtx = oc.log.With().
+		logCtx = oc.loggerForContext(ctx).With().
 			Stringer("event_id", msg.Event.ID).
 			Stringer("portal", portal.PortalKey).
 			Logger()
@@ -1189,7 +1189,7 @@ func (oc *AIClient) handleMediaMessage(
 			FileName:      strings.TrimSpace(msg.Content.FileName),
 		}}
 		if result, err := oc.applyMediaUnderstandingForAttachments(ctx, portal, meta, capability, attachments, rawCaption, hasUserCaption); err != nil {
-			oc.log.Warn().Err(err).Msg("Media understanding failed")
+			oc.loggerForContext(ctx).Warn().Err(err).Msg("Media understanding failed")
 		} else if result != nil {
 			understanding = result
 			if strings.TrimSpace(result.Body) != "" {
@@ -1210,7 +1210,7 @@ func (oc *AIClient) handleMediaMessage(
 				analysisPrompt := buildImageUnderstandingPrompt(caption, hasUserCaption)
 				description, err := oc.analyzeImageWithModel(ctx, visionModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
 				if err != nil {
-					oc.log.Warn().Err(err).Msg("Image understanding failed")
+					oc.loggerForContext(ctx).Warn().Err(err).Msg("Image understanding failed")
 					return nil, messageSendStatusError(err, "Image understanding failed. Please try again or switch to a vision-capable model using /model.", "")
 				}
 
@@ -1229,7 +1229,7 @@ func (oc *AIClient) handleMediaMessage(
 				analysisPrompt := buildAudioUnderstandingPrompt(caption, hasUserCaption)
 				transcript, err := oc.analyzeAudioWithModel(ctx, audioModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
 				if err != nil {
-					oc.log.Warn().Err(err).Msg("Audio understanding failed")
+					oc.loggerForContext(ctx).Warn().Err(err).Msg("Audio understanding failed")
 					return nil, messageSendStatusError(err, "Audio understanding failed. Please try again or switch to an audio-capable model using /model.", "")
 				}
 
@@ -1363,7 +1363,7 @@ func (oc *AIClient) handleTextFileMessage(
 
 	content, truncated, err := oc.downloadTextFile(ctx, mediaURL, encryptedFile, mimeType)
 	if err != nil {
-		oc.log.Warn().Err(err).Msg("Text file understanding failed")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Text file understanding failed")
 		return nil, messageSendStatusError(err, "Text file understanding failed. Please upload a UTF-8 text file under 5 MB.", "")
 	}
 
@@ -1423,7 +1423,7 @@ func (oc *AIClient) handleTextFileMessage(
 // savePortalQuiet saves portal and logs errors without failing
 func (oc *AIClient) savePortalQuiet(ctx context.Context, portal *bridgev2.Portal, action string) {
 	if err := portal.Save(ctx); err != nil {
-		oc.log.Warn().Err(err).Str("action", action).Msg("Failed to save portal")
+		oc.loggerForContext(ctx).Warn().Err(err).Str("action", action).Msg("Failed to save portal")
 	}
 }
 
@@ -1476,7 +1476,7 @@ func (oc *AIClient) sendAckReaction(ctx context.Context, portal *bridgev2.Portal
 		return ""
 	}
 	if err := oc.ensureModelInRoom(ctx, portal); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to ensure ghost is in room for ack reaction")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure ghost is in room for ack reaction")
 		return ""
 	}
 	intent := oc.getModelIntent(ctx, portal)
@@ -1496,14 +1496,14 @@ func (oc *AIClient) sendAckReaction(ctx context.Context, portal *bridgev2.Portal
 
 	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventReaction, eventContent, nil)
 	if err != nil {
-		oc.log.Warn().Err(err).
+		oc.loggerForContext(ctx).Warn().Err(err).
 			Stringer("target_event", targetEventID).
 			Str("emoji", emoji).
 			Msg("Failed to send ack reaction")
 		return ""
 	}
 
-	oc.log.Debug().
+	oc.loggerForContext(ctx).Debug().
 		Stringer("target_event", targetEventID).
 		Str("emoji", emoji).
 		Stringer("reaction_event", resp.EventID).
@@ -1558,11 +1558,11 @@ func (oc *AIClient) removeAckReaction(ctx context.Context, portal *bridgev2.Port
 		},
 	}, nil)
 	if err != nil {
-		oc.log.Warn().Err(err).
+		oc.loggerForContext(ctx).Warn().Err(err).
 			Stringer("reaction_event", reactionEventID).
 			Msg("Failed to remove ack reaction")
 	} else {
-		oc.log.Debug().
+		oc.loggerForContext(ctx).Debug().
 			Stringer("reaction_event", reactionEventID).
 			Msg("Removed ack reaction")
 	}
@@ -1612,7 +1612,6 @@ func (oc *AIClient) handleRegenerate(
 	meta *PortalMetadata,
 ) {
 	runCtx := oc.backgroundContext(ctx)
-	runCtx = oc.log.WithContext(runCtx)
 
 	// Get message history
 	history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(runCtx, portal.PortalKey, 10)
@@ -1680,7 +1679,6 @@ func (oc *AIClient) handleRegenerateTitle(
 	portal *bridgev2.Portal,
 ) {
 	runCtx := oc.backgroundContext(ctx)
-	runCtx = oc.log.WithContext(runCtx)
 
 	history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(runCtx, portal.PortalKey, 20)
 	if err != nil || len(history) == 0 {

@@ -380,7 +380,10 @@ func serviceTokensEmpty(tokens *ServiceTokens) bool {
 	}
 	if len(tokens.MCPServers) > 0 {
 		for _, server := range tokens.MCPServers {
-			if strings.TrimSpace(server.Endpoint) != "" ||
+			if strings.TrimSpace(server.Transport) != "" ||
+				strings.TrimSpace(server.Endpoint) != "" ||
+				strings.TrimSpace(server.Command) != "" ||
+				len(server.Args) > 0 ||
 				strings.TrimSpace(server.Token) != "" ||
 				strings.TrimSpace(server.AuthURL) != "" ||
 				strings.TrimSpace(server.AuthType) != "" ||

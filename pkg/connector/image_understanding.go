@@ -57,7 +57,7 @@ func (oc *AIClient) resolveUnderstandingModel(
 	store := NewAgentStoreAdapter(oc)
 	agent, err := store.GetAgentByID(ctx, agentID)
 	if err != nil {
-		oc.log.Warn().Err(err).Str("agent_id", agentID).Msg(fmt.Sprintf("Failed to load agent for %s understanding", logLabel))
+		oc.loggerForContext(ctx).Warn().Err(err).Str("agent_id", agentID).Msg(fmt.Sprintf("Failed to load agent for %s understanding", logLabel))
 		return ""
 	}
 	if agent == nil {

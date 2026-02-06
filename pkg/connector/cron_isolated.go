@@ -34,7 +34,6 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 		metaSnapshot = &PortalMetadata{}
 	}
 	metaSnapshot.AgentID = agentID
-	metaSnapshot.DefaultAgentID = agentID
 
 	// Apply model override for this run if provided.
 	if strings.TrimSpace(job.Payload.Model) != "" {

@@ -98,26 +98,27 @@ func TestNormalizeMessageID(t *testing.T) {
 	}
 }
 
-func TestNormalizeMessageArgsMessageIDAlias(t *testing.T) {
+func TestNormalizeMessageArgsCanonicalMessageID(t *testing.T) {
 	args := map[string]any{
-		"action":    "reply",
-		"messageId": "[message_id: $abc:example.com]",
+		"action":     "reply",
+		"message_id": "[message_id: $abc:example.com]",
 	}
 	normalizeMessageArgs(args)
 	got, _ := args["message_id"].(string)
 	if got != "$abc:example.com" {
-		t.Fatalf("normalized alias message_id = %q, want %q", got, "$abc:example.com")
+		t.Fatalf("normalized message_id = %q, want %q", got, "$abc:example.com")
 	}
 }
 
-func TestNormalizeMessageArgsInvalidAliasHint(t *testing.T) {
+func TestNormalizeMessageArgsIgnoresLegacyAliasFields(t *testing.T) {
 	args := map[string]any{
-		"action":  "reply",
-		"replyTo": "[message_id: invalid id]",
+		"action":    "reply",
+		"messageId": "[message_id: $abc:example.com]",
+		"replyTo":   "[message_id: $def:example.com]",
 	}
 	normalizeMessageArgs(args)
 	got, _ := args["message_id"].(string)
 	if got != "" {
-		t.Fatalf("normalized invalid replyTo hint = %q, want empty", got)
+		t.Fatalf("expected legacy alias fields to be ignored, got message_id=%q", got)
 	}
 }

@@ -48,7 +48,7 @@ func (oc *AIClient) collectDesktopAccountHints(ctx context.Context) desktopAccou
 	for _, instance := range instanceNames {
 		accountMap, err := oc.listDesktopAccounts(ctx, instance)
 		if err != nil {
-			oc.log.Debug().Err(err).Str("instance", instance).Msg("Skipping desktop account hints for unreachable instance")
+			oc.loggerForContext(ctx).Debug().Err(err).Str("instance", instance).Msg("Skipping desktop account hints for unreachable instance")
 			continue
 		}
 		if len(accountMap) == 0 {
@@ -91,7 +91,9 @@ func (oc *AIClient) collectDesktopAccountHints(ctx context.Context) desktopAccou
 		return instances[i].instanceKey < instances[j].instanceKey
 	})
 
-	areThereMultipleDesktopInstances := len(instances) > 1
+	// Keep account ID prefixing consistent with sessions_list by using
+	// configured instance count (not only currently reachable accounts).
+	areThereMultipleDesktopInstances := len(instanceNames) > 1
 	items := make([]desktopAccountHint, 0, 8)
 	seenAccountIDs := map[string]struct{}{}
 	for _, inst := range instances {

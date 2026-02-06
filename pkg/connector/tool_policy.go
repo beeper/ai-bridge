@@ -55,11 +55,6 @@ func (oc *AIClient) isToolAvailable(meta *PortalMetadata, toolName string) (bool
 		return false, SourceModelLimit, "Model does not support tools"
 	}
 
-	switch toolName {
-	case ToolNameAnalyzeImage:
-		toolName = ToolNameImage
-	}
-
 	if agenttools.IsBossTool(toolName) && !(meta.IsBuilderRoom || hasBossAgent(meta)) {
 		return false, SourceGlobalDefault, "Builder room only"
 	}
@@ -72,25 +67,20 @@ func (oc *AIClient) isToolAvailable(meta *PortalMetadata, toolName string) (bool
 			return false, SourceModelLimit, "No vision-capable model available"
 		}
 	}
-	if oc.isNexusMCPToolName(toolName) {
-		if !canUseNexusToolsForAgent(meta) {
+	if oc.isMCPToolName(toolName) {
+		if oc.isNexusScopedMCPTool(toolName) && !canUseNexusToolsForAgent(meta) {
 			return false, SourceAgentPolicy, "Nexus tools are restricted to the Nexus agent"
 		}
-		if !oc.isNexusConfigured() {
-			return false, SourceProviderLimit, "Nexus MCP tool bridge is not configured"
+		if !oc.isMCPConfigured() {
+			return false, SourceProviderLimit, "MCP tool bridge is not configured"
 		}
 	}
-
 	return true, SourceGlobalDefault, ""
 }
 
 // isToolEnabled checks if a specific tool is enabled (policy + availability).
 func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
 	toolName = normalizeToolAlias(toolName)
-	switch toolName {
-	case ToolNameAnalyzeImage:
-		toolName = ToolNameImage
-	}
 
 	available, _, _ := oc.isToolAvailable(meta, toolName)
 	if !available {
@@ -116,7 +106,7 @@ func (oc *AIClient) toolNamesForPortal(meta *PortalMetadata) []string {
 			nameSet[tool.Name] = struct{}{}
 		}
 	}
-	if oc != nil && oc.isNexusConfigured() {
+	if oc != nil && oc.isMCPConfigured() {
 		discoveryCtx, cancel := context.WithTimeout(context.Background(), nexusMCPDiscoveryTimeout)
 		for _, name := range oc.nexusDiscoveredToolNames(discoveryCtx) {
 			nameSet[name] = struct{}{}

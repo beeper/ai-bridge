@@ -36,7 +36,7 @@ func (oc *AIClient) responseWithRetryAndReasoningFallback(
 			metaCopy := *meta
 			metaCopy.ReasoningEffort = currentLevel
 			effectiveMeta = &metaCopy
-			oc.log.Info().
+			oc.loggerForContext(ctx).Info().
 				Str("original_level", originalLevel).
 				Str("fallback_level", currentLevel).
 				Msg("Retrying with lower reasoning level")

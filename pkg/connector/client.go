@@ -336,6 +336,7 @@ type AIClient struct {
 	nexusMCPToolsMu        sync.Mutex
 	nexusMCPTools          []ToolDefinition
 	nexusMCPToolSet        map[string]struct{}
+	nexusMCPToolServer     map[string]string
 	nexusMCPToolsFetchedAt time.Time
 }
 
@@ -559,7 +560,7 @@ func (oc *AIClient) queuePendingMessage(roomID id.RoomID, item pendingQueueItem,
 			queued = len(snapshot.items)
 		}
 		if traceEnabled(item.pending.Meta) {
-			oc.log.Debug().
+			oc.loggerForContext(context.Background()).Debug().
 				Str("room_id", roomID.String()).
 				Int("queue_length", queued).
 				Msg("Message queued for later processing")
@@ -634,7 +635,7 @@ func (oc *AIClient) dispatchOrQueue(
 	shouldFollowup := queueSettings.Mode == QueueModeFollowup || queueSettings.Mode == QueueModeCollect || queueSettings.Mode == QueueModeSteerBacklog
 	trace := traceEnabled(meta)
 	if trace {
-		oc.log.Debug().
+		oc.loggerForContext(ctx).Debug().
 			Str("room_id", roomID.String()).
 			Str("queue_mode", string(queueSettings.Mode)).
 			Str("pending_type", string(queueItem.pending.Type)).
@@ -647,17 +648,17 @@ func (oc *AIClient) dispatchOrQueue(
 	}
 	if oc.acquireRoom(roomID) {
 		if trace {
-			oc.log.Debug().Str("room_id", roomID.String()).Msg("Room acquired; dispatching immediately")
+			oc.loggerForContext(ctx).Debug().Str("room_id", roomID.String()).Msg("Room acquired; dispatching immediately")
 		}
 		oc.stopQueueTyping(roomID)
 		// Save user message to database - we must do this ourselves since we return Pending=true.
 		if userMessage != nil && evt != nil {
 			userMessage.MXID = evt.ID
 			if _, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userMessage.SenderID); err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to ensure user ghost before saving message")
+				oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure user ghost before saving message")
 			}
 			if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, userMessage); err != nil {
-				oc.log.Err(err).Msg("Failed to save user message to database")
+				oc.loggerForContext(ctx).Err(err).Msg("Failed to save user message to database")
 			}
 		}
 		if !queueItem.pending.PendingSent {
@@ -694,7 +695,7 @@ func (oc *AIClient) dispatchOrQueue(
 		steered := oc.enqueueSteerQueue(roomID, queueItem)
 		if steered {
 			if trace {
-				oc.log.Debug().
+				oc.loggerForContext(ctx).Debug().
 					Str("room_id", roomID.String()).
 					Bool("followup", shouldFollowup).
 					Msg("Steering message into active run")
@@ -704,10 +705,10 @@ func (oc *AIClient) dispatchOrQueue(
 					userMessage.MXID = evt.ID
 				}
 				if _, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userMessage.SenderID); err != nil {
-					oc.log.Warn().Err(err).Msg("Failed to ensure user ghost before saving steered message")
+					oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure user ghost before saving steered message")
 				}
 				if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, userMessage); err != nil {
-					oc.log.Err(err).Msg("Failed to save steered message to database")
+					oc.loggerForContext(ctx).Err(err).Msg("Failed to save steered message to database")
 				}
 			}
 			if !shouldFollowup {
@@ -726,10 +727,10 @@ func (oc *AIClient) dispatchOrQueue(
 	if userMessage != nil {
 		userMessage.MXID = evt.ID
 		if _, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userMessage.SenderID); err != nil {
-			oc.log.Warn().Err(err).Msg("Failed to ensure user ghost before saving queued message")
+			oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure user ghost before saving queued message")
 		}
 		if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, userMessage); err != nil {
-			oc.log.Err(err).Msg("Failed to save queued message to database")
+			oc.loggerForContext(ctx).Err(err).Msg("Failed to save queued message to database")
 		}
 	}
 
@@ -737,12 +738,12 @@ func (oc *AIClient) dispatchOrQueue(
 		queueItem.backlogAfter = true
 	}
 	if trace {
-		oc.log.Debug().Str("room_id", roomID.String()).Msg("Room busy; queued message")
+		oc.loggerForContext(ctx).Debug().Str("room_id", roomID.String()).Msg("Room busy; queued message")
 	}
 	enqueued := oc.queuePendingMessage(roomID, queueItem, queueSettings)
 	if !enqueued {
 		if trace {
-			oc.log.Warn().Str("room_id", roomID.String()).Msg("Room busy queue rejected message")
+			oc.loggerForContext(ctx).Warn().Str("room_id", roomID.String()).Msg("Room busy queue rejected message")
 		}
 		oc.sendQueueRejectedStatus(ctx, portal, evt, queueItem.pending.StatusEvents, "Request was not accepted by queue. Please retry.")
 		return userMessage, false
@@ -770,7 +771,7 @@ func (oc *AIClient) dispatchOrQueueWithStatus(
 	shouldFollowup := queueSettings.Mode == QueueModeFollowup || queueSettings.Mode == QueueModeCollect || queueSettings.Mode == QueueModeSteerBacklog
 	trace := traceEnabled(meta)
 	if trace {
-		oc.log.Debug().
+		oc.loggerForContext(ctx).Debug().
 			Str("room_id", roomID.String()).
 			Str("queue_mode", string(queueSettings.Mode)).
 			Str("pending_type", string(queueItem.pending.Type)).
@@ -783,7 +784,7 @@ func (oc *AIClient) dispatchOrQueueWithStatus(
 	}
 	if oc.acquireRoom(roomID) {
 		if trace {
-			oc.log.Debug().Str("room_id", roomID.String()).Msg("Room acquired; dispatching immediately")
+			oc.loggerForContext(ctx).Debug().Str("room_id", roomID.String()).Msg("Room acquired; dispatching immediately")
 		}
 		oc.stopQueueTyping(roomID)
 		runCtx := withStatusEvents(oc.backgroundContext(ctx), queueItem.pending.StatusEvents)
@@ -811,7 +812,7 @@ func (oc *AIClient) dispatchOrQueueWithStatus(
 		steered := oc.enqueueSteerQueue(roomID, queueItem)
 		if steered && !shouldFollowup {
 			if trace {
-				oc.log.Debug().
+				oc.loggerForContext(ctx).Debug().
 					Str("room_id", roomID.String()).
 					Bool("followup", shouldFollowup).
 					Msg("Steering message into active run")
@@ -829,12 +830,12 @@ func (oc *AIClient) dispatchOrQueueWithStatus(
 		queueItem.backlogAfter = true
 	}
 	if trace {
-		oc.log.Debug().Str("room_id", roomID.String()).Msg("Room busy; queued message")
+		oc.loggerForContext(ctx).Debug().Str("room_id", roomID.String()).Msg("Room busy; queued message")
 	}
 	enqueued := oc.queuePendingMessage(roomID, queueItem, queueSettings)
 	if !enqueued {
 		if trace {
-			oc.log.Warn().Str("room_id", roomID.String()).Msg("Room busy queue rejected message")
+			oc.loggerForContext(ctx).Warn().Str("room_id", roomID.String()).Msg("Room busy queue rejected message")
 		}
 		oc.sendQueueRejectedStatus(ctx, portal, evt, queueItem.pending.StatusEvents, "Request was not accepted by queue. Please retry.")
 		return
@@ -867,7 +868,7 @@ func (oc *AIClient) processPendingQueue(ctx context.Context, roomID id.RoomID) {
 		traceFull := traceFull(traceMeta)
 		logCtx := zerolog.Nop()
 		if trace {
-			logCtx = oc.log.With().Str("room_id", roomID.String()).Logger()
+			logCtx = oc.loggerForContext(ctx).With().Str("room_id", roomID.String()).Logger()
 			logCtx.Debug().
 				Str("queue_mode", string(snapshot.mode)).
 				Int("queued_items", len(snapshot.items)).
@@ -1005,7 +1006,7 @@ func (oc *AIClient) processPendingQueue(ctx context.Context, roomID id.RoomID) {
 		}
 
 		if err != nil {
-			oc.log.Err(err).Msg("Failed to build prompt for pending queue item")
+			oc.loggerForContext(ctx).Err(err).Msg("Failed to build prompt for pending queue item")
 			oc.notifyMatrixSendFailure(ctx, item.pending.Portal, item.pending.Event, err)
 			if item.pending.Meta != nil && item.pending.Meta.AckReactionRemoveAfter {
 				oc.removePendingAckReactions(oc.backgroundContext(ctx), item.pending.Portal, item.pending)
@@ -1036,7 +1037,7 @@ func (oc *AIClient) Connect(ctx context.Context) {
 	}
 	if oc.cronService != nil {
 		if err := oc.cronService.Start(); err != nil {
-			oc.log.Warn().Err(err).Msg("cron: failed to start scheduler")
+			oc.loggerForContext(ctx).Warn().Err(err).Msg("cron: failed to start scheduler")
 		}
 	}
 }
@@ -1044,7 +1045,7 @@ func (oc *AIClient) Connect(ctx context.Context) {
 func (oc *AIClient) Disconnect() {
 	// Flush pending debounced messages before disconnect (bridgev2 pattern)
 	if oc.inboundDebouncer != nil {
-		oc.log.Info().Msg("Flushing pending debounced messages on disconnect")
+		oc.loggerForContext(context.Background()).Info().Msg("Flushing pending debounced messages on disconnect")
 		oc.inboundDebouncer.FlushAll()
 	}
 	oc.loggedIn.Store(false)
@@ -1458,7 +1459,7 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 	store := NewAgentStoreAdapter(oc)
 	agent, err := store.GetAgentByID(ctx, agentID)
 	if err != nil || agent == nil {
-		oc.log.Warn().Err(err).Str("agent", agentID).Msg("Failed to load agent for prompt")
+		oc.loggerForContext(ctx).Warn().Err(err).Str("agent", agentID).Msg("Failed to load agent for prompt")
 		return ""
 	}
 
@@ -1681,7 +1682,7 @@ func (oc *AIClient) isGroupChat(ctx context.Context, portal *bridgev2.Portal) bo
 	}
 	members, err := matrixConn.GetMembers(ctx, portal.MXID)
 	if err != nil {
-		oc.log.Debug().Err(err).Msg("Failed to get joined members for group chat detection")
+		oc.loggerForContext(ctx).Debug().Err(err).Msg("Failed to get joined members for group chat detection")
 		return false
 	}
 
@@ -1888,9 +1889,9 @@ func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) 
 		}
 	}
 
-	oc.log.Debug().Msg("Loading model catalog from VFS")
+	oc.loggerForContext(ctx).Debug().Msg("Loading model catalog from VFS")
 	if _, err := oc.ensureModelCatalogVFS(ctx); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to seed model catalog")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to seed model catalog")
 	}
 	allModels := oc.loadModelCatalogModels(ctx)
 
@@ -1905,10 +1906,10 @@ func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) 
 
 	// Save metadata
 	if err := oc.UserLogin.Save(ctx); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to save model cache")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to save model cache")
 	}
 
-	oc.log.Info().Int("count", len(allModels)).Msg("Cached available models")
+	oc.loggerForContext(ctx).Info().Int("count", len(allModels)).Msg("Cached available models")
 	return allModels, nil
 }
 
@@ -2254,8 +2255,11 @@ func (oc *AIClient) buildPromptUpToMessage(
 ) ([]openai.ChatCompletionMessageParamUnion, error) {
 	var prompt []openai.ChatCompletionMessageParamUnion
 
-	// Add system prompt
-	systemPrompt := oc.effectivePrompt(meta)
+	// Add system prompt - agent prompt takes priority, then room override, then config default
+	systemPrompt := oc.effectiveAgentPrompt(ctx, meta)
+	if systemPrompt == "" {
+		systemPrompt = oc.effectivePrompt(meta)
+	}
 	if systemPrompt != "" {
 		prompt = append(prompt, openai.SystemMessage(systemPrompt))
 	}
@@ -2505,7 +2509,7 @@ func (oc *AIClient) ensureGhostDisplayNameWithGhost(ctx context.Context, ghost *
 			IsBot:       ptr.Ptr(false),
 			Identifiers: modelContactIdentifiers(modelID, info),
 		})
-		oc.log.Debug().Str("model", modelID).Str("name", displayName).Msg("Updated ghost display name")
+		oc.loggerForContext(ctx).Debug().Str("model", modelID).Str("name", displayName).Msg("Updated ghost display name")
 	}
 }
 
@@ -2545,7 +2549,7 @@ func (oc *AIClient) ensureAgentGhostDisplayName(ctx context.Context, agentID, mo
 			Identifiers: modelContactIdentifiers(modelID, oc.findModelInfo(modelID)),
 			Avatar:      avatar,
 		})
-		oc.log.Debug().Str("agent", agentID).Str("model", modelID).Str("name", displayName).Msg("Updated agent ghost display name")
+		oc.loggerForContext(ctx).Debug().Str("agent", agentID).Str("model", modelID).Str("name", displayName).Msg("Updated agent ghost display name")
 	}
 }
 
@@ -2572,7 +2576,7 @@ func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal)
 			}
 			return ghost.Intent
 		}
-		oc.log.Warn().Err(err).Str("agent", agentID).Msg("Failed to get agent ghost, falling back to model")
+		oc.loggerForContext(ctx).Warn().Err(err).Str("agent", agentID).Msg("Failed to get agent ghost, falling back to model")
 	}
 
 	// Fall back to model ghost
@@ -2584,7 +2588,7 @@ func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal)
 	}
 	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, modelUserID(modelID))
 	if err != nil {
-		oc.log.Warn().Err(err).Str("model", modelID).Msg("Failed to get model ghost")
+		oc.loggerForContext(ctx).Warn().Err(err).Str("model", modelID).Msg("Failed to get model ghost")
 		return nil
 	}
 	return ghost.Intent
@@ -2604,20 +2608,28 @@ func (oc *AIClient) ensureModelInRoom(ctx context.Context, portal *bridgev2.Port
 	return intent.EnsureJoined(ctx, portal.MXID)
 }
 
+func (oc *AIClient) loggerForContext(ctx context.Context) *zerolog.Logger {
+	if ctx != nil {
+		if ctxLog := zerolog.Ctx(ctx); ctxLog != nil && ctxLog.GetLevel() != zerolog.Disabled {
+			return ctxLog
+		}
+	}
+	return &oc.log
+}
+
 func (oc *AIClient) backgroundContext(ctx context.Context) context.Context {
+	var base context.Context
 	// Always prefer BackgroundCtx for long-running operations that outlive request context
 	if oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.BackgroundCtx != nil {
-		base := oc.UserLogin.Bridge.BackgroundCtx
-		if model, ok := modelOverrideFromContext(ctx); ok {
-			return withModelOverride(base, model)
-		}
-		return base
+		base = oc.UserLogin.Bridge.BackgroundCtx
+	} else {
+		base = context.Background()
 	}
-	base := context.Background()
+
 	if model, ok := modelOverrideFromContext(ctx); ok {
-		return withModelOverride(base, model)
+		base = withModelOverride(base, model)
 	}
-	return base
+	return oc.loggerForContext(ctx).WithContext(base)
 }
 
 func ptrIfNotEmpty(value string) *string {
@@ -2676,12 +2688,13 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 		return
 	}
 
+	ctx := oc.backgroundContext(context.Background())
 	last := entries[len(entries)-1]
 	trace := traceEnabled(last.Meta)
 	traceFull := traceFull(last.Meta)
 	logCtx := zerolog.Nop()
 	if trace {
-		logCtx = oc.log.With().
+		logCtx = oc.loggerForContext(ctx).With().
 			Stringer("portal", last.Portal.PortalKey).
 			Logger()
 		if last.Event != nil {
@@ -2689,7 +2702,6 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 		}
 		logCtx.Debug().Int("entry_count", len(entries)).Msg("Debounce flush triggered")
 	}
-	ctx := oc.backgroundContext(context.Background())
 	if last.Meta != nil {
 		if override := oc.effectiveModel(last.Meta); strings.TrimSpace(override) != "" {
 			ctx = withModelOverride(ctx, override)
@@ -2724,7 +2736,7 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 	// Build prompt with combined body
 	promptMessages, err := oc.buildPromptWithLinkContext(statusCtx, last.Portal, last.Meta, combinedBody, rawEventContent, last.Event.ID)
 	if err != nil {
-		oc.log.Err(err).Msg("Failed to build prompt for debounced messages")
+		oc.loggerForContext(ctx).Err(err).Msg("Failed to build prompt for debounced messages")
 		oc.notifyMatrixSendFailure(statusCtx, last.Portal, last.Event, err)
 		if last.Meta.AckReactionRemoveAfter && entries[0].AckEventID != "" {
 			oc.removeAckReactionByID(statusCtx, last.Portal, entries[0].AckEventID)
@@ -2752,10 +2764,10 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 	// returned Pending: true to the bridge framework when debouncing started
 	// Ensure ghost row exists to avoid foreign key violations.
 	if _, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userMessage.SenderID); err != nil {
-		oc.log.Warn().Err(err).Msg("Failed to ensure user ghost before saving debounced message")
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure user ghost before saving debounced message")
 	}
 	if err := oc.UserLogin.Bridge.DB.Message.Insert(ctx, userMessage); err != nil {
-		oc.log.Err(err).Msg("Failed to save debounced user message to database")
+		oc.loggerForContext(ctx).Err(err).Msg("Failed to save debounced user message to database")
 	}
 
 	// Dispatch using existing flow (handles room lock + status)
@@ -2813,11 +2825,11 @@ func (oc *AIClient) removeAckReactionByID(ctx context.Context, portal *bridgev2.
 		},
 	}, nil)
 	if err != nil {
-		oc.log.Warn().Err(err).
+		oc.loggerForContext(ctx).Warn().Err(err).
 			Stringer("reaction_event", reactionEventID).
 			Msg("Failed to remove ack reaction by ID")
 	} else {
-		oc.log.Debug().
+		oc.loggerForContext(ctx).Debug().
 			Stringer("reaction_event", reactionEventID).
 			Msg("Removed ack reaction by ID")
 	}

@@ -87,9 +87,6 @@ const ToolNameImage = toolspec.ImageName
 // ToolNameImageGenerate is the image generation tool (non-OpenClaw).
 const ToolNameImageGenerate = toolspec.ImageGenerateName
 
-// ToolNameAnalyzeImage is a deprecated alias for ToolNameImage.
-const ToolNameAnalyzeImage = toolspec.AnalyzeImageName
-
 // ToolNameSessionStatus is the name of the session status tool.
 const ToolNameSessionStatus = toolspec.SessionStatusName
 
@@ -147,80 +144,19 @@ const DefaultGeminiImageModel = "gemini-3-pro-image-preview"
 // TTSResultPrefix is the prefix used to identify TTS results that need audio sending.
 const TTSResultPrefix = "AUDIO:"
 
-// normalizeMessageAction maps OpenClaw aliases to supported actions.
+// normalizeMessageAction coerces message actions to canonical lowercase form.
 func normalizeMessageAction(action string) string {
-	switch action {
-	case "unsend":
-		return "delete"
-	case "open", "select":
-		return "focus"
-	case "sendWithEffect", "broadcast":
-		return "send"
-	default:
-		return action
-	}
+	return strings.ToLower(strings.TrimSpace(action))
 }
 
-// normalizeMessageArgs maps OpenClaw-style argument names to bridge equivalents.
+// normalizeMessageArgs normalizes canonical message arguments in-place.
 func normalizeMessageArgs(args map[string]any) {
 	if args == nil {
 		return
 	}
-	setMessageID := func(raw any) bool {
-		switch value := raw.(type) {
-		case string:
-			normalized := normalizeMessageID(value)
-			args["message_id"] = normalized
-			return normalized != ""
-		default:
-			if raw == nil {
-				return false
-			}
-			args["message_id"] = raw
-			return true
-		}
-	}
-
-	hasMessageID := false
 	if raw, ok := args["message_id"]; ok {
-		hasMessageID = setMessageID(raw)
-	}
-	if !hasMessageID {
-		if v, ok := args["messageId"]; ok {
-			hasMessageID = setMessageID(v)
-		} else if v, ok := args["replyTo"]; ok {
-			hasMessageID = setMessageID(v)
-		}
-	}
-	hasThreadID := false
-	if raw, ok := args["thread_id"]; ok {
-		if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
-			hasThreadID = true
-		}
-	}
-	if !hasThreadID {
-		if v, ok := args["threadId"]; ok {
-			args["thread_id"] = v
-		}
-	}
-	if _, ok := args["path"]; !ok {
-		if v, ok := args["filePath"]; ok {
-			args["path"] = v
-		}
-	}
-	if _, ok := args["filename"]; !ok {
-		if v, ok := args["fileName"]; ok {
-			args["filename"] = v
-		}
-	}
-	if _, ok := args["mimeType"]; !ok {
-		if v, ok := args["contentType"]; ok {
-			args["mimeType"] = v
-		}
-	}
-	if _, ok := args["chatId"]; !ok {
-		if v, ok := args["chatID"]; ok {
-			args["chatId"] = v
+		if value, ok := raw.(string); ok {
+			args["message_id"] = normalizeMessageID(value)
 		}
 	}
 }
@@ -420,6 +356,9 @@ func executeMessage(ctx context.Context, args map[string]any) (string, error) {
 	}
 
 	action = normalizeMessageAction(action)
+	if action == "" {
+		return "", fmt.Errorf("missing or invalid 'action' argument")
+	}
 	normalizeMessageArgs(args)
 
 	switch action {
@@ -1744,19 +1683,18 @@ func executeMemorySearch(ctx context.Context, args map[string]any) (string, erro
 	if !ok || query == "" {
 		return "", fmt.Errorf("query required")
 	}
-
-	var input MemorySearchInput
-	input.Query = query
+	var maxResults *int
+	var minScore *float64
 
 	if raw := args["maxResults"]; raw != nil {
 		if max, ok := readNumberArg(raw); ok {
 			val := int(max)
-			input.MaxResults = &val
+			maxResults = &val
 		}
 	}
 	if raw := args["minScore"]; raw != nil {
 		if score, ok := readNumberArg(raw); ok {
-			input.MinScore = &score
+			minScore = &score
 		}
 	}
 
@@ -1777,13 +1715,13 @@ func executeMemorySearch(ctx context.Context, args map[string]any) (string, erro
 		SessionKey: btc.Portal.PortalKey.String(),
 		MinScore:   math.NaN(),
 	}
-	if input.MaxResults != nil {
-		opts.MaxResults = *input.MaxResults
+	if maxResults != nil {
+		opts.MaxResults = *maxResults
 	}
-	if input.MinScore != nil {
-		opts.MinScore = *input.MinScore
+	if minScore != nil {
+		opts.MinScore = *minScore
 	}
-	results, err := manager.Search(ctx, input.Query, opts)
+	results, err := manager.Search(ctx, query, opts)
 	if err != nil {
 		payload := memorySearchOutput{
 			Results:  []memory.SearchResult{},

@@ -57,7 +57,7 @@ func (oc *AIClient) resolveToolPolicies(meta *PortalMetadata) toolPolicyResoluti
 	providerProfilePolicy = toolpolicy.MergeAlsoAllow(providerProfilePolicy, effective.ProviderAlsoAllow)
 
 	ctx := oc.buildToolPolicyContext(meta)
-	log := oc.log.With().Str("policy", "tools").Logger()
+	log := oc.loggerForContext(context.Background()).With().Str("policy", "tools").Logger()
 	resolve := newPolicyResolver(log, ctx)
 
 	resolvedPolicies := []*toolpolicy.ToolPolicy{

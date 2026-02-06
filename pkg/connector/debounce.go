@@ -17,16 +17,16 @@ const DefaultDebounceMs = 0
 
 // DebounceEntry represents a buffered message waiting to be processed.
 type DebounceEntry struct {
-	Event       *event.Event
-	Portal      *bridgev2.Portal
-	Meta        *PortalMetadata
-	RawBody     string
-	SenderName  string
-	RoomName    string
-	IsGroup     bool
+	Event        *event.Event
+	Portal       *bridgev2.Portal
+	Meta         *PortalMetadata
+	RawBody      string
+	SenderName   string
+	RoomName     string
+	IsGroup      bool
 	WasMentioned bool
-	AckEventID  id.EventID // Track ack reaction for removal after flush
-	PendingSent bool       // Whether a pending status was already sent for this event
+	AckEventID   id.EventID // Track ack reaction for removal after flush
+	PendingSent  bool       // Whether a pending status was already sent for this event
 }
 
 // DebounceBuffer holds pending messages for a key.

@@ -18,7 +18,7 @@ func hasDesktopMessageTargetHints(args map[string]any) bool {
 	if firstNonEmptyString(args["label"]) != "" {
 		return true
 	}
-	if firstNonEmptyString(args["chatId"], args["chatID"]) != "" {
+	if firstNonEmptyString(args["chatId"]) != "" {
 		return true
 	}
 	if firstNonEmptyString(args["instance"]) != "" {
@@ -34,7 +34,7 @@ func resolveDesktopMessageTarget(ctx context.Context, client *AIClient, args map
 
 	sessionKey = firstNonEmptyString(args["sessionKey"])
 	label := firstNonEmptyString(args["label"])
-	chatID = firstNonEmptyString(args["chatId"], args["chatID"])
+	chatID = firstNonEmptyString(args["chatId"])
 	instance = firstNonEmptyString(args["instance"])
 	resolveOpts := desktopLabelResolveOptions{
 		AccountID: strings.TrimSpace(firstNonEmptyString(args["accountId"])),
@@ -183,12 +183,12 @@ func maybeExecuteMessageEditDesktop(ctx context.Context, args map[string]any, bt
 		return true, "", err
 	}
 	output, err := jsonActionResult("edit", map[string]any{
-		"status":    "sent",
-		"channel":   channelDesktopAPI,
-		"instance":  instance,
-		"chatId":    chatID,
+		"status":     "sent",
+		"channel":    channelDesktopAPI,
+		"instance":   instance,
+		"chatId":     chatID,
 		"sessionKey": key,
-		"messageId": messageID,
+		"messageId":  messageID,
 	})
 	return true, output, err
 }
@@ -412,17 +412,17 @@ func executeMessageDesktopCreateChat(ctx context.Context, args map[string]any, b
 		accountID,
 		participantIDs,
 		firstNonEmptyString(args["type"]),
-		firstNonEmptyString(args["title"]),
+		firstNonEmptyString(args["name"]),
 		firstNonEmptyString(args["message"]),
 	)
 	if err != nil {
 		return "", err
 	}
 	return jsonActionResult("desktop-create-chat", map[string]any{
-		"status":    "ok",
-		"channel":   channelDesktopAPI,
-		"instance":  instance,
-		"chatId":    chatID,
+		"status":     "ok",
+		"channel":    channelDesktopAPI,
+		"instance":   instance,
+		"chatId":     chatID,
 		"sessionKey": normalizeDesktopSessionKeyWithInstance(instance, chatID),
 	})
 }
@@ -440,12 +440,12 @@ func executeMessageDesktopArchiveChat(ctx context.Context, args map[string]any, 
 		return "", err
 	}
 	return jsonActionResult("desktop-archive-chat", map[string]any{
-		"status":    "ok",
-		"channel":   channelDesktopAPI,
-		"instance":  instance,
-		"chatId":    chatID,
+		"status":     "ok",
+		"channel":    channelDesktopAPI,
+		"instance":   instance,
+		"chatId":     chatID,
 		"sessionKey": key,
-		"archived":  archived,
+		"archived":   archived,
 	})
 }
 
@@ -485,10 +485,10 @@ func executeMessageDesktopClearReminder(ctx context.Context, args map[string]any
 		return "", err
 	}
 	return jsonActionResult("desktop-clear-reminder", map[string]any{
-		"status":    "ok",
-		"channel":   channelDesktopAPI,
-		"instance":  instance,
-		"chatId":    chatID,
+		"status":     "ok",
+		"channel":    channelDesktopAPI,
+		"instance":   instance,
+		"chatId":     chatID,
 		"sessionKey": key,
 	})
 }

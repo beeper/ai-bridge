@@ -104,7 +104,7 @@ func (oc *AIClient) handleInboundCommand(
 		if modelToken == "" {
 			return inboundCommandResult{handled: true, response: fmt.Sprintf("Current model: %s", oc.effectiveModel(meta))}
 		}
-		if agents.IsBossAgent(meta.AgentID) || agents.IsBossAgent(meta.DefaultAgentID) {
+		if agents.IsBossAgent(resolveAgentID(meta)) {
 			return inboundCommandResult{handled: true, response: "Cannot change model in a room managed by the Boss agent."}
 		}
 		if agentID := resolveAgentID(meta); agentID != "" {

@@ -176,7 +176,7 @@ func (oc *AIClient) applyMediaUnderstandingForAttachments(
 		Outcome:     decisionOutcome,
 		Attachments: attachmentDecisions,
 	}}
-	oc.log.Debug().
+	oc.loggerForContext(ctx).Debug().
 		Str("capability", string(capability)).
 		Str("outcome", decisionOutcome).
 		Int("attachments", len(selected)).
@@ -596,7 +596,7 @@ func (oc *AIClient) extractMediaFileBlocks(
 		}
 		content, truncated, err := oc.downloadTextFile(ctx, attachment.URL, attachment.EncryptedFile, mimeType)
 		if err != nil {
-			oc.log.Warn().Err(err).
+			oc.loggerForContext(ctx).Warn().Err(err).
 				Int("attachment_index", attachment.Index).
 				Msg("Failed to extract text file block for media understanding")
 			continue
@@ -885,7 +885,7 @@ func (oc *AIClient) describeVideoWithEntry(
 		base64Size := estimateBase64Size(len(data))
 		maxBase64 := resolveVideoMaxBase64Bytes(maxBytes)
 		if base64Size > maxBase64 {
-			oc.log.Warn().
+			oc.loggerForContext(ctx).Warn().
 				Int("base64_bytes", base64Size).
 				Int("limit_bytes", maxBase64).
 				Msg("OpenRouter video payload exceeds base64 limit")
@@ -944,7 +944,7 @@ func (oc *AIClient) describeVideoWithEntry(
 	base64Size := estimateBase64Size(len(data))
 	maxBase64 := resolveVideoMaxBase64Bytes(maxBytes)
 	if base64Size > maxBase64 {
-		oc.log.Warn().
+		oc.loggerForContext(ctx).Warn().
 			Int("base64_bytes", base64Size).
 			Int("limit_bytes", maxBase64).
 			Msg("Google video payload exceeds base64 limit")

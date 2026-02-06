@@ -298,13 +298,7 @@ func (oc *OpenAIConnector) GetBridgeInfoVersion() (info, capabilities int) {
 // FillPortalBridgeInfo sets custom room type for AI rooms
 func (oc *OpenAIConnector) FillPortalBridgeInfo(portal *bridgev2.Portal, content *event.BridgeEventContent) {
 	meta := portalMeta(portal)
-	if meta.IsAgentDataRoom {
-		// Unknown room type = auto-hidden by clients
-		content.BeeperRoomTypeV2 = "agent_data"
-	} else if meta.IsGlobalMemoryRoom {
-		// Global memory room = auto-hidden by clients
-		content.BeeperRoomTypeV2 = "global_memory"
-	} else if meta.IsCronRoom {
+	if meta.IsCronRoom {
 		// Cron rooms are hidden by clients
 		content.BeeperRoomTypeV2 = "cron"
 	} else {

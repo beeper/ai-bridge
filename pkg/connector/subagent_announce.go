@@ -149,7 +149,7 @@ func (oc *AIClient) runSubagentCompletion(
 		if !shouldFallbackOnError(err) || idx == len(modelChain)-1 {
 			return false, err
 		}
-		oc.log.Warn().
+		oc.loggerForContext(ctx).Warn().
 			Err(err).
 			Str("failed_model", modelID).
 			Str("next_model", modelChain[idx+1]).
@@ -239,7 +239,7 @@ func (oc *AIClient) runSubagentAndAnnounce(
 		parentMeta := portalMeta(parentPortal)
 		if parentMeta != nil {
 			if _, _, err := oc.dispatchInternalMessage(runCtx, parentPortal, parentMeta, triggerMessage, "subagent", true); err != nil {
-				oc.log.Warn().Err(err).Msg("Failed to dispatch subagent announce trigger")
+				oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to dispatch subagent announce trigger")
 			}
 		}
 	}

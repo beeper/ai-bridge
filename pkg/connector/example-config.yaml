@@ -140,6 +140,11 @@ tools:
     auth_type: "bearer" # bearer | apikey
     timeout_seconds: 30
 
+  # Generic MCP behavior.
+  mcp:
+    # Disabled by default for safety. Enable explicitly to allow local stdio MCP servers.
+    enable_stdio: false
+
   # Media understanding/transcription (OpenClaw-style).
   # Supports provider/CLI entries and per-capability defaults.
   media:

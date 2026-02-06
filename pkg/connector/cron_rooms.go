@@ -51,6 +51,6 @@ func (oc *AIClient) getOrCreateCronRoom(ctx context.Context, agentID, jobID, job
 	if err := portal.CreateMatrixRoom(ctx, oc.UserLogin, chatInfo); err != nil {
 		return nil, fmt.Errorf("failed to create Matrix room: %w", err)
 	}
-	oc.log.Info().Str("agent_id", trimmedAgent).Str("job_id", trimmedJob).Stringer("portal", portal.PortalKey).Msg("Created cron room")
+	oc.loggerForContext(ctx).Info().Str("agent_id", trimmedAgent).Str("job_id", trimmedJob).Stringer("portal", portal.PortalKey).Msg("Created cron room")
 	return portal, nil
 }

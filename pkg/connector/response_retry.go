@@ -48,7 +48,7 @@ func (oc *AIClient) responseWithRetry(
 			// In Responses conversation mode, previous_response_id can accumulate hidden server-side
 			// context that local truncation cannot affect. Reset it once and retry with local history.
 			if meta != nil && meta.ConversationMode == "responses" && meta.LastResponseID != "" && !oc.isOpenRouterProvider() {
-				oc.log.Warn().
+				oc.loggerForContext(ctx).Warn().
 					Str("last_response_id", meta.LastResponseID).
 					Msg("Context overflow in responses mode; clearing previous_response_id and retrying with local context")
 				meta.LastResponseID = ""
@@ -103,7 +103,7 @@ func (oc *AIClient) responseWithRetry(
 						WillRetry:      true,
 					})
 
-					oc.log.Info().
+					oc.loggerForContext(ctx).Info().
 						Int("messages_before", result.MessagesBefore).
 						Int("messages_after", result.MessagesAfter).
 						Int("tokens_before", result.TokensBefore).
@@ -121,7 +121,7 @@ func (oc *AIClient) responseWithRetry(
 					Error:     "compaction did not reduce context sufficiently",
 				})
 
-				oc.log.Warn().Msg("Auto-compaction did not help, falling back to reactive truncation")
+				oc.loggerForContext(ctx).Warn().Msg("Auto-compaction did not help, falling back to reactive truncation")
 			}
 
 			// Fall back to reactive truncation
@@ -133,7 +133,7 @@ func (oc *AIClient) responseWithRetry(
 			oc.notifyContextLengthExceeded(ctx, portal, cle, true)
 			currentPrompt = truncated
 
-			oc.log.Debug().
+			oc.loggerForContext(ctx).Debug().
 				Int("attempt", attempt+1).
 				Int("new_prompt_len", len(currentPrompt)).
 				Str("log_label", logLabel).
@@ -282,7 +282,7 @@ func (oc *AIClient) emitCompactionStatus(ctx context.Context, portal *bridgev2.P
 	eventContent := &event.Content{Raw: content}
 
 	if _, err := intent.SendMessage(ctx, portal.MXID, CompactionStatusEventType, eventContent, nil); err != nil {
-		oc.log.Warn().Err(err).
+		oc.loggerForContext(ctx).Warn().Err(err).
 			Str("type", string(evt.Type)).
 			Msg("Failed to emit compaction status event")
 	}

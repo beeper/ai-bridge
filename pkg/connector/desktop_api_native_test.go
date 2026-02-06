@@ -75,14 +75,37 @@ func TestFilterDesktopChatsByResolveOptions(t *testing.T) {
 		"acc-ig": {AccountID: "acc-ig", Network: "instagram"},
 	}
 
-	filtered := filterDesktopChatsByResolveOptions(chats, accounts, desktopLabelResolveOptions{AccountID: "acc-wa"})
+	filtered := filterDesktopChatsByResolveOptions(chats, accounts, "main_desktop", desktopLabelResolveOptions{AccountID: "acc-wa"})
 	if len(filtered) != 1 || filtered[0].ID != "c1" {
 		t.Fatalf("account filter failed: %+v", filtered)
 	}
 
-	filtered = filterDesktopChatsByResolveOptions(chats, accounts, desktopLabelResolveOptions{Network: "instagram"})
+	filtered = filterDesktopChatsByResolveOptions(chats, accounts, "main_desktop", desktopLabelResolveOptions{Network: "instagram"})
 	if len(filtered) != 1 || filtered[0].ID != "c2" {
 		t.Fatalf("network filter failed: %+v", filtered)
+	}
+}
+
+func TestFilterDesktopChatsByResolveOptionsCanonicalAccountID(t *testing.T) {
+	chats := []beeperdesktopapi.Chat{
+		{ID: "c1", Title: "Family", AccountID: "acc-wa"},
+	}
+	accounts := map[string]beeperdesktopapi.Account{
+		"acc-wa": {AccountID: "acc-wa", Network: "whatsapp"},
+	}
+
+	filtered := filterDesktopChatsByResolveOptions(chats, accounts, "Main Desktop", desktopLabelResolveOptions{
+		AccountID: "whatsapp_acc-wa",
+	})
+	if len(filtered) != 1 || filtered[0].ID != "c1" {
+		t.Fatalf("single-instance canonical account filter failed: %+v", filtered)
+	}
+
+	filtered = filterDesktopChatsByResolveOptions(chats, accounts, "Main Desktop", desktopLabelResolveOptions{
+		AccountID: "main_desktop_whatsapp_acc-wa",
+	})
+	if len(filtered) != 1 || filtered[0].ID != "c1" {
+		t.Fatalf("multi-instance canonical account filter failed: %+v", filtered)
 	}
 }
 

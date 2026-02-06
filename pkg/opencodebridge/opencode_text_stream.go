@@ -57,7 +57,7 @@ func (m *OpenCodeManager) emitTextStreamDeltaForKind(ctx context.Context, inst *
 	meta := m.bridge.portalMeta(portal)
 	agentID := ""
 	if meta != nil {
-		agentID = meta.DefaultAgentID
+		agentID = meta.AgentID
 	}
 	textStarted, _, reasoningStarted, _ := inst.partTextStreamFlags(part.SessionID, part.ID)
 	started := textStarted
@@ -100,7 +100,7 @@ func (m *OpenCodeManager) emitTextStreamEnd(ctx context.Context, inst *openCodeI
 	meta := m.bridge.portalMeta(portal)
 	agentID := ""
 	if meta != nil {
-		agentID = meta.DefaultAgentID
+		agentID = meta.AgentID
 	}
 	textStarted, textEnded, reasoningStarted, reasoningEnded := inst.partTextStreamFlags(part.SessionID, part.ID)
 	started := textStarted
