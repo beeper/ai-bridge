@@ -30,6 +30,13 @@ var BridgeStateHumanErrors = map[status.BridgeStateErrorCode]string{
 	AIProviderError:  "The AI provider returned an error.",
 }
 
+var (
+	maxContextPattern        = regexp.MustCompile(`maximum context length is (\d+) tokens`)
+	resultedTokensPattern    = regexp.MustCompile(`resulted in (\d+) tokens`)
+	promptTooLongPattern     = regexp.MustCompile(`prompt is too long:\s*(\d+)\s*tokens\s*>\s*(\d+)\s*maximum`)
+	overflowTokenPairPattern = regexp.MustCompile(`(\d+)\s*tokens\s*>\s*(\d+)\s*(?:maximum|max)`)
+)
+
 // Pre-defined bridgev2.RespError constants for consistent error responses
 var (
 	ErrAPIKeyRequired = bridgev2.RespError{
@@ -133,6 +140,51 @@ func IsPreDeltaError(err error) bool {
 	return errors.As(err, &pde)
 }
 
+func parseContextLengthTokenCounts(text string) (maxTokens, requestedTokens int) {
+	if text == "" {
+		return 0, 0
+	}
+
+	lower := strings.ToLower(text)
+	if matches := maxContextPattern.FindStringSubmatch(lower); len(matches) > 1 {
+		maxTokens, _ = strconv.Atoi(matches[1])
+	}
+	if matches := resultedTokensPattern.FindStringSubmatch(lower); len(matches) > 1 {
+		requestedTokens, _ = strconv.Atoi(matches[1])
+	}
+	if matches := promptTooLongPattern.FindStringSubmatch(lower); len(matches) > 2 {
+		requestedTokens, _ = strconv.Atoi(matches[1])
+		maxTokens, _ = strconv.Atoi(matches[2])
+	}
+	if (maxTokens == 0 || requestedTokens == 0) && strings.Contains(lower, "prompt is too long") {
+		if matches := overflowTokenPairPattern.FindStringSubmatch(lower); len(matches) > 2 {
+			requestedTokens, _ = strconv.Atoi(matches[1])
+			maxTokens, _ = strconv.Atoi(matches[2])
+		}
+	}
+
+	return maxTokens, requestedTokens
+}
+
+func hasContextLengthSignal(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, "context length") ||
+		strings.Contains(lower, "context_length") ||
+		strings.Contains(lower, "prompt is too long")
+}
+
+func safeErrorString(err error) (text string) {
+	if err == nil {
+		return ""
+	}
+	defer func() {
+		if recover() != nil {
+			text = ""
+		}
+	}()
+	return err.Error()
+}
+
 // ParseContextLengthError checks if err is a context length exceeded error
 // and extracts the token counts from the error message
 func ParseContextLengthError(err error) *ContextLengthError {
@@ -145,39 +197,49 @@ func ParseContextLengthError(err error) *ContextLengthError {
 		return cle
 	}
 
+	sources := []string{}
+	if text := safeErrorString(err); text != "" {
+		sources = append(sources, text)
+	}
 	var apiErr *openai.Error
-	if !errors.As(err, &apiErr) {
+	if errors.As(err, &apiErr) {
+		if apiErr.Message != "" {
+			sources = append(sources, apiErr.Message)
+		}
+		if raw := apiErr.RawJSON(); raw != "" {
+			sources = append(sources, raw)
+		}
+	}
+
+	matched := false
+	maxTokens := 0
+	requestedTokens := 0
+	for _, source := range sources {
+		if !hasContextLengthSignal(source) {
+			continue
+		}
+		matched = true
+		parsedMax, parsedRequested := parseContextLengthTokenCounts(source)
+		if parsedMax > 0 {
+			maxTokens = parsedMax
+		}
+		if parsedRequested > 0 {
+			requestedTokens = parsedRequested
+		}
+	}
+	if !matched {
 		return nil
 	}
 
-	// Check for context_length_exceeded error
-	// OpenAI returns: "This model's maximum context length is X tokens.
-	// However, your messages resulted in Y tokens."
-	if apiErr.StatusCode != 400 {
+	if apiErr != nil && apiErr.StatusCode != 0 && apiErr.StatusCode != 400 && apiErr.StatusCode != 413 {
 		return nil
 	}
 
-	msg := apiErr.Message
-	if !strings.Contains(msg, "context length") && !strings.Contains(msg, "maximum") && !strings.Contains(msg, "tokens") {
-		return nil
+	return &ContextLengthError{
+		ModelMaxTokens:  maxTokens,
+		RequestedTokens: requestedTokens,
+		OriginalError:   err,
 	}
-
-	cle = &ContextLengthError{OriginalError: err}
-
-	// Parse token counts from message
-	// Pattern: "maximum context length is X tokens"
-	maxPattern := regexp.MustCompile(`maximum context length is (\d+) tokens`)
-	if matches := maxPattern.FindStringSubmatch(msg); len(matches) > 1 {
-		cle.ModelMaxTokens, _ = strconv.Atoi(matches[1])
-	}
-
-	// Pattern: "resulted in Y tokens" or "your messages resulted in Y tokens"
-	reqPattern := regexp.MustCompile(`resulted in (\d+) tokens`)
-	if matches := reqPattern.FindStringSubmatch(msg); len(matches) > 1 {
-		cle.RequestedTokens, _ = strconv.Atoi(matches[1])
-	}
-
-	return cle
 }
 
 // IsRateLimitError checks if the error is a rate limit (429) error
