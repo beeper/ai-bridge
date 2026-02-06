@@ -436,7 +436,14 @@ func fnSetDesktopAPIToken(ce *commands.Event) {
 		return
 	}
 
-	token := strings.TrimSpace(strings.Join(ce.Args, " "))
+	token := ""
+	baseURL := ""
+	if len(ce.Args) > 0 {
+		token = strings.TrimSpace(ce.Args[0])
+	}
+	if len(ce.Args) > 1 {
+		baseURL = strings.TrimSpace(strings.Join(ce.Args[1:], " "))
+	}
 	if token == "" {
 		ce.Reply("Usage: `!ai desktop-api add <token> [baseURL]`.")
 		return
@@ -466,9 +473,16 @@ func fnSetDesktopAPIToken(ce *commands.Event) {
 	}
 	defaultConfig := meta.ServiceTokens.DesktopAPIInstances[desktopDefaultInstance]
 	defaultConfig.Token = token
+	if baseURL != "" {
+		defaultConfig.BaseURL = baseURL
+	}
 	meta.ServiceTokens.DesktopAPIInstances[desktopDefaultInstance] = defaultConfig
 	if err := login.Save(ce.Ctx); err != nil {
 		ce.Reply("Failed to set Desktop API token: %s", err)
+		return
+	}
+	if baseURL != "" {
+		ce.Reply("Desktop API token saved (base URL %s)", baseURL)
 		return
 	}
 	ce.Reply("Desktop API token saved")
@@ -630,19 +644,26 @@ func fnDesktopAPI(ce *commands.Event) {
 		fnListDesktopAPIInstances(ce)
 		return
 	case "add", "set":
-		switch len(ce.Args) {
-		case 2:
-			ce.Args = ce.Args[1:]
+		parsedName, parsedToken, parsedBaseURL, parsedErr := parseDesktopAPIAddArgs(ce.Args[1:])
+		if parsedErr != nil {
+			ce.Reply("Usage: `!ai desktop-api add <token> [baseURL]` or `!ai desktop-api add <name> <token> [baseURL]`.")
+			return
+		}
+		if parsedName == "" || parsedName == desktopDefaultInstance {
+			nextArgs := []string{parsedToken}
+			if parsedBaseURL != "" {
+				nextArgs = append(nextArgs, parsedBaseURL)
+			}
+			ce.Args = nextArgs
 			fnSetDesktopAPIToken(ce)
 			return
-		default:
-			if len(ce.Args) >= 3 {
-				ce.Args = ce.Args[1:]
-				fnAddDesktopAPIInstance(ce)
-				return
-			}
 		}
-		ce.Reply("Usage: `!ai desktop-api add <token> [baseURL]` or `!ai desktop-api add <name> <token> [baseURL]`.")
+		nextArgs := []string{parsedName, parsedToken}
+		if parsedBaseURL != "" {
+			nextArgs = append(nextArgs, parsedBaseURL)
+		}
+		ce.Args = nextArgs
+		fnAddDesktopAPIInstance(ce)
 		return
 	case "remove", "rm", "delete":
 		ce.Args = ce.Args[1:]
@@ -651,6 +672,46 @@ func fnDesktopAPI(ce *commands.Event) {
 	default:
 		ce.Reply("Usage: %s", desktopAPIManageUsage)
 	}
+}
+
+func parseDesktopAPIAddArgs(args []string) (name, token, baseURL string, err error) {
+	if len(args) == 0 {
+		return "", "", "", fmt.Errorf("missing args")
+	}
+
+	trimmed := make([]string, 0, len(args))
+	for _, raw := range args {
+		part := strings.TrimSpace(raw)
+		if part != "" {
+			trimmed = append(trimmed, part)
+		}
+	}
+	if len(trimmed) == 0 {
+		return "", "", "", fmt.Errorf("missing args")
+	}
+
+	switch len(trimmed) {
+	case 1:
+		return desktopDefaultInstance, trimmed[0], "", nil
+	case 2:
+		if isLikelyHTTPURL(trimmed[1]) {
+			return desktopDefaultInstance, trimmed[0], trimmed[1], nil
+		}
+		return normalizeDesktopInstanceName(trimmed[0]), trimmed[1], "", nil
+	default:
+		name = normalizeDesktopInstanceName(trimmed[0])
+		token = trimmed[1]
+		baseURL = strings.TrimSpace(strings.Join(trimmed[2:], " "))
+		if token == "" {
+			return "", "", "", fmt.Errorf("missing token")
+		}
+		return name, token, baseURL, nil
+	}
+}
+
+func isLikelyHTTPURL(raw string) bool {
+	value := strings.TrimSpace(strings.ToLower(raw))
+	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")
 }
 
 // CommandDebounce handles the !ai debounce command
