@@ -19,7 +19,6 @@ var DefaultFallbackOrder = []string{
 	ProviderExa,
 	ProviderBrave,
 	ProviderPerplexity,
-	ProviderDuckDuckGo,
 }
 
 // Config controls search provider selection and credentials.

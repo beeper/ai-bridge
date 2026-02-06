@@ -91,7 +91,7 @@ default_system_prompt: |
   tools:
     search:
       provider: "openrouter"
-      fallbacks: ["exa", "brave", "perplexity", "ddg"]
+      fallbacks: ["exa", "brave", "perplexity"]
       exa:
         api_key: ""
         base_url: "https://api.exa.ai"
@@ -110,9 +110,6 @@ default_system_prompt: |
         api_key: ""
         base_url: "https://openrouter.ai/api/v1"
         model: "openai/gpt-5.2"
-      ddg:
-        enabled: true
-
     fetch:
       provider: "exa"
       fallbacks: ["direct"]

@@ -105,7 +105,4 @@ func registerProviders(registry *Registry, cfg *Config) {
 	if p := newOpenRouterProvider(cfg); p != nil {
 		registry.Register(p)
 	}
-	if p := newDDGProvider(cfg); p != nil {
-		registry.Register(p)
-	}
 }
