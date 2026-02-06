@@ -13,6 +13,11 @@ import (
 	"github.com/beeper/ai-bridge/pkg/cron"
 )
 
+const (
+	defaultCronIsolatedTimeoutSeconds = 600
+	noTimeoutMs                       = int64(30 * 24 * 60 * 60 * 1000)
+)
+
 func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (status string, summary string, outputText string, err error) {
 	if oc == nil || oc.UserLogin == nil {
 		return "error", "", "", fmt.Errorf("missing client")
@@ -45,10 +50,7 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 		}
 	}
 
-	timeoutMs := int64(2 * 60 * 1000)
-	if job.Payload.TimeoutSeconds != nil && *job.Payload.TimeoutSeconds > 0 {
-		timeoutMs = int64(*job.Payload.TimeoutSeconds) * 1000
-	}
+	timeoutMs := resolveCronIsolatedTimeoutMs(job, &oc.connector.Config)
 
 	sessionKey := cronSessionKey(agentID, job.ID)
 	runID := newCronSessionID()
@@ -133,6 +135,27 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 	}
 
 	return "ok", summary, outputText, nil
+}
+
+func resolveCronIsolatedTimeoutMs(job cron.CronJob, cfg *Config) int64 {
+	defaultSeconds := defaultCronIsolatedTimeoutSeconds
+	if cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.TimeoutSeconds > 0 {
+		defaultSeconds = cfg.Agents.Defaults.TimeoutSeconds
+	}
+	timeoutSeconds := defaultSeconds
+	if job.Payload.TimeoutSeconds != nil {
+		overrideSeconds := *job.Payload.TimeoutSeconds
+		switch {
+		case overrideSeconds == 0:
+			return noTimeoutMs
+		case overrideSeconds > 0:
+			timeoutSeconds = overrideSeconds
+		}
+	}
+	if timeoutSeconds < 1 {
+		timeoutSeconds = 1
+	}
+	return int64(timeoutSeconds) * 1000
 }
 
 func (oc *AIClient) lastAssistantMessageInfo(ctx context.Context, portal *bridgev2.Portal) (string, int64) {

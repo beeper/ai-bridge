@@ -40,6 +40,16 @@ func (oc *AIClient) resolveCronDeliveryTarget(agentID string, delivery *cron.Cro
 				target = strings.TrimSpace(entry.LastTo)
 			}
 		}
+		if target == "" {
+			if portal := oc.lastActivePortal(agentID); portal != nil && portal.MXID != "" {
+				target = portal.MXID.String()
+			}
+		}
+		if target == "" {
+			if portal := oc.defaultChatPortal(); portal != nil && portal.MXID != "" {
+				target = portal.MXID.String()
+			}
+		}
 	}
 	if target == "" {
 		return cronDeliveryTarget{Channel: "matrix", Reason: "no-target"}

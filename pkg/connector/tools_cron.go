@@ -282,6 +282,27 @@ func injectCronContext(job *cron.CronJobCreate, btc *BridgeToolContext) {
 		}
 		job.AgentID = &agentID
 	}
+	// For isolated announce jobs created from a room, pin delivery target to that room.
+	// This avoids depending on "last activity" metadata for routing.
+	if btc.Portal != nil && btc.Portal.MXID != "" &&
+		job.SessionTarget == cron.CronSessionIsolated &&
+		strings.EqualFold(strings.TrimSpace(job.Payload.Kind), "agentTurn") {
+		if job.Delivery == nil {
+			job.Delivery = &cron.CronDelivery{Mode: cron.CronDeliveryAnnounce}
+		}
+		mode := job.Delivery.Mode
+		if strings.TrimSpace(string(mode)) == "" {
+			mode = cron.CronDeliveryAnnounce
+			job.Delivery.Mode = mode
+		}
+		channel := strings.ToLower(strings.TrimSpace(job.Delivery.Channel))
+		if mode == cron.CronDeliveryAnnounce &&
+			strings.TrimSpace(job.Delivery.To) == "" &&
+			(channel == "" || channel == "last" || channel == "matrix") {
+			job.Delivery.Channel = "matrix"
+			job.Delivery.To = btc.Portal.MXID.String()
+		}
+	}
 }
 
 const (
