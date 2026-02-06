@@ -445,6 +445,24 @@ func executeMessage(ctx context.Context, args map[string]any) (string, error) {
 		return executeMessageChannelEdit(ctx, args, btc)
 	case "focus":
 		return executeMessageFocus(ctx, args, btc)
+	case "desktop-list-chats":
+		return executeMessageDesktopListChats(ctx, args, btc)
+	case "desktop-search-chats":
+		return executeMessageDesktopSearchChats(ctx, args, btc)
+	case "desktop-search-messages":
+		return executeMessageDesktopSearchMessages(ctx, args, btc)
+	case "desktop-create-chat":
+		return executeMessageDesktopCreateChat(ctx, args, btc)
+	case "desktop-archive-chat":
+		return executeMessageDesktopArchiveChat(ctx, args, btc)
+	case "desktop-set-reminder":
+		return executeMessageDesktopSetReminder(ctx, args, btc)
+	case "desktop-clear-reminder":
+		return executeMessageDesktopClearReminder(ctx, args, btc)
+	case "desktop-upload-asset":
+		return executeMessageDesktopUploadAsset(ctx, args, btc)
+	case "desktop-download-asset":
+		return executeMessageDesktopDownloadAsset(ctx, args, btc)
 	default:
 		return "", fmt.Errorf("unknown action: %s", action)
 	}
@@ -487,6 +505,10 @@ func executeMessageReact(ctx context.Context, args map[string]any, btc *BridgeTo
 
 // executeMessageSend handles the send action of the message tool.
 func executeMessageSend(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	if handled, desktopResult, err := maybeExecuteMessageSendDesktop(ctx, args, btc); handled {
+		return desktopResult, err
+	}
+
 	message, _ := args["message"].(string)
 	message = strings.TrimSpace(message)
 	caption, _ := args["caption"].(string)
@@ -614,6 +636,10 @@ func executeMessageSend(ctx context.Context, args map[string]any, btc *BridgeToo
 
 // executeMessageEdit handles the edit action - edits an existing message.
 func executeMessageEdit(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	if handled, desktopResult, err := maybeExecuteMessageEditDesktop(ctx, args, btc); handled {
+		return desktopResult, err
+	}
+
 	messageID, ok := args["message_id"].(string)
 	if !ok || messageID == "" {
 		return "", fmt.Errorf("action=edit requires 'message_id' parameter")
@@ -695,6 +721,10 @@ func executeMessageDelete(ctx context.Context, args map[string]any, btc *BridgeT
 
 // executeMessageReply handles the reply action - sends a message as a reply to another.
 func executeMessageReply(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	if handled, desktopResult, err := maybeExecuteMessageReplyDesktop(ctx, args, btc); handled {
+		return desktopResult, err
+	}
+
 	messageID, ok := args["message_id"].(string)
 	if !ok || messageID == "" {
 		return "", fmt.Errorf("action=reply requires 'message_id' parameter")
@@ -837,6 +867,10 @@ func executeMessageThreadReply(ctx context.Context, args map[string]any, btc *Br
 
 // executeMessageSearch searches messages in the current chat.
 func executeMessageSearch(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
+	if handled, desktopResult, err := maybeExecuteMessageSearchDesktop(ctx, args, btc); handled {
+		return desktopResult, err
+	}
+
 	query, ok := args["query"].(string)
 	if !ok || query == "" {
 		return "", fmt.Errorf("action=search requires 'query' parameter")

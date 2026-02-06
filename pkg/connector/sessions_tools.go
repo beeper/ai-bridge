@@ -45,6 +45,17 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 			messageLimit = 20
 		}
 	}
+	channelFilter := strings.ToLower(strings.TrimSpace(tools.ReadStringDefault(args, "channel", "")))
+	accountIDFilter := strings.TrimSpace(tools.ReadStringDefault(args, "accountId", ""))
+	networkFilter := strings.ToLower(strings.TrimSpace(tools.ReadStringDefault(args, "network", "")))
+	desktopAccountIDs := map[string]struct{}{}
+	if accountIDFilter != "" {
+		desktopAccountIDs[accountIDFilter] = struct{}{}
+	}
+	desktopNetworks := map[string]struct{}{}
+	if networkFilter != "" {
+		desktopNetworks[networkFilter] = struct{}{}
+	}
 	trace := traceEnabled(portalMeta(portal))
 	if trace {
 		oc.log.Debug().
@@ -69,83 +80,85 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 	}
 
 	entries := make([]sessionListEntry, 0, len(portals))
-	for _, candidate := range portals {
-		if candidate == nil || candidate.MXID == "" {
-			continue
-		}
-		meta := portalMeta(candidate)
-		if meta != nil && (meta.IsAgentDataRoom || meta.IsGlobalMemoryRoom || meta.IsCronRoom) {
-			continue
-		}
-		kind := resolveSessionKind(currentRoomID, candidate, meta)
-		if len(allowedKinds) > 0 {
-			if _, ok := allowedKinds[kind]; !ok {
+	if channelFilter == "" || channelFilter == "matrix" {
+		for _, candidate := range portals {
+			if candidate == nil || candidate.MXID == "" {
 				continue
 			}
-		}
-
-		updatedAt := int64(0)
-		if activeMinutes > 0 || messageLimit > 0 {
-			if last := oc.lastMessageTimestamp(ctx, candidate); last > 0 {
-				updatedAt = last
+			meta := portalMeta(candidate)
+			if meta != nil && (meta.IsAgentDataRoom || meta.IsGlobalMemoryRoom || meta.IsCronRoom) {
+				continue
 			}
-			if activeMinutes > 0 {
-				cutoff := time.Now().Add(-time.Duration(activeMinutes) * time.Minute).UnixMilli()
-				if updatedAt == 0 || updatedAt < cutoff {
+			kind := resolveSessionKind(currentRoomID, candidate, meta)
+			if len(allowedKinds) > 0 {
+				if _, ok := allowedKinds[kind]; !ok {
 					continue
 				}
 			}
-		}
 
-		sessionKey := candidate.MXID.String()
-		entry := map[string]any{
-			"key":     sessionKey,
-			"kind":    kind,
-			"channel": "matrix",
-		}
-		if label := resolveSessionLabel(candidate, meta); label != "" {
-			entry["label"] = label
-		}
-		if displayName := resolveSessionDisplayName(candidate, meta); displayName != "" {
-			entry["displayName"] = displayName
-		}
-		if updatedAt > 0 {
-			entry["updatedAt"] = updatedAt
-		}
-		if meta != nil {
-			model := meta.Model
-			if strings.TrimSpace(model) == "" {
-				model = oc.effectiveModel(meta)
-			}
-			if model != "" {
-				entry["model"] = model
-			}
-			if meta.IsOpenCodeRoom {
-				entry["source"] = "opencode"
-				if meta.OpenCodeInstanceID != "" {
-					entry["opencodeInstanceID"] = meta.OpenCodeInstanceID
+			updatedAt := int64(0)
+			if activeMinutes > 0 || messageLimit > 0 {
+				if last := oc.lastMessageTimestamp(ctx, candidate); last > 0 {
+					updatedAt = last
 				}
-				if meta.OpenCodeSessionID != "" {
-					entry["opencodeSessionID"] = meta.OpenCodeSessionID
+				if activeMinutes > 0 {
+					cutoff := time.Now().Add(-time.Duration(activeMinutes) * time.Minute).UnixMilli()
+					if updatedAt == 0 || updatedAt < cutoff {
+						continue
+					}
 				}
 			}
-		}
-		entry["sessionId"] = sessionKey
-		if portalID := string(candidate.PortalKey.ID); portalID != "" && portalID != sessionKey {
-			entry["portalId"] = portalID
-		}
 
-		if messageLimit > 0 {
-			messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, candidate.PortalKey, messageLimit)
-			if err == nil && len(messages) > 0 {
-				entry["messages"] = buildSessionMessages(messages, false)
+			sessionKey := candidate.MXID.String()
+			entry := map[string]any{
+				"key":     sessionKey,
+				"kind":    kind,
+				"channel": "matrix",
 			}
-		}
+			if label := resolveSessionLabel(candidate, meta); label != "" {
+				entry["label"] = label
+			}
+			if displayName := resolveSessionDisplayName(candidate, meta); displayName != "" {
+				entry["displayName"] = displayName
+			}
+			if updatedAt > 0 {
+				entry["updatedAt"] = updatedAt
+			}
+			if meta != nil {
+				model := meta.Model
+				if strings.TrimSpace(model) == "" {
+					model = oc.effectiveModel(meta)
+				}
+				if model != "" {
+					entry["model"] = model
+				}
+				if meta.IsOpenCodeRoom {
+					entry["source"] = "opencode"
+					if meta.OpenCodeInstanceID != "" {
+						entry["opencodeInstanceID"] = meta.OpenCodeInstanceID
+					}
+					if meta.OpenCodeSessionID != "" {
+						entry["opencodeSessionID"] = meta.OpenCodeSessionID
+					}
+				}
+			}
+			entry["sessionId"] = sessionKey
+			if portalID := string(candidate.PortalKey.ID); portalID != "" && portalID != sessionKey {
+				entry["portalId"] = portalID
+			}
 
-		entries = append(entries, sessionListEntry{updatedAt: updatedAt, data: entry})
+			if messageLimit > 0 {
+				messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, candidate.PortalKey, messageLimit)
+				if err == nil && len(messages) > 0 {
+					entry["messages"] = buildSessionMessages(messages, false)
+				}
+			}
+
+			entries = append(entries, sessionListEntry{updatedAt: updatedAt, data: entry})
+		}
 	}
 
-	if oc != nil {
+	if oc != nil && (channelFilter == "" || channelFilter == channelDesktopAPI) {
 		instances := oc.desktopAPIInstanceNames()
 		for _, instance := range instances {
 			accounts := map[string]beeperdesktopapi.Account{}
@@ -154,12 +167,14 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 			} else if err != nil {
 				oc.log.Warn().Err(err).Str("instance", instance).Msg("Desktop API account listing failed")
 			}
-			desktopEntries, err := oc.listDesktopSessions(ctx, instance, desktopSessionListOptions{
-				Limit:         limit,
-				ActiveMinutes: activeMinutes,
-				MessageLimit:  messageLimit,
-				AllowedKinds:  allowedKinds,
-			}, accounts)
+				desktopEntries, err := oc.listDesktopSessions(ctx, instance, desktopSessionListOptions{
+					Limit:         limit,
+					ActiveMinutes: activeMinutes,
+					MessageLimit:  messageLimit,
+					AllowedKinds:  allowedKinds,
+					AccountIDs:    desktopAccountIDs,
+					Networks:      desktopNetworks,
+				}, accounts)
 			if err == nil {
 				if len(desktopEntries) > 0 {
 					entries = append(entries, desktopEntries...)
@@ -355,6 +370,8 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 	label := tools.ReadStringDefault(args, "label", "")
 	agentID := tools.ReadStringDefault(args, "agentId", "")
 	instance := tools.ReadStringDefault(args, "instance", "")
+	accountID := tools.ReadStringDefault(args, "accountId", "")
+	network := tools.ReadStringDefault(args, "network", "")
 	if sessionKey != "" && label != "" {
 		return tools.JSONResult(map[string]any{
 			"status": "error",
@@ -366,7 +383,9 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 		if trace {
 			oc.log.Debug().Str("instance", instance).Str("chat_id", chatID).Msg("Sending to desktop session by key")
 		}
-		pendingID, sendErr := oc.sendDesktopMessage(ctx, instance, chatID, message)
+			pendingID, sendErr := oc.sendDesktopMessage(ctx, instance, chatID, desktopSendMessageRequest{
+				Text: message,
+			})
 		if sendErr != nil {
 			return tools.JSONResult(map[string]any{
 				"status": "error",
@@ -393,6 +412,7 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 
 	var targetPortal *bridgev2.Portal
 	var displayKey string
+	resolvedFromLabel := false
 	if sessionKey != "" {
 		target, display, resolveErr := oc.resolveSessionPortal(ctx, portal, sessionKey)
 		if resolveErr != nil {
@@ -406,30 +426,37 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 		if trace {
 			oc.log.Debug().Stringer("portal", targetPortal.PortalKey).Msg("Resolved session key to Matrix portal")
 		}
-	} else {
-		if strings.TrimSpace(label) == "" {
+		} else {
+			if strings.TrimSpace(label) == "" {
 			return tools.JSONResult(map[string]any{
 				"status": "error",
 				"error":  "sessionKey or label is required",
 			}), nil
 		}
-		target, display, resolveErr := oc.resolveSessionPortalByLabel(ctx, label, agentID)
-		if resolveErr != nil {
-			var desktopInstance string
-			var chatID string
-			var desktopKey string
-			var desktopErr error
-			if strings.TrimSpace(instance) != "" {
-				chatID, desktopKey, desktopErr = oc.resolveDesktopSessionByLabel(ctx, instance, label)
-				desktopInstance = instance
-			} else {
-				desktopInstance, chatID, desktopKey, desktopErr = oc.resolveDesktopSessionByLabelAnyInstance(ctx, label)
-			}
-			if desktopErr == nil {
-				if trace {
-					oc.log.Debug().Str("instance", desktopInstance).Str("chat_id", chatID).Msg("Sending to desktop session by label")
+			target, display, resolveErr := oc.resolveSessionPortalByLabel(ctx, label, agentID)
+			if resolveErr != nil {
+				var desktopInstance string
+				var chatID string
+				var desktopKey string
+				var desktopErr error
+				resolveOpts := desktopLabelResolveOptions{
+					AccountID: strings.TrimSpace(accountID),
+					Network:   strings.TrimSpace(network),
 				}
-				pendingID, sendErr := oc.sendDesktopMessage(ctx, desktopInstance, chatID, message)
+				if strings.TrimSpace(instance) != "" {
+					chatID, desktopKey, desktopErr = oc.resolveDesktopSessionByLabelWithOptions(ctx, instance, label, resolveOpts)
+					desktopInstance = instance
+				} else {
+					desktopInstance, chatID, desktopKey, desktopErr = oc.resolveDesktopSessionByLabelAnyInstanceWithOptions(ctx, label, resolveOpts)
+				}
+				if desktopErr == nil {
+					resolvedFromLabel = true
+					if trace {
+						oc.log.Debug().Str("instance", desktopInstance).Str("chat_id", chatID).Msg("Sending to desktop session by label")
+					}
+					pendingID, sendErr := oc.sendDesktopMessage(ctx, desktopInstance, chatID, desktopSendMessageRequest{
+						Text: message,
+					})
 				if sendErr != nil {
 					return tools.JSONResult(map[string]any{
 						"status": "error",
@@ -440,17 +467,21 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 				if config, ok := oc.desktopAPIInstanceConfig(desktopInstance); ok {
 					baseURL = strings.TrimSpace(config.BaseURL)
 				}
-				result := map[string]any{
-					"runId":            uuid.NewString(),
-					"status":           "ok",
-					"sessionKey":       desktopKey,
-					"pendingMessageId": pendingID,
-					"instance":         desktopInstance,
-					"chatId":           chatID,
-				}
-				if baseURL != "" {
-					result["baseUrl"] = baseURL
-				}
+					result := map[string]any{
+						"runId":            uuid.NewString(),
+						"status":           "ok",
+						"sessionKey":       desktopKey,
+						"pendingMessageId": pendingID,
+						"instance":         desktopInstance,
+						"chatId":           chatID,
+					}
+					if resolvedFromLabel {
+						result["resolvedFromLabel"] = true
+						result["hint"] = "Prefer using this sessionKey directly next time (from sessions_list)."
+					}
+					if baseURL != "" {
+						result["baseUrl"] = baseURL
+					}
 				return tools.JSONResult(result), nil
 			}
 			if desktopErr != nil {
@@ -464,12 +495,13 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 				"error":  resolveErr.Error(),
 			}), nil
 		}
-		targetPortal = target
-		displayKey = display
-		if trace {
-			oc.log.Debug().Stringer("portal", targetPortal.PortalKey).Msg("Resolved session label to Matrix portal")
+			targetPortal = target
+			displayKey = display
+			resolvedFromLabel = true
+			if trace {
+				oc.log.Debug().Stringer("portal", targetPortal.PortalKey).Msg("Resolved session label to Matrix portal")
+			}
 		}
-	}
 
 	if targetPortal == nil {
 		return tools.JSONResult(map[string]any{
@@ -496,11 +528,16 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 		status = "accepted"
 	}
 
-	return tools.JSONResult(map[string]any{
+	result := map[string]any{
 		"runId":      uuid.NewString(),
 		"status":     status,
 		"sessionKey": displayKey,
-	}), nil
+	}
+	if resolvedFromLabel {
+		result["resolvedFromLabel"] = true
+		result["hint"] = "Prefer using this sessionKey directly next time (from sessions_list)."
+	}
+	return tools.JSONResult(result), nil
 }
 
 func resolveSessionKind(current id.RoomID, portal *bridgev2.Portal, meta *PortalMetadata) string {
@@ -575,7 +612,7 @@ func (oc *AIClient) resolveSessionPortal(ctx context.Context, portal *bridgev2.P
 			return candidate, key, nil
 		}
 	}
-	return nil, "", fmt.Errorf("session not found: %s", trimmed)
+	return nil, "", fmt.Errorf("session not found: %s (use the full sessionKey from sessions_list)", trimmed)
 }
 
 func (oc *AIClient) resolveSessionPortalByLabel(ctx context.Context, label string, agentID string) (*bridgev2.Portal, string, error) {
@@ -590,6 +627,7 @@ func (oc *AIClient) resolveSessionPortalByLabel(ctx context.Context, label strin
 	if err != nil {
 		return nil, "", err
 	}
+	matches := make([]*bridgev2.Portal, 0, 4)
 	for _, candidate := range portals {
 		if candidate == nil {
 			continue
@@ -604,14 +642,20 @@ func (oc *AIClient) resolveSessionPortalByLabel(ctx context.Context, label strin
 		labelVal := strings.ToLower(resolveSessionLabel(candidate, meta))
 		displayVal := strings.ToLower(resolveSessionDisplayName(candidate, meta))
 		if labelVal == needle || displayVal == needle {
-			key := candidate.MXID.String()
-			if key == "" {
-				key = string(candidate.PortalKey.ID)
-			}
-			return candidate, key, nil
+			matches = append(matches, candidate)
 		}
 	}
-	return nil, "", fmt.Errorf("no session found for label '%s'", trimmed)
+	if len(matches) == 1 {
+		key := matches[0].MXID.String()
+		if key == "" {
+			key = string(matches[0].PortalKey.ID)
+		}
+		return matches[0], key, nil
+	}
+	if len(matches) > 1 {
+		return nil, "", fmt.Errorf("label '%s' matched multiple sessions; use full sessionKey from sessions_list", trimmed)
+	}
+	return nil, "", fmt.Errorf("no session found for label '%s' (use full sessionKey from sessions_list)", trimmed)
 }
 
 func (oc *AIClient) lastMessageTimestamp(ctx context.Context, portal *bridgev2.Portal) int64 {

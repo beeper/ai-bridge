@@ -223,11 +223,11 @@ func MessageSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"action": map[string]any{
-				"type":        "string",
-				"enum":        []string{"send", "sendWithEffect", "broadcast", "react", "reactions", "edit", "delete", "unsend", "reply", "pin", "unpin", "list-pins", "thread-reply", "search", "read", "member-info", "channel-info", "channel-edit", "focus"},
-				"description": "The action to perform",
-			},
+				"action": map[string]any{
+					"type":        "string",
+					"enum":        []string{"send", "sendWithEffect", "broadcast", "react", "reactions", "edit", "delete", "unsend", "reply", "pin", "unpin", "list-pins", "thread-reply", "search", "read", "member-info", "channel-info", "channel-edit", "focus", "desktop-list-chats", "desktop-search-chats", "desktop-search-messages", "desktop-create-chat", "desktop-archive-chat", "desktop-set-reminder", "desktop-clear-reminder", "desktop-upload-asset", "desktop-download-asset"},
+					"description": "The action to perform",
+				},
 			"message": map[string]any{
 				"type":        "string",
 				"description": "For send/edit/reply/thread-reply: the message text",
@@ -362,24 +362,67 @@ func MessageSchema() map[string]any {
 			},
 			"sessionKey": map[string]any{
 				"type":        "string",
-				"description": "For action=focus: session key (desktop-api:<instance>:<chatID> or desktop-api:<chatID> for default)",
+				"description": "Preferred canonical target key (from sessions_list). For desktop: desktop-api:<instance>:<chatID> or desktop-api:<chatID>.",
 			},
-			"instance": map[string]any{
-				"type":        "string",
-				"description": "For action=focus: desktop API instance name (default if omitted)",
-			},
-			"label": map[string]any{
-				"type":        "string",
-				"description": "For action=focus: chat title label (desktop API lookup)",
-			},
+				"instance": map[string]any{
+					"type":        "string",
+					"description": "For desktop actions: desktop API instance name (default if omitted)",
+				},
+					"label": map[string]any{
+						"type":        "string",
+						"description": "Fallback desktop target by label/title (can be ambiguous; sessionKey is preferred)",
+					},
 			"chatId": map[string]any{
 				"type":        "string",
 				"description": "For action=focus: desktop chat ID",
 			},
-			"chatID": map[string]any{
-				"type":        "string",
-				"description": "Alias for chatId",
-			},
+				"chatID": map[string]any{
+					"type":        "string",
+					"description": "Alias for chatId",
+				},
+					"accountId": map[string]any{
+						"type":        "string",
+						"description": "For desktop targeting: account ID filter; for desktop-create-chat: source account ID",
+					},
+					"network": map[string]any{
+						"type":        "string",
+						"description": "For desktop targeting: network filter (e.g. whatsapp, instagram, imessage)",
+					},
+				"participantIds": map[string]any{
+					"type":        "array",
+					"description": "For desktop-create-chat: participant user IDs",
+					"items": map[string]any{
+						"type": "string",
+					},
+				},
+				"type": map[string]any{
+					"type":        "string",
+					"description": "For desktop-create-chat: chat type (single|group)",
+				},
+				"archived": map[string]any{
+					"type":        "boolean",
+					"description": "For desktop-archive-chat: true to archive, false to unarchive",
+				},
+				"remindAtMs": map[string]any{
+					"type":        "number",
+					"description": "For desktop-set-reminder: unix timestamp in milliseconds",
+				},
+				"dismissOnIncomingMessage": map[string]any{
+					"type":        "boolean",
+					"description": "For desktop-set-reminder: dismiss reminder if new message arrives",
+				},
+				"uploadID": map[string]any{
+					"type":        "string",
+					"description": "For desktop send action: upload ID from desktop-upload-asset",
+				},
+				"attachmentType": map[string]any{
+					"type":        "string",
+					"description": "For desktop send action: attachment type override (gif|voiceNote|sticker)",
+				},
+				"url": map[string]any{
+					"type":        "string",
+					"description": "For desktop-download-asset: mxc:// or localmxc:// URL",
+				},
 			"draftText": map[string]any{
 				"type":        "string",
 				"description": "For action=focus: draft text to prefill",
@@ -419,11 +462,7 @@ func MessageSchema() map[string]any {
 					"type": "string",
 				},
 			},
-			"accountId": map[string]any{
-				"type":        "string",
-				"description": "Optional: account override (ignored by bridge).",
-			},
-			"dryRun": map[string]any{
+				"dryRun": map[string]any{
 				"type":        "boolean",
 				"description": "Optional: dry run (ignored by bridge).",
 			},
