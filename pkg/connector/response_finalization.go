@@ -531,7 +531,29 @@ func buildSourceParts(citations []sourceCitation, documents []sourceDocument, pr
 	}
 
 	for _, citation := range citations {
-		appendURL(citation.URL, citation.Title, nil)
+		meta := map[string]any{}
+		if desc := strings.TrimSpace(citation.Description); desc != "" {
+			meta["description"] = desc
+		}
+		if published := strings.TrimSpace(citation.Published); published != "" {
+			meta["published"] = published
+		}
+		if site := strings.TrimSpace(citation.SiteName); site != "" {
+			meta["site_name"] = site
+		}
+		if author := strings.TrimSpace(citation.Author); author != "" {
+			meta["author"] = author
+		}
+		if image := strings.TrimSpace(citation.Image); image != "" {
+			meta["image"] = image
+		}
+		if favicon := strings.TrimSpace(citation.Favicon); favicon != "" {
+			meta["favicon"] = favicon
+		}
+		if len(meta) == 0 {
+			meta = nil
+		}
+		appendURL(citation.URL, citation.Title, meta)
 	}
 
 	for _, doc := range documents {
