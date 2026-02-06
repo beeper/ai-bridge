@@ -7,7 +7,7 @@ func TestExtractWebSearchCitationsFromToolOutput(t *testing.T) {
 		"query":"open source llm",
 		"provider":"exa",
 		"results":[
-			{"title":"One","url":"https://example.com/one","description":"a"},
+			{"title":"One","url":"https://example.com/one","description":"a","published":"2026-01-01","siteName":"example.com","author":"A"},
 			{"title":"Two","url":"http://example.org/two","description":"b"},
 			{"title":"Skip","url":"ftp://example.net/three"}
 		]
@@ -19,6 +19,9 @@ func TestExtractWebSearchCitationsFromToolOutput(t *testing.T) {
 	}
 	if got[0].URL != "https://example.com/one" || got[0].Title != "One" {
 		t.Fatalf("unexpected first citation: %+v", got[0])
+	}
+	if got[0].Description != "a" || got[0].Published != "2026-01-01" || got[0].SiteName != "example.com" || got[0].Author != "A" {
+		t.Fatalf("unexpected first citation metadata: %+v", got[0])
 	}
 	if got[1].URL != "http://example.org/two" || got[1].Title != "Two" {
 		t.Fatalf("unexpected second citation: %+v", got[1])
@@ -38,7 +41,7 @@ func TestMergeSourceCitations_DedupesByURL(t *testing.T) {
 		{URL: "https://example.com/one", Title: "One"},
 	}
 	incoming := []sourceCitation{
-		{URL: "https://example.com/one", Title: "Duplicate"},
+		{URL: "https://example.com/one", Title: "Duplicate", Description: "desc"},
 		{URL: "https://example.com/two", Title: "Two"},
 	}
 
@@ -48,6 +51,9 @@ func TestMergeSourceCitations_DedupesByURL(t *testing.T) {
 	}
 	if got[0].URL != "https://example.com/one" {
 		t.Fatalf("unexpected first merged citation: %+v", got[0])
+	}
+	if got[0].Description != "desc" {
+		t.Fatalf("expected duplicate merge to keep missing fields, got %+v", got[0])
 	}
 	if got[1].URL != "https://example.com/two" {
 		t.Fatalf("unexpected second merged citation: %+v", got[1])

@@ -83,9 +83,13 @@ func (p *exaProvider) Search(ctx context.Context, req Request) (*Response, error
 
 	var resp struct {
 		Results []struct {
+			ID            string   `json:"id"`
 			Title         string   `json:"title"`
 			URL           string   `json:"url"`
+			Author        string   `json:"author"`
 			PublishedDate string   `json:"publishedDate"`
+			Image         string   `json:"image"`
+			Favicon       string   `json:"favicon"`
 			Text          string   `json:"text"`
 			Highlights    []string `json:"highlights"`
 		} `json:"results"`
@@ -104,11 +108,15 @@ func (p *exaProvider) Search(ctx context.Context, req Request) (*Response, error
 			desc = truncate(entry.Text, 240)
 		}
 		results = append(results, Result{
+			ID:          strings.TrimSpace(entry.ID),
 			Title:       strings.TrimSpace(entry.Title),
 			URL:         entry.URL,
 			Description: desc,
 			Published:   entry.PublishedDate,
 			SiteName:    resolveSiteName(entry.URL),
+			Author:      strings.TrimSpace(entry.Author),
+			Image:       strings.TrimSpace(entry.Image),
+			Favicon:     strings.TrimSpace(entry.Favicon),
 		})
 	}
 

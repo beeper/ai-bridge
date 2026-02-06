@@ -12,11 +12,15 @@ type Request struct {
 
 // Result is a normalized search result.
 type Result struct {
+	ID          string
 	Title       string
 	URL         string
 	Description string
 	Published   string
 	SiteName    string
+	Author      string
+	Image       string
+	Favicon     string
 }
 
 // Response is a normalized search response.

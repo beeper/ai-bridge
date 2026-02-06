@@ -9,8 +9,14 @@ import (
 )
 
 type sourceCitation struct {
-	URL   string
-	Title string
+	URL         string
+	Title       string
+	Description string
+	Published   string
+	SiteName    string
+	Author      string
+	Image       string
+	Favicon     string
 }
 
 type sourceDocument struct {
@@ -121,7 +127,22 @@ func extractWebSearchCitationsFromToolOutput(toolName, output string) []sourceCi
 			continue
 		}
 		title, _ := readStringArg(entry, "title")
-		citations = append(citations, sourceCitation{URL: urlStr, Title: title})
+		description, _ := readStringArg(entry, "description")
+		published, _ := readStringArg(entry, "published")
+		siteName, _ := readStringArg(entry, "siteName")
+		author, _ := readStringArg(entry, "author")
+		image, _ := readStringArg(entry, "image")
+		favicon, _ := readStringArg(entry, "favicon")
+		citations = append(citations, sourceCitation{
+			URL:         urlStr,
+			Title:       title,
+			Description: description,
+			Published:   published,
+			SiteName:    siteName,
+			Author:      author,
+			Image:       image,
+			Favicon:     favicon,
+		})
 	}
 	return citations
 }
@@ -130,17 +151,18 @@ func mergeSourceCitations(existing, incoming []sourceCitation) []sourceCitation 
 	if len(incoming) == 0 {
 		return existing
 	}
-	seen := make(map[string]struct{}, len(existing)+len(incoming))
+	seen := make(map[string]int, len(existing)+len(incoming))
 	merged := make([]sourceCitation, 0, len(existing)+len(incoming))
 	for _, citation := range existing {
 		urlStr := strings.TrimSpace(citation.URL)
 		if urlStr == "" {
 			continue
 		}
-		if _, ok := seen[urlStr]; ok {
+		if idx, ok := seen[urlStr]; ok {
+			merged[idx] = mergeCitationFields(merged[idx], citation)
 			continue
 		}
-		seen[urlStr] = struct{}{}
+		seen[urlStr] = len(merged)
 		merged = append(merged, citation)
 	}
 	for _, citation := range incoming {
@@ -148,11 +170,37 @@ func mergeSourceCitations(existing, incoming []sourceCitation) []sourceCitation 
 		if urlStr == "" {
 			continue
 		}
-		if _, ok := seen[urlStr]; ok {
+		if idx, ok := seen[urlStr]; ok {
+			merged[idx] = mergeCitationFields(merged[idx], citation)
 			continue
 		}
-		seen[urlStr] = struct{}{}
+		seen[urlStr] = len(merged)
 		merged = append(merged, citation)
 	}
 	return merged
+}
+
+func mergeCitationFields(dst, src sourceCitation) sourceCitation {
+	if strings.TrimSpace(dst.Title) == "" {
+		dst.Title = src.Title
+	}
+	if strings.TrimSpace(dst.Description) == "" {
+		dst.Description = src.Description
+	}
+	if strings.TrimSpace(dst.Published) == "" {
+		dst.Published = src.Published
+	}
+	if strings.TrimSpace(dst.SiteName) == "" {
+		dst.SiteName = src.SiteName
+	}
+	if strings.TrimSpace(dst.Author) == "" {
+		dst.Author = src.Author
+	}
+	if strings.TrimSpace(dst.Image) == "" {
+		dst.Image = src.Image
+	}
+	if strings.TrimSpace(dst.Favicon) == "" {
+		dst.Favicon = src.Favicon
+	}
+	return dst
 }
