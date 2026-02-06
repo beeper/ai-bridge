@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"strings"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/rs/zerolog"
@@ -10,7 +11,10 @@ import (
 // applyProactivePruning applies context pruning before sending to the API
 func (oc *AIClient) applyProactivePruning(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion, meta *PortalMetadata) []openai.ChatCompletionMessageParamUnion {
 	config := oc.connector.Config.Pruning
-	if config == nil || !config.Enabled {
+	if config == nil {
+		return messages
+	}
+	if strings.EqualFold(strings.TrimSpace(config.Mode), "off") || !config.Enabled {
 		return messages
 	}
 

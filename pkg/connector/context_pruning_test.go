@@ -3,6 +3,7 @@ package connector
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 )
@@ -414,6 +415,12 @@ func TestSmartTruncatePrompt(t *testing.T) {
 func TestDefaultPruningConfig(t *testing.T) {
 	config := DefaultPruningConfig()
 
+	if config.Mode != "cache-ttl" {
+		t.Errorf("Expected Mode cache-ttl, got %q", config.Mode)
+	}
+	if config.TTL != time.Hour {
+		t.Errorf("Expected TTL 1h, got %v", config.TTL)
+	}
 	if !config.Enabled {
 		t.Errorf("Expected Enabled true, got %v", config.Enabled)
 	}

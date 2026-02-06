@@ -4,12 +4,22 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 )
 
 // PruningConfig configures context pruning behavior (matches OpenClaw's AgentContextPruningConfig)
 type PruningConfig struct {
+	// Mode controls pruning strategy.
+	// "off" disables proactive pruning.
+	// "cache-ttl" enables proactive pruning using TTL-like refresh behavior.
+	Mode string `yaml:"mode" json:"mode,omitempty"`
+
+	// TTL is the refresh interval for cache-ttl mode.
+	// Default: 1h
+	TTL time.Duration `yaml:"ttl" json:"ttl,omitempty"`
+
 	// Enabled turns on proactive context pruning
 	Enabled bool `yaml:"enabled" json:"enabled"`
 
@@ -104,6 +114,8 @@ type MemoryFlushConfig struct {
 func DefaultPruningConfig() *PruningConfig {
 	enabled := true
 	return &PruningConfig{
+		Mode:                 "cache-ttl",
+		TTL:                  1 * time.Hour,
 		Enabled:              true,
 		SoftTrimRatio:        0.3,
 		HardClearRatio:       0.5,
@@ -502,6 +514,12 @@ func applyPruningDefaults(config *PruningConfig) *PruningConfig {
 	cfg := *config // Copy
 	defaults := DefaultPruningConfig()
 
+	if strings.TrimSpace(cfg.Mode) == "" {
+		cfg.Mode = defaults.Mode
+	}
+	if cfg.TTL <= 0 {
+		cfg.TTL = defaults.TTL
+	}
 	if cfg.SoftTrimRatio <= 0 {
 		cfg.SoftTrimRatio = defaults.SoftTrimRatio
 	}

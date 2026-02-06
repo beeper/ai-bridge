@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	defaultGroupHistoryLimit = 50
+	defaultGroupHistoryLimit = 20
 	maxGroupHistoryKeys      = 1000
 	groupHistoryMarker       = "[Chat messages since your last reply - for context]"
 	currentMessageMarker     = "[Current message - respond to this]"

@@ -166,20 +166,30 @@ func normalizeMessageArgs(args map[string]any) {
 	if args == nil {
 		return
 	}
+	setMessageID := func(raw any) bool {
+		switch value := raw.(type) {
+		case string:
+			normalized := normalizeMessageID(value)
+			args["message_id"] = normalized
+			return normalized != ""
+		default:
+			if raw == nil {
+				return false
+			}
+			args["message_id"] = raw
+			return true
+		}
+	}
+
 	hasMessageID := false
 	if raw, ok := args["message_id"]; ok {
-		if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
-			args["message_id"] = normalizeMessageID(s)
-			if strings.TrimSpace(args["message_id"].(string)) != "" {
-				hasMessageID = true
-			}
-		}
+		hasMessageID = setMessageID(raw)
 	}
 	if !hasMessageID {
 		if v, ok := args["messageId"]; ok {
-			args["message_id"] = v
+			hasMessageID = setMessageID(v)
 		} else if v, ok := args["replyTo"]; ok {
-			args["message_id"] = v
+			hasMessageID = setMessageID(v)
 		}
 	}
 	hasThreadID := false

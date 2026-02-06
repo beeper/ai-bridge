@@ -19,7 +19,7 @@ func (oc *AIClient) injectMemoryContext(
 	meta *PortalMetadata,
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) []openai.ChatCompletionMessageParamUnion {
-	if oc == nil || portal == nil || meta == nil {
+	if oc == nil || portal == nil || meta == nil || oc.connector == nil || oc.connector.Config.Memory == nil || !oc.connector.Config.Memory.InjectContext {
 		return prompt
 	}
 

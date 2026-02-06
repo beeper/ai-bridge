@@ -23,7 +23,7 @@ import (
 const (
 	defaultTemperature          = 0.0 // Unset by default; provider/model default is used.
 	defaultMaxContextMessages   = 20
-	defaultGroupContextMessages = 50
+	defaultGroupContextMessages = 20
 	defaultMaxTokens            = 512
 	defaultReasoningEffort      = "low"
 )
@@ -57,12 +57,7 @@ func (oc *OpenAIConnector) Stop(ctx context.Context) {
 }
 
 func (oc *OpenAIConnector) Start(ctx context.Context) error {
-	if oc.Config.ModelCacheDuration == 0 {
-		oc.Config.ModelCacheDuration = 6 * time.Hour
-	}
-	if oc.Config.Bridge.CommandPrefix == "" {
-		oc.Config.Bridge.CommandPrefix = "!ai"
-	}
+	oc.applyRuntimeDefaults()
 
 	// Register AI commands with the command processor
 	if proc, ok := oc.br.Commands.(*commands.Processor); ok {
@@ -79,6 +74,20 @@ func (oc *OpenAIConnector) Start(ctx context.Context) error {
 	oc.initProvisioning()
 
 	return nil
+}
+
+func (oc *OpenAIConnector) applyRuntimeDefaults() {
+	if oc.Config.ModelCacheDuration == 0 {
+		oc.Config.ModelCacheDuration = 6 * time.Hour
+	}
+	if oc.Config.Bridge.CommandPrefix == "" {
+		oc.Config.Bridge.CommandPrefix = "!ai"
+	}
+	if oc.Config.Pruning == nil {
+		oc.Config.Pruning = DefaultPruningConfig()
+	} else {
+		oc.Config.Pruning = applyPruningDefaults(oc.Config.Pruning)
+	}
 }
 
 // SetMatrixCredentials seeds Beeper provider config from the Matrix account, if unset.

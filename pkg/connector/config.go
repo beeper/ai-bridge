@@ -179,7 +179,8 @@ type SessionConfig struct {
 
 // MemoryConfig configures memory behavior (OpenClaw-style).
 type MemoryConfig struct {
-	Citations string `yaml:"citations"`
+	Citations     string `yaml:"citations"`
+	InjectContext bool   `yaml:"inject_context"`
 }
 
 // MemorySearchConfig configures semantic memory search (OpenClaw-style).
@@ -526,11 +527,15 @@ func upgradeConfig(helper configupgrade.Helper) {
 	// Global settings
 	helper.Copy(configupgrade.Str, "default_system_prompt")
 	helper.Copy(configupgrade.Str, "model_cache_duration")
+	helper.Copy(configupgrade.Str, "memory", "citations")
+	helper.Copy(configupgrade.Bool, "memory", "inject_context")
 
 	// Bridge-specific configuration
 	helper.Copy(configupgrade.Str, "bridge", "command_prefix")
 
 	// Context pruning configuration
+	helper.Copy(configupgrade.Str, "pruning", "mode")
+	helper.Copy(configupgrade.Str, "pruning", "ttl")
 	helper.Copy(configupgrade.Bool, "pruning", "enabled")
 	helper.Copy(configupgrade.Float, "pruning", "soft_trim_ratio")
 	helper.Copy(configupgrade.Float, "pruning", "hard_clear_ratio")
