@@ -214,6 +214,7 @@ func applyLoginTokensToSearchConfig(cfg *search.Config, meta *UserLoginMetadata,
 
 	if shouldForceExaSearchProvider(meta) {
 		forceSearchProviderExa(cfg)
+		disableDuckDuckGoSearch(cfg)
 		applyExaProxyDefaults(cfg, meta, connector)
 	}
 
@@ -260,6 +261,17 @@ func forceSearchProviderExa(cfg *search.Config) {
 		return
 	}
 	cfg.Provider = search.ProviderExa
+}
+
+func disableDuckDuckGoSearch(cfg *search.Config) {
+	if cfg == nil {
+		return
+	}
+	// Keep provider selection deterministic for managed logins:
+	// Exa primary only, and no DDG fallback if Exa fails.
+	cfg.Fallbacks = []string{search.ProviderExa}
+	disabled := false
+	cfg.DDG.Enabled = &disabled
 }
 
 func applyExaProxyDefaults(cfg *search.Config, meta *UserLoginMetadata, connector *OpenAIConnector) {
