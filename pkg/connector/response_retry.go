@@ -45,6 +45,17 @@ func (oc *AIClient) responseWithRetry(
 
 		// If we got a context length error, try auto-compaction first, then truncation
 		if cle != nil {
+			// In Responses conversation mode, previous_response_id can accumulate hidden server-side
+			// context that local truncation cannot affect. Reset it once and retry with local history.
+			if meta != nil && meta.ConversationMode == "responses" && meta.LastResponseID != "" && !oc.isOpenRouterProvider() {
+				oc.log.Warn().
+					Str("last_response_id", meta.LastResponseID).
+					Msg("Context overflow in responses mode; clearing previous_response_id and retrying with local context")
+				meta.LastResponseID = ""
+				oc.savePortalQuiet(ctx, portal, "responses context reset")
+				continue
+			}
+
 			// Try auto-compaction first (only once per retry loop)
 			if !autoCompactionAttempted {
 				autoCompactionAttempted = true

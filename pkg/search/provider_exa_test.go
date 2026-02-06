@@ -13,6 +13,12 @@ func TestExaProviderSearchUsesHighlightMaxCharacters(t *testing.T) {
 
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-api-key") != "test-key" {
+			t.Fatalf("missing api key header")
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Fatalf("missing bearer header, got %q", got)
+		}
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}
@@ -51,5 +57,31 @@ func TestExaProviderSearchUsesHighlightMaxCharacters(t *testing.T) {
 	}
 	if int(highlights["maxCharacters"].(float64)) != 777 {
 		t.Fatalf("expected maxCharacters=777, got %#v", highlights["maxCharacters"])
+	}
+}
+
+func TestShouldAttachExaBearerAuth(t *testing.T) {
+	t.Helper()
+
+	tests := []struct {
+		name    string
+		baseURL string
+		want    bool
+	}{
+		{name: "default exa endpoint", baseURL: "https://api.exa.ai", want: false},
+		{name: "default exa endpoint with path", baseURL: "https://api.exa.ai/search", want: false},
+		{name: "proxy endpoint", baseURL: "https://ai.bt.hn/exa", want: true},
+		{name: "relative path", baseURL: "/exa", want: true},
+		{name: "empty", baseURL: "", want: false},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := shouldAttachExaBearerAuth(tc.baseURL)
+			if got != tc.want {
+				t.Fatalf("shouldAttachExaBearerAuth(%q) = %v, want %v", tc.baseURL, got, tc.want)
+			}
+		})
 	}
 }
