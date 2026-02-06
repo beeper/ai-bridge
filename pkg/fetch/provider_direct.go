@@ -60,7 +60,15 @@ func (p *directProvider) Fetch(ctx context.Context, req Request) (*Response, err
 		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, resp.Status)
 	}
 
-	limit := int64(req.MaxChars * 2)
+	maxChars := req.MaxChars
+	if maxChars <= 0 {
+		maxChars = p.cfg.MaxChars
+		if maxChars <= 0 {
+			maxChars = DefaultMaxChars
+		}
+	}
+
+	limit := int64(maxChars * 2)
 	if limit <= 0 {
 		limit = int64(DefaultMaxChars * 2)
 	}
@@ -91,8 +99,8 @@ func (p *directProvider) Fetch(ctx context.Context, req Request) (*Response, err
 
 	truncated := false
 	rawLength := len(text)
-	if len(text) > req.MaxChars {
-		text = text[:req.MaxChars] + "...[truncated]"
+	if maxChars > 0 && len(text) > maxChars {
+		text = text[:maxChars] + "...[truncated]"
 		truncated = true
 	}
 	wrappedLength := len(text)
