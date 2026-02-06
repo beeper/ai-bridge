@@ -55,7 +55,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	maunium.net/go/mauflag v1.0.0 // indirect
 )
-
-replace maunium.net/go/mautrix => /Users/batuhan/Projects/texts/mautrix-go
-
-replace github.com/beeper/desktop-api-go => /Users/batuhan/Projects/texts/desktop-api-go
