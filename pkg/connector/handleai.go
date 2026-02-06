@@ -262,7 +262,7 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 		return // Don't send if we can't persist state
 	}
 
-	oc.sendSystemNotice(ctx, portal, "Welcome to your chat with Beep")
+	oc.sendSystemNotice(ctx, portal, "AI Chats can make mistakes.")
 	oc.scheduleAutoGreeting(ctx, portal)
 }
 
