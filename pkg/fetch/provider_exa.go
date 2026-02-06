@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -54,10 +55,7 @@ func (p *exaProvider) Fetch(ctx context.Context, req Request) (*Response, error)
 	}
 
 	start := time.Now()
-	data, _, err := postJSON(ctx, endpoint, map[string]string{
-		"x-api-key": p.cfg.APIKey,
-		"accept":    "application/json",
-	}, payload, DefaultTimeoutSecs)
+	data, _, err := postJSON(ctx, endpoint, exaAuthHeaders(p.cfg.BaseURL, p.cfg.APIKey), payload, DefaultTimeoutSecs)
 	if err != nil {
 		return nil, err
 	}
@@ -183,4 +181,27 @@ func formatExaStatusError(targetURL string, statuses []exaContentStatus) string 
 		return tag
 	}
 	return fmt.Sprintf("%s: %s", matched.ID, tag)
+}
+
+func exaAuthHeaders(baseURL, apiKey string) map[string]string {
+	headers := map[string]string{
+		"x-api-key": apiKey,
+		"accept":    "application/json",
+	}
+	if shouldAttachExaBearerAuth(baseURL) {
+		headers["Authorization"] = fmt.Sprintf("Bearer %s", apiKey)
+	}
+	return headers
+}
+
+func shouldAttachExaBearerAuth(baseURL string) bool {
+	trimmed := strings.TrimSpace(baseURL)
+	if trimmed == "" {
+		return false
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Hostname() == "" {
+		return true
+	}
+	return !strings.EqualFold(parsed.Hostname(), "api.exa.ai")
 }

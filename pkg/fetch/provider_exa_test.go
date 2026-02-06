@@ -17,6 +17,9 @@ func TestExaProviderFetchUsesConfigMaxCharsByDefault(t *testing.T) {
 		if r.Header.Get("x-api-key") != "test-key" {
 			t.Fatalf("missing api key header")
 		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Fatalf("missing bearer header, got %q", got)
+		}
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}
@@ -146,5 +149,31 @@ func TestExaProviderFetchReturnsStatusErrors(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "CRAWL_TIMEOUT") || !strings.Contains(msg, "408") {
 		t.Fatalf("expected status details in error, got: %s", msg)
+	}
+}
+
+func TestShouldAttachExaBearerAuth(t *testing.T) {
+	t.Helper()
+
+	tests := []struct {
+		name    string
+		baseURL string
+		want    bool
+	}{
+		{name: "default exa endpoint", baseURL: "https://api.exa.ai", want: false},
+		{name: "default exa endpoint with path", baseURL: "https://api.exa.ai/contents", want: false},
+		{name: "proxy endpoint", baseURL: "https://ai.bt.hn/exa", want: true},
+		{name: "relative path", baseURL: "/exa", want: true},
+		{name: "empty", baseURL: "", want: false},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := shouldAttachExaBearerAuth(tc.baseURL)
+			if got != tc.want {
+				t.Fatalf("shouldAttachExaBearerAuth(%q) = %v, want %v", tc.baseURL, got, tc.want)
+			}
+		})
 	}
 }
