@@ -212,10 +212,12 @@ func applyLoginTokensToSearchConfig(cfg *search.Config, meta *UserLoginMetadata,
 		cfg.OpenRouter.BaseURL = services[serviceOpenRouter].BaseURL
 	}
 
-	if shouldForceExaSearchProvider(meta) {
-		forceSearchProviderExa(cfg)
-		disableDuckDuckGoSearch(cfg)
+	if shouldApplyExaProxyDefaults(meta) {
 		applyExaProxyDefaults(cfg, meta, connector)
+	}
+	if shouldForceExaProvider(cfg.Exa.APIKey, cfg.Exa.BaseURL, meta) {
+		forceSearchProviderExa(cfg)
+		cfg.Fallbacks = []string{search.ProviderExa}
 	}
 
 	return cfg
@@ -237,23 +239,53 @@ func applyLoginTokensToFetchConfig(cfg *fetch.Config, meta *UserLoginMetadata, c
 		cfg.Exa.BaseURL = services[serviceExa].BaseURL
 	}
 
-	if shouldForceExaSearchProvider(meta) {
+	if shouldApplyExaProxyDefaults(meta) {
 		applyFetchExaProxyDefaults(cfg, meta, connector)
+	}
+	if shouldForceExaProvider(cfg.Exa.APIKey, cfg.Exa.BaseURL, meta) {
+		cfg.Provider = fetch.ProviderExa
+		cfg.Fallbacks = []string{fetch.ProviderExa}
 	}
 
 	return cfg
 }
 
-func shouldForceExaSearchProvider(meta *UserLoginMetadata) bool {
+func shouldApplyExaProxyDefaults(meta *UserLoginMetadata) bool {
 	if meta == nil {
 		return false
 	}
 	switch meta.Provider {
-	case ProviderBeeper, ProviderOpenAI, ProviderOpenRouter, ProviderMagicProxy:
+	case ProviderBeeper, ProviderMagicProxy:
 		return true
 	default:
 		return false
 	}
+}
+
+func shouldForceExaProvider(apiKey, baseURL string, meta *UserLoginMetadata) bool {
+	if isMagicProxyLogin(meta) {
+		return true
+	}
+	return hasExaTokenAndCustomEndpoint(apiKey, baseURL)
+}
+
+func isMagicProxyLogin(meta *UserLoginMetadata) bool {
+	return meta != nil && meta.Provider == ProviderMagicProxy
+}
+
+func hasExaTokenAndCustomEndpoint(apiKey, baseURL string) bool {
+	if strings.TrimSpace(apiKey) == "" {
+		return false
+	}
+	return isCustomExaEndpoint(baseURL)
+}
+
+func isCustomExaEndpoint(baseURL string) bool {
+	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if trimmed == "" {
+		return false
+	}
+	return !strings.EqualFold(trimmed, "https://api.exa.ai")
 }
 
 func forceSearchProviderExa(cfg *search.Config) {
@@ -261,17 +293,6 @@ func forceSearchProviderExa(cfg *search.Config) {
 		return
 	}
 	cfg.Provider = search.ProviderExa
-}
-
-func disableDuckDuckGoSearch(cfg *search.Config) {
-	if cfg == nil {
-		return
-	}
-	// Keep provider selection deterministic for managed logins:
-	// Exa primary only, and no DDG fallback if Exa fails.
-	cfg.Fallbacks = []string{search.ProviderExa}
-	disabled := false
-	cfg.DDG.Enabled = &disabled
 }
 
 func applyExaProxyDefaults(cfg *search.Config, meta *UserLoginMetadata, connector *OpenAIConnector) {
@@ -294,8 +315,10 @@ func applyExaProxyDefaults(cfg *search.Config, meta *UserLoginMetadata, connecto
 			if token := strings.TrimSpace(meta.APIKey); token != "" {
 				cfg.Exa.APIKey = token
 			}
-		} else if token := connector.resolveBeeperToken(meta); token != "" {
-			cfg.Exa.APIKey = token
+		} else if meta != nil && meta.Provider == ProviderBeeper {
+			if token := connector.resolveBeeperToken(meta); token != "" {
+				cfg.Exa.APIKey = token
+			}
 		}
 	}
 }
@@ -320,8 +343,10 @@ func applyFetchExaProxyDefaults(cfg *fetch.Config, meta *UserLoginMetadata, conn
 			if token := strings.TrimSpace(meta.APIKey); token != "" {
 				cfg.Exa.APIKey = token
 			}
-		} else if token := connector.resolveBeeperToken(meta); token != "" {
-			cfg.Exa.APIKey = token
+		} else if meta != nil && meta.Provider == ProviderBeeper {
+			if token := connector.resolveBeeperToken(meta); token != "" {
+				cfg.Exa.APIKey = token
+			}
 		}
 	}
 }
@@ -383,10 +408,6 @@ func mapSearchConfig(src *SearchConfig) *search.Config {
 			Model:        src.OpenRouter.Model,
 			TimeoutSecs:  src.OpenRouter.TimeoutSecs,
 			CacheTtlSecs: src.OpenRouter.CacheTtlSecs,
-		},
-		DDG: search.DDGConfig{
-			Enabled:     src.DDG.Enabled,
-			TimeoutSecs: src.DDG.TimeoutSecs,
 		},
 	}
 }

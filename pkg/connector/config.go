@@ -368,7 +368,6 @@ type SearchConfig struct {
 	Brave      ProviderBraveConfig      `yaml:"brave"`
 	Perplexity ProviderPerplexityConfig `yaml:"perplexity"`
 	OpenRouter ProviderOpenRouterConfig `yaml:"openrouter"`
-	DDG        ProviderDDGConfig        `yaml:"ddg"`
 }
 
 type FetchConfig struct {
@@ -419,11 +418,6 @@ type ProviderOpenRouterConfig struct {
 	Model        string `yaml:"model"`
 	TimeoutSecs  int    `yaml:"timeout_seconds"`
 	CacheTtlSecs int    `yaml:"cache_ttl_seconds"`
-}
-
-type ProviderDDGConfig struct {
-	Enabled     *bool `yaml:"enabled"`
-	TimeoutSecs int   `yaml:"timeout_seconds"`
 }
 
 type ProviderDirectConfig struct {
@@ -653,9 +647,6 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Str, "tools", "search", "openrouter", "model")
 	helper.Copy(configupgrade.Int, "tools", "search", "openrouter", "timeout_seconds")
 	helper.Copy(configupgrade.Int, "tools", "search", "openrouter", "cache_ttl_seconds")
-	helper.Copy(configupgrade.Bool, "tools", "search", "ddg", "enabled")
-	helper.Copy(configupgrade.Int, "tools", "search", "ddg", "timeout_seconds")
-
 	helper.Copy(configupgrade.Str, "tools", "fetch", "provider")
 	helper.Copy(configupgrade.List, "tools", "fetch", "fallbacks")
 	helper.Copy(configupgrade.Bool, "tools", "fetch", "exa", "enabled")

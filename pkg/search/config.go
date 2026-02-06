@@ -7,7 +7,6 @@ const (
 	ProviderBrave       = "brave"
 	ProviderPerplexity  = "perplexity"
 	ProviderOpenRouter  = "openrouter"
-	ProviderDuckDuckGo  = "ddg"
 	DefaultSearchCount  = 5
 	MaxSearchCount      = 10
 	DefaultTimeoutSecs  = 30
@@ -30,7 +29,6 @@ type Config struct {
 	Brave      BraveConfig      `yaml:"brave"`
 	Perplexity PerplexityConfig `yaml:"perplexity"`
 	OpenRouter OpenRouterConfig `yaml:"openrouter"`
-	DDG        DDGConfig        `yaml:"ddg"`
 }
 
 type ExaConfig struct {
@@ -75,11 +73,6 @@ type OpenRouterConfig struct {
 	CacheTtlSecs int    `yaml:"cache_ttl_seconds"`
 }
 
-type DDGConfig struct {
-	Enabled     *bool `yaml:"enabled"`
-	TimeoutSecs int   `yaml:"timeout_seconds"`
-}
-
 func (c *Config) WithDefaults() *Config {
 	if c == nil {
 		c = &Config{}
@@ -98,7 +91,6 @@ func (c *Config) WithDefaults() *Config {
 	c.Brave = c.Brave.withDefaults()
 	c.Perplexity = c.Perplexity.withDefaults()
 	c.OpenRouter = c.OpenRouter.withDefaults()
-	c.DDG = c.DDG.withDefaults()
 	return c
 }
 
@@ -159,13 +151,6 @@ func (c OpenRouterConfig) withDefaults() OpenRouterConfig {
 	}
 	if c.CacheTtlSecs <= 0 {
 		c.CacheTtlSecs = DefaultCacheTtlSecs
-	}
-	return c
-}
-
-func (c DDGConfig) withDefaults() DDGConfig {
-	if c.TimeoutSecs <= 0 {
-		c.TimeoutSecs = DefaultTimeoutSecs
 	}
 	return c
 }

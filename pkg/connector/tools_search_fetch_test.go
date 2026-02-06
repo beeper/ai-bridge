@@ -6,7 +6,7 @@ import (
 	"github.com/beeper/ai-bridge/pkg/search"
 )
 
-func TestApplyLoginTokensToSearchConfig_MagicProxyDisablesDDGFallback(t *testing.T) {
+func TestApplyLoginTokensToSearchConfig_MagicProxyForcesExa(t *testing.T) {
 	oc := &OpenAIConnector{}
 	meta := &UserLoginMetadata{
 		Provider: ProviderMagicProxy,
@@ -14,7 +14,8 @@ func TestApplyLoginTokensToSearchConfig_MagicProxyDisablesDDGFallback(t *testing
 		BaseURL:  "https://bai.bt.hn/team/proxy",
 	}
 	cfg := &search.Config{
-		Fallbacks: []string{search.ProviderBrave, search.ProviderDuckDuckGo},
+		Provider:  search.ProviderOpenRouter,
+		Fallbacks: []string{search.ProviderBrave},
 	}
 
 	got := applyLoginTokensToSearchConfig(cfg, meta, oc)
@@ -25,9 +26,6 @@ func TestApplyLoginTokensToSearchConfig_MagicProxyDisablesDDGFallback(t *testing
 	if len(got.Fallbacks) != 1 || got.Fallbacks[0] != search.ProviderExa {
 		t.Fatalf("expected exa-only fallbacks, got %#v", got.Fallbacks)
 	}
-	if got.DDG.Enabled == nil || *got.DDG.Enabled {
-		t.Fatalf("expected ddg to be disabled, got %+v", got.DDG.Enabled)
-	}
 	if got.Exa.BaseURL != "https://bai.bt.hn/team/proxy/exa" {
 		t.Fatalf("unexpected exa base URL: %q", got.Exa.BaseURL)
 	}
@@ -36,26 +34,51 @@ func TestApplyLoginTokensToSearchConfig_MagicProxyDisablesDDGFallback(t *testing
 	}
 }
 
-func TestApplyLoginTokensToSearchConfig_NoMetaLeavesDDGConfigUntouched(t *testing.T) {
+func TestApplyLoginTokensToSearchConfig_CustomExaEndpointForcesExa(t *testing.T) {
 	oc := &OpenAIConnector{}
-	enabled := true
+	meta := &UserLoginMetadata{Provider: ProviderOpenAI}
 	cfg := &search.Config{
-		Provider:  search.ProviderDuckDuckGo,
-		Fallbacks: []string{search.ProviderDuckDuckGo},
-		DDG: search.DDGConfig{
-			Enabled: &enabled,
+		Provider:  search.ProviderOpenRouter,
+		Fallbacks: []string{search.ProviderOpenRouter, search.ProviderBrave},
+		Exa: search.ExaConfig{
+			APIKey:  "exa-token",
+			BaseURL: "https://ai.bt.hn/exa",
 		},
 	}
 
-	got := applyLoginTokensToSearchConfig(cfg, nil, oc)
+	got := applyLoginTokensToSearchConfig(cfg, meta, oc)
 
-	if got.Provider != search.ProviderDuckDuckGo {
-		t.Fatalf("unexpected provider: %q", got.Provider)
+	if got.Provider != search.ProviderExa {
+		t.Fatalf("expected provider %q, got %q", search.ProviderExa, got.Provider)
 	}
-	if len(got.Fallbacks) != 1 || got.Fallbacks[0] != search.ProviderDuckDuckGo {
+	if len(got.Fallbacks) != 1 || got.Fallbacks[0] != search.ProviderExa {
+		t.Fatalf("expected exa-only fallbacks, got %#v", got.Fallbacks)
+	}
+}
+
+func TestApplyLoginTokensToSearchConfig_DefaultExaEndpointDoesNotForceExa(t *testing.T) {
+	oc := &OpenAIConnector{}
+	meta := &UserLoginMetadata{
+		Provider: ProviderOpenRouter,
+		APIKey:   "openrouter-token",
+	}
+	cfg := &search.Config{
+		Provider:  search.ProviderOpenRouter,
+		Fallbacks: []string{search.ProviderOpenRouter, search.ProviderBrave},
+		Exa: search.ExaConfig{
+			BaseURL: "https://api.exa.ai",
+		},
+	}
+
+	got := applyLoginTokensToSearchConfig(cfg, meta, oc)
+
+	if got.Provider != search.ProviderOpenRouter {
+		t.Fatalf("unexpected provider override: %q", got.Provider)
+	}
+	if len(got.Fallbacks) != 2 {
 		t.Fatalf("unexpected fallbacks: %#v", got.Fallbacks)
 	}
-	if got.DDG.Enabled == nil || !*got.DDG.Enabled {
-		t.Fatalf("expected ddg enabled to stay true")
+	if got.Exa.APIKey == "openrouter-token" {
+		t.Fatalf("openrouter token must not be copied into exa api key")
 	}
 }
