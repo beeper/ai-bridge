@@ -26,7 +26,7 @@ type toolPolicyContext struct {
 
 func (oc *AIClient) resolveToolPolicies(meta *PortalMetadata) toolPolicyResolution {
 	var agent *agents.AgentDefinition
-	if hasAssignedAgent(meta) {
+	if meta != nil {
 		store := NewAgentStoreAdapter(oc)
 		agent, _ = store.GetAgentForRoom(context.Background(), meta)
 	}
@@ -69,7 +69,7 @@ func (oc *AIClient) resolveToolPolicies(meta *PortalMetadata) toolPolicyResoluti
 		resolve.resolvePolicy(effective.AgentProviderPolicy, resolveAgentPolicyLabel("agents.tools.byProvider.allow", agent)),
 		resolve.resolvePolicy(resolveSubagentPolicy(meta, globalTools), "tools.subagents"),
 	}
-	if !hasAssignedAgent(meta) {
+	if agent == nil && !hasAssignedAgent(meta) {
 		modelRoomPolicy := &toolpolicy.ToolPolicy{
 			Allow: []string{
 				toolspec.MemorySearchName,

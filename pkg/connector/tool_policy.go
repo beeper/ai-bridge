@@ -52,12 +52,6 @@ func (oc *AIClient) isToolAvailable(meta *PortalMetadata, toolName string) (bool
 		toolName = ToolNameImage
 	}
 
-	if toolName == ToolNameMessage && !hasAssignedAgent(meta) {
-		return false, SourceGlobalDefault, "Requires an assigned agent"
-	}
-	if agenttools.IsSessionTool(toolName) && !hasAssignedAgent(meta) {
-		return false, SourceGlobalDefault, "Requires an assigned agent"
-	}
 	if agenttools.IsBossTool(toolName) && !(meta.IsBuilderRoom || hasBossAgent(meta)) {
 		return false, SourceGlobalDefault, "Builder room only"
 	}

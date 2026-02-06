@@ -388,10 +388,14 @@ var SessionsListTool = &Tool{
 		Annotations: &mcp.ToolAnnotations{Title: "List Sessions"},
 		InputSchema: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"kinds": map[string]any{
-					"type":  "array",
-					"items": map[string]any{"type": "string"},
+				"properties": map[string]any{
+					"channel": map[string]any{
+						"type":        "string",
+						"description": "Optional channel filter (matrix or desktop-api)",
+					},
+					"kinds": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"type": "string"},
 				},
 				"limit": map[string]any{
 					"type":        "number",
@@ -401,13 +405,21 @@ var SessionsListTool = &Tool{
 					"type":        "number",
 					"description": "Only include sessions active within this many minutes",
 				},
-				"messageLimit": map[string]any{
-					"type":        "number",
-					"description": "Include the last N messages for each session",
+					"messageLimit": map[string]any{
+						"type":        "number",
+						"description": "Include the last N messages for each session",
+					},
+					"accountId": map[string]any{
+						"type":        "string",
+						"description": "For desktop-api channel: filter sessions by account ID",
+					},
+					"network": map[string]any{
+						"type":        "string",
+						"description": "For desktop-api channel: filter sessions by network (e.g. whatsapp, instagram)",
+					},
 				},
 			},
 		},
-	},
 	Type:  ToolTypeBuiltin,
 	Group: GroupSessions,
 }
@@ -416,15 +428,15 @@ var SessionsListTool = &Tool{
 var SessionsHistoryTool = &Tool{
 	Tool: mcp.Tool{
 		Name:        "sessions_history",
-		Description: "Fetch message history for a session.",
+		Description: "Fetch message history for a session. Use full sessionKey from sessions_list.",
 		Annotations: &mcp.ToolAnnotations{Title: "Session History"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"sessionKey": map[string]any{
-					"type":        "string",
-					"description": "Session key to fetch history from",
-				},
+					"sessionKey": map[string]any{
+						"type":        "string",
+						"description": "Full session key from sessions_list (preferred canonical target)",
+					},
 				"limit": map[string]any{
 					"type":        "number",
 					"description": "Maximum number of messages to return (default: 50)",
@@ -445,26 +457,34 @@ var SessionsHistoryTool = &Tool{
 var SessionsSendTool = &Tool{
 	Tool: mcp.Tool{
 		Name:        "sessions_send",
-		Description: "Send a message into another session. Use sessionKey or label to identify the target.",
+		Description: "Send a message into another session. Prefer full sessionKey from sessions_list; label is fallback only.",
 		Annotations: &mcp.ToolAnnotations{Title: "Send to Session"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"sessionKey": map[string]any{
-					"type":        "string",
-					"description": "Session key of the target session",
-				},
-				"label": map[string]any{
-					"type":        "string",
-					"description": "Session label to target (alternative to sessionKey)",
-				},
-				"instance": map[string]any{
-					"type":        "string",
-					"description": "Desktop API instance name when targeting a desktop label",
-				},
-				"agentId": map[string]any{
-					"type":        "string",
-					"description": "Agent id filter for label lookups",
+					"sessionKey": map[string]any{
+						"type":        "string",
+						"description": "Full session key from sessions_list (preferred canonical target)",
+					},
+					"label": map[string]any{
+						"type":        "string",
+						"description": "Session label fallback (can be ambiguous; sessionKey is preferred)",
+					},
+					"instance": map[string]any{
+						"type":        "string",
+						"description": "Desktop API instance name when targeting a desktop label",
+					},
+					"accountId": map[string]any{
+						"type":        "string",
+						"description": "For desktop label targeting: narrow to a specific Desktop account ID",
+					},
+					"network": map[string]any{
+						"type":        "string",
+						"description": "For desktop label targeting: narrow to a specific network (e.g. whatsapp, instagram)",
+					},
+					"agentId": map[string]any{
+						"type":        "string",
+						"description": "Agent id filter for label lookups",
 				},
 				"message": map[string]any{
 					"type":        "string",
