@@ -1145,11 +1145,9 @@ func executeTTS(ctx context.Context, args map[string]any) (string, error) {
 	// Try provider-based TTS first (Beeper/OpenAI)
 	if btc != nil {
 		if provider, ok := btc.Client.provider.(*OpenAIProvider); ok {
-			baseURL := strings.ToLower(provider.baseURL)
-			isBeeperProvider := strings.Contains(baseURL, "beeper")
-			isOpenAIProvider := baseURL == "" || strings.Contains(baseURL, "openai.com")
+			ttsBaseURL, supportsOpenAITTS := resolveOpenAITTSBaseURL(btc, provider.baseURL)
 
-			if isBeeperProvider || isOpenAIProvider {
+			if supportsOpenAITTS {
 				// Use OpenAI voice if not specified
 				if voice == "" {
 					voice = "alloy"
@@ -1165,7 +1163,7 @@ func executeTTS(ctx context.Context, args map[string]any) (string, error) {
 				}
 
 				// Call OpenAI TTS API
-				audioData, err := callOpenAITTS(ctx, btc.Client.apiKey, provider.baseURL, text, voice)
+				audioData, err := callOpenAITTS(ctx, btc.Client.apiKey, ttsBaseURL, text, voice)
 				if err == nil {
 					return TTSResultPrefix + audioData, nil
 				}
@@ -1187,6 +1185,66 @@ func executeTTS(ctx context.Context, args map[string]any) (string, error) {
 	}
 
 	return "", fmt.Errorf("TTS not available: requires Beeper/OpenAI provider or macOS")
+}
+
+func resolveOpenAITTSBaseURL(btc *BridgeToolContext, providerBaseURL string) (string, bool) {
+	baseURL := strings.TrimRight(strings.TrimSpace(providerBaseURL), "/")
+	lowerBaseURL := strings.ToLower(baseURL)
+
+	isOpenAIProvider := lowerBaseURL == "" || strings.Contains(lowerBaseURL, "openai.com")
+	isBeeperProvider := strings.Contains(lowerBaseURL, "beeper")
+
+	if btc == nil || btc.Client == nil {
+		return baseURL, isOpenAIProvider || isBeeperProvider
+	}
+
+	client := btc.Client
+	if client.UserLogin == nil || client.UserLogin.Metadata == nil {
+		return baseURL, isOpenAIProvider || isBeeperProvider
+	}
+
+	meta, ok := client.UserLogin.Metadata.(*UserLoginMetadata)
+	if !ok || meta == nil {
+		return baseURL, isOpenAIProvider || isBeeperProvider
+	}
+
+	switch meta.Provider {
+	case ProviderOpenAI:
+		if client.connector != nil {
+			resolved := strings.TrimRight(strings.TrimSpace(client.connector.resolveOpenAIBaseURL()), "/")
+			if resolved != "" {
+				return resolved, true
+			}
+		}
+		return baseURL, true
+	case ProviderBeeper, ProviderMagicProxy:
+		if client.connector != nil {
+			services := client.connector.resolveServiceConfig(meta)
+			if svc, ok := services[serviceOpenAI]; ok {
+				resolved := strings.TrimRight(strings.TrimSpace(svc.BaseURL), "/")
+				if resolved != "" {
+					return resolved, true
+				}
+			}
+		}
+
+		if meta.Provider == ProviderMagicProxy {
+			if root := normalizeMagicProxyBaseURL(meta.BaseURL); root != "" {
+				return joinProxyPath(root, "/openai/v1"), true
+			}
+		}
+
+		if meta.Provider == ProviderBeeper && client.connector != nil {
+			base := strings.TrimRight(strings.TrimSpace(client.connector.resolveBeeperBaseURL(meta)), "/")
+			if base != "" {
+				return base + "/openai/v1", true
+			}
+		}
+
+		return baseURL, true
+	default:
+		return baseURL, isOpenAIProvider || isBeeperProvider
+	}
 }
 
 // isTTSMacOSAvailable checks if macOS 'say' command is available.
