@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -232,13 +233,17 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "requests-in-flight"}
 	}
 
+	sessionResolution := oc.resolveHeartbeatSession(agentID, heartbeat)
+	storeKey := strings.TrimSpace(sessionResolution.SessionKey)
+
 	sessionPortal, sessionKey, err := oc.resolveHeartbeatSessionPortal(agentID, heartbeat)
 	if err != nil || sessionPortal == nil || sessionPortal.MXID == "" {
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "no-session"}
 	}
 
 	// Skip when HEARTBEAT.md exists but is effectively empty.
-	if !oc.shouldRunHeartbeatForFile(agentID, reason) {
+	pendingEvents := hasSystemEvents(sessionKey) || (storeKey != "" && !strings.EqualFold(storeKey, sessionKey) && hasSystemEvents(storeKey))
+	if !oc.shouldRunHeartbeatForFile(agentID, reason) && !pendingEvents {
 		emitHeartbeatEvent(&HeartbeatEventPayload{
 			TS:     time.Now().UnixMilli(),
 			Status: "skipped",
@@ -247,8 +252,6 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "empty-heartbeat-file"}
 	}
 
-	sessionResolution := oc.resolveHeartbeatSession(agentID, heartbeat)
-	storeKey := strings.TrimSpace(sessionResolution.SessionKey)
 	entry := sessionResolution.Entry
 	prevUpdatedAt := int64(0)
 	if entry != nil {
@@ -281,7 +284,11 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	isExecEvent := reason == "exec-event"
 	hasExecCompletion := false
 	if isExecEvent {
-		for _, evt := range peekSystemEvents(sessionKey) {
+		systemEvents := peekSystemEvents(sessionKey)
+		if storeKey != "" && !strings.EqualFold(storeKey, sessionKey) {
+			systemEvents = append(systemEvents, peekSystemEvents(storeKey)...)
+		}
+		for _, evt := range systemEvents {
 			if strings.Contains(evt, "Exec finished") {
 				hasExecCompletion = true
 				break
@@ -323,7 +330,7 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	if hasExecCompletion {
 		prompt = execEventPrompt
 	}
-	systemEvents := formatSystemEvents(drainSystemEventEntries(sessionKey))
+	systemEvents := formatSystemEvents(drainHeartbeatSystemEvents(sessionKey, storeKey))
 	if systemEvents != "" {
 		prompt = systemEvents + "\n\n" + prompt
 	}
@@ -353,6 +360,20 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	case <-time.After(2 * time.Minute):
 		return cron.HeartbeatRunResult{Status: "failed", Reason: "heartbeat timed out"}
 	}
+}
+
+func drainHeartbeatSystemEvents(primaryKey string, secondaryKey string) []SystemEvent {
+	entries := drainSystemEventEntries(primaryKey)
+	if strings.TrimSpace(secondaryKey) != "" && !strings.EqualFold(strings.TrimSpace(primaryKey), strings.TrimSpace(secondaryKey)) {
+		entries = append(entries, drainSystemEventEntries(secondaryKey)...)
+	}
+	if len(entries) <= 1 {
+		return entries
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].TS < entries[j].TS
+	})
+	return entries
 }
 
 func (oc *AIClient) buildPromptWithHeartbeat(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, prompt string) ([]openai.ChatCompletionMessageParamUnion, error) {

@@ -78,8 +78,12 @@ func resolveHeartbeatConfig(cfg *Config, agentID string) *HeartbeatConfig {
 
 func isHeartbeatEnabledForAgent(cfg *Config, agentID string) bool {
 	resolved := normalizeAgentID(agentID)
-	if cfg == nil || cfg.Agents == nil {
-		return false
+	defaultAgent := normalizeAgentID(agents.DefaultAgentID)
+	if cfg == nil {
+		return resolved == defaultAgent
+	}
+	if cfg.Agents == nil {
+		return resolved == defaultAgent
 	}
 	if hasExplicitHeartbeatAgents(cfg) {
 		for _, entry := range cfg.Agents.List {
@@ -92,7 +96,7 @@ func isHeartbeatEnabledForAgent(cfg *Config, agentID string) bool {
 		}
 		return false
 	}
-	return resolved == normalizeAgentID(agents.DefaultAgentID)
+	return resolved == defaultAgent
 }
 
 func resolveHeartbeatIntervalMs(cfg *Config, overrideEvery string, heartbeat *HeartbeatConfig) int64 {

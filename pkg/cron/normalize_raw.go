@@ -60,6 +60,16 @@ func normalizeCronJobInputRaw(raw any, applyDefaults bool) rawRecord {
 			next["delivery"] = coerceDeliveryMap(deliveryMap)
 		}
 	}
+	if payloadRaw, ok := base["payload"]; ok {
+		if payloadMap, ok := payloadRaw.(map[string]any); ok {
+			nextPayload := map[string]any{}
+			for k, v := range payloadMap {
+				nextPayload[k] = v
+			}
+			next["payload"] = nextPayload
+			coerceLegacyPayloadDelivery(next, nextPayload)
+		}
+	}
 	if _, ok := base["isolation"]; ok {
 		delete(next, "isolation")
 	}
@@ -100,6 +110,77 @@ func normalizeCronJobInputRaw(raw any, applyDefaults bool) rawRecord {
 	return next
 }
 
+func coerceLegacyPayloadDelivery(next rawRecord, payload map[string]any) {
+	kind, _ := payload["kind"].(string)
+	if strings.ToLower(strings.TrimSpace(kind)) != "agentturn" {
+		return
+	}
+	legacyDelivery, ok := legacyDeliveryFromPayload(payload)
+	if !ok {
+		return
+	}
+	if existingRaw, ok := next["delivery"]; ok {
+		if existing, ok := existingRaw.(map[string]any); ok {
+			next["delivery"] = mergeDeliveryMap(existing, legacyDelivery)
+		}
+	} else {
+		next["delivery"] = legacyDelivery
+	}
+	delete(payload, "deliver")
+	delete(payload, "channel")
+	delete(payload, "to")
+	delete(payload, "bestEffortDeliver")
+}
+
+func legacyDeliveryFromPayload(payload map[string]any) (map[string]any, bool) {
+	deliver, hasDeliver := payload["deliver"].(bool)
+	bestEffort, hasBestEffort := payload["bestEffortDeliver"].(bool)
+	toRaw, hasTo := payload["to"].(string)
+	to := strings.TrimSpace(toRaw)
+	if !hasDeliver && !hasBestEffort && (!hasTo || to == "") {
+		return nil, false
+	}
+	next := map[string]any{}
+	if hasDeliver && !deliver {
+		next["mode"] = string(CronDeliveryNone)
+	} else {
+		next["mode"] = string(CronDeliveryAnnounce)
+	}
+	if channelRaw, ok := payload["channel"].(string); ok {
+		channel := strings.ToLower(strings.TrimSpace(channelRaw))
+		if channel != "" {
+			next["channel"] = channel
+		}
+	}
+	if to != "" {
+		next["to"] = to
+	}
+	if hasBestEffort {
+		next["bestEffort"] = bestEffort
+	}
+	return next, true
+}
+
+func mergeDeliveryMap(existing map[string]any, patch map[string]any) map[string]any {
+	next := map[string]any{}
+	for k, v := range existing {
+		next[k] = v
+	}
+	if mode, ok := patch["mode"]; ok {
+		next["mode"] = mode
+	}
+	if channel, ok := patch["channel"]; ok {
+		next["channel"] = channel
+	}
+	if to, ok := patch["to"]; ok {
+		next["to"] = to
+	}
+	if bestEffort, ok := patch["bestEffort"]; ok {
+		next["bestEffort"] = bestEffort
+	}
+	return next
+}
+
 func unwrapCronJob(raw any) (rawRecord, bool) {
 	base, ok := raw.(map[string]any)
 	if !ok {
@@ -120,6 +201,8 @@ func coerceScheduleMap(schedule map[string]any) map[string]any {
 	if strings.TrimSpace(kind) == "" {
 		if schedule["at"] != nil {
 			next["kind"] = "at"
+		} else if schedule["atMs"] != nil {
+			next["kind"] = "at"
 		} else if schedule["everyMs"] != nil {
 			next["kind"] = "every"
 		} else if schedule["expr"] != nil {
@@ -127,17 +210,51 @@ func coerceScheduleMap(schedule map[string]any) map[string]any {
 		}
 	}
 
+	if atVal, ok := coerceScheduleAt(schedule); ok {
+		next["at"] = atVal
+		delete(next, "atMs")
+	}
+	return next
+}
+
+func coerceScheduleAt(schedule map[string]any) (string, bool) {
 	if rawAt, ok := schedule["at"].(string); ok {
 		trimmed := strings.TrimSpace(rawAt)
 		if trimmed != "" {
 			if ts, ok := parseAbsoluteTimeMs(trimmed); ok {
-				next["at"] = formatIsoMillis(ts)
-			} else {
-				next["at"] = trimmed
+				return formatIsoMillis(ts), true
 			}
+			return trimmed, true
 		}
 	}
-	return next
+	if ts, ok := coerceAtMs(schedule["atMs"]); ok {
+		return formatIsoMillis(ts), true
+	}
+	return "", false
+}
+
+func coerceAtMs(raw any) (int64, bool) {
+	switch v := raw.(type) {
+	case int64:
+		return v, true
+	case int32:
+		return int64(v), true
+	case int:
+		return int64(v), true
+	case float64:
+		return int64(v), true
+	case float32:
+		return int64(v), true
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return 0, false
+		}
+		if ts, ok := parseAbsoluteTimeMs(trimmed); ok {
+			return ts, true
+		}
+	}
+	return 0, false
 }
 
 func formatIsoMillis(ts int64) string {

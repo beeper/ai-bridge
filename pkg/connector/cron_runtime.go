@@ -71,7 +71,11 @@ func (oc *AIClient) enqueueCronSystemEvent(text string, agentID string) error {
 		if err != nil {
 			oc.log.Warn().Err(err).Str("agent_id", agentID).Msg("cron: unable to resolve heartbeat session for system event")
 		}
-		return nil
+		// Fallback to logical session key so the event isn't lost if room resolution is temporarily unavailable.
+		sessionKey = strings.TrimSpace(oc.resolveHeartbeatSession(agentID, hb).SessionKey)
+		if sessionKey == "" {
+			return nil
+		}
 	}
 	enqueueSystemEvent(sessionKey, text, agentID)
 	return nil

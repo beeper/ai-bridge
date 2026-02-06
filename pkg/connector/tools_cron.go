@@ -239,6 +239,9 @@ func readCronJobID(args map[string]any) string {
 	if val := strings.TrimSpace(agenttools.ReadStringDefault(args, "jobId", "")); val != "" {
 		return val
 	}
+	if val := strings.TrimSpace(agenttools.ReadStringDefault(args, "id", "")); val != "" {
+		return val
+	}
 	return ""
 }
 

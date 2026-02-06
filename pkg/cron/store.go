@@ -2,6 +2,7 @@ package cron
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -50,8 +51,33 @@ func LoadCronStore(ctx context.Context, backend StoreBackend, storePath string) 
 	if err != nil || !found {
 		return CronStoreFile{Version: 1, Jobs: []CronJob{}}, nil
 	}
+	var raw map[string]any
+	if err := json5.Unmarshal(data, &raw); err != nil {
+		return CronStoreFile{Version: 1, Jobs: []CronJob{}}, nil
+	}
+	if raw == nil {
+		raw = map[string]any{}
+	}
+	if jobsRaw, ok := raw["jobs"].([]any); ok {
+		normalizedJobs := make([]any, 0, len(jobsRaw))
+		for _, rawJob := range jobsRaw {
+			normalized := normalizeCronJobInputRaw(rawJob, true)
+			if normalized == nil {
+				continue
+			}
+			normalizedJobs = append(normalizedJobs, normalized)
+		}
+		raw["jobs"] = normalizedJobs
+	}
+	if _, ok := raw["version"]; !ok {
+		raw["version"] = float64(1)
+	}
+	normalizedData, err := json.Marshal(raw)
+	if err != nil {
+		return CronStoreFile{Version: 1, Jobs: []CronJob{}}, nil
+	}
 	var parsed CronStoreFile
-	if err := json5.Unmarshal(data, &parsed); err != nil {
+	if err := json.Unmarshal(normalizedData, &parsed); err != nil {
 		return CronStoreFile{Version: 1, Jobs: []CronJob{}}, nil
 	}
 	if parsed.Version == 0 {
