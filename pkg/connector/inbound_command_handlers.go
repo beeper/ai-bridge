@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 )
@@ -22,6 +23,7 @@ func (oc *AIClient) handleInboundCommand(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
+	sender id.UserID,
 	isGroup bool,
 	queueSettings QueueSettings,
 	cmd inboundCommand,
@@ -31,6 +33,52 @@ func (oc *AIClient) handleInboundCommand(
 	}
 
 	switch cmd.Name {
+	case "approve":
+		if oc == nil || oc.UserLogin == nil || sender == "" || sender != oc.UserLogin.UserMXID {
+			// Owner-only: ignore approvals from non-owner even if they can run other commands.
+			return inboundCommandResult{handled: true, response: formatSystemAck("Only the owner can approve.")}
+		}
+		idToken, rest := splitCommandArgs(cmd.Args)
+		actionToken, reason := splitCommandArgs(rest)
+		idToken = strings.TrimSpace(idToken)
+		actionToken = strings.ToLower(strings.TrimSpace(actionToken))
+		reason = strings.TrimSpace(reason)
+		if idToken == "" || actionToken == "" {
+			return inboundCommandResult{handled: true, response: "Usage: /approve <approvalId> <allow|always|deny> [reason]"}
+		}
+		approve := false
+		always := false
+		switch actionToken {
+		case "allow", "approve", "yes", "y", "true", "1":
+			approve = true
+		case "allow-once", "once":
+			approve = true
+		case "allow-always", "always":
+			approve = true
+			always = true
+		case "deny", "reject", "no", "n", "false", "0":
+			approve = false
+		default:
+			return inboundCommandResult{handled: true, response: "Usage: /approve <approvalId> <allow|always|deny> [reason]"}
+		}
+
+		err := oc.resolveToolApproval(portal.MXID, idToken, ToolApprovalDecision{
+			Approve:   approve,
+			Always:    always,
+			Reason:    reason,
+			DecidedAt: time.Now(),
+			DecidedBy: sender,
+		})
+		if err != nil {
+			return inboundCommandResult{handled: true, response: formatSystemAck(err.Error())}
+		}
+		if approve {
+			if always {
+				return inboundCommandResult{handled: true, response: formatSystemAck("Approved (always allow).")}
+			}
+			return inboundCommandResult{handled: true, response: formatSystemAck("Approved.")}
+		}
+		return inboundCommandResult{handled: true, response: formatSystemAck("Denied.")}
 	case "status":
 		return inboundCommandResult{handled: true, response: oc.buildStatusText(ctx, portal, meta, isGroup, queueSettings)}
 	case "context":

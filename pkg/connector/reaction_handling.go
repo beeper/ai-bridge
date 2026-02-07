@@ -11,6 +11,19 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
+func toolApprovalDecisionFromEmoji(emoji string) (approve bool, always bool, ok bool) {
+	switch emoji {
+	case "👍":
+		return true, false, true
+	case "⭐":
+		return true, true, true
+	case "👎":
+		return false, false, true
+	default:
+		return false, false, false
+	}
+}
+
 func (oc *AIClient) PreHandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
 	if msg == nil || msg.Event == nil || msg.Content == nil {
 		return bridgev2.MatrixReactionPreResponse{}, bridgev2.ErrReactionsNotSupported
@@ -44,6 +57,22 @@ func (oc *AIClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2.Matr
 	}
 	if emoji == "" && msg.Content != nil {
 		emoji = variationselector.Remove(msg.Content.RelatesTo.Key)
+	}
+
+	// Owner-only tool approvals via reactions on tool-call timeline messages.
+	// If the reaction matches a pending approval, resolve and do not enqueue as feedback.
+	if oc != nil && oc.UserLogin != nil && msg.Event.Sender == oc.UserLogin.UserMXID {
+		if approve, always, ok := toolApprovalDecisionFromEmoji(emoji); ok && msg.TargetMessage.MXID != "" {
+			err := oc.resolveToolApprovalByTargetEvent(msg.Portal.MXID, msg.TargetMessage.MXID, ToolApprovalDecision{
+				Approve:   approve,
+				Always:    always,
+				DecidedAt: time.Now(),
+				DecidedBy: msg.Event.Sender,
+			})
+			if err == nil {
+				return &database.Reaction{}, nil
+			}
+		}
 	}
 
 	feedback := ReactionFeedback{

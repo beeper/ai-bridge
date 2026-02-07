@@ -534,7 +534,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 				logCtx.Debug().Str("command", cmd.Name).Msg("Abort command handled")
 				return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 			default:
-				result := oc.handleInboundCommand(ctx, portal, meta, isGroup, queueSettings, cmd)
+				result := oc.handleInboundCommand(ctx, portal, meta, msg.Event.Sender, isGroup, queueSettings, cmd)
 				if result.handled {
 					if strings.TrimSpace(result.response) != "" {
 						oc.sendSystemNotice(ctx, portal, result.response)

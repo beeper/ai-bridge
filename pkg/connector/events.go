@@ -7,6 +7,7 @@ import (
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
+	"github.com/beeper/ai-bridge/pkg/matrixevents"
 )
 
 // init registers custom AI event types with mautrix's TypeMap
@@ -19,108 +20,57 @@ func init() {
 }
 
 // AssistantTurnEventType is the container event for an assistant's response
-var AssistantTurnEventType = event.Type{
-	Type:  "com.beeper.ai.assistant_turn",
-	Class: event.MessageEventType,
-}
+var AssistantTurnEventType = matrixevents.AssistantTurnEventType
 
 // ToolCallEventType represents a tool invocation
-var ToolCallEventType = event.Type{
-	Type:  "com.beeper.ai.tool_call",
-	Class: event.MessageEventType,
-}
+var ToolCallEventType = matrixevents.ToolCallEventType
 
 // ToolResultEventType represents a tool execution result
-var ToolResultEventType = event.Type{
-	Type:  "com.beeper.ai.tool_result",
-	Class: event.MessageEventType,
-}
+var ToolResultEventType = matrixevents.ToolResultEventType
 
 // AIErrorEventType represents AI generation errors that are part of conversation
-var AIErrorEventType = event.Type{
-	Type:  "com.beeper.ai.error",
-	Class: event.MessageEventType,
-}
+var AIErrorEventType = matrixevents.AIErrorEventType
 
 // TurnCancelledEventType represents a cancelled turn
-var TurnCancelledEventType = event.Type{
-	Type:  "com.beeper.ai.turn_cancelled",
-	Class: event.MessageEventType,
-}
+var TurnCancelledEventType = matrixevents.TurnCancelledEventType
 
 // AgentHandoffEventType represents a handoff between agents
-var AgentHandoffEventType = event.Type{
-	Type:  "com.beeper.ai.agent_handoff",
-	Class: event.MessageEventType,
-}
+var AgentHandoffEventType = matrixevents.AgentHandoffEventType
 
 // StepBoundaryEventType represents multi-step boundaries within a turn
-var StepBoundaryEventType = event.Type{
-	Type:  "com.beeper.ai.step_boundary",
-	Class: event.MessageEventType,
-}
+var StepBoundaryEventType = matrixevents.StepBoundaryEventType
 
 // StreamDeltaEventType is the custom event type for streaming token updates (ephemeral).
-var StreamDeltaEventType = event.Type{
-	Type:  "com.beeper.ai.stream_delta",
-	Class: event.EphemeralEventType,
-}
+var StreamDeltaEventType = matrixevents.StreamDeltaEventType
 
 // StreamEventMessageType is the unified event type for AI streaming updates (ephemeral).
-var StreamEventMessageType = event.Type{
-	Type:  "com.beeper.ai.stream_event",
-	Class: event.EphemeralEventType,
-}
+var StreamEventMessageType = matrixevents.StreamEventMessageType
 
 // GenerationStatusEventType provides rich status updates during generation
-var GenerationStatusEventType = event.Type{
-	Type:  "com.beeper.ai.generation_status",
-	Class: event.MessageEventType,
-}
+var GenerationStatusEventType = matrixevents.GenerationStatusEventType
 
 // ToolProgressEventType provides tool execution progress updates
-var ToolProgressEventType = event.Type{
-	Type:  "com.beeper.ai.tool_progress",
-	Class: event.MessageEventType,
-}
+var ToolProgressEventType = matrixevents.ToolProgressEventType
 
 // CompactionStatusEventType notifies clients about context compaction
-var CompactionStatusEventType = event.Type{
-	Type:  "com.beeper.ai.compaction_status",
-	Class: event.MessageEventType,
-}
+var CompactionStatusEventType = matrixevents.CompactionStatusEventType
 
 // ApprovalRequestEventType requests user approval for tool execution
-var ApprovalRequestEventType = event.Type{
-	Type:  "com.beeper.ai.approval_request",
-	Class: event.MessageEventType,
-}
+var ApprovalRequestEventType = matrixevents.ApprovalRequestEventType
 
 // RoomCapabilitiesEventType is the Matrix state event type for bridge-controlled capabilities
 // Protected by power levels (100) so only the bridge bot can modify
-var RoomCapabilitiesEventType = event.Type{
-	Type:  "com.beeper.ai.room_capabilities",
-	Class: event.StateEventType,
-}
+var RoomCapabilitiesEventType = matrixevents.RoomCapabilitiesEventType
 
 // RoomSettingsEventType is the Matrix state event type for user-editable settings
 // Normal power level (0) so users can modify
-var RoomSettingsEventType = event.Type{
-	Type:  "com.beeper.ai.room_settings",
-	Class: event.StateEventType,
-}
+var RoomSettingsEventType = matrixevents.RoomSettingsEventType
 
 // ModelCapabilitiesEventType is the Matrix state event type for broadcasting available models
-var ModelCapabilitiesEventType = event.Type{
-	Type:  "com.beeper.ai.model_capabilities",
-	Class: event.StateEventType,
-}
+var ModelCapabilitiesEventType = matrixevents.ModelCapabilitiesEventType
 
 // AgentsEventType configures active agents in a room
-var AgentsEventType = event.Type{
-	Type:  "com.beeper.ai.agents",
-	Class: event.StateEventType,
-}
+var AgentsEventType = matrixevents.AgentsEventType
 
 // StreamContentType identifies the type of content in a stream delta
 type StreamContentType string
@@ -639,17 +589,17 @@ const (
 
 // Relation types
 const (
-	RelReplace   = "m.replace"
-	RelReference = "m.reference"
-	RelThread    = "m.thread"
-	RelInReplyTo = "m.in_reply_to"
+	RelReplace   = matrixevents.RelReplace
+	RelReference = matrixevents.RelReference
+	RelThread    = matrixevents.RelThread
+	RelInReplyTo = matrixevents.RelInReplyTo
 )
 
 // Content field keys
 const (
-	BeeperAIKey           = "com.beeper.ai"
-	BeeperAIToolCallKey   = "com.beeper.ai.tool_call"
-	BeeperAIToolResultKey = "com.beeper.ai.tool_result"
+	BeeperAIKey           = matrixevents.BeeperAIKey
+	BeeperAIToolCallKey   = matrixevents.BeeperAIToolCallKey
+	BeeperAIToolResultKey = matrixevents.BeeperAIToolResultKey
 )
 
 // ModelInfo describes a single AI model's capabilities

@@ -66,12 +66,32 @@ func userMdHasValues(content string) bool {
 	if trimmed == "" {
 		return false
 	}
-	labels := []string{
-		"name:",
-		"what to call them:",
-		"pronouns:",
-		"timezone:",
-		"notes:",
+	// USER.md includes placeholder hints like "*(optional)*" which should not count as "filled in".
+	// Normalize extracted values and ignore known placeholders.
+	normalizeValue := func(value string) string {
+		v := strings.TrimSpace(value)
+		// Strip common markdown emphasis markers. Do this a couple times because removing "**"
+		// can expose leading whitespace before another marker like "*...*".
+		for i := 0; i < 2; i++ {
+			v = strings.TrimSpace(strings.Trim(v, "*_"))
+		}
+		if strings.HasPrefix(v, "(") && strings.HasSuffix(v, ")") {
+			v = strings.TrimSpace(v[1 : len(v)-1])
+		}
+		// Match identity normalization: normalize fancy dashes and collapse whitespace.
+		replacer := strings.NewReplacer("\u2013", "-", "\u2014", "-")
+		v = replacer.Replace(v)
+		v = strings.Join(strings.Fields(v), " ")
+		v = strings.ToLower(v)
+		return v
+	}
+	isPlaceholder := func(value string) bool {
+		switch normalizeValue(value) {
+		case "", "optional":
+			return true
+		default:
+			return false
+		}
 	}
 	for _, rawLine := range strings.Split(trimmed, "\n") {
 		line := strings.TrimSpace(rawLine)
@@ -82,17 +102,26 @@ func userMdHasValues(content string) bool {
 		if strings.HasPrefix(line, "#") {
 			continue
 		}
-		lower := strings.ToLower(line)
-		for _, label := range labels {
-			idx := strings.Index(lower, label)
-			if idx == -1 {
-				continue
-			}
-			after := strings.TrimSpace(line[idx+len(label):])
-			after = strings.Trim(after, "*_")
-			if after != "" {
-				return true
-			}
+		// Only treat the "profile fields" list items as authoritative; other sections may mention labels.
+		if !(strings.HasPrefix(line, "-") || strings.HasPrefix(line, "*")) {
+			continue
+		}
+		line = strings.TrimSpace(strings.TrimLeft(line, "-*"))
+
+		// Parse "- **Label:** value" style lines. Avoid substring matching to prevent bold markers
+		// (e.g. "**Pronouns:**") from polluting the extracted value.
+		colonIndex := strings.Index(line, ":")
+		if colonIndex == -1 {
+			continue
+		}
+		label := strings.ToLower(strings.TrimSpace(strings.Trim(line[:colonIndex], "*_")))
+		value := strings.TrimSpace(line[colonIndex+1:])
+		if isPlaceholder(value) {
+			continue
+		}
+		switch label {
+		case "name", "what to call them", "pronouns", "timezone", "notes":
+			return true
 		}
 	}
 	return false

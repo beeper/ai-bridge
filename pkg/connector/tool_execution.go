@@ -212,6 +212,18 @@ func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Port
 		Str("tool", tool.toolName).
 		Msg("Sent tool call timeline event")
 
+	// Expose the Matrix event ID to the streaming UI so Desktop can react to the tool call event.
+	if state != nil && tool != nil && strings.TrimSpace(tool.callID) != "" && resp.EventID != "" {
+		oc.emitStreamEvent(ctx, portal, state, map[string]any{
+			"type": "data-tool-call-event",
+			"id":   fmt.Sprintf("tool-call-event:%s", tool.callID),
+			"data": map[string]any{
+				"toolCallId":  tool.callID,
+				"callEventId": resp.EventID.String(),
+			},
+		})
+	}
+
 	return resp.EventID
 }
 

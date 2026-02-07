@@ -16,6 +16,7 @@ const (
 	ProviderOpenAI     = "openai"      // Direct OpenAI API
 	ProviderOpenRouter = "openrouter"  // Direct OpenRouter API
 	ProviderMagicProxy = "magic_proxy" // Magic Proxy (OpenRouter-compatible)
+	ProviderCodex      = "codex"       // Local Codex app-server (stdio JSON-RPC)
 	FlowCustom         = "custom"      // Custom login flow (provider resolved during login)
 )
 

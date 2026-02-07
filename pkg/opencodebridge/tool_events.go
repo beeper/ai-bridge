@@ -3,18 +3,18 @@ package opencodebridge
 import (
 	"strings"
 
-	"maunium.net/go/mautrix/event"
+	"github.com/beeper/ai-bridge/pkg/matrixevents"
 )
 
 // ToolCallEventType represents a tool invocation.
-var ToolCallEventType = event.Type{Type: "com.beeper.ai.tool_call", Class: event.MessageEventType}
+var ToolCallEventType = matrixevents.ToolCallEventType
 
 // ToolResultEventType represents a tool execution result.
-var ToolResultEventType = event.Type{Type: "com.beeper.ai.tool_result", Class: event.MessageEventType}
+var ToolResultEventType = matrixevents.ToolResultEventType
 
 const (
-	BeeperAIToolCallKey   = "com.beeper.ai.tool_call"
-	BeeperAIToolResultKey = "com.beeper.ai.tool_result"
+	BeeperAIToolCallKey   = matrixevents.BeeperAIToolCallKey
+	BeeperAIToolResultKey = matrixevents.BeeperAIToolResultKey
 )
 
 // ToolStatus represents the state of a tool call.

@@ -81,12 +81,39 @@ type MCPServerConfig struct {
 	Kind      string   `json:"kind,omitempty"` // generic|nexus
 }
 
+// ToolApprovalsConfig stores per-login persisted tool approval rules.
+// This is used by the tool approval system to support "always allow" decisions.
+type ToolApprovalsConfig struct {
+	// MCPAlwaysAllow contains exact-match allow rules for MCP approvals.
+	// Matching is done on normalized (trim + lowercase) server label + tool name.
+	MCPAlwaysAllow []MCPAlwaysAllowRule `json:"mcp_always_allow,omitempty"`
+
+	// BuiltinAlwaysAllow contains exact-match allow rules for builtin tool approvals.
+	// Matching is done on normalized (trim + lowercase) tool name + action.
+	// Action "" means "any action".
+	BuiltinAlwaysAllow []BuiltinAlwaysAllowRule `json:"builtin_always_allow,omitempty"`
+}
+
+type MCPAlwaysAllowRule struct {
+	ServerLabel string `json:"server_label,omitempty"`
+	ToolName    string `json:"tool_name,omitempty"`
+}
+
+type BuiltinAlwaysAllowRule struct {
+	ToolName string `json:"tool_name,omitempty"`
+	Action   string `json:"action,omitempty"`
+}
+
 // UserLoginMetadata is stored on each login row to keep per-user settings.
 type UserLoginMetadata struct {
 	Persona              string         `json:"persona,omitempty"`
 	Provider             string         `json:"provider,omitempty"` // Selected provider (beeper, openai, openrouter)
 	APIKey               string         `json:"api_key,omitempty"`
 	BaseURL              string         `json:"base_url,omitempty"`               // Per-user API endpoint
+	CodexHome            string         `json:"codex_home,omitempty"`             // Isolated CODEX_HOME for this login (provider=codex)
+	CodexCommand         string         `json:"codex_command,omitempty"`          // Optional per-login codex binary override
+	CodexAuthMode        string         `json:"codex_auth_mode,omitempty"`        // chatgpt|apiKey
+	CodexAccountEmail    string         `json:"codex_account_email,omitempty"`    // Optional, from account/read
 	TitleGenerationModel string         `json:"title_generation_model,omitempty"` // Model to use for generating chat titles
 	NextChatIndex        int            `json:"next_chat_index,omitempty"`
 	DefaultChatPortalID  string         `json:"default_chat_portal_id,omitempty"`
@@ -105,6 +132,9 @@ type UserLoginMetadata struct {
 
 	// Optional per-login tokens for external services
 	ServiceTokens *ServiceTokens `json:"service_tokens,omitempty"`
+
+	// Tool approval rules (e.g. "always allow" decisions for MCP approvals or dangerous builtin tools).
+	ToolApprovals *ToolApprovalsConfig `json:"tool_approvals,omitempty"`
 
 	// AgentModelOverrides stores per-agent model overrides (agent ID -> model ID).
 	AgentModelOverrides map[string]string `json:"agent_model_overrides,omitempty"`
@@ -194,6 +224,11 @@ type PortalMetadata struct {
 	OpenCodeSessionID    string `json:"opencode_session_id,omitempty"`
 	OpenCodeReadOnly     bool   `json:"opencode_read_only,omitempty"`
 	OpenCodeTitlePending bool   `json:"opencode_title_pending,omitempty"`
+
+	// Codex app-server session metadata (isolated, does not integrate with OpenCode sessions list).
+	IsCodexRoom   bool   `json:"is_codex_room,omitempty"`
+	CodexThreadID string `json:"codex_thread_id,omitempty"`
+	CodexCwd      string `json:"codex_cwd,omitempty"`
 
 	// Ack reaction config - similar to OpenClaw's ack reactions
 	AckReactionEmoji       string `json:"ack_reaction_emoji,omitempty"`        // Emoji to react with when message received (e.g., "👀", "🤔"). Empty = disabled.

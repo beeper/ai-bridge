@@ -16,18 +16,20 @@ var exampleNetworkConfig string
 // Config represents the connector-specific configuration that is nested under
 // the `network:` block in the main bridge config.
 type Config struct {
-	Beeper     BeeperConfig                       `yaml:"beeper"`
-	Providers  ProvidersConfig                    `yaml:"providers"`
-	Models     *ModelsConfig                      `yaml:"models"`
-	Bridge     BridgeConfig                       `yaml:"bridge"`
-	Tools      ToolProvidersConfig                `yaml:"tools"`
-	ToolPolicy *toolpolicy.GlobalToolPolicyConfig `yaml:"tool_policy"`
-	Agents     *AgentsConfig                      `yaml:"agents"`
-	Channels   *ChannelsConfig                    `yaml:"channels"`
-	Cron       *CronConfig                        `yaml:"cron"`
-	Messages   *MessagesConfig                    `yaml:"messages"`
-	Commands   *CommandsConfig                    `yaml:"commands"`
-	Session    *SessionConfig                     `yaml:"session"`
+	Beeper        BeeperConfig                       `yaml:"beeper"`
+	Codex         *CodexConfig                       `yaml:"codex"`
+	Providers     ProvidersConfig                    `yaml:"providers"`
+	Models        *ModelsConfig                      `yaml:"models"`
+	Bridge        BridgeConfig                       `yaml:"bridge"`
+	Tools         ToolProvidersConfig                `yaml:"tools"`
+	ToolApprovals *ToolApprovalsRuntimeConfig        `yaml:"tool_approvals"`
+	ToolPolicy    *toolpolicy.GlobalToolPolicyConfig `yaml:"tool_policy"`
+	Agents        *AgentsConfig                      `yaml:"agents"`
+	Channels      *ChannelsConfig                    `yaml:"channels"`
+	Cron          *CronConfig                        `yaml:"cron"`
+	Messages      *MessagesConfig                    `yaml:"messages"`
+	Commands      *CommandsConfig                    `yaml:"commands"`
+	Session       *SessionConfig                     `yaml:"session"`
 
 	// Global settings
 	DefaultSystemPrompt string              `yaml:"default_system_prompt"`
@@ -43,6 +45,69 @@ type Config struct {
 
 	// Inbound message processing configuration
 	Inbound *InboundConfig `yaml:"inbound"`
+}
+
+// ToolApprovalsRuntimeConfig controls runtime behaviour for tool approvals.
+// This gates OpenAI MCP approvals (mcp_approval_request) and selected dangerous builtin tools.
+type ToolApprovalsRuntimeConfig struct {
+	Enabled         *bool    `yaml:"enabled"`
+	TTLSeconds      int      `yaml:"ttlSeconds"`
+	RequireForMCP   *bool    `yaml:"requireForMcp"`
+	RequireForTools []string `yaml:"requireForTools"`
+}
+
+func (c *ToolApprovalsRuntimeConfig) WithDefaults() *ToolApprovalsRuntimeConfig {
+	if c == nil {
+		c = &ToolApprovalsRuntimeConfig{}
+	}
+	if c.Enabled == nil {
+		c.Enabled = ptrBool(true)
+	}
+	if c.TTLSeconds <= 0 {
+		c.TTLSeconds = 600
+	}
+	if c.RequireForMCP == nil {
+		c.RequireForMCP = ptrBool(true)
+	}
+	if len(c.RequireForTools) == 0 {
+		c.RequireForTools = []string{
+			"message",
+			"write",
+			"edit",
+			"apply_patch",
+			"cron",
+			"gravatar_set",
+
+			// Boss/session mutation tools
+			"create_agent",
+			"fork_agent",
+			"edit_agent",
+			"delete_agent",
+			"modify_room",
+			"sessions_send",
+			"sessions_spawn",
+			"run_internal_command",
+		}
+	}
+	return c
+}
+
+func ptrBool(v bool) *bool { return &v }
+
+// CodexConfig configures the optional Codex app-server integration.
+type CodexConfig struct {
+	Enabled       *bool            `yaml:"enabled"`
+	Command       string           `yaml:"command"`
+	HomeBaseDir   string           `yaml:"home_base_dir"`
+	DefaultModel  string           `yaml:"default_model"`
+	NetworkAccess *bool            `yaml:"network_access"`
+	ClientInfo    *CodexClientInfo `yaml:"client_info"`
+}
+
+type CodexClientInfo struct {
+	Name    string `yaml:"name"`
+	Title   string `yaml:"title"`
+	Version string `yaml:"version"`
 }
 
 // AgentsConfig configures agent defaults (OpenClaw-style).
@@ -538,6 +603,9 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Str, "model_cache_duration")
 	helper.Copy(configupgrade.Str, "memory", "citations")
 	helper.Copy(configupgrade.Bool, "memory", "inject_context")
+
+	// Tool approvals
+	helper.Copy(configupgrade.Map, "tool_approvals")
 
 	// Bridge-specific configuration
 	helper.Copy(configupgrade.Str, "bridge", "command_prefix")

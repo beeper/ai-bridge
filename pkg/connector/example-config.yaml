@@ -7,6 +7,19 @@ beeper:
   base_url: ""  # Optional. If empty, login uses selected Beeper domain.
   token: ""     # Beeper AI key (requires Beeper Plus)
 
+# Optional Codex integration (uses local `codex app-server` via stdio).
+codex:
+  enabled: true
+  command: "codex"
+  # Base directory for per-account isolated Codex state (CODEX_HOME).
+  home_base_dir: "~/.local/share/ai-bridge/codex"
+  default_model: "gpt-5.1-codex"
+  network_access: true
+  client_info:
+    name: "ai_bridge_matrix"
+    title: "AI Bridge (Matrix)"
+    version: "0.1.0"
+
 # Per-provider default models and settings.
 # These are used when a room doesn't have a specific model configured.
 providers:
@@ -76,6 +89,14 @@ messages:
 commands:
   # Optional allowlist for owner-only tools/commands (Matrix IDs, or "matrix:@user:server").
   ownerAllowFrom: []
+
+# Tool approval gating (Clawdbot-style approvals).
+tool_approvals:
+  enabled: true
+  ttlSeconds: 600
+  requireForMcp: true
+  # List of builtin tool names that require approval (subject to per-tool action allowlists).
+  requireForTools: ["message", "write", "edit", "apply_patch", "cron", "gravatar_set", "create_agent", "fork_agent", "edit_agent", "delete_agent", "modify_room", "sessions_send", "sessions_spawn", "run_internal_command"]
 
 # Optional per-channel overrides.
 channels:

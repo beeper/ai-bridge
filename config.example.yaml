@@ -44,6 +44,19 @@ network:
     base_url: ""  # Optional. If empty, login uses selected Beeper domain.
     token: ""     # Beeper AI key (requires Beeper Plus)
 
+  # Optional Codex integration (uses local `codex app-server` via stdio).
+  codex:
+    enabled: true
+    command: "codex"
+    # Base directory for per-account isolated Codex state (CODEX_HOME).
+    home_base_dir: "~/.local/share/ai-bridge/codex"
+    default_model: "gpt-5.1-codex"
+    network_access: true
+    client_info:
+      name: "ai_bridge_matrix"
+      title: "AI Bridge (Matrix)"
+      version: "0.1.0"
+
   # Per-provider default models
   providers:
     beeper:

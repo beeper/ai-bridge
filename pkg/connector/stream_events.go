@@ -2,8 +2,9 @@ package connector
 
 import (
 	"context"
-	"fmt"
 	"strings"
+
+	"github.com/beeper/ai-bridge/pkg/matrixevents"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2"
@@ -24,25 +25,14 @@ func buildStreamEventEnvelope(state *streamingState, part map[string]any) (turnI
 	state.sequenceNum++
 	seq = state.sequenceNum
 
-	// Conformance invariants:
-	// - turn_id is required and non-empty.
-	// - seq is strictly monotonic per turn (state.sequenceNum++).
-	// - part is the AI SDK chunk payload passed through unchanged.
-	content = map[string]any{
-		"turn_id": turnID,
-		"seq":     seq,
-		"part":    part,
+	env, err := matrixevents.BuildStreamEventEnvelope(turnID, seq, part, matrixevents.StreamEventOpts{
+		TargetEventID: state.initialEventID.String(),
+		AgentID:       state.agentID,
+	})
+	if err != nil {
+		return "", 0, nil, false
 	}
-	if state.initialEventID != "" {
-		content["target_event"] = state.initialEventID.String()
-		content["m.relates_to"] = map[string]any{
-			"rel_type": RelReference,
-			"event_id": state.initialEventID.String(),
-		}
-	}
-	if state.agentID != "" {
-		content["agent_id"] = state.agentID
-	}
+	content = env
 
 	return turnID, seq, content, true
 }
@@ -114,8 +104,5 @@ func (oc *AIClient) emitStreamEvent(
 }
 
 func buildStreamEventTxnID(turnID string, seq int) string {
-	if turnID == "" {
-		return fmt.Sprintf("ai_stream_%d", seq)
-	}
-	return fmt.Sprintf("ai_stream_%s_%d", turnID, seq)
+	return matrixevents.BuildStreamEventTxnID(turnID, seq)
 }

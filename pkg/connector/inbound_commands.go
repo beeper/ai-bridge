@@ -189,6 +189,7 @@ var controlCommandNames = map[string]struct{}{
 	"esc":        {},
 	"whoami":     {},
 	"id":         {},
+	"approve":    {},
 }
 
 func isControlCommandMessage(body string) bool {

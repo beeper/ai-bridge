@@ -126,3 +126,47 @@ func TestBootstrapFileIsOptionalAndAutoDeleted(t *testing.T) {
 		t.Fatalf("expected BOOTSTRAP.md to be deleted (err=%v found=%v)", err, found)
 	}
 }
+
+func TestBootstrapFileInjectedOnBrandNewWorkspace(t *testing.T) {
+	ctx := context.Background()
+	db := setupBootstrapDB(t)
+	bridge := &bridgev2.Bridge{DB: db}
+	login := &database.UserLogin{ID: networkid.UserLoginID("login")}
+	userLogin := &bridgev2.UserLogin{UserLogin: login, Bridge: bridge, Log: zerolog.Nop()}
+	oc := &AIClient{
+		UserLogin: userLogin,
+		connector: &OpenAIConnector{Config: Config{}},
+		log:       zerolog.Nop(),
+	}
+
+	files := oc.buildBootstrapContextFiles(ctx, "beeper", nil)
+	var found bool
+	for _, file := range files {
+		if strings.EqualFold(file.Path, agents.DefaultBootstrapFilename) {
+			found = true
+			if strings.Contains(file.Content, "[MISSING]") {
+				t.Fatalf("expected BOOTSTRAP.md content, got missing placeholder")
+			}
+			if strings.TrimSpace(file.Content) == "" {
+				t.Fatalf("expected BOOTSTRAP.md to have content")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected BOOTSTRAP.md to be injected on brand new workspace")
+	}
+}
+
+func TestUserMdOptionalPlaceholderDoesNotTriggerBootstrapDeletion(t *testing.T) {
+	// Ensure the "(optional)" hint in the USER.md template does not count as a "filled in" value.
+	content := strings.Join([]string{
+		"# USER.md",
+		"",
+		"- **Name:**",
+		"- **Pronouns:** *(optional)*",
+		"- **Timezone:**",
+	}, "\n")
+	if userMdHasValues(content) {
+		t.Fatalf("expected optional placeholder not to count as a filled-in USER.md value")
+	}
+}
