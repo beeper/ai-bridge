@@ -1,9 +1,10 @@
 package connector
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -210,8 +211,8 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 		resultPayload["desktopApi"] = desktopStatus
 	}
 
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].updatedAt > entries[j].updatedAt
+	slices.SortFunc(entries, func(a, b sessionListEntry) int {
+		return cmp.Compare(b.updatedAt, a.updatedAt)
 	})
 	if limit > 0 && len(entries) > limit {
 		entries = entries[:limit]

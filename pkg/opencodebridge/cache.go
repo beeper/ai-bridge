@@ -209,10 +209,3 @@ func (inst *openCodeInstance) listCachedMessages(sessionID string) []opencode.Me
 	cache.mu.Unlock()
 	return out
 }
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

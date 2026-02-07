@@ -8,14 +8,6 @@ const (
 	ModelZAIGLM47     = "z-ai/glm-4.7"
 )
 
-// Reasoning effort levels
-const (
-	ReasoningNone   = "none"
-	ReasoningLow    = "low"
-	ReasoningMedium = "medium"
-	ReasoningHigh   = "high"
-)
-
 // PresetAgents contains the default agent definitions.
 // Includes Beep (default), Playground (sandbox), and Boss (meta).
 var PresetAgents = []*AgentDefinition{
@@ -45,11 +37,3 @@ func IsPreset(agentID string) bool {
 	return false
 }
 
-// GetAllPresets returns copies of all preset agents.
-func GetAllPresets() []*AgentDefinition {
-	result := make([]*AgentDefinition, len(PresetAgents))
-	for i, preset := range PresetAgents {
-		result[i] = preset.Clone()
-	}
-	return result
-}

@@ -5,7 +5,3 @@ func IsProviderTool(t *Tool) bool {
 	return t.Type == ToolTypeProvider || t.Type == ToolTypePlugin
 }
 
-// ProviderTools returns all provider/plugin tools.
-func ProviderTools() []*Tool {
-	return nil
-}

@@ -26,13 +26,6 @@ type InitializeCapabilities struct {
 	ExperimentalAPI bool `json:"experimentalApi,omitempty"`
 }
 
-type InitializeParams struct {
-	ClientInfo   ClientInfo              `json:"clientInfo"`
-	Capabilities *InitializeCapabilities `json:"capabilities,omitempty"`
-	Extra        map[string]any          `json:"-"`
-	RawExtraJSON json.RawMessage         `json:"-"`
-}
-
 type initializeParamsWire struct {
 	ClientInfo   ClientInfo              `json:"clientInfo"`
 	Capabilities *InitializeCapabilities `json:"capabilities,omitempty"`

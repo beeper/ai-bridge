@@ -52,15 +52,6 @@ func ImageResult(label, path string, data []byte, mimeType string) *Result {
 	}
 }
 
-// PartialResult creates a result indicating partial success.
-func PartialResult(text string, errors []string) *Result {
-	return &Result{
-		Status:  ResultPartial,
-		Content: []ContentBlock{{Type: "text", Text: text}},
-		Details: map[string]any{"errors": errors},
-	}
-}
-
 // mustJSON marshals payload to JSON, returning error message on failure.
 func mustJSON(v any) string {
 	data, err := json.Marshal(v)

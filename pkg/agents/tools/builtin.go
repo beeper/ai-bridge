@@ -75,7 +75,6 @@ func AllTools() []*Tool {
 	appendTools(BuiltinTools())
 	appendTools(SessionTools())
 	appendTools(BossTools())
-	appendTools(ProviderTools())
 	return all
 }
 

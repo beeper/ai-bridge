@@ -171,9 +171,6 @@ func (oc *AIClient) toolNamesForPortal(meta *PortalMetadata) []string {
 	for _, tool := range agenttools.SessionTools() {
 		nameSet[tool.Name] = struct{}{}
 	}
-	for _, tool := range agenttools.ProviderTools() {
-		nameSet[tool.Name] = struct{}{}
-	}
 	if meta != nil && (meta.IsBuilderRoom || hasBossAgent(meta)) {
 		for _, tool := range agenttools.BossTools() {
 			nameSet[tool.Name] = struct{}{}

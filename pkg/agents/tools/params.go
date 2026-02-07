@@ -72,18 +72,6 @@ func ReadNumber(params map[string]any, key string, required bool) (float64, erro
 	return 0, nil
 }
 
-// ReadNumberDefault reads a numeric parameter with a default value.
-func ReadNumberDefault(params map[string]any, key string, defaultVal float64) float64 {
-	if _, ok := params[key]; !ok {
-		return defaultVal
-	}
-	n, err := ReadNumber(params, key, false)
-	if err != nil {
-		return defaultVal
-	}
-	return n
-}
-
 // ReadInt reads an integer parameter from input.
 func ReadInt(params map[string]any, key string, required bool) (int, error) {
 	n, err := ReadNumber(params, key, required)

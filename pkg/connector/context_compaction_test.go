@@ -154,9 +154,6 @@ func TestCompactionEventTypes(t *testing.T) {
 		t.Errorf("Expected CompactionEventEnd to be 'compaction_end', got %s", CompactionEventEnd)
 	}
 
-	if CompactionEventProgress != "compaction_progress" {
-		t.Errorf("Expected CompactionEventProgress to be 'compaction_progress', got %s", CompactionEventProgress)
-	}
 }
 
 func TestEstimateTotalTokens(t *testing.T) {

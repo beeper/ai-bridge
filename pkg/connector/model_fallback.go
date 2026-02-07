@@ -103,46 +103,6 @@ func (oc *AIClient) overrideModel(meta *PortalMetadata, modelID string) *PortalM
 	return &metaCopy
 }
 
-//lint:ignore U1000 Legacy fallback preserved for reference.
-func (oc *AIClient) responseWithModelFallback(
-	ctx context.Context,
-	evt *event.Event,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-	prompt []openai.ChatCompletionMessageParamUnion,
-	responseFn responseFunc,
-	logLabel string,
-) {
-	modelChain := oc.modelFallbackChain(ctx, meta)
-	if len(modelChain) == 0 {
-		modelChain = []string{oc.effectiveModel(meta)}
-	}
-
-	for idx, modelID := range modelChain {
-		effectiveMeta := meta
-		if meta != nil {
-			effectiveMeta = oc.overrideModel(meta, modelID)
-		}
-		success, err := oc.responseWithRetryAndReasoningFallback(ctx, evt, portal, effectiveMeta, prompt, responseFn, logLabel)
-		if success {
-			return
-		}
-		if err == nil {
-			// Error already handled (context length or non-retryable path).
-			return
-		}
-		if !shouldFallbackOnError(err) || idx == len(modelChain)-1 {
-			oc.notifyMatrixSendFailure(ctx, portal, evt, err)
-			return
-		}
-		oc.loggerForContext(ctx).Warn().
-			Err(err).
-			Str("failed_model", modelID).
-			Str("next_model", modelChain[idx+1]).
-			Msg("Model failed; falling back to next model")
-	}
-}
-
 type responseSelector func(meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (responseFunc, string)
 
 func (oc *AIClient) responseWithModelFallbackDynamic(

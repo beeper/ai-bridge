@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -121,7 +121,7 @@ func flattenGravatarValue(value any, prefix string, out *[]string) {
 		for key := range v {
 			keys = append(keys, key)
 		}
-		sort.Strings(keys)
+		slices.Sort(keys)
 		for _, key := range keys {
 			child := v[key]
 			if isGravatarEmpty(child) {

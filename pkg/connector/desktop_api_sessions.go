@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -103,7 +103,7 @@ func resolveDesktopInstanceName(instances map[string]DesktopAPIInstance, request
 	for name := range instances {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return "", fmt.Errorf(
 		"multiple desktop API instances configured (%s). Provide instance or use full sessionKey (desktop-api:<instance>:<chatId>) from sessions_list, or set a default with !ai desktop-api add <token> [baseURL]",
 		strings.Join(names, ", "),
@@ -216,7 +216,7 @@ func (oc *AIClient) desktopAPIInstanceNames() []string {
 	for name := range instances {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	for i, name := range names {
 		if name == desktopDefaultInstance {
 			if i > 0 {
@@ -374,8 +374,8 @@ func (oc *AIClient) listDesktopMessages(ctx context.Context, client *beeperdeskt
 		return nil, nil
 	}
 
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].Timestamp.Before(items[j].Timestamp)
+	slices.SortFunc(items, func(a, b shared.Message) int {
+		return a.Timestamp.Compare(b.Timestamp)
 	})
 	if len(items) > limit {
 		items = items[len(items)-limit:]
@@ -779,8 +779,8 @@ func (oc *AIClient) searchDesktopMessages(ctx context.Context, instance, query s
 	if len(out) > limit {
 		out = out[:limit]
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].Timestamp.Before(out[j].Timestamp)
+	slices.SortFunc(out, func(a, b shared.Message) int {
+		return a.Timestamp.Compare(b.Timestamp)
 	})
 	return out, nil
 }

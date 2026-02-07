@@ -1466,34 +1466,6 @@ func (oc *AIClient) ensureSingleAIGhost(ctx context.Context, portal *bridgev2.Po
 	return nil
 }
 
-//lint:ignore U1000 Staged for future agent model override wiring.
-func (oc *AIClient) applyAgentModelChange(ctx context.Context, agentID, oldModel, newModel string) {
-	if agentID == "" || oldModel == "" || newModel == "" || oldModel == newModel {
-		return
-	}
-	portals, err := oc.listAllChatPortals(ctx)
-	if err != nil {
-		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to list portals for agent model change")
-		return
-	}
-	for _, portal := range portals {
-		meta := portalMeta(portal)
-		if resolveAgentID(meta) != agentID {
-			continue
-		}
-		if meta.Model != "" {
-			continue // Room override wins
-		}
-		meta.Capabilities = getModelCapabilities(newModel, oc.findModelInfo(newModel))
-		meta.LastRoomStateSync = time.Now().Unix()
-		if err := portal.Save(ctx); err != nil {
-			oc.loggerForContext(ctx).Warn().Err(err).Stringer("portal", portal.PortalKey).Msg("Failed to save portal on agent model change")
-			continue
-		}
-		oc.handleAgentModelSwitch(ctx, portal, agentID, oldModel, newModel)
-	}
-}
-
 // BroadcastRoomState sends current room capabilities and settings to Matrix room state
 func (oc *AIClient) BroadcastRoomState(ctx context.Context, portal *bridgev2.Portal) error {
 	if err := oc.broadcastCapabilities(ctx, portal); err != nil {

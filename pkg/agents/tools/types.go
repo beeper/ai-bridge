@@ -70,8 +70,6 @@ const (
 	ResultSuccess ResultStatus = "success"
 	// ResultError indicates the tool failed with an error.
 	ResultError ResultStatus = "error"
-	// ResultPartial indicates partial success with some errors.
-	ResultPartial ResultStatus = "partial"
 )
 
 // ToolInfo provides metadata about a tool for listing.
@@ -81,11 +79,6 @@ type ToolInfo struct {
 	Type        ToolType `json:"type"`
 	Group       string   `json:"group,omitempty"`
 	Enabled     bool     `json:"enabled"`
-}
-
-// ToMCPTool converts a Tool to its underlying mcp.Tool.
-func (t *Tool) ToMCPTool() mcp.Tool {
-	return t.Tool
 }
 
 // Clone creates a copy of the tool.

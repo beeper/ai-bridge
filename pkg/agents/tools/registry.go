@@ -1,8 +1,9 @@
 package tools
 
 import (
+	"cmp"
 	"maps"
-	"sort"
+	"slices"
 	"sync"
 )
 
@@ -92,8 +93,8 @@ func (r *Registry) All() []*Tool {
 	}
 
 	// Sort by name for consistent ordering
-	sort.Slice(tools, func(i, j int) bool {
-		return tools[i].Name < tools[j].Name
+	slices.SortFunc(tools, func(a, b *Tool) int {
+		return cmp.Compare(a.Name, b.Name)
 	})
 
 	return tools
@@ -108,7 +109,7 @@ func (r *Registry) Groups() []string {
 	for group := range r.groups {
 		groups = append(groups, group)
 	}
-	sort.Strings(groups)
+	slices.Sort(groups)
 	return groups
 }
 
@@ -159,7 +160,7 @@ func (r *Registry) Clone() *Registry {
 		newReg.tools[name] = tool.Clone()
 	}
 	for group, names := range r.groups {
-		newReg.groups[group] = append([]string{}, names...)
+		newReg.groups[group] = slices.Clone(names)
 	}
 	maps.Copy(newReg.aliases, r.aliases)
 	return newReg

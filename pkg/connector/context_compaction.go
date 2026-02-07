@@ -58,9 +58,8 @@ func DefaultCompactionConfig() *CompactionConfig {
 type CompactionEventType string
 
 const (
-	CompactionEventStart    CompactionEventType = "compaction_start"
-	CompactionEventEnd      CompactionEventType = "compaction_end"
-	CompactionEventProgress CompactionEventType = "compaction_progress"
+	CompactionEventStart CompactionEventType = "compaction_start"
+	CompactionEventEnd   CompactionEventType = "compaction_end"
 )
 
 // CompactionEvent represents a compaction lifecycle event

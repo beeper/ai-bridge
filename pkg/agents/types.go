@@ -261,27 +261,6 @@ func (m ModelConfig) Clone() ModelConfig {
 	return clone
 }
 
-// EffectiveModel returns the primary model, falling back to a default if empty.
-func (m ModelConfig) EffectiveModel(defaultModel string) string {
-	if m.Primary != "" {
-		return m.Primary
-	}
-	return defaultModel
-}
-
-// MarshalJSON implements json.Marshaler.
-func (a *AgentDefinition) MarshalJSON() ([]byte, error) {
-	type Alias AgentDefinition
-	return json.Marshal((*Alias)(a))
-}
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (a *AgentDefinition) UnmarshalJSON(data []byte) error {
-	type Alias AgentDefinition
-	aux := (*Alias)(a)
-	return json.Unmarshal(data, aux)
-}
-
 // Validate checks if the agent definition is valid.
 func (a *AgentDefinition) Validate() error {
 	if a.ID == "" {
@@ -291,11 +270,6 @@ func (a *AgentDefinition) Validate() error {
 		return ErrMissingAgentName
 	}
 	return nil
-}
-
-// IsCustom returns true if this is a user-created (non-preset) agent.
-func (a *AgentDefinition) IsCustom() bool {
-	return !a.IsPreset
 }
 
 // EffectiveName returns the agent's display name, preferring identity name over the base name.

@@ -1553,7 +1553,7 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		DefaultModel: oc.defaultModelForProvider(),
 		Channel:      "matrix",
 		Capabilities: caps,
-		RepoRoot:     resolvePromptRepoRoot(workspaceDir),
+		RepoRoot:     "",
 	}
 
 	// Reaction guidance - default to minimal for group chats

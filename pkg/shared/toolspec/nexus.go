@@ -2,8 +2,6 @@ package toolspec
 
 // Nexus tool names and schemas mirrored from clay-nexus (toolsV2).
 const (
-	NexusGetUserInformationName          = "get_user_information"
-	NexusGetUserInformationDescription   = "Get information about the current user."
 	NexusSearchContactsName              = "searchContacts"
 	NexusSearchContactsDescription       = "Search for contacts and return matching people. Use for contact lookup, filtering, and who-type questions."
 	NexusGetContactName                  = "getContact"

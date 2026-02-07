@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -226,7 +226,7 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 		Provider:          m.status.Provider,
 		Model:             m.status.Model,
 		RequestedProvider: m.cfg.Provider,
-		Sources:           append([]string{}, m.cfg.Sources...),
+		Sources:           slices.Clone(m.cfg.Sources),
 		ExtraPaths:        resolveStatusExtraPaths(m.cfg.ExtraPaths, workspaceDir),
 		Fallback:          m.status.Fallback,
 	}
@@ -520,10 +520,10 @@ func memoryManagerCacheKey(bridgeID, loginID, agentID string, cfg *memory.Resolv
 	if cfg == nil {
 		return fmt.Sprintf("%s:%s:%s", bridgeID, loginID, agentID)
 	}
-	sources := append([]string{}, cfg.Sources...)
-	extra := append([]string{}, cfg.ExtraPaths...)
-	sort.Strings(sources)
-	sort.Strings(extra)
+	sources := slices.Clone(cfg.Sources)
+	extra := slices.Clone(cfg.ExtraPaths)
+	slices.Sort(sources)
+	slices.Sort(extra)
 	payload := map[string]any{
 		"sources":       sources,
 		"extraPaths":    extra,
@@ -569,7 +569,7 @@ func sortedHeaderNames(headers map[string]string) []string {
 		}
 		keys = append(keys, trimmed)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return keys
 }
 
@@ -670,7 +670,7 @@ func normalizeExtraPaths(paths []string) []string {
 		seen[normalized] = struct{}{}
 		out = append(out, normalized)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -696,7 +696,7 @@ func resolveStatusExtraPaths(paths []string, workspaceDir string) []string {
 		seen[cleaned] = struct{}{}
 		out = append(out, cleaned)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 

@@ -42,21 +42,6 @@ func normalizeContextKey(key string) string {
 	return strings.ToLower(trimmed)
 }
 
-func isSystemEventContextChanged(sessionKey string, contextKey string) bool {
-	key, err := requireSessionKey(sessionKey)
-	if err != nil {
-		return false
-	}
-	systemEventsMu.Lock()
-	defer systemEventsMu.Unlock()
-	entry := systemEvents[key]
-	lastContext := ""
-	if entry != nil {
-		lastContext = entry.lastContextKey
-	}
-	return normalizeContextKey(contextKey) != normalizeContextKey(lastContext)
-}
-
 func enqueueSystemEvent(sessionKey string, text string, contextKey string) {
 	key, err := requireSessionKey(sessionKey)
 	if err != nil {
@@ -100,17 +85,6 @@ func drainSystemEventEntries(sessionKey string) []SystemEvent {
 	copy(out, entry.queue)
 	delete(systemEvents, key)
 	systemEventsMu.Unlock()
-	return out
-}
-
-func drainSystemEvents(sessionKey string) []string {
-	entries := drainSystemEventEntries(sessionKey)
-	out := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if strings.TrimSpace(entry.Text) != "" {
-			out = append(out, entry.Text)
-		}
-	}
 	return out
 }
 

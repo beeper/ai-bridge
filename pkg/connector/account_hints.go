@@ -1,9 +1,10 @@
 package connector
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	beeperdesktopapi "github.com/beeper/desktop-api-go"
@@ -87,8 +88,8 @@ func (oc *AIClient) collectDesktopAccountHints(ctx context.Context) desktopAccou
 	if len(instances) == 0 {
 		return desktopAccountHintsSnapshot{}
 	}
-	sort.Slice(instances, func(i, j int) bool {
-		return instances[i].instanceKey < instances[j].instanceKey
+	slices.SortFunc(instances, func(a, b instanceAccounts) int {
+		return cmp.Compare(a.instanceKey, b.instanceKey)
 	})
 
 	// Keep account ID prefixing consistent with sessions_list by using
@@ -101,7 +102,7 @@ func (oc *AIClient) collectDesktopAccountHints(ctx context.Context) desktopAccou
 		for rawID := range inst.accounts {
 			rawIDs = append(rawIDs, rawID)
 		}
-		sort.Strings(rawIDs)
+		slices.Sort(rawIDs)
 		for _, rawID := range rawIDs {
 			item := inst.accounts[rawID]
 			accountID := formatDesktopAccountID(areThereMultipleDesktopInstances, item.InstanceKey, item.BridgeType, item.RawAccountID)
@@ -250,7 +251,7 @@ func formatDesktopAccountID(areThereMultipleDesktopInstances bool, instanceKey, 
 
 func chooseDesktopAccountHintBaseURL(baseURLs []string) string {
 	unique := uniqueNonEmptyStrings(baseURLs)
-	sort.Strings(unique)
+	slices.Sort(unique)
 	switch len(unique) {
 	case 0:
 		return ""
