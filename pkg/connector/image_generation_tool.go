@@ -461,13 +461,13 @@ func normalizeOpenAIImageParams(req imageGenRequest) (openAIImageParams, error) 
 		if background != "" || outputFormat != "" {
 			return openAIImageParams{}, fmt.Errorf("background/output_format are not supported for %s", model)
 		}
-		if !isAllowedValue(size, map[string]bool{"1024x1024": true, "1792x1024": true, "1024x1792": true}) {
+		if !isAllowedValue(size, allowedDalle3Sizes) {
 			return openAIImageParams{}, fmt.Errorf("unsupported size for %s: %s", model, size)
 		}
-		if !isAllowedValue(quality, map[string]bool{"standard": true, "hd": true}) {
+		if !isAllowedValue(quality, allowedDalle3Qualities) {
 			return openAIImageParams{}, fmt.Errorf("unsupported quality for %s: %s", model, quality)
 		}
-		if !isAllowedValue(style, map[string]bool{"vivid": true, "natural": true}) {
+		if !isAllowedValue(style, allowedDalle3Styles) {
 			return openAIImageParams{}, fmt.Errorf("unsupported style for %s: %s", model, style)
 		}
 		if count > 1 {
@@ -486,7 +486,7 @@ func normalizeOpenAIImageParams(req imageGenRequest) (openAIImageParams, error) 
 		if background != "" || outputFormat != "" {
 			return openAIImageParams{}, fmt.Errorf("background/output_format are not supported for %s", model)
 		}
-		if !isAllowedValue(size, map[string]bool{"256x256": true, "512x512": true, "1024x1024": true}) {
+		if !isAllowedValue(size, allowedDalle2Sizes) {
 			return openAIImageParams{}, fmt.Errorf("unsupported size for %s: %s", model, size)
 		}
 		if quality != "standard" {
@@ -508,16 +508,16 @@ func normalizeOpenAIImageParams(req imageGenRequest) (openAIImageParams, error) 
 		if style != "" {
 			return openAIImageParams{}, fmt.Errorf("style is not supported for %s", model)
 		}
-		if !isAllowedValue(size, map[string]bool{"1024x1024": true, "1536x1024": true, "1024x1536": true, "auto": true}) {
+		if !isAllowedValue(size, allowedGPTImageSizes) {
 			return openAIImageParams{}, fmt.Errorf("unsupported size for %s: %s", model, size)
 		}
-		if !isAllowedValue(quality, map[string]bool{"auto": true, "high": true, "medium": true, "low": true}) {
+		if !isAllowedValue(quality, allowedGPTImageQualities) {
 			return openAIImageParams{}, fmt.Errorf("unsupported quality for %s: %s", model, quality)
 		}
-		if background != "" && !isAllowedValue(background, map[string]bool{"auto": true, "transparent": true, "opaque": true}) {
+		if background != "" && !isAllowedValue(background, allowedGPTImageBackgrounds) {
 			return openAIImageParams{}, fmt.Errorf("unsupported background for %s: %s", model, background)
 		}
-		if outputFormat != "" && !isAllowedValue(outputFormat, map[string]bool{"png": true, "jpeg": true, "webp": true}) {
+		if outputFormat != "" && !isAllowedValue(outputFormat, allowedGPTImageFormats) {
 			return openAIImageParams{}, fmt.Errorf("unsupported output_format for %s: %s", model, outputFormat)
 		}
 	}
@@ -533,6 +533,18 @@ func normalizeOpenAIImageParams(req imageGenRequest) (openAIImageParams, error) 
 		OutputFormat: outputFormat,
 	}, nil
 }
+
+var (
+	allowedDalle3Sizes      = map[string]bool{"1024x1024": true, "1792x1024": true, "1024x1792": true}
+	allowedDalle3Qualities  = map[string]bool{"standard": true, "hd": true}
+	allowedDalle3Styles     = map[string]bool{"vivid": true, "natural": true}
+	allowedDalle2Sizes      = map[string]bool{"256x256": true, "512x512": true, "1024x1024": true}
+	allowedGPTImageSizes    = map[string]bool{"1024x1024": true, "1536x1024": true, "1024x1536": true, "auto": true}
+	allowedGPTImageQualities = map[string]bool{"auto": true, "high": true, "medium": true, "low": true}
+	allowedGPTImageBackgrounds = map[string]bool{"auto": true, "transparent": true, "opaque": true}
+	allowedGPTImageFormats  = map[string]bool{"png": true, "jpeg": true, "webp": true}
+	allowedGeminiResolutions = map[string]bool{"1k": true, "2k": true, "4k": true}
+)
 
 func isAllowedValue(value string, allowed map[string]bool) bool {
 	if value == "" {
@@ -730,7 +742,7 @@ func callGeminiImageGen(ctx context.Context, btc *BridgeToolContext, baseURL, mo
 			resolution = "2K"
 		}
 	}
-	if !isAllowedValue(strings.ToLower(resolution), map[string]bool{"1k": true, "2k": true, "4k": true}) {
+	if !isAllowedValue(strings.ToLower(resolution), allowedGeminiResolutions) {
 		return nil, fmt.Errorf("unsupported resolution: %s", resolution)
 	}
 

@@ -1148,11 +1148,6 @@ func executeTTS(ctx context.Context, args map[string]any) (string, error) {
 
 	btc := GetBridgeToolContext(ctx)
 
-	validVoices := map[string]bool{
-		"alloy": true, "ash": true, "coral": true, "echo": true,
-		"fable": true, "onyx": true, "nova": true, "sage": true, "shimmer": true,
-	}
-
 	// Try provider-based TTS first (Beeper/OpenAI)
 	if btc != nil {
 		if provider, ok := btc.Client.provider.(*OpenAIProvider); ok {
