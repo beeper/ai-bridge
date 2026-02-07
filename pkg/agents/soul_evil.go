@@ -3,6 +3,7 @@ package agents
 import (
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"regexp"
 	"strconv"
 	"strings"
@@ -165,5 +166,5 @@ func DecideSoulEvil(params SoulEvilCheckParams) SoulEvilDecision {
 }
 
 func randFloat64() float64 {
-	return float64(time.Now().UnixNano()%1e9) / 1e9
+	return rand.Float64()
 }

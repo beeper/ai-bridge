@@ -26,3 +26,12 @@ func setCachedStore(path string, store *CronStoreFile) {
 	sharedStoreCache.data[path] = store
 	sharedStoreCache.mu.Unlock()
 }
+
+func clearCachedStore(path string) {
+	if path == "" {
+		return
+	}
+	sharedStoreCache.mu.Lock()
+	delete(sharedStoreCache.data, path)
+	sharedStoreCache.mu.Unlock()
+}

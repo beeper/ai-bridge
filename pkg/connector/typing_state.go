@@ -39,9 +39,9 @@ func (oc *AIClient) getUserTypingState(roomID id.RoomID) (userTypingState, bool)
 	if oc == nil || roomID == "" {
 		return userTypingState{}, false
 	}
-	oc.userTypingMu.Lock()
+	oc.userTypingMu.RLock()
 	state, ok := oc.userTypingState[roomID]
-	oc.userTypingMu.Unlock()
+	oc.userTypingMu.RUnlock()
 	return state, ok
 }
 

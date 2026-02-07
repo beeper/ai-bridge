@@ -9,7 +9,7 @@ import (
 // and ensure tool results are properly matched to requests.
 // Based on clawdbot's session-tool-result-guard pattern.
 type Guard struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	pending  map[string]*PendingCall // callID -> pending call info
 	timeout  time.Duration
 	stopChan chan struct{} // signals cleanup goroutine to stop
@@ -138,23 +138,23 @@ func (g *Guard) CompleteWithResult(callID string, result *Result) *PendingCall {
 
 // IsPending checks if a call is currently pending.
 func (g *Guard) IsPending(callID string) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	_, exists := g.pending[callID]
 	return exists
 }
 
 // Get retrieves a pending call without completing it.
 func (g *Guard) Get(callID string) *PendingCall {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	return g.pending[callID]
 }
 
 // Pending returns all pending calls.
 func (g *Guard) Pending() []*PendingCall {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 
 	calls := make([]*PendingCall, 0, len(g.pending))
 	for _, call := range g.pending {
@@ -165,8 +165,8 @@ func (g *Guard) Pending() []*PendingCall {
 
 // PendingCount returns the number of pending calls.
 func (g *Guard) PendingCount() int {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	return len(g.pending)
 }
 
