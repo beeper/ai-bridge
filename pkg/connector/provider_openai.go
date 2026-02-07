@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/shared/httputil"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
@@ -89,17 +90,6 @@ func NewOpenAIProviderWithUserID(apiKey, baseURL, userID string, log zerolog.Log
 		log:     log.With().Str("provider", "openai").Logger(),
 		baseURL: baseURL,
 	}, nil
-}
-
-func appendHeaderOptions(opts []option.RequestOption, headers map[string]string) []option.RequestOption {
-	for key, value := range headers {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		opts = append(opts, option.WithHeader(key, trimmed))
-	}
-	return opts
 }
 
 func newOutboundRequestID() string {
@@ -198,7 +188,7 @@ func NewOpenAIProviderWithPDFPlugin(apiKey, baseURL, userID, pdfEngine string, h
 		}))
 	}
 
-	opts = appendHeaderOptions(opts, headers)
+	opts = httputil.AppendHeaderOptions(opts, headers)
 
 	// Add PDF plugin middleware
 	opts = append(opts, option.WithMiddleware(MakePDFPluginMiddleware(pdfEngine)))

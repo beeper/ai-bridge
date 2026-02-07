@@ -3,6 +3,8 @@ package fetch
 import (
 	"os"
 	"strings"
+
+	"github.com/beeper/ai-bridge/pkg/shared/stringutil"
 )
 
 // ConfigFromEnv builds a fetch config using environment variables.
@@ -13,7 +15,7 @@ func ConfigFromEnv() *Config {
 		cfg.Provider = provider
 	}
 	if fallbacks := strings.TrimSpace(os.Getenv("FETCH_FALLBACKS")); fallbacks != "" {
-		cfg.Fallbacks = splitCSV(fallbacks)
+		cfg.Fallbacks = stringutil.SplitCSV(fallbacks)
 	}
 
 	cfg.Exa.APIKey = envOr(cfg.Exa.APIKey, os.Getenv("EXA_API_KEY"))
@@ -55,14 +57,3 @@ func envOr(existing, value string) string {
 	return value
 }
 
-func splitCSV(value string) []string {
-	parts := strings.Split(value, ",")
-	var out []string
-	for _, part := range parts {
-		item := strings.TrimSpace(part)
-		if item != "" {
-			out = append(out, item)
-		}
-	}
-	return out
-}

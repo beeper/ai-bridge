@@ -2,12 +2,14 @@ package connector
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
 
@@ -24,8 +26,30 @@ func toolApprovalDecisionFromEmoji(emoji string) (approve bool, always bool, ok 
 	}
 }
 
+func ensureReactionContent(msg *bridgev2.MatrixReaction) *event.ReactionEventContent {
+	if msg == nil {
+		return nil
+	}
+	if msg.Content != nil {
+		return msg.Content
+	}
+	if msg.Event == nil || len(msg.Event.Content.VeryRaw) == 0 {
+		return nil
+	}
+	var parsed event.ReactionEventContent
+	if err := json.Unmarshal(msg.Event.Content.VeryRaw, &parsed); err != nil {
+		return nil
+	}
+	msg.Content = &parsed
+	return msg.Content
+}
+
 func (oc *AIClient) PreHandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
-	if msg == nil || msg.Event == nil || msg.Content == nil {
+	if msg == nil || msg.Event == nil {
+		return bridgev2.MatrixReactionPreResponse{}, bridgev2.ErrReactionsNotSupported
+	}
+	content := ensureReactionContent(msg)
+	if content == nil {
 		return bridgev2.MatrixReactionPreResponse{}, bridgev2.ErrReactionsNotSupported
 	}
 	if msg.Portal != nil {
@@ -35,7 +59,7 @@ func (oc *AIClient) PreHandleMatrixReaction(ctx context.Context, msg *bridgev2.M
 		}
 	}
 
-	emoji := variationselector.Remove(msg.Content.RelatesTo.Key)
+	emoji := variationselector.Remove(content.RelatesTo.Key)
 	return bridgev2.MatrixReactionPreResponse{
 		SenderID:     oc.matrixSenderID(msg.Event.Sender),
 		Emoji:        emoji,
@@ -44,26 +68,28 @@ func (oc *AIClient) PreHandleMatrixReaction(ctx context.Context, msg *bridgev2.M
 }
 
 func (oc *AIClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (*database.Reaction, error) {
-	if msg == nil || msg.Event == nil || msg.Portal == nil || msg.Content == nil {
+	if msg == nil || msg.Event == nil || msg.Portal == nil {
 		return &database.Reaction{}, nil
 	}
 	if oc.isMatrixBotUser(ctx, msg.Event.Sender) {
 		return &database.Reaction{}, nil
 	}
 
+	content := ensureReactionContent(msg)
+
 	emoji := ""
 	if msg.PreHandleResp != nil {
 		emoji = msg.PreHandleResp.Emoji
 	}
-	if emoji == "" && msg.Content != nil {
-		emoji = variationselector.Remove(msg.Content.RelatesTo.Key)
+	if emoji == "" && content != nil {
+		emoji = variationselector.Remove(content.RelatesTo.Key)
 	}
 
 	targetEventID := id.EventID("")
 	if msg.TargetMessage != nil && msg.TargetMessage.MXID != "" {
 		targetEventID = msg.TargetMessage.MXID
-	} else if msg.Content != nil && msg.Content.RelatesTo.EventID != "" {
-		targetEventID = msg.Content.RelatesTo.EventID
+	} else if content != nil && content.RelatesTo.EventID != "" {
+		targetEventID = content.RelatesTo.EventID
 	}
 
 	// Owner-only tool approvals via reactions on tool-call timeline messages.

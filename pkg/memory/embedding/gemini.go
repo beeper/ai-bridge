@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 )
@@ -178,12 +179,10 @@ func (c *geminiClient) post(ctx context.Context, url string, payload map[string]
 }
 
 func mergeHeaders(base map[string]string, overrides map[string]string) map[string]string {
-	out := make(map[string]string)
-	for k, v := range base {
-		out[k] = v
+	out := maps.Clone(base)
+	if out == nil {
+		out = make(map[string]string)
 	}
-	for k, v := range overrides {
-		out[k] = v
-	}
+	maps.Copy(out, overrides)
 	return out
 }

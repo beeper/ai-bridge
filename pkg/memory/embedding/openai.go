@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/beeper/ai-bridge/pkg/shared/httputil"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 )
@@ -33,7 +34,7 @@ func NewOpenAIProvider(apiKey, baseURL, model string, headers map[string]string)
 		baseURL = DefaultOpenAIBaseURL
 	}
 	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
-	opts = appendHeaderOptions(opts, headers)
+	opts = httputil.AppendHeaderOptions(opts, headers)
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}
@@ -79,13 +80,3 @@ func NewOpenAIProvider(apiKey, baseURL, model string, headers map[string]string)
 	}, nil
 }
 
-func appendHeaderOptions(opts []option.RequestOption, headers map[string]string) []option.RequestOption {
-	for key, value := range headers {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		opts = append(opts, option.WithHeader(key, trimmed))
-	}
-	return opts
-}

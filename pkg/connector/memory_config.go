@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
@@ -195,13 +196,11 @@ func mergeHeaders(base, override map[string]string) map[string]string {
 	if len(base) == 0 && len(override) == 0 {
 		return nil
 	}
-	out := make(map[string]string)
-	for k, v := range base {
-		out[k] = v
+	out := maps.Clone(base)
+	if out == nil {
+		out = make(map[string]string)
 	}
-	for k, v := range override {
-		out[k] = v
-	}
+	maps.Copy(out, override)
 	return out
 }
 

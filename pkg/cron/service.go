@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"go.mau.fi/util/ptr"
 )
 
 // Logger matches OpenClaw logger shape.
@@ -178,7 +180,7 @@ func (c *CronService) Add(input CronJobCreate) (CronJob, error) {
 			return err
 		}
 		c.armTimerLocked()
-		c.emit(CronEvent{JobID: created.ID, Action: "added", NextRunAtMs: derefInt64(created.State.NextRunAtMs)})
+		c.emit(CronEvent{JobID: created.ID, Action: "added", NextRunAtMs: ptr.Val(created.State.NextRunAtMs)})
 		job = created
 		return nil
 	})
@@ -218,7 +220,7 @@ func (c *CronService) Update(id string, patch CronJobPatch) (CronJob, error) {
 			return err
 		}
 		c.armTimerLocked()
-		c.emit(CronEvent{JobID: current.ID, Action: "updated", NextRunAtMs: derefInt64(current.State.NextRunAtMs)})
+		c.emit(CronEvent{JobID: current.ID, Action: "updated", NextRunAtMs: ptr.Val(current.State.NextRunAtMs)})
 		job = current
 		return nil
 	})
@@ -407,7 +409,7 @@ func (c *CronService) executeJobLocked(jobID string, forced bool) (bool, error) 
 		job.State.RunningAtMs = nil
 		job.State.LastRunAtMs = &startedAt
 		job.State.LastStatus = statusVal
-		job.State.LastDurationMs = ptrInt64(maxInt64(0, endedAt-startedAt))
+		job.State.LastDurationMs = ptr.Ptr(max(0, endedAt-startedAt))
 		job.State.LastError = errVal
 		job.UpdatedAtMs = endedAt
 
@@ -430,11 +432,11 @@ func (c *CronService) executeJobLocked(jobID string, forced bool) (bool, error) 
 			JobID:       job.ID,
 			Action:      "finished",
 			RunAtMs:     startedAt,
-			DurationMs:  maxInt64(0, endedAt-startedAt),
+			DurationMs:  max(0, endedAt-startedAt),
 			Status:      statusVal,
 			Error:       errVal,
 			Summary:     summaryVal,
-			NextRunAtMs: derefInt64(job.State.NextRunAtMs),
+			NextRunAtMs: ptr.Val(job.State.NextRunAtMs),
 		})
 
 		if shouldDelete {
@@ -617,7 +619,7 @@ func (c *CronService) armTimerLocked() {
 	if next == nil {
 		return
 	}
-	delayMs := maxInt64(0, *next-c.deps.NowMs())
+	delayMs := max(0, *next-c.deps.NowMs())
 	const maxTimeoutMs int64 = (1 << 31) - 1
 	if delayMs > maxTimeoutMs {
 		delayMs = maxTimeoutMs

@@ -175,6 +175,10 @@ func (cc *CodexClient) Disconnect() {
 	cc.subMu.Lock()
 	cc.turnSubs = make(map[string]chan codexNotif)
 	cc.subMu.Unlock()
+
+	cc.roomMu.Lock()
+	cc.activeRooms = make(map[id.RoomID]bool)
+	cc.roomMu.Unlock()
 }
 
 func (cc *CodexClient) IsLoggedIn() bool {
@@ -545,6 +549,8 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 
 	finishStatus := "completed"
 	var completedErr string
+	maxWait := time.NewTimer(10 * time.Minute)
+	defer maxWait.Stop()
 	for {
 		select {
 		case evt := <-turnCh:
@@ -554,6 +560,10 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 				completedErr = errText
 				goto done
 			}
+			maxWait.Reset(10 * time.Minute)
+		case <-maxWait.C:
+			finishStatus = "timeout"
+			goto done
 		case <-ctx.Done():
 			finishStatus = "interrupted"
 			goto done
@@ -1271,7 +1281,22 @@ func (cc *CodexClient) dispatchNotifications() {
 		ch := cc.turnSubs[key]
 		cc.subMu.Unlock()
 		if ch == nil {
-			continue
+			// Race: turn/start just returned but subscribeTurn() hasn't registered yet.
+			// Spin-wait briefly for terminal events that must not be dropped.
+			if evt.Method == "turn/completed" || evt.Method == "error" {
+				for i := 0; i < 20; i++ {
+					time.Sleep(50 * time.Millisecond)
+					cc.subMu.Lock()
+					ch = cc.turnSubs[key]
+					cc.subMu.Unlock()
+					if ch != nil {
+						break
+					}
+				}
+			}
+			if ch == nil {
+				continue
+			}
 		}
 
 		// Try non-blocking, but ensure critical terminal events are delivered.
