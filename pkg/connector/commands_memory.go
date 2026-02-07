@@ -134,11 +134,15 @@ func fnMemory(ce *commands.Event) {
 			ce.Reply("Memory search disabled: %s", errMsg)
 			return
 		}
-		if err := manager.sync(ce.Ctx, "", true); err != nil {
+		ce.Reply("Memory reindex starting...")
+		onProgress := func(completed, total int, label string) {
+			ce.Reply("Indexing %d/%d: %s", completed+1, total, label)
+		}
+		if err := manager.syncWithProgress(ce.Ctx, "", true, onProgress); err != nil {
 			ce.Reply("Memory reindex failed: %v", err)
 			return
 		}
-		ce.Reply("Memory reindex queued.")
+		ce.Reply("Memory reindex complete.")
 		return
 	case "search":
 		if len(ce.Args) < 2 {

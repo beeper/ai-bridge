@@ -185,6 +185,7 @@ func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sess
 	if err := m.removeStaleSessions(ctx, active); err != nil {
 		return err
 	}
+	m.pruneExpiredSessions(ctx)
 	return nil
 }
 

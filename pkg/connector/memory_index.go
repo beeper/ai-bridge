@@ -49,6 +49,20 @@ func (m *MemorySearchManager) ensureSchema(ctx context.Context) {
 	m.ftsAvailable = true
 }
 
+// syncWithProgress is like sync but calls onProgress during indexing.
+// The progress callback is set before acquiring the sync lock and cleared after.
+func (m *MemorySearchManager) syncWithProgress(ctx context.Context, sessionKey string, force bool, onProgress func(completed, total int, label string)) error {
+	if m == nil {
+		return fmt.Errorf("memory search unavailable")
+	}
+	// Safe: syncProgress is only read inside sync() which holds m.mu.
+	// This write happens before sync() acquires the lock, creating a happens-before.
+	m.syncProgress = onProgress
+	err := m.sync(ctx, sessionKey, force)
+	m.syncProgress = nil
+	return err
+}
+
 func (m *MemorySearchManager) sync(ctx context.Context, sessionKey string, force bool) error {
 	if m == nil {
 		return fmt.Errorf("memory search unavailable")
@@ -65,7 +79,60 @@ func (m *MemorySearchManager) sync(ctx context.Context, sessionKey string, force
 		generation = uuid.NewString()
 	}
 
-	if err := m.indexMemoryFiles(ctx, needsFullReindex, generation); err != nil {
+	if needsFullReindex {
+		return m.syncFullReindex(ctx, sessionKey, generation)
+	}
+	return m.syncIncremental(ctx, sessionKey, generation)
+}
+
+// syncFullReindex wraps a full reindex in a database transaction for atomicity.
+// If any step fails, the transaction rolls back and the existing index remains intact.
+// Vector table operations (separate sql.Conn) are best-effort outside the transaction.
+func (m *MemorySearchManager) syncFullReindex(ctx context.Context, sessionKey, generation string) error {
+	// Collect vector IDs to clean up after commit (vector table uses separate conn).
+	var vectorCleanupIDs []string
+
+	err := m.db.DoTxn(ctx, nil, func(txCtx context.Context) error {
+		if err := m.indexMemoryFiles(txCtx, true, generation); err != nil {
+			return err
+		}
+		if m.cfg.Experimental.SessionMemory && hasSource(m.cfg.Sources, "sessions") {
+			if err := m.syncSessions(txCtx, true, sessionKey, generation); err != nil {
+				return err
+			}
+		}
+		if err := m.updateMeta(txCtx, generation); err != nil {
+			return err
+		}
+		// Collect old-generation chunk IDs for vector cleanup (within txn so we see consistent state).
+		vectorCleanupIDs = m.collectOldGenerationIDs(txCtx, generation)
+		// Delete old-generation chunks and FTS entries within the transaction.
+		m.deleteOldGenerations(txCtx, generation)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// Transaction committed successfully — update in-memory state.
+	m.indexGen = generation
+	if hasSource(m.cfg.Sources, "memory") {
+		m.dirty = false
+	}
+	if m.cfg.Experimental.SessionMemory && hasSource(m.cfg.Sources, "sessions") {
+		m.sessionsDirty = false
+	}
+
+	// Best-effort vector cleanup outside the transaction.
+	if m.vectorReady && len(vectorCleanupIDs) > 0 {
+		m.deleteVectorIDs(ctx, vectorCleanupIDs)
+	}
+	return nil
+}
+
+// syncIncremental performs an incremental (non-transactional) sync for unchanged config.
+func (m *MemorySearchManager) syncIncremental(ctx context.Context, sessionKey, generation string) error {
+	if err := m.indexMemoryFiles(ctx, false, generation); err != nil {
 		return err
 	}
 	if hasSource(m.cfg.Sources, "memory") {
@@ -73,7 +140,7 @@ func (m *MemorySearchManager) sync(ctx context.Context, sessionKey string, force
 	}
 
 	if m.cfg.Experimental.SessionMemory && hasSource(m.cfg.Sources, "sessions") {
-		if err := m.syncSessions(ctx, needsFullReindex, sessionKey, generation); err != nil {
+		if err := m.syncSessions(ctx, false, sessionKey, generation); err != nil {
 			return err
 		}
 		m.sessionsDirty = false
@@ -81,10 +148,6 @@ func (m *MemorySearchManager) sync(ctx context.Context, sessionKey string, force
 
 	if err := m.updateMeta(ctx, generation); err != nil {
 		return err
-	}
-	if needsFullReindex {
-		m.indexGen = generation
-		m.cleanupOldGenerations(ctx, generation)
 	}
 	return nil
 }
@@ -210,6 +273,8 @@ func (m *MemorySearchManager) indexMemoryFiles(ctx context.Context, force bool, 
 		Int("concurrency", m.indexConcurrency()).
 		Msg("memory sync: indexing memory files")
 
+	total := len(activePaths)
+	completed := 0
 	for _, entry := range activePaths {
 		source := "memory"
 		needs, err := m.needsFileIndex(ctx, entry, source, generation)
@@ -217,11 +282,19 @@ func (m *MemorySearchManager) indexMemoryFiles(ctx context.Context, force bool, 
 			return err
 		}
 		if !force && !needs {
+			completed++
 			continue
+		}
+		if m.syncProgress != nil {
+			m.syncProgress(completed, total, entry.Path)
 		}
 		if err := m.indexContent(ctx, entry.Path, source, entry.Content, generation); err != nil {
 			return err
 		}
+		completed++
+	}
+	if m.syncProgress != nil {
+		m.syncProgress(total, total, "cleanup")
 	}
 
 	return m.removeStaleMemoryChunks(ctx, activePaths, generation)
@@ -399,8 +472,8 @@ func (m *MemorySearchManager) deletePathChunks(ctx context.Context, path, source
 	for _, id := range ids {
 		_, _ = m.db.Exec(ctx,
 			`DELETE FROM ai_memory_chunks_fts
-             WHERE id=$1`,
-			id,
+             WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND id=$4`,
+			m.bridgeID, m.loginID, m.agentID, id,
 		)
 	}
 	_, err = m.db.Exec(ctx,
@@ -461,10 +534,12 @@ func (m *MemorySearchManager) removeStaleMemoryChunks(ctx context.Context, activ
 	return nil
 }
 
-func (m *MemorySearchManager) cleanupOldGenerations(ctx context.Context, generation string) {
+// collectOldGenerationIDs returns chunk IDs that belong to older generations.
+// Used to collect IDs for vector table cleanup before deleting from main tables.
+func (m *MemorySearchManager) collectOldGenerationIDs(ctx context.Context, generation string) []string {
 	generation = strings.TrimSpace(generation)
 	if generation == "" {
-		return
+		return nil
 	}
 	rows, err := m.db.Query(ctx,
 		`SELECT id FROM ai_memory_chunks
@@ -472,29 +547,37 @@ func (m *MemorySearchManager) cleanupOldGenerations(ctx context.Context, generat
 		m.bridgeID, m.loginID, m.agentID, generation+":%",
 	)
 	if err != nil {
-		return
+		return nil
 	}
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			return
+			return ids
 		}
 		ids = append(ids, id)
 	}
 	rows.Close()
-	if len(ids) == 0 {
+	return ids
+}
+
+// deleteOldGenerations removes chunks and FTS entries from previous generations.
+// Safe to call inside a transaction — vector cleanup should be done separately.
+func (m *MemorySearchManager) deleteOldGenerations(ctx context.Context, generation string) {
+	generation = strings.TrimSpace(generation)
+	if generation == "" {
 		return
 	}
-	if m.vectorReady {
-		m.deleteVectorIDs(ctx, ids)
-	}
-	for _, id := range ids {
-		_, _ = m.db.Exec(ctx,
-			`DELETE FROM ai_memory_chunks_fts WHERE id=$1`,
-			id,
-		)
+	if m.ftsAvailable {
+		ids := m.collectOldGenerationIDs(ctx, generation)
+		for _, id := range ids {
+			_, _ = m.db.Exec(ctx,
+				`DELETE FROM ai_memory_chunks_fts
+                 WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND id=$4`,
+				m.bridgeID, m.loginID, m.agentID, id,
+			)
+		}
 	}
 	_, _ = m.db.Exec(ctx,
 		`DELETE FROM ai_memory_chunks

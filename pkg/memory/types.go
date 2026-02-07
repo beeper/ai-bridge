@@ -61,12 +61,14 @@ type SyncConfig struct {
 type SessionSyncConfig struct {
 	DeltaBytes    int
 	DeltaMessages int
+	RetentionDays int
 }
 
 type QueryConfig struct {
-	MaxResults int
-	MinScore   float64
-	Hybrid     HybridConfig
+	MaxResults      int
+	MinScore        float64
+	MaxInjectedChars int
+	Hybrid          HybridConfig
 }
 
 type HybridConfig struct {

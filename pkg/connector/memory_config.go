@@ -107,12 +107,14 @@ func mergeMemorySearchConfig(
 		Sessions: memory.SessionSyncConfig{
 			DeltaBytes:    pickInt(overridesSyncDeltaBytes(overrides), defaultsSyncDeltaBytes(defaults), memory.DefaultSessionDeltaBytes),
 			DeltaMessages: pickInt(overridesSyncDeltaMessages(overrides), defaultsSyncDeltaMessages(defaults), memory.DefaultSessionDeltaMessages),
+			RetentionDays: pickInt(overridesSyncRetentionDays(overrides), defaultsSyncRetentionDays(defaults), 0),
 		},
 	}
 
 	query := memory.QueryConfig{
-		MaxResults: pickInt(overridesQueryMaxResults(overrides), defaultsQueryMaxResults(defaults), memory.DefaultMaxResults),
-		MinScore:   pickFloat(overridesQueryMinScore(overrides), defaultsQueryMinScore(defaults), memory.DefaultMinScore),
+		MaxResults:       pickInt(overridesQueryMaxResults(overrides), defaultsQueryMaxResults(defaults), memory.DefaultMaxResults),
+		MinScore:         pickFloat(overridesQueryMinScore(overrides), defaultsQueryMinScore(defaults), memory.DefaultMinScore),
+		MaxInjectedChars: pickInt(overridesQueryMaxInjectedChars(overrides), defaultsQueryMaxInjectedChars(defaults), 0),
 		Hybrid: memory.HybridConfig{
 			Enabled:             pickBool(overridesHybridEnabled(overrides), defaultsHybridEnabled(defaults), memory.DefaultHybridEnabled),
 			VectorWeight:        pickFloat(overridesHybridVectorWeight(overrides), defaultsHybridVectorWeight(defaults), memory.DefaultHybridVectorWeight),
@@ -140,6 +142,7 @@ func mergeMemorySearchConfig(
 	query.Hybrid.CandidateMultiplier = min(max(query.Hybrid.CandidateMultiplier, 1), 20)
 	sync.Sessions.DeltaBytes = max(0, sync.Sessions.DeltaBytes)
 	sync.Sessions.DeltaMessages = max(0, sync.Sessions.DeltaMessages)
+	sync.Sessions.RetentionDays = max(0, sync.Sessions.RetentionDays)
 
 	experimental := memory.ExperimentalConfig{SessionMemory: sessionMemory}
 
@@ -494,6 +497,20 @@ func defaultsSyncDeltaMessages(cfg *MemorySearchConfig) int {
 	return cfg.Sync.Sessions.DeltaMessages
 }
 
+func overridesSyncRetentionDays(cfg *agents.MemorySearchConfig) int {
+	if cfg == nil || cfg.Sync == nil || cfg.Sync.Sessions == nil {
+		return 0
+	}
+	return cfg.Sync.Sessions.RetentionDays
+}
+
+func defaultsSyncRetentionDays(cfg *MemorySearchConfig) int {
+	if cfg == nil || cfg.Sync == nil || cfg.Sync.Sessions == nil {
+		return 0
+	}
+	return cfg.Sync.Sessions.RetentionDays
+}
+
 func overridesQueryMaxResults(cfg *agents.MemorySearchConfig) int {
 	if cfg == nil || cfg.Query == nil {
 		return 0
@@ -520,6 +537,20 @@ func defaultsQueryMinScore(cfg *MemorySearchConfig) float64 {
 		return 0
 	}
 	return cfg.Query.MinScore
+}
+
+func overridesQueryMaxInjectedChars(cfg *agents.MemorySearchConfig) int {
+	if cfg == nil || cfg.Query == nil {
+		return 0
+	}
+	return cfg.Query.MaxInjectedChars
+}
+
+func defaultsQueryMaxInjectedChars(cfg *MemorySearchConfig) int {
+	if cfg == nil || cfg.Query == nil {
+		return 0
+	}
+	return cfg.Query.MaxInjectedChars
 }
 
 func overridesHybridEnabled(cfg *agents.MemorySearchConfig) *bool {
