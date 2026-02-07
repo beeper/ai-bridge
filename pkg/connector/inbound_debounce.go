@@ -1,12 +1,5 @@
 package connector
 
-func normalizeDebounceMs(value int) int {
-	if value < 0 {
-		return 0
-	}
-	return value
-}
-
 func (oc *AIClient) resolveInboundDebounceMs(channel string) int {
 	if oc == nil || oc.connector == nil {
 		return DefaultDebounceMs
@@ -15,10 +8,10 @@ func (oc *AIClient) resolveInboundDebounceMs(channel string) int {
 	if cfg.Messages != nil && cfg.Messages.InboundDebounce != nil {
 		if byChannel := cfg.Messages.InboundDebounce.ByChannel; byChannel != nil {
 			if v, ok := byChannel[channel]; ok {
-				return normalizeDebounceMs(v)
+				return max(v, 0)
 			}
 		}
-		return normalizeDebounceMs(cfg.Messages.InboundDebounce.DebounceMs)
+		return max(cfg.Messages.InboundDebounce.DebounceMs, 0)
 	}
 	if cfg.Inbound != nil {
 		return cfg.Inbound.WithDefaults().DefaultDebounceMs

@@ -12,6 +12,7 @@ import (
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/cron"
+	"github.com/google/uuid"
 )
 
 const (
@@ -53,10 +54,10 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 	timeoutMs := resolveCronIsolatedTimeoutMs(job, &oc.connector.Config)
 
 	sessionKey := cronSessionKey(agentID, job.ID)
-	runID := newCronSessionID()
+	runID := uuid.NewString()
 	oc.updateCronSessionEntry(ctx, sessionKey, func(entry cronSessionEntry) cronSessionEntry {
 		entry.SessionID = runID
-		entry.UpdatedAt = cronSessionUpdatedAt()
+		entry.UpdatedAt = time.Now().UnixMilli()
 		return entry
 	})
 
@@ -91,7 +92,7 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 						if total > 0 {
 							entry.TotalTokens = total
 						}
-						entry.UpdatedAt = cronSessionUpdatedAt()
+						entry.UpdatedAt = time.Now().UnixMilli()
 						return entry
 					})
 				}

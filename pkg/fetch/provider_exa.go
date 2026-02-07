@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/beeper/ai-bridge/pkg/shared/exa"
+	"github.com/beeper/ai-bridge/pkg/shared/httputil"
 )
 
 type exaProvider struct {
@@ -57,7 +58,7 @@ func (p *exaProvider) Fetch(ctx context.Context, req Request) (*Response, error)
 	}
 
 	start := time.Now()
-	data, _, err := postJSON(ctx, endpoint, exaAuthHeaders(p.cfg.BaseURL, p.cfg.APIKey), payload, DefaultTimeoutSecs)
+	data, _, err := httputil.PostJSON(ctx, endpoint, exa.AuthHeaders(p.cfg.BaseURL, p.cfg.APIKey), payload, DefaultTimeoutSecs)
 	if err != nil {
 		return nil, err
 	}
@@ -184,5 +185,3 @@ func formatExaStatusError(targetURL string, statuses []exaContentStatus) string 
 	}
 	return fmt.Sprintf("%s: %s", matched.ID, tag)
 }
-
-var exaAuthHeaders = exa.AuthHeaders
