@@ -32,27 +32,25 @@ func normalizeMimeType(mimeType string) string {
 	return lower
 }
 
-func textFileMimeTypes() map[string]event.CapabilitySupportLevel {
-	return map[string]event.CapabilitySupportLevel{
-		"text/plain":                event.CapLevelFullySupported,
-		"text/markdown":             event.CapLevelFullySupported,
-		"text/csv":                  event.CapLevelFullySupported,
-		"text/tab-separated-values": event.CapLevelFullySupported,
-		"text/html":                 event.CapLevelFullySupported,
-		"text/xml":                  event.CapLevelFullySupported,
-		"text/yaml":                 event.CapLevelFullySupported,
-		"text/javascript":           event.CapLevelFullySupported,
-		"application/json":          event.CapLevelFullySupported,
-		"application/xml":           event.CapLevelFullySupported,
-		"application/xhtml+xml":     event.CapLevelFullySupported,
-		"application/x-yaml":        event.CapLevelFullySupported,
-		"application/yaml":          event.CapLevelFullySupported,
-		"application/toml":          event.CapLevelFullySupported,
-		"application/x-toml":        event.CapLevelFullySupported,
-		"application/csv":           event.CapLevelFullySupported,
-		"application/x-csv":         event.CapLevelFullySupported,
-		"application/javascript":    event.CapLevelFullySupported,
-	}
+var textFileMimeTypesMap = map[string]event.CapabilitySupportLevel{
+	"text/plain":                event.CapLevelFullySupported,
+	"text/markdown":             event.CapLevelFullySupported,
+	"text/csv":                  event.CapLevelFullySupported,
+	"text/tab-separated-values": event.CapLevelFullySupported,
+	"text/html":                 event.CapLevelFullySupported,
+	"text/xml":                  event.CapLevelFullySupported,
+	"text/yaml":                 event.CapLevelFullySupported,
+	"text/javascript":           event.CapLevelFullySupported,
+	"application/json":          event.CapLevelFullySupported,
+	"application/xml":           event.CapLevelFullySupported,
+	"application/xhtml+xml":     event.CapLevelFullySupported,
+	"application/x-yaml":        event.CapLevelFullySupported,
+	"application/yaml":          event.CapLevelFullySupported,
+	"application/toml":          event.CapLevelFullySupported,
+	"application/x-toml":        event.CapLevelFullySupported,
+	"application/csv":           event.CapLevelFullySupported,
+	"application/x-csv":         event.CapLevelFullySupported,
+	"application/javascript":    event.CapLevelFullySupported,
 }
 
 func isTextFileMime(mimeType string) bool {
@@ -63,7 +61,7 @@ func isTextFileMime(mimeType string) bool {
 	if strings.HasSuffix(mimeType, "+json") || strings.HasSuffix(mimeType, "+xml") || strings.HasSuffix(mimeType, "+yaml") {
 		return true
 	}
-	_, ok := textFileMimeTypes()[mimeType]
+	_, ok := textFileMimeTypesMap[mimeType]
 	return ok
 }
 

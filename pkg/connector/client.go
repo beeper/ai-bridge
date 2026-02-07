@@ -218,7 +218,7 @@ func pdfFileFeatures() *event.FileFeatures {
 
 func textFileFeatures() *event.FileFeatures {
 	return &event.FileFeatures{
-		MimeTypes:        textFileMimeTypes(),
+		MimeTypes:        textFileMimeTypesMap,
 		Caption:          event.CapLevelFullySupported,
 		MaxCaptionLength: AIMaxTextLength,
 		MaxSize:          50 * 1024 * 1024, // Shared cap with PDFs
@@ -308,7 +308,7 @@ type AIClient struct {
 	inboundDebouncer *Debouncer
 
 	// Matrix typing state (per room)
-	userTypingMu    sync.Mutex
+	userTypingMu    sync.RWMutex
 	userTypingState map[id.RoomID]userTypingState
 
 	// Typing indicator while messages are queued (per room)

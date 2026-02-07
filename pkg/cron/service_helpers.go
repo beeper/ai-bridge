@@ -321,8 +321,10 @@ func findJobIndex(jobs []CronJob, id string) int {
 }
 
 func sortJobs(jobs []CronJob) {
+	const maxInt64 = int64(1<<63 - 1)
 	slices.SortFunc(jobs, func(a, b CronJob) int {
-		var av, bv int64
+		av := maxInt64
+		bv := maxInt64
 		if a.State.NextRunAtMs != nil {
 			av = *a.State.NextRunAtMs
 		}

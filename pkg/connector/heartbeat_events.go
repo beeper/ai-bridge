@@ -92,6 +92,6 @@ func getLastHeartbeatEvent() *HeartbeatEventPayload {
 	if heartbeatEvents.last == nil {
 		return nil
 	}
-	copy := *heartbeatEvents.last
-	return &copy
+	eventsCopy := *heartbeatEvents.last
+	return &eventsCopy
 }

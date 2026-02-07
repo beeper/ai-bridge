@@ -62,6 +62,10 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 	userTimezone, _ := oc.resolveUserTimezone()
 	cronMessage := buildCronMessage(job.ID, job.Name, message, userTimezone)
 
+	if job.Payload.AllowUnsafeExternal == nil || !*job.Payload.AllowUnsafeExternal {
+		cronMessage = wrapSafeExternalPrompt(cronMessage)
+	}
+
 	// Capture last assistant message before dispatch.
 	lastID, lastTimestamp := oc.lastAssistantMessageInfo(ctx, portal)
 

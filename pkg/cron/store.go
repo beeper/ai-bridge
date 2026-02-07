@@ -42,7 +42,8 @@ func ResolveCronStorePath(storePath string) string {
 	return defaultCronStorePath
 }
 
-// LoadCronStore reads the JSON store, tolerating missing or invalid files.
+// LoadCronStore reads the JSON store, tolerating missing files.
+// On parse failure, it attempts to load from the .bak file.
 func LoadCronStore(ctx context.Context, backend StoreBackend, storePath string) (CronStoreFile, error) {
 	if backend == nil {
 		return CronStoreFile{Version: 1, Jobs: []CronJob{}}, fmt.Errorf("cron store backend not configured")
@@ -51,9 +52,24 @@ func LoadCronStore(ctx context.Context, backend StoreBackend, storePath string) 
 	if err != nil || !found {
 		return CronStoreFile{Version: 1, Jobs: []CronJob{}}, nil
 	}
+	if parsed, parseErr := parseCronStoreData(data); parseErr == nil {
+		return parsed, nil
+	}
+	// Main file corrupt — try .bak
+	bakData, bakFound, bakErr := backend.Read(ctx, storePath+".bak")
+	if bakErr != nil || !bakFound {
+		return CronStoreFile{Version: 1, Jobs: []CronJob{}}, fmt.Errorf("cron store corrupt and no valid backup: %s", storePath)
+	}
+	if parsed, parseErr := parseCronStoreData(bakData); parseErr == nil {
+		return parsed, nil
+	}
+	return CronStoreFile{Version: 1, Jobs: []CronJob{}}, fmt.Errorf("cron store and backup both corrupt: %s", storePath)
+}
+
+func parseCronStoreData(data []byte) (CronStoreFile, error) {
 	var raw map[string]any
 	if err := json5.Unmarshal(data, &raw); err != nil {
-		return CronStoreFile{Version: 1, Jobs: []CronJob{}}, nil
+		return CronStoreFile{}, fmt.Errorf("json5 parse: %w", err)
 	}
 	if raw == nil {
 		raw = map[string]any{}
@@ -74,11 +90,11 @@ func LoadCronStore(ctx context.Context, backend StoreBackend, storePath string) 
 	}
 	normalizedData, err := json.Marshal(raw)
 	if err != nil {
-		return CronStoreFile{Version: 1, Jobs: []CronJob{}}, nil
+		return CronStoreFile{}, fmt.Errorf("json marshal: %w", err)
 	}
 	var parsed CronStoreFile
 	if err := json.Unmarshal(normalizedData, &parsed); err != nil {
-		return CronStoreFile{Version: 1, Jobs: []CronJob{}}, nil
+		return CronStoreFile{}, fmt.Errorf("json unmarshal: %w", err)
 	}
 	if parsed.Version == 0 {
 		parsed.Version = 1

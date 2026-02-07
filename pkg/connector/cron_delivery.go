@@ -58,6 +58,9 @@ func (oc *AIClient) resolveCronDeliveryTarget(agentID string, delivery *cron.Cro
 		return cronDeliveryTarget{Channel: "matrix", Reason: "invalid-target"}
 	}
 	if portal, err := oc.UserLogin.Bridge.GetPortalByMXID(context.Background(), id.RoomID(target)); err == nil && portal != nil {
+		if !oc.IsLoggedIn() {
+			return cronDeliveryTarget{Channel: "matrix", Reason: "channel-not-ready"}
+		}
 		return cronDeliveryTarget{Portal: portal, RoomID: portal.MXID, Channel: "matrix"}
 	}
 	return cronDeliveryTarget{Channel: "matrix", Reason: "no-target"}
