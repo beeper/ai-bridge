@@ -66,28 +66,28 @@ func parseInlineDirectives(body string) inlineDirectives {
 		return out
 	}
 
-	think := extractLevelDirectiveRE(out.cleaned, thinkDirectiveRE, normalizeThinkLevel)
+	think := extractLevelDirective(out.cleaned, []string{"thinking", "think", "t"}, normalizeThinkLevel)
 	out.cleaned = think.cleaned
 	out.hasThink = think.has
 	out.thinkLevel = think.level
 	out.rawThink = think.raw
 	out.invalidThink = think.has && think.level == "" && think.raw != ""
 
-	verbose := extractLevelDirectiveRE(out.cleaned, verboseDirectiveRE, normalizeVerboseLevel)
+	verbose := extractLevelDirective(out.cleaned, []string{"verbose", "v"}, normalizeVerboseLevel)
 	out.cleaned = verbose.cleaned
 	out.hasVerbose = verbose.has
 	out.verboseLevel = verbose.level
 	out.rawVerbose = verbose.raw
 	out.invalidVerbose = verbose.has && verbose.level == "" && verbose.raw != ""
 
-	reasoning := extractLevelDirectiveRE(out.cleaned, reasoningDirectiveRE, normalizeReasoningLevel)
+	reasoning := extractLevelDirective(out.cleaned, []string{"reasoning", "reason"}, normalizeReasoningLevel)
 	out.cleaned = reasoning.cleaned
 	out.hasReasoning = reasoning.has
 	out.reasoningLevel = reasoning.level
 	out.rawReasoning = reasoning.raw
 	out.invalidReasoning = reasoning.has && reasoning.level == "" && reasoning.raw != ""
 
-	elevated := extractLevelDirectiveRE(out.cleaned, elevatedDirectiveRE, normalizeElevatedLevel)
+	elevated := extractLevelDirective(out.cleaned, []string{"elevated", "elev"}, normalizeElevatedLevel)
 	out.cleaned = elevated.cleaned
 	out.hasElevated = elevated.has
 	out.elevatedLevel = elevated.level
@@ -147,10 +147,6 @@ type directiveMatch struct {
 	start int
 	end   int
 	raw   string
-}
-
-func matchLevelDirective(body string, names []string) *directiveMatch {
-	return matchLevelDirectiveRE(body, directiveREForNames(names))
 }
 
 func matchLevelDirectiveRE(body string, re *regexp.Regexp) *directiveMatch {
