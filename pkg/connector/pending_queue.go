@@ -196,7 +196,7 @@ func (oc *AIClient) dispatchQueuedPrompt(
 	item pendingQueueItem,
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) {
-	roomID := id.RoomID("")
+	var roomID id.RoomID
 	if item.pending.Portal != nil {
 		roomID = item.pending.Portal.MXID
 	}

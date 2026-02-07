@@ -73,7 +73,6 @@ func (c *DedupeCache) nextTimestamp() int64 {
 
 // touch updates the timestamp for a key, moving it to the end of the LRU order.
 func (c *DedupeCache) touch(key string, now int64) {
-	delete(c.entries, key)
 	c.entries[key] = now
 }
 

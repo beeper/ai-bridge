@@ -138,8 +138,3 @@ type CronJobPatch struct {
 	State          *CronJobState      `json:"state,omitempty"`
 }
 
-// MarshalJSON ensures payload patches include kind when set.
-func (p CronPayloadPatch) MarshalJSON() ([]byte, error) {
-	type alias CronPayloadPatch
-	return json.Marshal(alias(p))
-}
