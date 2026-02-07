@@ -43,21 +43,11 @@ func (rt *nexusAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 	return base.RoundTrip(cloned)
 }
 
-func normalizeMCPAuthType(authType string) string {
-	value := strings.ToLower(strings.TrimSpace(authType))
-	if value == "" {
-		return "bearer"
-	}
-	switch value {
-	case "bearer", "apikey", "api_key", "api-key", "none":
-		return value
-	default:
-		return value
-	}
-}
-
 func mcpAuthorizationHeaderValue(authType, token string) (string, error) {
-	authType = normalizeMCPAuthType(authType)
+	authType = strings.ToLower(strings.TrimSpace(authType))
+	if authType == "" {
+		authType = "bearer"
+	}
 	token = strings.TrimSpace(token)
 	switch authType {
 	case "none":
