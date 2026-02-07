@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -148,9 +149,7 @@ func ParseCronRunLogEntries(raw string, limit int, jobID string) []CronRunLogEnt
 		}
 		entries = append(entries, entry)
 	}
-	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
-		entries[i], entries[j] = entries[j], entries[i]
-	}
+	slices.Reverse(entries)
 	return entries
 }
 

@@ -279,7 +279,7 @@ func (m *MemorySearchManager) computeSessionDelta(ctx context.Context, portalKey
 		}
 		line := label + ": " + text
 		deltaMessages++
-		deltaBytes += len([]byte(line)) + 1
+		deltaBytes += len(line) + 1
 	}
 	if err := rows.Err(); err != nil {
 		return maxRowID.Int64, 0, 0, err

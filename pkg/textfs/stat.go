@@ -37,7 +37,7 @@ func (s *Store) Stat(ctx context.Context, relPath string) (*StatEntry, error) {
 			return &StatEntry{
 				Path:      entry.Path,
 				Type:      StatTypeFile,
-				Size:      len([]byte(entry.Content)),
+				Size:      len(entry.Content),
 				Hash:      entry.Hash,
 				Source:    entry.Source,
 				UpdatedAt: entry.UpdatedAt,

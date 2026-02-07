@@ -44,7 +44,7 @@ func TruncateHead(content string, maxLines, maxBytes int) Truncation {
 	}
 	lines := splitLines(content)
 	totalLines := len(lines)
-	totalBytes := len([]byte(content))
+	totalBytes := len(content)
 	if totalLines <= maxLines && totalBytes <= maxBytes {
 		return Truncation{
 			Content:     content,

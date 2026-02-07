@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -81,7 +82,7 @@ func StartProcess(ctx context.Context, cfg ProcessConfig) (*Client, error) {
 	if strings.TrimSpace(cfg.Command) == "" {
 		return nil, fmt.Errorf("missing command")
 	}
-	args := append([]string{}, cfg.Args...)
+	args := slices.Clone(cfg.Args)
 	cmd := exec.CommandContext(ctx, cfg.Command, args...)
 	if len(cfg.Env) > 0 {
 		cmd.Env = append(os.Environ(), cfg.Env...)

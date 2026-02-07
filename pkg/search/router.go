@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -83,7 +84,7 @@ func dedupeOrder(items []string) []string {
 		result = append(result, name)
 	}
 	if len(result) == 0 {
-		return append([]string{}, DefaultFallbackOrder...)
+		return slices.Clone(DefaultFallbackOrder)
 	}
 	return result
 }

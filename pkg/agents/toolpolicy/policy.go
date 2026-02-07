@@ -2,6 +2,7 @@ package toolpolicy
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -146,26 +147,26 @@ func (c *ToolPolicyConfig) Clone() *ToolPolicyConfig {
 		for key, value := range c.ByProvider {
 			clone := value
 			if len(value.Allow) > 0 {
-				clone.Allow = append([]string{}, value.Allow...)
+				clone.Allow = slices.Clone(value.Allow)
 			}
 			if len(value.AlsoAllow) > 0 {
-				clone.AlsoAllow = append([]string{}, value.AlsoAllow...)
+				clone.AlsoAllow = slices.Clone(value.AlsoAllow)
 			}
 			if len(value.Deny) > 0 {
-				clone.Deny = append([]string{}, value.Deny...)
+				clone.Deny = slices.Clone(value.Deny)
 			}
 			if len(value.ByProvider) > 0 {
 				clone.ByProvider = make(map[string]ToolPolicyConfig, len(value.ByProvider))
 				for subKey, subVal := range value.ByProvider {
 					subClone := subVal
 					if len(subVal.Allow) > 0 {
-						subClone.Allow = append([]string{}, subVal.Allow...)
+						subClone.Allow = slices.Clone(subVal.Allow)
 					}
 					if len(subVal.AlsoAllow) > 0 {
-						subClone.AlsoAllow = append([]string{}, subVal.AlsoAllow...)
+						subClone.AlsoAllow = slices.Clone(subVal.AlsoAllow)
 					}
 					if len(subVal.Deny) > 0 {
-						subClone.Deny = append([]string{}, subVal.Deny...)
+						subClone.Deny = slices.Clone(subVal.Deny)
 					}
 					subClone.ByProvider = nil
 					clone.ByProvider[subKey] = subClone
@@ -262,8 +263,8 @@ func ResolveToolProfilePolicy(profile ToolProfileID) *ToolPolicy {
 		return nil
 	}
 	return &ToolPolicy{
-		Allow: append([]string{}, policy.Allow...),
-		Deny:  append([]string{}, policy.Deny...),
+		Allow: slices.Clone(policy.Allow),
+		Deny:  slices.Clone(policy.Deny),
 	}
 }
 
@@ -275,11 +276,11 @@ func MergeAlsoAllow(policy *ToolPolicy, alsoAllow []string) *ToolPolicy {
 	if len(policy.Allow) == 0 {
 		return policy
 	}
-	merged := append([]string{}, policy.Allow...)
+	merged := slices.Clone(policy.Allow)
 	merged = append(merged, alsoAllow...)
 	return &ToolPolicy{
 		Allow: uniqueStrings(merged),
-		Deny:  append([]string{}, policy.Deny...),
+		Deny:  slices.Clone(policy.Deny),
 	}
 }
 
@@ -307,8 +308,8 @@ func PickToolPolicy(config *ToolPolicyConfig) *ToolPolicy {
 		return nil
 	}
 	return &ToolPolicy{
-		Allow: append([]string{}, allow...),
-		Deny:  append([]string{}, deny...),
+		Allow: slices.Clone(allow),
+		Deny:  slices.Clone(deny),
 	}
 }
 
@@ -579,7 +580,7 @@ var defaultSubagentDeny = []string{
 
 // ResolveSubagentToolPolicy returns the default subagent policy (deny wins).
 func ResolveSubagentToolPolicy(global *GlobalToolPolicyConfig) *ToolPolicy {
-	deny := append([]string{}, defaultSubagentDeny...)
+	deny := slices.Clone(defaultSubagentDeny)
 	if global != nil && global.Subagents != nil && global.Subagents.Tools != nil {
 		if len(global.Subagents.Tools.Deny) > 0 {
 			deny = append(deny, global.Subagents.Tools.Deny...)
@@ -732,7 +733,7 @@ func StripPluginOnlyAllowlist(policy *ToolPolicy, groups PluginToolGroups, coreT
 	if stripped {
 		return true, uniqueStrings(unknownAllowlist), &ToolPolicy{
 			Allow: nil,
-			Deny:  append([]string{}, policy.Deny...),
+			Deny:  slices.Clone(policy.Deny),
 		}
 	}
 	return false, uniqueStrings(unknownAllowlist), policy

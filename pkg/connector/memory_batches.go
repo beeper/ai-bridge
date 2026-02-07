@@ -365,7 +365,6 @@ func runOpenAIBatches(ctx context.Context, params openAIBatchParams) (map[string
 	byCustomID := make(map[string][]float64)
 	tasks := make([]func() (struct{}, error), 0, len(groups))
 	for _, group := range groups {
-		group := group
 		tasks = append(tasks, func() (struct{}, error) {
 			batchID, outputFileID, err := submitOpenAIBatch(ctx, client, params, group)
 			if err != nil {
@@ -663,7 +662,6 @@ func runGeminiBatches(ctx context.Context, params geminiBatchParams) (map[string
 	byCustomID := make(map[string][]float64)
 	tasks := make([]func() (struct{}, error), 0, len(groups))
 	for _, group := range groups {
-		group := group
 		tasks = append(tasks, func() (struct{}, error) {
 			batchName, outputFileID, err := submitGeminiBatch(ctx, client, params, group)
 			if err != nil {
