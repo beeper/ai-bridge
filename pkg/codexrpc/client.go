@@ -60,8 +60,8 @@ type Client struct {
 	reqMu         sync.RWMutex
 	requestRoutes map[string]func(ctx context.Context, req Request) (any, *RPCError)
 
-	closed   atomic.Bool
-	failOnce sync.Once
+	closed    atomic.Bool
+	failOnce  sync.Once
 	closeOnce sync.Once
 }
 

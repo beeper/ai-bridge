@@ -1609,7 +1609,10 @@ func (cc *CodexClient) sendSystemNotice(ctx context.Context, portal *bridgev2.Po
 		MsgType: event.MsgNotice,
 		Body:    strings.TrimSpace(message),
 	}
-	_, _ = bot.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{Parsed: content}, nil)
+	bg := cc.backgroundContext(ctx)
+	sendCtx, cancel := context.WithTimeout(bg, 10*time.Second)
+	defer cancel()
+	_, _ = bot.SendMessage(sendCtx, portal.MXID, event.EventMessage, &event.Content{Parsed: content}, nil)
 }
 
 func (cc *CodexClient) sendPendingStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, message string) {

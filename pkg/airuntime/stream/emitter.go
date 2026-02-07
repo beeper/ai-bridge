@@ -52,4 +52,3 @@ func (e *Emitter) Emit(ctx context.Context, roomID id.RoomID, env PartEnvelope) 
 	}
 	return e.T.SendEphemeral(ctx, finalRoomID, env.EphemeralType, &event.Content{Raw: contentRaw}, env.TransactionID)
 }
-

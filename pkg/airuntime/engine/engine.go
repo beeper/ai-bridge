@@ -27,4 +27,3 @@ func (e *Engine) HandleEvent(ctx context.Context) error {
 	// we refactor connector logic into the engine.
 	return nil
 }
-
