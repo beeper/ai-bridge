@@ -265,14 +265,10 @@ func (oc *AIClient) handleInboundCommand(
 		}
 		oc.savePortalQuiet(ctx, portal, "reasoning change")
 		if rest == "" {
-			switch level {
-			case "off":
+			if level == "off" {
 				return inboundCommandResult{handled: true, response: formatSystemAck("Reasoning visibility disabled.")}
-			case "on":
-				return inboundCommandResult{handled: true, response: formatSystemAck("Reasoning visibility enabled.")}
-			default:
-				return inboundCommandResult{handled: true, response: formatSystemAck("Reasoning visibility enabled.")}
 			}
+			return inboundCommandResult{handled: true, response: formatSystemAck("Reasoning visibility enabled.")}
 		}
 		return inboundCommandResult{newBody: rest}
 	case "elevated":

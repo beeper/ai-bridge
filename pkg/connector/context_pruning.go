@@ -204,14 +204,6 @@ func analyzeMessage(msg openai.ChatCompletionMessageParamUnion, index int) messa
 		info.role = "tool"
 		info.isToolResult = true
 		info.toolCallID = msg.OfTool.ToolCallID
-		// Note: OpenAI SDK doesn't expose tool name on result, we'd need to track from call
-		// For now, all tool results are potentially prunable unless they have images
-		// Images in tool results: check content parts
-		for _, part := range msg.OfTool.Content.OfArrayOfContentParts {
-			// Tool results typically don't have image parts in OpenAI format,
-			// but we check anyway for safety
-			_ = part // OpenAI tool content is text-only currently
-		}
 	}
 
 	return info

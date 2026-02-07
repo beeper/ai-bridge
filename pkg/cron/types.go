@@ -1,7 +1,5 @@
 package cron
 
-import "encoding/json"
-
 // CronSchedule defines when a cron job should run.
 type CronSchedule struct {
 	Kind     string `json:"kind"`
