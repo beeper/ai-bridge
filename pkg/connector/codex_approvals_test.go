@@ -36,13 +36,15 @@ func TestCodex_CommandApproval_RequestBlocksUntilApproved(t *testing.T) {
 	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: id.RoomID("!room:example.com")}}
 	meta := &PortalMetadata{}
 	state := &streamingState{turnID: "turn_local"}
-	cc.activeTurn = &codexActiveTurn{
-		portal:   portal,
-		meta:     meta,
-		state:    state,
-		threadID: "thr_1",
-		turnID:   "turn_1",
-		model:    "gpt-5.1-codex",
+	cc.activeTurns = map[string]*codexActiveTurn{
+		codexTurnKey("thr_1", "turn_1"): {
+			portal:   portal,
+			meta:     meta,
+			state:    state,
+			threadID: "thr_1",
+			turnID:   "turn_1",
+			model:    "gpt-5.1-codex",
+		},
 	}
 
 	params := map[string]any{
@@ -112,12 +114,14 @@ func TestCodex_CommandApproval_AutoApproveInFullElevated(t *testing.T) {
 	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: id.RoomID("!room:example.com")}}
 	meta := &PortalMetadata{ElevatedLevel: "full"}
 	state := &streamingState{turnID: "turn_local"}
-	cc.activeTurn = &codexActiveTurn{
-		portal:   portal,
-		meta:     meta,
-		state:    state,
-		threadID: "thr_1",
-		turnID:   "turn_1",
+	cc.activeTurns = map[string]*codexActiveTurn{
+		codexTurnKey("thr_1", "turn_1"): {
+			portal:   portal,
+			meta:     meta,
+			state:    state,
+			threadID: "thr_1",
+			turnID:   "turn_1",
+		},
 	}
 
 	paramsRaw, _ := json.Marshal(map[string]any{

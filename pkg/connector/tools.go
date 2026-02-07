@@ -1536,6 +1536,14 @@ Chat: %s%s%s`,
 
 const textFSMaxBytes = 256 * 1024
 
+const (
+	// Protect DB-backed virtual FS tools from hanging indefinitely (e.g. DB locks / slow IO).
+	textFSToolTimeout = 10 * time.Second
+
+	// Post-write side effects should never block tool completion.
+	textFSPostWriteTimeout = 5 * time.Second
+)
+
 func textFSStore(ctx context.Context) (*textfs.Store, error) {
 	btc := GetBridgeToolContext(ctx)
 	if btc == nil {
@@ -1550,6 +1558,14 @@ func textFSStore(ctx context.Context) (*textfs.Store, error) {
 	bridgeID := string(btc.Client.UserLogin.Bridge.DB.BridgeID)
 	loginID := string(btc.Client.UserLogin.ID)
 	return textfs.NewStore(db, bridgeID, loginID, agentID), nil
+}
+
+func detachedBridgeToolContext(ctx context.Context) context.Context {
+	base := context.Background()
+	if btc := GetBridgeToolContext(ctx); btc != nil {
+		base = WithBridgeToolContext(base, btc)
+	}
+	return base
 }
 
 func readStringArg(args map[string]any, keys ...string) (string, bool) {
@@ -1599,7 +1615,9 @@ func executeReadFile(ctx context.Context, args map[string]any) (string, error) {
 	offset, _ := readIntArg(args, "offset")
 	limit, _ := readIntArg(args, "limit")
 
-	entry, found, err := store.Read(ctx, path)
+	readCtx, cancel := context.WithTimeout(ctx, textFSToolTimeout)
+	defer cancel()
+	entry, found, err := store.Read(readCtx, path)
 	if err != nil {
 		return "", err
 	}
@@ -1663,13 +1681,20 @@ func executeWriteFile(ctx context.Context, args map[string]any) (string, error) 
 	if len(content) > textFSMaxBytes {
 		return "", fmt.Errorf("content exceeds %s limit", textfs.FormatSize(textFSMaxBytes))
 	}
-	entry, err := store.Write(ctx, path, content)
+	writeCtx, cancel := context.WithTimeout(ctx, textFSToolTimeout)
+	defer cancel()
+	entry, err := store.Write(writeCtx, path, content)
 	if err != nil {
 		return "", err
 	}
 	if entry != nil {
-		notifyMemoryFileChanged(ctx, entry.Path)
-		maybeRefreshAgentIdentity(ctx, entry.Path)
+		// Detach post-write work so slow Matrix/DB operations can't stall tool completion.
+		go func(path string) {
+			bg, cancel := context.WithTimeout(detachedBridgeToolContext(ctx), textFSPostWriteTimeout)
+			defer cancel()
+			notifyMemoryFileChanged(bg, path)
+			maybeRefreshAgentIdentity(bg, path)
+		}(entry.Path)
 	}
 	return fmt.Sprintf("Successfully wrote %d bytes to %s", len([]byte(content)), path), nil
 }
@@ -1693,7 +1718,9 @@ func executeEditFile(ctx context.Context, args map[string]any) (string, error) {
 		return "", fmt.Errorf("missing or invalid 'newText' argument")
 	}
 
-	entry, found, err := store.Read(ctx, path)
+	readCtx, cancel := context.WithTimeout(ctx, textFSToolTimeout)
+	defer cancel()
+	entry, found, err := store.Read(readCtx, path)
 	if err != nil {
 		return "", err
 	}
@@ -1727,13 +1754,19 @@ func executeEditFile(ctx context.Context, args map[string]any) (string, error) {
 	if len(updated) > textFSMaxBytes {
 		return "", fmt.Errorf("content exceeds %s limit", textfs.FormatSize(textFSMaxBytes))
 	}
-	entry, err = store.Write(ctx, path, updated)
+	writeCtx, cancel := context.WithTimeout(ctx, textFSToolTimeout)
+	defer cancel()
+	entry, err = store.Write(writeCtx, path, updated)
 	if err != nil {
 		return "", err
 	}
 	if entry != nil {
-		notifyMemoryFileChanged(ctx, entry.Path)
-		maybeRefreshAgentIdentity(ctx, entry.Path)
+		go func(path string) {
+			bg, cancel := context.WithTimeout(detachedBridgeToolContext(ctx), textFSPostWriteTimeout)
+			defer cancel()
+			notifyMemoryFileChanged(bg, path)
+			maybeRefreshAgentIdentity(bg, path)
+		}(entry.Path)
 	}
 	return fmt.Sprintf("Successfully replaced text in %s.", path), nil
 }
