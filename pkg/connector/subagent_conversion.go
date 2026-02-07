@@ -1,6 +1,8 @@
 package connector
 
 import (
+	"slices"
+
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
 )
@@ -13,7 +15,7 @@ func subagentsToTools(cfg *agents.SubagentConfig) *tools.SubagentConfig {
 		Model: cfg.Model,
 	}
 	if len(cfg.AllowAgents) > 0 {
-		out.AllowAgents = append([]string{}, cfg.AllowAgents...)
+		out.AllowAgents = slices.Clone(cfg.AllowAgents)
 	}
 	return out
 }
@@ -26,7 +28,7 @@ func subagentsFromTools(cfg *tools.SubagentConfig) *agents.SubagentConfig {
 		Model: cfg.Model,
 	}
 	if len(cfg.AllowAgents) > 0 {
-		out.AllowAgents = append([]string{}, cfg.AllowAgents...)
+		out.AllowAgents = slices.Clone(cfg.AllowAgents)
 	}
 	return out
 }

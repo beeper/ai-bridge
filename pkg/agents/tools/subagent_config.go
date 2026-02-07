@@ -1,5 +1,7 @@
 package tools
 
+import "slices"
+
 // SubagentConfig mirrors OpenClaw-style subagent defaults for tools API payloads.
 type SubagentConfig struct {
 	Model       string   `json:"model,omitempty"`
@@ -14,7 +16,7 @@ func cloneSubagentConfig(cfg *SubagentConfig) *SubagentConfig {
 		Model: cfg.Model,
 	}
 	if len(cfg.AllowAgents) > 0 {
-		out.AllowAgents = append([]string{}, cfg.AllowAgents...)
+		out.AllowAgents = slices.Clone(cfg.AllowAgents)
 	}
 	return out
 }
