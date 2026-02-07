@@ -341,7 +341,9 @@ func TestFinishComputesNextRunOnce(t *testing.T) {
 // Robustness #9: Stop waits for in-flight execution
 func TestStopWaitsForInflightExecution(t *testing.T) {
 	log := &testLogger{}
-	nowMs := int64(1700000060000)
+	// Use an advancing clock: Start sees t=0, onTimer sees t=60001 (job is due).
+	var clock atomic.Int64
+	clock.Store(1700000000000)
 	backend := &testStoreBackend{
 		files: map[string][]byte{
 			"cron/jobs.json": []byte(`{
@@ -357,7 +359,7 @@ func TestStopWaitsForInflightExecution(t *testing.T) {
       "sessionTarget": "isolated",
       "wakeMode": "next-heartbeat",
       "payload": { "kind": "agentTurn", "message": "slow task" },
-      "state": { "nextRunAtMs": 1700000000000 }
+      "state": { "nextRunAtMs": 1700000060000 }
     }
   ]
 }`),
@@ -366,7 +368,7 @@ func TestStopWaitsForInflightExecution(t *testing.T) {
 
 	var jobStarted atomic.Bool
 	svc := NewCronService(CronServiceDeps{
-		NowMs:       func() int64 { return nowMs },
+		NowMs:       func() int64 { return clock.Load() },
 		Log:         log,
 		StorePath:   "cron/jobs.json",
 		Store:       backend,
@@ -381,6 +383,9 @@ func TestStopWaitsForInflightExecution(t *testing.T) {
 	if err := svc.Start(); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
+
+	// Advance clock past the due time.
+	clock.Store(1700000060001)
 
 	// Trigger execution in background.
 	go svc.onTimer()
