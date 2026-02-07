@@ -1566,7 +1566,7 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 
 	// Reasoning hints and level
 	params.ReasoningTagHint = meta.Capabilities.SupportsReasoning && meta.EmitThinking
-	params.ReasoningLevel = resolvePromptReasoningLevel(meta, oc.effectiveReasoningEffort(meta))
+	params.ReasoningLevel = resolvePromptReasoningLevel(meta)
 
 	// Default thinking level (OpenClaw-style): low for reasoning-capable models, otherwise off.
 	params.DefaultThinkLevel = oc.defaultThinkLevel(meta)

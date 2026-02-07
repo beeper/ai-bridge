@@ -3,6 +3,8 @@ package connector
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/beeper/ai-bridge/pkg/shared/media"
@@ -110,15 +112,19 @@ func executeAnalyzeImage(ctx context.Context, args map[string]any) (string, erro
 
 // inferMimeTypeFromURL guesses the mime type from a URL's file extension.
 func inferMimeTypeFromURL(imageURL string) string {
-	lowerURL := strings.ToLower(imageURL)
-	switch {
-	case strings.Contains(lowerURL, ".png"):
+	parsed, err := url.Parse(imageURL)
+	if err != nil {
+		return "image/jpeg"
+	}
+	ext := strings.ToLower(filepath.Ext(parsed.Path))
+	switch ext {
+	case ".png":
 		return "image/png"
-	case strings.Contains(lowerURL, ".gif"):
+	case ".gif":
 		return "image/gif"
-	case strings.Contains(lowerURL, ".webp"):
+	case ".webp":
 		return "image/webp"
-	case strings.Contains(lowerURL, ".svg"):
+	case ".svg":
 		return "image/svg+xml"
 	default:
 		return "image/jpeg"

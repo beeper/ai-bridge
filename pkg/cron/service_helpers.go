@@ -94,7 +94,11 @@ func applyJobPatch(job *CronJob, patch CronJobPatch) error {
 		job.WakeMode = *patch.WakeMode
 	}
 	if patch.Payload != nil {
-		job.Payload = mergeCronPayload(job.Payload, *patch.Payload)
+		merged, err := mergeCronPayload(job.Payload, *patch.Payload)
+		if err != nil {
+			return err
+		}
+		job.Payload = merged
 	}
 	if patch.Delivery != nil {
 		job.Delivery = mergeCronDelivery(job.Delivery, *patch.Delivery)
@@ -137,7 +141,7 @@ func mergeCronState(existing CronJobState, patch CronJobState) CronJobState {
 	return next
 }
 
-func mergeCronPayload(existing CronPayload, patch CronPayloadPatch) CronPayload {
+func mergeCronPayload(existing CronPayload, patch CronPayloadPatch) (CronPayload, error) {
 	if patch.Kind != "" && !strings.EqualFold(patch.Kind, existing.Kind) {
 		return buildPayloadFromPatch(patch)
 	}
@@ -147,7 +151,7 @@ func mergeCronPayload(existing CronPayload, patch CronPayloadPatch) CronPayload 
 		if patch.Text != nil {
 			text = *patch.Text
 		}
-		return CronPayload{Kind: "systemEvent", Text: text}
+		return CronPayload{Kind: "systemEvent", Text: text}, nil
 	}
 	next := existing
 	if patch.Message != nil {
@@ -165,10 +169,10 @@ func mergeCronPayload(existing CronPayload, patch CronPayloadPatch) CronPayload 
 	if patch.AllowUnsafeExternal != nil {
 		next.AllowUnsafeExternal = patch.AllowUnsafeExternal
 	}
-	return next
+	return next, nil
 }
 
-func buildPayloadFromPatch(patch CronPayloadPatch) CronPayload {
+func buildPayloadFromPatch(patch CronPayloadPatch) (CronPayload, error) {
 	kind := strings.ToLower(patch.Kind)
 	if kind == "systemevent" {
 		text := ""
@@ -176,16 +180,16 @@ func buildPayloadFromPatch(patch CronPayloadPatch) CronPayload {
 			text = *patch.Text
 		}
 		if strings.TrimSpace(text) == "" {
-			panic("cron.update payload.kind=systemEvent requires text")
+			return CronPayload{}, fmt.Errorf("cron.update payload.kind=systemEvent requires text")
 		}
-		return CronPayload{Kind: "systemEvent", Text: text}
+		return CronPayload{Kind: "systemEvent", Text: text}, nil
 	}
 	msg := ""
 	if patch.Message != nil {
 		msg = *patch.Message
 	}
 	if strings.TrimSpace(msg) == "" {
-		panic("cron.update payload.kind=agentTurn requires message")
+		return CronPayload{}, fmt.Errorf("cron.update payload.kind=agentTurn requires message")
 	}
 	return CronPayload{
 		Kind:                "agentTurn",
@@ -194,7 +198,7 @@ func buildPayloadFromPatch(patch CronPayloadPatch) CronPayload {
 		Thinking:            derefString(patch.Thinking),
 		TimeoutSeconds:      patch.TimeoutSeconds,
 		AllowUnsafeExternal: patch.AllowUnsafeExternal,
-	}
+	}, nil
 }
 
 func mergeCronDelivery(existing *CronDelivery, patch CronDeliveryPatch) *CronDelivery {

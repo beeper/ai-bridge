@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"image"
@@ -8,6 +9,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -199,14 +201,15 @@ func isAllowedURL(rawURL string) bool {
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return false
 	}
-	// Block localhost and local IPs
 	host := strings.ToLower(parsed.Hostname())
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+	if host == "localhost" {
 		return false
 	}
-	// Block private IP ranges (basic check)
-	if strings.HasPrefix(host, "192.168.") || strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "172.") {
-		return false
+	ip := net.ParseIP(host)
+	if ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+			return false
+		}
 	}
 	return true
 }
@@ -375,7 +378,7 @@ func (lp *LinkPreviewer) downloadImage(ctx context.Context, imageURL string) ([]
 
 	// Get dimensions
 	width, height := 0, 0
-	if img, _, err := image.DecodeConfig(strings.NewReader(string(data))); err == nil {
+	if img, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
 		width = img.Width
 		height = img.Height
 	}

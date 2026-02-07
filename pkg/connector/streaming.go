@@ -843,7 +843,7 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 
 	// Back-compat fallback: many clients either don't support or don't render our
 	// ephemeral stream events. If approvals are required, give the user a clear,
-	// timeline-visible way to proceed (react or /approve).
+	// timeline-visible way to proceed (/approve or UI card).
 	if state.suppressSend {
 		return
 	}

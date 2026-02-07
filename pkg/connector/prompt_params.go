@@ -3,7 +3,6 @@ package connector
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func resolvePromptWorkspaceDir() string {
@@ -33,11 +32,8 @@ func findGitRoot(startDir string) string {
 	return ""
 }
 
-func resolvePromptReasoningLevel(meta *PortalMetadata, reasoningEffort string) string {
+func resolvePromptReasoningLevel(meta *PortalMetadata) string {
 	if meta != nil && meta.EmitThinking {
-		if strings.TrimSpace(reasoningEffort) != "" {
-			return "on"
-		}
 		return "on"
 	}
 	return "off"
