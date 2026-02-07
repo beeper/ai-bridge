@@ -160,81 +160,128 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 	cl.codexHome = codexHome
 	cl.instanceID = instanceID
 	cl.authMode = mode
-
-	// Keep SubmitUserInput responsive: callers may have ~30-40s request timeouts.
-	initCtx, cancelInit := context.WithTimeout(ctx, 20*time.Second)
-	defer cancelInit()
-	_, err = rpc.Initialize(initCtx, codexrpc.ClientInfo{
-		Name:    cl.Connector.Config.Codex.ClientInfo.Name,
-		Title:   cl.Connector.Config.Codex.ClientInfo.Title,
-		Version: cl.Connector.Config.Codex.ClientInfo.Version,
-	}, false)
-	if err != nil {
-		log.Warn().Err(err).Msg("Codex initialize failed")
-		_ = rpc.Close()
-		cl.rpc = nil
-		return nil, err
+	cl.loginID = ""
+	cl.authURL = ""
+	if mode == "apiKey" {
+		cl.waitUntil = time.Now().Add(5 * time.Minute)
+	} else {
+		cl.waitUntil = time.Now().Add(10 * time.Minute)
 	}
 
-	// Subscribe to account/login/completed so Wait() can resolve.
 	cl.loginDoneCh = make(chan codexLoginDone, 1)
-	rpc.OnNotification(func(method string, params json.RawMessage) {
-		switch method {
-		case "account/login/completed":
-			var evt struct {
-				Success bool    `json:"success"`
-				LoginID *string `json:"loginId"`
-				Error   *string `json:"error"`
-			}
-			_ = json.Unmarshal(params, &evt)
-			// Some Codex builds omit loginId; only filter when it's present.
-			if cl.loginID != "" && evt.LoginID != nil && strings.TrimSpace(*evt.LoginID) != cl.loginID {
-				return
-			}
-			errText := ""
-			if evt.Error != nil {
-				errText = strings.TrimSpace(*evt.Error)
-			}
+	cl.startCh = make(chan error, 1)
+
+	// Make SubmitUserInput return quickly: initialize + login/start can be slow and can freeze provisioning.
+	go func() {
+		// Initialize first (some Codex builds won't accept login/start before initialize).
+		initCtx, cancelInit := context.WithTimeout(procCtx, 45*time.Second)
+		_, initErr := rpc.Initialize(initCtx, codexrpc.ClientInfo{
+			Name:    cl.Connector.Config.Codex.ClientInfo.Name,
+			Title:   cl.Connector.Config.Codex.ClientInfo.Title,
+			Version: cl.Connector.Config.Codex.ClientInfo.Version,
+		}, false)
+		cancelInit()
+		if initErr != nil {
+			log.Warn().Err(initErr).Msg("Codex initialize failed")
+			_ = rpc.Close()
+			cl.rpc = nil
 			select {
-			case cl.loginDoneCh <- codexLoginDone{success: evt.Success, errText: errText}:
+			case cl.startCh <- initErr:
 			default:
 			}
-		case "account/updated":
-			// Some Codex builds only emit account/updated after login.
-			var evt struct {
-				AuthMode *string `json:"authMode"`
-			}
-			_ = json.Unmarshal(params, &evt)
-			if evt.AuthMode != nil && strings.TrimSpace(*evt.AuthMode) != "" {
+			return
+		}
+
+		// Subscribe to account/login/completed so Wait() can resolve.
+		rpc.OnNotification(func(method string, params json.RawMessage) {
+			switch method {
+			case "account/login/completed":
+				var evt struct {
+					Success bool    `json:"success"`
+					LoginID *string `json:"loginId"`
+					Error   *string `json:"error"`
+				}
+				_ = json.Unmarshal(params, &evt)
+				// Some Codex builds omit loginId; only filter when it's present.
+				if cl.loginID != "" && evt.LoginID != nil && strings.TrimSpace(*evt.LoginID) != cl.loginID {
+					return
+				}
+				errText := ""
+				if evt.Error != nil {
+					errText = strings.TrimSpace(*evt.Error)
+				}
 				select {
-				case cl.loginDoneCh <- codexLoginDone{success: true}:
+				case cl.loginDoneCh <- codexLoginDone{success: evt.Success, errText: errText}:
 				default:
 				}
+			case "account/updated":
+				// Some Codex builds only emit account/updated after login.
+				var evt struct {
+					AuthMode *string `json:"authMode"`
+				}
+				_ = json.Unmarshal(params, &evt)
+				if evt.AuthMode != nil && strings.TrimSpace(*evt.AuthMode) != "" {
+					select {
+					case cl.loginDoneCh <- codexLoginDone{success: true}:
+					default:
+					}
+				}
 			}
-		}
-	})
+		})
 
-	if mode == "apiKey" {
-		// Start apiKey login in the background and let Wait() poll/resolve. This avoids
-		// blocking the provisioning request (which can freeze clients).
-		cl.waitUntil = time.Now().Add(5 * time.Minute)
-		cl.apiKeyStartCh = make(chan error, 1)
-		go func() {
-			var loginResp struct {
-				Type string `json:"type"`
-			}
-			startCtx, cancel := context.WithTimeout(cl.persistContext(ctx), 20*time.Second)
-			err := rpc.Call(startCtx, "account/login/start", map[string]any{"type": "apiKey", "apiKey": apiKey}, &loginResp)
+		if mode == "apiKey" {
+			startCtx, cancel := context.WithTimeout(procCtx, 60*time.Second)
+			startErr := rpc.Call(startCtx, "account/login/start", map[string]any{"type": "apiKey", "apiKey": apiKey}, &struct{}{})
 			cancel()
-			if err != nil {
-				log.Warn().Err(err).Msg("Codex apiKey login start failed")
+			if startErr != nil {
+				log.Warn().Err(startErr).Msg("Codex apiKey login start failed")
+				select {
+				case cl.startCh <- startErr:
+				default:
+				}
+				return
 			}
 			select {
-			case cl.apiKeyStartCh <- err:
+			case cl.startCh <- nil:
 			default:
 			}
-		}()
+			return
+		}
 
+		var loginResp struct {
+			Type    string `json:"type"`
+			LoginID string `json:"loginId"`
+			AuthURL string `json:"authUrl"`
+		}
+		startCtx, cancel := context.WithTimeout(procCtx, 60*time.Second)
+		startErr := rpc.Call(startCtx, "account/login/start", map[string]any{"type": "chatgpt"}, &loginResp)
+		cancel()
+		if startErr != nil {
+			log.Warn().Err(startErr).Msg("Codex chatgpt login start failed")
+			select {
+			case cl.startCh <- startErr:
+			default:
+			}
+			return
+		}
+		cl.loginID = strings.TrimSpace(loginResp.LoginID)
+		cl.authURL = strings.TrimSpace(loginResp.AuthURL)
+		if cl.authURL == "" || cl.loginID == "" {
+			startErr = fmt.Errorf("codex returned empty authUrl/loginId")
+			select {
+			case cl.startCh <- startErr:
+			default:
+			}
+			return
+		}
+		log.Info().Str("instance_id", cl.instanceID).Str("login_id", cl.loginID).Msg("Codex browser login started")
+		select {
+		case cl.startCh <- nil:
+		default:
+		}
+	}()
+
+	if mode == "apiKey" {
 		return &bridgev2.LoginStep{
 			Type:         bridgev2.LoginStepTypeDisplayAndWait,
 			StepID:       "io.ai-bridge.codex.validating",
@@ -245,33 +292,12 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 		}, nil
 	}
 
-	var loginResp struct {
-		Type    string `json:"type"`
-		LoginID string `json:"loginId"`
-		AuthURL string `json:"authUrl"`
-	}
-	loginCtx, cancelLogin := context.WithTimeout(ctx, 60*time.Second)
-	defer cancelLogin()
-	if err := rpc.Call(loginCtx, "account/login/start", map[string]any{"type": "chatgpt"}, &loginResp); err != nil {
-		log.Warn().Err(err).Msg("Codex chatgpt login start failed")
-		return nil, err
-	}
-	cl.loginID = strings.TrimSpace(loginResp.LoginID)
-	authURL := strings.TrimSpace(loginResp.AuthURL)
-	if authURL == "" || cl.loginID == "" {
-		return nil, fmt.Errorf("codex returned empty authUrl/loginId")
-	}
-	cl.authURL = authURL
-	cl.waitUntil = time.Now().Add(10 * time.Minute)
-	log.Info().Str("instance_id", cl.instanceID).Str("login_id", cl.loginID).Msg("Codex browser login started")
-
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeDisplayAndWait,
-		StepID:       "io.ai-bridge.codex.chatgpt",
-		Instructions: "Open this URL in a browser and complete login, then wait here.",
+		StepID:       "io.ai-bridge.codex.starting",
+		Instructions: "Starting Codex browser login…",
 		DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
-			Type: bridgev2.LoginDisplayTypeCode,
-			Data: authURL,
+			Type: bridgev2.LoginDisplayTypeNothing,
 		},
 	}, nil
 }
@@ -283,6 +309,9 @@ func (cl *CodexLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 	}
 	if cl.loginDoneCh == nil {
 		return nil, fmt.Errorf("login wait unavailable")
+	}
+	if cl.waitUntil.IsZero() {
+		cl.waitUntil = time.Now().Add(10 * time.Minute)
 	}
 
 	overallTimeout := time.Until(cl.waitUntil)
@@ -303,13 +332,12 @@ func (cl *CodexLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 
 	for {
 		select {
-		case err := <-cl.apiKeyStartCh:
-			// apiKey mode: surface start failure early instead of waiting until timeout.
+		case err := <-cl.startCh:
+			// Surface initialize/login-start failures early.
+			cl.startCh = nil
 			if err != nil {
 				return nil, err
 			}
-			// Prevent repeated handling if the channel is re-used.
-			cl.apiKeyStartCh = nil
 		case done := <-cl.loginDoneCh:
 			if !done.success {
 				if done.errText == "" {
@@ -319,12 +347,12 @@ func (cl *CodexLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 				return nil, fmt.Errorf("%s", done.errText)
 			}
 			log.Info().Str("login_id", cl.loginID).Msg("Codex login completed (notification)")
-			return cl.finishLogin(ctx)
+			return cl.finishLogin(cl.persistContext(ctx))
 		case <-tick.C:
 			if cl.rpc == nil {
 				return nil, fmt.Errorf("codex login process stopped")
 			}
-			readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			readCtx, cancel := context.WithTimeout(cl.persistContext(ctx), 10*time.Second)
 			var resp struct {
 				Account *struct {
 					Type  string `json:"type"`
@@ -346,17 +374,32 @@ func (cl *CodexLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 				log.Info().Str("login_id", cl.loginID).Msg("Codex login completed (account/read)")
 				return cl.finishLogin(cl.persistContext(ctx))
 			}
+			// Expose the browser auth URL as soon as it becomes available.
+			if cl.authMode == "chatgpt" && strings.TrimSpace(cl.authURL) != "" {
+				return &bridgev2.LoginStep{
+					Type:         bridgev2.LoginStepTypeDisplayAndWait,
+					StepID:       "io.ai-bridge.codex.chatgpt",
+					Instructions: "Open this URL in a browser and complete login, then wait here.",
+					DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
+						Type: bridgev2.LoginDisplayTypeCode,
+						Data: strings.TrimSpace(cl.authURL),
+					},
+				}, nil
+			}
 		case <-returnAfter.C:
 			log.Debug().Str("login_id", cl.loginID).Msg("Codex login still waiting")
 			stepID := "io.ai-bridge.codex.chatgpt"
 			instr := "Still waiting for Codex login to complete. Keep this screen open."
-			displayType := bridgev2.LoginDisplayTypeCode
-			data := strings.TrimSpace(cl.authURL)
+			displayType := bridgev2.LoginDisplayTypeNothing
+			data := ""
 			if cl.authMode == "apiKey" {
 				stepID = "io.ai-bridge.codex.validating"
 				instr = "Still validating the API key with Codex. Keep this screen open."
 				displayType = bridgev2.LoginDisplayTypeNothing
 				data = ""
+			} else if strings.TrimSpace(cl.authURL) != "" {
+				displayType = bridgev2.LoginDisplayTypeCode
+				data = strings.TrimSpace(cl.authURL)
 			}
 			return &bridgev2.LoginStep{
 				Type:         bridgev2.LoginStepTypeDisplayAndWait,
@@ -376,13 +419,16 @@ func (cl *CodexLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 			log.Debug().Str("login_id", cl.loginID).Msg("Codex login wait context ended; returning still-waiting step")
 			stepID := "io.ai-bridge.codex.chatgpt"
 			instr := "Still waiting for Codex login to complete. Keep this screen open after completing the browser login."
-			displayType := bridgev2.LoginDisplayTypeCode
-			data := strings.TrimSpace(cl.authURL)
+			displayType := bridgev2.LoginDisplayTypeNothing
+			data := ""
 			if cl.authMode == "apiKey" {
 				stepID = "io.ai-bridge.codex.validating"
 				instr = "Still validating the API key with Codex. Keep this screen open."
 				displayType = bridgev2.LoginDisplayTypeNothing
 				data = ""
+			} else if strings.TrimSpace(cl.authURL) != "" {
+				displayType = bridgev2.LoginDisplayTypeCode
+				data = strings.TrimSpace(cl.authURL)
 			}
 			return &bridgev2.LoginStep{
 				Type:         bridgev2.LoginStepTypeDisplayAndWait,
