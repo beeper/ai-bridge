@@ -46,6 +46,20 @@ type codexLoginDone struct {
 	errText string
 }
 
+func (cl *CodexLogin) logger(ctx context.Context) *zerolog.Logger {
+	if ctx != nil {
+		if ctxLog := zerolog.Ctx(ctx); ctxLog != nil && ctxLog.GetLevel() != zerolog.Disabled {
+			return ctxLog
+		}
+	}
+	if cl != nil && cl.User != nil {
+		l := cl.User.Log.With().Str("component", "codex_login").Logger()
+		return &l
+	}
+	l := zerolog.Nop()
+	return &l
+}
+
 func (cl *CodexLogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
 	cmd := cl.resolveCodexCommand()
 	if _, err := exec.LookPath(cmd); err != nil {
@@ -99,15 +113,7 @@ func (cl *CodexLogin) Cancel() {
 }
 
 func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
-	log := zerolog.Ctx(ctx)
-	if log == nil || log.GetLevel() == zerolog.Disabled {
-		base := zerolog.Nop()
-		if cl != nil && cl.User != nil {
-			base = cl.User.Log
-		}
-		l := base.With().Str("component", "codex_login").Logger()
-		log = &l
-	}
+	log := cl.logger(ctx)
 
 	cmd := cl.resolveCodexCommand()
 	if _, err := exec.LookPath(cmd); err != nil {
@@ -170,25 +176,38 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 	// Subscribe to account/login/completed so Wait() can resolve.
 	cl.loginDoneCh = make(chan codexLoginDone, 1)
 	rpc.OnNotification(func(method string, params json.RawMessage) {
-		if method != "account/login/completed" {
-			return
-		}
-		var evt struct {
-			Success bool    `json:"success"`
-			LoginID *string `json:"loginId"`
-			Error   *string `json:"error"`
-		}
-		_ = json.Unmarshal(params, &evt)
-		if cl.loginID != "" && (evt.LoginID == nil || strings.TrimSpace(*evt.LoginID) != cl.loginID) {
-			return
-		}
-		errText := ""
-		if evt.Error != nil {
-			errText = strings.TrimSpace(*evt.Error)
-		}
-		select {
-		case cl.loginDoneCh <- codexLoginDone{success: evt.Success, errText: errText}:
-		default:
+		switch method {
+		case "account/login/completed":
+			var evt struct {
+				Success bool    `json:"success"`
+				LoginID *string `json:"loginId"`
+				Error   *string `json:"error"`
+			}
+			_ = json.Unmarshal(params, &evt)
+			// Some Codex builds omit loginId; only filter when it's present.
+			if cl.loginID != "" && evt.LoginID != nil && strings.TrimSpace(*evt.LoginID) != cl.loginID {
+				return
+			}
+			errText := ""
+			if evt.Error != nil {
+				errText = strings.TrimSpace(*evt.Error)
+			}
+			select {
+			case cl.loginDoneCh <- codexLoginDone{success: evt.Success, errText: errText}:
+			default:
+			}
+		case "account/updated":
+			// Some Codex builds only emit account/updated after login.
+			var evt struct {
+				AuthMode *string `json:"authMode"`
+			}
+			_ = json.Unmarshal(params, &evt)
+			if evt.AuthMode != nil && strings.TrimSpace(*evt.AuthMode) != "" {
+				select {
+				case cl.loginDoneCh <- codexLoginDone{success: true}:
+				default:
+				}
+			}
 		}
 	})
 
@@ -223,6 +242,7 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 	}
 	cl.authURL = authURL
 	cl.waitUntil = time.Now().Add(10 * time.Minute)
+	log.Info().Str("instance_id", cl.instanceID).Str("login_id", cl.loginID).Msg("Codex browser login started")
 
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeDisplayAndWait,
@@ -236,6 +256,7 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 }
 
 func (cl *CodexLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
+	log := cl.logger(ctx)
 	if cl.rpc == nil {
 		return nil, fmt.Errorf("login not started")
 	}
@@ -266,8 +287,10 @@ func (cl *CodexLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 				if done.errText == "" {
 					done.errText = "login failed"
 				}
+				log.Warn().Str("login_id", cl.loginID).Str("error", done.errText).Msg("Codex login failed")
 				return nil, fmt.Errorf("%s", done.errText)
 			}
+			log.Info().Str("login_id", cl.loginID).Msg("Codex login completed (notification)")
 			return cl.finishLogin(ctx)
 		case <-tick.C:
 			if cl.rpc == nil {
@@ -279,13 +302,24 @@ func (cl *CodexLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 					Type  string `json:"type"`
 					Email string `json:"email"`
 				} `json:"account"`
+				RequiresOpenaiAuth bool `json:"requiresOpenaiAuth"`
 			}
-			err := cl.rpc.Call(readCtx, "account/read", map[string]any{"refreshToken": false}, &resp)
+			// Try a few variants for compatibility with different Codex versions.
+			// Use refreshToken=true during login to force Codex to re-check auth state when supported.
+			err := cl.rpc.Call(readCtx, "account/read", map[string]any{"refreshToken": true}, &resp)
+			if err != nil {
+				err = cl.rpc.Call(readCtx, "account/read", map[string]any{"refreshToken": false}, &resp)
+			}
+			if err != nil {
+				err = cl.rpc.Call(readCtx, "account/read", nil, &resp)
+			}
 			cancel()
-			if err == nil && resp.Account != nil && strings.TrimSpace(resp.Account.Type) != "" {
-				return cl.finishLogin(ctx)
+			if err == nil && (resp.Account != nil || !resp.RequiresOpenaiAuth) {
+				log.Info().Str("login_id", cl.loginID).Msg("Codex login completed (account/read)")
+				return cl.finishLogin(cl.persistContext(ctx))
 			}
 		case <-returnAfter.C:
+			log.Debug().Str("login_id", cl.loginID).Msg("Codex login still waiting")
 			return &bridgev2.LoginStep{
 				Type:         bridgev2.LoginStepTypeDisplayAndWait,
 				StepID:       "io.ai-bridge.codex.chatgpt",
@@ -296,17 +330,40 @@ func (cl *CodexLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 				},
 			}, nil
 		case <-deadline.C:
+			log.Warn().Str("login_id", cl.loginID).Msg("Codex login timed out")
 			return nil, fmt.Errorf("timed out waiting for Codex login to complete")
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			// Most callers will have their own HTTP/gRPC deadlines. Returning the same waiting
+			// step allows the client to poll again without the login process being marked as failed.
+			log.Debug().Str("login_id", cl.loginID).Msg("Codex login wait context ended; returning still-waiting step")
+			return &bridgev2.LoginStep{
+				Type:         bridgev2.LoginStepTypeDisplayAndWait,
+				StepID:       "io.ai-bridge.codex.chatgpt",
+				Instructions: "Still waiting for Codex login to complete. Keep this screen open after completing the browser login.",
+				DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
+					Type: bridgev2.LoginDisplayTypeCode,
+					Data: strings.TrimSpace(cl.authURL),
+				},
+			}, nil
 		}
 	}
+}
+
+func (cl *CodexLogin) persistContext(ctx context.Context) context.Context {
+	if cl != nil && cl.Connector != nil && cl.Connector.br != nil && cl.Connector.br.BackgroundCtx != nil {
+		return cl.Connector.br.BackgroundCtx
+	}
+	_ = ctx
+	return context.Background()
 }
 
 func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, error) {
 	if cl.User == nil {
 		return nil, fmt.Errorf("missing user")
 	}
+	persistCtx := cl.persistContext(ctx)
+	log := cl.logger(persistCtx)
+
 	loginID := makeCodexUserLoginID(cl.User.MXID, cl.instanceID)
 	remoteName := "Codex"
 	if cl.User != nil {
@@ -331,7 +388,7 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 	// Best-effort read account email (chatgpt mode).
 	accountEmail := ""
 	if cl.rpc != nil {
-		readCtx, cancelRead := context.WithTimeout(ctx, 10*time.Second)
+		readCtx, cancelRead := context.WithTimeout(persistCtx, 10*time.Second)
 		defer cancelRead()
 		var acct struct {
 			Account *struct {
@@ -351,7 +408,40 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 		CodexAuthMode:     cl.authMode,
 		CodexAccountEmail: accountEmail,
 	}
-	login, err := cl.User.NewLogin(ctx, &database.UserLogin{
+
+	if cl.Connector != nil && cl.Connector.br != nil {
+		if existing, _ := cl.Connector.br.GetExistingUserLoginByID(persistCtx, loginID); existing != nil {
+			existingMeta, ok := existing.Metadata.(*UserLoginMetadata)
+			if !ok || existingMeta == nil {
+				existingMeta = &UserLoginMetadata{}
+			}
+			*existingMeta = *meta
+			existing.Metadata = existingMeta
+			existing.RemoteName = remoteName
+			if err := existing.Save(persistCtx); err != nil {
+				return nil, fmt.Errorf("failed to update existing login: %w", err)
+			}
+			log.Info().Str("user_login_id", string(existing.ID)).Msg("Updated existing Codex login")
+			if err := cl.Connector.LoadUserLogin(persistCtx, existing); err != nil {
+				return nil, fmt.Errorf("failed to load client: %w", err)
+			}
+			go existing.Client.Connect(existing.Log.WithContext(context.Background()))
+			if cl.rpc != nil {
+				_ = cl.rpc.Close()
+				cl.rpc = nil
+			}
+			return &bridgev2.LoginStep{
+				Type:   bridgev2.LoginStepTypeComplete,
+				StepID: "io.ai-bridge.codex.complete",
+				CompleteParams: &bridgev2.LoginCompleteParams{
+					UserLoginID: existing.ID,
+					UserLogin:   existing,
+				},
+			}, nil
+		}
+	}
+
+	login, err := cl.User.NewLogin(persistCtx, &database.UserLogin{
 		ID:         loginID,
 		RemoteName: remoteName,
 		Metadata:   meta,
@@ -359,7 +449,8 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to create login: %w", err)
 	}
-	if err := cl.Connector.LoadUserLogin(ctx, login); err != nil {
+	log.Info().Str("user_login_id", string(login.ID)).Msg("Created new Codex login")
+	if err := cl.Connector.LoadUserLogin(persistCtx, login); err != nil {
 		return nil, fmt.Errorf("failed to load client: %w", err)
 	}
 	go login.Client.Connect(login.Log.WithContext(context.Background()))

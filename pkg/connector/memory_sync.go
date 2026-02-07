@@ -85,12 +85,23 @@ func (m *MemorySearchManager) ensureIntervalSync() {
 	}
 	m.intervalOnce.Do(func() {
 		interval := time.Duration(m.cfg.Sync.IntervalMinutes) * time.Minute
+		m.mu.Lock()
+		if m.intervalStop == nil {
+			m.intervalStop = make(chan struct{})
+		}
+		stopCh := m.intervalStop
+		m.mu.Unlock()
 		go func() {
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
-			for range ticker.C {
-				if err := m.sync(context.Background(), "", false); err != nil {
-					m.log.Warn().Msg("memory sync failed (interval): " + err.Error())
+			for {
+				select {
+				case <-ticker.C:
+					if err := m.sync(context.Background(), "", false); err != nil {
+						m.log.Warn().Msg("memory sync failed (interval): " + err.Error())
+					}
+				case <-stopCh:
+					return
 				}
 			}
 		}()

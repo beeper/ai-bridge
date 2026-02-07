@@ -1070,6 +1070,9 @@ func (oc *AIClient) IsLoggedIn() bool {
 }
 
 func (oc *AIClient) LogoutRemote(ctx context.Context) {
+	// Best-effort: remove per-login data not covered by bridgev2's user_login/portal/message cleanup.
+	purgeLoginDataBestEffort(ctx, oc.UserLogin)
+
 	oc.Disconnect()
 	oc.UserLogin.BridgeState.Send(status.BridgeState{
 		StateEvent: status.StateLoggedOut,

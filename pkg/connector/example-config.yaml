@@ -39,7 +39,7 @@ providers:
     api_key: ""
     # Optional. Defaults to https://openrouter.ai/api/v1
     base_url: "https://openrouter.ai/api/v1"
-    default_model: "openai/gpt-5.2"
+    default_model: "anthropic/claude-opus-4.6"
     # PDF processing engine for OpenRouter's file-parser plugin.
     # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
     default_pdf_engine: "mistral-ocr"

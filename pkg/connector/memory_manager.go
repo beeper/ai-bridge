@@ -46,6 +46,8 @@ type MemorySearchManager struct {
 	sessionWatchTimer *time.Timer
 	sessionWatchKey   string
 	intervalOnce      sync.Once
+	intervalStop      chan struct{}
+	intervalStopOnce  sync.Once
 	vectorConn        *sql.Conn
 	vectorReady       bool
 	vectorError       string

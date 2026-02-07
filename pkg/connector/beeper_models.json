@@ -35,6 +35,23 @@
       "api": "openai-completions"
     },
     {
+      "id": "anthropic/claude-opus-4.6",
+      "name": "Claude Opus 4.6",
+      "provider": "openrouter",
+      "supports_vision": true,
+      "supports_tool_calling": true,
+      "supports_reasoning": true,
+      "supports_web_search": true,
+      "supports_pdf": true,
+      "context_window": 200000,
+      "max_output_tokens": 64000,
+      "available_tools": [
+        "web_search",
+        "function_calling"
+      ],
+      "api": "openai-completions"
+    },
+    {
       "id": "anthropic/claude-sonnet-4.5",
       "name": "Claude Sonnet 4.5",
       "provider": "openrouter",

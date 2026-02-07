@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -193,11 +194,95 @@ func (cc *CodexClient) LogoutRemote(ctx context.Context) {
 		var out map[string]any
 		_ = cc.rpc.Call(callCtx, "account/logout", nil, &out)
 	}
+	// Best-effort: remove on-disk Codex state for this login.
+	cc.purgeCodexHomeBestEffort(ctx)
+	// Best-effort: remove on-disk per-room Codex working dirs.
+	cc.purgeCodexCwdsBestEffort(ctx)
+
+	// Best-effort: remove per-login data not covered by bridgev2's user_login/portal/message cleanup.
+	purgeLoginDataBestEffort(ctx, cc.UserLogin)
+
 	cc.Disconnect()
 	cc.UserLogin.BridgeState.Send(status.BridgeState{
 		StateEvent: status.StateLoggedOut,
 		Message:    "Disconnected by user",
 	})
+}
+
+func (cc *CodexClient) purgeCodexHomeBestEffort(ctx context.Context) {
+	if cc == nil || cc.UserLogin == nil {
+		return
+	}
+	meta, ok := cc.UserLogin.Metadata.(*UserLoginMetadata)
+	if !ok || meta == nil {
+		return
+	}
+	codexHome := strings.TrimSpace(meta.CodexHome)
+	if codexHome == "" {
+		return
+	}
+	// Safety: refuse to delete suspicious paths.
+	clean := filepath.Clean(codexHome)
+	if clean == string(os.PathSeparator) || clean == "." {
+		return
+	}
+	// Best-effort recursive delete.
+	_ = os.RemoveAll(clean)
+}
+
+func (cc *CodexClient) purgeCodexCwdsBestEffort(ctx context.Context) {
+	if cc == nil || cc.UserLogin == nil || cc.UserLogin.Bridge == nil || cc.UserLogin.Bridge.DB == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// Enumerate portal metadata before bridgev2 deletes the portal rows.
+	ups, err := cc.UserLogin.Bridge.DB.UserPortal.GetAllForLogin(ctx, cc.UserLogin.UserLogin)
+	if err != nil || len(ups) == 0 {
+		return
+	}
+
+	tmp := filepath.Clean(os.TempDir())
+	if tmp == "" || tmp == "." || tmp == string(os.PathSeparator) {
+		// Should never happen, but avoid deleting arbitrary dirs if it does.
+		return
+	}
+
+	seen := make(map[string]struct{})
+	for _, up := range ups {
+		if up == nil {
+			continue
+		}
+		portal, err := cc.UserLogin.Bridge.GetExistingPortalByKey(ctx, up.Portal)
+		if err != nil || portal == nil || portal.Metadata == nil {
+			continue
+		}
+		meta, ok := portal.Metadata.(*PortalMetadata)
+		if !ok || meta == nil {
+			continue
+		}
+		cwd := strings.TrimSpace(meta.CodexCwd)
+		if cwd == "" {
+			continue
+		}
+		clean := filepath.Clean(cwd)
+		if clean == "." || clean == string(os.PathSeparator) {
+			continue
+		}
+		// Safety: only delete dirs we created via os.MkdirTemp("", "ai-bridge-codex-*").
+		if !strings.HasPrefix(filepath.Base(clean), "ai-bridge-codex-") {
+			continue
+		}
+		if !strings.HasPrefix(clean, tmp+string(os.PathSeparator)) {
+			continue
+		}
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		_ = os.RemoveAll(clean)
+	}
 }
 
 func (cc *CodexClient) IsThisUser(ctx context.Context, userID networkid.UserID) bool {
