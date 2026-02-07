@@ -2,7 +2,7 @@ package agents
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -382,7 +382,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 			enabledTools = append(enabledTools, tool)
 		}
 	}
-	sort.Strings(extraTools)
+	slices.Sort(extraTools)
 
 	toolLines := make([]string, 0, len(enabledTools)+len(extraTools))
 	for _, tool := range enabledTools {

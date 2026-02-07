@@ -1,8 +1,9 @@
 package cron
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -323,15 +324,15 @@ func findJobIndex(jobs []CronJob, id string) int {
 }
 
 func sortJobs(jobs []CronJob) {
-	sort.Slice(jobs, func(i, j int) bool {
-		var a, b int64
-		if jobs[i].State.NextRunAtMs != nil {
-			a = *jobs[i].State.NextRunAtMs
+	slices.SortFunc(jobs, func(a, b CronJob) int {
+		var av, bv int64
+		if a.State.NextRunAtMs != nil {
+			av = *a.State.NextRunAtMs
 		}
-		if jobs[j].State.NextRunAtMs != nil {
-			b = *jobs[j].State.NextRunAtMs
+		if b.State.NextRunAtMs != nil {
+			bv = *b.State.NextRunAtMs
 		}
-		return a < b
+		return cmp.Compare(av, bv)
 	})
 }
 
