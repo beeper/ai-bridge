@@ -20,8 +20,8 @@ func NormalizeOpenAIModel(model string) string {
 	if trimmed == "" {
 		return DefaultOpenAIEmbeddingModel
 	}
-	if strings.HasPrefix(trimmed, "openai/") {
-		return strings.TrimPrefix(trimmed, "openai/")
+	if after, ok := strings.CutPrefix(trimmed, "openai/"); ok {
+		return after
 	}
 	return trimmed
 }

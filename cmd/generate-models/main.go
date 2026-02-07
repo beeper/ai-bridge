@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go/format"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"slices"
@@ -301,7 +302,7 @@ var ModelManifest = struct {
 `)
 
 	// Get sorted model IDs for deterministic output
-	modelIDs := sortedKeys(modelConfig.Models)
+	modelIDs := slices.Sorted(maps.Keys(modelConfig.Models))
 
 	for _, modelID := range modelIDs {
 		displayName := modelConfig.Models[modelID]
@@ -354,7 +355,7 @@ var ModelManifest = struct {
 `)
 
 	// Add aliases
-	aliasKeys := sortedKeys(modelConfig.Aliases)
+	aliasKeys := slices.Sorted(maps.Keys(modelConfig.Aliases))
 	for _, alias := range aliasKeys {
 		target := modelConfig.Aliases[alias]
 		buf.WriteString(fmt.Sprintf(`		%q: %q,
@@ -402,7 +403,7 @@ func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) e
 	var models []JSONModelInfo
 
 	// Add OpenRouter models
-	modelIDs := sortedKeys(modelConfig.Models)
+	modelIDs := slices.Sorted(maps.Keys(modelConfig.Models))
 	for _, modelID := range modelIDs {
 		displayName := modelConfig.Models[modelID]
 		apiModel, hasAPIData := apiModels[modelID]
@@ -446,12 +447,4 @@ func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) e
 	return os.WriteFile(outputPath, data, 0644)
 }
 
-// sortedKeys returns the keys of a map sorted alphabetically
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
-}
+

@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -60,12 +61,7 @@ func (r *schemaSanitizeReport) list() []string {
 	if r == nil || len(r.stripped) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(r.stripped))
-	for key := range r.stripped {
-		out = append(out, key)
-	}
-	slices.Sort(out)
-	return out
+	return slices.Sorted(maps.Keys(r.stripped))
 }
 
 func logSchemaSanitization(log *zerolog.Logger, toolName string, stripped []string) {
@@ -171,11 +167,7 @@ func hasObjectProperties(schema map[string]any) bool {
 }
 
 func cloneSchemaMap(schema map[string]any) map[string]any {
-	clone := make(map[string]any, len(schema))
-	for k, v := range schema {
-		clone[k] = v
-	}
-	return clone
+	return maps.Clone(schema)
 }
 
 func mergeObjectUnionSchema(schema map[string]any) map[string]any {

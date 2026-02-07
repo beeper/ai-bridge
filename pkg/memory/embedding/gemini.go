@@ -29,11 +29,11 @@ func NormalizeGeminiModel(model string) string {
 		return DefaultGeminiEmbeddingModel
 	}
 	withoutPrefix := strings.TrimPrefix(trimmed, "models/")
-	if strings.HasPrefix(withoutPrefix, "gemini/") {
-		return strings.TrimPrefix(withoutPrefix, "gemini/")
+	if after, ok := strings.CutPrefix(withoutPrefix, "gemini/"); ok {
+		return after
 	}
-	if strings.HasPrefix(withoutPrefix, "google/") {
-		return strings.TrimPrefix(withoutPrefix, "google/")
+	if after, ok := strings.CutPrefix(withoutPrefix, "google/"); ok {
+		return after
 	}
 	return withoutPrefix
 }

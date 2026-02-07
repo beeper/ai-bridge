@@ -14,6 +14,11 @@ import (
 	"maunium.net/go/mautrix/event"
 )
 
+var (
+	fileCloseTagRE = regexp.MustCompile(`(?i)<\s*/\s*file\s*>`)
+	fileOpenTagRE  = regexp.MustCompile(`(?i)<\s*file\b`)
+)
+
 const maxTextFileBytes = 5 * 1024 * 1024
 
 func normalizeMimeType(mimeType string) string {
@@ -270,9 +275,7 @@ func xmlEscapeAttr(value string) string {
 }
 
 func escapeFileBlockContent(value string) string {
-	closeTag := regexp.MustCompile(`(?i)<\s*/\s*file\s*>`)
-	openTag := regexp.MustCompile(`(?i)<\s*file\b`)
-	value = closeTag.ReplaceAllString(value, "&lt;/file&gt;")
-	value = openTag.ReplaceAllString(value, "&lt;file")
+	value = fileCloseTagRE.ReplaceAllString(value, "&lt;/file&gt;")
+	value = fileOpenTagRE.ReplaceAllString(value, "&lt;file")
 	return value
 }

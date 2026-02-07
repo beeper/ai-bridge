@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -436,18 +437,7 @@ type openAIBatchParams struct {
 }
 
 func splitOpenAIRequests(requests []openAIBatchRequest) [][]openAIBatchRequest {
-	if len(requests) <= openAIBatchMaxRequests {
-		return [][]openAIBatchRequest{requests}
-	}
-	var groups [][]openAIBatchRequest
-	for i := 0; i < len(requests); i += openAIBatchMaxRequests {
-		end := i + openAIBatchMaxRequests
-		if end > len(requests) {
-			end = len(requests)
-		}
-		groups = append(groups, requests[i:end])
-	}
-	return groups
+	return slices.Collect(slices.Chunk(requests, openAIBatchMaxRequests))
 }
 
 func submitOpenAIBatch(
@@ -721,18 +711,7 @@ func runGeminiBatches(ctx context.Context, params geminiBatchParams) (map[string
 }
 
 func splitGeminiRequests(requests []geminiBatchRequest) [][]geminiBatchRequest {
-	if len(requests) <= geminiBatchMaxRequests {
-		return [][]geminiBatchRequest{requests}
-	}
-	var groups [][]geminiBatchRequest
-	for i := 0; i < len(requests); i += geminiBatchMaxRequests {
-		end := i + geminiBatchMaxRequests
-		if end > len(requests) {
-			end = len(requests)
-		}
-		groups = append(groups, requests[i:end])
-	}
-	return groups
+	return slices.Collect(slices.Chunk(requests, geminiBatchMaxRequests))
 }
 
 func submitGeminiBatch(

@@ -3,6 +3,7 @@ package cron
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 )
@@ -14,10 +15,7 @@ func normalizeCronJobInputRaw(raw any, applyDefaults bool) rawRecord {
 	if !ok {
 		return nil
 	}
-	next := rawRecord{}
-	for k, v := range base {
-		next[k] = v
-	}
+	next := maps.Clone(base)
 
 	// agentId handling (trim, allow null to clear)
 	if val, ok := base["agentId"]; ok {
@@ -62,11 +60,7 @@ func normalizeCronJobInputRaw(raw any, applyDefaults bool) rawRecord {
 	}
 	if payloadRaw, ok := base["payload"]; ok {
 		if payloadMap, ok := payloadRaw.(map[string]any); ok {
-			nextPayload := map[string]any{}
-			for k, v := range payloadMap {
-				nextPayload[k] = v
-			}
-			next["payload"] = nextPayload
+			next["payload"] = maps.Clone(payloadMap)
 		}
 	}
 	if _, ok := base["isolation"]; ok {
@@ -121,10 +115,7 @@ func unwrapCronJob(raw any) (rawRecord, bool) {
 }
 
 func coerceScheduleMap(schedule map[string]any) map[string]any {
-	next := map[string]any{}
-	for k, v := range schedule {
-		next[k] = v
-	}
+	next := maps.Clone(schedule)
 	kind, _ := schedule["kind"].(string)
 	if strings.TrimSpace(kind) == "" {
 		if schedule["at"] != nil {
@@ -190,10 +181,7 @@ func formatIsoMillis(ts int64) string {
 }
 
 func coerceDeliveryMap(delivery map[string]any) map[string]any {
-	next := map[string]any{}
-	for k, v := range delivery {
-		next[k] = v
-	}
+	next := maps.Clone(delivery)
 	if rawMode, ok := delivery["mode"].(string); ok {
 		mode := strings.ToLower(strings.TrimSpace(rawMode))
 		if mode != "" {

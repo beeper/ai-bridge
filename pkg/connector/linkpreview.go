@@ -156,6 +156,8 @@ var urlRegex = regexp.MustCompile(`https?://[^\s<>\[\]()'"]+[^\s<>\[\]()'",.:;!?
 // Markdown link regex to strip [text](url) before extracting bare URLs
 var markdownLinkRegex = regexp.MustCompile(`\[[^\]]*]\((https?://\S+?)\)`)
 
+var whitespaceCollapseRE = regexp.MustCompile(`\s+`)
+
 // ExtractURLs extracts URLs from text, returning up to maxURLs unique URLs.
 // It strips markdown link syntax to avoid detecting the same URL twice.
 func ExtractURLs(text string, maxURLs int) []string {
@@ -623,7 +625,7 @@ func extractDescription(doc *goquery.Document) string {
 func summarizeText(text string, maxWords, maxLength int) string {
 	// Normalize whitespace
 	text = strings.TrimSpace(text)
-	text = regexp.MustCompile(`\s+`).ReplaceAllString(text, " ")
+	text = whitespaceCollapseRE.ReplaceAllString(text, " ")
 
 	if text == "" {
 		return ""

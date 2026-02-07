@@ -1015,12 +1015,7 @@ func (m *MemorySearchManager) collectChunkIDs(ctx context.Context, path, source,
 }
 
 func hasSource(sources []string, target string) bool {
-	for _, source := range sources {
-		if source == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(sources, target)
 }
 
 func isExtraPath(path string, extra []string) bool {

@@ -16,6 +16,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -719,14 +720,7 @@ func executeMessagePin(ctx context.Context, args map[string]any, btc *BridgeTool
 	// Modify pinned events
 	if pin {
 		// Add to pinned if not already there
-		found := false
-		for _, evtID := range pinnedEvents {
-			if evtID == targetEventID.String() {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(pinnedEvents, targetEventID.String()) {
 			pinnedEvents = append(pinnedEvents, targetEventID.String())
 		}
 	} else {

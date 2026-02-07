@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
@@ -53,9 +54,9 @@ func mergeMemorySearchConfig(
 		remote.Batch = memory.BatchConfig{
 			Enabled:        pickBool(overridesBatchEnabled(overrides), defaultsBatchEnabled(defaults), true),
 			Wait:           pickBool(overridesBatchWait(overrides), defaultsBatchWait(defaults), true),
-			Concurrency:    maxInt(1, pickInt(overridesBatchConcurrency(overrides), defaultsBatchConcurrency(defaults), 2)),
-			PollIntervalMs: maxInt(100, pickInt(overridesBatchPoll(overrides), defaultsBatchPoll(defaults), 2000)),
-			TimeoutMinutes: maxInt(1, pickInt(overridesBatchTimeout(overrides), defaultsBatchTimeout(defaults), 60)),
+			Concurrency:    max(1, pickInt(overridesBatchConcurrency(overrides), defaultsBatchConcurrency(defaults), 2)),
+			PollIntervalMs: max(100, pickInt(overridesBatchPoll(overrides), defaultsBatchPoll(defaults), 2000)),
+			TimeoutMinutes: max(1, pickInt(overridesBatchTimeout(overrides), defaultsBatchTimeout(defaults), 60)),
 		}
 	}
 
@@ -68,10 +69,10 @@ func mergeMemorySearchConfig(
 	}
 	model := pickString(overridesModel(overrides), defaultsModel(defaults), modelDefault)
 
-	rawSources := mergeStringSlices(defaultsSources(defaults), overridesSources(overrides))
+	rawSources := slices.Concat(defaultsSources(defaults), overridesSources(overrides))
 	sources := normalizeSources(rawSources, sessionMemory)
 
-	rawExtraPaths := mergeStringSlices(defaultsExtraPaths(defaults), overridesExtraPaths(overrides))
+	rawExtraPaths := slices.Concat(defaultsExtraPaths(defaults), overridesExtraPaths(overrides))
 	extraPaths := dedupeStrings(rawExtraPaths)
 
 	vector := memory.VectorConfig{
@@ -94,7 +95,7 @@ func mergeMemorySearchConfig(
 		chunkOverlap = 0
 	}
 	if chunkOverlap >= chunkTokens {
-		chunkOverlap = maxInt(0, chunkTokens-1)
+		chunkOverlap = max(0, chunkTokens-1)
 	}
 
 	sync := memory.SyncConfig{
@@ -125,9 +126,9 @@ func mergeMemorySearchConfig(
 		MaxEntries: pickInt(overridesCacheMaxEntries(overrides), defaultsCacheMaxEntries(defaults), 0),
 	}
 
-	query.MinScore = clampFloat(query.MinScore, 0, 1)
-	vectorWeight := clampFloat(query.Hybrid.VectorWeight, 0, 1)
-	textWeight := clampFloat(query.Hybrid.TextWeight, 0, 1)
+	query.MinScore = min(max(query.MinScore, 0.0), 1.0)
+	vectorWeight := min(max(query.Hybrid.VectorWeight, 0.0), 1.0)
+	textWeight := min(max(query.Hybrid.TextWeight, 0.0), 1.0)
 	sum := vectorWeight + textWeight
 	if sum <= 0 {
 		query.Hybrid.VectorWeight = memory.DefaultHybridVectorWeight
@@ -136,9 +137,9 @@ func mergeMemorySearchConfig(
 		query.Hybrid.VectorWeight = vectorWeight / sum
 		query.Hybrid.TextWeight = textWeight / sum
 	}
-	query.Hybrid.CandidateMultiplier = clampInt(query.Hybrid.CandidateMultiplier, 1, 20)
-	sync.Sessions.DeltaBytes = maxInt(0, sync.Sessions.DeltaBytes)
-	sync.Sessions.DeltaMessages = maxInt(0, sync.Sessions.DeltaMessages)
+	query.Hybrid.CandidateMultiplier = min(max(query.Hybrid.CandidateMultiplier, 1), 20)
+	sync.Sessions.DeltaBytes = max(0, sync.Sessions.DeltaBytes)
+	sync.Sessions.DeltaMessages = max(0, sync.Sessions.DeltaMessages)
 	if cache.MaxEntries <= 0 {
 		cache.MaxEntries = 0
 	}
@@ -204,13 +205,6 @@ func mergeHeaders(base, override map[string]string) map[string]string {
 	return out
 }
 
-func mergeStringSlices(a, b []string) []string {
-	merged := make([]string, 0, len(a)+len(b))
-	merged = append(merged, a...)
-	merged = append(merged, b...)
-	return merged
-}
-
 func pickBool(override, fallback *bool, defaultVal bool) bool {
 	if override != nil {
 		return *override
@@ -249,33 +243,6 @@ func pickFloat(override, fallback, defaultVal float64) float64 {
 		return fallback
 	}
 	return defaultVal
-}
-
-func clampFloat(value, min, max float64) float64 {
-	if value < min {
-		return min
-	}
-	if value > max {
-		return max
-	}
-	return value
-}
-
-func clampInt(value, min, max int) int {
-	if value < min {
-		return min
-	}
-	if value > max {
-		return max
-	}
-	return value
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func overridesEnabled(cfg *agents.MemorySearchConfig) *bool {

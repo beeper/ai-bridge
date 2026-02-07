@@ -221,16 +221,16 @@ func openCodeMessageTime(msg opencode.MessageWithParts) time.Time {
 
 func parseOpenCodePartID(msgID networkid.MessageID) (string, bool) {
 	raw := string(msgID)
-	switch {
-	case strings.HasPrefix(raw, "opencode:part:"):
-		return strings.TrimPrefix(raw, "opencode:part:"), true
-	case strings.HasPrefix(raw, "opencode:toolcall:"):
-		return strings.TrimPrefix(raw, "opencode:toolcall:"), true
-	case strings.HasPrefix(raw, "opencode:toolresult:"):
-		return strings.TrimPrefix(raw, "opencode:toolresult:"), true
-	default:
-		return "", false
+	if after, ok := strings.CutPrefix(raw, "opencode:part:"); ok {
+		return after, true
 	}
+	if after, ok := strings.CutPrefix(raw, "opencode:toolcall:"); ok {
+		return after, true
+	}
+	if after, ok := strings.CutPrefix(raw, "opencode:toolresult:"); ok {
+		return after, true
+	}
+	return "", false
 }
 
 func parseOpenCodeMessageID(msgID networkid.MessageID) (string, bool) {

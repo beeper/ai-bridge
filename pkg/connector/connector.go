@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -53,10 +54,7 @@ func (oc *OpenAIConnector) Init(bridge *bridgev2.Bridge) {
 
 func (oc *OpenAIConnector) Stop(ctx context.Context) {
 	oc.clientsMu.Lock()
-	clients := make(map[networkid.UserLoginID]bridgev2.NetworkAPI, len(oc.clients))
-	for k, v := range oc.clients {
-		clients[k] = v
-	}
+	clients := maps.Clone(oc.clients)
 	oc.clientsMu.Unlock()
 
 	for _, client := range clients {

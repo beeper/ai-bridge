@@ -379,7 +379,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 				TS:            time.Now().UnixMilli(),
 				Status:        "skipped",
 				Reason:        "duplicate",
-				Preview:       cleaned[:minInt(len(cleaned), 200)],
+				Preview:       cleaned[:min(len(cleaned), 200)],
 				Channel:       hb.Channel,
 				HasMedia:      hasMedia,
 				IndicatorType: indicator,
@@ -400,7 +400,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 			TS:       time.Now().UnixMilli(),
 			Status:   "skipped",
 			Reason:   targetReason,
-			Preview:  preview[:minInt(len(preview), 200)],
+			Preview:  preview[:min(len(preview), 200)],
 			Channel:  hb.Channel,
 			HasMedia: hasMedia,
 		})
@@ -424,7 +424,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 			TS:            time.Now().UnixMilli(),
 			Status:        "skipped",
 			Reason:        "alerts-disabled",
-			Preview:       preview[:minInt(len(preview), 200)],
+			Preview:       preview[:min(len(preview), 200)],
 			Channel:       hb.Channel,
 			HasMedia:      hasMedia,
 			IndicatorType: indicator,
@@ -463,7 +463,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		TS:            time.Now().UnixMilli(),
 		Status:        "sent",
 		Reason:        hb.Reason,
-		Preview:       preview[:minInt(len(preview), 200)],
+		Preview:       preview[:min(len(preview), 200)],
 		Channel:       hb.Channel,
 		HasMedia:      hasMedia,
 		IndicatorType: indicator,
@@ -506,13 +506,6 @@ func (oc *AIClient) sendPlainAssistantMessage(ctx context.Context, portal *bridg
 	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{Raw: eventRawContent}, nil); err == nil {
 		oc.recordAgentActivity(ctx, portal, portalMeta(portal))
 	}
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func buildSourceParts(citations []sourceCitation, documents []sourceDocument, previews []*event.BeeperLinkPreview) []map[string]any {

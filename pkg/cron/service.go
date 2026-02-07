@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -241,14 +242,10 @@ func (c *CronService) Remove(id string) (bool, error) {
 			return err
 		}
 		before := len(c.store.Jobs)
-		filtered := make([]CronJob, 0, len(c.store.Jobs))
-		for _, job := range c.store.Jobs {
-			if job.ID != id {
-				filtered = append(filtered, job)
-			}
-		}
-		removed = len(filtered) != before
-		c.store.Jobs = filtered
+		c.store.Jobs = slices.DeleteFunc(c.store.Jobs, func(job CronJob) bool {
+			return job.ID == id
+		})
+		removed = len(c.store.Jobs) != before
 		if err := c.persist(); err != nil {
 			return err
 		}
@@ -440,13 +437,9 @@ func (c *CronService) executeJobLocked(jobID string, forced bool) (bool, error) 
 		})
 
 		if shouldDelete {
-			filtered := make([]CronJob, 0, len(c.store.Jobs))
-			for _, existing := range c.store.Jobs {
-				if existing.ID != job.ID {
-					filtered = append(filtered, existing)
-				}
-			}
-			c.store.Jobs = filtered
+			c.store.Jobs = slices.DeleteFunc(c.store.Jobs, func(existing CronJob) bool {
+				return existing.ID == job.ID
+			})
 			c.emit(CronEvent{JobID: job.ID, Action: "removed"})
 			deleted = true
 		} else {
