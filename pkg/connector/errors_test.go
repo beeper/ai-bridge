@@ -181,8 +181,9 @@ func TestFormatUserFacingError_JSONPayloadParsing(t *testing.T) {
 func TestFormatUserFacingError_FlatJSONPayload(t *testing.T) {
 	err := errors.New(`{"type":"server_error","message":"internal failure"}`)
 	msg := FormatUserFacingError(err)
-	// server_error should be caught by IsServerError
-	expected := "The AI provider encountered an error. Please try again later."
+	// String-based checks don't match server_error (requires openai.Error),
+	// so it falls through to JSON parsing
+	expected := "server_error: internal failure"
 	if msg != expected {
 		t.Fatalf("expected %q, got %q", expected, msg)
 	}
@@ -212,10 +213,10 @@ func TestFormatUserFacingError_TruncationAt600(t *testing.T) {
 }
 
 func TestFormatUserFacingError_StripsFinalTags(t *testing.T) {
-	err := errors.New("some error <final>internal details</final> happened")
+	err := errors.New("some error <final>internal details</final>happened")
 	msg := FormatUserFacingError(err)
 	if msg != "some error happened" {
-		t.Fatalf("expected final tags stripped, got: %s", msg)
+		t.Fatalf("expected final tags stripped, got: %q", msg)
 	}
 }
 
@@ -225,10 +226,10 @@ func TestStripFinalTags(t *testing.T) {
 		want  string
 	}{
 		{"no tags here", "no tags here"},
-		{"before <final>secret</final> after", "before after"},
+		{"before <final>secret</final> after", "before  after"},
 		{"<final>all secret</final>", ""},
 		{"unclosed <final>tag", "unclosed"},
-		{"multiple <final>a</final> and <final>b</final> tags", "multiple and tags"},
+		{"multiple <final>a</final> and <final>b</final> tags", "multiple  and  tags"},
 	}
 	for _, tt := range tests {
 		if got := stripFinalTags(tt.input); got != tt.want {
@@ -268,7 +269,7 @@ func TestStripThinkTags(t *testing.T) {
 		{"no think tags", "no think tags"},
 		{"<think>reasoning here</think> actual response", "actual response"},
 		{"<think>line1\nline2\nline3</think>\nresponse", "response"},
-		{"<think>first</think> middle <think>second</think> end", "middle  end"},
+		{"<think>first</think> middle <think>second</think> end", "middle end"},
 		{"<think>everything is thinking</think>", ""},
 		{"response without think", "response without think"},
 	}

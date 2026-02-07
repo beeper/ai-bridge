@@ -41,6 +41,7 @@ type MemorySearchManager struct {
 
 	dirty             bool
 	sessionsDirty     bool
+	syncProgress      func(completed, total int, label string)
 	sessionWarm       map[string]struct{}
 	watchTimer        *time.Timer
 	sessionWatchTimer *time.Timer
@@ -426,11 +427,11 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 	}
 
 	if !m.cfg.Query.Hybrid.Enabled {
-		return filterAndLimit(vectorResultsToSearch(vectorResults), minScore, maxResults), nil
+		return clampInjectedChars(filterAndLimit(vectorResultsToSearch(vectorResults), minScore, maxResults), m.cfg.Query.MaxInjectedChars), nil
 	}
 
 	merged := memory.MergeHybridResults(vectorResults, keywordResults, m.cfg.Query.Hybrid.VectorWeight, m.cfg.Query.Hybrid.TextWeight)
-	return filterAndLimit(merged, minScore, maxResults), nil
+	return clampInjectedChars(filterAndLimit(merged, minScore, maxResults), m.cfg.Query.MaxInjectedChars), nil
 }
 
 func (m *MemorySearchManager) ReadFile(ctx context.Context, relPath string, from, lines *int) (map[string]any, error) {
@@ -499,6 +500,29 @@ func filterAndLimit(results []memory.SearchResult, minScore float64, maxResults 
 		return filtered[:maxResults]
 	}
 	return filtered
+}
+
+// clampInjectedChars enforces a total character budget across all search result snippets.
+// If maxChars <= 0, no clamping is applied. The last result that would exceed the budget
+// is truncated; subsequent results are dropped.
+func clampInjectedChars(results []memory.SearchResult, maxChars int) []memory.SearchResult {
+	if maxChars <= 0 || len(results) == 0 {
+		return results
+	}
+	total := 0
+	for i, result := range results {
+		n := len(result.Snippet)
+		if total+n > maxChars {
+			remaining := maxChars - total
+			if remaining <= 0 {
+				return results[:i]
+			}
+			results[i].Snippet = result.Snippet[:remaining]
+			return results[:i+1]
+		}
+		total += n
+	}
+	return results
 }
 
 func vectorResultsToSearch(results []memory.HybridVectorResult) []memory.SearchResult {

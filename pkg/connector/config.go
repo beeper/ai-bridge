@@ -318,12 +318,14 @@ type MemorySearchSyncConfig struct {
 type MemorySearchSessionSyncConfig struct {
 	DeltaBytes    int `yaml:"delta_bytes"`
 	DeltaMessages int `yaml:"delta_messages"`
+	RetentionDays int `yaml:"retention_days"`
 }
 
 type MemorySearchQueryConfig struct {
-	MaxResults int                       `yaml:"max_results"`
-	MinScore   float64                   `yaml:"min_score"`
-	Hybrid     *MemorySearchHybridConfig `yaml:"hybrid"`
+	MaxResults       int                       `yaml:"max_results"`
+	MinScore         float64                   `yaml:"min_score"`
+	MaxInjectedChars int                       `yaml:"max_injected_chars"`
+	Hybrid           *MemorySearchHybridConfig `yaml:"hybrid"`
 }
 
 type MemorySearchHybridConfig struct {

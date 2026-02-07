@@ -149,12 +149,14 @@ type MemorySearchSyncConfig struct {
 type MemorySearchSessionSyncConfig struct {
 	DeltaBytes    int `json:"delta_bytes,omitempty"`
 	DeltaMessages int `json:"delta_messages,omitempty"`
+	RetentionDays int `json:"retention_days,omitempty"`
 }
 
 type MemorySearchQueryConfig struct {
-	MaxResults int                       `json:"max_results,omitempty"`
-	MinScore   float64                   `json:"min_score,omitempty"`
-	Hybrid     *MemorySearchHybridConfig `json:"hybrid,omitempty"`
+	MaxResults       int                       `json:"max_results,omitempty"`
+	MinScore         float64                   `json:"min_score,omitempty"`
+	MaxInjectedChars int                       `json:"max_injected_chars,omitempty"`
+	Hybrid           *MemorySearchHybridConfig `json:"hybrid,omitempty"`
 }
 
 type MemorySearchHybridConfig struct {
