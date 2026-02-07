@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -1945,6 +1946,15 @@ catalogFallback:
 
 // buildBasePrompt builds the system prompt and history portion of a prompt.
 // This is the common pattern used by buildPrompt and buildPromptWithImage.
+// thinkTagPattern matches <think>...</think> blocks (including multiline) in assistant messages.
+// These are thinking/reasoning traces that should be stripped from historical messages.
+var thinkTagPattern = regexp.MustCompile(`(?s)<think>.*?</think>\s*`)
+
+// stripThinkTags removes <think>...</think> blocks from text.
+func stripThinkTags(s string) string {
+	return strings.TrimSpace(thinkTagPattern.ReplaceAllString(s, ""))
+}
+
 func (oc *AIClient) buildBasePrompt(
 	ctx context.Context,
 	portal *bridgev2.Portal,
@@ -1990,6 +2000,12 @@ func (oc *AIClient) buildBasePrompt(
 			}
 			switch msgMeta.Role {
 			case "assistant":
+				// Strip thinking traces from historical assistant messages to avoid
+				// confusing models or wasting tokens on replayed reasoning.
+				body = stripThinkTags(body)
+				if body == "" {
+					continue
+				}
 				prompt = append(prompt, openai.AssistantMessage(body))
 			default:
 				prompt = append(prompt, openai.UserMessage(body))
@@ -2323,6 +2339,10 @@ func (oc *AIClient) buildPromptUpToMessage(
 			}
 			switch msgMeta.Role {
 			case "assistant":
+				body = stripThinkTags(body)
+				if body == "" {
+					continue
+				}
 				prompt = append(prompt, openai.AssistantMessage(body))
 			default:
 				prompt = append(prompt, openai.UserMessage(body))

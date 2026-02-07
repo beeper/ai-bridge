@@ -46,3 +46,258 @@ func TestParseContextLengthError_NonContextError(t *testing.T) {
 		t.Fatal("expected nil for non-context error")
 	}
 }
+
+func TestParseContextLengthError_RequestTooLarge(t *testing.T) {
+	err := errors.New(`{"type":"error","error":{"type":"request_too_large","message":"Request too large"}}`)
+	cle := ParseContextLengthError(err)
+	if cle == nil {
+		t.Fatal("expected context length error for request_too_large")
+	}
+}
+
+func TestParseContextLengthError_413TooLarge(t *testing.T) {
+	err := errors.New("413 too large: request body exceeds limit")
+	cle := ParseContextLengthError(err)
+	if cle == nil {
+		t.Fatal("expected context length error for 413 too large")
+	}
+}
+
+func TestParseContextLengthError_ExceedsMaximumSize(t *testing.T) {
+	err := errors.New("request exceeds the maximum size allowed")
+	cle := ParseContextLengthError(err)
+	if cle == nil {
+		t.Fatal("expected context length error for request exceeds the maximum size")
+	}
+}
+
+func TestParseContextLengthError_ExceedsModelContextWindow(t *testing.T) {
+	err := errors.New("the input exceeds model context window of 128000 tokens")
+	cle := ParseContextLengthError(err)
+	if cle == nil {
+		t.Fatal("expected context length error for exceeds model context window")
+	}
+}
+
+func TestIsRateLimitError_ResourceExhausted(t *testing.T) {
+	err := errors.New("resource_exhausted: quota exceeded for project")
+	if !IsRateLimitError(err) {
+		t.Fatal("expected resource_exhausted to be classified as rate limit")
+	}
+}
+
+func TestIsRateLimitError_QuotaExceeded(t *testing.T) {
+	err := errors.New("quota exceeded for this billing period")
+	if !IsRateLimitError(err) {
+		t.Fatal("expected 'quota exceeded' to be classified as rate limit")
+	}
+}
+
+func TestIsRateLimitError_UsageLimit(t *testing.T) {
+	err := errors.New("usage limit reached for this model")
+	if !IsRateLimitError(err) {
+		t.Fatal("expected 'usage limit' to be classified as rate limit")
+	}
+}
+
+func TestIsRateLimitError_429StatusCode(t *testing.T) {
+	err := &openai.Error{StatusCode: 429, Message: "rate limit exceeded"}
+	if !IsRateLimitError(err) {
+		t.Fatal("expected 429 status to be classified as rate limit")
+	}
+}
+
+func TestIsOverloadedError_ResourceExhausted(t *testing.T) {
+	// resource_exhausted should still match overloaded too
+	err := errors.New("resource_exhausted: service overloaded")
+	if !IsOverloadedError(err) {
+		t.Fatal("expected resource_exhausted to still match overloaded")
+	}
+}
+
+func TestIsMissingToolCallInputError(t *testing.T) {
+	tests := []struct {
+		msg  string
+		want bool
+	}{
+		{"tool_call.input is required", true},
+		{"tool_use.input must be provided", true},
+		{"input is a required property", true},
+		{"missing required field: input", true},
+		{"some other error", false},
+	}
+	for _, tt := range tests {
+		if got := IsMissingToolCallInputError(errors.New(tt.msg)); got != tt.want {
+			t.Errorf("IsMissingToolCallInputError(%q) = %v, want %v", tt.msg, got, tt.want)
+		}
+	}
+}
+
+func TestIsToolUseIDFormatError(t *testing.T) {
+	tests := []struct {
+		msg  string
+		want bool
+	}{
+		{"invalid tool_use_id format", true},
+		{"tool_use.id must be alphanumeric", true},
+		{"tool_call_id is invalid", true},
+		{"invalid tool_use block", true},
+		{"tool_use block with id xyz is malformed", true},
+		{"some other error", false},
+	}
+	for _, tt := range tests {
+		if got := IsToolUseIDFormatError(errors.New(tt.msg)); got != tt.want {
+			t.Errorf("IsToolUseIDFormatError(%q) = %v, want %v", tt.msg, got, tt.want)
+		}
+	}
+}
+
+func TestFormatUserFacingError_MissingToolCallInput(t *testing.T) {
+	err := errors.New("tool_call.input is required but was not provided")
+	msg := FormatUserFacingError(err)
+	if msg != "Session data is corrupted (missing tool call input). Please start a new conversation to recover." {
+		t.Fatalf("unexpected message: %s", msg)
+	}
+}
+
+func TestFormatUserFacingError_ToolUseIDFormat(t *testing.T) {
+	err := errors.New("invalid tool_use_id format: must be alphanumeric")
+	msg := FormatUserFacingError(err)
+	if msg != "Tool call ID format error. Please start a new conversation to recover." {
+		t.Fatalf("unexpected message: %s", msg)
+	}
+}
+
+func TestFormatUserFacingError_JSONPayloadParsing(t *testing.T) {
+	// Anthropic-style nested error
+	err := errors.New(`{"error":{"type":"invalid_request_error","message":"prompt is too long"}}`)
+	msg := FormatUserFacingError(err)
+	// This should match context length first since "prompt is too long" triggers it
+	if msg == "The AI provider returned an error. Please try again." {
+		t.Fatal("expected JSON to be parsed, not treated as generic")
+	}
+}
+
+func TestFormatUserFacingError_FlatJSONPayload(t *testing.T) {
+	err := errors.New(`{"type":"server_error","message":"internal failure"}`)
+	msg := FormatUserFacingError(err)
+	// server_error should be caught by IsServerError
+	expected := "The AI provider encountered an error. Please try again later."
+	if msg != expected {
+		t.Fatalf("expected %q, got %q", expected, msg)
+	}
+}
+
+func TestFormatUserFacingError_UnknownJSONPayload(t *testing.T) {
+	// JSON that doesn't match known error types but has parseable type+message
+	err := errors.New(`{"type":"custom_error","message":"something specific happened"}`)
+	msg := FormatUserFacingError(err)
+	expected := "custom_error: something specific happened"
+	if msg != expected {
+		t.Fatalf("expected %q, got %q", expected, msg)
+	}
+}
+
+func TestFormatUserFacingError_TruncationAt600(t *testing.T) {
+	// Create an error with exactly 601 chars
+	longMsg := ""
+	for len(longMsg) < 601 {
+		longMsg += "a"
+	}
+	err := errors.New(longMsg)
+	msg := FormatUserFacingError(err)
+	if len(msg) != 603 { // 600 + "..."
+		t.Fatalf("expected truncation at 600 chars + ..., got len %d", len(msg))
+	}
+}
+
+func TestFormatUserFacingError_StripsFinalTags(t *testing.T) {
+	err := errors.New("some error <final>internal details</final> happened")
+	msg := FormatUserFacingError(err)
+	if msg != "some error happened" {
+		t.Fatalf("expected final tags stripped, got: %s", msg)
+	}
+}
+
+func TestStripFinalTags(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"no tags here", "no tags here"},
+		{"before <final>secret</final> after", "before after"},
+		{"<final>all secret</final>", ""},
+		{"unclosed <final>tag", "unclosed"},
+		{"multiple <final>a</final> and <final>b</final> tags", "multiple and tags"},
+	}
+	for _, tt := range tests {
+		if got := stripFinalTags(tt.input); got != tt.want {
+			t.Errorf("stripFinalTags(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestParseJSONErrorMessage(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		// Anthropic-style nested
+		{`{"error":{"type":"invalid_request_error","message":"prompt is too long"}}`, "invalid_request_error: prompt is too long"},
+		// Flat style
+		{`{"type":"rate_limit_error","message":"too many requests"}`, "rate_limit_error: too many requests"},
+		// Message only
+		{`{"message":"something went wrong"}`, "something went wrong"},
+		// No message field
+		{`{"status":"error"}`, ""},
+		// Invalid JSON
+		{`not json`, ""},
+	}
+	for _, tt := range tests {
+		if got := parseJSONErrorMessage(tt.input); got != tt.want {
+			t.Errorf("parseJSONErrorMessage(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestStripThinkTags(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"no think tags", "no think tags"},
+		{"<think>reasoning here</think> actual response", "actual response"},
+		{"<think>line1\nline2\nline3</think>\nresponse", "response"},
+		{"<think>first</think> middle <think>second</think> end", "middle  end"},
+		{"<think>everything is thinking</think>", ""},
+		{"response without think", "response without think"},
+	}
+	for _, tt := range tests {
+		if got := stripThinkTags(tt.input); got != tt.want {
+			t.Errorf("stripThinkTags(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestHasContextLengthSignal_NewPatterns(t *testing.T) {
+	tests := []struct {
+		text string
+		want bool
+	}{
+		{"context_length_exceeded", true},
+		{"context length is too long", true},
+		{"prompt is too long", true},
+		{"request_too_large", true},
+		{"Request Too Large error", true},
+		{"413 Too Large", true},
+		{"request exceeds the maximum size", true},
+		{"exceeds model context window", true},
+		{"just a normal error", false},
+	}
+	for _, tt := range tests {
+		if got := hasContextLengthSignal(tt.text); got != tt.want {
+			t.Errorf("hasContextLengthSignal(%q) = %v, want %v", tt.text, got, tt.want)
+		}
+	}
+}
+
