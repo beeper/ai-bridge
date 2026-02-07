@@ -197,7 +197,7 @@ func (oc *AIClient) desktopAPIInstanceConfig(instance string) (DesktopAPIInstanc
 func (oc *AIClient) desktopAPIClient(instance string) (*beeperdesktopapi.Client, error) {
 	config, ok := oc.desktopAPIInstanceConfig(instance)
 	if !ok || strings.TrimSpace(config.Token) == "" {
-		return nil, nil
+		return nil, fmt.Errorf("desktop API token is not set")
 	}
 	options := []option.RequestOption{option.WithAccessToken(strings.TrimSpace(config.Token))}
 	if baseURL := strings.TrimSpace(config.BaseURL); baseURL != "" {
@@ -232,9 +232,6 @@ func (oc *AIClient) listDesktopSessions(ctx context.Context, instance string, op
 	client, err := oc.desktopAPIClient(instance)
 	if err != nil {
 		return nil, err
-	}
-	if client == nil {
-		return nil, nil
 	}
 
 	limit := opts.Limit
@@ -499,9 +496,6 @@ func (oc *AIClient) listDesktopAccounts(ctx context.Context, instance string) (m
 	if err != nil {
 		return nil, err
 	}
-	if client == nil {
-		return nil, fmt.Errorf("desktop API token is not set")
-	}
 	accounts, err := client.Accounts.List(ctx)
 	if err != nil || accounts == nil {
 		return nil, err
@@ -520,9 +514,6 @@ func (oc *AIClient) resolveDesktopSessionByLabelWithOptions(ctx context.Context,
 	client, err := oc.desktopAPIClient(instance)
 	if err != nil {
 		return "", "", err
-	}
-	if client == nil {
-		return "", "", fmt.Errorf("desktop API token is not set")
 	}
 	trimmed := strings.TrimSpace(label)
 	if trimmed == "" {
@@ -651,9 +642,6 @@ func (oc *AIClient) sendDesktopMessage(ctx context.Context, instance, chatID str
 	if err != nil {
 		return "", err
 	}
-	if client == nil {
-		return "", fmt.Errorf("desktop API token is not set")
-	}
 	trimmed := strings.TrimSpace(chatID)
 	if trimmed == "" {
 		return "", errors.New("chat ID is required")
@@ -698,9 +686,6 @@ func (oc *AIClient) listDesktopChats(ctx context.Context, instance string, limit
 	if err != nil {
 		return nil, err
 	}
-	if client == nil {
-		return nil, fmt.Errorf("desktop API token is not set")
-	}
 	if limit <= 0 {
 		limit = 50
 	}
@@ -729,9 +714,6 @@ func (oc *AIClient) searchDesktopChats(ctx context.Context, instance, query stri
 	client, err := oc.desktopAPIClient(instance)
 	if err != nil {
 		return nil, err
-	}
-	if client == nil {
-		return nil, fmt.Errorf("desktop API token is not set")
 	}
 	if limit <= 0 {
 		limit = 50
@@ -767,9 +749,6 @@ func (oc *AIClient) searchDesktopMessages(ctx context.Context, instance, query s
 	client, err := oc.desktopAPIClient(instance)
 	if err != nil {
 		return nil, err
-	}
-	if client == nil {
-		return nil, fmt.Errorf("desktop API token is not set")
 	}
 	if limit <= 0 {
 		limit = 20
@@ -811,9 +790,6 @@ func (oc *AIClient) editDesktopMessage(ctx context.Context, instance, chatID, me
 	if err != nil {
 		return err
 	}
-	if client == nil {
-		return fmt.Errorf("desktop API token is not set")
-	}
 	if strings.TrimSpace(chatID) == "" || strings.TrimSpace(messageID) == "" {
 		return fmt.Errorf("chat ID and message ID are required")
 	}
@@ -828,9 +804,6 @@ func (oc *AIClient) createDesktopChat(ctx context.Context, instance, accountID s
 	client, err := oc.desktopAPIClient(instance)
 	if err != nil {
 		return "", err
-	}
-	if client == nil {
-		return "", fmt.Errorf("desktop API token is not set")
 	}
 	trimmedAccount := strings.TrimSpace(accountID)
 	if trimmedAccount == "" {
@@ -879,9 +852,6 @@ func (oc *AIClient) archiveDesktopChat(ctx context.Context, instance, chatID str
 	if err != nil {
 		return err
 	}
-	if client == nil {
-		return fmt.Errorf("desktop API token is not set")
-	}
 	_, err = client.Chats.Archive(ctx, strings.TrimSpace(chatID), beeperdesktopapi.ChatArchiveParams{
 		Archived: beeperdesktopapi.Bool(archived),
 	})
@@ -892,9 +862,6 @@ func (oc *AIClient) setDesktopChatReminder(ctx context.Context, instance, chatID
 	client, err := oc.desktopAPIClient(instance)
 	if err != nil {
 		return err
-	}
-	if client == nil {
-		return fmt.Errorf("desktop API token is not set")
 	}
 	_, err = client.Chats.Reminders.New(ctx, strings.TrimSpace(chatID), beeperdesktopapi.ChatReminderNewParams{
 		Reminder: beeperdesktopapi.ChatReminderNewParamsReminder{
@@ -910,9 +877,6 @@ func (oc *AIClient) clearDesktopChatReminder(ctx context.Context, instance, chat
 	if err != nil {
 		return err
 	}
-	if client == nil {
-		return fmt.Errorf("desktop API token is not set")
-	}
 	_, err = client.Chats.Reminders.Delete(ctx, strings.TrimSpace(chatID))
 	return err
 }
@@ -921,9 +885,6 @@ func (oc *AIClient) uploadDesktopAssetBase64(ctx context.Context, instance strin
 	client, err := oc.desktopAPIClient(instance)
 	if err != nil {
 		return nil, err
-	}
-	if client == nil {
-		return nil, fmt.Errorf("desktop API token is not set")
 	}
 	params := beeperdesktopapi.AssetUploadBase64Params{
 		Content: base64.StdEncoding.EncodeToString(data),
@@ -941,9 +902,6 @@ func (oc *AIClient) downloadDesktopAsset(ctx context.Context, instance, url stri
 	client, err := oc.desktopAPIClient(instance)
 	if err != nil {
 		return nil, err
-	}
-	if client == nil {
-		return nil, fmt.Errorf("desktop API token is not set")
 	}
 	return client.Assets.Download(ctx, beeperdesktopapi.AssetDownloadParams{URL: strings.TrimSpace(url)})
 }

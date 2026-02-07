@@ -158,15 +158,26 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 		entries = append(entries, sessionListEntry{updatedAt: updatedAt, data: entry})
 	}
 
+	resultPayload := map[string]any{
+		"sessions": nil,
+		"count":    0,
+	}
+
 	if oc != nil {
 		instances := oc.desktopAPIInstanceNames()
 		hasMultipleDesktopInstances := len(instances) > 1
+		desktopErrors := make([]map[string]any, 0, 2)
 		for _, instance := range instances {
 			accounts := map[string]beeperdesktopapi.Account{}
 			if accountMap, err := oc.listDesktopAccounts(ctx, instance); err == nil && accountMap != nil {
 				accounts = accountMap
 			} else if err != nil {
 				oc.loggerForContext(ctx).Warn().Err(err).Str("instance", instance).Msg("Desktop API account listing failed")
+				desktopErrors = append(desktopErrors, map[string]any{
+					"instance": instance,
+					"op":       "accounts_list",
+					"error":    err.Error(),
+				})
 			}
 			desktopEntries, err := oc.listDesktopSessions(ctx, instance, desktopSessionListOptions{
 				Limit:         limit,
@@ -181,8 +192,22 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 				}
 			} else {
 				oc.loggerForContext(ctx).Warn().Err(err).Str("instance", instance).Msg("Desktop API session listing failed")
+				desktopErrors = append(desktopErrors, map[string]any{
+					"instance": instance,
+					"op":       "sessions_list",
+					"error":    err.Error(),
+				})
 			}
 		}
+
+		desktopStatus := map[string]any{
+			"configured": len(instances) > 0,
+			"instances":  instances,
+		}
+		if len(desktopErrors) > 0 {
+			desktopStatus["errors"] = desktopErrors
+		}
+		resultPayload["desktopApi"] = desktopStatus
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
@@ -200,10 +225,9 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 		oc.loggerForContext(ctx).Debug().Int("count", len(result)).Msg("Sessions list completed")
 	}
 
-	return tools.JSONResult(map[string]any{
-		"sessions": result,
-		"count":    len(result),
-	}), nil
+	resultPayload["sessions"] = result
+	resultPayload["count"] = len(result)
+	return tools.JSONResult(resultPayload), nil
 }
 
 func (oc *AIClient) executeSessionsHistory(ctx context.Context, portal *bridgev2.Portal, args map[string]any) (*tools.Result, error) {

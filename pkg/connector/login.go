@@ -242,11 +242,7 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, provider, apiKey, baseUR
 			existingMeta.Provider = provider
 			existingMeta.APIKey = apiKey
 			existingMeta.BaseURL = baseURL
-			if serviceTokens != nil && !serviceTokensEmpty(serviceTokens) {
-				existingMeta.ServiceTokens = serviceTokens
-			} else {
-				existingMeta.ServiceTokens = nil
-			}
+			existingMeta.ServiceTokens = mergeServiceTokens(existingMeta.ServiceTokens, serviceTokens)
 			existing.Metadata = existingMeta
 			existing.RemoteName = remoteName
 			if err := existing.Save(ctx); err != nil {
@@ -399,6 +395,77 @@ func serviceTokensEmpty(tokens *ServiceTokens) bool {
 		strings.TrimSpace(tokens.Brave) == "" &&
 		strings.TrimSpace(tokens.Perplexity) == "" &&
 		strings.TrimSpace(tokens.DesktopAPI) == ""
+}
+
+func mergeServiceTokens(existing, incoming *ServiceTokens) *ServiceTokens {
+	if incoming == nil || serviceTokensEmpty(incoming) {
+		if existing == nil || serviceTokensEmpty(existing) {
+			return nil
+		}
+		return existing
+	}
+	if existing == nil || serviceTokensEmpty(existing) {
+		return incoming
+	}
+
+	merged := *existing
+
+	// Simple string tokens: only overwrite when a non-empty incoming value is provided.
+	if v := strings.TrimSpace(incoming.OpenAI); v != "" {
+		merged.OpenAI = v
+	}
+	if v := strings.TrimSpace(incoming.OpenRouter); v != "" {
+		merged.OpenRouter = v
+	}
+	if v := strings.TrimSpace(incoming.Exa); v != "" {
+		merged.Exa = v
+	}
+	if v := strings.TrimSpace(incoming.Brave); v != "" {
+		merged.Brave = v
+	}
+	if v := strings.TrimSpace(incoming.Perplexity); v != "" {
+		merged.Perplexity = v
+	}
+	if v := strings.TrimSpace(incoming.DesktopAPI); v != "" {
+		merged.DesktopAPI = v
+	}
+
+	// Maps: merge keys where the incoming entry has meaningful values.
+	if len(incoming.DesktopAPIInstances) > 0 {
+		if merged.DesktopAPIInstances == nil {
+			merged.DesktopAPIInstances = map[string]DesktopAPIInstance{}
+		}
+		for name, cfg := range incoming.DesktopAPIInstances {
+			if strings.TrimSpace(cfg.Token) == "" && strings.TrimSpace(cfg.BaseURL) == "" {
+				continue
+			}
+			merged.DesktopAPIInstances[name] = cfg
+		}
+	}
+	if len(incoming.MCPServers) > 0 {
+		if merged.MCPServers == nil {
+			merged.MCPServers = map[string]MCPServerConfig{}
+		}
+		for name, cfg := range incoming.MCPServers {
+			if strings.TrimSpace(cfg.Transport) == "" &&
+				strings.TrimSpace(cfg.Endpoint) == "" &&
+				strings.TrimSpace(cfg.Command) == "" &&
+				len(cfg.Args) == 0 &&
+				strings.TrimSpace(cfg.Token) == "" &&
+				strings.TrimSpace(cfg.AuthURL) == "" &&
+				strings.TrimSpace(cfg.AuthType) == "" &&
+				strings.TrimSpace(cfg.Kind) == "" &&
+				!cfg.Connected {
+				continue
+			}
+			merged.MCPServers[name] = cfg
+		}
+	}
+
+	if serviceTokensEmpty(&merged) {
+		return nil
+	}
+	return &merged
 }
 
 func beeperBaseURLFromDomain(domain string) string {
