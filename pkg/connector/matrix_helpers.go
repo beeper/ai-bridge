@@ -62,10 +62,7 @@ func (oc *AIClient) isCommandAuthorizedSender(sender id.UserID) bool {
 	if oc == nil || oc.UserLogin == nil {
 		return false
 	}
-	if oc.UserLogin.UserMXID != "" && sender == oc.UserLogin.UserMXID {
-		return true
-	}
-	return false
+	return oc.UserLogin.UserMXID != "" && sender == oc.UserLogin.UserMXID
 }
 
 func (oc *AIClient) buildMatrixInboundBody(

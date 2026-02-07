@@ -19,8 +19,7 @@ func normalizeOptionalText(raw *string) string {
 	if raw == nil {
 		return ""
 	}
-	trimmed := strings.TrimSpace(*raw)
-	return trimmed
+	return strings.TrimSpace(*raw)
 }
 
 func normalizeOptionalAgentID(raw *string) string {

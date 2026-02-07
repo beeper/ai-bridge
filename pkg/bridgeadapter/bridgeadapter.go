@@ -31,7 +31,6 @@ func (a *Adapter) SendMessage(ctx context.Context, roomID id.RoomID, eventType e
 	if a == nil || a.Intent == nil {
 		return "", fmt.Errorf("missing intent")
 	}
-	_ = txnID // bridgev2 MatrixAPI doesn't expose explicit txn IDs here.
 	resp, err := a.Intent.SendMessage(ctx, roomID, eventType, content, nil)
 	if err != nil {
 		return "", err
@@ -58,10 +57,6 @@ func (a *Adapter) SendEphemeral(ctx context.Context, roomID id.RoomID, eventType
 }
 
 func (a *Adapter) SendMessageStatus(ctx context.Context, roomID id.RoomID, targetEventID id.EventID, statusPayload map[string]any) error {
-	_ = ctx
-	_ = roomID
-	_ = targetEventID
-	_ = statusPayload
 	// Status events are bridge-internal; connector will continue to use bridgev2 directly
 	// until we extract a proper abstraction.
 	return nil
@@ -71,30 +66,18 @@ func (a *Adapter) MarkTyping(ctx context.Context, roomID id.RoomID, typingType s
 	if a == nil || a.Intent == nil {
 		return nil
 	}
-	_ = typingType
 	return a.Intent.MarkTyping(ctx, roomID, bridgev2.TypingTypeText, timeout)
 }
 
 func (a *Adapter) UploadMedia(ctx context.Context, data []byte, mimeType, filename string) (id.ContentURIString, *event.EncryptedFileInfo, error) {
-	_ = ctx
-	_ = data
-	_ = mimeType
-	_ = filename
 	return "", nil, fmt.Errorf("UploadMedia not implemented")
 }
 
 func (a *Adapter) DownloadMedia(ctx context.Context, uri id.ContentURIString, encryptedFile *event.EncryptedFileInfo) ([]byte, string, error) {
-	_ = ctx
-	_ = uri
-	_ = encryptedFile
 	return nil, "", fmt.Errorf("DownloadMedia not implemented")
 }
 
 func (a *Adapter) GetRoomState(ctx context.Context, roomID id.RoomID, eventType event.Type, stateKey string) (*event.Event, error) {
-	_ = ctx
-	_ = roomID
-	_ = eventType
-	_ = stateKey
 	// State access isn't available on MatrixAPI; bridge adapter will need a bridgev2.MatrixConnector.
 	return nil, fmt.Errorf("GetRoomState not implemented")
 }
@@ -115,14 +98,9 @@ func (a *Adapter) GetMembers(ctx context.Context, roomID id.RoomID) ([]id.UserID
 		return nil, fmt.Errorf("missing intent")
 	}
 	// MatrixAPI doesn't expose member list; connector has direct access via bridge Matrix connector.
-	_ = ctx
-	_ = roomID
 	return nil, fmt.Errorf("GetMembers not implemented")
 }
 
 func (a *Adapter) GetMemberProfile(ctx context.Context, roomID id.RoomID, userID id.UserID) (*event.MemberEventContent, error) {
-	_ = ctx
-	_ = roomID
-	_ = userID
 	return nil, fmt.Errorf("GetMemberProfile not implemented")
 }
