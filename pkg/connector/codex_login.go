@@ -152,6 +152,16 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 		Command: cmd,
 		Args:    []string{"app-server", "--listen", "stdio://"},
 		Env:     []string{"CODEX_HOME=" + codexHome},
+		OnStderr: func(line string) {
+			log.Debug().Str("codex_home", codexHome).Str("stderr", line).Msg("Codex stderr")
+		},
+		OnProcessExit: func(err error) {
+			if err != nil {
+				log.Warn().Err(err).Str("codex_home", codexHome).Msg("Codex process exited with error")
+			} else {
+				log.Debug().Str("codex_home", codexHome).Msg("Codex process exited normally")
+			}
+		},
 	})
 	if err != nil {
 		return nil, err

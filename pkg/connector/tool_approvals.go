@@ -215,12 +215,37 @@ func (oc *AIClient) dropToolApprovalLocked(approvalID string) {
 		return
 	}
 	oc.toolApprovalsMu.Lock()
-	p := oc.toolApprovals[approvalID]
 	delete(oc.toolApprovals, approvalID)
-	if p != nil && p.TargetEventID != "" {
-		if oc.toolApprovalsByTargetEvt[p.TargetEventID] == approvalID {
-			delete(oc.toolApprovalsByTargetEvt, p.TargetEventID)
+	// Clean up any target-event mappings pointing at this approval (tool call event, fallback notice, etc).
+	// This keeps behavior correct even if multiple event IDs were mapped to the same approval.
+	for evtID, mapped := range oc.toolApprovalsByTargetEvt {
+		if mapped == approvalID {
+			delete(oc.toolApprovalsByTargetEvt, evtID)
 		}
 	}
 	oc.toolApprovalsMu.Unlock()
+}
+
+// addToolApprovalTargetEvent maps an additional Matrix event ID to an existing pending approval.
+// This enables reaction-based approvals on fallback timeline notices (and other correlated events).
+func (oc *AIClient) addToolApprovalTargetEvent(approvalID string, targetEventID id.EventID) {
+	if oc == nil {
+		return
+	}
+	approvalID = strings.TrimSpace(approvalID)
+	targetEventID = id.EventID(strings.TrimSpace(string(targetEventID)))
+	if approvalID == "" || targetEventID == "" {
+		return
+	}
+
+	oc.toolApprovalsMu.Lock()
+	defer oc.toolApprovalsMu.Unlock()
+
+	if oc.toolApprovals[approvalID] == nil {
+		return
+	}
+	// Best-effort: do not override an existing mapping for this target message.
+	if _, exists := oc.toolApprovalsByTargetEvt[targetEventID]; !exists {
+		oc.toolApprovalsByTargetEvt[targetEventID] = approvalID
+	}
 }

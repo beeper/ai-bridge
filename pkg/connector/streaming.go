@@ -894,12 +894,20 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 	// Prefer sending as the model/assistant identity if possible (so the message
 	// reads as part of the assistant's flow), but fall back to the bridge bot.
 	if intent := oc.getModelIntent(ctx, portal); intent != nil {
-		if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, content, nil); err == nil {
+		if resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, content, nil); err == nil {
+			// Allow reacting on this fallback notice message itself to approve.
+			if resp != nil && resp.EventID != "" {
+				oc.addToolApprovalTargetEvent(approvalID, resp.EventID)
+			}
 			return
 		}
 	}
 	if oc != nil && oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.Bot != nil {
-		_, _ = oc.UserLogin.Bridge.Bot.SendMessage(ctx, portal.MXID, event.EventMessage, content, nil)
+		if resp, err := oc.UserLogin.Bridge.Bot.SendMessage(ctx, portal.MXID, event.EventMessage, content, nil); err == nil {
+			if resp != nil && resp.EventID != "" {
+				oc.addToolApprovalTargetEvent(approvalID, resp.EventID)
+			}
+		}
 	}
 }
 

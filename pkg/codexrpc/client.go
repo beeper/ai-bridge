@@ -41,6 +41,11 @@ type ProcessConfig struct {
 	Command string
 	Args    []string
 	Env     []string
+	// OnStderr is called for each line of stderr output from the process.
+	// If nil, stderr is silently discarded.
+	OnStderr func(line string)
+	// OnProcessExit is called when the process exits with its exit error (nil if exit code 0).
+	OnProcessExit func(err error)
 }
 
 type Client struct {
@@ -59,6 +64,9 @@ type Client struct {
 
 	reqMu         sync.RWMutex
 	requestRoutes map[string]func(ctx context.Context, req Request) (any, *RPCError)
+
+	onStderr      func(line string)
+	onProcessExit func(err error)
 
 	closed    atomic.Bool
 	failOnce  sync.Once
@@ -101,6 +109,8 @@ func StartProcess(ctx context.Context, cfg ProcessConfig) (*Client, error) {
 		stderr:        stderr,
 		writeCh:       make(chan writeReq, 256),
 		requestRoutes: make(map[string]func(ctx context.Context, req Request) (any, *RPCError)),
+		onStderr:      cfg.OnStderr,
+		onProcessExit: cfg.OnProcessExit,
 	}
 	c.nextID.Store(1)
 	go c.writeLoop()
@@ -108,6 +118,15 @@ func StartProcess(ctx context.Context, cfg ProcessConfig) (*Client, error) {
 	if c.stderr != nil {
 		go c.drainStderr()
 	}
+	// Monitor process exit in a separate goroutine.
+	go func() {
+		waitErr := cmd.Wait()
+		if c.onProcessExit != nil {
+			c.onProcessExit(waitErr)
+		}
+		c.failAllPending()
+		_ = c.Close()
+	}()
 	return c, nil
 }
 
@@ -432,9 +451,13 @@ func (c *Client) dispatchNotification(method string, params json.RawMessage) {
 func (c *Client) drainStderr() {
 	r := bufio.NewReader(c.stderr)
 	for {
-		_, err := r.ReadString('\n')
+		line, err := r.ReadString('\n')
 		if err != nil {
 			return
+		}
+		line = strings.TrimSpace(line)
+		if line != "" && c.onStderr != nil {
+			c.onStderr(line)
 		}
 	}
 }
