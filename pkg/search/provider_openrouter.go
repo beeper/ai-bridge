@@ -80,7 +80,7 @@ func (p *openRouterProvider) Search(ctx context.Context, req Request) (*Response
 		return nil, err
 	}
 	answer := ""
-	results := []Result{}
+	var results []Result
 	if len(resp.Choices) > 0 {
 		message := resp.Choices[0].Message
 		answer = strings.TrimSpace(message.Content)

@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/beeper/ai-bridge/pkg/cron"
 	"github.com/beeper/ai-bridge/pkg/textfs"
@@ -40,10 +39,7 @@ func (oc *AIClient) cronTextFSStore() (*textfs.Store, error) {
 	}
 	bridgeID := string(oc.UserLogin.Bridge.DB.BridgeID)
 	loginID := string(oc.UserLogin.ID)
-	agentID := strings.TrimSpace(cronStoreAgentID)
-	if agentID == "" {
-		agentID = "cron"
-	}
+	agentID := cronStoreAgentID
 	return textfs.NewStore(oc.UserLogin.Bridge.DB.Database, bridgeID, loginID, agentID), nil
 }
 

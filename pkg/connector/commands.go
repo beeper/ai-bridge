@@ -484,11 +484,8 @@ func fnSetDesktopAPIToken(ce *commands.Event) {
 		return
 	}
 
-	token := ""
+	token := strings.TrimSpace(ce.Args[0])
 	baseURL := ""
-	if len(ce.Args) > 0 {
-		token = strings.TrimSpace(ce.Args[0])
-	}
 	if len(ce.Args) > 1 {
 		baseURL = strings.TrimSpace(strings.Join(ce.Args[1:], " "))
 	}
