@@ -62,10 +62,10 @@ func (w *HeartbeatWake) schedule(delay time.Duration) {
 		w.scheduled = false
 		handler := w.handler
 		if w.running || handler == nil {
-			if w.running {
+			shouldReschedule := w.running
+			if shouldReschedule {
 				w.scheduled = true
 			}
-			shouldReschedule := w.scheduled
 			w.mu.Unlock()
 			if shouldReschedule {
 				w.schedule(delay)

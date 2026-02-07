@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -136,6 +137,23 @@ func normalizeContentType(value string) string {
 	return strings.TrimSpace(parts[0])
 }
 
+var fetchBlockedCIDRs = []*net.IPNet{
+	mustParseCIDR("127.0.0.0/8"),
+	mustParseCIDR("10.0.0.0/8"),
+	mustParseCIDR("172.16.0.0/12"),
+	mustParseCIDR("192.168.0.0/16"),
+	mustParseCIDR("169.254.0.0/16"),
+	mustParseCIDR("::1/128"),
+}
+
+func mustParseCIDR(value string) *net.IPNet {
+	_, parsed, err := net.ParseCIDR(value)
+	if err != nil {
+		panic(fmt.Sprintf("invalid CIDR %q: %v", value, err))
+	}
+	return parsed
+}
+
 func isAllowedURL(rawURL string) bool {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -145,11 +163,19 @@ func isAllowedURL(rawURL string) bool {
 		return false
 	}
 	host := strings.ToLower(parsed.Hostname())
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+	if host == "localhost" {
 		return false
 	}
-	if strings.HasPrefix(host, "192.168.") || strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "172.") {
-		return false
+	ip := net.ParseIP(host)
+	if ip != nil {
+		if ip4 := ip.To4(); ip4 != nil {
+			ip = ip4
+		}
+		for _, cidr := range fetchBlockedCIDRs {
+			if cidr.Contains(ip) {
+				return false
+			}
+		}
 	}
 	return true
 }

@@ -61,7 +61,7 @@ func (r *Registry) Register(def Definition) *commands.FullHandler {
 
 // RegisterHandler adds an already-constructed handler to the registry.
 func (r *Registry) RegisterHandler(handler *commands.FullHandler) {
-	if handler == nil || handler.Name == "" {
+	if handler == nil || handler.Name == "" || handler.Func == nil {
 		return
 	}
 	r.mu.Lock()

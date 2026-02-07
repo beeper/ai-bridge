@@ -227,9 +227,9 @@ func (oc *AIClient) executeSessionsSpawn(ctx context.Context, portal *bridgev2.P
 	}
 
 	allowAny, allowSet := oc.resolveSubagentAllowlist(ctx, requesterAgentID)
-	if targetAgentID != requesterAgentID {
+	if targetAgentID != requesterAgentID && !allowAny {
 		_, allowed := allowSet[targetAgentID]
-		if !allowAny && !allowed {
+		if !allowed {
 			allowedText := "none"
 			if len(allowSet) > 0 {
 				ids := make([]string, 0, len(allowSet))

@@ -8,5 +8,5 @@ func resolvePromptReasoningLevel(meta *PortalMetadata) string {
 	if meta != nil && meta.EmitThinking {
 		return "on"
 	}
-	return "off"
+	return ""
 }
