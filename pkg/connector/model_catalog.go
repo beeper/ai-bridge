@@ -310,9 +310,7 @@ func (oc *AIClient) loadModelCatalog(ctx context.Context, useCache bool) []Model
 	}
 	entry, found, err := store.Read(ctx, modelCatalogStoreRef)
 	if err != nil || !found {
-		if modelCatalogStoreAlt != "" {
-			entry, found, err = store.Read(ctx, modelCatalogStoreAlt)
-		}
+		entry, found, err = store.Read(ctx, modelCatalogStoreAlt)
 	}
 	if err != nil || !found {
 		if useCache {

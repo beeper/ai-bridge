@@ -30,10 +30,7 @@ func (oc *AIClient) recordAgentActivity(ctx context.Context, portal *bridgev2.Po
 	_ = oc.UserLogin.Save(ctx)
 
 	storeRef, mainKey := oc.resolveHeartbeatMainSessionRef(agentID)
-	accountID := ""
-	if oc.UserLogin != nil {
-		accountID = string(oc.UserLogin.ID)
-	}
+	accountID := string(oc.UserLogin.ID)
 	if mainKey != "" {
 		oc.updateSessionEntry(ctx, storeRef, mainKey, func(entry sessionEntry) sessionEntry {
 			patch := sessionEntry{
@@ -44,7 +41,7 @@ func (oc *AIClient) recordAgentActivity(ctx context.Context, portal *bridgev2.Po
 			return mergeSessionEntry(entry, patch)
 		})
 	}
-	if portal.MXID.String() != "" && portal.MXID.String() != mainKey {
+	if portal.MXID.String() != mainKey {
 		oc.updateSessionEntry(ctx, storeRef, portal.MXID.String(), func(entry sessionEntry) sessionEntry {
 			patch := sessionEntry{
 				LastChannel:   "matrix",

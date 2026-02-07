@@ -116,8 +116,7 @@ func applyPatchModelAllowed(allow []string, modelID string, provider string) boo
 		return false
 	}
 	normalizedProvider := strings.ToLower(strings.TrimSpace(provider))
-	backend, actual := ParseModelPrefix(modelID)
-	_ = backend
+	_, actual := ParseModelPrefix(modelID)
 	normalizedFull := strings.ToLower(strings.TrimSpace(modelID))
 	normalizedActual := strings.ToLower(strings.TrimSpace(actual))
 

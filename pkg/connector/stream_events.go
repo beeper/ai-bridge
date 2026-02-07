@@ -52,7 +52,7 @@ func (oc *AIClient) emitStreamEvent(
 		oc.loggerForContext(ctx).Debug().Msg("Stream event skipped: missing state")
 		return
 	}
-	if state != nil && state.suppressSend {
+	if state.suppressSend {
 		oc.loggerForContext(ctx).Debug().
 			Str("turn_id", strings.TrimSpace(state.turnID)).
 			Msg("Stream event suppressed (suppressSend)")

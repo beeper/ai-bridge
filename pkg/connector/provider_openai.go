@@ -848,7 +848,7 @@ func ToOpenAITools(tools []ToolDefinition, strictMode ToolStrictMode, log *zerol
 		}
 
 		// Add description if available (SDK helper doesn't support this directly)
-		if tool.Description != "" && toolParam.OfFunction != nil {
+		if tool.Description != "" {
 			toolParam.OfFunction.Description = openai.String(tool.Description)
 		}
 

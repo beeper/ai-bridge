@@ -94,7 +94,7 @@ func (oc *AIClient) buildSubagentStatsLine(ctx context.Context, portal *bridgev2
 	messages, _ := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, 200)
 	inputTokens, outputTokens, totalTokens := oc.resolveUsageFromMessages(messages)
 
-	parts := []string{}
+	var parts []string
 	runtime := formatDurationShort(runtimeMs)
 	if runtime == "" {
 		parts = append(parts, "runtime n/a")

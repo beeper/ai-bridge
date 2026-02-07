@@ -87,9 +87,9 @@ func canonicalDesktopNetwork(network string) string {
 		return "instagram"
 	case strings.Contains(token, "messenger"):
 		return "messenger"
-	case strings.HasPrefix(token, "google_chat"), token == "googlechat":
+	case strings.HasPrefix(token, "google_chat"):
 		return "googlechat"
-	case strings.HasPrefix(token, "nextcloud_talk"), token == "nextcloudtalk":
+	case strings.HasPrefix(token, "nextcloud_talk"):
 		return "nextcloudtalk"
 	case strings.HasPrefix(token, "mattermost"):
 		return "mattermost"
