@@ -14,9 +14,7 @@ func NormalizePath(raw string) (string, error) {
 	}
 	cleaned := strings.ReplaceAll(trimmed, "\\", "/")
 	cleaned = strings.TrimPrefix(cleaned, "file://")
-	for strings.HasPrefix(cleaned, "/") {
-		cleaned = strings.TrimPrefix(cleaned, "/")
-	}
+	cleaned = strings.TrimLeft(cleaned, "/")
 	cleaned = strings.TrimPrefix(cleaned, "./")
 	cleaned = path.Clean(cleaned)
 	if cleaned == "." || cleaned == "" {
@@ -63,12 +61,7 @@ func IsVirtualDir(relDir string) bool {
 	if err != nil || normalized == "" {
 		return false
 	}
-	switch normalized {
-	case "memory":
-		return true
-	default:
-		return false
-	}
+	return normalized == "memory"
 }
 
 // VirtualRootEntries returns the virtual root directories.

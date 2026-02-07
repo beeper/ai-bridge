@@ -10,10 +10,7 @@ func messageStatusForError(err error) event.MessageStatus {
 		ParseContextLengthError(err) != nil,
 		IsImageError(err):
 		return event.MessageStatusFail
-	case IsRateLimitError(err), IsOverloadedError(err), IsTimeoutError(err), IsServerError(err):
-		return event.MessageStatusRetriable
 	default:
-		// Default to retriable for transient API/generation errors.
 		return event.MessageStatusRetriable
 	}
 }

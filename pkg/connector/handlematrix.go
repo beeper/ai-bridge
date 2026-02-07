@@ -202,11 +202,8 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 			debounceKey := BuildDebounceKey(portal.MXID, msg.Event.Sender)
 			oc.inboundDebouncer.FlushKey(debounceKey)
 		}
-		pendingSent := false
-		if msg.Event != nil {
-			oc.sendPendingStatus(ctx, portal, msg.Event, "Processing...")
-			pendingSent = true
-		}
+		oc.sendPendingStatus(ctx, portal, msg.Event, "Processing...")
+		pendingSent := true
 		return oc.handleMediaMessage(ctx, msg, portal, meta, msgType, pendingSent)
 	case event.MsgText, event.MsgNotice, event.MsgEmote:
 		// Continue to text handling below
