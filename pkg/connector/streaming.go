@@ -820,6 +820,9 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 	state *streamingState,
 	approvalID string,
 	toolCallID string,
+	toolName string,
+	targetEventID id.EventID,
+	ttlSeconds int,
 ) {
 	if strings.TrimSpace(approvalID) == "" || strings.TrimSpace(toolCallID) == "" {
 		return
@@ -830,6 +833,56 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 		"approvalId": approvalID,
 		"toolCallId": toolCallID,
 	})
+
+	// Back-compat fallback: many clients either don't support or don't render our
+	// ephemeral stream events. If approvals are required, give the user a clear,
+	// timeline-visible way to proceed (react or /approve).
+	if state != nil && state.suppressSend {
+		return
+	}
+	if portal == nil || portal.MXID == "" {
+		return
+	}
+	if strings.TrimSpace(toolName) == "" {
+		toolName = "tool"
+	}
+	mins := 0
+	if ttlSeconds > 0 {
+		mins = (ttlSeconds + 59) / 60
+	}
+	expires := ""
+	if mins > 0 {
+		expires = fmt.Sprintf(" Expires in %d min.", mins)
+	}
+	body := fmt.Sprintf(
+		"Approval required to run %s. React 👍 to allow, ⭐ to always allow, or 👎 to deny. Or type /approve %s allow|always|deny.%s",
+		toolName,
+		approvalID,
+		expires,
+	)
+
+	raw := map[string]any{
+		"body":    body,
+		"msgtype": event.MsgNotice,
+	}
+	if targetEventID != "" {
+		raw["m.relates_to"] = map[string]any{
+			"rel_type": RelReference,
+			"event_id": targetEventID.String(),
+		}
+	}
+	content := &event.Content{Raw: raw}
+
+	// Prefer sending as the model/assistant identity if possible (so the message
+	// reads as part of the assistant's flow), but fall back to the bridge bot.
+	if intent := oc.getModelIntent(ctx, portal); intent != nil {
+		if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, content, nil); err == nil {
+			return
+		}
+	}
+	if oc != nil && oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.Bot != nil {
+		_, _ = oc.UserLogin.Bridge.Bot.SendMessage(ctx, portal.MXID, event.EventMessage, content, nil)
+	}
 }
 
 func (oc *AIClient) emitUIToolOutputAvailable(ctx context.Context, portal *bridgev2.Portal, state *streamingState, toolCallID string, output any, providerExecuted bool, preliminary bool) {
@@ -1108,15 +1161,15 @@ func (oc *AIClient) handleResponseOutputItemAdded(
 			// If approvals are disabled, not required, or already always-allowed, auto-approve without prompting.
 			// Otherwise emit an approval request to the UI.
 			needsApproval := oc.toolApprovalsRuntimeEnabled() && oc.toolApprovalsRequireForMCP() && !oc.isMcpAlwaysAllowed(serverLabel, mcpToolName)
-			if needsApproval {
-				if state != nil && !state.uiToolApprovalRequested[approvalID] {
-					state.uiToolApprovalRequested[approvalID] = true
-					oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID)
-				}
-			} else {
-				_ = oc.resolveToolApproval(state.roomID, approvalID, ToolApprovalDecision{
-					Approve:   true,
-					DecidedAt: time.Now(),
+				if needsApproval {
+					if state != nil && !state.uiToolApprovalRequested[approvalID] {
+						state.uiToolApprovalRequested[approvalID] = true
+						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, tool.toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
+					}
+				} else {
+					_ = oc.resolveToolApproval(state.roomID, approvalID, ToolApprovalDecision{
+						Approve:   true,
+						DecidedAt: time.Now(),
 					DecidedBy: oc.UserLogin.UserMXID,
 				})
 			}
@@ -1210,7 +1263,7 @@ func (oc *AIClient) handleResponseOutputItemDone(
 			if needsApproval {
 				if state != nil && !state.uiToolApprovalRequested[approvalID] {
 					state.uiToolApprovalRequested[approvalID] = true
-					oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID)
+					oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, tool.toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
 				}
 			} else {
 				_ = oc.resolveToolApproval(state.roomID, approvalID, ToolApprovalDecision{
@@ -2223,7 +2276,7 @@ func (oc *AIClient) streamingResponse(
 							TargetEvent:  tool.eventID,
 							TTL:          ttl,
 						})
-						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID)
+						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
 						decision, _, ok := oc.waitToolApproval(ctx, approvalID)
 						if !ok {
 							decision = ToolApprovalDecision{Approve: false, Reason: "timeout"}
@@ -2267,7 +2320,7 @@ func (oc *AIClient) streamingResponse(
 							TargetEvent:  tool.eventID,
 							TTL:          ttl,
 						})
-						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID)
+						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
 						decision, _, ok := oc.waitToolApproval(ctx, approvalID)
 						if !ok {
 							decision = ToolApprovalDecision{Approve: false, Reason: "timeout"}
@@ -3404,10 +3457,10 @@ func (oc *AIClient) streamingResponse(
 							ToolKind:     ToolApprovalKindBuiltin,
 							RuleToolName: toolName,
 							Action:       action,
-							TargetEvent:  tool.eventID,
-							TTL:          ttl,
-						})
-						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID)
+						TargetEvent:  tool.eventID,
+						TTL:          ttl,
+					})
+						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
 						decision, _, ok := oc.waitToolApproval(ctx, approvalID)
 						if !ok {
 							decision = ToolApprovalDecision{Approve: false, Reason: "timeout"}
@@ -4156,10 +4209,10 @@ func (oc *AIClient) streamChatCompletions(
 							ToolKind:     ToolApprovalKindBuiltin,
 							RuleToolName: toolName,
 							Action:       action,
-							TargetEvent:  tool.eventID,
-							TTL:          ttl,
-						})
-						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID)
+						TargetEvent:  tool.eventID,
+						TTL:          ttl,
+					})
+						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
 						decision, _, ok := oc.waitToolApproval(ctx, approvalID)
 						if !ok {
 							decision = ToolApprovalDecision{Approve: false, Reason: "timeout"}
