@@ -5,6 +5,14 @@ import (
 	"strings"
 )
 
+var (
+	markdownHeaderRE     = regexp.MustCompile(`^#+(\s|$)`)
+	emptyChecklistItemRE = regexp.MustCompile(`^[-*+]\s*(\[[\sXx]?\]\s*)?$`)
+	htmlTagRE            = regexp.MustCompile(`<[^>]*>`)
+	mdEmphasisPrefixRE   = regexp.MustCompile(`^[*\x60~_]+`)
+	mdEmphasisSuffixRE   = regexp.MustCompile(`[*\x60~_]+$`)
+)
+
 // DefaultHeartbeatPrompt is the OpenClaw default heartbeat prompt.
 const DefaultHeartbeatPrompt = "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK."
 
@@ -23,12 +31,10 @@ func IsHeartbeatContentEffectivelyEmpty(content string) bool {
 		if trimmed == "" {
 			continue
 		}
-		// Skip markdown headers like "# Header" but not "#TODO"
-		if regexp.MustCompile(`^#+(\s|$)`).MatchString(trimmed) {
+		if markdownHeaderRE.MatchString(trimmed) {
 			continue
 		}
-		// Skip empty checklist/list items like "- [ ]" or "- "
-		if regexp.MustCompile(`^[-*+]\s*(\[[\sXx]?\]\s*)?$`).MatchString(trimmed) {
+		if emptyChecklistItemRE.MatchString(trimmed) {
 			continue
 		}
 		return false
@@ -99,10 +105,10 @@ func StripHeartbeatTokenWithMode(text string, mode StripHeartbeatMode, maxAckCha
 	}
 
 	stripMarkup := func(input string) string {
-		out := regexp.MustCompile(`<[^>]*>`).ReplaceAllString(input, " ")
+		out := htmlTagRE.ReplaceAllString(input, " ")
 		out = strings.ReplaceAll(out, "&nbsp;", " ")
-		out = regexp.MustCompile(`^[*\x60~_]+`).ReplaceAllString(out, "")
-		out = regexp.MustCompile(`[*\x60~_]+$`).ReplaceAllString(out, "")
+		out = mdEmphasisPrefixRE.ReplaceAllString(out, "")
+		out = mdEmphasisSuffixRE.ReplaceAllString(out, "")
 		return out
 	}
 

@@ -4,8 +4,20 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
+
+var senderPrefixRECache sync.Map
+
+func getSenderPrefixRE(label string) *regexp.Regexp {
+	if cached, ok := senderPrefixRECache.Load(label); ok {
+		return cached.(*regexp.Regexp)
+	}
+	re := regexp.MustCompile(`(?i)(^|\n|\]\s*)` + regexp.QuoteMeta(label) + `:\s`)
+	senderPrefixRECache.Store(label, re)
+	return re
+}
 
 type EnvelopeFormatOptions struct {
 	Timezone         string
@@ -159,8 +171,7 @@ func hasSenderPrefix(body string, senderLabel string) bool {
 	if label == "" || strings.TrimSpace(body) == "" {
 		return false
 	}
-	pattern := regexp.MustCompile(`(?i)(^|\n|\]\s*)` + regexp.QuoteMeta(label) + `:\s`)
-	return pattern.MatchString(body)
+	return getSenderPrefixRE(label).MatchString(body)
 }
 
 func formatInboundBodyWithSenderMeta(body string, senderLabel string, isGroup bool) string {

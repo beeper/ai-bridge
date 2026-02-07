@@ -315,12 +315,9 @@ func isJobDue(job CronJob, nowMs int64, forced bool) bool {
 }
 
 func findJobIndex(jobs []CronJob, id string) int {
-	for i, job := range jobs {
-		if job.ID == id {
-			return i
-		}
-	}
-	return -1
+	return slices.IndexFunc(jobs, func(job CronJob) bool {
+		return job.ID == id
+	})
 }
 
 func sortJobs(jobs []CronJob) {

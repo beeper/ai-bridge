@@ -50,6 +50,10 @@ var (
 	markupEmphasisPrefixRE = regexp.MustCompile("^[*`~_]+")
 	// markupEmphasisSuffixRE matches markdown emphasis at end
 	markupEmphasisSuffixRE = regexp.MustCompile("[*`~_]+$")
+
+	collapseSpacesRE    = regexp.MustCompile(`[ \t]+`)
+	normalizeNewlinesRE = regexp.MustCompile(`[ \t]*\n[ \t]*`)
+	collapseNewlinesRE  = regexp.MustCompile(`\n{3,}`)
 )
 
 // ParseResponseDirectives extracts directives from LLM response text.
@@ -149,18 +153,9 @@ func stripMarkup(text string) string {
 
 // normalizeDirectiveWhitespace cleans up whitespace after directive removal.
 func normalizeDirectiveWhitespace(text string) string {
-	// Collapse multiple spaces into one
-	spaceRE := regexp.MustCompile(`[ \t]+`)
-	text = spaceRE.ReplaceAllString(text, " ")
-
-	// Normalize newlines with surrounding whitespace
-	nlRE := regexp.MustCompile(`[ \t]*\n[ \t]*`)
-	text = nlRE.ReplaceAllString(text, "\n")
-
-	// Collapse multiple newlines into two (preserve paragraph breaks)
-	multiNL := regexp.MustCompile(`\n{3,}`)
-	text = multiNL.ReplaceAllString(text, "\n\n")
-
+	text = collapseSpacesRE.ReplaceAllString(text, " ")
+	text = normalizeNewlinesRE.ReplaceAllString(text, "\n")
+	text = collapseNewlinesRE.ReplaceAllString(text, "\n\n")
 	return strings.TrimSpace(text)
 }
 

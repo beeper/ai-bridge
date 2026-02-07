@@ -5,6 +5,13 @@ import (
 	"strings"
 )
 
+var (
+	silentReplyPrefixRE   = regexp.MustCompile(`(?i)^\s*` + regexp.QuoteMeta(SilentReplyToken) + `(?:$|\W)`)
+	silentReplySuffixRE   = regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(SilentReplyToken) + `\W*$`)
+	heartbeatReplyPrefixRE = regexp.MustCompile(`(?i)^\s*` + regexp.QuoteMeta(HeartbeatToken) + `(?:$|\W)`)
+	heartbeatReplySuffixRE = regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(HeartbeatToken) + `\W*$`)
+)
+
 // ReactionGuidance controls reaction behavior in prompts.
 // Matches OpenClaw's reactionGuidance with level and channel.
 type ReactionGuidance struct {
@@ -121,37 +128,39 @@ func containsToken(text, token string) bool {
 	if text == "" {
 		return false
 	}
-	// Strip common markup wrappers
 	stripped := stripMarkup(text)
 	trimmed := strings.TrimSpace(stripped)
 
-	// Exact match after stripping
 	if trimmed == token {
 		return true
 	}
 
-	// Check if token appears at start or end (allowing punctuation/whitespace)
-	escaped := regexp.QuoteMeta(token)
-	// Prefix pattern: token at start, followed by end or non-word
-	prefixPattern := regexp.MustCompile(`(?i)^\s*` + escaped + `(?:$|\W)`)
-	if prefixPattern.MatchString(stripped) {
+	var prefixRE, suffixRE *regexp.Regexp
+	switch token {
+	case SilentReplyToken:
+		prefixRE = silentReplyPrefixRE
+		suffixRE = silentReplySuffixRE
+	case HeartbeatToken:
+		prefixRE = heartbeatReplyPrefixRE
+		suffixRE = heartbeatReplySuffixRE
+	default:
+		escaped := regexp.QuoteMeta(token)
+		prefixRE = regexp.MustCompile(`(?i)^\s*` + escaped + `(?:$|\W)`)
+		suffixRE = regexp.MustCompile(`(?i)\b` + escaped + `\W*$`)
+	}
+	if prefixRE.MatchString(stripped) {
 		return true
 	}
-	// Suffix pattern: word boundary + token at end
-	suffixPattern := regexp.MustCompile(`(?i)\b` + escaped + `\W*$`)
-	return suffixPattern.MatchString(stripped)
+	return suffixRE.MatchString(stripped)
 }
 
 // stripMarkup removes common HTML/markdown formatting that models might wrap tokens in.
 // Based on OpenClaw's stripMarkup from heartbeat.ts.
 func stripMarkup(text string) string {
-	// Remove HTML tags
-	text = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(text, " ")
-	// Remove &nbsp;
+	text = htmlTagRE.ReplaceAllString(text, " ")
 	text = strings.ReplaceAll(text, "&nbsp;", " ")
-	// Remove leading/trailing markdown emphasis: *, `, ~, _
-	text = regexp.MustCompile(`^[*\x60~_]+`).ReplaceAllString(text, "")
-	text = regexp.MustCompile(`[*\x60~_]+$`).ReplaceAllString(text, "")
+	text = mdEmphasisPrefixRE.ReplaceAllString(text, "")
+	text = mdEmphasisSuffixRE.ReplaceAllString(text, "")
 	return text
 }
 

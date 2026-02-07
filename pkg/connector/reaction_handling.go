@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"time"
@@ -181,11 +182,5 @@ func portalRoomName(portal *bridgev2.Portal) string {
 	if meta == nil {
 		return ""
 	}
-	if meta.Title != "" {
-		return meta.Title
-	}
-	if meta.Slug != "" {
-		return meta.Slug
-	}
-	return ""
+	return cmp.Or(meta.Title, meta.Slug)
 }

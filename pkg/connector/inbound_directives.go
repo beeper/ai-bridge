@@ -5,6 +5,18 @@ import (
 	"strings"
 )
 
+var (
+	thinkDirectiveRE     = regexp.MustCompile(`(?i)(?:^|\s)/(?:thinking|think|t)(?:$|\s|:)`)
+	verboseDirectiveRE   = regexp.MustCompile(`(?i)(?:^|\s)/(?:verbose|v)(?:$|\s|:)`)
+	reasoningDirectiveRE = regexp.MustCompile(`(?i)(?:^|\s)/(?:reasoning|reason)(?:$|\s|:)`)
+	elevatedDirectiveRE  = regexp.MustCompile(`(?i)(?:^|\s)/(?:elevated|elev)(?:$|\s|:)`)
+	statusDirectiveRE    = regexp.MustCompile(`(?i)(?:^|\s)/(?:status)(?:$|\s|:)(?:\s*:\s*)?`)
+	modelDirectiveRE     = regexp.MustCompile(`(?i)(?:^|\s)/(?:model)(?:$|\s|:)`)
+	helpDirectiveRE      = regexp.MustCompile(`(?i)(?:^|\s)/(?:help)(?:$|\s|:)(?:\s*:\s*)?`)
+	commandsDirectiveRE  = regexp.MustCompile(`(?i)(?:^|\s)/(?:commands)(?:$|\s|:)(?:\s*:\s*)?`)
+	whoamiDirectiveRE    = regexp.MustCompile(`(?i)(?:^|\s)/(?:whoami|id)(?:$|\s|:)(?:\s*:\s*)?`)
+)
+
 type inlineDirectives struct {
 	cleaned string
 
@@ -54,35 +66,35 @@ func parseInlineDirectives(body string) inlineDirectives {
 		return out
 	}
 
-	think := extractLevelDirective(out.cleaned, []string{"thinking", "think", "t"}, normalizeThinkLevel)
+	think := extractLevelDirectiveRE(out.cleaned, thinkDirectiveRE, normalizeThinkLevel)
 	out.cleaned = think.cleaned
 	out.hasThink = think.has
 	out.thinkLevel = think.level
 	out.rawThink = think.raw
 	out.invalidThink = think.has && think.level == "" && think.raw != ""
 
-	verbose := extractLevelDirective(out.cleaned, []string{"verbose", "v"}, normalizeVerboseLevel)
+	verbose := extractLevelDirectiveRE(out.cleaned, verboseDirectiveRE, normalizeVerboseLevel)
 	out.cleaned = verbose.cleaned
 	out.hasVerbose = verbose.has
 	out.verboseLevel = verbose.level
 	out.rawVerbose = verbose.raw
 	out.invalidVerbose = verbose.has && verbose.level == "" && verbose.raw != ""
 
-	reasoning := extractLevelDirective(out.cleaned, []string{"reasoning", "reason"}, normalizeReasoningLevel)
+	reasoning := extractLevelDirectiveRE(out.cleaned, reasoningDirectiveRE, normalizeReasoningLevel)
 	out.cleaned = reasoning.cleaned
 	out.hasReasoning = reasoning.has
 	out.reasoningLevel = reasoning.level
 	out.rawReasoning = reasoning.raw
 	out.invalidReasoning = reasoning.has && reasoning.level == "" && reasoning.raw != ""
 
-	elevated := extractLevelDirective(out.cleaned, []string{"elevated", "elev"}, normalizeElevatedLevel)
+	elevated := extractLevelDirectiveRE(out.cleaned, elevatedDirectiveRE, normalizeElevatedLevel)
 	out.cleaned = elevated.cleaned
 	out.hasElevated = elevated.has
 	out.elevatedLevel = elevated.level
 	out.rawElevated = elevated.raw
 	out.invalidElevated = elevated.has && elevated.level == "" && elevated.raw != ""
 
-	status := extractSimpleDirective(out.cleaned, []string{"status"})
+	status := extractSimpleDirectiveRE(out.cleaned, statusDirectiveRE)
 	out.cleaned = status.cleaned
 	out.hasStatus = status.hasDirective
 
@@ -103,7 +115,15 @@ func extractLevelDirective(
 	names []string,
 	normalize func(string) (string, bool),
 ) levelDirective {
-	match := matchLevelDirective(body, names)
+	return extractLevelDirectiveRE(body, directiveREForNames(names), normalize)
+}
+
+func extractLevelDirectiveRE(
+	body string,
+	re *regexp.Regexp,
+	normalize func(string) (string, bool),
+) levelDirective {
+	match := matchLevelDirectiveRE(body, re)
 	if match == nil {
 		return levelDirective{cleaned: strings.TrimSpace(body)}
 	}
@@ -130,11 +150,13 @@ type directiveMatch struct {
 }
 
 func matchLevelDirective(body string, names []string) *directiveMatch {
+	return matchLevelDirectiveRE(body, directiveREForNames(names))
+}
+
+func matchLevelDirectiveRE(body string, re *regexp.Regexp) *directiveMatch {
 	if body == "" {
 		return nil
 	}
-	namePattern := strings.Join(escapeDirectiveNames(names), "|")
-	re := regexp.MustCompile(`(?i)(?:^|\s)/(?:` + namePattern + `)(?:$|\s|:)`)
 	loc := re.FindStringIndex(body)
 	if loc == nil {
 		return nil
@@ -167,12 +189,17 @@ func extractSimpleDirective(body string, names []string) (out struct {
 	cleaned      string
 	hasDirective bool
 }) {
+	return extractSimpleDirectiveRE(body, simpleDirectiveREForNames(names))
+}
+
+func extractSimpleDirectiveRE(body string, re *regexp.Regexp) (out struct {
+	cleaned      string
+	hasDirective bool
+}) {
 	if body == "" {
 		out.cleaned = ""
 		return out
 	}
-	namePattern := strings.Join(escapeDirectiveNames(names), "|")
-	re := regexp.MustCompile(`(?i)(?:^|\s)/(?:` + namePattern + `)(?:$|\s|:)(?:\s*:\s*)?`)
 	loc := re.FindStringIndex(body)
 	if loc == nil {
 		out.cleaned = strings.TrimSpace(body)
@@ -207,9 +234,7 @@ func extractModelDirective(body string) modelDirective {
 }
 
 func matchModelDirective(body string) *directiveMatch {
-	namePattern := strings.Join(escapeDirectiveNames([]string{"model"}), "|")
-	re := regexp.MustCompile(`(?i)(?:^|\s)/(?:` + namePattern + `)(?:$|\s|:)`)
-	loc := re.FindStringIndex(body)
+	loc := modelDirectiveRE.FindStringIndex(body)
 	if loc == nil {
 		return nil
 	}
@@ -240,6 +265,38 @@ func matchModelDirective(body string) *directiveMatch {
 func extractInlineShortcut(body string, names []string) (string, bool) {
 	out := extractSimpleDirective(body, names)
 	return out.cleaned, out.hasDirective
+}
+
+var levelDirectiveREs = map[string]*regexp.Regexp{
+	"thinking,think,t":    thinkDirectiveRE,
+	"verbose,v":           verboseDirectiveRE,
+	"reasoning,reason":    reasoningDirectiveRE,
+	"elevated,elev":       elevatedDirectiveRE,
+}
+
+var simpleDirectiveREs = map[string]*regexp.Regexp{
+	"status":      statusDirectiveRE,
+	"help":        helpDirectiveRE,
+	"commands":    commandsDirectiveRE,
+	"whoami,id":   whoamiDirectiveRE,
+}
+
+func directiveREForNames(names []string) *regexp.Regexp {
+	key := strings.Join(names, ",")
+	if re, ok := levelDirectiveREs[key]; ok {
+		return re
+	}
+	namePattern := strings.Join(escapeDirectiveNames(names), "|")
+	return regexp.MustCompile(`(?i)(?:^|\s)/(?:` + namePattern + `)(?:$|\s|:)`)
+}
+
+func simpleDirectiveREForNames(names []string) *regexp.Regexp {
+	key := strings.Join(names, ",")
+	if re, ok := simpleDirectiveREs[key]; ok {
+		return re
+	}
+	namePattern := strings.Join(escapeDirectiveNames(names), "|")
+	return regexp.MustCompile(`(?i)(?:^|\s)/(?:` + namePattern + `)(?:$|\s|:)(?:\s*:\s*)?`)
 }
 
 func escapeDirectiveNames(names []string) []string {
