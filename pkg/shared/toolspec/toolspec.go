@@ -12,6 +12,9 @@ const (
 	WebFetchName        = "web_fetch"
 	WebFetchDescription = "Fetch and extract readable content from a URL (HTML \u2192 markdown/text). Use for lightweight page access without browser automation."
 
+	NodesName        = "nodes"
+	NodesDescription = "Discover and control paired nodes (status/describe/pairing/notify/camera/screen/location/run/invoke)."
+
 	MessageName        = "message"
 	MessageDescription = "Send messages and channel actions. Supports actions: send, delete, react, poll, pin, threads, focus, and more."
 
@@ -50,6 +53,79 @@ const (
 	GravatarSetName          = "gravatar_set"
 	GravatarSetDescription   = "Set the primary Gravatar profile for this login."
 )
+
+// NodesSchema returns the JSON schema for the OpenClaw-compatible nodes tool.
+// Keep this flattened: runtime validates per-action requirements.
+func NodesSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"action": map[string]any{
+				"type": "string",
+				"enum": []string{
+					"status",
+					"describe",
+					"pending",
+					"approve",
+					"reject",
+					"notify",
+					"run",
+					"invoke",
+				},
+				"description": "Action to perform.",
+			},
+			// Common targeting
+			"node": map[string]any{
+				"type":        "string",
+				"description": "Node id/name/ip to target (required for most actions except status/pending).",
+			},
+			"requestId": map[string]any{
+				"type":        "string",
+				"description": "Pairing request id (approve/reject).",
+			},
+			// notify
+			"title": map[string]any{"type": "string"},
+			"body":  map[string]any{"type": "string"},
+			"sound": map[string]any{"type": "string"},
+			"priority": map[string]any{
+				"type": "string",
+				"enum": []string{"passive", "active", "timeSensitive"},
+			},
+			"delivery": map[string]any{
+				"type": "string",
+				"enum": []string{"system", "overlay", "auto"},
+			},
+			// run
+			"command": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "system.run argv array (e.g. ['echo','Hello']).",
+			},
+			"cwd": map[string]any{"type": "string"},
+			"env": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "KEY=VAL pairs.",
+			},
+			"commandTimeoutMs": map[string]any{"type": "number"},
+			"invokeTimeoutMs":  map[string]any{"type": "number"},
+			"needsScreenRecording": map[string]any{
+				"type":        "boolean",
+				"description": "If true, require screen recording permission for system.run.",
+			},
+			// invoke
+			"invokeCommand": map[string]any{
+				"type":        "string",
+				"description": "Raw node command name for node.invoke (e.g. 'location.get', 'camera.snap', 'system.notify').",
+			},
+			"invokeParamsJson": map[string]any{
+				"type":        "string",
+				"description": "JSON string for node.invoke params.",
+			},
+		},
+		"required": []string{"action"},
+	}
+}
 
 // CalculatorSchema returns the JSON schema for the calculator tool.
 func CalculatorSchema() map[string]any {

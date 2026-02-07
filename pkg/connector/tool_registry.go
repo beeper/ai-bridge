@@ -15,6 +15,7 @@ func builtinToolExecutors() map[string]toolExecutor {
 	return map[string]toolExecutor{
 		toolspec.CalculatorName:                executeCalculator,
 		toolspec.WebSearchName:                 executeWebSearch,
+		toolspec.NodesName:                     executeNodes,
 		ToolNameMessage:                        executeMessage,
 		ToolNameTTS:                            executeTTS,
 		ToolNameWebFetch:                       executeWebFetch,

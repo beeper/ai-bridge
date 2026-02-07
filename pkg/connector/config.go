@@ -274,6 +274,17 @@ type ToolProvidersConfig struct {
 	Media  *MediaToolsConfig `yaml:"media"`
 	Nexus  *NexusToolsConfig `yaml:"nexus"`
 	MCP    *MCPToolsConfig   `yaml:"mcp"`
+	// OpenClaw gateway integration for nodes (node.list/node.invoke over WS).
+	OpenClaw *OpenClawToolsConfig `yaml:"openclaw"`
+}
+
+// OpenClawToolsConfig configures optional integration with an OpenClaw Gateway.
+// This is used to forward the `nodes` tool to OpenClaw's `node.*` gateway methods over WebSocket.
+type OpenClawToolsConfig struct {
+	Enabled        *bool  `yaml:"enabled"`
+	GatewayURL     string `yaml:"gateway_url"` // ws://host:port (or wss://)
+	Token          string `yaml:"token"`       // gateway.auth.token
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
 // NexusToolsConfig configures Nexus tool bridging to a clay-nexus backend.

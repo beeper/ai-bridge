@@ -49,7 +49,8 @@ var ToolGroups = map[string][]string{
 	GroupAutomation: {"cron", "gateway"},
 	GroupNodes:      {"nodes"},
 	GroupStatus:     {"session_status"},
-	GroupOpenClaw:   {"message", "agents_list", "list_models", "list_tools", "modify_room", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_fetch", "image", "gravatar_fetch"},
+	// group:openclaw = all built-in OpenClaw-style tools (excluding provider plugins).
+	GroupOpenClaw:   {"message", "nodes", "agents_list", "list_models", "list_tools", "modify_room", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_fetch", "image", "gravatar_fetch"},
 	GroupFS:         {"read", "write", "edit", "apply_patch", "stat", "ls", "find", "grep"},
 	GroupNexus: {
 		"get_user_information",

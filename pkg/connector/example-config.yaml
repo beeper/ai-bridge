@@ -177,6 +177,14 @@ tools:
         - provider: "openrouter"
           model: "google/gemini-3-flash-preview"
 
+  # OpenClaw Gateway nodes integration (optional).
+  # Enables the `nodes` tool backed by OpenClaw's gateway WebSocket (node.list/node.invoke).
+  openclaw:
+    enabled: false
+    gateway_url: "ws://127.0.0.1:18789"
+    token: ""
+    timeout_seconds: 30
+
 memory_search:
   enabled: true
   sources: ["memory"]

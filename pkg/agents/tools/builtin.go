@@ -23,6 +23,7 @@ const (
 	GroupWeb       = toolpolicy.GroupWeb
 	GroupMedia     = toolpolicy.GroupMedia
 	GroupStatus    = toolpolicy.GroupStatus
+	GroupNodes     = toolpolicy.GroupNodes
 	GroupOpenClaw  = toolpolicy.GroupOpenClaw
 	GroupFS        = toolpolicy.GroupFS
 	GroupNexus     = toolpolicy.GroupNexus
@@ -35,6 +36,7 @@ func BuiltinTools() []*Tool {
 		WebSearch,
 		MessageTool,
 		CronTool,
+		NodesTool,
 		WebFetchTool,
 		SessionStatusTool,
 		MemorySearchTool,

@@ -8,6 +8,7 @@ import (
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 	agenttools "github.com/beeper/ai-bridge/pkg/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 )
 
 func canUseNexusToolsForAgent(meta *PortalMetadata) bool {
@@ -73,6 +74,11 @@ func (oc *AIClient) isToolAvailable(meta *PortalMetadata, toolName string) (bool
 		}
 		if !oc.isMCPConfigured() {
 			return false, SourceProviderLimit, "MCP tool bridge is not configured"
+		}
+	}
+	if toolName == toolspec.NodesName {
+		if oc == nil || oc.connector == nil || oc.connector.Config.Tools.OpenClaw == nil || oc.connector.Config.Tools.OpenClaw.Enabled == nil || !*oc.connector.Config.Tools.OpenClaw.Enabled {
+			return false, SourceProviderLimit, "OpenClaw nodes integration is not configured"
 		}
 	}
 	// Compact local Nexus wrappers are not MCP tools, but still must be Nexus-agent-only.

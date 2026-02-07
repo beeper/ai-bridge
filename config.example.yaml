@@ -166,6 +166,14 @@ default_system_prompt: |
           - provider: "openrouter"
             model: "google/gemini-3-flash-preview"
 
+    # OpenClaw Gateway nodes integration (optional).
+    # Enables the `nodes` tool backed by OpenClaw's gateway WebSocket (node.list/node.invoke).
+    openclaw:
+      enabled: false
+      gateway_url: "ws://127.0.0.1:18789"
+      token: ""
+      timeout_seconds: 30
+
   # Memory search configuration (OpenClaw-style).
   # Indexes MEMORY.md + memory/*.md stored in the bridge DB.
   # Per-agent overrides can be set via agent definitions.
