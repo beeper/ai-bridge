@@ -26,14 +26,14 @@ type InitializeCapabilities struct {
 }
 
 type InitializeParams struct {
-	ClientInfo    ClientInfo              `json:"clientInfo"`
-	Capabilities  *InitializeCapabilities  `json:"capabilities,omitempty"`
-	Extra         map[string]any          `json:"-"`
-	RawExtraJSON  json.RawMessage          `json:"-"`
+	ClientInfo   ClientInfo              `json:"clientInfo"`
+	Capabilities *InitializeCapabilities `json:"capabilities,omitempty"`
+	Extra        map[string]any          `json:"-"`
+	RawExtraJSON json.RawMessage         `json:"-"`
 }
 
 type initializeParamsWire struct {
-	ClientInfo   ClientInfo             `json:"clientInfo"`
+	ClientInfo   ClientInfo              `json:"clientInfo"`
 	Capabilities *InitializeCapabilities `json:"capabilities,omitempty"`
 }
 
@@ -49,7 +49,7 @@ type Client struct {
 	stdout io.ReadCloser
 	stderr io.ReadCloser
 
-	writeMu sync.Mutex
+	writeCh chan writeReq
 
 	nextID  atomic.Int64
 	pending sync.Map // idKey -> chan Response
@@ -60,7 +60,15 @@ type Client struct {
 	reqMu         sync.RWMutex
 	requestRoutes map[string]func(ctx context.Context, req Request) (any, *RPCError)
 
-	closed atomic.Bool
+	closed   atomic.Bool
+	failOnce sync.Once
+	closeOnce sync.Once
+}
+
+type writeReq struct {
+	ctx  context.Context
+	data []byte
+	done chan error
 }
 
 func StartProcess(ctx context.Context, cfg ProcessConfig) (*Client, error) {
@@ -91,9 +99,11 @@ func StartProcess(ctx context.Context, cfg ProcessConfig) (*Client, error) {
 		stdin:         stdin,
 		stdout:        stdout,
 		stderr:        stderr,
+		writeCh:       make(chan writeReq, 256),
 		requestRoutes: make(map[string]func(ctx context.Context, req Request) (any, *RPCError)),
 	}
 	c.nextID.Store(1)
+	go c.writeLoop()
 	go c.readLoop()
 	if c.stderr != nil {
 		go c.drainStderr()
@@ -108,6 +118,12 @@ func (c *Client) Close() error {
 	if c.closed.Swap(true) {
 		return nil
 	}
+	c.failAllPending()
+	c.closeOnce.Do(func() {
+		if c.writeCh != nil {
+			close(c.writeCh)
+		}
+	})
 	_ = c.stdin.Close()
 	if c.cmd != nil && c.cmd.Process != nil {
 		_ = c.cmd.Process.Kill()
@@ -116,6 +132,28 @@ func (c *Client) Close() error {
 		_ = c.cmd.Wait()
 	}
 	return nil
+}
+
+func (c *Client) failAllPending() {
+	if c == nil {
+		return
+	}
+	c.failOnce.Do(func() {
+		rpcErr := &RPCError{Code: -32000, Message: "rpc process closed"}
+		c.pending.Range(func(key, value any) bool {
+			ch, ok := value.(chan Response)
+			if !ok || ch == nil {
+				return true
+			}
+			keyStr, _ := key.(string)
+			idRaw := json.RawMessage(keyStr)
+			select {
+			case ch <- Response{ID: idRaw, Error: rpcErr}:
+			default:
+			}
+			return true
+		})
+	})
 }
 
 func (c *Client) OnNotification(fn func(method string, params json.RawMessage)) {
@@ -218,13 +256,78 @@ func (c *Client) writeJSONL(ctx context.Context, v any) error {
 		return err
 	}
 	data = append(data, '\n')
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req := writeReq{
+		ctx:  ctx,
+		data: data,
+		done: make(chan error, 1),
+	}
+	select {
+	case c.writeCh <- req:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-req.done:
+		return err
+	case <-ctx.Done():
+		// Best-effort: if the write is stuck (e.g. child stopped reading),
+		// close the process to unblock the writer goroutine.
+		_ = c.Close()
+		return ctx.Err()
+	}
+}
 
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+func (c *Client) writeLoop() {
+	for req := range c.writeCh {
+		if c.closed.Load() {
+			select {
+			case req.done <- errors.New("rpc client closed"):
+			default:
+			}
+			continue
+		}
+		// Perform the write in a goroutine so we can enforce context cancellation.
+		writeDone := make(chan error, 1)
+		go func(b []byte) {
+			_, err := c.stdin.Write(b)
+			writeDone <- err
+		}(req.data)
 
-	_ = ctx
-	_, err = c.stdin.Write(data)
-	return err
+		// If caller provided no deadline, enforce a conservative max write time.
+		maxWrite := 30 * time.Second
+		timer := (*time.Timer)(nil)
+		if _, ok := req.ctx.Deadline(); !ok {
+			timer = time.NewTimer(maxWrite)
+		}
+
+		var err error
+		select {
+		case err = <-writeDone:
+		case <-req.ctx.Done():
+			err = req.ctx.Err()
+			_ = c.Close()
+		case <-timerC(timer):
+			err = errors.New("rpc write timed out")
+			_ = c.Close()
+		}
+		if timer != nil {
+			timer.Stop()
+		}
+		select {
+		case req.done <- err:
+		default:
+		}
+	}
+}
+
+func timerC(t *time.Timer) <-chan time.Time {
+	if t == nil {
+		return nil
+	}
+	return t.C
 }
 
 func (c *Client) readLoop() {
@@ -276,6 +379,7 @@ func (c *Client) readLoop() {
 			continue
 		}
 	}
+	c.failAllPending()
 	_ = c.Close()
 }
 
