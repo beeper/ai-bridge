@@ -2,6 +2,9 @@ package connector
 
 import (
 	"encoding/json"
+	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -116,6 +119,21 @@ func containsAnyPattern(err error, patterns []string) bool {
 	return false
 }
 
+// IsCompactionFailureError checks if a context-length error originated from
+// compaction itself (e.g., the summarisation prompt overflowed). This lets
+// callers avoid re-attempting compaction when compaction was the thing that failed.
+func IsCompactionFailureError(err error) bool {
+	if ParseContextLengthError(err) == nil {
+		return false
+	}
+	return containsAnyPattern(err, []string{
+		"summarization failed",
+		"auto-compaction",
+		"compaction failed",
+		"compaction",
+	})
+}
+
 // IsBillingError checks if the error is a billing/payment error (402)
 func IsBillingError(err error) bool {
 	return containsAnyPattern(err, []string{
@@ -127,6 +145,7 @@ func IsBillingError(err error) bool {
 		"quota exceeded",
 		"billing",
 		"plans & billing",
+		"resource has been exhausted",
 	})
 }
 
@@ -134,6 +153,7 @@ func IsBillingError(err error) bool {
 func IsOverloadedError(err error) bool {
 	return containsAnyPattern(err, []string{
 		"overloaded_error",
+		"\"overloaded_error\"",
 		"overloaded",
 		"resource_exhausted",
 		"service unavailable",
@@ -211,6 +231,69 @@ func IsToolUseIDFormatError(err error) bool {
 	})
 }
 
+// ImageDimensionError contains parsed details from image dimension errors.
+type ImageDimensionError struct {
+	MaxDimensionPx int
+}
+
+var imageDimensionPattern = regexp.MustCompile(`(\d+)\s*(?:px|pixels)`)
+
+// ParseImageDimensionError extracts max dimension from an image error.
+// Returns nil if the error is not an image dimension error.
+func ParseImageDimensionError(err error) *ImageDimensionError {
+	if err == nil || !IsImageError(err) {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "dimension") && !strings.Contains(msg, "resolution") {
+		return nil
+	}
+	if matches := imageDimensionPattern.FindStringSubmatch(msg); len(matches) > 1 {
+		if px, parseErr := strconv.Atoi(matches[1]); parseErr == nil && px > 0 {
+			return &ImageDimensionError{MaxDimensionPx: px}
+		}
+	}
+	return nil
+}
+
+// ImageSizeError contains parsed details from image size errors.
+type ImageSizeError struct {
+	MaxMB float64
+}
+
+var imageSizeMBPattern = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*(?:mb|megabytes)`)
+
+// ParseImageSizeError extracts max size in MB from an image error.
+// Returns nil if the error is not an image size error.
+func ParseImageSizeError(err error) *ImageSizeError {
+	if err == nil || !IsImageError(err) {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if matches := imageSizeMBPattern.FindStringSubmatch(msg); len(matches) > 1 {
+		if mb, parseErr := strconv.ParseFloat(matches[1], 64); parseErr == nil && mb > 0 {
+			return &ImageSizeError{MaxMB: mb}
+		}
+	}
+	return nil
+}
+
+// collapseConsecutiveDuplicateBlocks removes consecutive duplicate paragraphs
+// from an error message. Paragraphs are separated by double newlines.
+func collapseConsecutiveDuplicateBlocks(s string) string {
+	blocks := strings.Split(s, "\n\n")
+	if len(blocks) <= 1 {
+		return s
+	}
+	deduped := []string{blocks[0]}
+	for i := 1; i < len(blocks); i++ {
+		if strings.TrimSpace(blocks[i]) != strings.TrimSpace(blocks[i-1]) {
+			deduped = append(deduped, blocks[i])
+		}
+	}
+	return strings.Join(deduped, "\n\n")
+}
+
 // FormatUserFacingError transforms an API error into a user-friendly message.
 // Returns a sanitized message suitable for display to end users.
 func FormatUserFacingError(err error) string {
@@ -247,6 +330,12 @@ func FormatUserFacingError(err error) string {
 	}
 
 	if IsImageError(err) {
+		if dimErr := ParseImageDimensionError(err); dimErr != nil && dimErr.MaxDimensionPx > 0 {
+			return fmt.Sprintf("Image exceeds %dpx dimension limit. Please resize the image and try again.", dimErr.MaxDimensionPx)
+		}
+		if sizeErr := ParseImageSizeError(err); sizeErr != nil && sizeErr.MaxMB > 0 {
+			return fmt.Sprintf("Image exceeds %.0fMB size limit. Please use a smaller image.", sizeErr.MaxMB)
+		}
 		return "Image is too large or has invalid dimensions. Please resize the image and try again."
 	}
 
@@ -308,12 +397,12 @@ func FormatUserFacingError(err error) string {
 	// If the message looks like raw JSON, try to extract a readable error
 	if strings.HasPrefix(strings.TrimSpace(msg), "{") {
 		if parsed := parseJSONErrorMessage(msg); parsed != "" {
-			return parsed
+			return collapseConsecutiveDuplicateBlocks(parsed)
 		}
 		return "The AI provider returned an error. Please try again."
 	}
 
-	return msg
+	return collapseConsecutiveDuplicateBlocks(msg)
 }
 
 // stripFinalTags removes <final>...</final> tags from text.

@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
-
-	"github.com/google/uuid"
 )
 
 type cronSessionEntry struct {
@@ -84,12 +81,4 @@ func (oc *AIClient) updateCronSessionEntry(ctx context.Context, sessionKey strin
 	entry = updater(entry)
 	store.Sessions[sessionKey] = entry
 	_ = oc.saveCronSessionStore(ctx, store)
-}
-
-func newCronSessionID() string {
-	return uuid.NewString()
-}
-
-func cronSessionUpdatedAt() int64 {
-	return time.Now().UnixMilli()
 }

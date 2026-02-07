@@ -9,7 +9,7 @@ func modelContactName(modelID string, info *ModelInfo) string {
 	if info != nil && info.Name != "" {
 		return info.Name
 	}
-	return FormatModelDisplay(modelID)
+	return GetModelDisplayName(modelID)
 }
 
 func modelContactProvider(modelID string, info *ModelInfo) string {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/beeper/ai-bridge/pkg/shared/httputil"
 )
 
 type perplexityProvider struct {
@@ -43,7 +45,7 @@ func (p *perplexityProvider) Search(ctx context.Context, req Request) (*Response
 		},
 	}
 	start := time.Now()
-	data, _, err := postJSON(ctx, endpoint, map[string]string{
+	data, _, err := httputil.PostJSON(ctx, endpoint, map[string]string{
 		"Authorization": fmt.Sprintf("Bearer %s", p.cfg.APIKey),
 	}, payload, p.cfg.TimeoutSecs)
 	if err != nil {

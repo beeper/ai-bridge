@@ -34,7 +34,7 @@ func createJob(nowMs int64, input CronJobCreate) (CronJob, error) {
 	}
 
 	job := CronJob{
-		ID:             randomID(),
+		ID:             uuid.NewString(),
 		AgentID:        normalizeOptionalAgentID(input.AgentID),
 		Name:           normalizedName,
 		Description:    normalizeOptionalText(input.Description),
@@ -333,10 +333,6 @@ func sortJobs(jobs []CronJob) {
 		}
 		return cmp.Compare(av, bv)
 	})
-}
-
-func randomID() string {
-	return uuid.NewString()
 }
 
 // helpers defined in normalize.go and utils.go

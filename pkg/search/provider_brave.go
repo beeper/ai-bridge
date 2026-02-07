@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/beeper/ai-bridge/pkg/shared/httputil"
 )
 
 type braveProvider struct {
@@ -80,7 +82,7 @@ func (p *braveProvider) Search(ctx context.Context, req Request) (*Response, err
 	searchURL.RawQuery = queryValues.Encode()
 
 	start := time.Now()
-	data, _, err := getJSON(ctx, searchURL.String(), map[string]string{
+	data, _, err := httputil.GetJSON(ctx, searchURL.String(), map[string]string{
 		"Accept":               "application/json",
 		"X-Subscription-Token": p.cfg.APIKey,
 	}, p.cfg.TimeoutSecs)
