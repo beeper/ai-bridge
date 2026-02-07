@@ -128,6 +128,8 @@ func (cc *CodexClient) Connect(ctx context.Context) {
 
 	// Best-effort account/read.
 	if cc.rpc != nil {
+		readCtx, cancel := context.WithTimeout(cc.backgroundContext(ctx), 10*time.Second)
+		defer cancel()
 		var resp struct {
 			Account *struct {
 				Type  string `json:"type"`
@@ -135,7 +137,7 @@ func (cc *CodexClient) Connect(ctx context.Context) {
 			} `json:"account"`
 			RequiresOpenaiAuth bool `json:"requiresOpenaiAuth"`
 		}
-		_ = cc.rpc.Call(cc.backgroundContext(ctx), "account/read", map[string]any{"refreshToken": false}, &resp)
+		_ = cc.rpc.Call(readCtx, "account/read", map[string]any{"refreshToken": false}, &resp)
 		if resp.Account != nil {
 			cc.loggedIn.Store(true)
 			meta := loginMetadata(cc.UserLogin)
@@ -186,8 +188,10 @@ func (cc *CodexClient) IsLoggedIn() bool {
 func (cc *CodexClient) LogoutRemote(ctx context.Context) {
 	// Best-effort: ask Codex to forget the account (tokens are managed by Codex under CODEX_HOME).
 	if err := cc.ensureRPC(cc.backgroundContext(ctx)); err == nil && cc.rpc != nil {
+		callCtx, cancel := context.WithTimeout(cc.backgroundContext(ctx), 10*time.Second)
+		defer cancel()
 		var out map[string]any
-		_ = cc.rpc.Call(cc.backgroundContext(ctx), "account/logout", nil, &out)
+		_ = cc.rpc.Call(callCtx, "account/logout", nil, &out)
 	}
 	cc.Disconnect()
 	cc.UserLogin.BridgeState.Send(status.BridgeState{
@@ -409,7 +413,9 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 			Status string `json:"status"`
 		} `json:"turn"`
 	}
-	err := cc.rpc.Call(ctx, "turn/start", map[string]any{
+	turnStartCtx, cancelTurnStart := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelTurnStart()
+	err := cc.rpc.Call(turnStartCtx, "turn/start", map[string]any{
 		"threadId": threadID,
 		"input": []map[string]any{
 			{"type": "text", "text": body},
@@ -525,6 +531,7 @@ func (cc *CodexClient) handleNotif(ctx context.Context, portal *bridgev2.Portal,
 		_ = json.Unmarshal(evt.Params, &p)
 		if strings.TrimSpace(p.Error.Message) != "" {
 			cc.emitUIError(ctx, portal, state, p.Error.Message)
+			cc.sendSystemNoticeOnce(ctx, portal, state, "turn:error", "Codex error: "+strings.TrimSpace(p.Error.Message))
 		}
 
 	case "item/agentMessage/delta":
@@ -693,6 +700,7 @@ func (cc *CodexClient) handleNotif(ctx context.Context, portal *bridgev2.Portal,
 			"explanation": input["explanation"],
 			"plan":        p.Plan,
 		}, true, true)
+		cc.sendSystemNoticeOnce(ctx, portal, state, "turn:plan_updated", "Codex updated the plan.")
 
 	case "thread/tokenUsage/updated":
 		var p struct {
@@ -817,10 +825,16 @@ func (cc *CodexClient) handleItemStarted(ctx context.Context, portal *bridgev2.P
 		var it map[string]any
 		_ = json.Unmarshal(raw, &it)
 		cc.ensureUIToolInputStart(ctx, portal, state, itemID, "webSearch", true, it)
+		notice := "Codex started web search."
+		if q, ok := it["query"].(string); ok && strings.TrimSpace(q) != "" {
+			notice = fmt.Sprintf("Codex started web search: %s", strings.TrimSpace(q))
+		}
+		cc.sendSystemNoticeOnce(ctx, portal, state, "websearch:"+itemID, notice)
 	case "imageView":
 		var it map[string]any
 		_ = json.Unmarshal(raw, &it)
 		cc.ensureUIToolInputStart(ctx, portal, state, itemID, "imageView", true, it)
+		cc.sendSystemNoticeOnce(ctx, portal, state, "imageview:"+itemID, "Codex viewed an image.")
 	case "plan":
 		var it map[string]any
 		_ = json.Unmarshal(raw, &it)
@@ -829,10 +843,16 @@ func (cc *CodexClient) handleItemStarted(ctx context.Context, portal *bridgev2.P
 		var it map[string]any
 		_ = json.Unmarshal(raw, &it)
 		cc.ensureUIToolInputStart(ctx, portal, state, itemID, "review", true, it)
+		if probe.Type == "enteredReviewMode" {
+			cc.sendSystemNoticeOnce(ctx, portal, state, "review:entered:"+itemID, "Codex entered review mode.")
+		} else {
+			cc.sendSystemNoticeOnce(ctx, portal, state, "review:exited:"+itemID, "Codex exited review mode.")
+		}
 	case "contextCompaction":
 		var it map[string]any
 		_ = json.Unmarshal(raw, &it)
 		cc.ensureUIToolInputStart(ctx, portal, state, itemID, "contextCompaction", true, it)
+		cc.sendSystemNoticeOnce(ctx, portal, state, "compaction:started:"+itemID, "Codex is compacting context…")
 	}
 }
 
@@ -1047,6 +1067,7 @@ func (cc *CodexClient) handleItemCompleted(ctx context.Context, portal *bridgev2
 			StartedAtMs:   time.Now().UnixMilli(),
 			CompletedAtMs: time.Now().UnixMilli(),
 		})
+		cc.sendSystemNoticeOnce(ctx, portal, state, "compaction:completed:"+itemID, "Codex finished compacting context.")
 	}
 }
 
@@ -1084,7 +1105,9 @@ func (cc *CodexClient) ensureRPC(ctx context.Context) error {
 	}
 	cc.rpc = rpc
 
-	_, err = rpc.Initialize(ctx, codexrpc.ClientInfo{
+	initCtx, cancelInit := context.WithTimeout(ctx, 45*time.Second)
+	defer cancelInit()
+	_, err = rpc.Initialize(initCtx, codexrpc.ClientInfo{
 		Name:    cc.connector.Config.Codex.ClientInfo.Name,
 		Title:   cc.connector.Config.Codex.ClientInfo.Title,
 		Version: cc.connector.Config.Codex.ClientInfo.Version,
@@ -1328,7 +1351,9 @@ func (cc *CodexClient) ensureCodexThread(ctx context.Context, portal *bridgev2.P
 			ID string `json:"id"`
 		} `json:"thread"`
 	}
-	err := cc.rpc.Call(ctx, "thread/start", map[string]any{
+	callCtx, cancelCall := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelCall()
+	err := cc.rpc.Call(callCtx, "thread/start", map[string]any{
 		"model":          model,
 		"cwd":            meta.CodexCwd,
 		"approvalPolicy": "untrusted",
@@ -1357,7 +1382,9 @@ func (cc *CodexClient) resetThread(ctx context.Context, portal *bridgev2.Portal,
 	// Best-effort archive the existing thread and remove the temp cwd.
 	if err := cc.ensureRPC(ctx); err == nil && cc.rpc != nil {
 		if tid := strings.TrimSpace(meta.CodexThreadID); tid != "" {
-			_ = cc.rpc.Call(ctx, "thread/archive", map[string]any{"threadId": tid}, &struct{}{})
+			callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			_ = cc.rpc.Call(callCtx, "thread/archive", map[string]any{"threadId": tid}, &struct{}{})
+			cancel()
 			cc.loadedMu.Lock()
 			delete(cc.loadedThreads, tid)
 			cc.loadedMu.Unlock()
@@ -1396,7 +1423,9 @@ func (cc *CodexClient) ensureCodexThreadLoaded(ctx context.Context, portal *brid
 			ID string `json:"id"`
 		} `json:"thread"`
 	}
-	err := cc.rpc.Call(ctx, "thread/resume", map[string]any{
+	callCtx, cancelCall := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelCall()
+	err := cc.rpc.Call(callCtx, "thread/resume", map[string]any{
 		"threadId":       threadID,
 		"model":          cc.connector.Config.Codex.DefaultModel,
 		"cwd":            meta.CodexCwd,
@@ -1458,14 +1487,18 @@ func (cc *CodexClient) HandleMatrixDeleteChat(ctx context.Context, msg *bridgev2
 	}
 	cc.activeMu.Unlock()
 	if active != nil && strings.TrimSpace(active.threadID) == strings.TrimSpace(meta.CodexThreadID) {
-		_ = cc.rpc.Call(ctx, "turn/interrupt", map[string]any{
+		callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		_ = cc.rpc.Call(callCtx, "turn/interrupt", map[string]any{
 			"threadId": active.threadID,
 			"turnId":   active.turnID,
 		}, &struct{}{})
+		cancel()
 	}
 
 	if tid := strings.TrimSpace(meta.CodexThreadID); tid != "" {
-		_ = cc.rpc.Call(ctx, "thread/archive", map[string]any{"threadId": tid}, &struct{}{})
+		callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		_ = cc.rpc.Call(callCtx, "thread/archive", map[string]any{"threadId": tid}, &struct{}{})
+		cancel()
 		cc.loadedMu.Lock()
 		delete(cc.loadedThreads, tid)
 		cc.loadedMu.Unlock()
@@ -2021,6 +2054,7 @@ func (cc *CodexClient) handleCommandApprovalRequest(ctx context.Context, req cod
 		"reason":  params.Reason,
 	})
 	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID)
+	cc.sendSystemNoticeOnce(ctx, active.portal, active.state, "codex-approval:"+approvalID, fmt.Sprintf("Approval required (%s): /approve %s <allow|deny> [reason]", "commandExecution", approvalID))
 	cc.registerToolApproval(approvalID, toolCallID, "commandExecution", 10*time.Minute)
 
 	// Auto-approve in elevated=full.
@@ -2067,6 +2101,7 @@ func (cc *CodexClient) handleFileChangeApprovalRequest(ctx context.Context, req 
 		"grantRoot": params.GrantRoot,
 	})
 	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID)
+	cc.sendSystemNoticeOnce(ctx, active.portal, active.state, "codex-approval:"+approvalID, fmt.Sprintf("Approval required (%s): /approve %s <allow|deny> [reason]", "fileChange", approvalID))
 	cc.registerToolApproval(approvalID, toolCallID, "fileChange", 10*time.Minute)
 
 	if active.meta != nil {
@@ -2083,4 +2118,20 @@ func (cc *CodexClient) handleFileChangeApprovalRequest(ctx context.Context, req 
 		return map[string]any{"decision": "accept"}, nil
 	}
 	return map[string]any{"decision": "decline"}, nil
+}
+
+func (cc *CodexClient) sendSystemNoticeOnce(ctx context.Context, portal *bridgev2.Portal, state *streamingState, key string, message string) {
+	key = strings.TrimSpace(key)
+	if key == "" || state == nil {
+		cc.sendSystemNotice(ctx, portal, message)
+		return
+	}
+	if state.codexTimelineNotices == nil {
+		state.codexTimelineNotices = make(map[string]bool)
+	}
+	if state.codexTimelineNotices[key] {
+		return
+	}
+	state.codexTimelineNotices[key] = true
+	cc.sendSystemNotice(ctx, portal, message)
 }

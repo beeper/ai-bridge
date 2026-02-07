@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 
@@ -29,11 +30,13 @@ type CodexLogin struct {
 	Connector *OpenAIConnector
 	FlowID    string
 
-	rpc      *codexrpc.Client
-	codexHome string
+	rpc        *codexrpc.Client
+	codexHome  string
 	instanceID string
 	authMode   string
 	loginID    string
+	authURL    string
+	waitUntil  time.Time
 
 	loginDoneCh chan codexLoginDone
 }
@@ -53,10 +56,10 @@ func (cl *CodexLogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
 			UserInputParams: &bridgev2.LoginUserInputParams{
 				Fields: []bridgev2.LoginInputDataField{
 					{
-						Type:        bridgev2.LoginInputFieldTypeURL,
-						ID:          "install_url",
-						Name:        "Install Codex",
-						Description: "Install Codex and retry. (Input is ignored; this field is just a reminder.)",
+						Type:         bridgev2.LoginInputFieldTypeURL,
+						ID:           "install_url",
+						Name:         "Install Codex",
+						Description:  "Install Codex and retry. (Input is ignored; this field is just a reminder.)",
 						DefaultValue: "https://github.com/openai/codex",
 					},
 				},
@@ -96,6 +99,16 @@ func (cl *CodexLogin) Cancel() {
 }
 
 func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
+	log := zerolog.Ctx(ctx)
+	if log == nil || log.GetLevel() == zerolog.Disabled {
+		base := zerolog.Nop()
+		if cl != nil && cl.User != nil {
+			base = cl.User.Log
+		}
+		l := base.With().Str("component", "codex_login").Logger()
+		log = &l
+	}
+
 	cmd := cl.resolveCodexCommand()
 	if _, err := exec.LookPath(cmd); err != nil {
 		return nil, fmt.Errorf("codex CLI not found (%q): %w", cmd, err)
@@ -120,7 +133,14 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 		return nil, fmt.Errorf("failed to create CODEX_HOME: %w", err)
 	}
 
-	rpc, err := codexrpc.StartProcess(ctx, codexrpc.ProcessConfig{
+	// IMPORTANT: Do not bind the Codex app-server process lifetime to the HTTP request context.
+	// The provisioning API cancels r.Context() after the response is written; using it would kill
+	// the child process and cause the login to hang forever in Wait().
+	procCtx := context.Background()
+	if cl.Connector != nil && cl.Connector.br != nil && cl.Connector.br.BackgroundCtx != nil {
+		procCtx = cl.Connector.br.BackgroundCtx
+	}
+	rpc, err := codexrpc.StartProcess(procCtx, codexrpc.ProcessConfig{
 		Command: cmd,
 		Args:    []string{"app-server", "--listen", "stdio://"},
 		Env:     []string{"CODEX_HOME=" + codexHome},
@@ -133,12 +153,15 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 	cl.instanceID = instanceID
 	cl.authMode = mode
 
-	_, err = rpc.Initialize(ctx, codexrpc.ClientInfo{
+	initCtx, cancelInit := context.WithTimeout(ctx, 45*time.Second)
+	defer cancelInit()
+	_, err = rpc.Initialize(initCtx, codexrpc.ClientInfo{
 		Name:    cl.Connector.Config.Codex.ClientInfo.Name,
 		Title:   cl.Connector.Config.Codex.ClientInfo.Title,
 		Version: cl.Connector.Config.Codex.ClientInfo.Version,
 	}, false)
 	if err != nil {
+		log.Warn().Err(err).Msg("Codex initialize failed")
 		_ = rpc.Close()
 		cl.rpc = nil
 		return nil, err
@@ -152,8 +175,8 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 		}
 		var evt struct {
 			Success bool    `json:"success"`
-			LoginID  *string `json:"loginId"`
-			Error    *string `json:"error"`
+			LoginID *string `json:"loginId"`
+			Error   *string `json:"error"`
 		}
 		_ = json.Unmarshal(params, &evt)
 		if cl.loginID != "" && (evt.LoginID == nil || strings.TrimSpace(*evt.LoginID) != cl.loginID) {
@@ -173,7 +196,10 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 		var loginResp struct {
 			Type string `json:"type"`
 		}
-		if err := rpc.Call(ctx, "account/login/start", map[string]any{"type": "apiKey", "apiKey": apiKey}, &loginResp); err != nil {
+		loginCtx, cancelLogin := context.WithTimeout(ctx, 60*time.Second)
+		defer cancelLogin()
+		if err := rpc.Call(loginCtx, "account/login/start", map[string]any{"type": "apiKey", "apiKey": apiKey}, &loginResp); err != nil {
+			log.Warn().Err(err).Msg("Codex apiKey login start failed")
 			return nil, err
 		}
 		return cl.finishLogin(ctx)
@@ -184,7 +210,10 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 		LoginID string `json:"loginId"`
 		AuthURL string `json:"authUrl"`
 	}
-	if err := rpc.Call(ctx, "account/login/start", map[string]any{"type": "chatgpt"}, &loginResp); err != nil {
+	loginCtx, cancelLogin := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelLogin()
+	if err := rpc.Call(loginCtx, "account/login/start", map[string]any{"type": "chatgpt"}, &loginResp); err != nil {
+		log.Warn().Err(err).Msg("Codex chatgpt login start failed")
 		return nil, err
 	}
 	cl.loginID = strings.TrimSpace(loginResp.LoginID)
@@ -192,6 +221,8 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 	if authURL == "" || cl.loginID == "" {
 		return nil, fmt.Errorf("codex returned empty authUrl/loginId")
 	}
+	cl.authURL = authURL
+	cl.waitUntil = time.Now().Add(10 * time.Minute)
 
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeDisplayAndWait,
@@ -212,22 +243,63 @@ func (cl *CodexLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 		return nil, fmt.Errorf("login wait unavailable")
 	}
 
-	timeout := 10 * time.Minute
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case done := <-cl.loginDoneCh:
-		if !done.success {
-			if done.errText == "" {
-				done.errText = "login failed"
-			}
-			return nil, fmt.Errorf("%s", done.errText)
-		}
-		return cl.finishLogin(ctx)
-	case <-timer.C:
+	overallTimeout := time.Until(cl.waitUntil)
+	if overallTimeout <= 0 {
 		return nil, fmt.Errorf("timed out waiting for Codex login to complete")
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	}
+	deadline := time.NewTimer(overallTimeout)
+	defer deadline.Stop()
+
+	// Poll account/read as a fallback in case the notification is dropped.
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+
+	// Avoid holding a single Wait() request open indefinitely; returning periodically
+	// allows polling callers and prevents head-of-line blocking in single-threaded callers.
+	returnAfter := time.NewTimer(25 * time.Second)
+	defer returnAfter.Stop()
+
+	for {
+		select {
+		case done := <-cl.loginDoneCh:
+			if !done.success {
+				if done.errText == "" {
+					done.errText = "login failed"
+				}
+				return nil, fmt.Errorf("%s", done.errText)
+			}
+			return cl.finishLogin(ctx)
+		case <-tick.C:
+			if cl.rpc == nil {
+				return nil, fmt.Errorf("codex login process stopped")
+			}
+			readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			var resp struct {
+				Account *struct {
+					Type  string `json:"type"`
+					Email string `json:"email"`
+				} `json:"account"`
+			}
+			err := cl.rpc.Call(readCtx, "account/read", map[string]any{"refreshToken": false}, &resp)
+			cancel()
+			if err == nil && resp.Account != nil && strings.TrimSpace(resp.Account.Type) != "" {
+				return cl.finishLogin(ctx)
+			}
+		case <-returnAfter.C:
+			return &bridgev2.LoginStep{
+				Type:         bridgev2.LoginStepTypeDisplayAndWait,
+				StepID:       "io.ai-bridge.codex.chatgpt",
+				Instructions: "Still waiting for Codex login to complete. Keep this screen open after completing the browser login.",
+				DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
+					Type: bridgev2.LoginDisplayTypeCode,
+					Data: strings.TrimSpace(cl.authURL),
+				},
+			}, nil
+		case <-deadline.C:
+			return nil, fmt.Errorf("timed out waiting for Codex login to complete")
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 }
 
@@ -259,13 +331,15 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 	// Best-effort read account email (chatgpt mode).
 	accountEmail := ""
 	if cl.rpc != nil {
+		readCtx, cancelRead := context.WithTimeout(ctx, 10*time.Second)
+		defer cancelRead()
 		var acct struct {
 			Account *struct {
 				Type  string `json:"type"`
 				Email string `json:"email"`
 			} `json:"account"`
 		}
-		_ = cl.rpc.Call(ctx, "account/read", map[string]any{"refreshToken": false}, &acct)
+		_ = cl.rpc.Call(readCtx, "account/read", map[string]any{"refreshToken": false}, &acct)
 		if acct.Account != nil && strings.TrimSpace(acct.Account.Email) != "" {
 			accountEmail = strings.TrimSpace(acct.Account.Email)
 		}

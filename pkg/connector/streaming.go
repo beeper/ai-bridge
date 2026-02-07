@@ -98,6 +98,8 @@ type streamingState struct {
 	codexToolOutputBuffers    map[string]*strings.Builder // toolCallId -> accumulated output
 	codexLatestDiff           string                      // last turn/diff/updated diff snapshot
 	codexReasoningSummarySeen bool                        // whether summary reasoning deltas have been seen
+	// Used by CodexClient to avoid spamming timeline notices for repeated signals.
+	codexTimelineNotices map[string]bool
 }
 
 type mcpApprovalRequest struct {
@@ -133,6 +135,7 @@ func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID 
 		uiToolTypeByToolCallID:  make(map[string]ToolType),
 		uiToolOutputFinalized:   make(map[string]bool),
 		pendingMcpApprovalsSeen: make(map[string]bool),
+		codexTimelineNotices:    make(map[string]bool),
 	}
 	if meta != nil && normalizeSendPolicyMode(meta.SendPolicy) == "deny" {
 		state.suppressSend = true
@@ -843,6 +846,17 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 	if portal == nil || portal.MXID == "" {
 		return
 	}
+	// Avoid spamming the timeline for the same approval. The ephemeral event is
+	// still emitted above (so capable clients can render the native UI).
+	if state.codexTimelineNotices == nil {
+		state.codexTimelineNotices = make(map[string]bool)
+	}
+	noticeKey := "approval:" + approvalID
+	if state.codexTimelineNotices[noticeKey] {
+		return
+	}
+	state.codexTimelineNotices[noticeKey] = true
+
 	if strings.TrimSpace(toolName) == "" {
 		toolName = "tool"
 	}
@@ -1161,15 +1175,15 @@ func (oc *AIClient) handleResponseOutputItemAdded(
 			// If approvals are disabled, not required, or already always-allowed, auto-approve without prompting.
 			// Otherwise emit an approval request to the UI.
 			needsApproval := oc.toolApprovalsRuntimeEnabled() && oc.toolApprovalsRequireForMCP() && !oc.isMcpAlwaysAllowed(serverLabel, mcpToolName)
-				if needsApproval {
-					if state != nil && !state.uiToolApprovalRequested[approvalID] {
-						state.uiToolApprovalRequested[approvalID] = true
-						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, tool.toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
-					}
-				} else {
-					_ = oc.resolveToolApproval(state.roomID, approvalID, ToolApprovalDecision{
-						Approve:   true,
-						DecidedAt: time.Now(),
+			if needsApproval {
+				if state != nil && !state.uiToolApprovalRequested[approvalID] {
+					state.uiToolApprovalRequested[approvalID] = true
+					oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, tool.toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
+				}
+			} else {
+				_ = oc.resolveToolApproval(state.roomID, approvalID, ToolApprovalDecision{
+					Approve:   true,
+					DecidedAt: time.Now(),
 					DecidedBy: oc.UserLogin.UserMXID,
 				})
 			}
@@ -3457,9 +3471,9 @@ func (oc *AIClient) streamingResponse(
 							ToolKind:     ToolApprovalKindBuiltin,
 							RuleToolName: toolName,
 							Action:       action,
-						TargetEvent:  tool.eventID,
-						TTL:          ttl,
-					})
+							TargetEvent:  tool.eventID,
+							TTL:          ttl,
+						})
 						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
 						decision, _, ok := oc.waitToolApproval(ctx, approvalID)
 						if !ok {
@@ -4209,9 +4223,9 @@ func (oc *AIClient) streamChatCompletions(
 							ToolKind:     ToolApprovalKindBuiltin,
 							RuleToolName: toolName,
 							Action:       action,
-						TargetEvent:  tool.eventID,
-						TTL:          ttl,
-					})
+							TargetEvent:  tool.eventID,
+							TTL:          ttl,
+						})
 						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
 						decision, _, ok := oc.waitToolApproval(ctx, approvalID)
 						if !ok {

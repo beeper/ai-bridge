@@ -119,6 +119,25 @@ func TestClient_ServerInitiatedRequestHandling(t *testing.T) {
 	}
 }
 
+func TestClient_ProcessExitFailsPendingCallWithoutDeadline(t *testing.T) {
+	c := startHelper(t)
+
+	done := make(chan error, 1)
+	go func() {
+		var out map[string]any
+		done <- c.Call(context.Background(), "exit_without_response", nil, &out)
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatalf("expected error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("call hung; expected pending call to be failed on process exit")
+	}
+}
+
 // Helper process: speaks JSONL over stdin/stdout.
 //
 // Protocol (minimal):
@@ -241,6 +260,9 @@ func TestCodexRPC_HelperProcess(t *testing.T) {
 			}
 
 			writeJSONL(map[string]any{"id": id, "result": map[string]any{"ok": true}}, false)
+		case "exit_without_response":
+			// Simulate a crash/exit before responding. The client should not hang forever.
+			os.Exit(0)
 		default:
 			writeJSONL(map[string]any{"id": id, "result": map[string]any{"ok": true}}, false)
 		}
