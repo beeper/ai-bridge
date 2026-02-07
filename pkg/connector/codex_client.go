@@ -217,6 +217,10 @@ func (cc *CodexClient) purgeCodexHomeBestEffort(ctx context.Context) {
 	if !ok || meta == nil {
 		return
 	}
+	// Don't delete unmanaged homes (e.g. the user's own ~/.codex).
+	if !meta.CodexHomeManaged {
+		return
+	}
 	codexHome := strings.TrimSpace(meta.CodexHome)
 	if codexHome == "" {
 		return

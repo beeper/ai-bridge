@@ -111,8 +111,9 @@ type UserLoginMetadata struct {
 	APIKey               string         `json:"api_key,omitempty"`
 	BaseURL              string         `json:"base_url,omitempty"`               // Per-user API endpoint
 	CodexHome            string         `json:"codex_home,omitempty"`             // Isolated CODEX_HOME for this login (provider=codex)
+	CodexHomeManaged     bool           `json:"codex_home_managed,omitempty"`     // True if we created this CODEX_HOME (false for existing ~/.codex)
 	CodexCommand         string         `json:"codex_command,omitempty"`          // Optional per-login codex binary override
-	CodexAuthMode        string         `json:"codex_auth_mode,omitempty"`        // chatgpt|apiKey
+	CodexAuthMode        string         `json:"codex_auth_mode,omitempty"`        // chatgpt|apiKey|existing
 	CodexAccountEmail    string         `json:"codex_account_email,omitempty"`    // Optional, from account/read
 	TitleGenerationModel string         `json:"title_generation_model,omitempty"` // Model to use for generating chat titles
 	NextChatIndex        int            `json:"next_chat_index,omitempty"`
