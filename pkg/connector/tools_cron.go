@@ -237,10 +237,7 @@ func readCronJobID(args map[string]any) string {
 	if args == nil {
 		return ""
 	}
-	if val := strings.TrimSpace(agenttools.ReadStringDefault(args, "jobId", "")); val != "" {
-		return val
-	}
-	return ""
+	return strings.TrimSpace(agenttools.ReadStringDefault(args, "jobId", ""))
 }
 
 func selectCronPatch(args map[string]any) any {

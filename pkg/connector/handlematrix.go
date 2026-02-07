@@ -137,7 +137,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 	oc.recordAgentActivity(ctx, portal, meta)
 
 	// Check deduplication - skip if we've already processed this event
-	if msg.Event != nil && oc.inboundDedupeCache != nil {
+	if oc.inboundDedupeCache != nil {
 		dedupeKey := oc.buildDedupeKey(portal.MXID, msg.Event.ID)
 		if oc.inboundDedupeCache.Check(dedupeKey) {
 			logCtx.Debug().Msg("Skipping duplicate message")
@@ -1058,9 +1058,6 @@ func (oc *AIClient) handleMediaMessage(
 	msgType event.MessageType,
 	pendingSent bool,
 ) (*bridgev2.MatrixMessageResponse, error) {
-	if msg.Event == nil {
-		return nil, fmt.Errorf("missing message event")
-	}
 	trace := traceEnabled(meta)
 	traceFull := traceFull(meta)
 	logCtx := zerolog.Nop()
@@ -1370,7 +1367,7 @@ func (oc *AIClient) handleTextFileMessage(
 	mimeType string,
 	pendingSent bool,
 ) (*bridgev2.MatrixMessageResponse, error) {
-	if msg == nil || msg.Event == nil {
+	if msg == nil {
 		return nil, fmt.Errorf("missing matrix event for text file message")
 	}
 	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})

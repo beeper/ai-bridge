@@ -224,10 +224,7 @@ func (m *MemorySearchManager) indexMemoryFiles(ctx context.Context, force bool, 
 		}
 	}
 
-	if err := m.removeStaleMemoryChunks(ctx, activePaths, generation); err != nil {
-		return err
-	}
-	return nil
+	return m.removeStaleMemoryChunks(ctx, activePaths, generation)
 }
 
 func (m *MemorySearchManager) indexConcurrency() int {

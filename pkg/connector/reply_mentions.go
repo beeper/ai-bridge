@@ -20,8 +20,5 @@ func (oc *AIClient) isReplyToBot(ctx context.Context, portal *bridgev2.Portal, r
 	if sender == "" {
 		return false
 	}
-	if strings.HasPrefix(sender, "model-") || strings.HasPrefix(sender, "agent-") {
-		return true
-	}
-	return false
+	return strings.HasPrefix(sender, "model-") || strings.HasPrefix(sender, "agent-")
 }
