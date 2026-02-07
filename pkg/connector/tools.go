@@ -1134,13 +1134,30 @@ func executeTTS(ctx context.Context, args map[string]any) (string, error) {
 		return "", fmt.Errorf("text too long: %d characters (max %d)", len(text), maxTextLen)
 	}
 
-	// Get voice (default to "alloy" for OpenAI, "Samantha" for macOS)
+	// Get voice/model (defaults are provider-specific).
 	voice := ""
-	if v, ok := args["voice"].(string); ok && v != "" {
-		voice = v
+	voiceFromArgs := false
+	if v, ok := args["voice"].(string); ok {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			voice = trimmed
+			voiceFromArgs = true
+		}
+	}
+	model := ""
+	modelFromArgs := false
+	if v, ok := args["model"].(string); ok {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			model = trimmed
+			modelFromArgs = true
+		}
 	}
 
 	btc := GetBridgeToolContext(ctx)
+
+	validVoices := map[string]bool{
+		"alloy": true, "ash": true, "coral": true, "echo": true,
+		"fable": true, "onyx": true, "nova": true, "sage": true, "shimmer": true,
+	}
 
 	// Try provider-based TTS first (Beeper/OpenAI)
 	if btc != nil {
@@ -1148,36 +1165,49 @@ func executeTTS(ctx context.Context, args map[string]any) (string, error) {
 			ttsBaseURL, supportsOpenAITTS := resolveOpenAITTSBaseURL(btc, provider.baseURL)
 
 			if supportsOpenAITTS {
-				// Use OpenAI voice if not specified
-				if voice == "" {
-					voice = "alloy"
+				// Pick voice/model for OpenAI TTS.
+				openAIVoice := strings.ToLower(strings.TrimSpace(voice))
+				if openAIVoice == "" {
+					openAIVoice = "nova"
+				}
+				if !validVoices[openAIVoice] {
+					openAIVoice = "nova"
 				}
 
-				// Validate OpenAI voice
-				validVoices := map[string]bool{
-					"alloy": true, "ash": true, "coral": true, "echo": true,
-					"fable": true, "onyx": true, "nova": true, "sage": true, "shimmer": true,
+				ttsModel := strings.ToLower(strings.TrimSpace(model))
+				if ttsModel == "" {
+					ttsModel = "tts-1-hd"
 				}
-				if !validVoices[voice] {
-					voice = "alloy" // Fall back to default
+				if !isAllowedValue(ttsModel, map[string]bool{"tts-1": true, "tts-1-hd": true}) {
+					ttsModel = "tts-1-hd"
 				}
 
-				// Call OpenAI TTS API
-				audioData, err := callOpenAITTS(ctx, btc.Client.apiKey, ttsBaseURL, text, voice)
+				// Call OpenAI TTS API (fallback from tts-1-hd -> tts-1 when using defaults).
+				audioData, err := callOpenAITTS(ctx, btc.Client.apiKey, ttsBaseURL, text, ttsModel, openAIVoice)
+				if err != nil && !modelFromArgs && ttsModel == "tts-1-hd" {
+					audioData, err = callOpenAITTS(ctx, btc.Client.apiKey, ttsBaseURL, text, "tts-1", openAIVoice)
+				}
 				if err == nil {
 					return TTSResultPrefix + audioData, nil
 				}
-				// Fall through to macOS say if API fails
+				// Fall through to macOS say if API fails.
 			}
 		}
 	}
 
 	// Try macOS 'say' command as fallback
 	if isTTSMacOSAvailable() {
-		if voice == "" {
-			voice = "Samantha" // Default macOS voice
+		macOSVoice := voice
+		if !voiceFromArgs {
+			macOSVoice = ""
+		} else if validVoices[strings.ToLower(strings.TrimSpace(macOSVoice))] {
+			// The user provided an OpenAI voice name; use a macOS voice instead.
+			macOSVoice = ""
 		}
-		audioData, err := callMacOSSay(ctx, text, voice)
+		if macOSVoice == "" {
+			macOSVoice = "Samantha" // Default macOS voice
+		}
+		audioData, err := callMacOSSay(ctx, text, macOSVoice)
 		if err != nil {
 			return "", fmt.Errorf("macOS TTS failed: %w", err)
 		}
@@ -1297,7 +1327,7 @@ func runMacOSSay(ctx context.Context, text, voice, suffix string, formatArgs []s
 }
 
 // callOpenAITTS calls OpenAI's /v1/audio/speech endpoint
-func callOpenAITTS(ctx context.Context, apiKey, baseURL, text, voice string) (string, error) {
+func callOpenAITTS(ctx context.Context, apiKey, baseURL, text, model, voice string) (string, error) {
 	// Determine endpoint URL
 	endpoint := "https://api.openai.com/v1/audio/speech"
 	if baseURL != "" {
@@ -1306,7 +1336,7 @@ func callOpenAITTS(ctx context.Context, apiKey, baseURL, text, voice string) (st
 
 	// Build request body
 	reqBody := map[string]any{
-		"model":           "tts-1",
+		"model":           model,
 		"input":           text,
 		"voice":           voice,
 		"response_format": "mp3",

@@ -249,12 +249,17 @@ func executeMessageFocus(ctx context.Context, args map[string]any, btc *BridgeTo
 		instance = parsedInstance
 	} else if label != "" {
 		if instance != "" {
-			resolvedID, resolvedKey, err := btc.Client.resolveDesktopSessionByLabel(ctx, instance, label)
+			resolvedInstance, resolveErr := btc.Client.resolveDesktopInstanceName(instance)
+			if resolveErr != nil {
+				return "", resolveErr
+			}
+			resolvedID, resolvedKey, err := btc.Client.resolveDesktopSessionByLabel(ctx, resolvedInstance, label)
 			if err != nil {
 				return "", err
 			}
 			chatID = resolvedID
 			sessionKey = resolvedKey
+			instance = resolvedInstance
 		} else {
 			resolvedInstance, resolvedID, resolvedKey, err := btc.Client.resolveDesktopSessionByLabelAnyInstance(ctx, label)
 			if err != nil {
@@ -264,8 +269,6 @@ func executeMessageFocus(ctx context.Context, args map[string]any, btc *BridgeTo
 			sessionKey = resolvedKey
 			instance = resolvedInstance
 		}
-	} else if chatID != "" && instance == "" {
-		instance = desktopDefaultInstance
 	}
 
 	if messageID != "" && chatID == "" {
@@ -274,6 +277,16 @@ func executeMessageFocus(ctx context.Context, args map[string]any, btc *BridgeTo
 
 	if draftAttachmentPath != "" {
 		draftAttachmentPath = expandUserPath(draftAttachmentPath)
+	}
+
+	resolvedInstance, resolveErr := btc.Client.resolveDesktopInstanceName(instance)
+	if resolveErr != nil {
+		return "", resolveErr
+	}
+	instance = resolvedInstance
+	if chatID != "" {
+		// Always return the canonical desktop session key (includes resolved instance).
+		sessionKey = normalizeDesktopSessionKeyWithInstance(instance, chatID)
 	}
 
 	_, err := btc.Client.focusDesktop(ctx, instance, desktopFocusParams{

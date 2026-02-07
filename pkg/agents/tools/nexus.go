@@ -19,6 +19,13 @@ func nexusTool(name, title, description string, schema map[string]any) *Tool {
 	}
 }
 
+var NexusContactsTool = nexusTool(
+	toolspec.NexusContactsName,
+	"Contacts",
+	toolspec.NexusContactsDescription,
+	toolspec.NexusContactsSchema(),
+)
+
 var NexusSearchContactsTool = nexusTool(
 	toolspec.NexusSearchContactsName,
 	"Nexus Search Contacts",
@@ -154,6 +161,7 @@ var NexusMergeContactsTool = nexusTool(
 
 func NexusTools() []*Tool {
 	return []*Tool{
+		NexusContactsTool,
 		NexusSearchContactsTool,
 		NexusGetContactTool,
 		NexusCreateContactTool,

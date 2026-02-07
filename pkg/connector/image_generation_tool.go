@@ -195,11 +195,50 @@ func resolveImageGenProvider(req imageGenRequest, btc *BridgeToolContext) (image
 			return "", fmt.Errorf("openai image generation is not available for this login")
 		}
 		return imageGenProviderOpenAI, nil
-	case ProviderOpenRouter, ProviderMagicProxy:
+	case ProviderOpenRouter:
 		if !supportsOpenRouterImageGen(btc) {
 			return "", fmt.Errorf("openrouter image generation is not available for this login")
 		}
 		return imageGenProviderOpenRouter, nil
+	case ProviderMagicProxy:
+		// Magic Proxy supports OpenRouter + OpenAI paths. Prefer OpenRouter for simple prompts, but
+		// switch to OpenAI when provider-specific controls are used (size/quality/count/etc).
+		openAISupported := supportsOpenAIImageGen(btc)
+		openRouterSupported := supportsOpenRouterImageGen(btc)
+
+		if usesOpenAIParams(req) {
+			if !openAISupported {
+				return "", fmt.Errorf("openai image generation is not available for this login")
+			}
+			return imageGenProviderOpenAI, nil
+		}
+
+		switch inferProviderFromModel(req.Model) {
+		case imageGenProviderOpenAI:
+			if openAISupported {
+				return imageGenProviderOpenAI, nil
+			}
+			if openRouterSupported {
+				return imageGenProviderOpenRouter, nil
+			}
+			return "", fmt.Errorf("openai image generation is not available for this login")
+		case imageGenProviderOpenRouter:
+			if openRouterSupported {
+				return imageGenProviderOpenRouter, nil
+			}
+			if openAISupported {
+				return imageGenProviderOpenAI, nil
+			}
+			return "", fmt.Errorf("openrouter image generation is not available for this login")
+		}
+
+		if openRouterSupported {
+			return imageGenProviderOpenRouter, nil
+		}
+		if openAISupported {
+			return imageGenProviderOpenAI, nil
+		}
+		return "", fmt.Errorf("image generation is not available for this login")
 	case ProviderBeeper:
 		// Beeper: prefer OpenRouter when the request is simple; otherwise use direct adapters.
 		openAISupported := supportsOpenAIImageGen(btc)
@@ -300,9 +339,13 @@ func supportsOpenAIImageGen(btc *BridgeToolContext) bool {
 	}
 	loginMeta := loginMetadata(btc.Client.UserLogin)
 	switch loginMeta.Provider {
-	case ProviderOpenAI, ProviderBeeper:
+	case ProviderOpenAI, ProviderBeeper, ProviderMagicProxy:
 		if loginMeta.Provider == ProviderBeeper {
 			return btc.Client.connector.resolveBeeperToken(loginMeta) != ""
+		}
+		if loginMeta.Provider == ProviderMagicProxy {
+			// Magic Proxy uses a per-login token+base URL, not the OpenAI config key.
+			return strings.TrimSpace(loginMeta.APIKey) != "" && strings.TrimSpace(loginMeta.BaseURL) != ""
 		}
 		return btc.Client.connector.resolveOpenAIAPIKey(loginMeta) != ""
 	default:
@@ -510,6 +553,18 @@ func buildOpenAIImagesBaseURL(btc *BridgeToolContext) (string, error) {
 	case ProviderOpenAI:
 		base := btc.Client.connector.resolveOpenAIBaseURL()
 		return strings.TrimSuffix(base, "/"), nil
+	case ProviderMagicProxy:
+		if btc.Client.connector != nil {
+			services := btc.Client.connector.resolveServiceConfig(loginMeta)
+			if svc, ok := services[serviceOpenAI]; ok && strings.TrimSpace(svc.BaseURL) != "" {
+				return strings.TrimSuffix(strings.TrimSpace(svc.BaseURL), "/"), nil
+			}
+		}
+		base := normalizeMagicProxyBaseURL(loginMeta.BaseURL)
+		if base == "" {
+			return "", fmt.Errorf("magic proxy base_url is required for image generation")
+		}
+		return joinProxyPath(base, "/openai/v1"), nil
 	default:
 		return "", fmt.Errorf("openai image generation not available for this provider")
 	}

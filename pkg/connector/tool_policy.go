@@ -75,6 +75,10 @@ func (oc *AIClient) isToolAvailable(meta *PortalMetadata, toolName string) (bool
 			return false, SourceProviderLimit, "MCP tool bridge is not configured"
 		}
 	}
+	// Compact local Nexus wrappers are not MCP tools, but still must be Nexus-agent-only.
+	if isNexusCompactToolName(toolName) && !canUseNexusToolsForAgent(meta) {
+		return false, SourceAgentPolicy, "Nexus tools are restricted to the Nexus agent"
+	}
 	return true, SourceGlobalDefault, ""
 }
 

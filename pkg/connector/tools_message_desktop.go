@@ -53,16 +53,24 @@ func resolveDesktopMessageTarget(ctx context.Context, client *AIClient, args map
 		if !ok {
 			return "", "", "", true, fmt.Errorf("sessionKey must be a desktop-api session")
 		}
-		return parsedInstance, parsedChatID, normalizeDesktopSessionKeyWithInstance(parsedInstance, parsedChatID), true, nil
+		resolvedInstance, resolveErr := client.resolveDesktopInstanceName(parsedInstance)
+		if resolveErr != nil {
+			return "", "", "", true, resolveErr
+		}
+		return resolvedInstance, parsedChatID, normalizeDesktopSessionKeyWithInstance(resolvedInstance, parsedChatID), true, nil
 	}
 
 	if label != "" {
 		if instance != "" {
-			resolvedID, resolvedKey, resolveErr := client.resolveDesktopSessionByLabelWithOptions(ctx, instance, label, resolveOpts)
+			resolvedInstance, resolveErr := client.resolveDesktopInstanceName(instance)
 			if resolveErr != nil {
 				return "", "", "", true, resolveErr
 			}
-			return instance, resolvedID, resolvedKey, true, nil
+			resolvedID, resolvedKey, resolveErr := client.resolveDesktopSessionByLabelWithOptions(ctx, resolvedInstance, label, resolveOpts)
+			if resolveErr != nil {
+				return "", "", "", true, resolveErr
+			}
+			return resolvedInstance, resolvedID, resolvedKey, true, nil
 		}
 		resolvedInstance, resolvedID, resolvedKey, resolveErr := client.resolveDesktopSessionByLabelAnyInstanceWithOptions(ctx, label, resolveOpts)
 		if resolveErr != nil {
@@ -72,17 +80,19 @@ func resolveDesktopMessageTarget(ctx context.Context, client *AIClient, args map
 	}
 
 	if chatID != "" {
-		if instance == "" {
-			instance = desktopDefaultInstance
+		resolvedInstance, resolveErr := client.resolveDesktopInstanceName(instance)
+		if resolveErr != nil {
+			return "", "", "", true, resolveErr
 		}
-		return instance, chatID, normalizeDesktopSessionKeyWithInstance(instance, chatID), true, nil
+		return resolvedInstance, chatID, normalizeDesktopSessionKeyWithInstance(resolvedInstance, chatID), true, nil
 	}
 
 	if !requireChat {
-		if instance == "" {
-			instance = desktopDefaultInstance
+		resolvedInstance, resolveErr := client.resolveDesktopInstanceName(instance)
+		if resolveErr != nil {
+			return "", "", "", true, resolveErr
 		}
-		return instance, "", "", true, nil
+		return resolvedInstance, "", "", true, nil
 	}
 	return "", "", "", true, fmt.Errorf("desktop action requires chatId, label, or sessionKey")
 }
@@ -286,9 +296,11 @@ func maybeExecuteMessageSearchDesktop(ctx context.Context, args map[string]any, 
 
 func executeMessageDesktopListChats(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
 	instance := firstNonEmptyString(args["instance"])
-	if instance == "" {
-		instance = desktopDefaultInstance
+	resolvedInstance, err := btc.Client.resolveDesktopInstanceName(instance)
+	if err != nil {
+		return "", err
 	}
+	instance = resolvedInstance
 	limit := 50
 	if raw, ok := args["limit"].(float64); ok && raw > 0 {
 		limit = int(raw)
@@ -312,9 +324,11 @@ func executeMessageDesktopSearchChats(ctx context.Context, args map[string]any, 
 		return "", fmt.Errorf("action=desktop-search-chats requires 'query'")
 	}
 	instance := firstNonEmptyString(args["instance"])
-	if instance == "" {
-		instance = desktopDefaultInstance
+	resolvedInstance, err := btc.Client.resolveDesktopInstanceName(instance)
+	if err != nil {
+		return "", err
 	}
+	instance = resolvedInstance
 	limit := 50
 	if raw, ok := args["limit"].(float64); ok && raw > 0 {
 		limit = int(raw)
@@ -343,7 +357,11 @@ func executeMessageDesktopSearchMessages(ctx context.Context, args map[string]an
 		return "", err
 	}
 	if !resolved {
-		instance = desktopDefaultInstance
+		resolvedInstance, err := btc.Client.resolveDesktopInstanceName("")
+		if err != nil {
+			return "", err
+		}
+		instance = resolvedInstance
 	}
 	limit := 20
 	if raw, ok := args["limit"].(float64); ok && raw > 0 {
@@ -378,9 +396,11 @@ func executeMessageDesktopSearchMessages(ctx context.Context, args map[string]an
 
 func executeMessageDesktopCreateChat(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
 	instance := firstNonEmptyString(args["instance"])
-	if instance == "" {
-		instance = desktopDefaultInstance
+	resolvedInstance, err := btc.Client.resolveDesktopInstanceName(instance)
+	if err != nil {
+		return "", err
 	}
+	instance = resolvedInstance
 	accountID := firstNonEmptyString(args["accountId"])
 	if accountID == "" {
 		return "", fmt.Errorf("action=desktop-create-chat requires 'accountId'")
@@ -495,9 +515,11 @@ func executeMessageDesktopClearReminder(ctx context.Context, args map[string]any
 
 func executeMessageDesktopUploadAsset(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
 	instance := firstNonEmptyString(args["instance"])
-	if instance == "" {
-		instance = desktopDefaultInstance
+	resolvedInstance, err := btc.Client.resolveDesktopInstanceName(instance)
+	if err != nil {
+		return "", err
 	}
+	instance = resolvedInstance
 	bufferInput := firstNonEmptyString(args["buffer"])
 	mediaInput := firstNonEmptyString(args["media"], args["path"])
 	if bufferInput == "" && mediaInput == "" {
@@ -523,9 +545,11 @@ func executeMessageDesktopUploadAsset(ctx context.Context, args map[string]any, 
 
 func executeMessageDesktopDownloadAsset(ctx context.Context, args map[string]any, btc *BridgeToolContext) (string, error) {
 	instance := firstNonEmptyString(args["instance"])
-	if instance == "" {
-		instance = desktopDefaultInstance
+	resolvedInstance, err := btc.Client.resolveDesktopInstanceName(instance)
+	if err != nil {
+		return "", err
 	}
+	instance = resolvedInstance
 	rawURL := firstNonEmptyString(args["url"])
 	if rawURL == "" {
 		return "", fmt.Errorf("action=desktop-download-asset requires 'url'")

@@ -1837,15 +1837,44 @@ func (oc *AIClient) streamingResponse(
 				}
 			}
 			if tool != nil {
+				if state != nil && state.uiToolOutputFinalized[tool.callID] {
+					break
+				}
 				errorText := strings.TrimSpace(streamEvent.Item.Error)
 				if errorText == "" {
 					errorText = "MCP tool call failed"
 				}
-				if outputItemLooksDenied(streamEvent.Item) {
+				denied := outputItemLooksDenied(streamEvent.Item)
+				if denied {
 					oc.emitUIToolOutputDenied(ctx, portal, state, tool.callID)
 				} else {
 					oc.emitUIToolOutputError(ctx, portal, state, tool.callID, errorText, true)
 				}
+
+				output := map[string]any{}
+				if denied {
+					output["status"] = "denied"
+				} else {
+					output["error"] = errorText
+				}
+				resultPayload := errorText
+				if denied && resultPayload == "" {
+					resultPayload = "Denied"
+				}
+				resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, resultPayload, ResultStatusError)
+				state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+					CallID:        tool.callID,
+					ToolName:      tool.toolName,
+					ToolType:      string(tool.toolType),
+					Output:        output,
+					Status:        string(ToolStatusFailed),
+					ResultStatus:  string(ResultStatusError),
+					ErrorMessage:  errorText,
+					StartedAtMs:   tool.startedAtMs,
+					CompletedAtMs: time.Now().UnixMilli(),
+					CallEventID:   string(tool.eventID),
+					ResultEventID: string(resultEventID),
+				})
 			}
 
 		case "response.output_text.delta":
@@ -2197,7 +2226,37 @@ func (oc *AIClient) streamingResponse(
 			if exists && tool != nil {
 				callID = tool.callID
 			}
-			oc.emitUIToolOutputAvailable(ctx, portal, state, callID, map[string]any{"status": "completed"}, true, false)
+			if state != nil && state.uiToolOutputFinalized[callID] {
+				break
+			}
+			if !exists {
+				tool = &activeToolCall{
+					callID:      callID,
+					toolName:    "file_search",
+					toolType:    ToolTypeProvider,
+					startedAtMs: time.Now().UnixMilli(),
+					itemID:      streamEvent.ItemID,
+				}
+				activeTools[streamEvent.ItemID] = tool
+				tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
+			}
+			output := map[string]any{"status": "completed"}
+			oc.emitUIToolOutputAvailable(ctx, portal, state, callID, output, true, false)
+
+			resultJSON, _ := json.Marshal(output)
+			resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, string(resultJSON), ResultStatusSuccess)
+			state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+				CallID:        callID,
+				ToolName:      "file_search",
+				ToolType:      string(tool.toolType),
+				Output:        output,
+				Status:        string(ToolStatusCompleted),
+				ResultStatus:  string(ResultStatusSuccess),
+				StartedAtMs:   tool.startedAtMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				CallEventID:   string(tool.eventID),
+				ResultEventID: string(resultEventID),
+			})
 
 		case "response.code_interpreter_call.in_progress", "response.code_interpreter_call.interpreting":
 			callID := strings.TrimSpace(streamEvent.ItemID)
@@ -2227,7 +2286,37 @@ func (oc *AIClient) streamingResponse(
 			if exists && tool != nil {
 				callID = tool.callID
 			}
-			oc.emitUIToolOutputAvailable(ctx, portal, state, callID, map[string]any{"status": "completed"}, true, false)
+			if state != nil && state.uiToolOutputFinalized[callID] {
+				break
+			}
+			if !exists {
+				tool = &activeToolCall{
+					callID:      callID,
+					toolName:    "code_interpreter",
+					toolType:    ToolTypeProvider,
+					startedAtMs: time.Now().UnixMilli(),
+					itemID:      streamEvent.ItemID,
+				}
+				activeTools[streamEvent.ItemID] = tool
+				tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
+			}
+			output := map[string]any{"status": "completed"}
+			oc.emitUIToolOutputAvailable(ctx, portal, state, callID, output, true, false)
+
+			resultJSON, _ := json.Marshal(output)
+			resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, string(resultJSON), ResultStatusSuccess)
+			state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+				CallID:        callID,
+				ToolName:      "code_interpreter",
+				ToolType:      string(tool.toolType),
+				Output:        output,
+				Status:        string(ToolStatusCompleted),
+				ResultStatus:  string(ResultStatusSuccess),
+				StartedAtMs:   tool.startedAtMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				CallEventID:   string(tool.eventID),
+				ResultEventID: string(resultEventID),
+			})
 
 		case "response.mcp_list_tools.in_progress":
 			callID := strings.TrimSpace(streamEvent.ItemID)
@@ -2257,7 +2346,37 @@ func (oc *AIClient) streamingResponse(
 			if exists && tool != nil {
 				callID = tool.callID
 			}
-			oc.emitUIToolOutputAvailable(ctx, portal, state, callID, map[string]any{"status": "completed"}, true, false)
+			if state != nil && state.uiToolOutputFinalized[callID] {
+				break
+			}
+			if !exists {
+				tool = &activeToolCall{
+					callID:      callID,
+					toolName:    "mcp.list_tools",
+					toolType:    ToolTypeMCP,
+					startedAtMs: time.Now().UnixMilli(),
+					itemID:      streamEvent.ItemID,
+				}
+				activeTools[streamEvent.ItemID] = tool
+				tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
+			}
+			output := map[string]any{"status": "completed"}
+			oc.emitUIToolOutputAvailable(ctx, portal, state, callID, output, true, false)
+
+			resultJSON, _ := json.Marshal(output)
+			resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, string(resultJSON), ResultStatusSuccess)
+			state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+				CallID:        callID,
+				ToolName:      "mcp.list_tools",
+				ToolType:      string(tool.toolType),
+				Output:        output,
+				Status:        string(ToolStatusCompleted),
+				ResultStatus:  string(ResultStatusSuccess),
+				StartedAtMs:   tool.startedAtMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				CallEventID:   string(tool.eventID),
+				ResultEventID: string(resultEventID),
+			})
 
 		case "response.mcp_list_tools.failed":
 			tool, exists := activeTools[streamEvent.ItemID]
@@ -2268,7 +2387,37 @@ func (oc *AIClient) streamingResponse(
 			if exists && tool != nil {
 				callID = tool.callID
 			}
-			oc.emitUIToolOutputError(ctx, portal, state, callID, "MCP list tools failed", true)
+			if state != nil && state.uiToolOutputFinalized[callID] {
+				break
+			}
+			if !exists {
+				tool = &activeToolCall{
+					callID:      callID,
+					toolName:    "mcp.list_tools",
+					toolType:    ToolTypeMCP,
+					startedAtMs: time.Now().UnixMilli(),
+					itemID:      streamEvent.ItemID,
+				}
+				activeTools[streamEvent.ItemID] = tool
+				tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
+			}
+			errText := "MCP list tools failed"
+			oc.emitUIToolOutputError(ctx, portal, state, callID, errText, true)
+
+			resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, errText, ResultStatusError)
+			state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+				CallID:        callID,
+				ToolName:      "mcp.list_tools",
+				ToolType:      string(tool.toolType),
+				Output:        map[string]any{"error": errText},
+				Status:        string(ToolStatusFailed),
+				ResultStatus:  string(ResultStatusError),
+				ErrorMessage:  errText,
+				StartedAtMs:   tool.startedAtMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				CallEventID:   string(tool.eventID),
+				ResultEventID: string(resultEventID),
+			})
 
 		case "response.mcp_call.in_progress":
 			callID := strings.TrimSpace(streamEvent.ItemID)
@@ -2298,7 +2447,37 @@ func (oc *AIClient) streamingResponse(
 			if exists && tool != nil {
 				callID = tool.callID
 			}
-			oc.emitUIToolOutputAvailable(ctx, portal, state, callID, map[string]any{"status": "completed"}, true, false)
+			if state != nil && state.uiToolOutputFinalized[callID] {
+				break
+			}
+			if !exists {
+				tool = &activeToolCall{
+					callID:      callID,
+					toolName:    "mcp.call",
+					toolType:    ToolTypeMCP,
+					startedAtMs: time.Now().UnixMilli(),
+					itemID:      streamEvent.ItemID,
+				}
+				activeTools[streamEvent.ItemID] = tool
+				tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
+			}
+			output := map[string]any{"status": "completed"}
+			oc.emitUIToolOutputAvailable(ctx, portal, state, callID, output, true, false)
+
+			resultJSON, _ := json.Marshal(output)
+			resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, string(resultJSON), ResultStatusSuccess)
+			state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+				CallID:        callID,
+				ToolName:      "mcp.call",
+				ToolType:      string(tool.toolType),
+				Output:        output,
+				Status:        string(ToolStatusCompleted),
+				ResultStatus:  string(ResultStatusSuccess),
+				StartedAtMs:   tool.startedAtMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				CallEventID:   string(tool.eventID),
+				ResultEventID: string(resultEventID),
+			})
 
 		case "response.web_search_call.searching", "response.web_search_call.in_progress":
 			touchTyping()
@@ -2722,15 +2901,44 @@ func (oc *AIClient) streamingResponse(
 					}
 				}
 				if tool != nil {
+					if state != nil && state.uiToolOutputFinalized[tool.callID] {
+						break
+					}
 					errorText := strings.TrimSpace(streamEvent.Item.Error)
 					if errorText == "" {
 						errorText = "MCP tool call failed"
 					}
-					if outputItemLooksDenied(streamEvent.Item) {
+					denied := outputItemLooksDenied(streamEvent.Item)
+					if denied {
 						oc.emitUIToolOutputDenied(ctx, portal, state, tool.callID)
 					} else {
 						oc.emitUIToolOutputError(ctx, portal, state, tool.callID, errorText, true)
 					}
+
+					output := map[string]any{}
+					if denied {
+						output["status"] = "denied"
+					} else {
+						output["error"] = errorText
+					}
+					resultPayload := errorText
+					if denied && resultPayload == "" {
+						resultPayload = "Denied"
+					}
+					resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, resultPayload, ResultStatusError)
+					state.toolCalls = append(state.toolCalls, ToolCallMetadata{
+						CallID:        tool.callID,
+						ToolName:      tool.toolName,
+						ToolType:      string(tool.toolType),
+						Output:        output,
+						Status:        string(ToolStatusFailed),
+						ResultStatus:  string(ResultStatusError),
+						ErrorMessage:  errorText,
+						StartedAtMs:   tool.startedAtMs,
+						CompletedAtMs: time.Now().UnixMilli(),
+						CallEventID:   string(tool.eventID),
+						ResultEventID: string(resultEventID),
+					})
 				}
 
 			case "response.output_text.delta":

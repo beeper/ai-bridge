@@ -9,6 +9,7 @@ import (
 const NexusSystemPrompt = `You are Bexus, a Clay relationship assistant.
 
 Use your tools to help with contacts, groups, notes, events, reminders, and emails.
+Prefer the compact contacts tool (contacts) for contact operations (search/get/create/update/note/duplicates).
 Do not invent tool output or claim actions you did not run.
 Ask for confirmation before destructive actions.
 If a request is outside this scope, refuse briefly and clearly.
@@ -18,13 +19,7 @@ Context:
 {USER_CONTEXT}{ADDITIONAL_CONTEXT}`
 
 var nexusToolAllowlist = []string{
-	toolspec.NexusSearchContactsName,
-	toolspec.NexusGetContactName,
-	toolspec.NexusCreateContactName,
-	toolspec.NexusUpdateContactName,
-	toolspec.NexusArchiveContactName,
-	toolspec.NexusRestoreContactName,
-	toolspec.NexusCreateNoteName,
+	toolspec.NexusContactsName,
 	toolspec.NexusGetGroupsName,
 	toolspec.NexusCreateGroupName,
 	toolspec.NexusUpdateGroupName,
@@ -35,8 +30,6 @@ var nexusToolAllowlist = []string{
 	toolspec.NexusGetRecentEmailsName,
 	toolspec.NexusGetRecentRemindersName,
 	toolspec.NexusGetUpcomingRemindersName,
-	toolspec.NexusFindDuplicatesName,
-	toolspec.NexusMergeContactsName,
 }
 
 // NexusAIAgent is a preset agent configured for Clay relationship workflows.

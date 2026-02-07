@@ -88,4 +88,3 @@ func TestResolveOpenAITTSBaseURLOpenRouterNotSupported(t *testing.T) {
 		t.Fatalf("unexpected passthrough base URL: %q", gotBaseURL)
 	}
 }
-

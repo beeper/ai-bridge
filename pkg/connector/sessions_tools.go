@@ -231,6 +231,14 @@ func (oc *AIClient) executeSessionsHistory(ctx context.Context, portal *bridgev2
 	}
 
 	if instance, chatID, ok := parseDesktopSessionKey(sessionKey); ok {
+		resolvedInstance, resolveErr := oc.resolveDesktopInstanceName(instance)
+		if resolveErr != nil {
+			return tools.JSONResult(map[string]any{
+				"status": "error",
+				"error":  resolveErr.Error(),
+			}), nil
+		}
+		instance = resolvedInstance
 		if trace {
 			oc.loggerForContext(ctx).Debug().Str("instance", instance).Str("chat_id", chatID).Msg("Fetching desktop session history")
 		}
@@ -357,6 +365,14 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 	}
 
 	if instance, chatID, ok := parseDesktopSessionKey(sessionKey); ok {
+		resolvedInstance, resolveErr := oc.resolveDesktopInstanceName(instance)
+		if resolveErr != nil {
+			return tools.JSONResult(map[string]any{
+				"status": "error",
+				"error":  resolveErr.Error(),
+			}), nil
+		}
+		instance = resolvedInstance
 		if trace {
 			oc.loggerForContext(ctx).Debug().Str("instance", instance).Str("chat_id", chatID).Msg("Sending to desktop session by key")
 		}
@@ -410,8 +426,15 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 			var desktopKey string
 			var desktopErr error
 			if strings.TrimSpace(instance) != "" {
-				chatID, desktopKey, desktopErr = oc.resolveDesktopSessionByLabel(ctx, instance, label)
-				desktopInstance = instance
+				resolvedInstance, resolveErr := oc.resolveDesktopInstanceName(instance)
+				if resolveErr != nil {
+					return tools.JSONResult(map[string]any{
+						"status": "error",
+						"error":  resolveErr.Error(),
+					}), nil
+				}
+				desktopInstance = resolvedInstance
+				chatID, desktopKey, desktopErr = oc.resolveDesktopSessionByLabel(ctx, resolvedInstance, label)
 			} else {
 				desktopInstance, chatID, desktopKey, desktopErr = oc.resolveDesktopSessionByLabelAnyInstance(ctx, label)
 			}

@@ -1,12 +1,15 @@
 package connector
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/commands"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
@@ -25,9 +28,40 @@ var reservedAgentIDs = map[string]struct{}{
 	"boss":  {},
 }
 
+func resolveLoginForCommand(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	defaultLogin *bridgev2.UserLogin,
+	getByID func(context.Context, networkid.UserLoginID) (*bridgev2.UserLogin, error),
+) *bridgev2.UserLogin {
+	if portal == nil || portal.Portal == nil || portal.Receiver == "" || getByID == nil {
+		return defaultLogin
+	}
+	login, err := getByID(ctx, portal.Receiver)
+	if err == nil && login != nil {
+		return login
+	}
+	return defaultLogin
+}
+
 // getAIClient retrieves the AIClient from the command event's user login
 func getAIClient(ce *commands.Event) *AIClient {
-	login := ce.User.GetDefaultLogin()
+	if ce == nil || ce.User == nil {
+		return nil
+	}
+
+	defaultLogin := ce.User.GetDefaultLogin()
+	br := ce.Bridge
+	if ce.User.Bridge != nil {
+		br = ce.User.Bridge
+	}
+
+	login := resolveLoginForCommand(ce.Ctx, ce.Portal, defaultLogin, func(ctx context.Context, id networkid.UserLoginID) (*bridgev2.UserLogin, error) {
+		if br == nil {
+			return nil, fmt.Errorf("missing bridge")
+		}
+		return br.GetExistingUserLoginByID(ctx, id)
+	})
 	if login == nil {
 		return nil
 	}

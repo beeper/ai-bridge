@@ -604,6 +604,14 @@ func TTSSchema() map[string]any {
 				"type":        "string",
 				"description": "Text to convert to speech.",
 			},
+			"voice": map[string]any{
+				"type":        "string",
+				"description": "Optional: preferred voice (OpenAI voices: alloy, ash, coral, echo, fable, onyx, nova, sage, shimmer).",
+			},
+			"model": map[string]any{
+				"type":        "string",
+				"description": "Optional: TTS model (e.g. tts-1-hd, tts-1).",
+			},
 			"channel": map[string]any{
 				"type":        "string",
 				"description": "Optional channel id to pick output format (e.g. telegram).",

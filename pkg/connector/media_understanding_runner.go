@@ -826,6 +826,9 @@ func (oc *AIClient) transcribeAudioWithEntry(
 		Data:     data,
 		Timeout:  timeout,
 	}
+	if providerID == "openai" && strings.TrimSpace(request.BaseURL) == "" {
+		request.BaseURL = resolveOpenAIMediaBaseURL(oc)
+	}
 
 	var text string
 	switch providerID {
@@ -1026,6 +1029,23 @@ func resolveOpenRouterMediaBaseURL(oc *AIClient) string {
 	return defaultOpenRouterBaseURL
 }
 
+func resolveOpenAIMediaBaseURL(oc *AIClient) string {
+	if oc == nil || oc.connector == nil {
+		return defaultOpenAITranscriptionBaseURL
+	}
+	if oc.UserLogin != nil && oc.UserLogin.Metadata != nil {
+		services := oc.connector.resolveServiceConfig(loginMetadata(oc.UserLogin))
+		if svc, ok := services[serviceOpenAI]; ok && strings.TrimSpace(svc.BaseURL) != "" {
+			return strings.TrimRight(strings.TrimSpace(svc.BaseURL), "/")
+		}
+	}
+	base := strings.TrimSpace(oc.connector.resolveOpenAIBaseURL())
+	if base != "" {
+		return strings.TrimRight(base, "/")
+	}
+	return defaultOpenAITranscriptionBaseURL
+}
+
 func resolveMediaBaseURL(cfg *MediaUnderstandingConfig, entry MediaUnderstandingModelConfig) string {
 	if strings.TrimSpace(entry.BaseURL) != "" {
 		return entry.BaseURL
@@ -1087,7 +1107,13 @@ func (oc *AIClient) resolveMediaProviderAPIKey(providerID string, profile string
 		if key := resolveProfiledEnvKey("OPENAI_API_KEY", preferredProfile); key != "" {
 			return key
 		}
-		if oc.connector != nil {
+		if oc.connector != nil && oc.UserLogin != nil && oc.UserLogin.Metadata != nil {
+			services := oc.connector.resolveServiceConfig(loginMetadata(oc.UserLogin))
+			if svc, ok := services[serviceOpenAI]; ok {
+				if key := strings.TrimSpace(svc.APIKey); key != "" {
+					return key
+				}
+			}
 			if key := strings.TrimSpace(oc.connector.resolveOpenAIAPIKey(loginMetadata(oc.UserLogin))); key != "" {
 				return key
 			}

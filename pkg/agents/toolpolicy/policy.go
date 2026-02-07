@@ -53,6 +53,7 @@ var ToolGroups = map[string][]string{
 	GroupFS:         {"read", "write", "edit", "apply_patch", "stat", "ls", "find", "grep"},
 	GroupNexus: {
 		"get_user_information",
+		"contacts",
 		"searchContacts",
 		"getContact",
 		"createContact",

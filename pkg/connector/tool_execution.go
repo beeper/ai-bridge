@@ -322,7 +322,7 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 		meta = portalMeta(portal)
 	}
 
-	if isNexusToolName(toolName) && !canUseNexusToolsForAgent(meta) {
+	if (isNexusToolName(toolName) || isNexusCompactToolName(toolName)) && !canUseNexusToolsForAgent(meta) {
 		return "", fmt.Errorf("tool %s is restricted to the Nexus agent", toolName)
 	}
 
