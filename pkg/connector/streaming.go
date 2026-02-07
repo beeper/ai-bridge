@@ -830,6 +830,10 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 	if strings.TrimSpace(approvalID) == "" || strings.TrimSpace(toolCallID) == "" {
 		return
 	}
+	if state == nil {
+		// Without a streaming state we can't track approvals or emit stream events safely.
+		return
+	}
 	state.uiToolCallIDByApproval[approvalID] = toolCallID
 	oc.emitStreamEvent(ctx, portal, state, map[string]any{
 		"type":       "tool-approval-request",
@@ -840,7 +844,7 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 	// Back-compat fallback: many clients either don't support or don't render our
 	// ephemeral stream events. If approvals are required, give the user a clear,
 	// timeline-visible way to proceed (react or /approve).
-	if state != nil && state.suppressSend {
+	if state.suppressSend {
 		return
 	}
 	if portal == nil || portal.MXID == "" {
@@ -1114,11 +1118,14 @@ func (oc *AIClient) handleResponseOutputItemAdded(
 	case "function_call", "web_search_call", "image_generation_call":
 		return
 	}
+	if state == nil {
+		return
+	}
 	tool := oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, desc)
 	if tool == nil {
 		return
 	}
-	if state != nil && state.uiToolOutputFinalized[tool.callID] {
+	if state.uiToolOutputFinalized[tool.callID] {
 		return
 	}
 
@@ -1132,7 +1139,7 @@ func (oc *AIClient) handleResponseOutputItemAdded(
 			tool.input.WriteString(stringifyJSONValue(desc.input))
 		}
 		oc.emitUIToolInputAvailable(ctx, portal, state, tool.callID, tool.toolName, desc.input, true)
-		if state != nil && !state.pendingMcpApprovalsSeen[approvalID] {
+		if !state.pendingMcpApprovalsSeen[approvalID] {
 			state.pendingMcpApprovalsSeen[approvalID] = true
 			parsed := item.AsMcpApprovalRequest()
 			serverLabel := strings.TrimSpace(parsed.ServerLabel)
@@ -1215,11 +1222,14 @@ func (oc *AIClient) handleResponseOutputItemDone(
 	case "function_call", "web_search_call", "image_generation_call":
 		return
 	}
+	if state == nil {
+		return
+	}
 	tool := oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, desc)
 	if tool == nil {
 		return
 	}
-	if state != nil && state.uiToolOutputFinalized[tool.callID] {
+	if state.uiToolOutputFinalized[tool.callID] {
 		return
 	}
 
@@ -1233,7 +1243,7 @@ func (oc *AIClient) handleResponseOutputItemDone(
 			tool.input.WriteString(stringifyJSONValue(desc.input))
 		}
 		oc.emitUIToolInputAvailable(ctx, portal, state, tool.callID, tool.toolName, desc.input, true)
-		if state != nil && !state.pendingMcpApprovalsSeen[approvalID] {
+		if !state.pendingMcpApprovalsSeen[approvalID] {
 			state.pendingMcpApprovalsSeen[approvalID] = true
 			parsed := item.AsMcpApprovalRequest()
 			serverLabel := strings.TrimSpace(parsed.ServerLabel)

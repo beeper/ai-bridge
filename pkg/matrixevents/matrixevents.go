@@ -93,4 +93,3 @@ func BuildStreamEventTxnID(turnID string, seq int) string {
 	}
 	return fmt.Sprintf("ai_stream_%s_%d", turnID, seq)
 }
-

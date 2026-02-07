@@ -31,4 +31,3 @@ func idKey(raw json.RawMessage) string {
 	// raw is JSON scalar; keep exact bytes to round-trip.
 	return string(raw)
 }
-

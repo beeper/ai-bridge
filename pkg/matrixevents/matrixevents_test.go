@@ -50,4 +50,3 @@ func TestBuildStreamEventTxnID(t *testing.T) {
 		t.Fatalf("unexpected txn id: %q", got)
 	}
 }
-

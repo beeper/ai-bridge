@@ -11,10 +11,7 @@ func normalizeApprovalToken(s string) string {
 
 func normalizeMcpRuleToolName(name string) string {
 	n := normalizeApprovalToken(name)
-	if strings.HasPrefix(n, "mcp.") {
-		n = strings.TrimPrefix(n, "mcp.")
-	}
-	return n
+	return strings.TrimPrefix(n, "mcp.")
 }
 
 func (oc *AIClient) toolApprovalsRuntimeEnabled() bool {

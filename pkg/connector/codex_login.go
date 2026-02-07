@@ -39,6 +39,8 @@ type CodexLogin struct {
 	waitUntil  time.Time
 
 	loginDoneCh chan codexLoginDone
+
+	startCh chan error
 }
 
 type codexLoginDone struct {
@@ -159,7 +161,8 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 	cl.instanceID = instanceID
 	cl.authMode = mode
 
-	initCtx, cancelInit := context.WithTimeout(ctx, 45*time.Second)
+	// Keep SubmitUserInput responsive: callers may have ~30-40s request timeouts.
+	initCtx, cancelInit := context.WithTimeout(ctx, 20*time.Second)
 	defer cancelInit()
 	_, err = rpc.Initialize(initCtx, codexrpc.ClientInfo{
 		Name:    cl.Connector.Config.Codex.ClientInfo.Name,
@@ -212,16 +215,34 @@ func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]stri
 	})
 
 	if mode == "apiKey" {
-		var loginResp struct {
-			Type string `json:"type"`
-		}
-		loginCtx, cancelLogin := context.WithTimeout(ctx, 60*time.Second)
-		defer cancelLogin()
-		if err := rpc.Call(loginCtx, "account/login/start", map[string]any{"type": "apiKey", "apiKey": apiKey}, &loginResp); err != nil {
-			log.Warn().Err(err).Msg("Codex apiKey login start failed")
-			return nil, err
-		}
-		return cl.finishLogin(ctx)
+		// Start apiKey login in the background and let Wait() poll/resolve. This avoids
+		// blocking the provisioning request (which can freeze clients).
+		cl.waitUntil = time.Now().Add(5 * time.Minute)
+		cl.apiKeyStartCh = make(chan error, 1)
+		go func() {
+			var loginResp struct {
+				Type string `json:"type"`
+			}
+			startCtx, cancel := context.WithTimeout(cl.persistContext(ctx), 20*time.Second)
+			err := rpc.Call(startCtx, "account/login/start", map[string]any{"type": "apiKey", "apiKey": apiKey}, &loginResp)
+			cancel()
+			if err != nil {
+				log.Warn().Err(err).Msg("Codex apiKey login start failed")
+			}
+			select {
+			case cl.apiKeyStartCh <- err:
+			default:
+			}
+		}()
+
+		return &bridgev2.LoginStep{
+			Type:         bridgev2.LoginStepTypeDisplayAndWait,
+			StepID:       "io.ai-bridge.codex.validating",
+			Instructions: "Validating the API key with Codex. Keep this screen open.",
+			DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
+				Type: bridgev2.LoginDisplayTypeNothing,
+			},
+		}, nil
 	}
 
 	var loginResp struct {
@@ -277,11 +298,18 @@ func (cl *CodexLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 
 	// Avoid holding a single Wait() request open indefinitely; returning periodically
 	// allows polling callers and prevents head-of-line blocking in single-threaded callers.
-	returnAfter := time.NewTimer(25 * time.Second)
+	returnAfter := time.NewTimer(20 * time.Second)
 	defer returnAfter.Stop()
 
 	for {
 		select {
+		case err := <-cl.apiKeyStartCh:
+			// apiKey mode: surface start failure early instead of waiting until timeout.
+			if err != nil {
+				return nil, err
+			}
+			// Prevent repeated handling if the channel is re-used.
+			cl.apiKeyStartCh = nil
 		case done := <-cl.loginDoneCh:
 			if !done.success {
 				if done.errText == "" {
@@ -320,13 +348,23 @@ func (cl *CodexLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 			}
 		case <-returnAfter.C:
 			log.Debug().Str("login_id", cl.loginID).Msg("Codex login still waiting")
+			stepID := "io.ai-bridge.codex.chatgpt"
+			instr := "Still waiting for Codex login to complete. Keep this screen open."
+			displayType := bridgev2.LoginDisplayTypeCode
+			data := strings.TrimSpace(cl.authURL)
+			if cl.authMode == "apiKey" {
+				stepID = "io.ai-bridge.codex.validating"
+				instr = "Still validating the API key with Codex. Keep this screen open."
+				displayType = bridgev2.LoginDisplayTypeNothing
+				data = ""
+			}
 			return &bridgev2.LoginStep{
 				Type:         bridgev2.LoginStepTypeDisplayAndWait,
-				StepID:       "io.ai-bridge.codex.chatgpt",
-				Instructions: "Still waiting for Codex login to complete. Keep this screen open after completing the browser login.",
+				StepID:       stepID,
+				Instructions: instr,
 				DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
-					Type: bridgev2.LoginDisplayTypeCode,
-					Data: strings.TrimSpace(cl.authURL),
+					Type: displayType,
+					Data: data,
 				},
 			}, nil
 		case <-deadline.C:
@@ -336,13 +374,23 @@ func (cl *CodexLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 			// Most callers will have their own HTTP/gRPC deadlines. Returning the same waiting
 			// step allows the client to poll again without the login process being marked as failed.
 			log.Debug().Str("login_id", cl.loginID).Msg("Codex login wait context ended; returning still-waiting step")
+			stepID := "io.ai-bridge.codex.chatgpt"
+			instr := "Still waiting for Codex login to complete. Keep this screen open after completing the browser login."
+			displayType := bridgev2.LoginDisplayTypeCode
+			data := strings.TrimSpace(cl.authURL)
+			if cl.authMode == "apiKey" {
+				stepID = "io.ai-bridge.codex.validating"
+				instr = "Still validating the API key with Codex. Keep this screen open."
+				displayType = bridgev2.LoginDisplayTypeNothing
+				data = ""
+			}
 			return &bridgev2.LoginStep{
 				Type:         bridgev2.LoginStepTypeDisplayAndWait,
-				StepID:       "io.ai-bridge.codex.chatgpt",
-				Instructions: "Still waiting for Codex login to complete. Keep this screen open after completing the browser login.",
+				StepID:       stepID,
+				Instructions: instr,
 				DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
-					Type: bridgev2.LoginDisplayTypeCode,
-					Data: strings.TrimSpace(cl.authURL),
+					Type: displayType,
+					Data: data,
 				},
 			}, nil
 		}
@@ -425,7 +473,7 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 			if err := cl.Connector.LoadUserLogin(persistCtx, existing); err != nil {
 				return nil, fmt.Errorf("failed to load client: %w", err)
 			}
-			go existing.Client.Connect(existing.Log.WithContext(context.Background()))
+			go existing.Client.Connect(existing.Log.WithContext(cl.persistContext(ctx)))
 			if cl.rpc != nil {
 				_ = cl.rpc.Close()
 				cl.rpc = nil
@@ -453,7 +501,7 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 	if err := cl.Connector.LoadUserLogin(persistCtx, login); err != nil {
 		return nil, fmt.Errorf("failed to load client: %w", err)
 	}
-	go login.Client.Connect(login.Log.WithContext(context.Background()))
+	go login.Client.Connect(login.Log.WithContext(cl.persistContext(ctx)))
 
 	if cl.rpc != nil {
 		_ = cl.rpc.Close()

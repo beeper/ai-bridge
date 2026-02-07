@@ -37,4 +37,3 @@ type Transport interface {
 type EventLoop interface {
 	OnEvent(ctx context.Context, evt *event.Event) error
 }
-
