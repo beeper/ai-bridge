@@ -51,7 +51,7 @@ func (oc *AIClient) buildAdditionalSystemPrompts(
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 ) []openai.ChatCompletionMessageParamUnion {
-	out := []openai.ChatCompletionMessageParamUnion{}
+	var out []openai.ChatCompletionMessageParamUnion
 
 	if meta != nil && portal != nil && oc.isGroupChat(ctx, portal) {
 		activation := oc.resolveGroupActivation(meta)

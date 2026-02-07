@@ -638,23 +638,21 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 
 	loginID := makeCodexUserLoginID(cl.User.MXID, cl.instanceID)
 	remoteName := "Codex"
-	if cl.User != nil {
-		dupCount := 0
-		for _, existing := range cl.User.GetUserLogins() {
-			if existing == nil || existing.Metadata == nil {
-				continue
-			}
-			meta, ok := existing.Metadata.(*UserLoginMetadata)
-			if !ok || meta == nil {
-				continue
-			}
-			if strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderCodex) && existing.ID != loginID {
-				dupCount++
-			}
+	dupCount := 0
+	for _, existing := range cl.User.GetUserLogins() {
+		if existing == nil || existing.Metadata == nil {
+			continue
 		}
-		if dupCount > 0 {
-			remoteName = fmt.Sprintf("%s (%d)", remoteName, dupCount+1)
+		meta, ok := existing.Metadata.(*UserLoginMetadata)
+		if !ok || meta == nil {
+			continue
 		}
+		if strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderCodex) && existing.ID != loginID {
+			dupCount++
+		}
+	}
+	if dupCount > 0 {
+		remoteName = fmt.Sprintf("%s (%d)", remoteName, dupCount+1)
 	}
 
 	// Best-effort read account email (chatgpt mode).

@@ -80,7 +80,7 @@ type writeReq struct {
 
 func StartProcess(ctx context.Context, cfg ProcessConfig) (*Client, error) {
 	if strings.TrimSpace(cfg.Command) == "" {
-		return nil, fmt.Errorf("missing command")
+		return nil, errors.New("missing command")
 	}
 	args := slices.Clone(cfg.Args)
 	cmd := exec.CommandContext(ctx, cfg.Command, args...)
@@ -229,7 +229,7 @@ func (c *Client) Initialize(ctx context.Context, info ClientInfo, experimental b
 
 func (c *Client) Notify(ctx context.Context, method string, params any) error {
 	if c == nil {
-		return fmt.Errorf("client is nil")
+		return errors.New("client is nil")
 	}
 	msg := map[string]any{
 		"method": method,
@@ -242,7 +242,7 @@ func (c *Client) Notify(ctx context.Context, method string, params any) error {
 
 func (c *Client) Call(ctx context.Context, method string, params any, out any) error {
 	if c == nil {
-		return fmt.Errorf("client is nil")
+		return errors.New("client is nil")
 	}
 	idNum := c.nextID.Add(1)
 	idRaw, _ := json.Marshal(idNum)

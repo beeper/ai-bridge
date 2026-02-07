@@ -2,7 +2,7 @@ package bridgeadapter
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"time"
 
 	"github.com/beeper/ai-bridge/pkg/matrixtransport"
@@ -29,7 +29,7 @@ type ephemeralSender interface {
 
 func (a *Adapter) SendMessage(ctx context.Context, roomID id.RoomID, eventType event.Type, content *event.Content, txnID string) (id.EventID, error) {
 	if a == nil || a.Intent == nil {
-		return "", fmt.Errorf("missing intent")
+		return "", errors.New("missing intent")
 	}
 	resp, err := a.Intent.SendMessage(ctx, roomID, eventType, content, nil)
 	if err != nil {
@@ -41,16 +41,16 @@ func (a *Adapter) SendMessage(ctx context.Context, roomID id.RoomID, eventType e
 func (a *Adapter) EditMessage(ctx context.Context, roomID id.RoomID, targetEventID id.EventID, newContent *event.Content, txnID string) (id.EventID, error) {
 	// Bridgev2 edit handling differs per connector; for now callers should send
 	// m.replace content themselves and use SendMessage.
-	return "", fmt.Errorf("EditMessage not implemented: send m.replace via SendMessage")
+	return "", errors.New("EditMessage not implemented: send m.replace via SendMessage")
 }
 
 func (a *Adapter) SendEphemeral(ctx context.Context, roomID id.RoomID, eventType event.Type, content *event.Content, txnID string) error {
 	if a == nil || a.Intent == nil {
-		return fmt.Errorf("missing intent")
+		return errors.New("missing intent")
 	}
 	es, ok := a.Intent.(ephemeralSender)
 	if !ok {
-		return fmt.Errorf("intent does not support ephemeral events")
+		return errors.New("intent does not support ephemeral events")
 	}
 	_, err := es.SendEphemeralEvent(ctx, roomID, eventType, content, txnID)
 	return err
@@ -70,21 +70,21 @@ func (a *Adapter) MarkTyping(ctx context.Context, roomID id.RoomID, typingType s
 }
 
 func (a *Adapter) UploadMedia(ctx context.Context, data []byte, mimeType, filename string) (id.ContentURIString, *event.EncryptedFileInfo, error) {
-	return "", nil, fmt.Errorf("UploadMedia not implemented")
+	return "", nil, errors.New("UploadMedia not implemented")
 }
 
 func (a *Adapter) DownloadMedia(ctx context.Context, uri id.ContentURIString, encryptedFile *event.EncryptedFileInfo) ([]byte, string, error) {
-	return nil, "", fmt.Errorf("DownloadMedia not implemented")
+	return nil, "", errors.New("DownloadMedia not implemented")
 }
 
 func (a *Adapter) GetRoomState(ctx context.Context, roomID id.RoomID, eventType event.Type, stateKey string) (*event.Event, error) {
 	// State access isn't available on MatrixAPI; bridge adapter will need a bridgev2.MatrixConnector.
-	return nil, fmt.Errorf("GetRoomState not implemented")
+	return nil, errors.New("GetRoomState not implemented")
 }
 
 func (a *Adapter) SetRoomState(ctx context.Context, roomID id.RoomID, eventType event.Type, stateKey string, content *event.Content) (id.EventID, error) {
 	if a == nil || a.Intent == nil {
-		return "", fmt.Errorf("missing intent")
+		return "", errors.New("missing intent")
 	}
 	resp, err := a.Intent.SendState(ctx, roomID, eventType, stateKey, content, time.Now())
 	if err != nil {
@@ -95,12 +95,12 @@ func (a *Adapter) SetRoomState(ctx context.Context, roomID id.RoomID, eventType 
 
 func (a *Adapter) GetMembers(ctx context.Context, roomID id.RoomID) ([]id.UserID, error) {
 	if a == nil || a.Intent == nil {
-		return nil, fmt.Errorf("missing intent")
+		return nil, errors.New("missing intent")
 	}
 	// MatrixAPI doesn't expose member list; connector has direct access via bridge Matrix connector.
-	return nil, fmt.Errorf("GetMembers not implemented")
+	return nil, errors.New("GetMembers not implemented")
 }
 
 func (a *Adapter) GetMemberProfile(ctx context.Context, roomID id.RoomID, userID id.UserID) (*event.MemberEventContent, error) {
-	return nil, fmt.Errorf("GetMemberProfile not implemented")
+	return nil, errors.New("GetMemberProfile not implemented")
 }

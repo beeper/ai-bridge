@@ -65,11 +65,10 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 	// Capture last assistant message before dispatch.
 	lastID, lastTimestamp := oc.lastAssistantMessageInfo(ctx, portal)
 
-	eventID, _, dispatchErr := oc.dispatchInternalMessage(ctx, portal, metaSnapshot, cronMessage, "cron", false)
+	_, _, dispatchErr := oc.dispatchInternalMessage(ctx, portal, metaSnapshot, cronMessage, "cron", false)
 	if dispatchErr != nil {
 		return "error", "", "", dispatchErr
 	}
-	_ = eventID
 
 	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
 	for time.Now().Before(deadline) {

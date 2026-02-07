@@ -23,7 +23,7 @@ func (oc *AIClient) listSubagentRunsForParent(parent id.RoomID) []*subagentRun {
 	}
 	oc.subagentRunsMu.Lock()
 	defer oc.subagentRunsMu.Unlock()
-	runs := make([]*subagentRun, 0)
+	var runs []*subagentRun
 	for _, run := range oc.subagentRuns {
 		if run != nil && run.ParentRoomID == parent {
 			runs = append(runs, run)

@@ -140,9 +140,6 @@ func mergeMemorySearchConfig(
 	query.Hybrid.CandidateMultiplier = min(max(query.Hybrid.CandidateMultiplier, 1), 20)
 	sync.Sessions.DeltaBytes = max(0, sync.Sessions.DeltaBytes)
 	sync.Sessions.DeltaMessages = max(0, sync.Sessions.DeltaMessages)
-	if cache.MaxEntries <= 0 {
-		cache.MaxEntries = 0
-	}
 
 	experimental := memory.ExperimentalConfig{SessionMemory: sessionMemory}
 

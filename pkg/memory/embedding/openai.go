@@ -35,9 +35,7 @@ func NewOpenAIProvider(apiKey, baseURL, model string, headers map[string]string)
 	}
 	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
 	opts = httputil.AppendHeaderOptions(opts, headers)
-	if baseURL != "" {
-		opts = append(opts, option.WithBaseURL(baseURL))
-	}
+	opts = append(opts, option.WithBaseURL(baseURL))
 	client := openai.NewClient(opts...)
 	normalized := NormalizeOpenAIModel(model)
 

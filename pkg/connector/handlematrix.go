@@ -297,7 +297,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 	}
 	queueSettings, _, storeRef, sessionKey := oc.resolveQueueSettingsForPortal(ctx, portal, meta, inlineMode, inlineOpts)
 	if commandAuthorized && queueDirective.HasDirective {
-		queueErrors := []string{}
+		var queueErrors []string
 		if queueDirective.HasDebounce && queueDirective.DebounceMs == nil {
 			queueErrors = append(queueErrors, fmt.Sprintf(
 				"Invalid debounce \"%s\". Use ms/s/m (e.g. debounce:1500ms, debounce:2s).",
@@ -324,7 +324,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		}
 	}
 	if directiveOnly {
-		responseLines := []string{}
+		var responseLines []string
 		metaChanged := false
 
 		if inlineDirs.invalidThink {
@@ -490,7 +490,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 
 	runMeta := meta
 	runCtx := ctx
-	inlineResponses := []string{}
+	var inlineResponses []string
 	if commandAuthorized && inlineDirs.hasAnyDirective() {
 		if inlineDirs.invalidThink {
 			inlineResponses = append(inlineResponses, fmt.Sprintf(

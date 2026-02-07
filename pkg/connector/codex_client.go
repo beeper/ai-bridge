@@ -323,8 +323,6 @@ func (cc *CodexClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (
 }
 
 func (cc *CodexClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
-	_ = ctx
-	_ = portal
 	return aiBaseCaps
 }
 

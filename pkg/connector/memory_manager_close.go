@@ -66,9 +66,6 @@ func purgeMemoryManagersForLogin(ctx context.Context, bridgeID, loginID string, 
 		ctx = context.Background()
 	}
 	for _, mgr := range managers {
-		if mgr == nil {
-			continue
-		}
 		if ids := chunkIDsByAgent[mgr.agentID]; len(ids) > 0 {
 			mgr.deleteVectorIDs(ctx, ids)
 		}

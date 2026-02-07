@@ -990,7 +990,7 @@ func isDisallowedImageIP(ip net.IP) bool {
 	if ip.IsLoopback() {
 		return true
 	}
-	if imageFetchMetadataIP != nil && ip.Equal(imageFetchMetadataIP) {
+	if ip.Equal(imageFetchMetadataIP) {
 		return true
 	}
 	for _, cidr := range imageFetchBlockedCIDRs {

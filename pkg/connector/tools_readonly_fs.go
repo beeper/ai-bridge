@@ -64,7 +64,7 @@ func executeFind(ctx context.Context, args map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	matches := []string{}
+	var matches []string
 	for _, entry := range entries {
 		rel := entry.Path
 		if base != "" {
@@ -146,7 +146,7 @@ func executeGrep(ctx context.Context, args map[string]any) (string, error) {
 		return "", err
 	}
 
-	matches := []string{}
+	var matches []string
 	for _, entry := range entries {
 		lines := strings.Split(entry.Content, "\n")
 		for idx, line := range lines {
