@@ -52,17 +52,15 @@ type codexLoginDone struct {
 }
 
 func (cl *CodexLogin) logger(ctx context.Context) *zerolog.Logger {
-	if ctx != nil {
-		if ctxLog := zerolog.Ctx(ctx); ctxLog != nil && ctxLog.GetLevel() != zerolog.Disabled {
-			return ctxLog
-		}
-	}
+	var fallback *zerolog.Logger
 	if cl != nil && cl.User != nil {
 		l := cl.User.Log.With().Str("component", "codex_login").Logger()
-		return &l
+		fallback = &l
+	} else {
+		l := zerolog.Nop()
+		fallback = &l
 	}
-	l := zerolog.Nop()
-	return &l
+	return loggerFromContext(ctx, fallback)
 }
 
 // hasExistingCodexAuth checks whether ~/.codex/auth.json exists on disk,

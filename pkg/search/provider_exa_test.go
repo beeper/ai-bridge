@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/beeper/ai-bridge/pkg/shared/exa"
 )
 
 func TestExaProviderSearchUsesHighlightMaxCharacters(t *testing.T) {
@@ -78,9 +80,9 @@ func TestShouldAttachExaBearerAuth(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := shouldAttachExaBearerAuth(tc.baseURL)
+			got := exa.ShouldAttachBearerAuth(tc.baseURL)
 			if got != tc.want {
-				t.Fatalf("shouldAttachExaBearerAuth(%q) = %v, want %v", tc.baseURL, got, tc.want)
+				t.Fatalf("exa.ShouldAttachBearerAuth(%q) = %v, want %v", tc.baseURL, got, tc.want)
 			}
 		})
 	}

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"go.mau.fi/util/configupgrade"
+	"go.mau.fi/util/ptr"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
@@ -62,13 +63,13 @@ func (c *ToolApprovalsRuntimeConfig) WithDefaults() *ToolApprovalsRuntimeConfig 
 		c = &ToolApprovalsRuntimeConfig{}
 	}
 	if c.Enabled == nil {
-		c.Enabled = ptrBool(true)
+		c.Enabled = ptr.Ptr(true)
 	}
 	if c.TTLSeconds <= 0 {
 		c.TTLSeconds = 600
 	}
 	if c.RequireForMCP == nil {
-		c.RequireForMCP = ptrBool(true)
+		c.RequireForMCP = ptr.Ptr(true)
 	}
 	if len(c.RequireForTools) == 0 {
 		c.RequireForTools = []string{
@@ -89,8 +90,6 @@ func (c *ToolApprovalsRuntimeConfig) WithDefaults() *ToolApprovalsRuntimeConfig 
 	}
 	return c
 }
-
-func ptrBool(v bool) *bool { return &v }
 
 // CodexConfig configures the optional Codex app-server integration.
 type CodexConfig struct {

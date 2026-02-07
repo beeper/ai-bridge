@@ -414,11 +414,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 			statusText = oc.buildStatusText(ctx, portal, meta, isGroup, queueSettings)
 		}
 		if statusText != "" {
-			if len(responseLines) == 0 {
-				responseLines = append(responseLines, statusText)
-			} else {
-				responseLines = append(responseLines, statusText)
-			}
+			responseLines = append(responseLines, statusText)
 		}
 		if len(responseLines) == 0 && inlineDirs.hasAnyDirective() {
 			responseLines = append(responseLines, "OK.")
