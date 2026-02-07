@@ -1,9 +1,10 @@
 package memory
 
 import (
+	"cmp"
 	"math"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -119,8 +120,8 @@ func MergeHybridResults(vector []HybridVectorResult, keyword []HybridKeywordResu
 		})
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
+	slices.SortFunc(results, func(a, b SearchResult) int {
+		return cmp.Compare(b.Score, a.Score)
 	})
 	return results
 }

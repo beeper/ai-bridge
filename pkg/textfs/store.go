@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -237,8 +237,8 @@ func (s *Store) DirEntries(entries []FileEntry, dir string) ([]string, bool) {
 	for name := range seen {
 		names = append(names, name)
 	}
-	sort.Slice(names, func(i, j int) bool {
-		return strings.ToLower(names[i]) < strings.ToLower(names[j])
+	slices.SortFunc(names, func(a, b string) int {
+		return strings.Compare(strings.ToLower(a), strings.ToLower(b))
 	})
 	return names, hasDir
 }
