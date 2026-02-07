@@ -24,8 +24,6 @@ var modelConfig = struct {
 	Models map[string]string
 	// Aliases for stable references
 	Aliases map[string]string
-	// Direct OpenAI models (not via OpenRouter)
-	OpenAIModels []OpenAIModel
 }{
 	Models: map[string]string{
 		// MiniMax
@@ -89,22 +87,6 @@ var modelConfig = struct {
 		"beeper/smart":     "openai/gpt-5.2",
 		"beeper/reasoning": "openai/gpt-5.2", // Uses reasoning effort parameter
 	},
-	// OpenAIModels is empty - OpenAI models are included in Models above
-	// and work for both OpenRouter and direct OpenAI access via the openai/ prefix
-	OpenAIModels: []OpenAIModel{},
-}
-
-// OpenAIModel represents a direct OpenAI model (not via OpenRouter)
-type OpenAIModel struct {
-	ID                  string
-	Name                string
-	Description         string
-	SupportsVision      bool
-	SupportsToolCalling bool
-	SupportsReasoning   bool
-	SupportsWebSearch   bool
-	ContextWindow       int
-	MaxOutputTokens     int
 }
 
 // OpenRouterArchitecture contains model architecture information
@@ -181,7 +163,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error generating file: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Generated %s with %d models\n", *outputFile, len(modelConfig.Models)+len(modelConfig.OpenAIModels))
+	fmt.Printf("Generated %s with %d models\n", *outputFile, len(modelConfig.Models))
 
 	if err := generateJSONFile(models, *jsonFile); err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating JSON file: %v\n", err)
@@ -368,49 +350,6 @@ var ModelManifest = struct {
 		))
 	}
 
-	// Add direct OpenAI models
-	for _, model := range modelConfig.OpenAIModels {
-		caps := ModelCapabilities{
-			Vision:      model.SupportsVision,
-			ToolCalling: model.SupportsToolCalling,
-			Reasoning:   model.SupportsReasoning,
-			WebSearch:   model.SupportsWebSearch,
-		}
-		apiLabel := resolveModelAPIForManifest(model.ID, "openai")
-		buf.WriteString(fmt.Sprintf(`		%q: {
-			ID:                  %q,
-			Name:                %q,
-			Provider:            "openai",
-			API:                 %q,
-			Description:         %q,
-			SupportsVision:      %t,
-			SupportsToolCalling: %t,
-			SupportsReasoning:   %t,
-			SupportsWebSearch:   %t,
-			SupportsImageGen:    false,
-			SupportsAudio:       false,
-			SupportsVideo:       false,
-			SupportsPDF:         false,
-			ContextWindow:       %d,
-			MaxOutputTokens:     %d,
-			AvailableTools:      %s,
-		},
-`,
-			model.ID,
-			model.ID,
-			model.Name,
-			apiLabel,
-			model.Description,
-			model.SupportsVision,
-			model.SupportsToolCalling,
-			model.SupportsReasoning,
-			model.SupportsWebSearch,
-			model.ContextWindow,
-			model.MaxOutputTokens,
-			availableToolsGo(caps),
-		))
-	}
-
 	buf.WriteString(`	},
 	Aliases: map[string]string{
 `)
@@ -490,31 +429,6 @@ func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) e
 			SupportsPDF:         caps.PDF,
 			ContextWindow:       caps.ContextWindow,
 			MaxOutputTokens:     caps.MaxOutputTokens,
-			AvailableTools:      availableToolsJSON(caps),
-		})
-	}
-
-	// Add direct OpenAI models
-	for _, model := range modelConfig.OpenAIModels {
-		caps := ModelCapabilities{
-			Vision:      model.SupportsVision,
-			ToolCalling: model.SupportsToolCalling,
-			Reasoning:   model.SupportsReasoning,
-			WebSearch:   model.SupportsWebSearch,
-		}
-		apiLabel := resolveModelAPIForManifest(model.ID, "openai")
-		models = append(models, JSONModelInfo{
-			ID:                  model.ID,
-			Name:                model.Name,
-			Provider:            "openai",
-			API:                 apiLabel,
-			Description:         model.Description,
-			SupportsVision:      model.SupportsVision,
-			SupportsToolCalling: model.SupportsToolCalling,
-			SupportsReasoning:   model.SupportsReasoning,
-			SupportsWebSearch:   model.SupportsWebSearch,
-			ContextWindow:       model.ContextWindow,
-			MaxOutputTokens:     model.MaxOutputTokens,
 			AvailableTools:      availableToolsJSON(caps),
 		})
 	}

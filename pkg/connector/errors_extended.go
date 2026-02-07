@@ -3,8 +3,6 @@ package connector
 import (
 	"encoding/json"
 	"strings"
-
-	"maunium.net/go/mautrix/bridgev2/status"
 )
 
 // ProxyError represents a structured error from the hungryserv proxy
@@ -84,22 +82,6 @@ func FormatProxyError(proxyErr *ProxyError) string {
 	}
 }
 
-// Extended bridge state error codes for AI-specific errors
-const (
-	AIBillingError status.BridgeStateErrorCode = "ai-billing-error"
-	AIOverloaded   status.BridgeStateErrorCode = "ai-overloaded"
-	AITimeout      status.BridgeStateErrorCode = "ai-timeout"
-	AIImageError   status.BridgeStateErrorCode = "ai-image-error"
-)
-
-func init() {
-	// Add extended error messages to the main map
-	BridgeStateHumanErrors[AIBillingError] = "Billing issue with AI provider. Please check your account credits."
-	BridgeStateHumanErrors[AIOverloaded] = "The AI service is temporarily overloaded. Please try again in a moment."
-	BridgeStateHumanErrors[AITimeout] = "Request timed out. Please try again."
-	BridgeStateHumanErrors[AIImageError] = "Image is too large or has invalid dimensions for this model."
-}
-
 // FallbackReasoningLevel returns a lower reasoning level to try when the current one fails.
 // Returns empty string if there's no fallback available (already at "none" or unknown level).
 func FallbackReasoningLevel(current string) string {
@@ -120,18 +102,24 @@ func FallbackReasoningLevel(current string) string {
 	}
 }
 
-// IsBillingError checks if the error is a billing/payment error (402)
-func IsBillingError(err error) bool {
+// containsAnyPattern checks if the lowercased error message contains any of the given patterns.
+func containsAnyPattern(err error, patterns []string) bool {
 	if err == nil {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	// Check for 402 status code pattern
-	if strings.Contains(msg, "402") {
-		return true
+	for _, pattern := range patterns {
+		if strings.Contains(msg, pattern) {
+			return true
+		}
 	}
-	// Check error message for billing-related keywords
-	billingPatterns := []string{
+	return false
+}
+
+// IsBillingError checks if the error is a billing/payment error (402)
+func IsBillingError(err error) bool {
+	return containsAnyPattern(err, []string{
+		"402",
 		"payment required",
 		"insufficient credits",
 		"credit balance",
@@ -139,43 +127,23 @@ func IsBillingError(err error) bool {
 		"quota exceeded",
 		"billing",
 		"plans & billing",
-	}
-	for _, pattern := range billingPatterns {
-		if strings.Contains(msg, pattern) {
-			return true
-		}
-	}
-	return false
+	})
 }
 
 // IsOverloadedError checks if the error indicates the service is overloaded
 func IsOverloadedError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	overloadedPatterns := []string{
+	return containsAnyPattern(err, []string{
 		"overloaded_error",
 		"overloaded",
 		"resource_exhausted",
 		"service unavailable",
 		"503",
-	}
-	for _, pattern := range overloadedPatterns {
-		if strings.Contains(msg, pattern) {
-			return true
-		}
-	}
-	return false
+	})
 }
 
 // IsTimeoutError checks if the error is a timeout error
 func IsTimeoutError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	timeoutPatterns := []string{
+	return containsAnyPattern(err, []string{
 		"timeout",
 		"timed out",
 		"deadline exceeded",
@@ -186,74 +154,38 @@ func IsTimeoutError(err error) bool {
 		"econnaborted",
 		"408",
 		"504",
-	}
-	for _, pattern := range timeoutPatterns {
-		if strings.Contains(msg, pattern) {
-			return true
-		}
-	}
-	return false
+	})
 }
 
 // IsImageError checks if the error is related to image size or dimensions
 func IsImageError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	imagePatterns := []string{
+	return containsAnyPattern(err, []string{
 		"image exceeds",
 		"image dimensions exceed",
 		"image too large",
 		"image size",
 		"max allowed size",
-	}
-	for _, pattern := range imagePatterns {
-		if strings.Contains(msg, pattern) {
-			return true
-		}
-	}
-	return false
+	})
 }
 
 // IsReasoningError checks if the error is related to unsupported reasoning/thinking levels
 func IsReasoningError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	reasoningPatterns := []string{
+	return containsAnyPattern(err, []string{
 		"reasoning",
 		"thinking",
 		"extended thinking",
 		"reasoning_effort",
-	}
-	for _, pattern := range reasoningPatterns {
-		if strings.Contains(msg, pattern) {
-			return true
-		}
-	}
-	return false
+	})
 }
 
 // IsRoleOrderingError checks if the error is related to message role ordering conflicts
 func IsRoleOrderingError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	rolePatterns := []string{
+	return containsAnyPattern(err, []string{
 		"incorrect role information",
 		"roles must alternate",
 		"consecutive user",
 		"consecutive assistant",
-	}
-	for _, pattern := range rolePatterns {
-		if strings.Contains(msg, pattern) {
-			return true
-		}
-	}
-	return false
+	})
 }
 
 // FormatUserFacingError transforms an API error into a user-friendly message.
@@ -345,27 +277,4 @@ func FormatUserFacingError(err error) string {
 	}
 
 	return msg
-}
-
-// MapErrorToStateCodeExtended extends MapErrorToStateCode with new error types.
-// Call this instead of MapErrorToStateCode for full error classification.
-func MapErrorToStateCodeExtended(err error) status.BridgeStateErrorCode {
-	if err == nil {
-		return ""
-	}
-	// Check extended error types first
-	if IsBillingError(err) {
-		return AIBillingError
-	}
-	if IsOverloadedError(err) {
-		return AIOverloaded
-	}
-	if IsTimeoutError(err) {
-		return AITimeout
-	}
-	if IsImageError(err) {
-		return AIImageError
-	}
-	// Fall back to original classification
-	return MapErrorToStateCode(err)
 }

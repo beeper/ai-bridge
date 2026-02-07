@@ -108,12 +108,7 @@ func newCodexClient(login *bridgev2.UserLogin, connector *OpenAIConnector) (*Cod
 }
 
 func (cc *CodexClient) loggerForContext(ctx context.Context) *zerolog.Logger {
-	if ctx != nil {
-		if ctxLog := zerolog.Ctx(ctx); ctxLog != nil && ctxLog.GetLevel() != zerolog.Disabled {
-			return ctxLog
-		}
-	}
-	return &cc.log
+	return loggerFromContext(ctx, &cc.log)
 }
 
 func (cc *CodexClient) Connect(ctx context.Context) {

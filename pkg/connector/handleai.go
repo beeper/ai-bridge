@@ -388,14 +388,8 @@ func (oc *AIClient) getTitleGenerationModel() string {
 		return meta.TitleGenerationModel
 	}
 
-	// Provider-specific defaults for title generation
-	switch meta.Provider {
-	case ProviderOpenRouter, ProviderBeeper, ProviderMagicProxy:
-		return "google/gemini-2.5-flash"
-	default:
-		// For non-OpenRouter providers, title generation is disabled.
-		return ""
-	}
+	// Provider-specific default for title generation (only reached for OpenRouter/Beeper/MagicProxy)
+	return "google/gemini-2.5-flash"
 }
 
 // generateRoomTitle asks the model to generate a short descriptive title for the conversation

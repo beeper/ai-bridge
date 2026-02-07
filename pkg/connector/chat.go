@@ -413,25 +413,17 @@ func (oc *AIClient) resolveOpenCodeIdentifier(ctx context.Context, instanceID st
 	if err != nil {
 		return nil, fmt.Errorf("failed to get OpenCode ghost: %w", err)
 	}
-	if oc.opencodeBridge != nil {
-		oc.opencodeBridge.EnsureGhostDisplayName(ctx, instanceID)
-	}
+	oc.opencodeBridge.EnsureGhostDisplayName(ctx, instanceID)
 
 	var chatResp *bridgev2.CreateChatResponse
 	if createChat {
-		if oc.opencodeBridge == nil {
-			return nil, fmt.Errorf("OpenCode integration is not available")
-		}
 		chatResp, err = oc.opencodeBridge.CreateSessionChat(ctx, instanceID, "", true)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OpenCode chat: %w", err)
 		}
 	}
 
-	displayName := ""
-	if oc.opencodeBridge != nil {
-		displayName = oc.opencodeBridge.DisplayName(instanceID)
-	}
+	displayName := oc.opencodeBridge.DisplayName(instanceID)
 	if displayName == "" {
 		displayName = "OpenCode"
 	}

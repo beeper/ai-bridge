@@ -19,6 +19,10 @@ const (
 	AIContextTooLong status.BridgeStateErrorCode = "ai-context-too-long"
 	AIModelNotFound  status.BridgeStateErrorCode = "ai-model-not-found"
 	AIProviderError  status.BridgeStateErrorCode = "ai-provider-error"
+	AIBillingError   status.BridgeStateErrorCode = "ai-billing-error"
+	AIOverloaded     status.BridgeStateErrorCode = "ai-overloaded"
+	AITimeout        status.BridgeStateErrorCode = "ai-timeout"
+	AIImageError     status.BridgeStateErrorCode = "ai-image-error"
 )
 
 // BridgeStateHumanErrors provides human-readable messages for AI bridge error codes
@@ -28,6 +32,10 @@ var BridgeStateHumanErrors = map[status.BridgeStateErrorCode]string{
 	AIContextTooLong: "Conversation is too long for this model's context window.",
 	AIModelNotFound:  "The requested model is not available.",
 	AIProviderError:  "The AI provider returned an error.",
+	AIBillingError:   "Billing issue with AI provider. Please check your account credits.",
+	AIOverloaded:     "The AI service is temporarily overloaded. Please try again in a moment.",
+	AITimeout:        "Request timed out. Please try again.",
+	AIImageError:     "Image is too large or has invalid dimensions for this model.",
 }
 
 var (
@@ -86,6 +94,18 @@ var (
 func MapErrorToStateCode(err error) status.BridgeStateErrorCode {
 	if err == nil {
 		return ""
+	}
+	if IsBillingError(err) {
+		return AIBillingError
+	}
+	if IsOverloadedError(err) {
+		return AIOverloaded
+	}
+	if IsTimeoutError(err) {
+		return AITimeout
+	}
+	if IsImageError(err) {
+		return AIImageError
 	}
 	if IsRateLimitError(err) {
 		return AIRateLimited

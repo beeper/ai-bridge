@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/beeper/ai-bridge/pkg/shared/exa"
 )
 
 type exaProvider struct {
@@ -149,28 +151,7 @@ func resolveEndpoint(baseURL, path string) string {
 	return strings.TrimRight(trimmed, "/") + path
 }
 
-func exaAuthHeaders(baseURL, apiKey string) map[string]string {
-	headers := map[string]string{
-		"x-api-key": apiKey,
-		"accept":    "application/json",
-	}
-	if shouldAttachExaBearerAuth(baseURL) {
-		headers["Authorization"] = fmt.Sprintf("Bearer %s", apiKey)
-	}
-	return headers
-}
-
-func shouldAttachExaBearerAuth(baseURL string) bool {
-	trimmed := strings.TrimSpace(baseURL)
-	if trimmed == "" {
-		return false
-	}
-	parsed, err := url.Parse(trimmed)
-	if err != nil || parsed.Hostname() == "" {
-		return true
-	}
-	return !strings.EqualFold(parsed.Hostname(), "api.exa.ai")
-}
+var exaAuthHeaders = exa.AuthHeaders
 
 func truncate(value string, max int) string {
 	value = strings.TrimSpace(value)

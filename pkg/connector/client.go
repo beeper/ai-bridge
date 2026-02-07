@@ -428,81 +428,37 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 	// All providers use the OpenAI SDK with different base URLs
 	switch meta.Provider {
 	case ProviderBeeper:
-		// Beeper mode: routes through Beeper's OpenRouter proxy
 		beeperBaseURL := connector.resolveBeeperBaseURL(meta)
 		if beeperBaseURL == "" {
 			return nil, fmt.Errorf("beeper base_url is required for Beeper provider")
 		}
-
-		// Get user ID for rate limiting
-		userID := login.User.MXID.String()
-
-		openrouterURL := beeperBaseURL + "/openrouter/v1"
-		log.Info().
-			Str("provider", ProviderBeeper).
-			Str("base_url", beeperBaseURL).
-			Str("openrouter_url", openrouterURL).
-			Msg("Initializing AI provider endpoint")
-
-		// Get PDF engine from provider config
 		pdfEngine := connector.Config.Providers.Beeper.DefaultPDFEngine
-		if pdfEngine == "" {
-			pdfEngine = "mistral-ocr" // Default
-		}
-
-		headers := openRouterHeaders()
-		provider, err := NewOpenAIProviderWithPDFPlugin(key, openrouterURL, userID, pdfEngine, headers, log)
+		provider, err := initOpenRouterProvider(key, beeperBaseURL+"/openrouter/v1", login.User.MXID.String(), pdfEngine, ProviderBeeper, log)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create Beeper provider: %w", err)
+			return nil, err
 		}
 		oc.provider = provider
 		oc.api = provider.Client()
 
 	case ProviderOpenRouter:
-		// OpenRouter direct access
 		openrouterURL := connector.resolveOpenRouterBaseURL()
-		log.Info().
-			Str("provider", ProviderOpenRouter).
-			Str("openrouter_url", openrouterURL).
-			Msg("Initializing AI provider endpoint")
-
-		// Get PDF engine from provider config
 		pdfEngine := connector.Config.Providers.OpenRouter.DefaultPDFEngine
-		if pdfEngine == "" {
-			pdfEngine = "mistral-ocr" // Default
-		}
-
-		headers := openRouterHeaders()
-		provider, err := NewOpenAIProviderWithPDFPlugin(key, openrouterURL, "", pdfEngine, headers, log)
+		provider, err := initOpenRouterProvider(key, openrouterURL, "", pdfEngine, ProviderOpenRouter, log)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create OpenRouter provider: %w", err)
+			return nil, err
 		}
 		oc.provider = provider
 		oc.api = provider.Client()
 
 	case ProviderMagicProxy:
-		// Magic Proxy: OpenRouter-compatible proxy with per-login base URL
 		baseURL := normalizeMagicProxyBaseURL(meta.BaseURL)
 		if baseURL == "" {
 			return nil, fmt.Errorf("magic proxy base_url is required")
 		}
-		openrouterURL := joinProxyPath(baseURL, "/openrouter/v1")
-		log.Info().
-			Str("provider", ProviderMagicProxy).
-			Str("base_url", baseURL).
-			Str("openrouter_url", openrouterURL).
-			Msg("Initializing AI provider endpoint")
-
-		// Get PDF engine from provider config
 		pdfEngine := connector.Config.Providers.OpenRouter.DefaultPDFEngine
-		if pdfEngine == "" {
-			pdfEngine = "mistral-ocr" // Default
-		}
-
-		headers := openRouterHeaders()
-		provider, err := NewOpenAIProviderWithPDFPlugin(key, openrouterURL, "", pdfEngine, headers, log)
+		provider, err := initOpenRouterProvider(key, joinProxyPath(baseURL, "/openrouter/v1"), "", pdfEngine, ProviderMagicProxy, log)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create Magic Proxy provider: %w", err)
+			return nil, err
 		}
 		oc.provider = provider
 		oc.api = provider.Client()
@@ -539,6 +495,22 @@ func openRouterHeaders() map[string]string {
 		"HTTP-Referer": openRouterAppReferer,
 		"X-Title":      openRouterAppTitle,
 	}
+}
+
+// initOpenRouterProvider creates an OpenRouter-compatible provider with PDF support.
+func initOpenRouterProvider(key, url, userID, pdfEngine, providerName string, log zerolog.Logger) (*OpenAIProvider, error) {
+	log.Info().
+		Str("provider", providerName).
+		Str("openrouter_url", url).
+		Msg("Initializing AI provider endpoint")
+	if pdfEngine == "" {
+		pdfEngine = "mistral-ocr"
+	}
+	provider, err := NewOpenAIProviderWithPDFPlugin(key, url, userID, pdfEngine, openRouterHeaders(), log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create %s provider: %w", providerName, err)
+	}
+	return provider, nil
 }
 
 func (oc *AIClient) acquireRoom(roomID id.RoomID) bool {
@@ -2654,12 +2626,7 @@ func (oc *AIClient) ensureModelInRoom(ctx context.Context, portal *bridgev2.Port
 }
 
 func (oc *AIClient) loggerForContext(ctx context.Context) *zerolog.Logger {
-	if ctx != nil {
-		if ctxLog := zerolog.Ctx(ctx); ctxLog != nil && ctxLog.GetLevel() != zerolog.Disabled {
-			return ctxLog
-		}
-	}
-	return &oc.log
+	return loggerFromContext(ctx, &oc.log)
 }
 
 func (oc *AIClient) backgroundContext(ctx context.Context) context.Context {
