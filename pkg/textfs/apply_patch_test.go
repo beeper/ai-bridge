@@ -19,7 +19,7 @@ func TestApplyPatchAddUpdateDeleteMove(t *testing.T) {
 		"*** End Patch",
 	}, "\n")
 
-	if _, err := ApplyPatch(store, addPatch); err != nil {
+	if _, err := ApplyPatch(ctx, store, addPatch); err != nil {
 		t.Fatalf("apply add patch: %v", err)
 	}
 	entry, found, err := store.Read(ctx, "notes/a.txt")
@@ -39,7 +39,7 @@ func TestApplyPatchAddUpdateDeleteMove(t *testing.T) {
 		"*** End Patch",
 	}, "\n")
 
-	if _, err := ApplyPatch(store, updatePatch); err != nil {
+	if _, err := ApplyPatch(ctx, store, updatePatch); err != nil {
 		t.Fatalf("apply update patch: %v", err)
 	}
 	entry, found, err = store.Read(ctx, "notes/a.txt")
@@ -60,7 +60,7 @@ func TestApplyPatchAddUpdateDeleteMove(t *testing.T) {
 		"*** End Patch",
 	}, "\n")
 
-	if _, err := ApplyPatch(store, movePatch); err != nil {
+	if _, err := ApplyPatch(ctx, store, movePatch); err != nil {
 		t.Fatalf("apply move patch: %v", err)
 	}
 	_, found, err = store.Read(ctx, "notes/a.txt")
@@ -84,7 +84,7 @@ func TestApplyPatchAddUpdateDeleteMove(t *testing.T) {
 		"*** End Patch",
 	}, "\n")
 
-	if _, err := ApplyPatch(store, deletePatch); err != nil {
+	if _, err := ApplyPatch(ctx, store, deletePatch); err != nil {
 		t.Fatalf("apply delete patch: %v", err)
 	}
 	_, found, err = store.Read(ctx, "notes/b.txt")

@@ -35,6 +35,10 @@ type codexNotif struct {
 	Params json.RawMessage
 }
 
+func codexTurnKey(threadID, turnID string) string {
+	return strings.TrimSpace(threadID) + "\n" + strings.TrimSpace(turnID)
+}
+
 type codexActiveTurn struct {
 	portal   *bridgev2.Portal
 	meta     *PortalMetadata
@@ -60,8 +64,12 @@ type CodexClient struct {
 	// instead of sending ephemeral Matrix events. Used by tests.
 	streamEventHook func(turnID string, seq int, content map[string]any, txnID string)
 
-	activeMu   sync.Mutex
-	activeTurn *codexActiveTurn
+	activeMu    sync.Mutex
+	activeTurns map[string]*codexActiveTurn // turnKey(threadId, turnId) -> active turn (for approvals)
+
+	subMu        sync.Mutex
+	turnSubs     map[string]chan codexNotif // turnKey(threadId, turnId) -> notification channel
+	dispatchOnce sync.Once
 
 	loadedMu      sync.Mutex
 	loadedThreads map[string]bool // threadId -> loaded via thread/start|thread/resume
@@ -92,6 +100,8 @@ func newCodexClient(login *bridgev2.UserLogin, connector *OpenAIConnector) (*Cod
 		notifCh:       make(chan codexNotif, 4096),
 		toolApprovals: make(map[string]*pendingToolApprovalCodex),
 		loadedThreads: make(map[string]bool),
+		activeTurns:   make(map[string]*codexActiveTurn),
+		turnSubs:      make(map[string]chan codexNotif),
 		activeRooms:   make(map[id.RoomID]bool),
 	}, nil
 }
@@ -159,6 +169,14 @@ func (cc *CodexClient) Disconnect() {
 	cc.loadedMu.Lock()
 	cc.loadedThreads = make(map[string]bool)
 	cc.loadedMu.Unlock()
+
+	cc.activeMu.Lock()
+	cc.activeTurns = make(map[string]*codexActiveTurn)
+	cc.activeMu.Unlock()
+
+	cc.subMu.Lock()
+	cc.turnSubs = make(map[string]chan codexNotif)
+	cc.subMu.Unlock()
 }
 
 func (cc *CodexClient) IsLoggedIn() bool {
@@ -416,8 +434,11 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 		turnID = "turn_unknown"
 	}
 
+	turnCh := cc.subscribeTurn(threadID, turnID)
+	defer cc.unsubscribeTurn(threadID, turnID)
+
 	cc.activeMu.Lock()
-	cc.activeTurn = &codexActiveTurn{
+	cc.activeTurns[codexTurnKey(threadID, turnID)] = &codexActiveTurn{
 		portal:   portal,
 		meta:     meta,
 		state:    state,
@@ -428,7 +449,7 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 	cc.activeMu.Unlock()
 	defer func() {
 		cc.activeMu.Lock()
-		cc.activeTurn = nil
+		delete(cc.activeTurns, codexTurnKey(threadID, turnID))
 		cc.activeMu.Unlock()
 	}()
 
@@ -436,7 +457,7 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 	var completedErr string
 	for {
 		select {
-		case evt := <-cc.notifCh:
+		case evt := <-turnCh:
 			cc.handleNotif(ctx, portal, meta, state, model, threadID, turnID, evt)
 			if st, errText, ok := codexTurnCompletedStatus(evt, threadID, turnID); ok {
 				finishStatus = st
@@ -1074,6 +1095,10 @@ func (cc *CodexClient) ensureRPC(ctx context.Context) error {
 		return err
 	}
 
+	cc.dispatchOnce.Do(func() {
+		go cc.dispatchNotifications()
+	})
+
 	rpc.OnNotification(func(method string, params json.RawMessage) {
 		select {
 		case cc.notifCh <- codexNotif{Method: method, Params: params}:
@@ -1086,6 +1111,74 @@ func (cc *CodexClient) ensureRPC(ctx context.Context) error {
 	rpc.HandleRequest("item/fileChange/requestApproval", cc.handleFileChangeApprovalRequest)
 
 	return nil
+}
+
+func (cc *CodexClient) subscribeTurn(threadID, turnID string) chan codexNotif {
+	key := codexTurnKey(threadID, turnID)
+	ch := make(chan codexNotif, 4096)
+	cc.subMu.Lock()
+	cc.turnSubs[key] = ch
+	cc.subMu.Unlock()
+	return ch
+}
+
+func (cc *CodexClient) unsubscribeTurn(threadID, turnID string) {
+	key := codexTurnKey(threadID, turnID)
+	cc.subMu.Lock()
+	delete(cc.turnSubs, key)
+	cc.subMu.Unlock()
+}
+
+func codexExtractThreadTurn(params json.RawMessage) (threadID, turnID string, ok bool) {
+	var p struct {
+		ThreadID string `json:"threadId"`
+		TurnID   string `json:"turnId"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return "", "", false
+	}
+	threadID = strings.TrimSpace(p.ThreadID)
+	turnID = strings.TrimSpace(p.TurnID)
+	return threadID, turnID, threadID != "" && turnID != ""
+}
+
+func (cc *CodexClient) dispatchNotifications() {
+	for evt := range cc.notifCh {
+		// Track logged-in state if Codex emits these (best-effort).
+		if evt.Method == "account/updated" {
+			var p struct {
+				AuthMode *string `json:"authMode"`
+			}
+			_ = json.Unmarshal(evt.Params, &p)
+			cc.loggedIn.Store(p.AuthMode != nil && strings.TrimSpace(*p.AuthMode) != "")
+			continue
+		}
+
+		threadID, turnID, ok := codexExtractThreadTurn(evt.Params)
+		if !ok {
+			continue
+		}
+		key := codexTurnKey(threadID, turnID)
+
+		cc.subMu.Lock()
+		ch := cc.turnSubs[key]
+		cc.subMu.Unlock()
+		if ch == nil {
+			continue
+		}
+
+		// Try non-blocking, but ensure critical terminal events are delivered.
+		select {
+		case ch <- evt:
+		default:
+			if evt.Method == "turn/completed" || evt.Method == "error" {
+				select {
+				case ch <- evt:
+				case <-time.After(2 * time.Second):
+				}
+			}
+		}
+	}
 }
 
 func (cc *CodexClient) resolveCodexCommand(meta *UserLoginMetadata) string {
@@ -1356,7 +1449,13 @@ func (cc *CodexClient) HandleMatrixDeleteChat(ctx context.Context, msg *bridgev2
 
 	// If a turn is in-flight for this thread, try to interrupt it.
 	cc.activeMu.Lock()
-	active := cc.activeTurn
+	active := (*codexActiveTurn)(nil)
+	for _, at := range cc.activeTurns {
+		if at != nil && strings.TrimSpace(at.threadID) == strings.TrimSpace(meta.CodexThreadID) {
+			active = at
+			break
+		}
+	}
 	cc.activeMu.Unlock()
 	if active != nil && strings.TrimSpace(active.threadID) == strings.TrimSpace(meta.CodexThreadID) {
 		_ = cc.rpc.Call(ctx, "turn/interrupt", map[string]any{
@@ -1906,7 +2005,7 @@ func (cc *CodexClient) handleCommandApprovalRequest(ctx context.Context, req cod
 	_ = json.Unmarshal(req.Params, &params)
 
 	cc.activeMu.Lock()
-	active := cc.activeTurn
+	active := cc.activeTurns[codexTurnKey(params.ThreadID, params.TurnID)]
 	cc.activeMu.Unlock()
 	if active == nil || params.ThreadID != active.threadID || params.TurnID != active.turnID {
 		return map[string]any{"decision": "decline"}, nil
@@ -1953,7 +2052,7 @@ func (cc *CodexClient) handleFileChangeApprovalRequest(ctx context.Context, req 
 	_ = json.Unmarshal(req.Params, &params)
 
 	cc.activeMu.Lock()
-	active := cc.activeTurn
+	active := cc.activeTurns[codexTurnKey(params.ThreadID, params.TurnID)]
 	cc.activeMu.Unlock()
 	if active == nil || params.ThreadID != active.threadID || params.TurnID != active.turnID {
 		return map[string]any{"decision": "decline"}, nil

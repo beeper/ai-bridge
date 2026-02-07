@@ -18,23 +18,27 @@ func executeApplyPatch(ctx context.Context, args map[string]any) (string, error)
 		return "", fmt.Errorf("missing or invalid 'input' argument")
 	}
 
-	result, err := textfs.ApplyPatch(store, input)
+	patchCtx, cancel := context.WithTimeout(ctx, textFSToolTimeout)
+	defer cancel()
+	result, err := textfs.ApplyPatch(patchCtx, store, input)
 	if err != nil {
 		return "", err
 	}
 	if result != nil {
-		for _, path := range result.Summary.Added {
-			notifyMemoryFileChanged(ctx, path)
-			maybeRefreshAgentIdentity(ctx, path)
-		}
-		for _, path := range result.Summary.Modified {
-			notifyMemoryFileChanged(ctx, path)
-			maybeRefreshAgentIdentity(ctx, path)
-		}
-		for _, path := range result.Summary.Deleted {
-			notifyMemoryFileChanged(ctx, path)
-			maybeRefreshAgentIdentity(ctx, path)
-		}
+		paths := make([]string, 0, len(result.Summary.Added)+len(result.Summary.Modified)+len(result.Summary.Deleted))
+		paths = append(paths, result.Summary.Added...)
+		paths = append(paths, result.Summary.Modified...)
+		paths = append(paths, result.Summary.Deleted...)
+
+		go func(paths []string) {
+			bg, cancel := context.WithTimeout(detachedBridgeToolContext(ctx), textFSPostWriteTimeout)
+			defer cancel()
+			for _, path := range paths {
+				notifyMemoryFileChanged(bg, path)
+				maybeRefreshAgentIdentity(bg, path)
+			}
+		}(paths)
+
 		if strings.TrimSpace(result.Text) != "" {
 			return result.Text, nil
 		}

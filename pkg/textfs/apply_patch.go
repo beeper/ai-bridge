@@ -62,9 +62,12 @@ type ApplyPatchResult struct {
 	Text    string
 }
 
-func ApplyPatch(store *Store, input string) (*ApplyPatchResult, error) {
+func ApplyPatch(ctx context.Context, store *Store, input string) (*ApplyPatchResult, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	parsed, err := parsePatchText(input)
 	if err != nil {
@@ -104,7 +107,6 @@ func ApplyPatch(store *Store, input string) (*ApplyPatchResult, error) {
 		}
 	}
 
-	ctx := context.Background()
 	for _, h := range parsed.hunks {
 		switch hunk := h.(type) {
 		case addFileHunk:

@@ -144,12 +144,35 @@ func (oc *AIClient) hasPortalMessages(ctx context.Context, portal *bridgev2.Port
 	if oc == nil || portal == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.DB == nil {
 		return true
 	}
-	history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, 1)
+
+	// Use a small lookback window so we can ignore "non-user" internal messages (e.g. welcome notices,
+	// subagent triggers) when deciding whether the chat is "empty enough" to auto-greet.
+	history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, 10)
 	if err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to check portal message history")
+		// Best-effort: if the DB is temporarily unavailable, prefer still scheduling the greeting.
+		// The goroutine re-checks message history before dispatching.
+		return false
+	}
+	for _, msg := range history {
+		// If we don't have our metadata type, assume it's a real message.
+		meta, ok := msg.Metadata.(*MessageMetadata)
+		if !ok || meta == nil {
+			return true
+		}
+		if meta.ExcludeFromHistory {
+			continue
+		}
+		role := strings.TrimSpace(strings.ToLower(meta.Role))
+		if role != "user" && role != "assistant" {
+			continue
+		}
+		if strings.TrimSpace(meta.Body) == "" {
+			continue
+		}
 		return true
 	}
-	return len(history) > 0
+	return false
 }
 
 func (oc *AIClient) scheduleAutoGreeting(ctx context.Context, portal *bridgev2.Portal) {
@@ -229,20 +252,29 @@ func (oc *AIClient) scheduleAutoGreeting(ctx context.Context, portal *bridgev2.P
 
 // sendWelcomeMessage sends a system notice when a new chat is created and schedules an auto-greeting.
 func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Portal) {
+	if oc == nil || portal == nil {
+		return
+	}
 	meta := portalMeta(portal)
+	if meta == nil {
+		return
+	}
 	if meta.WelcomeSent {
 		return
 	}
 
-	// Mark as sent BEFORE queuing to prevent duplicate welcome messages on race
+	// Mark as sent BEFORE queuing to prevent duplicate welcome messages on race.
+	// Use a background context so "new chat" UX isn't sensitive to request cancellation/timeouts.
 	meta.WelcomeSent = true
-	if err := portal.Save(ctx); err != nil {
+	bgCtx, cancel := context.WithTimeout(oc.backgroundContext(ctx), 10*time.Second)
+	defer cancel()
+	if err := portal.Save(bgCtx); err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to persist welcome message state")
-		return // Don't send if we can't persist state
+		// Still send the welcome notice and schedule greeting; duplicates are preferable to missing UX.
 	}
 
-	oc.sendSystemNotice(ctx, portal, "AI Chats can make mistakes.")
-	oc.scheduleAutoGreeting(ctx, portal)
+	oc.sendSystemNotice(bgCtx, portal, "AI Chats can make mistakes.")
+	oc.scheduleAutoGreeting(bgCtx, portal)
 }
 
 // maybeGenerateTitle generates a title for the room after the first exchange
