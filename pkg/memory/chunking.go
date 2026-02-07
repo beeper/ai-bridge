@@ -3,6 +3,7 @@ package memory
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
 	"strings"
 )
 
@@ -69,11 +70,12 @@ func ChunkMarkdown(content string, tokens, overlap int) []Chunk {
 		for i := len(current) - 1; i >= 0; i-- {
 			entry := current[i]
 			acc += len(entry.line) + 1
-			kept = append([]lineEntry{entry}, kept...)
+			kept = append(kept, entry)
 			if acc >= overlapChars {
 				break
 			}
 		}
+		slices.Reverse(kept)
 		current = kept
 		currentChars = 0
 		for _, entry := range kept {

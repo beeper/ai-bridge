@@ -43,6 +43,13 @@ type ToolDefinition struct {
 
 var imageFetchHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
+var validVoices = map[string]bool{
+	"alloy": true, "ash": true, "coral": true, "echo": true,
+	"fable": true, "onyx": true, "nova": true, "sage": true, "shimmer": true,
+}
+
+var validTTSModels = map[string]bool{"tts-1": true, "tts-1-hd": true}
+
 // BridgeToolContext provides bridge-specific context for tool execution
 type BridgeToolContext struct {
 	Client        *AIClient
@@ -1167,7 +1174,7 @@ func executeTTS(ctx context.Context, args map[string]any) (string, error) {
 				if ttsModel == "" {
 					ttsModel = "tts-1-hd"
 				}
-				if !isAllowedValue(ttsModel, map[string]bool{"tts-1": true, "tts-1-hd": true}) {
+				if !isAllowedValue(ttsModel, validTTSModels) {
 					ttsModel = "tts-1-hd"
 				}
 

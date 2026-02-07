@@ -188,6 +188,29 @@ func IsRoleOrderingError(err error) bool {
 	})
 }
 
+// IsMissingToolCallInputError checks if the error indicates a corrupted session
+// where tool call inputs are missing (e.g., from interrupted streaming).
+func IsMissingToolCallInputError(err error) bool {
+	return containsAnyPattern(err, []string{
+		"tool_call.input",
+		"tool_use.input",
+		"input is a required property",
+		"missing required field: input",
+	})
+}
+
+// IsToolUseIDFormatError checks if the error is caused by an invalid tool_use ID format
+// (e.g., when IDs from one provider are replayed to another).
+func IsToolUseIDFormatError(err error) bool {
+	return containsAnyPattern(err, []string{
+		"tool_use_id",
+		"tool_use.id",
+		"tool_call_id",
+		"invalid tool_use block",
+		"tool_use block with id",
+	})
+}
+
 // FormatUserFacingError transforms an API error into a user-friendly message.
 // Returns a sanitized message suitable for display to end users.
 func FormatUserFacingError(err error) string {
@@ -239,6 +262,14 @@ func FormatUserFacingError(err error) string {
 		return "The requested model is not available. Please select a different model."
 	}
 
+	if IsMissingToolCallInputError(err) {
+		return "Session data is corrupted (missing tool call input). Please start a new conversation to recover."
+	}
+
+	if IsToolUseIDFormatError(err) {
+		return "Tool call ID format error. Please start a new conversation to recover."
+	}
+
 	// Check for structured proxy errors (from hungryserv)
 	if proxyErr := ParseProxyError(err); proxyErr != nil {
 		return FormatProxyError(proxyErr)
@@ -250,6 +281,9 @@ func FormatUserFacingError(err error) string {
 
 	// For unknown errors, try to extract a sensible message
 	msg := err.Error()
+
+	// Strip <final> tags that may leak from internal processing
+	msg = stripFinalTags(msg)
 
 	// Strip common error prefixes
 	prefixes := []string{
@@ -267,14 +301,66 @@ func FormatUserFacingError(err error) string {
 	}
 
 	// Truncate very long error messages
-	if len(msg) > 200 {
-		msg = msg[:200] + "..."
+	if len(msg) > 600 {
+		msg = msg[:600] + "..."
 	}
 
-	// If the message looks like raw JSON, return a generic message
+	// If the message looks like raw JSON, try to extract a readable error
 	if strings.HasPrefix(strings.TrimSpace(msg), "{") {
+		if parsed := parseJSONErrorMessage(msg); parsed != "" {
+			return parsed
+		}
 		return "The AI provider returned an error. Please try again."
 	}
 
 	return msg
+}
+
+// stripFinalTags removes <final>...</final> tags from text.
+func stripFinalTags(s string) string {
+	for {
+		start := strings.Index(s, "<final>")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(s, "</final>")
+		if end == -1 {
+			// Unclosed tag — strip from <final> to end
+			s = strings.TrimSpace(s[:start])
+			break
+		}
+		s = strings.TrimSpace(s[:start] + s[end+len("</final>"):])
+	}
+	return s
+}
+
+// parseJSONErrorMessage attempts to extract a human-readable message from a JSON error payload.
+func parseJSONErrorMessage(raw string) string {
+	// Try nested {"error": {"type": ..., "message": ...}} format (Anthropic style)
+	var nested struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(raw), &nested); err == nil && nested.Error.Message != "" {
+		if nested.Error.Type != "" {
+			return nested.Error.Type + ": " + nested.Error.Message
+		}
+		return nested.Error.Message
+	}
+
+	// Try flat {"type": ..., "message": ...} format (OpenAI style)
+	var flat struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(raw), &flat); err == nil && flat.Message != "" {
+		if flat.Type != "" {
+			return flat.Type + ": " + flat.Message
+		}
+		return flat.Message
+	}
+
+	return ""
 }

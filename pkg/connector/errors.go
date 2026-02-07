@@ -190,7 +190,12 @@ func hasContextLengthSignal(text string) bool {
 	lower := strings.ToLower(text)
 	return strings.Contains(lower, "context length") ||
 		strings.Contains(lower, "context_length") ||
-		strings.Contains(lower, "prompt is too long")
+		strings.Contains(lower, "prompt is too long") ||
+		strings.Contains(lower, "request_too_large") ||
+		strings.Contains(lower, "request too large") ||
+		strings.Contains(lower, "413 too large") ||
+		strings.Contains(lower, "request exceeds the maximum size") ||
+		strings.Contains(lower, "exceeds model context window")
 }
 
 func safeErrorString(err error) (text string) {
@@ -269,9 +274,15 @@ func IsRateLimitError(err error) bool {
 		if strings.EqualFold(apiErr.Code, "rate_limit_exceeded") {
 			return true
 		}
-		return apiErr.StatusCode == 429
+		if apiErr.StatusCode == 429 {
+			return true
+		}
 	}
-	return false
+	return containsAnyPattern(err, []string{
+		"resource_exhausted",
+		"quota exceeded",
+		"usage limit",
+	})
 }
 
 // IsServerError checks if the error is a server-side (5xx) error
