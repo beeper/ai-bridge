@@ -1,10 +1,12 @@
-# Matrix AI Transport Spec v1
+# Real-time AI with Matrix?
+
+## Matrix AI Transport Spec v1
 
 > [!WARNING]
-> Status: *Unreleased*, proposed v1.
+> Status: *Draft* (unreleased), proposed v1.
 > This is a highly experimental profile.
 > It requires homeserver and client support (custom event types + ephemeral events + rendering/consumption).
-> Beeper is building experimental support for this profile, and it might never get a public release.
+> This repo contains one experimental implementation, but the transport profile is not bridge-specific: any Matrix bot/client/bridge can emit and consume these events.
 
 ## Contents
 - [Scope](#scope)
@@ -23,13 +25,15 @@
 
 <a id="scope"></a>
 ## Scope
-This document specifies the Matrix transport surface used by this bridge:
+This document specifies a Matrix transport profile for real-time AI:
 - Canonical assistant content in `m.room.message` (`com.beeper.ai` as AI SDK-compatible `UIMessage`).
 - Streaming deltas as ephemeral events (`com.beeper.ai.stream_event` with AI SDK `UIMessageChunk`).
 - `com.beeper.ai.*` timeline projection events (tool call/result, compaction status, etc).
 - `com.beeper.ai.*` state events (room settings/capabilities).
 - Tool approvals (MCP approvals + selected builtin tools).
 - Auxiliary `com.beeper.ai*` keys used for routing/metadata.
+
+This spec is intended to be usable by any Matrix bot/client/bridge. Where this document references "the bridge", it refers to the producing implementation (for this repo, `ai-bridge`).
 
 Upstream reference (AI SDK):
 - Vercel AI SDK inspected at commit `ff7dd528f3933f67bf4568126db0a81cd4a47a96` (2026-02-06 UTC).
@@ -38,7 +42,7 @@ Upstream reference (AI SDK):
   - `packages/ai/src/ui-message-stream/ui-message-chunks.ts`
   - `packages/ai/src/ui-message-stream/json-to-sse-transform-stream.ts`
 
-Source of truth in this repo:
+Reference implementation in this repo (ai-bridge):
 - Event type identifiers: `pkg/matrixevents/matrixevents.go`
 - Event payload structs (where defined): `pkg/connector/events.go`
 - Streaming envelope and emission: `pkg/matrixevents/matrixevents.go`, `pkg/connector/stream_events.go`
@@ -76,7 +80,7 @@ Authoritative identifiers are defined in `pkg/matrixevents/matrixevents.go`.
 | `com.beeper.ai.tool_call` | message | timeline | Tool invocation projection | [Projections](#projection-tool-call) |
 | `com.beeper.ai.tool_result` | message | timeline | Tool result projection | [Projections](#projection-tool-result) |
 | `com.beeper.ai.compaction_status` | message | timeline | Context compaction lifecycle/status | [Projections](#projection-compaction) |
-| `com.beeper.ai.room_capabilities` | state | state | Bridge-controlled capabilities and effective settings | [State](#state-room-capabilities) |
+| `com.beeper.ai.room_capabilities` | state | state | Producer-controlled capabilities and effective settings | [State](#state-room-capabilities) |
 | `com.beeper.ai.room_settings` | state | state | User-editable room settings | [State](#state-room-settings) |
 | `com.beeper.ai.model_capabilities` | state | state | Available models + capabilities (defined; may be unused) | [State](#state-model-capabilities) |
 | `com.beeper.ai.agents` | state | state | Agents + orchestration (defined; may be unused) | [State](#state-agents) |
@@ -370,7 +374,7 @@ State events broadcast room configuration and capabilities.
 
 <a id="state-room-capabilities"></a>
 ### `com.beeper.ai.room_capabilities`
-Bridge-controlled capabilities and effective settings.
+Producer-controlled capabilities and effective settings.
 
 Fields (see `RoomCapabilitiesEventContent` in `pkg/connector/events.go`):
 - `capabilities?: ModelCapabilities`
