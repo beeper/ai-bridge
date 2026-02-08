@@ -43,7 +43,9 @@ func (c *brokenLoginClient) LogoutRemote(ctx context.Context) {
 	}
 }
 
-func (c *brokenLoginClient) IsThisUser(ctx context.Context, userID networkid.UserID) bool { return false }
+func (c *brokenLoginClient) IsThisUser(ctx context.Context, userID networkid.UserID) bool {
+	return false
+}
 
 func (c *brokenLoginClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 	return nil, bridgev2.ErrNotLoggedIn
@@ -60,4 +62,3 @@ func (c *brokenLoginClient) GetCapabilities(ctx context.Context, portal *bridgev
 func (c *brokenLoginClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (*bridgev2.MatrixMessageResponse, error) {
 	return nil, bridgev2.ErrNotLoggedIn
 }
-

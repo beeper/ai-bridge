@@ -18,4 +18,3 @@ func TestImplicitModelCatalogEntries_MagicProxySeedsCatalog(t *testing.T) {
 		t.Fatalf("expected non-empty model catalog entries for magic_proxy, got 0")
 	}
 }
-

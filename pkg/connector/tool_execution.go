@@ -261,11 +261,11 @@ func (oc *AIClient) sendToolCallApprovalEvent(
 
 	toolCallData := map[string]any{
 		"call_id":                toolCallID,
-		"turn_id":               state.turnID,
-		"tool_name":             toolName,
-		"tool_type":             toolType,
-		"status":                string(ToolStatusApprovalRequired),
-		"approval_id":           approvalID,
+		"turn_id":                state.turnID,
+		"tool_name":              toolName,
+		"tool_type":              toolType,
+		"status":                 string(ToolStatusApprovalRequired),
+		"approval_id":            approvalID,
 		"approval_expires_at_ms": expiresAtMs,
 		"display": map[string]any{
 			"title":     displayTitle,
