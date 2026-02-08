@@ -32,7 +32,7 @@ func makeUserLoginIDForConfig(mxid id.UserID, provider, apiKey, baseURL string, 
 	baseURL = normalizeBaseURLForLoginID(baseURL)
 
 	// Stable, unambiguous hash input.
-	sum := sha256.Sum256([]byte(provider + \"\n\" + baseURL + \"\n\" + apiKey))
+	sum := sha256.Sum256([]byte(provider + "\n" + baseURL + "\n" + apiKey))
 	hashShort := hex.EncodeToString(sum[:8]) // 16 hex chars
 
 	base := fmt.Sprintf("openai:%s:%s:%s", escaped, provider, hashShort)
@@ -60,7 +60,7 @@ func normalizeBaseURLForLoginID(baseURL string) string {
 	return strings.ToLower(clean)
 }
 
-func makeCodexUserLoginID(func makeCodexUserLoginID(mxid id.UserID, instanceID string) networkid.UserLoginID {
+func makeCodexUserLoginID(mxid id.UserID, instanceID string) networkid.UserLoginID {
 	escaped := url.PathEscape(string(mxid))
 	instanceID = strings.TrimSpace(instanceID)
 	if instanceID == "" {

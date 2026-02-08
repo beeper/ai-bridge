@@ -1221,6 +1221,9 @@ func (oc *AIClient) handleResponseOutputItemAdded(
 			// If approvals are disabled, not required, or already always-allowed, auto-approve without prompting.
 			// Otherwise emit an approval request to the UI.
 			needsApproval := oc.toolApprovalsRuntimeEnabled() && oc.toolApprovalsRequireForMCP() && !oc.isMcpAlwaysAllowed(serverLabel, mcpToolName)
+			if needsApproval && state != nil && state.heartbeat != nil {
+				needsApproval = false
+			}
 			if needsApproval {
 				if state != nil && !state.uiToolApprovalRequested[approvalID] {
 					state.uiToolApprovalRequested[approvalID] = true
@@ -1321,6 +1324,9 @@ func (oc *AIClient) handleResponseOutputItemDone(
 			})
 
 			needsApproval := oc.toolApprovalsRuntimeEnabled() && oc.toolApprovalsRequireForMCP() && !oc.isMcpAlwaysAllowed(serverLabel, mcpToolName)
+			if needsApproval && state != nil && state.heartbeat != nil {
+				needsApproval = false
+			}
 			if needsApproval {
 				if state != nil && !state.uiToolApprovalRequested[approvalID] {
 					state.uiToolApprovalRequested[approvalID] = true
@@ -2323,6 +2329,9 @@ func (oc *AIClient) streamingResponse(
 					if required && oc.isBuiltinAlwaysAllowed(toolName, action) {
 						required = false
 					}
+					if required && state.heartbeat != nil {
+						required = false
+					}
 					if required {
 						approvalID := NewCallID()
 						ttl := time.Duration(oc.toolApprovalsTTLSeconds()) * time.Second
@@ -2370,6 +2379,9 @@ func (oc *AIClient) streamingResponse(
 					// If we couldn't parse args as JSON object, still gate by tool name.
 					required, action := oc.builtinToolApprovalRequirement(toolName, nil)
 					if required && oc.isBuiltinAlwaysAllowed(toolName, action) {
+						required = false
+					}
+					if required && state.heartbeat != nil {
 						required = false
 					}
 					if required {
@@ -3536,6 +3548,9 @@ func (oc *AIClient) streamingResponse(
 					if required && oc.isBuiltinAlwaysAllowed(toolName, action) {
 						required = false
 					}
+					if required && state.heartbeat != nil {
+						required = false
+					}
 					if required {
 						approvalID := NewCallID()
 						ttl := time.Duration(oc.toolApprovalsTTLSeconds()) * time.Second
@@ -4299,6 +4314,9 @@ func (oc *AIClient) streamChatCompletions(
 					_ = json.Unmarshal([]byte(argsJSON), &argsObj)
 					required, action := oc.builtinToolApprovalRequirement(toolName, argsObj)
 					if required && oc.isBuiltinAlwaysAllowed(toolName, action) {
+						required = false
+					}
+					if required && state.heartbeat != nil {
 						required = false
 					}
 					if required {

@@ -28,7 +28,7 @@ const (
 
 	// ImageGenerateName is an AI image generation tool (not in OpenClaw).
 	ImageGenerateName        = "image_generate"
-	ImageGenerateDescription = "Generate one or more images from a text prompt. Supports provider-specific controls such as size, quality, style, background, output format, resolution, and optional input images for editing/composition."
+	ImageGenerateDescription = "Generate one or more images from a text prompt. Optional controls include model selection, aspect ratio, resolution, and input images for editing/composition."
 
 	TTSName        = "tts"
 	TTSDescription = "Convert text to speech and return a MEDIA: path. Use when the user requests audio or TTS is enabled. Copy the MEDIA line exactly."
@@ -534,17 +534,13 @@ func ImageGenerateSchema() map[string]any {
 				"type":        "boolean",
 				"description": "Optional: if true, start image generation in the background and send results to the chat when ready (tool returns immediately).",
 			},
-			"provider": map[string]any{
-				"type":        "string",
-				"description": "Optional: provider override (openai, gemini, openrouter). Defaults to an available provider for this login.",
-			},
 			"prompt": map[string]any{
 				"type":        "string",
 				"description": "The text prompt describing the image to generate",
 			},
 			"model": map[string]any{
 				"type":        "string",
-				"description": "Optional: image model to use (provider-specific)",
+				"description": "Optional: image model to use.",
 			},
 			"count": map[string]any{
 				"type":        "number",
@@ -552,37 +548,21 @@ func ImageGenerateSchema() map[string]any {
 				"minimum":     1,
 				"maximum":     10,
 			},
-			"size": map[string]any{
+			"aspect_ratio": map[string]any{
 				"type":        "string",
-				"description": "Optional: image size (OpenAI). Examples: 1024x1024, 1536x1024, 1024x1536, 1792x1024.",
+				"description": "Optional: desired aspect ratio (e.g., 1:1, 16:9, 4:3).",
 			},
-			"quality": map[string]any{
+			"aspectRatio": map[string]any{
 				"type":        "string",
-				"description": "Optional: image quality (OpenAI). Examples: high, medium, low, standard, hd.",
-			},
-			"style": map[string]any{
-				"type":        "string",
-				"description": "Optional: image style (OpenAI DALL·E 3). Examples: vivid, natural.",
-			},
-			"background": map[string]any{
-				"type":        "string",
-				"description": "Optional: background mode (OpenAI GPT image models). Examples: transparent, opaque, auto.",
-			},
-			"output_format": map[string]any{
-				"type":        "string",
-				"description": "Optional: output format (OpenAI GPT image models). Examples: png, jpeg, webp.",
-			},
-			"outputFormat": map[string]any{
-				"type":        "string",
-				"description": "Optional: alias for output_format.",
+				"description": "Optional: alias for aspect_ratio.",
 			},
 			"resolution": map[string]any{
 				"type":        "string",
-				"description": "Optional: output resolution (Gemini). Examples: 1K, 2K, 4K.",
+				"description": "Optional: output resolution. Examples: 1K, 2K, 4K.",
 			},
 			"input_images": map[string]any{
 				"type":        "array",
-				"description": "Optional: input image paths/URLs/data URIs for editing/composition (Gemini).",
+				"description": "Optional: input images for editing/composition (paths/URLs/data URIs).",
 				"items": map[string]any{
 					"type": "string",
 				},

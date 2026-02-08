@@ -91,7 +91,7 @@ func stripProxyServiceSuffix(path string) string {
 	}
 	for {
 		changed := false
-		for _, suffix := range []string{"/openrouter/v1", "/openai/v1", "/exa"} {
+		for _, suffix := range []string{"/openrouter/v1", "/openai/v1", "/gemini/v1beta", "/exa"} {
 			if strings.HasSuffix(trimmed, suffix) {
 				trimmed = strings.TrimRight(strings.TrimSuffix(trimmed, suffix), "/")
 				changed = true

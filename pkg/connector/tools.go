@@ -976,28 +976,26 @@ func executeImageGeneration(ctx context.Context, args map[string]any) (string, e
 	return ImagesResultPrefix + string(payload), nil
 }
 
-// callOpenRouterImageGen calls OpenRouter's image generation endpoint.
-func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model string) ([]string, error) {
-	// OpenRouter uses chat completions with image models
-	// The response will contain a URL or base64 image
-
-	// Normalize base URL
+// callOpenRouterImageGen calls OpenRouter's chat completions endpoint for image generation.
+// reqBody must contain: model, messages, modalities=["image","text"] (or include "image").
+func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL string, reqBody map[string]any) ([]string, error) {
+	// Normalize base URL.
 	if baseURL == "" {
 		baseURL = "https://openrouter.ai/api/v1"
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
-	// Build request for image generation via chat completions
-	reqBody := map[string]any{
-		"model": model,
-		"messages": []map[string]any{
-			{
-				"role":    "user",
-				"content": prompt,
-			},
-		},
-		"modalities": []string{"image", "text"},
-		"max_tokens": 1,
+	if strings.TrimSpace(apiKey) == "" {
+		return nil, errors.New("missing api key")
+	}
+	if reqBody == nil {
+		return nil, errors.New("missing request body")
+	}
+	if _, ok := reqBody["model"]; !ok {
+		return nil, errors.New("missing model in request body")
+	}
+	if _, ok := reqBody["messages"]; !ok {
+		return nil, errors.New("missing messages in request body")
 	}
 
 	jsonBody, err := json.Marshal(reqBody)

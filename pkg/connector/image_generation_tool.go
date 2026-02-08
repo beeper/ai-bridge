@@ -45,6 +45,7 @@ type imageGenRequest struct {
 	Style        string
 	Background   string
 	OutputFormat string
+	AspectRatio  string
 	Resolution   string
 	InputImages  []string
 }
@@ -111,6 +112,11 @@ func parseImageGenArgs(args map[string]any) (imageGenRequest, error) {
 	} else if v, ok := args["outputFormat"].(string); ok {
 		req.OutputFormat = strings.TrimSpace(v)
 	}
+	if v, ok := args["aspect_ratio"].(string); ok {
+		req.AspectRatio = strings.TrimSpace(v)
+	} else if v, ok := args["aspectRatio"].(string); ok {
+		req.AspectRatio = strings.TrimSpace(v)
+	}
 	if v, ok := args["resolution"].(string); ok {
 		req.Resolution = strings.TrimSpace(v)
 	}
@@ -166,19 +172,24 @@ func dedupeStrings(values []string) []string {
 }
 
 func resolveImageGenProvider(req imageGenRequest, btc *BridgeToolContext) (imageGenProvider, error) {
+	// Magic Proxy: always route image generation via OpenRouter (Gemini models) when available.
+	// This avoids OpenRouter rejecting provider-specific "advanced controls".
+	if btc != nil && btc.Client != nil && btc.Client.UserLogin != nil {
+		loginMeta := loginMetadata(btc.Client.UserLogin)
+		if loginMeta.Provider == ProviderMagicProxy {
+			if supportsOpenRouterImageGen(btc) {
+				return imageGenProviderOpenRouter, nil
+			}
+			// Fallback only if OpenRouter isn't configured for this login.
+			if supportsOpenAIImageGen(btc) {
+				return imageGenProviderOpenAI, nil
+			}
+			return "", errors.New("image generation is not available for this login")
+		}
+	}
+
 	provider := strings.ToLower(strings.TrimSpace(req.Provider))
 	if provider != "" {
-		// Magic Proxy policy: always prefer OpenRouter (Gemini) over OpenAI for image generation.
-		// Even if the caller asks for provider=openai, route to OpenRouter if available.
-		if btc != nil && btc.Client != nil && btc.Client.UserLogin != nil {
-			loginMeta := loginMetadata(btc.Client.UserLogin)
-			if loginMeta.Provider == ProviderMagicProxy && provider == "openai" {
-				if supportsOpenRouterImageGen(btc) {
-					return imageGenProviderOpenRouter, nil
-				}
-				// Fall back to OpenAI only if OpenRouter is unavailable.
-			}
-		}
 		switch provider {
 		case "openai":
 			if !supportsOpenAIImageGen(btc) {
@@ -213,12 +224,11 @@ func resolveImageGenProvider(req imageGenRequest, btc *BridgeToolContext) (image
 		}
 		return imageGenProviderOpenRouter, nil
 	case ProviderMagicProxy:
-		// Magic Proxy supports OpenRouter + OpenAI paths, but we intentionally keep image
-		// generation on OpenRouter (Gemini default) whenever possible.
-		openRouterSupported := supportsOpenRouterImageGen(btc)
-
-		if openRouterSupported {
+		if supportsOpenRouterImageGen(btc) {
 			return imageGenProviderOpenRouter, nil
+		}
+		if supportsOpenAIImageGen(btc) {
+			return imageGenProviderOpenAI, nil
 		}
 		return "", errors.New("image generation is not available for this login")
 	case ProviderBeeper:
@@ -312,7 +322,7 @@ func usesOpenAIParams(req imageGenRequest) bool {
 }
 
 func usesGeminiParams(req imageGenRequest) bool {
-	return req.Resolution != "" || len(req.InputImages) > 0
+	return req.AspectRatio != "" || req.Resolution != "" || len(req.InputImages) > 0
 }
 
 func supportsOpenAIImageGen(btc *BridgeToolContext) bool {
@@ -606,10 +616,13 @@ func generateImagesForRequest(ctx context.Context, btc *BridgeToolContext, req i
 		}
 		return callGeminiImageGen(ctx, btc, baseURL, model, req)
 	case imageGenProviderOpenRouter:
-		// OpenRouter only supports prompt+model. We'll emulate count>1 by making multiple calls.
-		if req.Size != "" || req.Quality != "" || req.Style != "" || req.Background != "" || req.OutputFormat != "" || usesGeminiParams(req) {
-			return nil, errors.New("openrouter image generation only supports prompt+model; use provider=openai or provider=gemini for advanced controls")
-		}
+		// We'll emulate count>1 by making multiple calls.
+		// Ignore OpenAI-specific controls (common with agent tools) rather than failing the request.
+		req.Size = ""
+		req.Quality = ""
+		req.Style = ""
+		req.Background = ""
+		req.OutputFormat = ""
 		model := normalizeOpenRouterModel(req.Model)
 		// Magic Proxy policy: if the request looks like it's targeting an OpenAI image model,
 		// force the OpenRouter default (Gemini) instead.
@@ -642,7 +655,7 @@ func generateImagesForRequest(ctx context.Context, btc *BridgeToolContext, req i
 			sem <- struct{}{}
 			go func() {
 				defer func() { <-sem }()
-				out, err := callOpenRouterImageGen(ctx, btc.Client.apiKey, provider.baseURL, req.Prompt, model)
+				out, err := callOpenRouterImageGenWithControls(ctx, btc, btc.Client.apiKey, provider.baseURL, req, model)
 				results <- genResult{images: out, err: err}
 			}()
 		}
@@ -661,6 +674,94 @@ func generateImagesForRequest(ctx context.Context, btc *BridgeToolContext, req i
 	default:
 		return nil, errors.New("unsupported image generation provider")
 	}
+}
+
+func openRouterImageURLForRef(ctx context.Context, btc *BridgeToolContext, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", errors.New("empty image reference")
+	}
+
+	if strings.HasPrefix(ref, "data:") {
+		return ref, nil
+	}
+	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
+		if err := validateExternalImageURL(ctx, ref); err != nil {
+			return "", err
+		}
+		return ref, nil
+	}
+	if strings.HasPrefix(ref, "mxc://") {
+		b64Data, mimeType, err := btc.Client.downloadAndEncodeMedia(ctx, ref, nil, imageInputMaxSizeMB)
+		if err != nil {
+			return "", err
+		}
+		return "data:" + mimeType + ";base64," + b64Data, nil
+	}
+	if isLocalImageRef(ref) {
+		resolved, err := resolveLocalImagePath(ref)
+		if err != nil {
+			return "", err
+		}
+		b64Data, mimeType, err := btc.Client.downloadAndEncodeMedia(ctx, resolved, nil, imageInputMaxSizeMB)
+		if err != nil {
+			return "", err
+		}
+		return "data:" + mimeType + ";base64," + b64Data, nil
+	}
+
+	return "", fmt.Errorf("unsupported image reference: %s", ref)
+}
+
+func callOpenRouterImageGenWithControls(ctx context.Context, btc *BridgeToolContext, apiKey, baseURL string, req imageGenRequest, model string) ([]string, error) {
+	// OpenRouter image generation uses /chat/completions with modalities=["image","text"].
+	msg := map[string]any{
+		"role": "user",
+	}
+
+	if len(req.InputImages) > 0 {
+		parts := make([]map[string]any, 0, len(req.InputImages)+1)
+		for _, ref := range req.InputImages {
+			url, err := openRouterImageURLForRef(ctx, btc, ref)
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, map[string]any{
+				"type": "image_url",
+				"image_url": map[string]any{
+					"url": url,
+				},
+			})
+		}
+		parts = append(parts, map[string]any{
+			"type": "text",
+			"text": req.Prompt,
+		})
+		msg["content"] = parts
+	} else {
+		msg["content"] = req.Prompt
+	}
+
+	reqBody := map[string]any{
+		"model":      model,
+		"messages":   []map[string]any{msg},
+		"modalities": []string{"image", "text"},
+		// Keep responses small; images come in the `images` field.
+		"max_tokens": 1,
+	}
+
+	imageCfg := map[string]any{}
+	if ar := strings.TrimSpace(req.AspectRatio); ar != "" {
+		imageCfg["aspect_ratio"] = ar
+	}
+	if res := strings.ToUpper(strings.TrimSpace(req.Resolution)); res != "" {
+		imageCfg["image_size"] = res
+	}
+	if len(imageCfg) > 0 {
+		reqBody["image_config"] = imageCfg
+	}
+
+	return callOpenRouterImageGen(ctx, apiKey, baseURL, reqBody)
 }
 
 func callOpenAIImageGen(ctx context.Context, apiKey, baseURL string, params openAIImageParams) ([]string, error) {
