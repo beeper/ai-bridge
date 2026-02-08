@@ -26,7 +26,6 @@ var (
 	GenerationStatusEventType = event.Type{Type: "com.beeper.ai.generation_status", Class: event.MessageEventType}
 	ToolProgressEventType     = event.Type{Type: "com.beeper.ai.tool_progress", Class: event.MessageEventType}
 	CompactionStatusEventType = event.Type{Type: "com.beeper.ai.compaction_status", Class: event.MessageEventType}
-	ApprovalRequestEventType  = event.Type{Type: "com.beeper.ai.approval_request", Class: event.MessageEventType}
 
 	RoomCapabilitiesEventType  = event.Type{Type: "com.beeper.ai.room_capabilities", Class: event.StateEventType}
 	RoomSettingsEventType      = event.Type{Type: "com.beeper.ai.room_settings", Class: event.StateEventType}
