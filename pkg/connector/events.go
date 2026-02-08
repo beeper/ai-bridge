@@ -55,9 +55,6 @@ var ToolProgressEventType = matrixevents.ToolProgressEventType
 // CompactionStatusEventType notifies clients about context compaction
 var CompactionStatusEventType = matrixevents.CompactionStatusEventType
 
-// ApprovalRequestEventType requests user approval for tool execution
-var ApprovalRequestEventType = matrixevents.ApprovalRequestEventType
-
 // RoomCapabilitiesEventType is the Matrix state event type for bridge-controlled capabilities
 // Protected by power levels (100) so only the bridge bot can modify
 var RoomCapabilitiesEventType = matrixevents.RoomCapabilitiesEventType
@@ -481,23 +478,6 @@ type ToolOutputPreview struct {
 	Stdout    string `json:"stdout,omitempty"`
 	Stderr    string `json:"stderr,omitempty"`
 	Truncated bool   `json:"truncated,omitempty"`
-}
-
-// ApprovalRequestContent represents a tool approval request
-type ApprovalRequestContent struct {
-	CallID       string           `json:"call_id"`
-	TurnID       string           `json:"turn_id"`
-	ToolName     string           `json:"tool_name"`
-	Description  string           `json:"description,omitempty"`
-	InputPreview map[string]any   `json:"input_preview,omitempty"`
-	Actions      []ApprovalAction `json:"actions,omitempty"`
-}
-
-// ApprovalAction represents an action button for approval
-type ApprovalAction struct {
-	ID    string `json:"id"` // "approve", "deny", "modify"
-	Label string `json:"label"`
-	Style string `json:"style,omitempty"` // "primary", "secondary", "tertiary"
 }
 
 // ReasoningEffortOption represents an available reasoning effort level

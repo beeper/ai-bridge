@@ -26,8 +26,7 @@ Experimental Matrix ↔ AI bridge for Beeper, built on top of [mautrix/bridgev2]
 
 ## Docs
 
-- `docs/matrix-ai-uimessage-spec-v1.md`: Matrix transport profile for AI SDK `UIMessage` + streaming `UIMessageChunk`s.
-- `docs/matrix-ai-events-and-approvals-spec-v1.md`: `com.beeper.ai.*` event types, content keys, and the tool approval flow.
+- `docs/matrix-ai-matrix-spec-v1.md`: Full Matrix transport spec (events, streaming, approvals, state, and schema examples).
 
 ## Build
 
