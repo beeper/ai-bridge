@@ -30,6 +30,19 @@ func (b *testStoreBackend) Write(_ context.Context, path string, data []byte) er
 	return nil
 }
 
+func (b *testStoreBackend) List(_ context.Context, prefix string) ([]StoreEntry, error) {
+	var entries []StoreEntry
+	if b.files == nil {
+		return entries, nil
+	}
+	for k, v := range b.files {
+		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			entries = append(entries, StoreEntry{Key: k, Data: v})
+		}
+	}
+	return entries, nil
+}
+
 func TestLoadCronStoreMigratesLegacyJobFields(t *testing.T) {
 	const storePath = "cron/jobs.json"
 	backend := &testStoreBackend{

@@ -437,20 +437,16 @@ func (oc *AIClient) readCronRuns(jobID string, limit int) ([]cron.CronRunLogEntr
 		return cron.ReadCronRunLogEntries(context.Background(), backend, path, limit, trimmed)
 	}
 	entries := make([]cron.CronRunLogEntry, 0)
-	store, err := oc.cronTextFSStore()
-	if err != nil {
-		return entries, nil
-	}
 	runDir := cron.ResolveCronRunLogDir(storePath)
-	files, err := store.ListWithPrefix(context.Background(), runDir)
+	storeEntries, err := backend.List(context.Background(), runDir)
 	if err != nil {
 		return entries, nil
 	}
-	for _, file := range files {
-		if !strings.HasSuffix(strings.ToLower(file.Path), ".jsonl") {
+	for _, se := range storeEntries {
+		if !strings.HasSuffix(strings.ToLower(se.Key), ".jsonl") {
 			continue
 		}
-		list := cron.ParseCronRunLogEntries(file.Content, limit, "")
+		list := cron.ParseCronRunLogEntries(string(se.Data), limit, "")
 		if len(list) > 0 {
 			entries = append(entries, list...)
 		}

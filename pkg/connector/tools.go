@@ -578,6 +578,16 @@ func executeMessageSend(ctx context.Context, args map[string]any, btc *BridgeToo
 		}
 	}
 
+	if msgType == event.MsgVideo {
+		if w, h, dur := analyzeVideo(ctx, data); w > 0 && h > 0 {
+			info["w"] = w
+			info["h"] = h
+			if dur > 0 {
+				info["duration"] = dur
+			}
+		}
+	}
+
 	if msgType == event.MsgAudio {
 		if durationMs, waveform := analyzeAudio(data, mimeType); durationMs > 0 || len(waveform) > 0 {
 			if durationMs > 0 {

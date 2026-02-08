@@ -26,6 +26,13 @@ func (b *failingStoreBackend) Write(ctx context.Context, path string, data []byt
 	return b.inner.Write(ctx, path, data)
 }
 
+func (b *failingStoreBackend) List(ctx context.Context, prefix string) ([]StoreEntry, error) {
+	if b.failReads.Load() {
+		return nil, errors.New("injected read error")
+	}
+	return b.inner.List(ctx, prefix)
+}
+
 // testLogger captures log messages for assertions.
 type testLogger struct {
 	mu       sync.Mutex
@@ -125,54 +132,18 @@ func TestOnTimerRearmsOnEnsureLoadedFailure(t *testing.T) {
 	svc.Stop()
 }
 
-// Bug #4: Corrupt store falls back to .bak
-func TestLoadCronStoreCorruptFallsBackToBak(t *testing.T) {
+// Corrupt store returns error (no .bak fallback — DB writes are atomic).
+func TestLoadCronStoreCorruptReturnsError(t *testing.T) {
 	const storePath = "cron/jobs.json"
 	backend := &testStoreBackend{
 		files: map[string][]byte{
-			storePath:          []byte(`{corrupt json!!!`),
-			storePath + ".bak": validStoreJSON(),
-		},
-	}
-
-	store, err := LoadCronStore(context.Background(), backend, storePath)
-	if err != nil {
-		t.Fatalf("expected .bak fallback to succeed, got error: %v", err)
-	}
-	if len(store.Jobs) != 1 {
-		t.Fatalf("expected 1 job from .bak, got %d", len(store.Jobs))
-	}
-	if store.Jobs[0].ID != "job-1" {
-		t.Fatalf("expected job id job-1, got %q", store.Jobs[0].ID)
-	}
-}
-
-func TestLoadCronStoreBothCorruptReturnsError(t *testing.T) {
-	const storePath = "cron/jobs.json"
-	backend := &testStoreBackend{
-		files: map[string][]byte{
-			storePath:          []byte(`{corrupt`),
-			storePath + ".bak": []byte(`also corrupt`),
+			storePath: []byte(`{corrupt json!!!`),
 		},
 	}
 
 	_, err := LoadCronStore(context.Background(), backend, storePath)
 	if err == nil {
-		t.Fatal("expected error when both main and .bak are corrupt")
-	}
-}
-
-func TestLoadCronStoreCorruptNoBakReturnsError(t *testing.T) {
-	const storePath = "cron/jobs.json"
-	backend := &testStoreBackend{
-		files: map[string][]byte{
-			storePath: []byte(`{corrupt`),
-		},
-	}
-
-	_, err := LoadCronStore(context.Background(), backend, storePath)
-	if err == nil {
-		t.Fatal("expected error when main is corrupt and no .bak exists")
+		t.Fatal("expected error when store is corrupt")
 	}
 }
 
