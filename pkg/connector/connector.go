@@ -19,7 +19,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2/matrix"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
-	"maunium.net/go/mautrix/id"
 )
 
 const (
@@ -196,18 +195,22 @@ func (oc *OpenAIConnector) handleRoomSettingsEvent(ctx context.Context, evt *eve
 		return
 	}
 
-	oc.processRoomSettingsContent(ctx, evt.RoomID, evt.Sender, &content, log)
+	oc.processRoomSettingsContent(ctx, evt, &content, log)
 }
 
 // processRoomSettingsContent handles the common logic for updating portal settings
 // Called by both handleRoomSettingsEvent and handleBeeperSendStateEvent
 func (oc *OpenAIConnector) processRoomSettingsContent(
 	ctx context.Context,
-	roomID id.RoomID,
-	sender id.UserID,
+	evt *event.Event,
 	content *RoomSettingsEventContent,
 	log zerolog.Logger,
 ) {
+	if evt == nil {
+		return
+	}
+	roomID := evt.RoomID
+	sender := evt.Sender
 	// Look up portal by Matrix room ID
 	portal, err := oc.br.GetPortalByMXID(ctx, roomID)
 	if err != nil {
@@ -253,8 +256,14 @@ func (oc *OpenAIConnector) processRoomSettingsContent(
 		content.Model = resolved
 	}
 
-	// Update portal metadata
-	client.updatePortalConfig(ctx, portal, content)
+	// Update portal metadata with optimistic update + rollback behavior.
+	if err := client.updatePortalConfig(ctx, portal, content); err != nil {
+		sendStateEventFailureStatus(ctx, portal, evt, err)
+		log.Warn().Err(err).Msg("Failed to apply room settings state event")
+		return
+	}
+
+	sendStateEventSuccessStatus(ctx, portal, evt)
 
 	// Send confirmation notice
 	var changes []string
@@ -328,7 +337,31 @@ func (oc *OpenAIConnector) handleBeeperSendStateEvent(ctx context.Context, evt *
 	}
 
 	// Reuse existing handler logic with the parsed content
-	oc.processRoomSettingsContent(ctx, evt.RoomID, evt.Sender, &content, log)
+	oc.processRoomSettingsContent(ctx, evt, &content, log)
+}
+
+func sendStateEventFailureStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, err error) {
+	if portal == nil || portal.Bridge == nil || evt == nil || err == nil {
+		return
+	}
+	msgStatus := bridgev2.WrapErrorInStatus(err).
+		WithStatus(event.MessageStatusRetriable).
+		WithErrorReason(event.MessageStatusGenericError).
+		WithMessage("Failed to apply room settings. Your change was rolled back.").
+		WithIsCertain(true).
+		WithSendNotice(false)
+	portal.Bridge.Matrix.SendMessageStatus(ctx, &msgStatus, bridgev2.StatusEventInfoFromEvent(evt))
+}
+
+func sendStateEventSuccessStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event) {
+	if portal == nil || portal.Bridge == nil || evt == nil {
+		return
+	}
+	msgStatus := bridgev2.MessageStatus{
+		Status:    event.MessageStatusSuccess,
+		IsCertain: true,
+	}
+	portal.Bridge.Matrix.SendMessageStatus(ctx, &msgStatus, bridgev2.StatusEventInfoFromEvent(evt))
 }
 
 func (oc *OpenAIConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
