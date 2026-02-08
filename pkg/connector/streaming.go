@@ -1670,8 +1670,10 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 		Str("detected_provider", loginMetadata(oc.UserLogin).Provider).
 		Msg("Provider detection for tool filtering")
 
-	// Add builtin function tools if model supports tool calling
-	if meta.Capabilities.SupportsToolCalling {
+	// Add builtin function tools only for agent chats that support tool calling.
+	// Model-only chats use a simple prompt without tools to avoid context overflow on small models.
+	hasAgent := resolveAgentID(meta) != ""
+	if meta.Capabilities.SupportsToolCalling && hasAgent {
 		enabledTools := oc.enabledBuiltinToolsForModel(ctx, meta)
 		if len(enabledTools) > 0 {
 			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
@@ -3903,8 +3905,10 @@ func (oc *AIClient) buildContinuationParams(
 		}
 	}
 
-	// OpenRouter's Responses API only supports function-type tools.
-	if meta.Capabilities.SupportsToolCalling {
+	// Add builtin function tools only for agent chats that support tool calling.
+	// Model-only chats use a simple prompt without tools to avoid context overflow on small models.
+	agentID := resolveAgentID(meta)
+	if meta.Capabilities.SupportsToolCalling && agentID != "" {
 		enabledTools := oc.enabledBuiltinToolsForModel(ctx, meta)
 		if len(enabledTools) > 0 {
 			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
@@ -3913,7 +3917,6 @@ func (oc *AIClient) buildContinuationParams(
 	}
 
 	// Add boss tools for Boss agent rooms (needed for multi-turn tool use)
-	agentID := resolveAgentID(meta)
 	if hasBossAgent(meta) || agents.IsBossAgent(agentID) {
 		var enabledBoss []*tools.Tool
 		for _, tool := range tools.BossTools() {

@@ -35,16 +35,16 @@ func cronSessionKey(agentID, jobID string) string {
 }
 
 func (oc *AIClient) loadCronSessionStore(ctx context.Context) (cronSessionStore, error) {
-	store, err := oc.cronTextFSStore()
-	if err != nil {
-		return cronSessionStore{Sessions: map[string]cronSessionEntry{}}, err
+	backend := oc.cronStoreBackend()
+	if backend == nil {
+		return cronSessionStore{Sessions: map[string]cronSessionEntry{}}, nil
 	}
-	entry, found, err := store.Read(ctx, cronSessionStorePath)
+	data, found, err := backend.Read(ctx, cronSessionStorePath)
 	if err != nil || !found {
 		return cronSessionStore{Sessions: map[string]cronSessionEntry{}}, nil
 	}
 	var parsed cronSessionStore
-	if err := json.Unmarshal([]byte(entry.Content), &parsed); err != nil {
+	if err := json.Unmarshal(data, &parsed); err != nil {
 		return cronSessionStore{Sessions: map[string]cronSessionEntry{}}, nil
 	}
 	if parsed.Sessions == nil {
@@ -61,12 +61,11 @@ func (oc *AIClient) saveCronSessionStore(ctx context.Context, store cronSessionS
 	if err != nil {
 		return err
 	}
-	textStore, err := oc.cronTextFSStore()
-	if err != nil {
-		return err
+	backend := oc.cronStoreBackend()
+	if backend == nil {
+		return nil
 	}
-	_, err = textStore.Write(ctx, cronSessionStorePath, string(blob))
-	return err
+	return backend.Write(ctx, cronSessionStorePath, blob)
 }
 
 func (oc *AIClient) updateCronSessionEntry(ctx context.Context, sessionKey string, updater func(entry cronSessionEntry) cronSessionEntry) {

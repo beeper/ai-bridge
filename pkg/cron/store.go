@@ -46,7 +46,6 @@ func ResolveCronStorePath(storePath string) string {
 }
 
 // LoadCronStore reads the JSON store, tolerating missing files.
-// On parse failure, it attempts to load from the .bak file.
 func LoadCronStore(ctx context.Context, backend StoreBackend, storePath string) (CronStoreFile, error) {
 	if backend == nil {
 		return emptyCronStore, errors.New("cron store backend not configured")
@@ -58,18 +57,11 @@ func LoadCronStore(ctx context.Context, backend StoreBackend, storePath string) 
 	if !found {
 		return emptyCronStore, nil
 	}
-	if parsed, parseErr := parseCronStoreData(data); parseErr == nil {
-		return parsed, nil
+	parsed, parseErr := parseCronStoreData(data)
+	if parseErr != nil {
+		return emptyCronStore, fmt.Errorf("cron store corrupt: %s: %w", storePath, parseErr)
 	}
-	// Main file corrupt — try .bak
-	bakData, bakFound, bakErr := backend.Read(ctx, storePath+".bak")
-	if bakErr != nil || !bakFound {
-		return emptyCronStore, fmt.Errorf("cron store corrupt and no valid backup: %s", storePath)
-	}
-	if parsed, parseErr := parseCronStoreData(bakData); parseErr == nil {
-		return parsed, nil
-	}
-	return emptyCronStore, fmt.Errorf("cron store and backup both corrupt: %s", storePath)
+	return parsed, nil
 }
 
 func parseCronStoreData(data []byte) (CronStoreFile, error) {
@@ -111,7 +103,7 @@ func parseCronStoreData(data []byte) (CronStoreFile, error) {
 	return parsed, nil
 }
 
-// SaveCronStore writes the JSON store and keeps a .bak copy in virtual storage.
+// SaveCronStore writes the JSON store.
 func SaveCronStore(ctx context.Context, backend StoreBackend, storePath string, store CronStoreFile) error {
 	if backend == nil {
 		return errors.New("cron store backend not configured")
@@ -123,9 +115,5 @@ func SaveCronStore(ctx context.Context, backend StoreBackend, storePath string, 
 	if err != nil {
 		return err
 	}
-	if err := backend.Write(ctx, storePath, payload); err != nil {
-		return err
-	}
-	_ = backend.Write(ctx, storePath+".bak", payload)
-	return nil
+	return backend.Write(ctx, storePath, payload)
 }
