@@ -168,6 +168,17 @@ func dedupeStrings(values []string) []string {
 func resolveImageGenProvider(req imageGenRequest, btc *BridgeToolContext) (imageGenProvider, error) {
 	provider := strings.ToLower(strings.TrimSpace(req.Provider))
 	if provider != "" {
+		// Magic Proxy policy: always prefer OpenRouter (Gemini) over OpenAI for image generation.
+		// Even if the caller asks for provider=openai, route to OpenRouter if available.
+		if btc != nil && btc.Client != nil && btc.Client.UserLogin != nil {
+			loginMeta := loginMetadata(btc.Client.UserLogin)
+			if loginMeta.Provider == ProviderMagicProxy && provider == "openai" {
+				if supportsOpenRouterImageGen(btc) {
+					return imageGenProviderOpenRouter, nil
+				}
+				// Fall back to OpenAI only if OpenRouter is unavailable.
+			}
+		}
 		switch provider {
 		case "openai":
 			if !supportsOpenAIImageGen(btc) {
@@ -202,42 +213,12 @@ func resolveImageGenProvider(req imageGenRequest, btc *BridgeToolContext) (image
 		}
 		return imageGenProviderOpenRouter, nil
 	case ProviderMagicProxy:
-		// Magic Proxy supports OpenRouter + OpenAI paths. Prefer OpenRouter for simple prompts, but
-		// switch to OpenAI when provider-specific controls are used (size/quality/count/etc).
-		openAISupported := supportsOpenAIImageGen(btc)
+		// Magic Proxy supports OpenRouter + OpenAI paths, but we intentionally keep image
+		// generation on OpenRouter (Gemini default) whenever possible.
 		openRouterSupported := supportsOpenRouterImageGen(btc)
-
-		if usesOpenAIParams(req) {
-			if !openAISupported {
-				return "", errors.New("openai image generation is not available for this login")
-			}
-			return imageGenProviderOpenAI, nil
-		}
-
-		switch inferProviderFromModel(req.Model) {
-		case imageGenProviderOpenAI:
-			if openAISupported {
-				return imageGenProviderOpenAI, nil
-			}
-			if openRouterSupported {
-				return imageGenProviderOpenRouter, nil
-			}
-			return "", errors.New("openai image generation is not available for this login")
-		case imageGenProviderOpenRouter:
-			if openRouterSupported {
-				return imageGenProviderOpenRouter, nil
-			}
-			if openAISupported {
-				return imageGenProviderOpenAI, nil
-			}
-			return "", errors.New("openrouter image generation is not available for this login")
-		}
 
 		if openRouterSupported {
 			return imageGenProviderOpenRouter, nil
-		}
-		if openAISupported {
-			return imageGenProviderOpenAI, nil
 		}
 		return "", errors.New("image generation is not available for this login")
 	case ProviderBeeper:
@@ -625,18 +606,58 @@ func generateImagesForRequest(ctx context.Context, btc *BridgeToolContext, req i
 		}
 		return callGeminiImageGen(ctx, btc, baseURL, model, req)
 	case imageGenProviderOpenRouter:
-		if req.Count > 1 {
-			return nil, errors.New("openrouter image generation supports count=1")
-		}
-		if usesOpenAIParams(req) || usesGeminiParams(req) {
+		// OpenRouter only supports prompt+model. We'll emulate count>1 by making multiple calls.
+		if req.Size != "" || req.Quality != "" || req.Style != "" || req.Background != "" || req.OutputFormat != "" || usesGeminiParams(req) {
 			return nil, errors.New("openrouter image generation only supports prompt+model; use provider=openai or provider=gemini for advanced controls")
 		}
 		model := normalizeOpenRouterModel(req.Model)
+		// Magic Proxy policy: if the request looks like it's targeting an OpenAI image model,
+		// force the OpenRouter default (Gemini) instead.
+		if btc != nil && btc.Client != nil && btc.Client.UserLogin != nil {
+			loginMeta := loginMetadata(btc.Client.UserLogin)
+			if loginMeta.Provider == ProviderMagicProxy && inferProviderFromModel(model) == imageGenProviderOpenAI {
+				model = DefaultImageModel
+			}
+		}
 		provider, ok := btc.Client.provider.(*OpenAIProvider)
 		if !ok {
 			return nil, errors.New("image generation requires OpenAI-compatible provider")
 		}
-		return callOpenRouterImageGen(ctx, btc.Client.apiKey, provider.baseURL, req.Prompt, model)
+		count := req.Count
+		if count < 1 {
+			count = 1
+		}
+		// Parallelize multi-image generation to reduce wall time.
+		type genResult struct {
+			images []string
+			err    error
+		}
+		concurrency := 3
+		if count < concurrency {
+			concurrency = count
+		}
+		sem := make(chan struct{}, concurrency)
+		results := make(chan genResult, count)
+		for i := 0; i < count; i++ {
+			sem <- struct{}{}
+			go func() {
+				defer func() { <-sem }()
+				out, err := callOpenRouterImageGen(ctx, btc.Client.apiKey, provider.baseURL, req.Prompt, model)
+				results <- genResult{images: out, err: err}
+			}()
+		}
+		images := make([]string, 0, count)
+		for i := 0; i < count; i++ {
+			r := <-results
+			if r.err != nil {
+				return nil, r.err
+			}
+			images = append(images, r.images...)
+		}
+		if len(images) > count {
+			images = images[:count]
+		}
+		return images, nil
 	default:
 		return nil, errors.New("unsupported image generation provider")
 	}

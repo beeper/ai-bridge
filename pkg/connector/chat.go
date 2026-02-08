@@ -511,6 +511,15 @@ func (oc *AIClient) createNewChat(ctx context.Context, modelID string) (*bridgev
 		return nil, err
 	}
 
+	// Keep model-only chats consistent with "!ai new <model>": raw/non-agentic.
+	meta := portalMeta(portal)
+	if meta != nil && !meta.IsRawMode {
+		meta.IsRawMode = true
+		if err := portal.Save(ctx); err != nil {
+			return nil, fmt.Errorf("failed to save portal raw mode: %w", err)
+		}
+	}
+
 	return &bridgev2.CreateChatResponse{
 		PortalKey:  portal.PortalKey,
 		PortalInfo: chatInfo,
@@ -714,7 +723,7 @@ func (oc *AIClient) handleNewChat(
 ) {
 	runCtx := oc.backgroundContext(ctx)
 
-	const usage = "Usage: !ai new [agent <agent_id> | model <model_id>]"
+	const usage = "Usage: !ai new [<model_id> | agent <agent_id> | model <model_id>]"
 
 	targetType := "current"
 	targetID := ""
@@ -736,8 +745,9 @@ func (oc *AIClient) handleNewChat(
 			return
 		}
 	} else if len(args) == 1 {
-		oc.sendSystemNotice(runCtx, portal, usage)
-		return
+		// Shorthand: !ai new <model_id>
+		targetType = "model"
+		targetID = args[0]
 	} else if len(args) > 1 {
 		oc.sendSystemNotice(runCtx, portal, usage)
 		return
@@ -1027,9 +1037,25 @@ func (oc *AIClient) copyMessagesToChat(
 
 // createNewChatWithModel creates a new chat portal with the specified model and default settings
 func (oc *AIClient) createNewChatWithModel(ctx context.Context, modelID string) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
-	return oc.initPortalForChat(ctx, PortalInitOpts{
+	portal, chatInfo, err := oc.initPortalForChat(ctx, PortalInitOpts{
 		ModelID: modelID,
 	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Model-only rooms are "raw"/non-agentic rooms. This disables directive processing
+	// and prevents media-understanding unions from making the room appear more capable
+	// than the base model.
+	meta := portalMeta(portal)
+	if meta != nil && !meta.IsRawMode {
+		meta.IsRawMode = true
+		if err := portal.Save(ctx); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return portal, chatInfo, nil
 }
 
 // chatInfoFromPortal builds ChatInfo from an existing portal

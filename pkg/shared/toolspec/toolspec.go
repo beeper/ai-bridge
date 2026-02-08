@@ -530,6 +530,10 @@ func ImageGenerateSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
+			"async": map[string]any{
+				"type":        "boolean",
+				"description": "Optional: if true, start image generation in the background and send results to the chat when ready (tool returns immediately).",
+			},
 			"provider": map[string]any{
 				"type":        "string",
 				"description": "Optional: provider override (openai, gemini, openrouter). Defaults to an available provider for this login.",

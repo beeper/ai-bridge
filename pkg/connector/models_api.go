@@ -14,6 +14,12 @@ var OpenClawAliases = map[string]string{
 	"gemini":       "google/gemini-3-pro-preview",
 	"gemini-flash": "google/gemini-3-flash-preview",
 
+	// OpenRouter expects the dotted major.minor model IDs. Map base Anthropic
+	// ids (often used in other APIs) to our canonical OpenRouter IDs.
+	"anthropic/claude-opus-4":   "anthropic/claude-opus-4.5",
+	"anthropic/claude-sonnet-4": "anthropic/claude-sonnet-4.5",
+	"anthropic/claude-haiku-4":  "anthropic/claude-haiku-4.5",
+
 	// OpenClaw model ID variants
 	"anthropic/claude-opus-4-5":   "anthropic/claude-opus-4.5",
 	"anthropic/claude-sonnet-4-5": "anthropic/claude-sonnet-4.5",
@@ -38,6 +44,33 @@ func GetModelDisplayName(modelID string) string {
 	return resolvedID
 }
 
+func stripAnthropicDateSuffix(modelID string) (string, bool) {
+	// Anthropic's canonical model ids often include a date suffix (YYYYMMDD), e.g.
+	// "anthropic/claude-opus-4-20250514". Gateways like OpenRouter typically
+	// expect the non-dated id (e.g. "anthropic/claude-opus-4").
+	//
+	// Only strip when the id:
+	// - is anthropic/claude-...
+	// - ends in "-<8 digits>"
+	lower := strings.ToLower(strings.TrimSpace(modelID))
+	if !strings.HasPrefix(lower, "anthropic/claude-") {
+		return "", false
+	}
+	if len(lower) < 9 {
+		return "", false
+	}
+	suffix := lower[len(lower)-9:]
+	if suffix[0] != '-' {
+		return "", false
+	}
+	for i := 1; i < len(suffix); i++ {
+		if suffix[i] < '0' || suffix[i] > '9' {
+			return "", false
+		}
+	}
+	return lower[:len(lower)-9], true
+}
+
 // ResolveAlias returns the actual model ID for a given alias.
 // If the input is not an alias, it returns the input unchanged.
 func ResolveAlias(modelID string) string {
@@ -51,6 +84,13 @@ func ResolveAlias(modelID string) string {
 	lower := strings.ToLower(normalized)
 	if resolved, ok := OpenClawAliases[lower]; ok {
 		return resolved
+	}
+	if stripped, ok := stripAnthropicDateSuffix(lower); ok {
+		// If the stripped id itself is an alias, resolve it too.
+		if resolved, ok := OpenClawAliases[stripped]; ok {
+			return resolved
+		}
+		return stripped
 	}
 	return normalized
 }
