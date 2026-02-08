@@ -20,11 +20,8 @@ func TestBuildSessionIdentityHint_IncludesRoomIDAndPortalID(t *testing.T) {
 	if got == "" {
 		t.Fatalf("expected non-empty hint")
 	}
-	if !strings.Contains(got, "sessionKey=!room:example.org") {
-		t.Fatalf("expected hint to include sessionKey room id, got %q", got)
-	}
-	if !strings.Contains(got, "portalId=portal-123") {
-		t.Fatalf("expected hint to include portalId, got %q", got)
+	if !strings.Contains(got, "Session: !room:example.org") {
+		t.Fatalf("expected hint to include session id, got %q", got)
 	}
 	if !strings.Contains(got, "agentId=beeper") {
 		t.Fatalf("expected hint to include agentId, got %q", got)

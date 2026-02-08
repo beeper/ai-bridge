@@ -97,7 +97,7 @@ func TestStreamingDirectiveAccumulator_TrailingWhitespace(t *testing.T) {
 	}
 
 	// Final whitespace-only delta — returns nil since TrimSpace is empty
-	result = acc.Consume(" ", true)
+	_ = acc.Consume(" ", true)
 	// This is acceptable: trailing whitespace at end of stream has no next token
 	// to attach to, so it's dropped. The important case is whitespace BETWEEN words.
 }

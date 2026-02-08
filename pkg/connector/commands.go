@@ -647,11 +647,19 @@ func fnRemoveDesktopAPIInstance(ce *commands.Event) {
 		ce.Reply("Desktop API instance '%s' not found", name)
 		return
 	}
-	if _, ok := meta.ServiceTokens.DesktopAPIInstances[name]; !ok {
+	// Stored keys may be in older (non-sanitized) forms; match by normalized name.
+	storedKey := ""
+	for rawKey := range meta.ServiceTokens.DesktopAPIInstances {
+		if normalizeDesktopInstanceName(rawKey) == name {
+			storedKey = rawKey
+			break
+		}
+	}
+	if storedKey == "" {
 		ce.Reply("Desktop API instance '%s' not found", name)
 		return
 	}
-	delete(meta.ServiceTokens.DesktopAPIInstances, name)
+	delete(meta.ServiceTokens.DesktopAPIInstances, storedKey)
 	if name == desktopDefaultInstance {
 		meta.ServiceTokens.DesktopAPI = ""
 	}

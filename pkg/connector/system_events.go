@@ -152,7 +152,7 @@ func snapshotSystemEvents() persistedSystemEvents {
 		}
 		events := make([]persistedEvent, len(entry.queue))
 		for i, evt := range entry.queue {
-			events[i] = persistedEvent{Text: evt.Text, TS: evt.TS}
+			events[i] = persistedEvent(evt)
 		}
 		snap.Queues[key] = &persistedQueue{Events: events, LastText: entry.lastText}
 	}
@@ -211,7 +211,7 @@ func restoreSystemEventsFromDisk(backend cron.StoreBackend, log *zerolog.Logger)
 		}
 		events := make([]SystemEvent, len(pq.Events))
 		for i, pe := range pq.Events {
-			events[i] = SystemEvent{Text: pe.Text, TS: pe.TS}
+			events[i] = SystemEvent(pe)
 		}
 		systemEvents[key] = &systemEventQueue{
 			queue:    events,

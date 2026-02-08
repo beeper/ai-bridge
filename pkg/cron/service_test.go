@@ -473,3 +473,58 @@ func TestOnTimerRearmsWhenRunning(t *testing.T) {
 
 	svc.Stop()
 }
+
+func TestValidateScheduleRejectsInvalidTZ(t *testing.T) {
+	result := ValidateSchedule(CronSchedule{Kind: "cron", Expr: "0 9 * * *", TZ: "American/New_York"})
+	if result.Ok {
+		t.Fatal("expected validation to fail for invalid timezone")
+	}
+	if !contains(result.Message, "not a valid IANA timezone") {
+		t.Fatalf("unexpected message: %s", result.Message)
+	}
+}
+
+func TestValidateScheduleAcceptsValidTZ(t *testing.T) {
+	result := ValidateSchedule(CronSchedule{Kind: "cron", Expr: "0 9 * * *", TZ: "America/New_York"})
+	if !result.Ok {
+		t.Fatalf("expected validation to pass for valid timezone, got: %s", result.Message)
+	}
+}
+
+func TestValidateScheduleAcceptsEmptyTZ(t *testing.T) {
+	result := ValidateSchedule(CronSchedule{Kind: "cron", Expr: "0 9 * * *"})
+	if !result.Ok {
+		t.Fatalf("expected validation to pass for empty timezone, got: %s", result.Message)
+	}
+}
+
+func TestValidateScheduleRejectsInvalidCronExpr(t *testing.T) {
+	result := ValidateSchedule(CronSchedule{Kind: "cron", Expr: "not a cron expr"})
+	if result.Ok {
+		t.Fatal("expected validation to fail for invalid cron expression")
+	}
+	if !contains(result.Message, "Invalid schedule.expr") {
+		t.Fatalf("unexpected message: %s", result.Message)
+	}
+}
+
+func TestValidateScheduleRejectsEmptyCronExpr(t *testing.T) {
+	result := ValidateSchedule(CronSchedule{Kind: "cron", Expr: ""})
+	if result.Ok {
+		t.Fatal("expected validation to fail for empty cron expression")
+	}
+}
+
+func TestValidateScheduleSkipsNonCronKinds(t *testing.T) {
+	// "every" schedule with a bogus TZ should still fail (TZ is validated regardless of kind).
+	result := ValidateSchedule(CronSchedule{Kind: "every", EveryMs: 60000, TZ: "Fake/Zone"})
+	if result.Ok {
+		t.Fatal("expected validation to fail for invalid timezone even on non-cron schedule")
+	}
+
+	// "at" schedule with no TZ should pass.
+	result = ValidateSchedule(CronSchedule{Kind: "at", At: "2025-06-01T00:00:00Z"})
+	if !result.Ok {
+		t.Fatalf("expected validation to pass for at schedule, got: %s", result.Message)
+	}
+}

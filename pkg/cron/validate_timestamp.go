@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	cronlib "github.com/robfig/cron/v3"
 )
 
 const (
@@ -15,6 +17,36 @@ const (
 type TimestampValidationResult struct {
 	Ok      bool
 	Message string
+}
+
+// ValidateSchedule validates the schedule's timezone and cron expression (if applicable).
+func ValidateSchedule(schedule CronSchedule) TimestampValidationResult {
+	kind := strings.TrimSpace(schedule.Kind)
+	if tz := strings.TrimSpace(schedule.TZ); tz != "" {
+		if _, err := time.LoadLocation(tz); err != nil {
+			return TimestampValidationResult{
+				Ok:      false,
+				Message: fmt.Sprintf("Invalid schedule.tz: %q is not a valid IANA timezone (e.g. America/New_York, Europe/London, UTC)", tz),
+			}
+		}
+	}
+	if kind == "cron" {
+		expr := strings.TrimSpace(schedule.Expr)
+		if expr == "" {
+			return TimestampValidationResult{
+				Ok:      false,
+				Message: "schedule.expr is required for kind=cron",
+			}
+		}
+		parser := cronlib.NewParser(cronlib.Minute | cronlib.Hour | cronlib.Dom | cronlib.Month | cronlib.Dow | cronlib.Descriptor)
+		if _, err := parser.Parse(expr); err != nil {
+			return TimestampValidationResult{
+				Ok:      false,
+				Message: fmt.Sprintf("Invalid schedule.expr: %s", err.Error()),
+			}
+		}
+	}
+	return TimestampValidationResult{Ok: true}
 }
 
 // ValidateScheduleTimestamp validates "at" schedules.

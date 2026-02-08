@@ -68,11 +68,7 @@ var (
 )
 
 func normalizeDesktopInstanceName(name string) string {
-	trimmed := strings.TrimSpace(name)
-	if trimmed == "" {
-		return desktopDefaultInstance
-	}
-	return strings.ToLower(trimmed)
+	return sanitizeDesktopInstanceKey(name)
 }
 
 func resolveDesktopInstanceName(instances map[string]DesktopAPIInstance, requested string) (string, error) {

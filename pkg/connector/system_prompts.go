@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
@@ -52,26 +51,17 @@ func buildSessionIdentityHint(portal *bridgev2.Portal, meta *PortalMetadata) str
 		return ""
 	}
 
-	// Prefer Matrix room ID as the canonical sessionKey for tools/user-facing references.
-	roomID := ""
+	// Use a single identifier to avoid confusing the model.
+	session := ""
 	if portal.MXID != "" {
-		roomID = strings.TrimSpace(portal.MXID.String())
+		session = strings.TrimSpace(portal.MXID.String())
 	}
-	portalID := strings.TrimSpace(string(portal.PortalKey.ID))
-
-	if roomID == "" && portalID == "" {
+	if session == "" {
 		return ""
 	}
 
-	parts := make([]string, 0, 6)
-	parts = append(parts, "Session identity:")
-	parts = append(parts, "channel=matrix")
-	if roomID != "" {
-		parts = append(parts, "sessionKey="+roomID)
-	}
-	if portalID != "" && portalID != roomID {
-		parts = append(parts, "portalId="+portalID)
-	}
+	parts := make([]string, 0, 5)
+	parts = append(parts, "Session:", session)
 	if meta != nil && strings.TrimSpace(meta.AgentID) != "" {
 		parts = append(parts, "agentId="+strings.TrimSpace(meta.AgentID))
 	}
@@ -87,8 +77,7 @@ func buildSessionIdentityHint(portal *bridgev2.Portal, meta *PortalMetadata) str
 		parts = append(parts, "Note: this is an internal cron room; the cron runner delivers results to the configured target room.")
 	}
 
-	// Make the labels actionable: they match the `sessions_*` tools (resolveSessionPortal supports both).
-	parts = append(parts, fmt.Sprintf("Use sessionKey (preferred) or portalId to refer to this room in tools (e.g. sessions_send/session_focus)."))
+	parts = append(parts, "Use this session id to refer to the current room in tools when needed.")
 	return strings.Join(parts, " ")
 }
 

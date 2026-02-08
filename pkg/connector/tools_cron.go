@@ -94,6 +94,12 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 				"error":  "payload.kind is required",
 			}).Text(), nil
 		}
+		if result := cron.ValidateSchedule(jobInput.Schedule); !result.Ok {
+			return agenttools.JSONResult(map[string]any{
+				"status": "error",
+				"error":  result.Message,
+			}).Text(), nil
+		}
 		if result := cron.ValidateScheduleTimestamp(jobInput.Schedule, time.Now().UnixMilli()); !result.Ok {
 			return agenttools.JSONResult(map[string]any{
 				"status": "error",
@@ -143,6 +149,12 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 			}
 		}
 		if patch.Schedule != nil {
+			if result := cron.ValidateSchedule(*patch.Schedule); !result.Ok {
+				return agenttools.JSONResult(map[string]any{
+					"status": "error",
+					"error":  result.Message,
+				}).Text(), nil
+			}
 			if result := cron.ValidateScheduleTimestamp(*patch.Schedule, time.Now().UnixMilli()); !result.Ok {
 				return agenttools.JSONResult(map[string]any{
 					"status": "error",
@@ -329,7 +341,7 @@ func validateCronDeliveryTo(to string) error {
 		return nil
 	}
 	if strings.HasPrefix(trimmed, "@") {
-		return errors.New("delivery.to must be a Matrix room id like !room:server (not a user id). Omit delivery.to to route to last active room / default chat.")
+		return errors.New("delivery.to must be a Matrix room id like !room:server (not a user id), omit delivery.to to route to last active room / default chat")
 	}
 	if !strings.HasPrefix(trimmed, "!") {
 		return errors.New("delivery.to must be a Matrix room id like !room:server")
