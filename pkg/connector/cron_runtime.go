@@ -39,11 +39,9 @@ func (oc *AIClient) buildCronService() *cron.CronService {
 		return nil
 	}
 	storePath := resolveCronStorePath(&oc.connector.Config)
-	storeBackend := oc.bridgeStateBackend()
-	if storeBackend == nil {
-		oc.loggerForContext(context.Background()).Warn().Msg("cron: missing virtual store backend")
-		return nil
-	}
+	// Use a lazy wrapper so that each store operation gets a fresh backend
+	// with the current loginID (survives reconnection without stale state).
+	storeBackend := &lazyStoreBackend{client: oc}
 	deps := cron.CronServiceDeps{
 		NowMs:               func() int64 { return time.Now().UnixMilli() },
 		Log:                 cronLogger{log: oc.log},

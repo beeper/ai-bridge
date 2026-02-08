@@ -856,7 +856,7 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 
 	// Back-compat fallback: many clients either don't support or don't render our
 	// ephemeral stream events. If approvals are required, give the user a clear,
-	// timeline-visible way to proceed (/approve or UI card).
+	// timeline-visible way to proceed (!ai approve or UI card).
 	if state.suppressSend {
 		return
 	}
@@ -886,7 +886,7 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 		expires = fmt.Sprintf(" Expires in %d min.", mins)
 	}
 	body := fmt.Sprintf(
-		"Approval required to run %s. Type /approve %s allow|always|deny.%s",
+		"Approval required to run %s. Type !ai approve %s allow|always|deny.%s",
 		toolName,
 		approvalID,
 		expires,
@@ -921,10 +921,10 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 	}
 
 	raw := map[string]any{
-		"body":        body,
-		"msgtype":     event.MsgNotice,
-		BeeperAIKey:   uiMessage,
-		"m.mentions":  map[string]any{},
+		"body":       body,
+		"msgtype":    event.MsgNotice,
+		BeeperAIKey:  uiMessage,
+		"m.mentions": map[string]any{},
 	}
 	if targetEventID != "" {
 		raw["m.relates_to"] = map[string]any{

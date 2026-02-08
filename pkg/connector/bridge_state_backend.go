@@ -85,3 +85,33 @@ func (oc *AIClient) bridgeStateBackend() cron.StoreBackend {
 		loginID:  string(oc.UserLogin.ID),
 	}
 }
+
+// lazyStoreBackend wraps an *AIClient and delegates each call to bridgeStateBackend(),
+// ensuring the backend always uses the current loginID (survives reconnection).
+type lazyStoreBackend struct {
+	client *AIClient
+}
+
+func (l *lazyStoreBackend) Read(ctx context.Context, key string) ([]byte, bool, error) {
+	b := l.client.bridgeStateBackend()
+	if b == nil {
+		return nil, false, errors.New("bridge state store not available")
+	}
+	return b.Read(ctx, key)
+}
+
+func (l *lazyStoreBackend) Write(ctx context.Context, key string, data []byte) error {
+	b := l.client.bridgeStateBackend()
+	if b == nil {
+		return errors.New("bridge state store not available")
+	}
+	return b.Write(ctx, key, data)
+}
+
+func (l *lazyStoreBackend) List(ctx context.Context, prefix string) ([]cron.StoreEntry, error) {
+	b := l.client.bridgeStateBackend()
+	if b == nil {
+		return nil, errors.New("bridge state store not available")
+	}
+	return b.List(ctx, prefix)
+}

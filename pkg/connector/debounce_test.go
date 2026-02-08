@@ -264,11 +264,14 @@ func TestShouldDebounce_Command(t *testing.T) {
 	if ShouldDebounce(evt, "  !command") {
 		t.Error("Commands with leading whitespace should not be debounced")
 	}
-	if ShouldDebounce(evt, "/status") {
-		t.Error("Slash commands should not be debounced")
+	if !ShouldDebounce(evt, "/status") {
+		t.Error("Slash-prefixed messages should be debounced (slash commands are not supported)")
 	}
-	if ShouldDebounce(evt, "  /command") {
-		t.Error("Slash commands with leading whitespace should not be debounced")
+	if !ShouldDebounce(evt, "  /command") {
+		t.Error("Slash-prefixed messages should be debounced (slash commands are not supported)")
+	}
+	if ShouldDebounce(evt, "stop") {
+		t.Error("Abort trigger should not be debounced")
 	}
 }
 

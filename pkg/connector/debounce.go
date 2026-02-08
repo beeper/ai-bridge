@@ -2,7 +2,6 @@ package connector
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -169,6 +168,9 @@ func ShouldDebounce(evt *event.Event, body string) bool {
 	// Don't debounce commands (starting with !)
 	trimmed := strings.TrimSpace(body)
 	if strings.HasPrefix(trimmed, "!") {
+		return false
+	}
+	if isAbortTrigger(trimmed) {
 		return false
 	}
 

@@ -389,6 +389,7 @@ func fnCommands(ce *commands.Event) {
 	ce.Reply(
 		"AI command groups (preferred forms):\n\n" +
 			"Core chat:\n" +
+			"- `!ai status`\n" +
 			"- `!ai config`\n" +
 			"- `!ai model [model]`\n" +
 			"- `!ai temp [0-2]`\n" +
@@ -399,8 +400,19 @@ func fnCommands(ce *commands.Event) {
 			"- `!ai tools [on|off] [tool]`\n" +
 			"- `!ai typing [never|instant|thinking|message|off|reset|interval <seconds>]`\n" +
 			"- `!ai debounce [ms|off|default]`\n\n" +
+			"Controls:\n" +
+			"- `!ai think off|minimal|low|medium|high|xhigh`\n" +
+			"- `!ai verbose on|off|full`\n" +
+			"- `!ai reasoning off|on|low|medium|high|xhigh`\n" +
+			"- `!ai elevated off|on|ask|full`\n" +
+			"- `!ai activation mention|always` (group chats)\n" +
+			"- `!ai send on|off|inherit`\n" +
+			"- `!ai queue status|reset|<mode> [debounce:<dur>] [cap:<n>] [drop:<old|new|summarize>]`\n\n" +
 			"Session actions:\n" +
+			"- `!ai approve <approvalId> <allow|always|deny> [reason]`\n" +
 			"- `!ai new` — New chat of the same type\n" +
+			"- `!ai reset` — Reset this session/thread\n" +
+			"- `!ai stop` — Abort the current run\n" +
 			"- `!ai fork`\n" +
 			"- `!ai regenerate`\n" +
 			"- `!ai title [text]`\n" +

@@ -250,397 +250,27 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 	}
 	mentionRegexes := buildMentionRegexes(&oc.connector.Config, agentDef)
 
+	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
+
 	commandBody := rawBody
 	if isGroup {
 		commandBody = stripMentionPatterns(commandBody, mentionRegexes)
 	}
-	if !commandAuthorized && isControlCommandMessage(commandBody) {
-		logCtx.Debug().Msg("Ignoring control command from unauthorized sender")
+	if !commandAuthorized && isAbortTrigger(commandBody) {
+		logCtx.Debug().Msg("Ignoring abort trigger from unauthorized sender")
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 	}
-
-	inlineDirs := inlineDirectives{cleaned: rawBody}
-	if commandAuthorized {
-		inlineDirs = parseInlineDirectives(rawBody)
-	}
-	rawBody = strings.TrimSpace(inlineDirs.cleaned)
-
-	directiveBody := rawBody
-	if isGroup {
-		directiveBody = stripMentionPatterns(directiveBody, mentionRegexes)
-	}
-	directiveOnly := commandAuthorized && inlineDirs.hasAnyDirective() && strings.TrimSpace(directiveBody) == ""
-	if inlineDirs.hasAnyDirective() {
-		logCtx.Debug().
-			Bool("directive_only", directiveOnly).
-			Bool("has_status", inlineDirs.hasStatus).
-			Msg("Parsed inline directives")
-	}
-
-	queueDirective := inlineDirs.queue
-	if !commandAuthorized {
-		queueDirective = QueueDirective{Cleaned: rawBody}
-	}
-	inlineMode := QueueMode("")
-	inlineOpts := QueueInlineOptions{}
-	if !queueDirective.QueueReset {
-		if queueDirective.QueueMode != "" {
-			inlineMode = queueDirective.QueueMode
-		}
-		inlineOpts = QueueInlineOptions{
-			DebounceMs: queueDirective.DebounceMs,
-			Cap:        queueDirective.Cap,
-			DropPolicy: queueDirective.DropPolicy,
-		}
-	}
-	queueSettings, _, storeRef, sessionKey := oc.resolveQueueSettingsForPortal(ctx, portal, meta, inlineMode, inlineOpts)
-	if commandAuthorized && queueDirective.HasDirective {
-		var queueErrors []string
-		if queueDirective.HasDebounce && queueDirective.DebounceMs == nil {
-			queueErrors = append(queueErrors, fmt.Sprintf(
-				"Invalid debounce \"%s\". Use ms/s/m (e.g. debounce:1500ms, debounce:2s).",
-				queueDirective.RawDebounce,
-			))
-		}
-		if queueDirective.HasCap && queueDirective.Cap == nil {
-			queueErrors = append(queueErrors, fmt.Sprintf(
-				"Invalid cap \"%s\". Use a positive integer (e.g. cap:10).",
-				queueDirective.RawCap,
-			))
-		}
-		if queueDirective.HasDrop && queueDirective.DropPolicy == nil {
-			queueErrors = append(queueErrors, fmt.Sprintf(
-				"Invalid drop policy \"%s\". Use drop:old, drop:new, or drop:summarize.",
-				queueDirective.RawDrop,
-			))
-		}
-		if len(queueErrors) > 0 {
-			oc.sendSystemNotice(ctx, portal, strings.Join(queueErrors, " "))
-			if directiveOnly {
-				return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-			}
-		}
-	}
-	if directiveOnly {
-		var responseLines []string
-		metaChanged := false
-
-		if inlineDirs.invalidThink {
-			oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
-				"Unrecognized thinking level \"%s\". Valid: off|minimal|low|medium|high|xhigh.",
-				inlineDirs.rawThink,
-			))
-			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-		}
-		if inlineDirs.hasThink {
-			if inlineDirs.thinkLevel == "" {
-				current := oc.defaultThinkLevel(meta)
-				responseLines = append(responseLines, fmt.Sprintf("Thinking: %s", current))
-			} else {
-				applyThinkingLevel(meta, inlineDirs.thinkLevel)
-				metaChanged = true
-				responseLines = append(responseLines, formatThinkingAck(inlineDirs.thinkLevel))
-			}
-		}
-
-		if inlineDirs.invalidVerbose {
-			oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
-				"Unrecognized verbose level \"%s\". Valid: on|off|full.",
-				inlineDirs.rawVerbose,
-			))
-			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-		}
-		if inlineDirs.hasVerbose {
-			if inlineDirs.verboseLevel == "" {
-				current := meta.VerboseLevel
-				if current == "" {
-					current = "off"
-				}
-				responseLines = append(responseLines, fmt.Sprintf("Verbosity: %s", current))
-			} else {
-				meta.VerboseLevel = inlineDirs.verboseLevel
-				metaChanged = true
-				responseLines = append(responseLines, formatVerboseAck(inlineDirs.verboseLevel))
-			}
-		}
-
-		if inlineDirs.invalidReasoning {
-			oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
-				"Unrecognized reasoning level \"%s\". Valid: off|on|low|medium|high|xhigh.",
-				inlineDirs.rawReasoning,
-			))
-			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-		}
-		if inlineDirs.hasReasoning {
-			if inlineDirs.reasoningLevel == "" {
-				current := meta.ReasoningEffort
-				if current == "" {
-					if meta.EmitThinking {
-						current = "on"
-					} else {
-						current = "off"
-					}
-				}
-				responseLines = append(responseLines, fmt.Sprintf("Reasoning: %s", current))
-			} else {
-				applyReasoningLevel(meta, inlineDirs.reasoningLevel)
-				metaChanged = true
-				responseLines = append(responseLines, formatReasoningAck(inlineDirs.reasoningLevel))
-			}
-		}
-
-		if inlineDirs.invalidElevated {
-			oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
-				"Unrecognized elevated level \"%s\". Valid: off|on|ask|full.",
-				inlineDirs.rawElevated,
-			))
-			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-		}
-		if inlineDirs.hasElevated {
-			if inlineDirs.elevatedLevel == "" {
-				current := meta.ElevatedLevel
-				if current == "" {
-					current = "off"
-				}
-				responseLines = append(responseLines, fmt.Sprintf("Elevated access: %s", current))
-			} else {
-				meta.ElevatedLevel = inlineDirs.elevatedLevel
-				metaChanged = true
-				responseLines = append(responseLines, formatElevatedAck(inlineDirs.elevatedLevel))
-			}
-		}
-
-		if inlineDirs.hasModel {
-			modelAck, modelChanged, modelErr := oc.applyModelDirective(ctx, portal, meta, inlineDirs.rawModel, true)
-			if modelErr != "" {
-				oc.sendSystemNotice(ctx, portal, modelErr)
-				return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-			}
-			if modelAck != "" {
-				responseLines = append(responseLines, modelAck)
-			}
-			metaChanged = metaChanged || modelChanged
-		}
-
-		if queueDirective.HasDirective {
-			wantsStatus := queueDirective.QueueMode == "" && !queueDirective.QueueReset && !queueDirective.HasOptions
-			if wantsStatus {
-				responseLines = append(responseLines, buildQueueStatusLine(queueSettings))
-			} else {
-				if queueDirective.QueueReset {
-					if sessionKey != "" {
-						oc.updateSessionEntry(ctx, storeRef, sessionKey, func(entry sessionEntry) sessionEntry {
-							entry.QueueMode = ""
-							entry.QueueDebounceMs = nil
-							entry.QueueCap = nil
-							entry.QueueDrop = ""
-							entry.UpdatedAt = time.Now().UnixMilli()
-							return entry
-						})
-					}
-					oc.clearPendingQueue(portal.MXID)
-				} else if sessionKey != "" {
-					oc.updateSessionEntry(ctx, storeRef, sessionKey, func(entry sessionEntry) sessionEntry {
-						if queueDirective.QueueMode != "" {
-							entry.QueueMode = string(queueDirective.QueueMode)
-						}
-						if queueDirective.DebounceMs != nil {
-							entry.QueueDebounceMs = queueDirective.DebounceMs
-						}
-						if queueDirective.Cap != nil {
-							entry.QueueCap = queueDirective.Cap
-						}
-						if queueDirective.DropPolicy != nil {
-							entry.QueueDrop = string(*queueDirective.DropPolicy)
-						}
-						entry.UpdatedAt = time.Now().UnixMilli()
-						return entry
-					})
-				}
-				queueSettings, _, _, _ = oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
-				ack := buildQueueDirectiveAck(queueDirective)
-				if strings.TrimSpace(ack) == "" {
-					ack = "OK."
-				}
-				responseLines = append(responseLines, ack)
-			}
-		}
-
-		if metaChanged {
-			oc.savePortalQuiet(ctx, portal, "directive change")
-		}
-
-		statusText := ""
-		if inlineDirs.hasStatus {
-			statusText = oc.buildStatusText(ctx, portal, meta, isGroup, queueSettings)
-		}
-		if statusText != "" {
-			responseLines = append(responseLines, statusText)
-		}
-		if len(responseLines) == 0 && inlineDirs.hasAnyDirective() {
-			responseLines = append(responseLines, "OK.")
-		}
-		if len(responseLines) > 0 {
-			oc.sendSystemNotice(ctx, portal, strings.Join(responseLines, "\n"))
-		}
+	if commandAuthorized && isAbortTrigger(commandBody) {
+		stopped := oc.abortRoom(ctx, portal, meta)
+		oc.sendSystemNotice(ctx, portal, formatAbortNotice(stopped))
+		logCtx.Debug().Msg("Abort trigger handled")
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 	}
 
 	runMeta := meta
 	runCtx := ctx
-	var inlineResponses []string
-	if commandAuthorized && inlineDirs.hasAnyDirective() {
-		if inlineDirs.invalidThink {
-			inlineResponses = append(inlineResponses, fmt.Sprintf(
-				"Unrecognized thinking level \"%s\". Valid: off|minimal|low|medium|high|xhigh.",
-				inlineDirs.rawThink,
-			))
-		} else if inlineDirs.hasThink && inlineDirs.thinkLevel != "" {
-			if runMeta == meta {
-				runMeta = clonePortalMetadata(meta)
-			}
-			applyThinkingLevel(runMeta, inlineDirs.thinkLevel)
-			inlineResponses = append(inlineResponses, formatThinkingAck(inlineDirs.thinkLevel))
-		}
-
-		if inlineDirs.invalidVerbose {
-			inlineResponses = append(inlineResponses, fmt.Sprintf(
-				"Unrecognized verbose level \"%s\". Valid: on|off|full.",
-				inlineDirs.rawVerbose,
-			))
-		} else if inlineDirs.hasVerbose && inlineDirs.verboseLevel != "" {
-			if runMeta == meta {
-				runMeta = clonePortalMetadata(meta)
-			}
-			runMeta.VerboseLevel = inlineDirs.verboseLevel
-			inlineResponses = append(inlineResponses, formatVerboseAck(inlineDirs.verboseLevel))
-		}
-
-		if inlineDirs.invalidReasoning {
-			inlineResponses = append(inlineResponses, fmt.Sprintf(
-				"Unrecognized reasoning level \"%s\". Valid: off|on|low|medium|high|xhigh.",
-				inlineDirs.rawReasoning,
-			))
-		} else if inlineDirs.hasReasoning && inlineDirs.reasoningLevel != "" {
-			if runMeta == meta {
-				runMeta = clonePortalMetadata(meta)
-			}
-			applyReasoningLevel(runMeta, inlineDirs.reasoningLevel)
-			inlineResponses = append(inlineResponses, formatReasoningAck(inlineDirs.reasoningLevel))
-		}
-
-		if inlineDirs.invalidElevated {
-			inlineResponses = append(inlineResponses, fmt.Sprintf(
-				"Unrecognized elevated level \"%s\". Valid: off|on|ask|full.",
-				inlineDirs.rawElevated,
-			))
-		} else if inlineDirs.hasElevated && inlineDirs.elevatedLevel != "" {
-			if runMeta == meta {
-				runMeta = clonePortalMetadata(meta)
-			}
-			runMeta.ElevatedLevel = inlineDirs.elevatedLevel
-			inlineResponses = append(inlineResponses, formatElevatedAck(inlineDirs.elevatedLevel))
-		}
-
-		if inlineDirs.hasModel && strings.TrimSpace(inlineDirs.rawModel) != "" {
-			if runMeta == meta {
-				runMeta = clonePortalMetadata(meta)
-			}
-			ack, modelChanged, modelErr := oc.applyModelDirective(ctx, portal, runMeta, inlineDirs.rawModel, false)
-			if modelErr != "" {
-				inlineResponses = append(inlineResponses, modelErr)
-			} else {
-				if ack != "" {
-					inlineResponses = append(inlineResponses, ack)
-				}
-				if modelChanged {
-					runCtx = withModelOverride(runCtx, oc.effectiveModel(runMeta))
-				}
-			}
-		}
-
-		if queueDirective.HasDirective {
-			wantsStatus := queueDirective.QueueMode == "" && !queueDirective.QueueReset && !queueDirective.HasOptions
-			if wantsStatus {
-				inlineResponses = append(inlineResponses, buildQueueStatusLine(queueSettings))
-			} else if !queueDirective.QueueReset {
-				ack := buildQueueDirectiveAck(queueDirective)
-				if strings.TrimSpace(ack) == "" {
-					ack = "OK."
-				}
-				inlineResponses = append(inlineResponses, ack)
-			}
-		}
-
-		if inlineDirs.hasStatus {
-			inlineResponses = append(inlineResponses, oc.buildStatusText(ctx, portal, meta, isGroup, queueSettings))
-		}
-	}
-
-	commandBody = rawBody
-	if isGroup {
-		commandBody = stripMentionPatterns(commandBody, mentionRegexes)
-	}
-	if commandAuthorized {
-		if cmd, ok := parseInboundCommand(commandBody); ok {
-			logCtx.Debug().Str("command", cmd.Name).Bool("has_args", strings.TrimSpace(cmd.Args) != "").Msg("Inbound command parsed")
-			switch cmd.Name {
-			case "stop", "abort", "interrupt", "exit", "wait", "esc":
-				stopped := oc.abortRoom(ctx, portal, meta)
-				oc.sendSystemNotice(ctx, portal, formatAbortNotice(stopped))
-				logCtx.Debug().Str("command", cmd.Name).Msg("Abort command handled")
-				return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-			default:
-				result := oc.handleInboundCommand(ctx, portal, meta, msg.Event.Sender, isGroup, queueSettings, cmd)
-				if result.handled {
-					if strings.TrimSpace(result.response) != "" {
-						oc.sendSystemNotice(ctx, portal, result.response)
-					}
-					logCtx.Debug().Str("command", cmd.Name).Msg("Inbound command handled")
-					return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-				}
-				if strings.TrimSpace(result.newBody) != "" {
-					rawBody = strings.TrimSpace(result.newBody)
-				}
-			}
-		} else if isAbortTrigger(commandBody) {
-			stopped := oc.abortRoom(ctx, portal, meta)
-			oc.sendSystemNotice(ctx, portal, formatAbortNotice(stopped))
-			logCtx.Debug().Msg("Abort trigger handled")
-			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-		}
-	}
-
-	if commandAuthorized {
-		cleaned := rawBody
-		foundHelp := false
-		cleaned, foundHelp = extractInlineShortcut(cleaned, []string{"help"})
-		foundCommands := false
-		if cleaned != "" {
-			cleaned, foundCommands = extractInlineShortcut(cleaned, []string{"commands"})
-		}
-		foundWhoami := false
-		if cleaned != "" {
-			cleaned, foundWhoami = extractInlineShortcut(cleaned, []string{"whoami", "id"})
-		}
-		rawBody = strings.TrimSpace(cleaned)
-		if foundHelp || foundCommands {
-			helpText := "Commands: /status, /context, /tools, /cron, /typing, /model, /think, /verbose, /reasoning, /elevated, /activation, /send, /queue, /new, /reset, /stop"
-			inlineResponses = append(inlineResponses, helpText)
-		}
-		if foundWhoami {
-			inlineResponses = append(inlineResponses, fmt.Sprintf("You are %s.", msg.Event.Sender.String()))
-		}
-	}
-
-	if len(inlineResponses) > 0 {
-		oc.sendSystemNotice(ctx, portal, strings.Join(inlineResponses, "\n"))
-	}
 
 	if rawBody == "" {
-		if len(inlineResponses) > 0 {
-			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-		}
 		return nil, unsupportedMessageStatus(errors.New("empty messages are not supported"))
 	}
 
@@ -1265,12 +895,12 @@ func (oc *AIClient) handleMediaMessage(
 				description, err := oc.analyzeImageWithModel(ctx, visionModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
 				if err != nil {
 					oc.loggerForContext(ctx).Warn().Err(err).Msg("Image understanding failed")
-					return nil, messageSendStatusError(err, "Couldn't analyze the image. Try again, or switch to a vision-capable model with /model.", "")
+					return nil, messageSendStatusError(err, "Couldn't analyze the image. Try again, or switch to a vision-capable model with !ai model.", "")
 				}
 
 				combined := buildImageUnderstandingMessage(caption, hasUserCaption, description)
 				if combined == "" {
-					return nil, messageSendStatusError(errors.New("image understanding produced empty result"), "Couldn't analyze the image. Try again, or switch to a vision-capable model with /model.", "")
+					return nil, messageSendStatusError(errors.New("image understanding produced empty result"), "Couldn't analyze the image. Try again, or switch to a vision-capable model with !ai model.", "")
 				}
 				return dispatchTextOnly(combined)
 			}
@@ -1284,19 +914,19 @@ func (oc *AIClient) handleMediaMessage(
 				transcript, err := oc.analyzeAudioWithModel(ctx, audioModel, string(mediaURL), mimeType, encryptedFile, analysisPrompt)
 				if err != nil {
 					oc.loggerForContext(ctx).Warn().Err(err).Msg("Audio understanding failed")
-					return nil, messageSendStatusError(err, "Couldn't analyze the audio. Try again, or switch to an audio-capable model with /model.", "")
+					return nil, messageSendStatusError(err, "Couldn't analyze the audio. Try again, or switch to an audio-capable model with !ai model.", "")
 				}
 
 				combined := buildAudioUnderstandingMessage(caption, hasUserCaption, transcript)
 				if combined == "" {
-					return nil, messageSendStatusError(errors.New("audio understanding produced empty result"), "Couldn't analyze the audio. Try again, or switch to an audio-capable model with /model.", "")
+					return nil, messageSendStatusError(errors.New("audio understanding produced empty result"), "Couldn't analyze the audio. Try again, or switch to an audio-capable model with !ai model.", "")
 				}
 				return dispatchTextOnly(combined)
 			}
 		}
 
 		return nil, unsupportedMessageStatus(fmt.Errorf(
-			"current model (%s) does not support %s; switch to a capable model using /model",
+			"current model (%s) does not support %s; switch to a capable model using !ai model",
 			oc.effectiveModel(meta), config.capabilityName,
 		))
 	}
@@ -1496,30 +1126,43 @@ type ackReactionEntry struct {
 var (
 	ackReactionStore   = make(map[id.RoomID]map[id.EventID]ackReactionEntry)
 	ackReactionStoreMu sync.Mutex
+	ackCleanupStop     = make(chan struct{})
+	ackCleanupOnce     sync.Once
 )
 
 func init() {
 	go cleanupAckReactionStore()
 }
 
+func stopAckReactionCleanup() {
+	ackCleanupOnce.Do(func() {
+		close(ackCleanupStop)
+	})
+}
+
 func cleanupAckReactionStore() {
 	ticker := time.NewTicker(ackReactionCleanupInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		cutoff := time.Now().Add(-ackReactionTTL)
-		ackReactionStoreMu.Lock()
-		for roomID, roomReactions := range ackReactionStore {
-			for sourceEventID, entry := range roomReactions {
-				if entry.storedAt.Before(cutoff) {
-					delete(roomReactions, sourceEventID)
+	for {
+		select {
+		case <-ticker.C:
+			cutoff := time.Now().Add(-ackReactionTTL)
+			ackReactionStoreMu.Lock()
+			for roomID, roomReactions := range ackReactionStore {
+				for sourceEventID, entry := range roomReactions {
+					if entry.storedAt.Before(cutoff) {
+						delete(roomReactions, sourceEventID)
+					}
+				}
+				if len(roomReactions) == 0 {
+					delete(ackReactionStore, roomID)
 				}
 			}
-			if len(roomReactions) == 0 {
-				delete(ackReactionStore, roomID)
-			}
+			ackReactionStoreMu.Unlock()
+		case <-ackCleanupStop:
+			return
 		}
-		ackReactionStoreMu.Unlock()
 	}
 }
 
@@ -1622,7 +1265,7 @@ func (oc *AIClient) removeAckReaction(ctx context.Context, portal *bridgev2.Port
 	}
 }
 
-// handleToolsCommand handles the /tools command for per-tool management
+// handleToolsCommand handles the !ai tools command for per-tool management
 func (oc *AIClient) handleToolsCommand(
 	ctx context.Context,
 	portal *bridgev2.Portal,
@@ -1647,8 +1290,8 @@ func (oc *AIClient) handleToolsCommand(
 		oc.sendSystemNotice(runCtx, portal, "Per-tool toggles aren't supported anymore. Update tool policy in agent settings or the global tool_policy config.")
 	default:
 		oc.sendSystemNotice(runCtx, portal, "Usage:\n"+
-			"• /tools - Show current tool status\n"+
-			"• /tools list - List available tools\n"+
+			"• !ai tools - Show current tool status\n"+
+			"• !ai tools list - List available tools\n"+
 			"Tool toggles are managed by tool policy.")
 	}
 }

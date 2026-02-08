@@ -86,28 +86,49 @@ func (m *MemorySearchManager) sync(ctx context.Context, sessionKey string, force
 	return m.syncIncremental(ctx, sessionKey, generation)
 }
 
-// syncFullReindex wraps a full reindex in a database transaction for atomicity.
-// If any step fails, the transaction rolls back and the existing index remains intact.
-// Vector table operations (separate sql.Conn) are best-effort outside the transaction.
+// syncFullReindex performs a full reindex in two phases:
+//   - Phase 1 (outside txn): read files, chunk content, compute embeddings via API calls.
+//   - Phase 2 (inside DoTxn): write pre-computed chunks + embeddings to DB (milliseconds).
+//
+// This split avoids holding the single SQLite connection during long embedding API calls.
 func (m *MemorySearchManager) syncFullReindex(ctx context.Context, sessionKey, generation string) error {
-	// Collect vector IDs to clean up after commit (vector table uses separate conn).
-	var vectorCleanupIDs []string
+	// Phase 1: prepare all content and embeddings outside the transaction.
+	prepared, activePaths, err := m.prepareMemoryFiles(ctx, true, generation)
+	if err != nil {
+		return err
+	}
 
-	err := m.db.DoTxn(ctx, nil, func(txCtx context.Context) error {
-		if err := m.indexMemoryFiles(txCtx, true, generation); err != nil {
+	var sessionPrepared []*preparedContent
+	if m.cfg.Experimental.SessionMemory && hasSource(m.cfg.Sources, "sessions") {
+		sessionPrepared, err = m.prepareSessions(ctx, true, sessionKey, generation)
+		if err != nil {
 			return err
 		}
+	}
+
+	// Phase 2: write everything inside a transaction (fast — no API calls).
+	var vectorCleanupIDs []string
+	err = m.db.DoTxn(ctx, nil, func(txCtx context.Context) error {
+		for _, pc := range prepared {
+			if err := m.writeContent(txCtx, pc); err != nil {
+				return err
+			}
+		}
+		if err := m.removeStaleMemoryChunks(txCtx, activePaths, generation); err != nil {
+			return err
+		}
+		if m.syncProgress != nil {
+			m.syncProgress(len(prepared), len(prepared), "cleanup")
+		}
 		if m.cfg.Experimental.SessionMemory && hasSource(m.cfg.Sources, "sessions") {
-			if err := m.syncSessions(txCtx, true, sessionKey, generation); err != nil {
+			if err := m.writeSessions(txCtx, true, sessionKey, sessionPrepared); err != nil {
 				return err
 			}
 		}
 		if err := m.updateMeta(txCtx, generation); err != nil {
 			return err
 		}
-		// Collect old-generation chunk IDs for vector cleanup (within txn so we see consistent state).
 		vectorCleanupIDs = m.collectOldGenerationIDs(txCtx, generation)
-		// Delete old-generation chunks and FTS entries within the transaction.
 		m.deleteOldGenerations(txCtx, generation)
 		return nil
 	})
@@ -115,7 +136,7 @@ func (m *MemorySearchManager) syncFullReindex(ctx context.Context, sessionKey, g
 		return err
 	}
 
-	// Transaction committed successfully — update in-memory state.
+	// Transaction committed — update in-memory state.
 	m.indexGen = generation
 	if hasSource(m.cfg.Sources, "memory") {
 		m.dirty = false
@@ -298,6 +319,66 @@ func (m *MemorySearchManager) indexMemoryFiles(ctx context.Context, force bool, 
 	return m.removeStaleMemoryChunks(ctx, activePaths, generation)
 }
 
+// prepareMemoryFiles reads files and computes embeddings without writing to the DB.
+// Returns prepared content ready for writeContent, plus activePaths for stale chunk cleanup.
+func (m *MemorySearchManager) prepareMemoryFiles(ctx context.Context, force bool, generation string) ([]*preparedContent, map[string]textfs.FileEntry, error) {
+	store := textfs.NewStore(m.db, m.bridgeID, m.loginID, m.agentID)
+	entries, err := store.List(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	extraPaths := normalizeExtraPaths(m.cfg.ExtraPaths)
+	activePaths := make(map[string]textfs.FileEntry)
+
+	for _, entry := range entries {
+		path := strings.TrimSpace(entry.Path)
+		if path == "" {
+			continue
+		}
+		if !strings.HasSuffix(strings.ToLower(path), ".md") {
+			continue
+		}
+		if !textfs.IsMemoryPath(path) && !isExtraPath(path, extraPaths) {
+			continue
+		}
+		activePaths[path] = entry
+	}
+
+	m.log.Debug().
+		Int("files", len(activePaths)).
+		Bool("needsFullReindex", force).
+		Bool("batch", m.batchEnabled).
+		Int("concurrency", m.indexConcurrency()).
+		Msg("memory sync: preparing memory files (embeddings)")
+
+	total := len(activePaths)
+	completed := 0
+	var prepared []*preparedContent
+	for _, entry := range activePaths {
+		source := "memory"
+		needs, err := m.needsFileIndex(ctx, entry, source, generation)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !force && !needs {
+			completed++
+			continue
+		}
+		if m.syncProgress != nil {
+			m.syncProgress(completed, total, entry.Path)
+		}
+		pc, err := m.prepareContent(ctx, entry.Path, source, entry.Content, generation)
+		if err != nil {
+			return nil, nil, err
+		}
+		if pc != nil {
+			prepared = append(prepared, pc)
+		}
+		completed++
+	}
+	return prepared, activePaths, nil
+}
+
 func (m *MemorySearchManager) indexConcurrency() int {
 	if m == nil {
 		return 1
@@ -333,7 +414,20 @@ func (m *MemorySearchManager) needsFileIndex(ctx context.Context, entry textfs.F
 	return false, nil
 }
 
-func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, content, generation string) error {
+// preparedContent holds pre-computed chunks and embeddings for a single content path.
+// Embeddings are computed outside the DB transaction to avoid holding the single
+// SQLite connection during long API calls.
+type preparedContent struct {
+	Path       string
+	Source     string
+	Generation string
+	Chunks     []memory.Chunk
+	Embeddings [][]float64
+}
+
+// prepareContent chunks content and computes embeddings (may call external APIs).
+// No DB writes happen here — safe to call outside a transaction.
+func (m *MemorySearchManager) prepareContent(ctx context.Context, path, source, content, generation string) (*preparedContent, error) {
 	cleanContent := normalizeNewlines(content)
 	chunks := memory.ChunkMarkdown(cleanContent, m.cfg.Chunking.Tokens, m.cfg.Chunking.Overlap)
 	filtered := chunks[:0]
@@ -345,7 +439,7 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 	}
 	chunks = filtered
 	if len(chunks) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	var embeddings [][]float64
@@ -353,18 +447,34 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 		var err error
 		embeddings, err = m.embedChunks(ctx, chunks, path, source)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		embeddings = make([][]float64, len(chunks))
 	}
+
+	return &preparedContent{
+		Path:       path,
+		Source:     source,
+		Generation: generation,
+		Chunks:     chunks,
+		Embeddings: embeddings,
+	}, nil
+}
+
+// writeContent writes pre-computed chunks and embeddings to the database.
+// This is fast (milliseconds) and safe to call inside a transaction.
+func (m *MemorySearchManager) writeContent(ctx context.Context, pc *preparedContent) error {
+	if pc == nil || len(pc.Chunks) == 0 {
+		return nil
+	}
 	now := time.Now().UnixMilli()
 	vectorReady := false
-	newIDs := make([]string, 0, len(chunks))
-	for i, chunk := range chunks {
+	newIDs := make([]string, 0, len(pc.Chunks))
+	for i, chunk := range pc.Chunks {
 		embedding := []float64{}
-		if i < len(embeddings) {
-			embedding = embeddings[i]
+		if i < len(pc.Embeddings) {
+			embedding = pc.Embeddings[i]
 		}
 		if m.cfg.Store.Vector.Enabled && m.vectorDims == 0 && len(embedding) > 0 {
 			m.vectorDims = len(embedding)
@@ -373,13 +483,13 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 			vectorReady = m.ensureVectorTable(ctx, len(embedding))
 		}
 		embeddingJSON, _ := json.Marshal(embedding)
-		chunkID := buildChunkID(generation)
+		chunkID := buildChunkID(pc.Generation)
 		newIDs = append(newIDs, chunkID)
 		_, err := m.db.Exec(ctx,
 			`INSERT INTO ai_memory_chunks
              (id, bridge_id, login_id, agent_id, path, source, start_line, end_line, hash, model, text, embedding, updated_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-			chunkID, m.bridgeID, m.loginID, m.agentID, path, source, chunk.StartLine, chunk.EndLine, chunk.Hash,
+			chunkID, m.bridgeID, m.loginID, m.agentID, pc.Path, pc.Source, chunk.StartLine, chunk.EndLine, chunk.Hash,
 			m.status.Model, chunk.Text, string(embeddingJSON), now,
 		)
 		if err != nil {
@@ -397,15 +507,26 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 				`INSERT INTO ai_memory_chunks_fts
                  (text, id, path, source, model, start_line, end_line, bridge_id, login_id, agent_id)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-				chunk.Text, chunkID, path, source, m.status.Model, chunk.StartLine, chunk.EndLine, m.bridgeID, m.loginID, m.agentID,
+				chunk.Text, chunkID, pc.Path, pc.Source, m.status.Model, chunk.StartLine, chunk.EndLine, m.bridgeID, m.loginID, m.agentID,
 			)
 		}
 	}
-	if err := m.deletePathChunks(ctx, path, source, generation, newIDs); err != nil {
+	if err := m.deletePathChunks(ctx, pc.Path, pc.Source, pc.Generation, newIDs); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+// indexContent chunks content, computes embeddings, and writes to the database.
+// For code paths that don't need the two-phase split (e.g., incremental sync),
+// this is a convenient wrapper around prepareContent + writeContent.
+func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, content, generation string) error {
+	pc, err := m.prepareContent(ctx, path, source, content, generation)
+	if err != nil {
+		return err
+	}
+	return m.writeContent(ctx, pc)
 }
 
 func buildChunkID(generation string) string {

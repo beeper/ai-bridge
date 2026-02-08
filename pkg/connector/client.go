@@ -346,6 +346,11 @@ type AIClient struct {
 	// Tool approvals (e.g. OpenAI MCP approval requests)
 	toolApprovalsMu sync.Mutex
 	toolApprovals   map[string]*pendingToolApproval // approvalID -> pending approval
+
+	// Per-login cancellation: cancelled when this login disconnects.
+	// All goroutines using backgroundContext() will be cancelled on disconnect.
+	disconnectCtx    context.Context
+	disconnectCancel context.CancelFunc
 }
 
 // pendingMessageType indicates what kind of pending message this is
@@ -1005,6 +1010,15 @@ func (oc *AIClient) processPendingQueue(ctx context.Context, roomID id.RoomID) {
 }
 
 func (oc *AIClient) Connect(ctx context.Context) {
+	// Create per-login cancellation context, derived from the bridge-wide background context.
+	var base context.Context
+	if oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.BackgroundCtx != nil {
+		base = oc.UserLogin.Bridge.BackgroundCtx
+	} else {
+		base = context.Background()
+	}
+	oc.disconnectCtx, oc.disconnectCancel = context.WithCancel(base)
+
 	// Trust the token - auth errors will be caught during actual API usage
 	// OpenRouter and Beeper provider don't support the GET /v1/models/{model} endpoint
 	oc.loggedIn.Store(true)
@@ -1031,6 +1045,11 @@ func (oc *AIClient) Connect(ctx context.Context) {
 }
 
 func (oc *AIClient) Disconnect() {
+	// Cancel per-login context early so background goroutines stop promptly.
+	if oc.disconnectCancel != nil {
+		oc.disconnectCancel()
+	}
+
 	// Flush pending debounced messages before disconnect (bridgev2 pattern)
 	if oc.inboundDebouncer != nil {
 		oc.loggerForContext(context.Background()).Info().Msg("Flushing pending debounced messages on disconnect")
@@ -1048,6 +1067,13 @@ func (oc *AIClient) Disconnect() {
 	}
 	if oc.heartbeatRunner != nil {
 		oc.heartbeatRunner.Stop()
+	}
+
+	// Stop all memory search managers for this login (releases goroutines/timers).
+	if oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.DB != nil {
+		bridgeID := string(oc.UserLogin.Bridge.DB.BridgeID)
+		loginID := string(oc.UserLogin.ID)
+		stopMemoryManagersForLogin(bridgeID, loginID)
 	}
 
 	// Clean up per-room maps to prevent unbounded growth
@@ -1622,7 +1648,7 @@ func (oc *AIClient) effectiveTemperature(meta *PortalMetadata) float64 {
 	return defaultTemperature
 }
 
-// defaultThinkLevel resolves the default /think level in an OpenClaw-compatible way:
+// defaultThinkLevel resolves the default think level in an OpenClaw-compatible way:
 // low for reasoning-capable models, off otherwise.
 func (oc *AIClient) defaultThinkLevel(meta *PortalMetadata) string {
 	if meta != nil {
@@ -2733,8 +2759,10 @@ func (oc *AIClient) logEphemeralVerbose() bool {
 
 func (oc *AIClient) backgroundContext(ctx context.Context) context.Context {
 	var base context.Context
-	// Always prefer BackgroundCtx for long-running operations that outlive request context
-	if oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.BackgroundCtx != nil {
+	// Use the per-login disconnectCtx so goroutines are cancelled on disconnect.
+	if oc.disconnectCtx != nil {
+		base = oc.disconnectCtx
+	} else if oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.BackgroundCtx != nil {
 		base = oc.UserLogin.Bridge.BackgroundCtx
 	} else {
 		base = context.Background()

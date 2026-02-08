@@ -58,7 +58,8 @@ type CodexClient struct {
 	rpcMu sync.Mutex
 	rpc   *codexrpc.Client
 
-	notifCh chan codexNotif
+	notifCh   chan codexNotif
+	notifDone chan struct{} // closed on Disconnect to stop dispatchNotifications
 
 	loggedIn atomic.Bool
 
@@ -100,6 +101,7 @@ func newCodexClient(login *bridgev2.UserLogin, connector *OpenAIConnector) (*Cod
 		connector:     connector,
 		log:           log,
 		notifCh:       make(chan codexNotif, 4096),
+		notifDone:     make(chan struct{}),
 		toolApprovals: make(map[string]*pendingToolApprovalCodex),
 		loadedThreads: make(map[string]bool),
 		activeTurns:   make(map[string]*codexActiveTurn),
@@ -158,6 +160,17 @@ func (cc *CodexClient) Connect(ctx context.Context) {
 
 func (cc *CodexClient) Disconnect() {
 	cc.loggedIn.Store(false)
+
+	// Signal dispatchNotifications goroutine to stop.
+	if cc.notifDone != nil {
+		select {
+		case <-cc.notifDone:
+			// Already closed.
+		default:
+			close(cc.notifDone)
+		}
+	}
+
 	cc.rpcMu.Lock()
 	if cc.rpc != nil {
 		_ = cc.rpc.Close()
@@ -350,7 +363,7 @@ func (cc *CodexClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Ma
 	}
 
 	// Structured approval decision (sent by capable clients). Keep this before the
-	// `/approve` command parser so the user doesn't need to emit fallback text.
+	// fallback command/UI path so the user doesn't need to emit text commands.
 	if decision := parseApprovalDecision(msg.Event.Content.Raw); decision != nil {
 		approve, _, ok := approvalDecisionFromString(decision.Decision)
 		if !ok {
@@ -383,74 +396,16 @@ func (cc *CodexClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Ma
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 	}
 
-	// Commands: /approve, /new, /status
-	if cmd, ok := parseInboundCommand(body); ok {
-		switch cmd.Name {
-		case "approve":
-			idToken, rest := splitCommandArgs(cmd.Args)
-			actionToken, reason := splitCommandArgs(rest)
-			idToken = strings.TrimSpace(idToken)
-			actionToken = strings.ToLower(strings.TrimSpace(actionToken))
-			reason = strings.TrimSpace(reason)
-			if idToken == "" || actionToken == "" {
-				cc.sendSystemNotice(ctx, portal, "Usage: /approve <approvalId> <allow|deny> [reason]")
-				return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-			}
-			approve := false
-			switch actionToken {
-			case "allow", "approve", "yes", "y", "true", "1":
-				approve = true
-			case "deny", "reject", "no", "n", "false", "0":
-				approve = false
-			default:
-				cc.sendSystemNotice(ctx, portal, "Usage: /approve <approvalId> <allow|deny> [reason]")
-				return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-			}
-			err := cc.resolveToolApproval(idToken, ToolApprovalDecisionCodex{
-				Approve:   approve,
-				Reason:    reason,
-				DecidedAt: time.Now(),
-				DecidedBy: msg.Event.Sender,
-			})
-			if err != nil {
-				cc.sendSystemNotice(ctx, portal, formatSystemAck(err.Error()))
-			} else if approve {
-				cc.sendSystemNotice(ctx, portal, formatSystemAck("Approved."))
-			} else {
-				cc.sendSystemNotice(ctx, portal, formatSystemAck("Denied."))
-			}
-			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-
-		case "new", "reset":
-			if err := cc.resetThread(ctx, portal, meta); err != nil {
-				cc.sendSystemNotice(ctx, portal, formatSystemAck("Couldn't start a new Codex thread: "+err.Error()))
-			} else {
-				cc.sendSystemNotice(ctx, portal, formatSystemAck("New Codex thread started."))
-			}
-			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-
-		case "status":
-			threadID := strings.TrimSpace(meta.CodexThreadID)
-			cwd := strings.TrimSpace(meta.CodexCwd)
-			cc.sendSystemNotice(ctx, portal, fmt.Sprintf("Codex: logged_in=%v thread_id=%s cwd=%s", cc.IsLoggedIn(), threadID, cwd))
-			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-
-		default:
-			cc.sendSystemNotice(ctx, portal, formatSystemAck("Command not supported in Codex rooms."))
-			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-		}
-	}
-
 	if err := cc.ensureRPC(cc.backgroundContext(ctx)); err != nil {
 		return nil, messageSendStatusError(err, "Codex isn't available. Sign in again.", "")
 	}
 	if strings.TrimSpace(meta.CodexThreadID) == "" || strings.TrimSpace(meta.CodexCwd) == "" {
 		if err := cc.ensureCodexThread(ctx, portal, meta); err != nil {
-			return nil, messageSendStatusError(err, "Codex thread unavailable. Try /new.", "")
+			return nil, messageSendStatusError(err, "Codex thread unavailable. Try !ai reset.", "")
 		}
 	}
 	if err := cc.ensureCodexThreadLoaded(ctx, portal, meta); err != nil {
-		return nil, messageSendStatusError(err, "Codex thread unavailable. Try /new.", "")
+		return nil, messageSendStatusError(err, "Codex thread unavailable. Try !ai reset.", "")
 	}
 
 	roomID := portal.MXID
@@ -1244,6 +1199,9 @@ func (cc *CodexClient) ensureRPC(ctx context.Context) error {
 	})
 
 	rpc.OnNotification(func(method string, params json.RawMessage) {
+		if !cc.loggedIn.Load() {
+			return
+		}
 		select {
 		case cc.notifCh <- codexNotif{Method: method, Params: params}:
 		default:
@@ -1287,7 +1245,17 @@ func codexExtractThreadTurn(params json.RawMessage) (threadID, turnID string, ok
 }
 
 func (cc *CodexClient) dispatchNotifications() {
-	for evt := range cc.notifCh {
+	for {
+		var evt codexNotif
+		select {
+		case <-cc.notifDone:
+			return
+		case e, ok := <-cc.notifCh:
+			if !ok {
+				return
+			}
+			evt = e
+		}
 		// Track logged-in state if Codex emits these (best-effort).
 		if evt.Method == "account/updated" {
 			var p struct {
@@ -1776,10 +1744,10 @@ func (cc *CodexClient) sendInitialStreamMessage(ctx context.Context, portal *bri
 	}
 	eventContent := &event.Content{
 		Raw: map[string]any{
-			"msgtype":     event.MsgText,
-			"body":        content,
-			BeeperAIKey:   uiMessage,
-			"m.mentions":  map[string]any{},
+			"msgtype":    event.MsgText,
+			"body":       content,
+			BeeperAIKey:  uiMessage,
+			"m.mentions": map[string]any{},
 		},
 	}
 	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
@@ -2211,7 +2179,7 @@ func (cc *CodexClient) handleCommandApprovalRequest(ctx context.Context, req cod
 		"reason":  params.Reason,
 	})
 	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID)
-	cc.sendSystemNoticeOnce(ctx, active.portal, active.state, "codex-approval:"+approvalID, fmt.Sprintf("Approval required (%s): /approve %s <allow|deny> [reason]", "commandExecution", approvalID))
+	cc.sendSystemNoticeOnce(ctx, active.portal, active.state, "codex-approval:"+approvalID, fmt.Sprintf("Approval required (%s): !ai approve %s <allow|deny> [reason]", "commandExecution", approvalID))
 	cc.registerToolApproval(approvalID, toolCallID, "commandExecution", 10*time.Minute)
 
 	// Auto-approve in elevated=full.
@@ -2258,7 +2226,7 @@ func (cc *CodexClient) handleFileChangeApprovalRequest(ctx context.Context, req 
 		"grantRoot": params.GrantRoot,
 	})
 	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID)
-	cc.sendSystemNoticeOnce(ctx, active.portal, active.state, "codex-approval:"+approvalID, fmt.Sprintf("Approval required (%s): /approve %s <allow|deny> [reason]", "fileChange", approvalID))
+	cc.sendSystemNoticeOnce(ctx, active.portal, active.state, "codex-approval:"+approvalID, fmt.Sprintf("Approval required (%s): !ai approve %s <allow|deny> [reason]", "fileChange", approvalID))
 	cc.registerToolApproval(approvalID, toolCallID, "fileChange", 10*time.Minute)
 
 	if active.meta != nil {

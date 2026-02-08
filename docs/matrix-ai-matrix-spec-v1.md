@@ -485,7 +485,7 @@ When approval is needed, the bridge emits:
 1. An ephemeral stream chunk (`com.beeper.ai.stream_event`) where `part.type = "tool-approval-request"` containing:
    - `approvalId: string`
    - `toolCallId: string`
-2. A timeline-visible fallback notice (for clients that drop/ignore ephemeral events) instructing the user to run `/approve ...`.
+2. A timeline-visible fallback notice (for clients that drop/ignore ephemeral events) instructing the user to run `!ai approve ...`.
    - The notice is an `m.room.message` with `msgtype = "m.notice"` and includes a `com.beeper.ai` `UIMessage` whose `parts` contains a `dynamic-tool` part with:
      - `state = "approval-requested"`
      - `toolCallId: string`
@@ -495,7 +495,7 @@ When approval is needed, the bridge emits:
 <a id="approvals-decision"></a>
 ### Approving / Denying
 Approvals can be resolved via:
-- Command: `/approve <approvalId> <allow|always|deny> [reason]` (owner-only).
+- Command: `!ai approve <approvalId> <allow|always|deny> [reason]` (owner-only).
 - Message payload: an `m.room.message` whose raw content includes `com.beeper.ai.approval_decision`.
 
 Approval decision payload:

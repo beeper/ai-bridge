@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sync"
 )
 
 const memoryVectorTable = "ai_memory_chunks_vec"
@@ -22,7 +21,6 @@ type loadExtensionEnabler interface {
 // This avoids re-checking the extension path on every operation while never holding
 // a persistent *sql.Conn (which would deadlock with max_open_conns=1).
 type vectorExtStatus struct {
-	once    sync.Once
 	ok      bool
 	errText string
 }

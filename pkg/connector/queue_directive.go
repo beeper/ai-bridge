@@ -3,7 +3,6 @@ package connector
 import (
 	"fmt"
 	"strings"
-	"unicode"
 )
 
 type QueueDirective struct {
@@ -146,44 +145,4 @@ func parseQueueDirectiveArgs(raw string) (consumed int, result QueueDirective) {
 	return consumed, result
 }
 
-func extractQueueDirective(body string) QueueDirective {
-	if strings.TrimSpace(body) == "" {
-		return QueueDirective{Cleaned: strings.TrimSpace(body)}
-	}
-	start, argsStart, ok := findQueueDirective(body)
-	if !ok {
-		return QueueDirective{Cleaned: strings.TrimSpace(body)}
-	}
-	consumed, parsed := parseQueueDirectiveArgs(body[argsStart:])
-	cleanedRaw := strings.TrimSpace(body[:start] + " " + body[argsStart+consumed:])
-	parsed.Cleaned = strings.TrimSpace(strings.Join(strings.Fields(cleanedRaw), " "))
-	parsed.HasDirective = true
-	return parsed
-}
-
-func findQueueDirective(body string) (start int, argsStart int, ok bool) {
-	lower := strings.ToLower(body)
-	offset := 0
-	for {
-		idx := strings.Index(lower, "/queue")
-		if idx < 0 {
-			return 0, 0, false
-		}
-		pos := offset + idx
-		beforeOK := pos == 0 || unicode.IsSpace(rune(body[pos-1]))
-		afterIdx := pos + len("/queue")
-		afterOK := afterIdx == len(body)
-		if !afterOK {
-			next := rune(body[afterIdx])
-			afterOK = unicode.IsSpace(next) || next == ':'
-		}
-		if beforeOK && afterOK {
-			return pos, afterIdx, true
-		}
-		offset = afterIdx
-		if offset >= len(body) {
-			return 0, 0, false
-		}
-		lower = lower[idx+len("/queue"):]
-	}
-}
+// NOTE: Slash-style inline `/queue ...` directives are intentionally not supported.

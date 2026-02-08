@@ -287,7 +287,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"sessions_history": "Fetch history for another session/sub-agent",
 		"sessions_send":    "Send a message to another session/sub-agent",
 		"sessions_spawn":   "Spawn a sub-agent session",
-		"session_status":   "Show a /status-equivalent status card (usage + time + Reasoning/Verbose/Elevated); use for model-use questions (📊 session_status); optional per-session model override",
+		"session_status":   "Show a !ai status-equivalent status card (usage + time + Reasoning/Verbose/Elevated); use for model-use questions (📊 session_status); optional per-session model override",
 		"image":            "Analyze an image with the configured image model",
 	}
 
@@ -626,8 +626,8 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		}
 		if params.SandboxInfo.Elevated != nil && params.SandboxInfo.Elevated.Allowed {
 			sandboxLines = append(sandboxLines, "Elevated exec is available for this session.")
-			sandboxLines = append(sandboxLines, "User can toggle with /elevated on|off|ask|full.")
-			sandboxLines = append(sandboxLines, "You may also send /elevated on|off|ask|full when needed.")
+			sandboxLines = append(sandboxLines, "User can toggle with !ai elevated on|off|ask|full.")
+			sandboxLines = append(sandboxLines, "You may also send !ai elevated on|off|ask|full when needed.")
 			if strings.TrimSpace(params.SandboxInfo.Elevated.DefaultLevel) != "" {
 				sandboxLines = append(sandboxLines, fmt.Sprintf("Current elevated level: %s (ask runs exec on host with approvals; full auto-approves).", params.SandboxInfo.Elevated.DefaultLevel))
 			}
@@ -757,7 +757,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	lines = append(lines,
 		"## Runtime",
 		buildRuntimeLine(runtimeInfo, runtimeChannel, runtimeCapabilities, params.DefaultThinkLevel),
-		fmt.Sprintf("Reasoning: %s (hidden unless on/stream). Toggle /reasoning; /status shows Reasoning when enabled.", reasoningLevel),
+		fmt.Sprintf("Reasoning: %s (hidden unless on/stream). Toggle !ai reasoning; !ai status shows Reasoning when enabled.", reasoningLevel),
 	)
 
 	return joinNonEmptyLines(lines)

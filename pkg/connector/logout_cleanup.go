@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"strings"
+	"time"
 
 	"go.mau.fi/util/dbutil"
 	"maunium.net/go/mautrix/bridgev2"
@@ -36,7 +37,7 @@ func purgeLoginDataBestEffort(ctx context.Context, login *bridgev2.UserLogin) {
 
 	// Best-effort: delete vector rows using a dedicated SQLite connection with the vector extension loaded.
 	// This covers the case where the bridge restarted and no MemorySearchManager exists in-process to perform
-	// vector cleanup using its vectorConn.
+	// vector cleanup via the grab+release pattern.
 	purgeVectorRowsBestEffort(ctx, login, bridgeID, loginID)
 
 	purgeAIMemoryTablesBestEffort(ctx, db, bridgeID, loginID)
@@ -186,6 +187,10 @@ func purgeVectorRowsBestEffort(ctx context.Context, login *bridgev2.UserLogin, b
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
+	// Use a timeout to prevent indefinite blocking of the single SQLite connection.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 
 	conn, err := db.RawDB.Conn(ctx)
 	if err != nil {
