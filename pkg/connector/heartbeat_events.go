@@ -1,6 +1,11 @@
 package connector
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+
+	"github.com/rs/zerolog/log"
+)
 
 type HeartbeatIndicatorType string
 
@@ -59,7 +64,11 @@ func emitHeartbeatEvent(evt *HeartbeatEventPayload) {
 	heartbeatEvents.mu.Unlock()
 	for _, fn := range listeners {
 		func(handler func(*HeartbeatEventPayload)) {
-			defer func() { _ = recover() }()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error().Str("panic", fmt.Sprint(r)).Msg("heartbeat event listener panicked")
+				}
+			}()
 			handler(evt)
 		}(fn)
 	}

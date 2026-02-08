@@ -39,12 +39,12 @@ func splitAtMarkdownBoundary(text string, maxBytes int) (string, string) {
 func (oc *AIClient) sendContinuationMessage(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, body string) {
 	rendered := format.RenderMarkdown(body, true, true)
 	raw := map[string]any{
-		"msgtype":                event.MsgText,
-		"body":                  rendered.Body,
-		"format":                rendered.Format,
-		"formatted_body":        rendered.FormattedBody,
+		"msgtype":                 event.MsgText,
+		"body":                    rendered.Body,
+		"format":                  rendered.Format,
+		"formatted_body":          rendered.FormattedBody,
 		"com.beeper.continuation": true,
-		"m.mentions":            map[string]any{},
+		"m.mentions":              map[string]any{},
 	}
 	eventContent := &event.Content{Raw: raw}
 	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {

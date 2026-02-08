@@ -249,6 +249,7 @@ func (oc *AIClient) scheduleAutoGreeting(ctx context.Context, portal *bridgev2.P
 	portalKey := portal.PortalKey
 	roomID := portal.MXID
 	go func() {
+		oc.Log().Debug().Stringer("room_id", roomID).Msg("auto-greeting loop started")
 		bgCtx := oc.backgroundContext(ctx)
 		for {
 			delay := autoGreetingDelay
@@ -265,22 +266,28 @@ func (oc *AIClient) scheduleAutoGreeting(ctx context.Context, portal *bridgev2.P
 
 			current, err := oc.UserLogin.Bridge.GetPortalByKey(bgCtx, portalKey)
 			if err != nil || current == nil {
+				oc.Log().Debug().Stringer("room_id", roomID).Msg("auto-greeting loop exiting: portal not found")
 				return
 			}
 			currentMeta := portalMeta(current)
 			if currentMeta == nil || currentMeta.AutoGreetingSent {
+				oc.Log().Debug().Stringer("room_id", roomID).Msg("auto-greeting loop exiting: already sent or no meta")
 				return
 			}
 			if currentMeta.IsBuilderRoom || currentMeta.IsCronRoom || currentMeta.IsOpenCodeRoom {
+				oc.Log().Debug().Stringer("room_id", roomID).Msg("auto-greeting loop exiting: special room type")
 				return
 			}
 			if normalizeSendPolicyMode(currentMeta.SendPolicy) == "deny" {
+				oc.Log().Debug().Stringer("room_id", roomID).Msg("auto-greeting loop exiting: send policy deny")
 				return
 			}
 			if resolveAgentID(currentMeta) == "" {
+				oc.Log().Debug().Stringer("room_id", roomID).Msg("auto-greeting loop exiting: no agent ID")
 				return
 			}
 			if oc.hasPortalMessages(bgCtx, current) {
+				oc.Log().Debug().Stringer("room_id", roomID).Msg("auto-greeting loop exiting: portal has messages")
 				return
 			}
 			if oc.isUserTyping(current.MXID) || !oc.userIdleFor(current.MXID, autoGreetingDelay) {
@@ -315,14 +322,17 @@ func (oc *AIClient) scheduleWelcomeMessage(ctx context.Context, portalKey networ
 	}
 	bgCtx := oc.backgroundContext(ctx)
 	go func() {
+		oc.Log().Debug().Str("portal_id", string(portalKey.ID)).Msg("welcome message schedule started")
 		deadline := time.Now().Add(45 * time.Second)
 		for time.Now().Before(deadline) {
 			current, err := oc.UserLogin.Bridge.GetPortalByKey(bgCtx, portalKey)
 			if err != nil || current == nil {
+				oc.Log().Debug().Str("portal_id", string(portalKey.ID)).Msg("welcome message schedule exiting: portal not found")
 				return
 			}
 			meta := portalMeta(current)
 			if meta != nil && meta.WelcomeSent {
+				oc.Log().Debug().Str("portal_id", string(portalKey.ID)).Msg("welcome message schedule exiting: already sent")
 				return
 			}
 			if current.MXID == "" {
@@ -330,8 +340,10 @@ func (oc *AIClient) scheduleWelcomeMessage(ctx context.Context, portalKey networ
 				continue
 			}
 			oc.sendWelcomeMessage(bgCtx, current)
+			oc.Log().Debug().Str("portal_id", string(portalKey.ID)).Msg("welcome message sent")
 			return
 		}
+		oc.Log().Debug().Str("portal_id", string(portalKey.ID)).Msg("welcome message schedule timed out waiting for room ID")
 	}()
 }
 

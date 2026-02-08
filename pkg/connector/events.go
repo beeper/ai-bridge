@@ -98,11 +98,11 @@ const (
 type ToolStatus string
 
 const (
-	ToolStatusPending   ToolStatus = "pending"
-	ToolStatusRunning   ToolStatus = "running"
-	ToolStatusCompleted ToolStatus = "completed"
-	ToolStatusFailed    ToolStatus = "failed"
-	ToolStatusTimeout   ToolStatus = "timeout"
+	ToolStatusPending          ToolStatus = "pending"
+	ToolStatusRunning          ToolStatus = "running"
+	ToolStatusCompleted        ToolStatus = "completed"
+	ToolStatusFailed           ToolStatus = "failed"
+	ToolStatusTimeout          ToolStatus = "timeout"
 	ToolStatusCancelled        ToolStatus = "cancelled"
 	ToolStatusApprovalRequired ToolStatus = "approval_required"
 )
