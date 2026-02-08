@@ -315,7 +315,12 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 		// Still send the welcome notice and schedule greeting; duplicates are preferable to missing UX.
 	}
 
-	oc.sendSystemNotice(bgCtx, portal, "AI Chats can make mistakes.")
+	if meta.AgentID == "" {
+		displayName := modelContactName(meta.Model, oc.findModelInfo(meta.Model))
+		oc.sendSystemNotice(bgCtx, portal, fmt.Sprintf("You are chatting with %s. AI can make mistakes.", displayName))
+	} else {
+		oc.sendSystemNotice(bgCtx, portal, "AI can make mistakes.")
+	}
 	oc.scheduleAutoGreeting(bgCtx, portal)
 }
 
