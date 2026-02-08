@@ -214,73 +214,60 @@ func (ol *OpenAILogin) credentialsStep() *bridgev2.LoginStep {
 func (ol *OpenAILogin) finishLogin(ctx context.Context, provider, apiKey, baseURL string, serviceTokens *ServiceTokens) (*bridgev2.LoginStep, error) {
 	apiKey = strings.TrimSpace(apiKey)
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	loginID := makeUserLoginID(ol.User.MXID, provider, apiKey)
-	remoteName := formatRemoteName(provider, apiKey)
-	if ol.User != nil {
-		dupCount := 0
-		for _, existing := range ol.User.GetUserLogins() {
-			if existing == nil || existing.Metadata == nil {
-				continue
-			}
-			meta, ok := existing.Metadata.(*UserLoginMetadata)
-			if !ok || meta == nil {
-				continue
-			}
-			existingBase := strings.TrimRight(strings.TrimSpace(meta.BaseURL), "/")
-			if meta.Provider == provider && meta.APIKey == apiKey && existingBase == baseURL && existing.ID != loginID {
-				dupCount++
-			}
+	if ol.User == nil {
+		return nil, errors.New("missing user context for login")
+	}
+
+	// Count existing logins for the same provider+baseURL+API key.
+	dupCount := 0
+	for _, existing := range ol.User.GetUserLogins() {
+		if existing == nil || existing.Metadata == nil {
+			continue
 		}
-		if dupCount > 0 {
-			remoteName = fmt.Sprintf("%s (%d)", remoteName, dupCount+1)
+		meta, ok := existing.Metadata.(*UserLoginMetadata)
+		if !ok || meta == nil {
+			continue
+		}
+		existingBase := strings.TrimRight(strings.TrimSpace(meta.BaseURL), "/")
+		if meta.Provider == provider && meta.APIKey == apiKey && existingBase == baseURL {
+			dupCount++
 		}
 	}
+
+	ordinal := dupCount + 1
+	// Hash provider+baseURL+API key, and disambiguate duplicates with -2/-3/... suffixes.
+	loginID := makeUserLoginIDForConfig(ol.User.MXID, provider, apiKey, baseURL, ordinal)
+
+	// Ensure uniqueness in case of gaps or concurrent additions.
 	if ol.Connector != nil && ol.Connector.br != nil {
-		if existing, _ := ol.Connector.br.GetExistingUserLoginByID(ctx, loginID); existing != nil {
-			// Reuse the existing login for the same provider+key instead of creating duplicates.
-			existingMeta, ok := existing.Metadata.(*UserLoginMetadata)
-			if !ok || existingMeta == nil {
-				existingMeta = &UserLoginMetadata{}
+		used := map[string]struct{}{}
+		for _, existing := range ol.User.GetUserLogins() {
+			if existing != nil {
+				used[string(existing.ID)] = struct{}{}
 			}
-			existingMeta.Provider = provider
-			existingMeta.APIKey = apiKey
-			existingMeta.BaseURL = baseURL
-			existingMeta.ServiceTokens = mergeServiceTokens(existingMeta.ServiceTokens, serviceTokens)
-			existing.Metadata = existingMeta
-			existing.RemoteName = remoteName
-			if err := existing.Save(ctx); err != nil {
-				return nil, fmt.Errorf("failed to update existing login: %w", err)
+		}
+		for {
+			if _, ok := used[string(loginID)]; ok {
+				ordinal++
+				loginID = makeUserLoginIDForConfig(ol.User.MXID, provider, apiKey, baseURL, ordinal)
+				continue
 			}
-
-			// Load login (which validates and caches the client internally)
-			if err := ol.Connector.LoadUserLogin(ctx, existing); err != nil {
-				return nil, fmt.Errorf("failed to load client: %w", err)
+			if existing, _ := ol.Connector.br.GetExistingUserLoginByID(ctx, loginID); existing != nil {
+				used[string(loginID)] = struct{}{}
+				ordinal++
+				loginID = makeUserLoginIDForConfig(ol.User.MXID, provider, apiKey, baseURL, ordinal)
+				continue
 			}
-
-			// Validate API key by attempting to list models (lightweight check)
-			if aiClient, ok := existing.Client.(*AIClient); ok {
-				valCtx, valCancel := context.WithTimeout(ctx, 5*time.Second)
-				_, valErr := aiClient.listAvailableModels(valCtx, true)
-				valCancel()
-				if valErr != nil && IsAuthError(valErr) {
-					return nil, errors.New("invalid API key: authentication failed")
-				}
-			}
-
-			// Trigger connection in background with a long-lived context
-			// (the request context gets cancelled after login returns)
-			go existing.Client.Connect(existing.Log.WithContext(context.Background()))
-
-			return &bridgev2.LoginStep{
-				Type:   bridgev2.LoginStepTypeComplete,
-				StepID: "io.ai-bridge.openai.complete",
-				CompleteParams: &bridgev2.LoginCompleteParams{
-					UserLoginID: existing.ID,
-					UserLogin:   existing,
-				},
-			}, nil
+			break
 		}
 	}
+
+	remoteNameBase := formatRemoteName(provider, apiKey)
+	remoteName := remoteNameBase
+	if ordinal > 1 {
+		remoteName = fmt.Sprintf("%s (%d)", remoteNameBase, ordinal)
+	}
+
 	meta := &UserLoginMetadata{
 		Provider: provider,
 		APIKey:   apiKey,

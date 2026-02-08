@@ -16,26 +16,51 @@ import (
 )
 
 // makeUserLoginID creates a stable login ID for a provider+API key pair.
-// Use makeUserLoginIDWithSuffix to disambiguate duplicates of the same config.
+//
+// This is kept for call sites that don't have a base URL. Prefer makeUserLoginIDForConfig.
 func makeUserLoginID(mxid id.UserID, provider, apiKey string) networkid.UserLoginID {
-	return makeUserLoginIDWithSuffix(mxid, provider, apiKey, "")
+	return makeUserLoginIDForConfig(mxid, provider, apiKey, "", 1)
 }
 
-// makeUserLoginIDWithSuffix creates a login ID with an extra suffix for duplicate accounts.
-// The suffix is appended verbatim and should be URL-safe.
-func makeUserLoginIDWithSuffix(mxid id.UserID, provider, apiKey, suffix string) networkid.UserLoginID {
+// makeUserLoginIDForConfig creates a stable login ID by hashing provider + base URL + API key.
+//
+// Multiple logins with identical config are supported by appending an ordinal suffix: -2, -3, ...
+func makeUserLoginIDForConfig(mxid id.UserID, provider, apiKey, baseURL string, ordinal int) networkid.UserLoginID {
 	escaped := url.PathEscape(string(mxid))
-	// Hash the API key to create unique but stable identifier per account
-	keyHash := sha256.Sum256([]byte(apiKey))
-	keyHashShort := hex.EncodeToString(keyHash[:8]) // First 8 bytes = 16 hex chars
-	base := fmt.Sprintf("openai:%s:%s:%s", escaped, provider, keyHashShort)
-	if suffix == "" {
+	provider = strings.TrimSpace(provider)
+	apiKey = strings.TrimSpace(apiKey)
+	baseURL = normalizeBaseURLForLoginID(baseURL)
+
+	// Stable, unambiguous hash input.
+	sum := sha256.Sum256([]byte(provider + \"\n\" + baseURL + \"\n\" + apiKey))
+	hashShort := hex.EncodeToString(sum[:8]) // 16 hex chars
+
+	base := fmt.Sprintf("openai:%s:%s:%s", escaped, provider, hashShort)
+	if ordinal <= 1 {
 		return networkid.UserLoginID(base)
 	}
-	return networkid.UserLoginID(fmt.Sprintf("%s:%s", base, suffix))
+	return networkid.UserLoginID(fmt.Sprintf("%s-%d", base, ordinal))
 }
 
-func makeCodexUserLoginID(mxid id.UserID, instanceID string) networkid.UserLoginID {
+func normalizeBaseURLForLoginID(baseURL string) string {
+	baseURL = strings.TrimSpace(baseURL)
+	baseURL = strings.TrimRight(baseURL, "/")
+	if baseURL == "" {
+		return ""
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return strings.ToLower(baseURL)
+	}
+	parsed.Host = strings.ToLower(strings.TrimSpace(parsed.Host))
+	parsed.Fragment = ""
+	parsed.RawQuery = ""
+	clean := strings.TrimSpace(parsed.String())
+	clean = strings.TrimRight(clean, "/")
+	return strings.ToLower(clean)
+}
+
+func makeCodexUserLoginID(func makeCodexUserLoginID(mxid id.UserID, instanceID string) networkid.UserLoginID {
 	escaped := url.PathEscape(string(mxid))
 	instanceID = strings.TrimSpace(instanceID)
 	if instanceID == "" {
