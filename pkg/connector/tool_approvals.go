@@ -144,7 +144,7 @@ func (oc *AIClient) resolveToolApproval(roomID id.RoomID, approvalID string, dec
 		return ErrApprovalWrongRoom
 	}
 	if time.Now().After(p.ExpiresAt) {
-		oc.dropToolApprovalLocked(approvalID)
+		oc.dropToolApproval(approvalID)
 		return fmt.Errorf("%w: %s", ErrApprovalExpired, approvalID)
 	}
 
@@ -157,12 +157,13 @@ func (oc *AIClient) resolveToolApproval(roomID id.RoomID, approvalID string, dec
 		go oc.emitApprovalSnapshotDecision(p, decision)
 		return nil
 	default:
+		oc.dropToolApproval(approvalID)
 		return fmt.Errorf("%w: %s", ErrApprovalAlreadyHandled, approvalID)
 	}
 }
 
 func (oc *AIClient) waitToolApproval(ctx context.Context, approvalID string) (ToolApprovalDecision, *pendingToolApproval, bool) {
-	if oc == nil {
+	if oc == nil || oc.UserLogin == nil {
 		return ToolApprovalDecision{}, nil, false
 	}
 	approvalID = strings.TrimSpace(approvalID)
@@ -179,7 +180,7 @@ func (oc *AIClient) waitToolApproval(ctx context.Context, approvalID string) (To
 
 	timeout := time.Until(p.ExpiresAt)
 	if timeout <= 0 {
-		oc.dropToolApprovalLocked(approvalID)
+		oc.dropToolApproval(approvalID)
 		// Best-effort snapshot update so clients stop showing approval UI.
 		// Pass p directly — the map entry is already dropped, but the pointer is still valid.
 		go oc.emitApprovalSnapshotDecision(p, ToolApprovalDecision{
@@ -197,12 +198,14 @@ func (oc *AIClient) waitToolApproval(ctx context.Context, approvalID string) (To
 	select {
 	case decision := <-p.decisionCh:
 		if decision.Approve && decision.Always {
-			_ = oc.persistAlwaysAllow(ctx, p)
+			if err := oc.persistAlwaysAllow(ctx, p); err != nil {
+				oc.Log().Warn().Err(err).Str("approval_id", approvalID).Msg("Failed to persist always-allow rule")
+			}
 		}
-		oc.dropToolApprovalLocked(approvalID)
+		oc.dropToolApproval(approvalID)
 		return decision, p, true
 	case <-timer.C:
-		oc.dropToolApprovalLocked(approvalID)
+		oc.dropToolApproval(approvalID)
 		// Timeout: update the approval snapshot so the UI can stop showing action buttons,
 		// even if the tool is no longer waiting (e.g. on reconnect).
 		go oc.emitApprovalSnapshotDecision(p, ToolApprovalDecision{
@@ -213,7 +216,7 @@ func (oc *AIClient) waitToolApproval(ctx context.Context, approvalID string) (To
 		})
 		return ToolApprovalDecision{}, p, false
 	case <-ctx.Done():
-		oc.dropToolApprovalLocked(approvalID)
+		oc.dropToolApproval(approvalID)
 		// Context cancellation: treat as expired for UI purposes.
 		go oc.emitApprovalSnapshotDecision(p, ToolApprovalDecision{
 			Approve:   false,
@@ -226,7 +229,13 @@ func (oc *AIClient) waitToolApproval(ctx context.Context, approvalID string) (To
 }
 
 func (oc *AIClient) emitApprovalSnapshotDecision(p *pendingToolApproval, decision ToolApprovalDecision) {
-	if oc == nil || oc.UserLogin == nil || p == nil || p.ApprovalEventID == "" {
+	if oc == nil || oc.UserLogin == nil || p == nil {
+		return
+	}
+	// ApprovalEventID may be empty if the approval was resolved before the timeline
+	// message was sent (race between resolveToolApproval and emitUIToolApprovalRequest).
+	// This is harmless — the stream event path (tool-output-*) resolves the UI instead.
+	if p.ApprovalEventID == "" {
 		return
 	}
 
@@ -304,7 +313,7 @@ func (oc *AIClient) emitApprovalSnapshotDecision(p *pendingToolApproval, decisio
 	}
 }
 
-func (oc *AIClient) dropToolApprovalLocked(approvalID string) {
+func (oc *AIClient) dropToolApproval(approvalID string) {
 	if oc == nil {
 		return
 	}

@@ -1170,9 +1170,11 @@ func (oc *AIClient) applyAgentChatInfo(chatInfo *bridgev2.ChatInfo, agentID, age
 	chatInfo.Members = members
 }
 
-// updatePortalConfig applies room settings to portal metadata
-func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Portal, config *RoomSettingsEventContent) {
+// updatePortalConfig applies room settings to portal metadata with optimistic updates.
+// If persistence fails, metadata is rolled back to the previous values.
+func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Portal, config *RoomSettingsEventContent) error {
 	meta := portalMeta(portal)
+	before := clonePortalMetadata(meta)
 
 	// Track old model for membership change
 	oldModel := meta.Model
@@ -1207,20 +1209,34 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 
 	meta.LastRoomStateSync = time.Now().Unix()
 
-	// Handle model switch - generate membership events if model changed
-	if config.Model != "" && oldModel != "" && config.Model != oldModel {
-		oc.handleModelSwitch(ctx, portal, oldModel, config.Model)
-	}
-
 	// Persist changes
 	if err := portal.Save(ctx); err != nil {
+		if before != nil {
+			*meta = *before
+		}
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to save portal after config update")
+		return err
 	}
 
 	// Re-broadcast room state to confirm changes to all clients
 	if err := oc.BroadcastRoomState(ctx, portal); err != nil {
+		if before != nil {
+			*meta = *before
+			if saveErr := portal.Save(ctx); saveErr != nil {
+				oc.loggerForContext(ctx).Warn().Err(saveErr).Msg("Failed to save rollback portal metadata after state broadcast failure")
+			}
+		}
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to re-broadcast room state after config update")
+		return err
 	}
+
+	// Handle model switch - generate membership events if model changed.
+	// This is done after persistence succeeds so optimistic updates can roll back safely.
+	if config.Model != "" && oldModel != "" && config.Model != oldModel {
+		oc.handleModelSwitch(ctx, portal, oldModel, config.Model)
+	}
+
+	return nil
 }
 
 // handleModelSwitch generates membership change events when switching models
