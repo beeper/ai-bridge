@@ -335,6 +335,7 @@ const timerRetryDelayMs = 30_000
 func (c *CronService) onTimer() {
 	c.mu.Lock()
 	if c.running {
+		c.armTimerWithDelayLocked(5000) // retry in 5s so the timer isn't permanently lost
 		c.mu.Unlock()
 		return
 	}
@@ -674,11 +675,17 @@ func (c *CronService) warnIfDisabled(action string) {
 
 func (c *CronService) armTimerLocked() {
 	c.stopTimerLocked()
-	if !c.deps.CronEnabled || c.store == nil {
+	if !c.deps.CronEnabled {
+		c.logDebug("cron: armTimer skipped (disabled)", nil)
+		return
+	}
+	if c.store == nil {
+		c.logDebug("cron: armTimer skipped (store nil)", nil)
 		return
 	}
 	next := nextWakeAtMs(c.store)
 	if next == nil {
+		c.logDebug("cron: armTimer skipped (no next wake)", nil)
 		return
 	}
 	delayMs := max(0, *next-c.deps.NowMs())
@@ -688,6 +695,7 @@ func (c *CronService) armTimerLocked() {
 	}
 	delay := time.Duration(delayMs) * time.Millisecond
 	c.timer = time.AfterFunc(delay, func() { c.onTimer() })
+	c.logDebug("cron: timer armed", map[string]any{"delayMs": delayMs, "nextWakeAtMs": *next})
 }
 
 func (c *CronService) armTimerWithDelayLocked(delayMs int64) {

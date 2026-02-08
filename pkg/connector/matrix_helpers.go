@@ -122,7 +122,7 @@ func (oc *AIClient) buildMatrixInboundBody(
 		HasPreviousTime bool
 		Envelope        EnvelopeFormatOptions
 	}{
-		Channel:         "Desktop API",
+		Channel:         "Matrix",
 		From:            from,
 		Body:            body,
 		Timestamp:       timestamp,

@@ -15,13 +15,6 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
-// makeUserLoginID creates a stable login ID for a provider+API key pair.
-//
-// This is kept for call sites that don't have a base URL. Prefer makeUserLoginIDForConfig.
-func makeUserLoginID(mxid id.UserID, provider, apiKey string) networkid.UserLoginID {
-	return makeUserLoginIDForConfig(mxid, provider, apiKey, "", 1)
-}
-
 // makeUserLoginIDForConfig creates a stable login ID by hashing provider + base URL + API key.
 //
 // Multiple logins with identical config are supported by appending an ordinal suffix: -2, -3, ...

@@ -1127,13 +1127,14 @@ var (
 	ackReactionStore   = make(map[id.RoomID]map[id.EventID]ackReactionEntry)
 	ackReactionStoreMu sync.Mutex
 	ackCleanupStop     = make(chan struct{})
-	ackCleanupOnce     sync.Once
+	ackCleanupOnce     sync.Once //lint:ignore U1000 shutdown guard for ack cleanup goroutine
 )
 
 func init() {
 	go cleanupAckReactionStore()
 }
 
+//lint:ignore U1000 called by ackCleanupOnce for graceful shutdown / test teardown
 func stopAckReactionCleanup() {
 	ackCleanupOnce.Do(func() {
 		close(ackCleanupStop)

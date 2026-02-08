@@ -431,3 +431,45 @@ func TestPersistInvalidatesCache(t *testing.T) {
 
 	svc.Stop()
 }
+
+// TestOnTimerRearmsWhenRunning verifies that when onTimer() fires while
+// another job is already executing (c.running == true), the timer is
+// re-armed with a short retry delay instead of being permanently dropped.
+func TestOnTimerRearmsWhenRunning(t *testing.T) {
+	log := &testLogger{}
+	backend := &testStoreBackend{
+		files: map[string][]byte{
+			"cron/jobs.json": validStoreJSON(),
+		},
+	}
+	svc := newTestService(backend, log)
+	svc.deps.EnqueueSystemEvent = func(text string, agentID string) error { return nil }
+
+	if err := svc.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Simulate a running job by setting c.running = true.
+	svc.mu.Lock()
+	svc.running = true
+	svc.stopTimerLocked() // clear any existing timer
+	svc.mu.Unlock()
+
+	// Call onTimer — it should see c.running == true and re-arm the timer.
+	svc.onTimer()
+
+	svc.mu.Lock()
+	timerSet := svc.timer != nil
+	svc.mu.Unlock()
+
+	if !timerSet {
+		t.Fatal("expected timer to be re-armed when c.running == true")
+	}
+
+	// Clean up: reset running so Stop() doesn't wait forever.
+	svc.mu.Lock()
+	svc.running = false
+	svc.mu.Unlock()
+
+	svc.Stop()
+}
