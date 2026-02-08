@@ -289,7 +289,7 @@ func TestIsCompactionFailureError(t *testing.T) {
 		{"context_length_exceeded: compaction failed due to overflow", true},
 		{"prompt is too long: auto-compaction exceeded limits", true},
 		{"prompt is too long: summarization failed for session", true},
-		{"context_length_exceeded: normal overflow", false}, // "compaction" not present
+		{"context_length_exceeded: normal overflow", false},  // "compaction" not present
 		{"compaction failed but not a context error", false}, // no context signal
 		{"just a normal error", false},
 	}

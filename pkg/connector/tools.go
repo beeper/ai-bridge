@@ -223,11 +223,11 @@ func resolveMessageMedia(ctx context.Context, btc *BridgeToolContext, bufferInpu
 
 	b64Data, mimeType, err := btc.Client.downloadAndEncodeMedia(ctx, resolved, nil, 50)
 	if err != nil {
-		return nil, "", fmt.Errorf("Couldn't load the media: %w", err)
+		return nil, "", fmt.Errorf("couldn't load the media: %w", err)
 	}
 	data, err := base64.StdEncoding.DecodeString(b64Data)
 	if err != nil {
-		return nil, "", fmt.Errorf("Couldn't decode the media: %w", err)
+		return nil, "", fmt.Errorf("couldn't decode the media: %w", err)
 	}
 	return data, mimeType, nil
 }
@@ -259,7 +259,7 @@ func resolveSandboxedMediaPath(raw string) (string, error) {
 	}
 	rootAbs, err := filepath.Abs(workspaceRoot)
 	if err != nil {
-		return "", fmt.Errorf("Couldn't resolve the workspace root: %w", err)
+		return "", fmt.Errorf("couldn't resolve the workspace root: %w", err)
 	}
 	rootAbs = filepath.Clean(rootAbs)
 
@@ -578,7 +578,7 @@ func executeMessageSend(ctx context.Context, args map[string]any, btc *BridgeToo
 	eventContent := &event.Content{Raw: rawContent}
 	resp, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventMessage, eventContent, nil)
 	if err != nil {
-		return "", fmt.Errorf("Couldn't send the media message: %w", err)
+		return "", fmt.Errorf("couldn't send the media message: %w", err)
 	}
 
 	return jsonActionResult("send", map[string]any{
@@ -634,7 +634,7 @@ func executeMessageEdit(ctx context.Context, args map[string]any, btc *BridgeToo
 
 	resp, err := intent.SendMessage(ctx, btc.Portal.MXID, event.EventMessage, eventContent, nil)
 	if err != nil {
-		return "", fmt.Errorf("Couldn't edit the message: %w", err)
+		return "", fmt.Errorf("couldn't edit the message: %w", err)
 	}
 
 	return jsonActionResult("edit", map[string]any{
@@ -665,7 +665,7 @@ func executeMessageDelete(ctx context.Context, args map[string]any, btc *BridgeT
 		},
 	}, nil)
 	if err != nil {
-		return "", fmt.Errorf("Couldn't delete the message: %w", err)
+		return "", fmt.Errorf("couldn't delete the message: %w", err)
 	}
 
 	return jsonActionResult("delete", map[string]any{
@@ -756,7 +756,7 @@ func executeMessagePin(ctx context.Context, args map[string]any, btc *BridgeTool
 		if !pin {
 			action = "unpin"
 		}
-		return "", fmt.Errorf("Couldn't %s the message: %w", action, err)
+		return "", fmt.Errorf("couldn't %s the message: %w", action, err)
 	}
 
 	action := "pin"
@@ -837,7 +837,7 @@ func executeMessageSearch(ctx context.Context, args map[string]any, btc *BridgeT
 	// Fetch more than needed since we'll filter
 	messages, err := btc.Client.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, btc.Portal.PortalKey, 1000)
 	if err != nil {
-		return "", fmt.Errorf("Couldn't load messages: %w", err)
+		return "", fmt.Errorf("couldn't load messages: %w", err)
 	}
 
 	// Search through messages
@@ -905,7 +905,7 @@ func executeImageGeneration(ctx context.Context, args map[string]any) (string, e
 
 	payload, err := json.Marshal(images)
 	if err != nil {
-		return "", fmt.Errorf("Couldn't encode image results: %w", err)
+		return "", fmt.Errorf("couldn't encode image results: %w", err)
 	}
 
 	return ImagesResultPrefix + string(payload), nil
@@ -937,12 +937,12 @@ func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model 
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("Couldn't marshal the request: %w", err)
+		return nil, fmt.Errorf("couldn't marshal the request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {
-		return nil, fmt.Errorf("Couldn't create the request: %w", err)
+		return nil, fmt.Errorf("couldn't create the request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -959,7 +959,7 @@ func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model 
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("Couldn't read the response: %w", err)
+		return nil, fmt.Errorf("couldn't read the response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -988,7 +988,7 @@ func callOpenRouterImageGen(ctx context.Context, apiKey, baseURL, prompt, model 
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("Couldn't parse the response: %w", err)
+		return nil, fmt.Errorf("couldn't parse the response: %w", err)
 	}
 
 	var images []string
@@ -1095,17 +1095,17 @@ func fetchImageAsBase64(ctx context.Context, imageURL string) (string, error) {
 func fetchImageAsBase64WithType(ctx context.Context, imageURL string) (string, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
-		return "", "", fmt.Errorf("Couldn't build the image request for %s: %w", imageURL, err)
+		return "", "", fmt.Errorf("couldn't build image request for %s: %w", imageURL, err)
 	}
 
 	resp, err := imageFetchHTTPClient.Do(req)
 	if err != nil {
-		return "", "", fmt.Errorf("Couldn't fetch the image %s: %w", imageURL, err)
+		return "", "", fmt.Errorf("couldn't fetch image %s: %w", imageURL, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("Couldn't fetch the image %s (status %d)", imageURL, resp.StatusCode)
+		return "", "", fmt.Errorf("couldn't fetch image %s (status %d)", imageURL, resp.StatusCode)
 	}
 
 	mimeType := normalizeMimeString(resp.Header.Get("Content-Type"))
@@ -1113,7 +1113,7 @@ func fetchImageAsBase64WithType(ctx context.Context, imageURL string) (string, s
 	// Limit to 10MB
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return "", "", fmt.Errorf("Couldn't read the image %s: %w", imageURL, err)
+		return "", "", fmt.Errorf("couldn't read image %s: %w", imageURL, err)
 	}
 
 	return base64.StdEncoding.EncodeToString(data), mimeType, nil
@@ -1292,7 +1292,7 @@ func callMacOSSay(ctx context.Context, text, voice string) (string, error) {
 func runMacOSSay(ctx context.Context, text, voice, suffix string, formatArgs []string) ([]byte, error) {
 	tmpFile, err := os.CreateTemp("", "tts-*"+suffix)
 	if err != nil {
-		return nil, fmt.Errorf("Couldn't create a temp file: %w", err)
+		return nil, fmt.Errorf("couldn't create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
@@ -1315,7 +1315,7 @@ func runMacOSSay(ctx context.Context, text, voice, suffix string, formatArgs []s
 
 	audioData, err := os.ReadFile(tmpPath)
 	if err != nil {
-		return nil, fmt.Errorf("Couldn't read the audio file: %w", err)
+		return nil, fmt.Errorf("couldn't read audio file: %w", err)
 	}
 	return audioData, nil
 }
@@ -1337,13 +1337,13 @@ func callOpenAITTS(ctx context.Context, apiKey, baseURL, text, model, voice stri
 	}
 	bodyJSON, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("Couldn't marshal the request: %w", err)
+		return "", fmt.Errorf("couldn't marshal the request: %w", err)
 	}
 
 	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyJSON))
 	if err != nil {
-		return "", fmt.Errorf("Couldn't create the request: %w", err)
+		return "", fmt.Errorf("couldn't create the request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -1365,7 +1365,7 @@ func callOpenAITTS(ctx context.Context, apiKey, baseURL, text, model, voice stri
 	// Read audio data
 	audioBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("Couldn't read the audio response: %w", err)
+		return "", fmt.Errorf("couldn't read audio response: %w", err)
 	}
 
 	// Return base64 encoded audio
@@ -1461,7 +1461,7 @@ func executeSessionStatus(ctx context.Context, args map[string]any) (string, err
 			effective := btc.Client.effectiveModel(meta)
 			meta.Capabilities = getModelCapabilities(effective, btc.Client.findModelInfo(effective))
 			if err := btc.Portal.Save(ctx); err != nil {
-				return "", fmt.Errorf("Couldn't save the model reset: %w", err)
+				return "", fmt.Errorf("couldn't save model reset: %w", err)
 			}
 			btc.Portal.UpdateBridgeInfo(ctx)
 			btc.Client.ensureGhostDisplayName(ctx, effective)
@@ -1479,7 +1479,7 @@ func executeSessionStatus(ctx context.Context, args map[string]any) (string, err
 			meta.Capabilities = getModelCapabilities(newModel, btc.Client.findModelInfo(newModel))
 			// Save portal metadata
 			if err := btc.Portal.Save(ctx); err != nil {
-				return "", fmt.Errorf("Couldn't save the model change: %w", err)
+				return "", fmt.Errorf("couldn't save model change: %w", err)
 			}
 			btc.Portal.UpdateBridgeInfo(ctx)
 			btc.Client.ensureGhostDisplayName(ctx, newModel)
@@ -1616,7 +1616,7 @@ func executeReadFile(ctx context.Context, args map[string]any) (string, error) {
 		return "", err
 	}
 	if !found {
-		return "", fmt.Errorf("File not found: %s", path)
+		return "", fmt.Errorf("file not found: %s", path)
 	}
 
 	content := strings.ReplaceAll(entry.Content, "\r\n", "\n")
@@ -1719,7 +1719,7 @@ func executeEditFile(ctx context.Context, args map[string]any) (string, error) {
 		return "", err
 	}
 	if !found {
-		return "", fmt.Errorf("File not found: %s", path)
+		return "", fmt.Errorf("file not found: %s", path)
 	}
 
 	original := entry.Content
@@ -1735,7 +1735,7 @@ func executeEditFile(ctx context.Context, args map[string]any) (string, error) {
 	}
 	count := strings.Count(normalized, oldNormalized)
 	if count == 0 {
-		return "", fmt.Errorf("Couldn't find the exact text in %s", path)
+		return "", fmt.Errorf("couldn't find the exact text in %s", path)
 	}
 	if count > 1 {
 		return "", fmt.Errorf("found %d occurrences in %s; make the match unique", count, path)
@@ -1860,7 +1860,7 @@ func executeMemorySearch(ctx context.Context, args map[string]any) (string, erro
 	}
 	output, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		return "", fmt.Errorf("Couldn't format results: %w", err)
+		return "", fmt.Errorf("couldn't format results: %w", err)
 	}
 
 	return string(output), nil
@@ -1930,7 +1930,7 @@ func executeMemoryGet(ctx context.Context, args map[string]any) (string, error) 
 	}
 	output, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		return "", fmt.Errorf("Couldn't format the result: %w", err)
+		return "", fmt.Errorf("couldn't format the result: %w", err)
 	}
 
 	return string(output), nil
@@ -2066,7 +2066,7 @@ func executeGravatarSet(ctx context.Context, args map[string]any) (string, error
 	state := ensureGravatarState(loginMeta)
 	state.Primary = profile
 	if err := btc.Client.UserLogin.Save(ctx); err != nil {
-		return "", fmt.Errorf("Couldn't save the Gravatar profile: %w", err)
+		return "", fmt.Errorf("couldn't save the Gravatar profile: %w", err)
 	}
 
 	return formatGravatarMarkdown(profile, "primary set"), nil

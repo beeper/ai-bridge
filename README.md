@@ -16,12 +16,12 @@ Experimental Matrix ↔ AI bridge for Beeper, built on top of [mautrix/bridgev2]
 
 ## Highlights
 
-- Multi-provider routing with prefixed model IDs (for example `openai/...`, `anthropic/...`, etc)
+- Multi-provider routing with prefixed model IDs (e.g. `openai/...`, `anthropic/...`)
 - Per-model chats (each model shows up as its own contact)
 - Streaming responses
 - Multimodal input (images, PDFs, audio, video) when supported by the model
 - Per-room settings (model, temperature, system prompt, context limits, tools)
-- Login flows for Beeper, Magic Proxy, or Custom (BYOK)
+- Login flows for Beeper, Magic Proxy, or custom (BYOK)
 - OpenClaw-style memory search (stored in the bridge DB)
 
 ## Docs

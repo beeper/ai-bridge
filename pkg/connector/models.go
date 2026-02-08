@@ -71,4 +71,3 @@ func DefaultModelForProvider(provider string) string {
 		return DefaultModelOpenRouter
 	}
 }
-

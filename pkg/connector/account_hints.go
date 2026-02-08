@@ -7,8 +7,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/shared/stringutil"
 	beeperdesktopapi "github.com/beeper/desktop-api-go"
+
+	"github.com/beeper/ai-bridge/pkg/shared/stringutil"
 )
 
 type desktopAccountHint struct {

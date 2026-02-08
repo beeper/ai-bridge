@@ -10,9 +10,10 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 
+	"github.com/google/uuid"
+
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/cron"
-	"github.com/google/uuid"
 )
 
 const (

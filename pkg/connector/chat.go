@@ -818,7 +818,7 @@ func (oc *AIClient) resolveExplicitModelID(ctx context.Context, modelID string) 
 		return "", err
 	}
 	if !ok || resolved == "" {
-		return "", fmt.Errorf("That model isn't available: %s", modelID)
+		return "", fmt.Errorf("that model isn't available: %s", modelID)
 	}
 	return resolved, nil
 }
@@ -845,7 +845,7 @@ func (oc *AIClient) resolveAgentModelForNewChat(ctx context.Context, agent *agen
 	}
 
 	if preferredModel != "" {
-		return "", fmt.Errorf("That model isn't available: %s", preferredModel)
+		return "", fmt.Errorf("that model isn't available: %s", preferredModel)
 	}
 	return "", errors.New("no available model")
 }

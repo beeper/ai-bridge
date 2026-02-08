@@ -401,7 +401,7 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 	if strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderCodex) {
 		// Codex uses its own auth/tokens stored under CODEX_HOME. No OpenAI API key is required here.
 		if oc.Config.Codex != nil && oc.Config.Codex.Enabled != nil && !*oc.Config.Codex.Enabled {
-			return errors.New("Codex integration is disabled in the configuration.")
+			return errors.New("codex integration is disabled in the configuration")
 		}
 
 		oc.clientsMu.Lock()
@@ -431,7 +431,7 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 
 	key := strings.TrimSpace(oc.resolveProviderAPIKey(meta))
 	if key == "" {
-		return errors.New("No API key available for this login. Sign in again.")
+		return errors.New("no API key available for this login; sign in again")
 	}
 	oc.clientsMu.Lock()
 	if existingAPI := oc.clients[login.ID]; existingAPI != nil {
