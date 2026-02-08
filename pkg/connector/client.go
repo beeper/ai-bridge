@@ -1039,9 +1039,28 @@ func (oc *AIClient) Connect(ctx context.Context) {
 	}
 	if oc.cronService != nil {
 		if err := oc.cronService.Start(); err != nil {
-			oc.loggerForContext(ctx).Warn().Err(err).Msg("cron: failed to start scheduler")
+			oc.loggerForContext(ctx).Warn().Err(err).Msg("cron: failed to start scheduler, scheduling retry")
+			go oc.retryCronStart(oc.disconnectCtx)
 		}
 	}
+}
+
+func (oc *AIClient) retryCronStart(ctx context.Context) {
+	delays := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second, 60 * time.Second}
+	for _, d := range delays {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(d):
+		}
+		if err := oc.cronService.Start(); err != nil {
+			oc.loggerForContext(ctx).Warn().Err(err).Dur("retryDelay", d).Msg("cron: start retry failed")
+			continue
+		}
+		oc.loggerForContext(ctx).Info().Msg("cron: start retry succeeded")
+		return
+	}
+	oc.loggerForContext(ctx).Error().Msg("cron: all start retries exhausted")
 }
 
 func (oc *AIClient) Disconnect() {

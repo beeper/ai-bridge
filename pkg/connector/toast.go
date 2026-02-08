@@ -12,8 +12,7 @@ import (
 type aiToastType string
 
 const (
-	aiToastTypeError   aiToastType = "error"
-	aiToastTypeNeutral aiToastType = "neutral"
+	aiToastTypeError aiToastType = "error"
 )
 
 func approvalErrorToastText(err error) string {
@@ -83,32 +82,5 @@ func (oc *AIClient) sendApprovalRejectionEvent(ctx context.Context, portal *brid
 	}
 	if _, sendErr := bot.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{Raw: raw}, nil); sendErr != nil {
 		oc.loggerForContext(ctx).Warn().Err(sendErr).Msg("Failed to send approval rejection event")
-	}
-}
-
-func (oc *AIClient) sendToast(ctx context.Context, portal *bridgev2.Portal, text string, toastType aiToastType) {
-	if oc == nil || portal == nil || portal.MXID == "" {
-		return
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	bot := oc.UserLogin.Bridge.Bot
-	if bot == nil {
-		return
-	}
-
-	raw := map[string]any{
-		"msgtype": event.MsgNotice,
-		"body":    text,
-		"com.beeper.ai.toast": map[string]any{
-			"text": text,
-			"type": string(toastType),
-		},
-		"m.mentions": map[string]any{},
-	}
-	if _, err := bot.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{Raw: raw}, nil); err != nil {
-		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to send toast")
 	}
 }

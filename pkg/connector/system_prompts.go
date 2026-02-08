@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
@@ -9,9 +10,9 @@ import (
 )
 
 func buildGroupIntro(roomName string, activation string) string {
-	subjectLine := "You are replying inside a bridged group chat from the desktop API."
+	subjectLine := "You are replying inside a bridged group chat (Matrix room)."
 	if strings.TrimSpace(roomName) != "" {
-		subjectLine = "You are replying inside the group \"" + strings.TrimSpace(roomName) + "\" (desktop API, WhatsApp-style)."
+		subjectLine = "You are replying inside the group \"" + strings.TrimSpace(roomName) + "\" (Matrix room)."
 	}
 	activationLine := "Activation: trigger-only (you are invoked only when explicitly mentioned; recent context may be included)."
 	if activation == "always" {
@@ -46,6 +47,51 @@ func buildVerboseSystemHint(meta *PortalMetadata) string {
 	}
 }
 
+func buildSessionIdentityHint(portal *bridgev2.Portal, meta *PortalMetadata) string {
+	if portal == nil {
+		return ""
+	}
+
+	// Prefer Matrix room ID as the canonical sessionKey for tools/user-facing references.
+	roomID := ""
+	if portal.MXID != "" {
+		roomID = strings.TrimSpace(portal.MXID.String())
+	}
+	portalID := strings.TrimSpace(string(portal.PortalKey.ID))
+
+	if roomID == "" && portalID == "" {
+		return ""
+	}
+
+	parts := make([]string, 0, 6)
+	parts = append(parts, "Session identity:")
+	parts = append(parts, "channel=matrix")
+	if roomID != "" {
+		parts = append(parts, "sessionKey="+roomID)
+	}
+	if portalID != "" && portalID != roomID {
+		parts = append(parts, "portalId="+portalID)
+	}
+	if meta != nil && strings.TrimSpace(meta.AgentID) != "" {
+		parts = append(parts, "agentId="+strings.TrimSpace(meta.AgentID))
+	}
+	if meta != nil && meta.IsCronRoom {
+		if strings.TrimSpace(meta.CronJobID) != "" {
+			parts = append(parts, "cronJobId="+strings.TrimSpace(meta.CronJobID))
+		} else {
+			parts = append(parts, "cronRoom=true")
+		}
+	}
+
+	if meta != nil && meta.IsCronRoom {
+		parts = append(parts, "Note: this is an internal cron room; the cron runner delivers results to the configured target room.")
+	}
+
+	// Make the labels actionable: they match the `sessions_*` tools (resolveSessionPortal supports both).
+	parts = append(parts, fmt.Sprintf("Use sessionKey (preferred) or portalId to refer to this room in tools (e.g. sessions_send/session_focus)."))
+	return strings.Join(parts, " ")
+}
+
 func (oc *AIClient) buildAdditionalSystemPrompts(
 	ctx context.Context,
 	portal *bridgev2.Portal,
@@ -75,6 +121,10 @@ func (oc *AIClient) buildAdditionalSystemPrompts(
 
 	if accountHint := oc.buildDesktopAccountHintPrompt(ctx); accountHint != "" {
 		out = append(out, openai.SystemMessage(accountHint))
+	}
+
+	if ident := buildSessionIdentityHint(portal, meta); ident != "" {
+		out = append(out, openai.SystemMessage(ident))
 	}
 
 	return out
