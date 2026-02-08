@@ -233,6 +233,9 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 		if tc.ResultStatus == string(ResultStatusSuccess) {
 			toolPart["state"] = "output-available"
 			toolPart["output"] = tc.Output
+		} else if tc.ResultStatus == string(ResultStatusDenied) {
+			toolPart["state"] = "output-denied"
+			toolPart["errorText"] = "Denied by user"
 		} else {
 			toolPart["state"] = "output-error"
 			if tc.ErrorMessage != "" {
@@ -551,6 +554,11 @@ func (oc *AIClient) sendPlainAssistantMessage(ctx context.Context, portal *bridg
 	if intent == nil {
 		return
 	}
+	// Best-effort: cron/heartbeat delivery may target rooms where the ghost isn't currently joined.
+	// EnsureJoined is typically a no-op when already in the room.
+	if err := intent.EnsureJoined(ctx, portal.MXID); err != nil {
+		oc.loggerForContext(ctx).Warn().Err(err).Stringer("room_id", portal.MXID).Msg("Failed to ensure assistant ghost is joined")
+	}
 	rendered := format.RenderMarkdown(text, true, true)
 	eventRawContent := map[string]any{
 		"msgtype":        event.MsgText,
@@ -558,9 +566,11 @@ func (oc *AIClient) sendPlainAssistantMessage(ctx context.Context, portal *bridg
 		"format":         rendered.Format,
 		"formatted_body": rendered.FormattedBody,
 	}
-	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{Raw: eventRawContent}, nil); err == nil {
-		oc.recordAgentActivity(ctx, portal, portalMeta(portal))
+	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{Raw: eventRawContent}, nil); err != nil {
+		oc.loggerForContext(ctx).Warn().Err(err).Stringer("room_id", portal.MXID).Msg("Failed to send plain assistant message")
+		return
 	}
+	oc.recordAgentActivity(ctx, portal, portalMeta(portal))
 }
 
 func buildSourceParts(citations []sourceCitation, documents []sourceDocument, previews []*event.BeeperLinkPreview) []map[string]any {
@@ -737,6 +747,9 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 		if tc.ResultStatus == string(ResultStatusSuccess) {
 			toolPart["state"] = "output-available"
 			toolPart["output"] = tc.Output
+		} else if tc.ResultStatus == string(ResultStatusDenied) {
+			toolPart["state"] = "output-denied"
+			toolPart["errorText"] = "Denied by user"
 		} else {
 			toolPart["state"] = "output-error"
 			if tc.ErrorMessage != "" {

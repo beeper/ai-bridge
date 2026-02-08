@@ -584,6 +584,10 @@ func TTSSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
+			"async": map[string]any{
+				"type":        "boolean",
+				"description": "Optional: if true, start TTS in the background and send the audio to the chat when ready (tool returns immediately).",
+			},
 			"text": map[string]any{
 				"type":        "string",
 				"description": "Text to convert to speech.",

@@ -20,6 +20,7 @@ func (oc *AIClient) sendGeneratedMedia(
 	fileName string,
 	metadataKey string,
 	asVoice bool,
+	caption string,
 ) (id.EventID, string, error) {
 	intent := oc.getModelIntent(ctx, portal)
 	if intent == nil {
@@ -36,16 +37,29 @@ func (oc *AIClient) sendGeneratedMedia(
 		"size":     len(data),
 	}
 
+	body := fileName
+	if caption != "" {
+		body = caption
+	}
+
 	rawContent := map[string]any{
-		"msgtype": msgType,
-		"body":    fileName,
-		"info":    info,
+		"msgtype":  msgType,
+		"body":     body,
+		"filename": fileName,
+		"info":     info,
 	}
 
 	if file != nil {
 		rawContent["file"] = file
 	} else {
 		rawContent["url"] = string(uri)
+	}
+
+	if msgType == event.MsgImage {
+		if w, h := analyzeImage(data); w > 0 && h > 0 {
+			info["w"] = w
+			info["h"] = h
+		}
 	}
 
 	if msgType == event.MsgAudio {

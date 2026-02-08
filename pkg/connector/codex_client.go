@@ -1065,7 +1065,7 @@ func (cc *CodexClient) handleItemCompleted(ctx context.Context, portal *bridgev2
 		}
 		switch statusVal {
 		case "declined":
-			tc.ResultStatus = string(ResultStatusError)
+			tc.ResultStatus = string(ResultStatusDenied)
 			tc.ErrorMessage = "Denied by user"
 		case "failed":
 			tc.ResultStatus = string(ResultStatusError)

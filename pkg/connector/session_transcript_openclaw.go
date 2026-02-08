@@ -267,7 +267,10 @@ func parseCanonicalAssistantBlocks(meta *MessageMetadata) ([]map[string]any, []o
 			} else {
 				call.Output = toMapAny(part["output"])
 				state := strings.TrimSpace(toString(part["state"]))
-				if strings.HasPrefix(state, "output-error") {
+				if state == "output-denied" {
+					call.ResultStatus = string(ResultStatusDenied)
+					call.ErrorMessage = strings.TrimSpace(toString(part["errorText"]))
+				} else if strings.HasPrefix(state, "output-error") {
 					call.ResultStatus = string(ResultStatusError)
 					call.ErrorMessage = strings.TrimSpace(toString(part["errorText"]))
 				} else if strings.HasPrefix(state, "output-") {
@@ -331,7 +334,7 @@ func renderOpenClawToolResultText(call openClawToolCall) string {
 
 func isOpenClawToolResultError(call openClawToolCall) bool {
 	status := strings.ToLower(strings.TrimSpace(call.ResultStatus))
-	if status == string(ResultStatusError) || status == "failed" || status == "timeout" || status == "cancelled" {
+	if status == string(ResultStatusError) || status == string(ResultStatusDenied) || status == "failed" || status == "timeout" || status == "cancelled" {
 		return true
 	}
 	if strings.TrimSpace(call.ErrorMessage) != "" {

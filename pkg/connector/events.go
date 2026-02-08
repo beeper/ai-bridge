@@ -113,6 +113,7 @@ const (
 	ResultStatusSuccess ResultStatus = "success"
 	ResultStatusError   ResultStatus = "error"
 	ResultStatusPartial ResultStatus = "partial"
+	ResultStatusDenied  ResultStatus = "denied"
 )
 
 // ToolType identifies the category of tool

@@ -78,6 +78,7 @@ func (oc *AIClient) enqueueCronSystemEvent(text string, agentID string) error {
 		}
 	}
 	enqueueSystemEvent(sessionKey, text, agentID)
+	persistSystemEventsSnapshot(oc.cronStoreBackend())
 	return nil
 }
 

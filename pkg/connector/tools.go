@@ -571,8 +571,26 @@ func executeMessageSend(ctx context.Context, args map[string]any, btc *BridgeToo
 	} else {
 		rawContent["url"] = string(uri)
 	}
-	if msgType == event.MsgAudio && asVoice {
-		rawContent["org.matrix.msc3245.voice"] = map[string]any{}
+	if msgType == event.MsgImage {
+		if w, h := analyzeImage(data); w > 0 && h > 0 {
+			info["w"] = w
+			info["h"] = h
+		}
+	}
+
+	if msgType == event.MsgAudio {
+		if durationMs, waveform := analyzeAudio(data, mimeType); durationMs > 0 || len(waveform) > 0 {
+			if durationMs > 0 {
+				info["duration"] = durationMs
+			}
+			rawContent["org.matrix.msc1767.audio"] = map[string]any{
+				"duration": durationMs,
+				"waveform": waveform,
+			}
+		}
+		if asVoice {
+			rawContent["org.matrix.msc3245.voice"] = map[string]any{}
+		}
 	}
 
 	eventContent := &event.Content{Raw: rawContent}
@@ -1216,11 +1234,99 @@ func executeTTS(ctx context.Context, args map[string]any) (string, error) {
 
 	btc := GetBridgeToolContext(ctx)
 
-	// Try provider-based TTS first (Beeper/OpenAI)
-	if btc != nil {
+	// Allow explicit async override (JSON tool args might encode booleans as native bools).
+	asyncExplicit := false
+	asyncValue := false
+	if raw, ok := args["async"]; ok {
+		asyncExplicit = true
+		switch v := raw.(type) {
+		case bool:
+			asyncValue = v
+		case float64:
+			asyncValue = v != 0
+		case int:
+			asyncValue = v != 0
+		case string:
+			asyncValue = strings.EqualFold(strings.TrimSpace(v), "true") || strings.TrimSpace(v) == "1"
+		}
+	}
+
+	// Default to async for Magic Proxy to avoid blocking the stream loop.
+	async := asyncValue
+	if btc != nil && !asyncExplicit {
+		loginMeta := loginMetadata(btc.Client.UserLogin)
+		if loginMeta.Provider == ProviderMagicProxy {
+			async = true
+		}
+	}
+
+	if async {
+		if btc == nil || btc.Client == nil || btc.Portal == nil {
+			return "", errors.New("TTS async requires bridge context")
+		}
+
+		// Preflight: if we're not on macOS and the OpenAI TTS endpoint isn't supported, fail fast.
+		supportsOpenAITTS := false
+		if provider, ok := btc.Client.provider.(*OpenAIProvider); ok {
+			_, supportsOpenAITTS = resolveOpenAITTSBaseURL(btc, provider.baseURL)
+		}
+		if !supportsOpenAITTS && !isTTSMacOSAvailable() {
+			return "", errors.New("TTS not available: requires Beeper/OpenAI provider or macOS")
+		}
+
+		// Copy minimal data for the background worker.
+		textCopy := text
+		voiceCopy := voice
+		modelCopy := model
+		voiceFromArgsCopy := voiceFromArgs
+		modelFromArgsCopy := modelFromArgs
+		client := btc.Client
+		portal := btc.Portal
+		btcCopy := *btc
+
+		go func() {
+			bgctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+
+			audioB64, err := generateTTSBase64(bgctx, &btcCopy, textCopy, voiceCopy, modelCopy, voiceFromArgsCopy, modelFromArgsCopy)
+			if err != nil {
+				client.sendSystemNotice(bgctx, portal, "TTS failed: "+err.Error())
+				return
+			}
+
+			audioData, err := base64.StdEncoding.DecodeString(audioB64)
+			if err != nil {
+				client.sendSystemNotice(bgctx, portal, "TTS failed: couldn't decode audio data")
+				return
+			}
+
+			mimeType := detectAudioMime(audioData, "audio/mpeg")
+			if _, _, err := client.sendGeneratedAudio(bgctx, portal, audioData, mimeType, ""); err != nil {
+				client.sendSystemNotice(bgctx, portal, "TTS finished, but sending failed: "+err.Error())
+				return
+			}
+		}()
+
+		return "TTS started (async). I'll send the audio here when ready.", nil
+	}
+
+	audioB64, err := generateTTSBase64(ctx, btc, text, voice, model, voiceFromArgs, modelFromArgs)
+	if err != nil {
+		return "", err
+	}
+	return TTSResultPrefix + audioB64, nil
+}
+
+func generateTTSBase64(
+	ctx context.Context,
+	btc *BridgeToolContext,
+	text, voice, model string,
+	voiceFromArgs, modelFromArgs bool,
+) (string, error) {
+	// Try provider-based TTS first (Beeper/OpenAI).
+	if btc != nil && btc.Client != nil {
 		if provider, ok := btc.Client.provider.(*OpenAIProvider); ok {
 			ttsBaseURL, supportsOpenAITTS := resolveOpenAITTSBaseURL(btc, provider.baseURL)
-
 			if supportsOpenAITTS {
 				// Pick voice/model for OpenAI TTS.
 				openAIVoice := strings.ToLower(strings.TrimSpace(voice))
@@ -1245,14 +1351,14 @@ func executeTTS(ctx context.Context, args map[string]any) (string, error) {
 					audioData, err = callOpenAITTS(ctx, btc.Client.apiKey, ttsBaseURL, text, "tts-1", openAIVoice)
 				}
 				if err == nil {
-					return TTSResultPrefix + audioData, nil
+					return audioData, nil
 				}
 				// Fall through to macOS say if API fails.
 			}
 		}
 	}
 
-	// Try macOS 'say' command as fallback
+	// Try macOS 'say' command as fallback.
 	if isTTSMacOSAvailable() {
 		macOSVoice := voice
 		if !voiceFromArgs {
@@ -1268,7 +1374,7 @@ func executeTTS(ctx context.Context, args map[string]any) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("macOS TTS failed: %w", err)
 		}
-		return TTSResultPrefix + audioData, nil
+		return audioData, nil
 	}
 
 	return "", errors.New("TTS not available: requires Beeper/OpenAI provider or macOS")
