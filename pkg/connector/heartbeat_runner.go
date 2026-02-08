@@ -98,6 +98,14 @@ func (r *HeartbeatRunner) updateConfig(cfg *Config) {
 			} else if prevState.intervalMs == intervalMs && prevState.nextDueMs > now {
 				nextDue = prevState.nextDueMs
 			}
+		} else if r.client != nil {
+			// On first startup (no prevState), seed from persisted session data
+			// so we don't wait a full interval if the heartbeat is already overdue.
+			ref, sessionKey := r.client.resolveHeartbeatMainSessionRef(agent.agentID)
+			if entry, ok := r.client.getSessionEntry(context.Background(), ref, sessionKey); ok && entry.LastHeartbeatSentAt > 0 {
+				lastRun = entry.LastHeartbeatSentAt
+				nextDue = lastRun + intervalMs
+			}
 		}
 		next[agent.agentID] = &heartbeatAgentState{
 			agentID:    agent.agentID,
@@ -334,6 +342,7 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	systemEvents := formatSystemEvents(drainHeartbeatSystemEvents(sessionKey, storeKey))
 	if systemEvents != "" {
 		prompt = systemEvents + "\n\n" + prompt
+		persistSystemEventsSnapshot(oc.cronStoreBackend())
 	}
 
 	promptMessages, err := oc.buildPromptWithHeartbeat(context.Background(), sessionPortal, promptMeta, prompt)

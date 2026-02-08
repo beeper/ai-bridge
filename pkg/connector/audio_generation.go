@@ -45,5 +45,6 @@ func (oc *AIClient) sendGeneratedAudio(
 		fileName,
 		"com.beeper.ai.tts",
 		true,
+		"",
 	)
 }

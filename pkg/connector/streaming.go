@@ -1364,7 +1364,7 @@ func (oc *AIClient) handleResponseOutputItemDone(
 	switch {
 	case outputItemLooksDenied(item):
 		oc.emitUIToolOutputDenied(ctx, portal, state, tool.callID)
-		resultStatus = ResultStatusError
+		resultStatus = ResultStatusDenied
 	case statusText == "failed" || statusText == "incomplete" || errorText != "":
 		if errorText == "" {
 			errorText = fmt.Sprintf("%s failed", tool.toolName)
@@ -2370,7 +2370,7 @@ func (oc *AIClient) streamingResponse(
 							}
 						}
 						if !decision.Approve {
-							resultStatus = ResultStatusError
+							resultStatus = ResultStatusDenied
 							result = "Denied by user"
 							oc.emitUIToolOutputDenied(ctx, portal, state, tool.callID)
 						}
@@ -2419,7 +2419,7 @@ func (oc *AIClient) streamingResponse(
 							}
 						}
 						if !decision.Approve {
-							resultStatus = ResultStatusError
+							resultStatus = ResultStatusDenied
 							result = "Denied by user"
 							oc.emitUIToolOutputDenied(ctx, portal, state, tool.callID)
 						}
@@ -2427,7 +2427,7 @@ func (oc *AIClient) streamingResponse(
 				}
 
 				// If denied, skip tool execution but still send a tool result to the model.
-				if !(resultStatus == ResultStatusError && strings.TrimSpace(result) == "Denied by user") {
+				if resultStatus != ResultStatusDenied {
 					// Wrap context with bridge info for tools that need it (e.g., channel-edit, react)
 					toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
 						Client:        oc,
@@ -2544,7 +2544,7 @@ func (oc *AIClient) streamingResponse(
 			// as completed without waiting for the timeline event send.
 			if resultStatus == ResultStatusSuccess {
 				oc.emitUIToolOutputAvailable(ctx, portal, state, tool.callID, result, tool.toolType == ToolTypeProvider, false)
-			} else {
+			} else if resultStatus != ResultStatusDenied {
 				oc.emitUIToolOutputError(ctx, portal, state, tool.callID, result, tool.toolType == ToolTypeProvider)
 			}
 
@@ -3586,13 +3586,13 @@ func (oc *AIClient) streamingResponse(
 							}
 						}
 						if !decision.Approve {
-							resultStatus = ResultStatusError
+							resultStatus = ResultStatusDenied
 							result = "Denied by user"
 							oc.emitUIToolOutputDenied(ctx, portal, state, tool.callID)
 						}
 					}
 
-					if !(resultStatus == ResultStatusError && strings.TrimSpace(result) == "Denied by user") {
+					if resultStatus != ResultStatusDenied {
 						toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
 							Client:        oc,
 							Portal:        portal,
@@ -3704,7 +3704,7 @@ func (oc *AIClient) streamingResponse(
 				// as completed without waiting for the timeline event send.
 				if resultStatus == ResultStatusSuccess {
 					oc.emitUIToolOutputAvailable(ctx, portal, state, tool.callID, result, tool.toolType == ToolTypeProvider, false)
-				} else {
+				} else if resultStatus != ResultStatusDenied {
 					oc.emitUIToolOutputError(ctx, portal, state, tool.callID, result, tool.toolType == ToolTypeProvider)
 				}
 
@@ -4354,13 +4354,13 @@ func (oc *AIClient) streamChatCompletions(
 							}
 						}
 						if !decision.Approve {
-							resultStatus = ResultStatusError
+							resultStatus = ResultStatusDenied
 							result = "Denied by user"
 							oc.emitUIToolOutputDenied(ctx, portal, state, tool.callID)
 						}
 					}
 
-					if !(resultStatus == ResultStatusError && strings.TrimSpace(result) == "Denied by user") {
+					if resultStatus != ResultStatusDenied {
 						var err error
 						result, err = oc.executeBuiltinTool(toolCtx, portal, toolName, argsJSON)
 						if err != nil {
@@ -4482,7 +4482,7 @@ func (oc *AIClient) streamChatCompletions(
 				if resultStatus == ResultStatusSuccess {
 					collectToolOutputCitations(state, toolName, result)
 					oc.emitUIToolOutputAvailable(ctx, portal, state, tool.callID, result, tool.toolType == ToolTypeProvider, false)
-				} else {
+				} else if resultStatus != ResultStatusDenied {
 					oc.emitUIToolOutputError(ctx, portal, state, tool.callID, result, tool.toolType == ToolTypeProvider)
 				}
 

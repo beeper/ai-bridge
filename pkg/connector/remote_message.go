@@ -131,6 +131,9 @@ func (m *OpenAIRemoteMessage) ConvertMessage(ctx context.Context, portal *bridge
 			if tc.ResultStatus == string(ResultStatusSuccess) {
 				toolPart["state"] = "output-available"
 				toolPart["output"] = tc.Output
+			} else if tc.ResultStatus == string(ResultStatusDenied) {
+				toolPart["state"] = "output-denied"
+				toolPart["errorText"] = "Denied by user"
 			} else {
 				toolPart["state"] = "output-error"
 				if tc.ErrorMessage != "" {

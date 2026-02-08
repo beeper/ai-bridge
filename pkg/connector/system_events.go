@@ -2,10 +2,14 @@
 package connector
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/beeper/ai-bridge/pkg/cron"
 )
 
 type SystemEvent struct {
@@ -117,4 +121,84 @@ func hasSystemEvents(sessionKey string) bool {
 	has := entry != nil && len(entry.queue) > 0
 	systemEventsMu.Unlock()
 	return has
+}
+
+// --- Persistence ---
+
+const systemEventsStorePath = "sessions/system_events.json"
+
+type persistedEvent struct {
+	Text string `json:"text"`
+	TS   int64  `json:"ts"`
+}
+
+type persistedQueue struct {
+	Events   []persistedEvent `json:"events"`
+	LastText string           `json:"lastText,omitempty"`
+}
+
+type persistedSystemEvents struct {
+	Queues map[string]*persistedQueue `json:"queues"`
+}
+
+func snapshotSystemEvents() persistedSystemEvents {
+	systemEventsMu.Lock()
+	snap := persistedSystemEvents{Queues: make(map[string]*persistedQueue, len(systemEvents))}
+	for key, entry := range systemEvents {
+		if entry == nil || len(entry.queue) == 0 {
+			continue
+		}
+		events := make([]persistedEvent, len(entry.queue))
+		for i, evt := range entry.queue {
+			events[i] = persistedEvent{Text: evt.Text, TS: evt.TS}
+		}
+		snap.Queues[key] = &persistedQueue{Events: events, LastText: entry.lastText}
+	}
+	systemEventsMu.Unlock()
+	return snap
+}
+
+func persistSystemEventsSnapshot(backend cron.StoreBackend) {
+	if backend == nil {
+		return
+	}
+	snap := snapshotSystemEvents()
+	data, err := json.Marshal(snap)
+	if err != nil {
+		return
+	}
+	_ = backend.Write(context.Background(), systemEventsStorePath, data)
+}
+
+func restoreSystemEventsFromDisk(backend cron.StoreBackend) {
+	if backend == nil {
+		return
+	}
+	data, found, err := backend.Read(context.Background(), systemEventsStorePath)
+	if err != nil || !found || len(data) == 0 {
+		return
+	}
+	var snap persistedSystemEvents
+	if err := json.Unmarshal(data, &snap); err != nil {
+		return
+	}
+	systemEventsMu.Lock()
+	for key, pq := range snap.Queues {
+		if pq == nil || len(pq.Events) == 0 {
+			continue
+		}
+		existing := systemEvents[key]
+		if existing != nil && len(existing.queue) > 0 {
+			continue // don't overwrite events already in memory
+		}
+		events := make([]SystemEvent, len(pq.Events))
+		for i, pe := range pq.Events {
+			events[i] = SystemEvent{Text: pe.Text, TS: pe.TS}
+		}
+		systemEvents[key] = &systemEventQueue{
+			queue:    events,
+			lastText: pq.LastText,
+		}
+	}
+	systemEventsMu.Unlock()
 }

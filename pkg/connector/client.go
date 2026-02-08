@@ -1018,6 +1018,8 @@ func (oc *AIClient) Connect(ctx context.Context) {
 		go oc.bootstrapOpenCode(oc.backgroundContext(ctx))
 	}
 
+	restoreSystemEventsFromDisk(oc.cronStoreBackend())
+
 	if oc.heartbeatRunner != nil {
 		oc.heartbeatRunner.Start()
 	}

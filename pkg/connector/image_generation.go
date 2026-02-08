@@ -51,5 +51,6 @@ func (oc *AIClient) sendGeneratedImage(
 		fileName,
 		"com.beeper.ai.image_generation",
 		false,
+		"",
 	)
 }
