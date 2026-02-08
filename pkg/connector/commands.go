@@ -960,7 +960,7 @@ func fnMode(ce *commands.Event) {
 var CommandNew = registerAICommand(commandregistry.Definition{
 	Name:           "new",
 	Description:    "Create a new chat using current agent/model (or specify agent/model)",
-	Args:           "[agent <agent_id> | model <model_id>]",
+	Args:           "[<model_id> | agent <agent_id> | model <model_id>]",
 	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,

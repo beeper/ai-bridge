@@ -894,6 +894,71 @@ func executeImageGeneration(ctx context.Context, args map[string]any) (string, e
 		return "", err
 	}
 
+	// Allow explicit async override (JSON tool args might encode booleans as native bools).
+	asyncExplicit := false
+	asyncValue := false
+	if raw, ok := args["async"]; ok {
+		asyncExplicit = true
+		switch v := raw.(type) {
+		case bool:
+			asyncValue = v
+		case float64:
+			asyncValue = v != 0
+		case int:
+			asyncValue = v != 0
+		case string:
+			asyncValue = strings.EqualFold(strings.TrimSpace(v), "true") || strings.TrimSpace(v) == "1"
+		}
+	}
+
+	// Default to async for Magic Proxy since image generation can take long and blocks the stream loop.
+	loginMeta := loginMetadata(btc.Client.UserLogin)
+	async := asyncValue
+	if !asyncExplicit && loginMeta.Provider == ProviderMagicProxy {
+		async = true
+	}
+
+	if async {
+		// Preflight: fail fast on unsupported configs (e.g. advanced controls on OpenRouter).
+		if _, err := resolveImageGenProvider(req, btc); err != nil {
+			return "", fmt.Errorf("image generation failed: %w", err)
+		}
+
+		// Copy minimal data for the background worker.
+		reqCopy := req
+		client := btc.Client
+		portal := btc.Portal
+		btcCopy := *btc
+
+		go func() {
+			bgctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+
+			images, err := generateImagesForRequest(bgctx, &btcCopy, reqCopy)
+			if err != nil {
+				client.sendSystemNotice(bgctx, portal, "Image generation failed: "+err.Error())
+				return
+			}
+
+			sent := 0
+			for _, imageB64 := range images {
+				imageData, mimeType, err := decodeBase64Image(imageB64)
+				if err != nil {
+					continue
+				}
+				if _, _, err := client.sendGeneratedImage(bgctx, portal, imageData, mimeType, ""); err != nil {
+					continue
+				}
+				sent++
+			}
+			if sent == 0 {
+				client.sendSystemNotice(bgctx, portal, "Image generation finished, but sending failed.")
+			}
+		}()
+
+		return "Image generation started (async). I'll send the image(s) here when ready.", nil
+	}
+
 	images, err := generateImagesForRequest(ctx, btc, req)
 	if err != nil {
 		return "", fmt.Errorf("image generation failed: %w", err)

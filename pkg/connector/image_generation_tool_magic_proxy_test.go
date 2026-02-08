@@ -37,8 +37,29 @@ func TestResolveImageGenProviderMagicProxyUsesOpenAIWhenCountIsGreaterThanOne(t 
 	if err != nil {
 		t.Fatalf("resolveImageGenProvider returned error: %v", err)
 	}
-	if got != imageGenProviderOpenAI {
-		t.Fatalf("expected provider %q, got %q", imageGenProviderOpenAI, got)
+	if got != imageGenProviderOpenRouter {
+		t.Fatalf("expected provider %q, got %q", imageGenProviderOpenRouter, got)
+	}
+}
+
+func TestResolveImageGenProviderMagicProxyProviderOpenAIStillRoutesToOpenRouter(t *testing.T) {
+	meta := &UserLoginMetadata{
+		Provider: ProviderMagicProxy,
+		APIKey:   "tok",
+		BaseURL:  "https://bai.bt.hn/team/proxy",
+	}
+	btc := newTTSTestBridgeContext(meta, &OpenAIConnector{})
+
+	got, err := resolveImageGenProvider(imageGenRequest{
+		Provider: "openai",
+		Prompt:   "cat",
+		Count:    1,
+	}, btc)
+	if err != nil {
+		t.Fatalf("resolveImageGenProvider returned error: %v", err)
+	}
+	if got != imageGenProviderOpenRouter {
+		t.Fatalf("expected provider %q, got %q", imageGenProviderOpenRouter, got)
 	}
 }
 
