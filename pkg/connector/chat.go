@@ -30,6 +30,9 @@ const (
 	ToolNameWebSearch  = toolspec.WebSearchName
 )
 
+// defaultRawModeSystemPrompt is the default system prompt for model-only (raw) rooms.
+const defaultRawModeSystemPrompt = "You are a helpful assistant."
+
 func hasAssignedAgent(meta *PortalMetadata) bool {
 	if meta == nil {
 		return false
@@ -505,7 +508,8 @@ func (oc *AIClient) createAgentChatWithModel(ctx context.Context, agent *agents.
 // createNewChat creates a new portal for a specific model
 func (oc *AIClient) createNewChat(ctx context.Context, modelID string) (*bridgev2.CreateChatResponse, error) {
 	portal, chatInfo, err := oc.initPortalForChat(ctx, PortalInitOpts{
-		ModelID: modelID,
+		ModelID:      modelID,
+		SystemPrompt: defaultRawModeSystemPrompt,
 	})
 	if err != nil {
 		return nil, err
@@ -723,39 +727,16 @@ func (oc *AIClient) handleNewChat(
 ) {
 	runCtx := oc.backgroundContext(ctx)
 
-	const usage = "Usage: !ai new [<model_id> | agent <agent_id> | model <model_id>]"
-
-	targetType := "current"
-	targetID := ""
+	const usage = "Usage: !ai new [agent <agent_id>]"
 
 	if len(args) >= 2 {
 		cmd := strings.ToLower(args[0])
-		if cmd != "agent" && cmd != "model" {
+		if cmd != "agent" {
 			oc.sendSystemNotice(runCtx, portal, usage)
 			return
 		}
-		targetType = cmd
-		targetID = args[1]
-		if targetID == "" {
-			oc.sendSystemNotice(runCtx, portal, usage)
-			return
-		}
-		if len(args) > 2 {
-			oc.sendSystemNotice(runCtx, portal, usage)
-			return
-		}
-	} else if len(args) == 1 {
-		// Shorthand: !ai new <model_id>
-		targetType = "model"
-		targetID = args[0]
-	} else if len(args) > 1 {
-		oc.sendSystemNotice(runCtx, portal, usage)
-		return
-	}
-
-	switch targetType {
-	case "agent":
-		if targetID == "" {
+		targetID := args[1]
+		if targetID == "" || len(args) > 2 {
 			oc.sendSystemNotice(runCtx, portal, usage)
 			return
 		}
@@ -772,65 +753,44 @@ func (oc *AIClient) handleNewChat(
 		}
 		oc.createAndOpenAgentChat(runCtx, portal, agent, modelID, false)
 		return
-	case "model":
-		if targetID == "" {
-			oc.sendSystemNotice(runCtx, portal, usage)
+	} else if len(args) == 1 {
+		oc.sendSystemNotice(runCtx, portal, usage)
+		return
+	}
+
+	// No args: create new room of same type
+	if meta == nil {
+		oc.sendSystemNotice(runCtx, portal, "Couldn't read current room settings.")
+		return
+	}
+	agentID := resolveAgentID(meta)
+	if agentID != "" {
+		store := NewAgentStoreAdapter(oc)
+		agent, err := store.GetAgentByID(runCtx, agentID)
+		if err != nil || agent == nil {
+			oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Agent not found: %s", agentID))
 			return
 		}
-		modelID, err := oc.resolveExplicitModelID(runCtx, targetID)
+		modelID, err := oc.resolveAgentModelForNewChat(runCtx, agent, oc.effectiveModel(meta))
 		if err != nil {
-			oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("That model isn't available: %s", targetID))
+			oc.sendSystemNotice(runCtx, portal, err.Error())
 			return
 		}
-		oc.createAndOpenModelChat(runCtx, portal, modelID)
-		return
-	default:
-		// targetType == "current": use current room's agent/model only
-		if meta == nil {
-			oc.sendSystemNotice(runCtx, portal, "Couldn't read current room settings.")
-			return
-		}
-		agentID := resolveAgentID(meta)
-		if agentID != "" {
-			store := NewAgentStoreAdapter(oc)
-			agent, err := store.GetAgentByID(runCtx, agentID)
-			if err != nil || agent == nil {
-				oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Agent not found: %s", agentID))
-				return
-			}
-			modelID, err := oc.resolveAgentModelForNewChat(runCtx, agent, oc.effectiveModel(meta))
-			if err != nil {
-				oc.sendSystemNotice(runCtx, portal, err.Error())
-				return
-			}
-			modelOverride := meta != nil && meta.Model != ""
-			oc.createAndOpenAgentChat(runCtx, portal, agent, modelID, modelOverride)
-			return
-		}
-
-		modelID := oc.effectiveModel(meta)
-		if modelID == "" {
-			oc.sendSystemNotice(runCtx, portal, "No model configured for this room.")
-			return
-		}
-		if ok, _ := oc.validateModel(runCtx, modelID); !ok {
-			oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("That model isn't available: %s", modelID))
-			return
-		}
-		oc.createAndOpenModelChat(runCtx, portal, modelID)
+		modelOverride := meta != nil && meta.Model != ""
+		oc.createAndOpenAgentChat(runCtx, portal, agent, modelID, modelOverride)
 		return
 	}
-}
 
-func (oc *AIClient) resolveExplicitModelID(ctx context.Context, modelID string) (string, error) {
-	resolved, ok, err := oc.resolveModelID(ctx, modelID)
-	if err != nil {
-		return "", err
+	modelID := oc.effectiveModel(meta)
+	if modelID == "" {
+		oc.sendSystemNotice(runCtx, portal, "No model configured for this room.")
+		return
 	}
-	if !ok || resolved == "" {
-		return "", fmt.Errorf("that model isn't available: %s", modelID)
+	if ok, _ := oc.validateModel(runCtx, modelID); !ok {
+		oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("That model isn't available: %s", modelID))
+		return
 	}
-	return resolved, nil
+	oc.createAndOpenModelChat(runCtx, portal, modelID)
 }
 
 func (oc *AIClient) resolveAgentModelForNewChat(ctx context.Context, agent *agents.AgentDefinition, preferredModel string) (string, error) {
@@ -1038,7 +998,8 @@ func (oc *AIClient) copyMessagesToChat(
 // createNewChatWithModel creates a new chat portal with the specified model and default settings
 func (oc *AIClient) createNewChatWithModel(ctx context.Context, modelID string) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
 	portal, chatInfo, err := oc.initPortalForChat(ctx, PortalInitOpts{
-		ModelID: modelID,
+		ModelID:      modelID,
+		SystemPrompt: defaultRawModeSystemPrompt,
 	})
 	if err != nil {
 		return nil, nil, err

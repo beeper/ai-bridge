@@ -400,18 +400,20 @@ func fnCommands(ce *commands.Event) {
 			"- `!ai typing [never|instant|thinking|message|off|reset|interval <seconds>]`\n" +
 			"- `!ai debounce [ms|off|default]`\n\n" +
 			"Session actions:\n" +
-			"- `!ai new`\n" +
+			"- `!ai new` — New chat of the same type\n" +
 			"- `!ai fork`\n" +
 			"- `!ai regenerate`\n" +
 			"- `!ai title [text]`\n" +
 			"- `!ai timezone [IANA_TZ]`\n\n" +
+			"Playground:\n" +
+			"- `!ai playground new [model]` — Create a new AI chat\n" +
+			"- `!ai playground list` — List available models\n\n" +
 			"Agents:\n" +
 			"- `!ai agent [id|none]`\n" +
 			"- `!ai agents`\n" +
 			"- `!ai create-agent <id> <name> [model] [system prompt...]`\n" +
 			"- `!ai delete-agent <id>`\n" +
-			"- `!ai manage`\n" +
-			"- `!ai playground <model>`\n\n" +
+			"- `!ai manage`\n\n" +
 			"Integrations:\n" +
 			"- MCP: `!ai mcp ...`\n" +
 			"- Clay: `!ai clay ...`\n" +
@@ -959,8 +961,8 @@ func fnMode(ce *commands.Event) {
 // CommandNew handles the !ai new command
 var CommandNew = registerAICommand(commandregistry.Definition{
 	Name:           "new",
-	Description:    "Create a new chat using current agent/model (or specify agent/model)",
-	Args:           "[<model_id> | agent <agent_id> | model <model_id>]",
+	Description:    "Create a new chat of the same type (agent or model)",
+	Args:           "[agent <agent_id>]",
 	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,

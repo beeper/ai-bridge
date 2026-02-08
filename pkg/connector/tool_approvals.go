@@ -154,7 +154,7 @@ func (oc *AIClient) resolveToolApproval(roomID id.RoomID, approvalID string, dec
 	}
 	select {
 	case p.decisionCh <- decision:
-		go oc.emitApprovalSnapshotDecision(approvalID, decision)
+		go oc.emitApprovalSnapshotDecision(p, decision)
 		return nil
 	default:
 		return fmt.Errorf("%w: %s", ErrApprovalAlreadyHandled, approvalID)
@@ -179,14 +179,15 @@ func (oc *AIClient) waitToolApproval(ctx context.Context, approvalID string) (To
 
 	timeout := time.Until(p.ExpiresAt)
 	if timeout <= 0 {
+		oc.dropToolApprovalLocked(approvalID)
 		// Best-effort snapshot update so clients stop showing approval UI.
-		go oc.emitApprovalSnapshotDecision(approvalID, ToolApprovalDecision{
+		// Pass p directly — the map entry is already dropped, but the pointer is still valid.
+		go oc.emitApprovalSnapshotDecision(p, ToolApprovalDecision{
 			Approve:   false,
 			Reason:    "expired",
 			DecidedAt: time.Now(),
 			DecidedBy: oc.UserLogin.UserMXID,
 		})
-		oc.dropToolApprovalLocked(approvalID)
 		return ToolApprovalDecision{}, p, false
 	}
 
@@ -201,41 +202,31 @@ func (oc *AIClient) waitToolApproval(ctx context.Context, approvalID string) (To
 		oc.dropToolApprovalLocked(approvalID)
 		return decision, p, true
 	case <-timer.C:
+		oc.dropToolApprovalLocked(approvalID)
 		// Timeout: update the approval snapshot so the UI can stop showing action buttons,
 		// even if the tool is no longer waiting (e.g. on reconnect).
-		go oc.emitApprovalSnapshotDecision(approvalID, ToolApprovalDecision{
+		go oc.emitApprovalSnapshotDecision(p, ToolApprovalDecision{
 			Approve:   false,
 			Reason:    "timeout",
 			DecidedAt: time.Now(),
 			DecidedBy: oc.UserLogin.UserMXID,
 		})
-		oc.dropToolApprovalLocked(approvalID)
 		return ToolApprovalDecision{}, p, false
 	case <-ctx.Done():
+		oc.dropToolApprovalLocked(approvalID)
 		// Context cancellation: treat as expired for UI purposes.
-		go oc.emitApprovalSnapshotDecision(approvalID, ToolApprovalDecision{
+		go oc.emitApprovalSnapshotDecision(p, ToolApprovalDecision{
 			Approve:   false,
 			Reason:    "cancelled",
 			DecidedAt: time.Now(),
 			DecidedBy: oc.UserLogin.UserMXID,
 		})
-		oc.dropToolApprovalLocked(approvalID)
 		return ToolApprovalDecision{}, p, false
 	}
 }
 
-func (oc *AIClient) emitApprovalSnapshotDecision(approvalID string, decision ToolApprovalDecision) {
-	if oc == nil || oc.UserLogin == nil {
-		return
-	}
-	approvalID = strings.TrimSpace(approvalID)
-	if approvalID == "" {
-		return
-	}
-	oc.toolApprovalsMu.Lock()
-	p := oc.toolApprovals[approvalID]
-	oc.toolApprovalsMu.Unlock()
-	if p == nil || p.ApprovalEventID == "" {
+func (oc *AIClient) emitApprovalSnapshotDecision(p *pendingToolApproval, decision ToolApprovalDecision) {
+	if oc == nil || oc.UserLogin == nil || p == nil || p.ApprovalEventID == "" {
 		return
 	}
 
@@ -278,7 +269,7 @@ func (oc *AIClient) emitApprovalSnapshotDecision(approvalID string, decision Too
 	}
 
 	uiMessage := map[string]any{
-		"id":       "approval:" + approvalID,
+		"id":       "approval:" + p.ApprovalID,
 		"role":     "assistant",
 		"metadata": map[string]any{"turn_id": p.TurnID},
 		"parts":    []map[string]any{toolPart},

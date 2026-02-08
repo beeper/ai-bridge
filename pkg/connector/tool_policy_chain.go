@@ -72,8 +72,6 @@ func (oc *AIClient) resolveToolPolicies(meta *PortalMetadata) toolPolicyResoluti
 	if agent == nil && !hasAssignedAgent(meta) {
 		modelRoomPolicy := &toolpolicy.ToolPolicy{
 			Allow: []string{
-				toolspec.MemorySearchName,
-				toolspec.MemoryGetName,
 				toolspec.WebSearchName,
 			},
 		}
