@@ -180,6 +180,36 @@ func mergeSourceCitations(existing, incoming []sourceCitation) []sourceCitation 
 	return merged
 }
 
+// citationProviderMetadata builds the providerMetadata map for a source-url part
+// from a sourceCitation. The keys are chosen to match what the desktop client reads
+// (e.g. "siteName" in camelCase for compatibility with pickString(md?.siteName)).
+func citationProviderMetadata(c sourceCitation) map[string]any {
+	meta := map[string]any{}
+	if desc := strings.TrimSpace(c.Description); desc != "" {
+		meta["description"] = desc
+	}
+	if published := strings.TrimSpace(c.Published); published != "" {
+		meta["published"] = published
+	}
+	if site := strings.TrimSpace(c.SiteName); site != "" {
+		meta["site_name"] = site
+		meta["siteName"] = site // camelCase alias for desktop compatibility
+	}
+	if author := strings.TrimSpace(c.Author); author != "" {
+		meta["author"] = author
+	}
+	if image := strings.TrimSpace(c.Image); image != "" {
+		meta["image"] = image
+	}
+	if favicon := strings.TrimSpace(c.Favicon); favicon != "" {
+		meta["favicon"] = favicon
+	}
+	if len(meta) == 0 {
+		return nil
+	}
+	return meta
+}
+
 func mergeCitationFields(dst, src sourceCitation) sourceCitation {
 	if strings.TrimSpace(dst.Title) == "" {
 		dst.Title = src.Title

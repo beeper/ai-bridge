@@ -195,6 +195,15 @@ func analyzeMessage(msg openai.ChatCompletionMessageParamUnion, index int) messa
 
 	case msg.OfUser != nil:
 		info.role = "user"
+		// Detect multimodal user messages containing images (e.g. synthetic messages
+		// for assistant-generated images, or user-sent media with re-injected images).
+		// These get the same pruning protection as tool results with images.
+		for _, part := range msg.OfUser.Content.OfArrayOfContentParts {
+			if part.OfImageURL != nil {
+				info.hasImages = true
+				break
+			}
+		}
 
 	case msg.OfAssistant != nil:
 		info.role = "assistant"

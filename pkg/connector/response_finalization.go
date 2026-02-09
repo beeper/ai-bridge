@@ -263,7 +263,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	}
 
 	// Generate link previews for URLs in the response
-	linkPreviews := oc.generateOutboundLinkPreviews(ctx, cleanedContent, intent, portal)
+	linkPreviews := oc.generateOutboundLinkPreviews(ctx, cleanedContent, intent, portal, state.sourceCitations)
 	if sourceParts := buildSourceParts(state.sourceCitations, state.sourceDocuments, linkPreviews); len(sourceParts) > 0 {
 		parts = append(parts, sourceParts...)
 	}
@@ -602,6 +602,23 @@ func buildSourceParts(citations []sourceCitation, documents []sourceDocument, pr
 		return nil
 	}
 
+	// Build a preview-by-URL index so we can enrich citation metadata with
+	// uploaded image URIs and dimensions from link previews.
+	previewByURL := make(map[string]*event.BeeperLinkPreview, len(previews))
+	for _, p := range previews {
+		if p == nil {
+			continue
+		}
+		for _, u := range []string{p.MatchedURL, p.CanonicalURL} {
+			u = strings.TrimSpace(u)
+			if u != "" {
+				if _, exists := previewByURL[u]; !exists {
+					previewByURL[u] = p
+				}
+			}
+		}
+	}
+
 	parts := make([]map[string]any, 0, len(citations)+len(documents)+len(previews))
 	seen := make(map[string]struct{}, len(citations)+len(documents)+len(previews))
 
@@ -630,28 +647,24 @@ func buildSourceParts(citations []sourceCitation, documents []sourceDocument, pr
 	}
 
 	for _, citation := range citations {
-		meta := map[string]any{}
-		if desc := strings.TrimSpace(citation.Description); desc != "" {
-			meta["description"] = desc
+		meta := citationProviderMetadata(citation)
+
+		// Enrich with uploaded image URI and dimensions from the matching link preview.
+		if p := previewByURL[strings.TrimSpace(citation.URL)]; p != nil {
+			if meta == nil {
+				meta = map[string]any{}
+			}
+			if p.ImageURL != "" {
+				meta["image_url"] = string(p.ImageURL)
+			}
+			if p.ImageWidth != 0 {
+				meta["image_width"] = int(p.ImageWidth)
+			}
+			if p.ImageHeight != 0 {
+				meta["image_height"] = int(p.ImageHeight)
+			}
 		}
-		if published := strings.TrimSpace(citation.Published); published != "" {
-			meta["published"] = published
-		}
-		if site := strings.TrimSpace(citation.SiteName); site != "" {
-			meta["site_name"] = site
-		}
-		if author := strings.TrimSpace(citation.Author); author != "" {
-			meta["author"] = author
-		}
-		if image := strings.TrimSpace(citation.Image); image != "" {
-			meta["image"] = image
-		}
-		if favicon := strings.TrimSpace(citation.Favicon); favicon != "" {
-			meta["favicon"] = favicon
-		}
-		if len(meta) == 0 {
-			meta = nil
-		}
+
 		appendURL(citation.URL, citation.Title, meta)
 	}
 
@@ -797,7 +810,7 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 	}
 
 	// Generate link previews for URLs in the response
-	linkPreviews := oc.generateOutboundLinkPreviews(ctx, rendered.Body, intent, portal)
+	linkPreviews := oc.generateOutboundLinkPreviews(ctx, rendered.Body, intent, portal, state.sourceCitations)
 	if sourceParts := buildSourceParts(state.sourceCitations, state.sourceDocuments, linkPreviews); len(sourceParts) > 0 {
 		parts = append(parts, sourceParts...)
 	}
@@ -853,7 +866,9 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 }
 
 // generateOutboundLinkPreviews extracts URLs from AI response text, generates link previews, and uploads images to Matrix.
-func (oc *AIClient) generateOutboundLinkPreviews(ctx context.Context, text string, intent bridgev2.MatrixAPI, portal *bridgev2.Portal) []*event.BeeperLinkPreview {
+// When citations are provided (e.g. from Exa search results), matching URLs use the citation's
+// image directly instead of fetching the page's HTML.
+func (oc *AIClient) generateOutboundLinkPreviews(ctx context.Context, text string, intent bridgev2.MatrixAPI, portal *bridgev2.Portal, citations []sourceCitation) []*event.BeeperLinkPreview {
 	config := oc.getLinkPreviewConfig()
 	if !config.Enabled {
 		return nil
@@ -868,7 +883,12 @@ func (oc *AIClient) generateOutboundLinkPreviews(ctx context.Context, text strin
 	fetchCtx, cancel := context.WithTimeout(ctx, config.FetchTimeout*time.Duration(len(urls)))
 	defer cancel()
 
-	previewsWithImages := previewer.FetchPreviews(fetchCtx, urls)
+	var previewsWithImages []*PreviewWithImage
+	if len(citations) > 0 {
+		previewsWithImages = previewer.FetchPreviewsWithCitations(fetchCtx, urls, citations)
+	} else {
+		previewsWithImages = previewer.FetchPreviews(fetchCtx, urls)
+	}
 
 	// Upload images to Matrix and get final previews
 	return UploadPreviewImages(ctx, previewsWithImages, intent, portal.MXID)
