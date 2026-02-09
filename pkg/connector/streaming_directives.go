@@ -92,15 +92,73 @@ func (acc *streamingDirectiveAccumulator) Consume(raw string, final bool) *strea
 }
 
 func splitTrailingDirective(text string) (string, string) {
+	// Buffer incomplete [[...]] reply directives.
 	openIndex := strings.LastIndex(text, "[[")
-	if openIndex < 0 {
+	if openIndex >= 0 {
+		closeIndex := strings.Index(text[openIndex+2:], "]]")
+		if closeIndex < 0 {
+			return text[:openIndex], text[openIndex:]
+		}
+	}
+
+	// Buffer incomplete [message_id: ...] or [matrix event id: ...] hints on the
+	// trailing line so partial tokens don't leak to the client.
+	if body, tail := splitTrailingMessageIDHint(text); tail != "" {
+		return body, tail
+	}
+
+	return text, ""
+}
+
+// splitTrailingMessageIDHint checks whether the last line of text looks like
+// the beginning of a [message_id: ...] or [matrix event id: ...] hint that
+// hasn't been closed yet. If so it returns (everything-before, trailing-line).
+func splitTrailingMessageIDHint(text string) (string, string) {
+	// Find the start of the last line.
+	idx := strings.LastIndex(text, "\n")
+	var prefix, lastLine string
+	if idx >= 0 {
+		prefix = text[:idx+1]
+		lastLine = text[idx+1:]
+	} else {
+		prefix = ""
+		lastLine = text
+	}
+
+	trimmed := strings.TrimSpace(lastLine)
+	if trimmed == "" {
 		return text, ""
 	}
-	closeIndex := strings.Index(text[openIndex+2:], "]]")
-	if closeIndex >= 0 {
+
+	// Fast reject: must start with '['.
+	if trimmed[0] != '[' {
 		return text, ""
 	}
-	return text[:openIndex], text[openIndex:]
+
+	// If the bracket is already closed, the hint is complete — parseStreamingChunk
+	// will strip it, so no need to buffer.
+	if strings.Contains(trimmed, "]") {
+		return text, ""
+	}
+
+	// Check whether the trailing text is a prefix of one of the known hint tags.
+	if isMessageIDHintPrefix(strings.ToLower(trimmed)) {
+		return prefix, lastLine
+	}
+
+	return text, ""
+}
+
+// isMessageIDHintPrefix returns true when lower is a case-folded prefix of
+// "[message_id:" or "[matrix event id:" (or the target is a prefix of lower,
+// meaning lower already contains the full tag opener).
+func isMessageIDHintPrefix(lower string) bool {
+	for _, target := range []string{"[message_id:", "[matrix event id:"} {
+		if strings.HasPrefix(target, lower) || strings.HasPrefix(lower, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseStreamingChunk(raw string) *streamingDirectiveResult {
@@ -117,6 +175,9 @@ func parseStreamingChunk(raw string) *streamingDirectiveResult {
 		}
 		return " "
 	})
+
+	// Strip [message_id: ...] hints the model may echo back from the prompt.
+	cleaned = stripMessageIDHintLines(cleaned)
 
 	if isSilentReplyText(cleaned) {
 		parsed.IsSilent = true

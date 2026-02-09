@@ -116,6 +116,18 @@ func (m *MemorySearchManager) doLoadExtension(ctx context.Context, conn *sql.Con
 	return nil
 }
 
+// dropVectorTable drops the vec0 virtual table. Called during full reindex to
+// handle dimension changes when the embedding model changes.
+func (m *MemorySearchManager) dropVectorTable(ctx context.Context) {
+	if m == nil || m.cfg == nil || !m.cfg.Store.Vector.Enabled {
+		return
+	}
+	_ = m.withVectorConn(ctx, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", memoryVectorTable))
+		return err
+	})
+}
+
 func (m *MemorySearchManager) ensureVectorTable(ctx context.Context, dims int) bool {
 	if m == nil || dims <= 0 {
 		return false

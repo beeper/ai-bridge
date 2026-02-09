@@ -92,6 +92,10 @@ func (m *MemorySearchManager) sync(ctx context.Context, sessionKey string, force
 //
 // This split avoids holding the single SQLite connection during long embedding API calls.
 func (m *MemorySearchManager) syncFullReindex(ctx context.Context, sessionKey, generation string) error {
+	// Drop the vec0 table before reindexing so it gets recreated with the
+	// correct dimensions if the embedding model changed.
+	m.dropVectorTable(ctx)
+
 	// Phase 1: prepare all content and embeddings outside the transaction.
 	prepared, activeBySource, err := m.prepareMemoryFiles(ctx, true, generation)
 	if err != nil {
@@ -107,10 +111,14 @@ func (m *MemorySearchManager) syncFullReindex(ctx context.Context, sessionKey, g
 	}
 
 	// Phase 2: write everything inside a transaction (fast — no API calls).
+	// Vector operations are deferred to after the transaction commits because
+	// withVectorConn needs a separate pool connection, which deadlocks with
+	// max_open_conns=1 while DoTxn holds the only connection.
+	vecOps := &pendingVectorOps{}
 	var vectorCleanupIDs []string
 	err = m.db.DoTxn(ctx, nil, func(txCtx context.Context) error {
 		for _, pc := range prepared {
-			if err := m.writeContent(txCtx, pc); err != nil {
+			if err := m.writeContent(txCtx, pc, vecOps); err != nil {
 				return err
 			}
 		}
@@ -119,7 +127,7 @@ func (m *MemorySearchManager) syncFullReindex(ctx context.Context, sessionKey, g
 			if active == nil {
 				continue
 			}
-			if err := m.removeStaleChunksForSource(txCtx, active, generation, source); err != nil {
+			if err := m.removeStaleChunksForSource(txCtx, active, generation, source, vecOps); err != nil {
 				return err
 			}
 		}
@@ -127,7 +135,7 @@ func (m *MemorySearchManager) syncFullReindex(ctx context.Context, sessionKey, g
 			m.syncProgress(len(prepared), len(prepared), "cleanup")
 		}
 		if m.cfg.Experimental.SessionMemory && hasSource(m.cfg.Sources, "sessions") {
-			if err := m.writeSessions(txCtx, true, sessionKey, sessionPrepared); err != nil {
+			if err := m.writeSessions(txCtx, true, sessionKey, sessionPrepared, vecOps); err != nil {
 				return err
 			}
 		}
@@ -151,9 +159,12 @@ func (m *MemorySearchManager) syncFullReindex(ctx context.Context, sessionKey, g
 		m.sessionsDirty = false
 	}
 
-	// Best-effort vector cleanup outside the transaction.
-	if m.vectorAvailable() && len(vectorCleanupIDs) > 0 {
-		m.deleteVectorIDs(ctx, vectorCleanupIDs)
+	// Best-effort vector operations outside the transaction (pool connection now free).
+	if m.vectorAvailable() {
+		if len(vectorCleanupIDs) > 0 {
+			vecOps.deletes = append(vecOps.deletes, vectorCleanupIDs...)
+		}
+		m.applyVectorOps(ctx, vecOps)
 	}
 	return nil
 }
@@ -361,7 +372,7 @@ func (m *MemorySearchManager) indexMemoryFiles(ctx context.Context, force bool, 
 		if active == nil {
 			continue
 		}
-		if err := m.removeStaleChunksForSource(ctx, active, generation, source); err != nil {
+		if err := m.removeStaleChunksForSource(ctx, active, generation, source, nil); err != nil {
 			return err
 		}
 	}
@@ -545,9 +556,53 @@ func (m *MemorySearchManager) prepareContent(ctx context.Context, path, source, 
 	}, nil
 }
 
+// pendingVectorOps collects vector table operations to execute after a
+// transaction commits. When max_open_conns=1 (the default), vec0 operations
+// cannot run inside a DoTxn because withVectorConn needs a second connection
+// from the same pool that the transaction already holds.
+type pendingVectorOps struct {
+	inserts []vectorInsert
+	deletes []string
+}
+
+type vectorInsert struct {
+	id   string
+	blob []byte
+}
+
+// applyVectorOps executes deferred vector operations outside any transaction.
+func (m *MemorySearchManager) applyVectorOps(ctx context.Context, ops *pendingVectorOps) {
+	if ops == nil || !m.vectorAvailable() {
+		return
+	}
+	if len(ops.deletes) > 0 {
+		m.deleteVectorIDs(ctx, ops.deletes)
+	}
+	if len(ops.inserts) > 0 {
+		dims := 0
+		for _, ins := range ops.inserts {
+			if len(ins.blob) > 0 {
+				dims = len(ins.blob) / 4 // float32 = 4 bytes
+				break
+			}
+		}
+		if dims > 0 && m.ensureVectorTable(ctx, dims) {
+			for _, ins := range ops.inserts {
+				_, _ = m.execVector(ctx, fmt.Sprintf("DELETE FROM %s WHERE id=?", memoryVectorTable), ins.id)
+				_, _ = m.execVector(ctx,
+					fmt.Sprintf("INSERT INTO %s (id, embedding) VALUES (?, ?)", memoryVectorTable),
+					ins.id, ins.blob,
+				)
+			}
+		}
+	}
+}
+
 // writeContent writes pre-computed chunks and embeddings to the database.
-// This is fast (milliseconds) and safe to call inside a transaction.
-func (m *MemorySearchManager) writeContent(ctx context.Context, pc *preparedContent) error {
+// When ops is non-nil, vector operations are collected into ops instead of
+// executing inline (required when called inside DoTxn with max_open_conns=1).
+// When ops is nil, vector operations execute immediately.
+func (m *MemorySearchManager) writeContent(ctx context.Context, pc *preparedContent, ops *pendingVectorOps) error {
 	if pc == nil || len(pc.Chunks) == 0 {
 		return nil
 	}
@@ -562,7 +617,8 @@ func (m *MemorySearchManager) writeContent(ctx context.Context, pc *preparedCont
 		if m.cfg.Store.Vector.Enabled && m.vectorDims == 0 && len(embedding) > 0 {
 			m.vectorDims = len(embedding)
 		}
-		if !vectorReady && m.cfg.Store.Vector.Enabled && len(embedding) > 0 {
+		// When executing inline (ops==nil), ensure the vector table exists.
+		if ops == nil && !vectorReady && m.cfg.Store.Vector.Enabled && len(embedding) > 0 {
 			vectorReady = m.ensureVectorTable(ctx, len(embedding))
 		}
 		embeddingJSON, _ := json.Marshal(embedding)
@@ -578,12 +634,17 @@ func (m *MemorySearchManager) writeContent(ctx context.Context, pc *preparedCont
 		if err != nil {
 			return err
 		}
-		if vectorReady && len(embedding) > 0 {
-			_, _ = m.execVector(ctx, fmt.Sprintf("DELETE FROM %s WHERE id=?", memoryVectorTable), chunkID)
-			_, _ = m.execVector(ctx,
-				fmt.Sprintf("INSERT INTO %s (id, embedding) VALUES (?, ?)", memoryVectorTable),
-				chunkID, vectorToBlob(embedding),
-			)
+		if m.cfg.Store.Vector.Enabled && len(embedding) > 0 {
+			blob := vectorToBlob(embedding)
+			if ops != nil {
+				ops.inserts = append(ops.inserts, vectorInsert{id: chunkID, blob: blob})
+			} else if vectorReady {
+				_, _ = m.execVector(ctx, fmt.Sprintf("DELETE FROM %s WHERE id=?", memoryVectorTable), chunkID)
+				_, _ = m.execVector(ctx,
+					fmt.Sprintf("INSERT INTO %s (id, embedding) VALUES (?, ?)", memoryVectorTable),
+					chunkID, blob,
+				)
+			}
 		}
 		if m.ftsAvailable {
 			_, _ = m.db.Exec(ctx,
@@ -594,7 +655,7 @@ func (m *MemorySearchManager) writeContent(ctx context.Context, pc *preparedCont
 			)
 		}
 	}
-	if err := m.deletePathChunks(ctx, pc.Path, pc.Source, pc.Generation, newIDs); err != nil {
+	if err := m.deletePathChunks(ctx, pc.Path, pc.Source, pc.Generation, newIDs, ops); err != nil {
 		return err
 	}
 
@@ -604,12 +665,13 @@ func (m *MemorySearchManager) writeContent(ctx context.Context, pc *preparedCont
 // indexContent chunks content, computes embeddings, and writes to the database.
 // For code paths that don't need the two-phase split (e.g., incremental sync),
 // this is a convenient wrapper around prepareContent + writeContent.
+// Vector operations execute inline (no transaction holding the pool connection).
 func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, content, generation string) error {
 	pc, err := m.prepareContent(ctx, path, source, content, generation)
 	if err != nil {
 		return err
 	}
-	return m.writeContent(ctx, pc)
+	return m.writeContent(ctx, pc, nil)
 }
 
 func buildChunkID(generation string) string {
@@ -620,7 +682,7 @@ func buildChunkID(generation string) string {
 	return generation + ":" + uuid.NewString()
 }
 
-func (m *MemorySearchManager) deletePathChunks(ctx context.Context, path, source, generation string, keepIDs []string) error {
+func (m *MemorySearchManager) deletePathChunks(ctx context.Context, path, source, generation string, keepIDs []string, ops *pendingVectorOps) error {
 	if m == nil {
 		return nil
 	}
@@ -669,7 +731,11 @@ func (m *MemorySearchManager) deletePathChunks(ctx context.Context, path, source
 		return nil
 	}
 	if m.vectorAvailable() {
-		m.deleteVectorIDs(ctx, ids)
+		if ops != nil {
+			ops.deletes = append(ops.deletes, ids...)
+		} else {
+			m.deleteVectorIDs(ctx, ids)
+		}
 	}
 	for _, id := range ids {
 		_, _ = m.db.Exec(ctx,
@@ -686,7 +752,7 @@ func (m *MemorySearchManager) deletePathChunks(ctx context.Context, path, source
 	return err
 }
 
-func (m *MemorySearchManager) removeStaleChunksForSource(ctx context.Context, active map[string]textfs.FileEntry, generation string, source string) error {
+func (m *MemorySearchManager) removeStaleChunksForSource(ctx context.Context, active map[string]textfs.FileEntry, generation string, source string, ops *pendingVectorOps) error {
 	source = strings.TrimSpace(source)
 	if source == "" {
 		return nil
@@ -722,7 +788,11 @@ func (m *MemorySearchManager) removeStaleChunksForSource(ctx context.Context, ac
 		delGenSQL, delGenArgs := generationFilterSQL(6, generation)
 		if m.vectorAvailable() {
 			ids := m.collectChunkIDs(ctx, path, source, m.status.Model, generation)
-			m.deleteVectorIDs(ctx, ids)
+			if ops != nil {
+				ops.deletes = append(ops.deletes, ids...)
+			} else {
+				m.deleteVectorIDs(ctx, ids)
+			}
 		}
 		_, _ = m.db.Exec(ctx,
 			`DELETE FROM ai_memory_chunks

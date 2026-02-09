@@ -5,13 +5,17 @@ import (
 	"time"
 )
 
-func (m *MemorySearchManager) purgeSessionPath(ctx context.Context, path string) {
+func (m *MemorySearchManager) purgeSessionPath(ctx context.Context, path string, ops *pendingVectorOps) {
 	if path == "" {
 		return
 	}
 	if m.vectorAvailable() {
 		ids := m.collectChunkIDs(ctx, path, "sessions", m.status.Model, "")
-		m.deleteVectorIDs(ctx, ids)
+		if ops != nil {
+			ops.deletes = append(ops.deletes, ids...)
+		} else {
+			m.deleteVectorIDs(ctx, ids)
+		}
 	}
 	_, _ = m.db.Exec(ctx,
 		`DELETE FROM ai_memory_chunks
@@ -29,7 +33,7 @@ func (m *MemorySearchManager) purgeSessionPath(ctx context.Context, path string)
 
 // pruneExpiredSessions removes session files and their index entries that are older
 // than the configured retention window. No-op if retention_days is 0 (unlimited).
-func (m *MemorySearchManager) pruneExpiredSessions(ctx context.Context) {
+func (m *MemorySearchManager) pruneExpiredSessions(ctx context.Context, ops *pendingVectorOps) {
 	if m == nil || m.cfg == nil {
 		return
 	}
@@ -54,7 +58,7 @@ func (m *MemorySearchManager) pruneExpiredSessions(ctx context.Context) {
 		if err := rows.Scan(&sessionKey, &path); err != nil {
 			return
 		}
-		m.purgeSessionPath(ctx, path)
+		m.purgeSessionPath(ctx, path, ops)
 		_, _ = m.db.Exec(ctx,
 			`DELETE FROM ai_memory_session_files
              WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND session_key=$4`,

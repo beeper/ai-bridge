@@ -41,7 +41,10 @@ func TestShouldContinueChatToolLoop(t *testing.T) {
 		{name: "tool-use", reason: "tool-use", toolCalls: 1, shouldLoop: true},
 		{name: "toolUse", reason: "toolUse", toolCalls: 1, shouldLoop: true},
 		{name: "empty_reason", reason: "", toolCalls: 1, shouldLoop: true},
-		{name: "stop_reason", reason: "stop", toolCalls: 1, shouldLoop: false},
+		{name: "stop_reason_with_tool_calls", reason: "stop", toolCalls: 1, shouldLoop: true},
+		{name: "length_reason_with_tool_calls", reason: "length", toolCalls: 1, shouldLoop: true},
+		{name: "error_reason", reason: "error", toolCalls: 1, shouldLoop: false},
+		{name: "cancelled_reason", reason: "cancelled", toolCalls: 1, shouldLoop: false},
 	}
 
 	for _, tc := range tests {

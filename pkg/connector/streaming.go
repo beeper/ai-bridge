@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
@@ -62,6 +64,9 @@ type streamingState struct {
 	senderID         string     // The triggering sender ID (for owner-only tool gating)
 	replyTarget      ReplyTarget
 	replyAccumulator *streamingDirectiveAccumulator
+	// If true, prepend a separator before the next non-whitespace text delta.
+	// Used when a tool continuation resumes a previously-started assistant message.
+	needsTextSeparator bool
 
 	// Heartbeat handling
 	heartbeat         *HeartbeatRunConfig
@@ -303,12 +308,42 @@ func shouldContinueChatToolLoop(finishReason string, toolCallCount int) bool {
 	if toolCallCount <= 0 {
 		return false
 	}
+	// Some providers/adapters report inconsistent finish reasons (e.g. "stop") even when
+	// tool calls are present in the stream. The presence of tool calls is the reliable
+	// signal that we must continue after sending tool results.
 	switch strings.ToLower(strings.TrimSpace(finishReason)) {
-	case "", "tool_calls", "tool-calls", "tool_use", "tool-use", "tooluse":
-		return true
-	default:
+	case "error", "cancelled":
 		return false
+	default:
+		return true
 	}
+}
+
+func maybePrependTextSeparator(state *streamingState, rawDelta string) string {
+	if state == nil || !state.needsTextSeparator {
+		return rawDelta
+	}
+	// Keep waiting until we see a non-whitespace delta; some providers stream whitespace separately.
+	if strings.TrimSpace(rawDelta) == "" {
+		return rawDelta
+	}
+	// If we don't have any visible text yet, don't inject anything.
+	if state.visibleAccumulated.Len() == 0 {
+		state.needsTextSeparator = false
+		return rawDelta
+	}
+
+	// Only insert when both sides are non-whitespace; avoids double-spacing if the model already
+	// starts the new round with whitespace/newlines.
+	vis := state.visibleAccumulated.String()
+	last, _ := utf8.DecodeLastRuneInString(vis)
+	first, _ := utf8.DecodeRuneInString(rawDelta)
+	state.needsTextSeparator = false
+	if unicode.IsSpace(last) || unicode.IsSpace(first) {
+		return rawDelta
+	}
+	// Newline is rendered as whitespace in Markdown/HTML, preventing word run-ons.
+	return "\n" + rawDelta
 }
 
 func mergeMaps(base map[string]any, extra map[string]any) map[string]any {
@@ -1884,7 +1919,9 @@ func (oc *AIClient) streamingResponse(
 	log := zerolog.Ctx(ctx).With().
 		Str("portal_id", portalID).
 		Logger()
-	maxToolRounds := 3
+	// Tool loops can legitimately require several rounds (e.g. multi-step file ops).
+	// Keep a cap to prevent runaway loops, but 3 rounds is too low in practice.
+	maxToolRounds := 10
 
 	// Initialize streaming state with turn tracking
 	// Pass source event ID for [[reply_to_current]] directive support
@@ -2149,10 +2186,11 @@ func (oc *AIClient) streamingResponse(
 
 		case "response.output_text.delta":
 			touchTyping()
-			state.accumulated.WriteString(streamEvent.Delta)
+			delta := maybePrependTextSeparator(state, streamEvent.Delta)
+			state.accumulated.WriteString(delta)
 			parsed := (*streamingDirectiveResult)(nil)
 			if state.replyAccumulator != nil {
-				parsed = state.replyAccumulator.Consume(streamEvent.Delta, false)
+				parsed = state.replyAccumulator.Consume(delta, false)
 			}
 			if parsed != nil {
 				oc.applyStreamingReplyTarget(state, parsed)
@@ -3188,6 +3226,8 @@ func (oc *AIClient) streamingResponse(
 		activeTools = make(map[string]*activeToolCall)
 
 		// Start continuation stream
+		// Ensure the next assistant text delta can't get glued to the previous text.
+		state.needsTextSeparator = true
 		stream = oc.api.Responses.NewStreaming(ctx, continuationParams)
 		if stream == nil {
 			initErr := errors.New("continuation streaming not available")
@@ -3377,10 +3417,11 @@ func (oc *AIClient) streamingResponse(
 
 			case "response.output_text.delta":
 				touchTyping()
-				state.accumulated.WriteString(streamEvent.Delta)
+				delta := maybePrependTextSeparator(state, streamEvent.Delta)
+				state.accumulated.WriteString(delta)
 				parsed := (*streamingDirectiveResult)(nil)
 				if state.replyAccumulator != nil {
-					parsed = state.replyAccumulator.Consume(streamEvent.Delta, false)
+					parsed = state.replyAccumulator.Consume(delta, false)
 				}
 				if parsed != nil {
 					oc.applyStreamingReplyTarget(state, parsed)
@@ -4073,7 +4114,9 @@ func (oc *AIClient) streamChatCompletions(
 	messages = oc.applyProactivePruning(ctx, messages, meta)
 
 	currentMessages := messages
-	maxToolRounds := 3
+	// Tool loops can legitimately require several rounds (e.g. multi-step file ops).
+	// Keep a cap to prevent runaway loops, but 3 rounds is too low in practice.
+	maxToolRounds := 10
 
 	oc.emitUIStart(ctx, portal, state, meta)
 
@@ -4151,12 +4194,13 @@ func (oc *AIClient) streamChatCompletions(
 			for _, choice := range chunk.Choices {
 				if choice.Delta.Content != "" {
 					touchTyping()
-					state.accumulated.WriteString(choice.Delta.Content)
-					roundContent.WriteString(choice.Delta.Content)
+					delta := maybePrependTextSeparator(state, choice.Delta.Content)
+					state.accumulated.WriteString(delta)
+					roundContent.WriteString(delta)
 
 					parsed := (*streamingDirectiveResult)(nil)
 					if state.replyAccumulator != nil {
-						parsed = state.replyAccumulator.Consume(choice.Delta.Content, false)
+						parsed = state.replyAccumulator.Consume(delta, false)
 					}
 					if parsed != nil {
 						oc.applyStreamingReplyTarget(state, parsed)
@@ -4525,11 +4569,13 @@ func (oc *AIClient) streamChatCompletions(
 		// Continue if tools were requested.
 		// Some Anthropic-compatible adapters may emit `tool_use` (or omit finish reason)
 		// even when tool calls are present.
-		if shouldContinueChatToolLoop(state.finishReason, len(toolCallParams)) {
-			if round >= maxToolRounds {
-				log.Warn().Int("rounds", round+1).Msg("Max tool call rounds reached; stopping chat completions continuation")
-				break
-			}
+			if shouldContinueChatToolLoop(state.finishReason, len(toolCallParams)) {
+				// Ensure the next assistant text delta can't get glued to the previous text.
+				state.needsTextSeparator = true
+				if round >= maxToolRounds {
+					log.Warn().Int("rounds", round+1).Msg("Max tool call rounds reached; stopping chat completions continuation")
+					break
+				}
 			assistantMsg := openai.ChatCompletionAssistantMessageParam{
 				ToolCalls: toolCallParams,
 			}
