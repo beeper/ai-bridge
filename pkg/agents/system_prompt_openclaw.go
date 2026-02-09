@@ -57,7 +57,7 @@ func buildMemorySection(params struct {
 	}
 	lines := []string{
 		"## Memory Recall",
-		"Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md; then use memory_get to pull only the needed lines. If low confidence after search, say you checked.",
+		"Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md + workspace/*.md; then use memory_get to pull only the needed lines. If low confidence after search, say you checked.",
 	}
 	if strings.EqualFold(strings.TrimSpace(params.citationsMode), "off") {
 		lines = append(lines, "Citations are disabled: do not mention file paths or line numbers in replies unless the user explicitly asks.")
