@@ -150,6 +150,8 @@ type UserLoginMetadata struct {
 	LastActiveRoomByAgent map[string]string `json:"last_active_room_by_agent,omitempty"`
 	// Heartbeat dedupe state per agent.
 	HeartbeatState map[string]HeartbeatState `json:"heartbeat_state,omitempty"`
+	// LastHeartbeatEvent is the last emitted heartbeat event for this login (command-only debug surface).
+	LastHeartbeatEvent *HeartbeatEventPayload `json:"last_heartbeat_event,omitempty"`
 
 	// OpenCode instances connected for this login (keyed by instance ID).
 	OpenCodeInstances map[string]*opencodebridge.OpenCodeInstance `json:"opencode_instances,omitempty"`

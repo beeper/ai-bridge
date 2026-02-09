@@ -1,10 +1,14 @@
 package connector
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog/log"
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 )
 
 type HeartbeatIndicatorType string
@@ -45,62 +49,151 @@ func resolveIndicatorType(status string) *HeartbeatIndicatorType {
 }
 
 var heartbeatEvents struct {
-	mu        sync.Mutex
-	last      *HeartbeatEventPayload
-	listeners map[int]func(*HeartbeatEventPayload)
-	nextID    int
+	mu          sync.Mutex
+	lastByLogin map[networkid.UserLoginID]*HeartbeatEventPayload
+	persist     map[networkid.UserLoginID]*heartbeatEventPersister
 }
 
-func emitHeartbeatEvent(evt *HeartbeatEventPayload) {
+type heartbeatEventPersister struct {
+	login *bridgev2.UserLogin
+	ch    chan *HeartbeatEventPayload // size=1, latest-wins
+}
+
+func (p *heartbeatEventPersister) offer(evt *HeartbeatEventPayload) {
+	if p == nil || evt == nil {
+		return
+	}
+	evtCopy := *evt
+	select {
+	case p.ch <- &evtCopy:
+		return
+	default:
+		// channel is full, replace existing value (latest-wins)
+		select {
+		case <-p.ch:
+		default:
+		}
+		select {
+		case p.ch <- &evtCopy:
+		default:
+		}
+	}
+}
+
+func (p *heartbeatEventPersister) run() {
+	if p == nil || p.login == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error().Str("panic", fmt.Sprint(r)).Msg("heartbeat event persistence worker panicked")
+		}
+	}()
+
+	for evt := range p.ch {
+		if evt == nil {
+			continue
+		}
+		// Coalesce bursts: if multiple events queued, keep only the latest before writing.
+		for {
+			select {
+			case next := <-p.ch:
+				if next != nil {
+					evt = next
+				}
+			default:
+				goto write
+			}
+		}
+
+	write:
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		meta := loginMetadata(p.login)
+		if meta != nil {
+			// Avoid redundant writes when events are identical.
+			if prev := meta.LastHeartbeatEvent; prev != nil {
+				if prev.TS == evt.TS && prev.Status == evt.Status && prev.Reason == evt.Reason && prev.To == evt.To && prev.Channel == evt.Channel && prev.Preview == evt.Preview {
+					cancel()
+					continue
+				}
+			}
+			meta.LastHeartbeatEvent = evt
+			_ = p.login.Save(ctx)
+		}
+		cancel()
+	}
+}
+
+func (oc *AIClient) emitHeartbeatEvent(evt *HeartbeatEventPayload) {
 	if evt == nil {
 		return
 	}
+	if oc == nil || oc.UserLogin == nil {
+		return
+	}
+
+	evtCopy := *evt
+
 	heartbeatEvents.mu.Lock()
-	heartbeatEvents.last = evt
-	listeners := make([]func(*HeartbeatEventPayload), 0, len(heartbeatEvents.listeners))
-	for _, fn := range heartbeatEvents.listeners {
-		listeners = append(listeners, fn)
+	if heartbeatEvents.lastByLogin == nil {
+		heartbeatEvents.lastByLogin = make(map[networkid.UserLoginID]*HeartbeatEventPayload)
+	}
+	heartbeatEvents.lastByLogin[oc.UserLogin.ID] = &evtCopy
+
+	if heartbeatEvents.persist == nil {
+		heartbeatEvents.persist = make(map[networkid.UserLoginID]*heartbeatEventPersister)
+	}
+	p := heartbeatEvents.persist[oc.UserLogin.ID]
+	if p == nil {
+		p = &heartbeatEventPersister{
+			login: oc.UserLogin,
+			ch:    make(chan *HeartbeatEventPayload, 1),
+		}
+		heartbeatEvents.persist[oc.UserLogin.ID] = p
+		go p.run()
+	} else if p.login == nil {
+		// Shouldn't happen, but don't crash if it does.
+		p.login = oc.UserLogin
 	}
 	heartbeatEvents.mu.Unlock()
-	for _, fn := range listeners {
-		func(handler func(*HeartbeatEventPayload)) {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Error().Str("panic", fmt.Sprint(r)).Msg("heartbeat event listener panicked")
-				}
-			}()
-			handler(evt)
-		}(fn)
-	}
+
+	// Persist last-heartbeat best-effort with bounded concurrency (latest-wins per login).
+	p.offer(&evtCopy)
 }
 
-//lint:ignore U1000 OpenClaw parity: expose heartbeat event subscription for UI integrations.
-func onHeartbeatEvent(listener func(*HeartbeatEventPayload)) func() {
-	if listener == nil {
-		return func() {}
+func seedLastHeartbeatEvent(loginID networkid.UserLoginID, evt *HeartbeatEventPayload) {
+	if loginID == "" || evt == nil {
+		return
 	}
+	evtCopy := *evt
 	heartbeatEvents.mu.Lock()
-	if heartbeatEvents.listeners == nil {
-		heartbeatEvents.listeners = make(map[int]func(*HeartbeatEventPayload))
+	if heartbeatEvents.lastByLogin == nil {
+		heartbeatEvents.lastByLogin = make(map[networkid.UserLoginID]*HeartbeatEventPayload)
 	}
-	heartbeatEvents.nextID++
-	id := heartbeatEvents.nextID
-	heartbeatEvents.listeners[id] = listener
+	heartbeatEvents.lastByLogin[loginID] = &evtCopy
 	heartbeatEvents.mu.Unlock()
-	return func() {
-		heartbeatEvents.mu.Lock()
-		delete(heartbeatEvents.listeners, id)
-		heartbeatEvents.mu.Unlock()
-	}
 }
 
-//lint:ignore U1000 OpenClaw parity: expose last heartbeat snapshot for status panels.
-func getLastHeartbeatEvent() *HeartbeatEventPayload {
-	heartbeatEvents.mu.Lock()
-	defer heartbeatEvents.mu.Unlock()
-	if heartbeatEvents.last == nil {
+func getLastHeartbeatEventForLogin(login *bridgev2.UserLogin) *HeartbeatEventPayload {
+	if login == nil {
 		return nil
 	}
-	eventsCopy := *heartbeatEvents.last
+	heartbeatEvents.mu.Lock()
+	last := (*HeartbeatEventPayload)(nil)
+	if heartbeatEvents.lastByLogin != nil {
+		last = heartbeatEvents.lastByLogin[login.ID]
+	}
+	heartbeatEvents.mu.Unlock()
+
+	if last == nil {
+		meta := loginMetadata(login)
+		if meta != nil && meta.LastHeartbeatEvent != nil {
+			seedLastHeartbeatEvent(login.ID, meta.LastHeartbeatEvent)
+			c := *meta.LastHeartbeatEvent
+			return &c
+		}
+		return nil
+	}
+	eventsCopy := *last
 	return &eventsCopy
 }

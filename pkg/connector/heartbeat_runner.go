@@ -231,6 +231,7 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	if oc == nil || oc.connector == nil {
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "disabled"}
 	}
+	startedAtMs := time.Now().UnixMilli()
 	cfg := &oc.connector.Config
 	if !isHeartbeatEnabledForAgent(cfg, agentID) {
 		oc.log.Debug().Str("agent_id", agentID).Msg("Heartbeat skipped: not enabled for agent")
@@ -265,10 +266,11 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	pendingEvents := hasSystemEvents(sessionKey) || (storeKey != "" && !strings.EqualFold(storeKey, sessionKey) && hasSystemEvents(storeKey))
 	if !oc.shouldRunHeartbeatForFile(agentID, reason) && !pendingEvents {
 		oc.log.Debug().Str("agent_id", agentID).Msg("Heartbeat skipped: empty heartbeat file and no pending events")
-		emitHeartbeatEvent(&HeartbeatEventPayload{
+		oc.emitHeartbeatEvent(&HeartbeatEventPayload{
 			TS:     time.Now().UnixMilli(),
 			Status: "skipped",
 			Reason: "empty-heartbeat-file",
+			DurationMs: time.Now().UnixMilli() - startedAtMs,
 		})
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "empty-heartbeat-file"}
 	}
@@ -290,11 +292,12 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	}
 	if !visibility.ShowAlerts && !visibility.ShowOk && !visibility.UseIndicator {
 		oc.log.Debug().Str("agent_id", agentID).Str("channel", channel).Msg("Heartbeat skipped: all visibility flags disabled")
-		emitHeartbeatEvent(&HeartbeatEventPayload{
+		oc.emitHeartbeatEvent(&HeartbeatEventPayload{
 			TS:      time.Now().UnixMilli(),
 			Status:  "skipped",
 			Reason:  "alerts-disabled",
 			Channel: channel,
+			DurationMs: time.Now().UnixMilli() - startedAtMs,
 		})
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "alerts-disabled"}
 	}
@@ -322,6 +325,12 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	if promptMeta == nil {
 		promptMeta = &PortalMetadata{}
 	}
+	// Force the heartbeat run to use the heartbeat agent's system prompt/context, even if the
+	// delivery/session portal is not currently assigned to that agent.
+	//
+	// Without this, heartbeats for the default agent can end up using a "non-agent room" prompt
+	// that doesn't inject HEARTBEAT.md and other workspace context files.
+	promptMeta.AgentID = agentID
 	if heartbeat != nil && heartbeat.Model != nil {
 		if model := strings.TrimSpace(*heartbeat.Model); model != "" {
 			promptMeta.Model = model
@@ -361,6 +370,19 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	promptMessages, err := oc.buildPromptWithHeartbeat(context.Background(), sessionPortal, promptMeta, prompt)
 	if err != nil {
 		oc.log.Warn().Str("agent_id", agentID).Str("reason", reason).Err(err).Msg("Heartbeat failed to build prompt")
+		indicator := (*HeartbeatIndicatorType)(nil)
+		if hbCfg.UseIndicator {
+			indicator = resolveIndicatorType("failed")
+		}
+		oc.emitHeartbeatEvent(&HeartbeatEventPayload{
+			TS:            time.Now().UnixMilli(),
+			Status:        "failed",
+			Reason:        err.Error(),
+			Channel:       hbCfg.Channel,
+			To:            hbCfg.TargetRoom.String(),
+			DurationMs:    time.Now().UnixMilli() - startedAtMs,
+			IndicatorType: indicator,
+		})
 		return cron.HeartbeatRunResult{Status: "failed", Reason: err.Error()}
 	}
 
@@ -375,7 +397,9 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		Msg("Heartbeat executing")
 
 	resultCh := make(chan HeartbeatRunOutcome, 1)
-	runCtx := withHeartbeatRun(oc.backgroundContext(context.Background()), hbCfg, resultCh)
+	timeoutCtx, cancel := context.WithTimeout(oc.backgroundContext(context.Background()), 2*time.Minute)
+	defer cancel()
+	runCtx := withHeartbeatRun(timeoutCtx, hbCfg, resultCh)
 	done := make(chan struct{})
 	sendPortal := sessionPortal
 	if deliveryPortal != nil && deliveryPortal.MXID != "" {
@@ -392,9 +416,35 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		return cron.HeartbeatRunResult{Status: res.Status, Reason: res.Reason}
 	case <-done:
 		oc.log.Warn().Str("agent_id", agentID).Msg("Heartbeat failed: stream completed without outcome")
+		indicator := (*HeartbeatIndicatorType)(nil)
+		if hbCfg.UseIndicator {
+			indicator = resolveIndicatorType("failed")
+		}
+		oc.emitHeartbeatEvent(&HeartbeatEventPayload{
+			TS:            time.Now().UnixMilli(),
+			Status:        "failed",
+			Reason:        "stream-finished-without-outcome",
+			Channel:       hbCfg.Channel,
+			To:            hbCfg.TargetRoom.String(),
+			DurationMs:    time.Now().UnixMilli() - startedAtMs,
+			IndicatorType: indicator,
+		})
 		return cron.HeartbeatRunResult{Status: "failed", Reason: "heartbeat failed"}
-	case <-time.After(2 * time.Minute):
+	case <-timeoutCtx.Done():
 		oc.log.Warn().Str("agent_id", agentID).Msg("Heartbeat timed out after 2 minutes")
+		indicator := (*HeartbeatIndicatorType)(nil)
+		if hbCfg.UseIndicator {
+			indicator = resolveIndicatorType("failed")
+		}
+		oc.emitHeartbeatEvent(&HeartbeatEventPayload{
+			TS:            time.Now().UnixMilli(),
+			Status:        "failed",
+			Reason:        "timeout",
+			Channel:       hbCfg.Channel,
+			To:            hbCfg.TargetRoom.String(),
+			DurationMs:    time.Now().UnixMilli() - startedAtMs,
+			IndicatorType: indicator,
+		})
 		return cron.HeartbeatRunResult{Status: "failed", Reason: "heartbeat timed out"}
 	}
 }
@@ -442,10 +492,15 @@ func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *Hea
 			lastTo := strings.TrimSpace(hbSession.Entry.LastTo)
 			if lastTo != "" && strings.HasPrefix(lastTo, "!") && (lastChannel == "" || strings.EqualFold(lastChannel, "matrix")) {
 				if portal := oc.portalByRoomID(context.Background(), id.RoomID(lastTo)); portal != nil {
+					if meta := portalMeta(portal); meta != nil && normalizeAgentID(meta.AgentID) != normalizeAgentID(agentID) {
+						// Stale routing: portal no longer uses this agent.
+						goto mainFallback
+					}
 					return portal, portal.MXID.String(), nil
 				}
 			}
 		}
+	mainFallback:
 		if portal := oc.lastActivePortal(agentID); portal != nil {
 			return portal, portal.MXID.String(), nil
 		}
@@ -466,10 +521,14 @@ func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *Hea
 		lastTo := strings.TrimSpace(hbSession.Entry.LastTo)
 		if lastTo != "" && strings.HasPrefix(lastTo, "!") && (lastChannel == "" || strings.EqualFold(lastChannel, "matrix")) {
 			if portal := oc.portalByRoomID(context.Background(), id.RoomID(lastTo)); portal != nil {
+				if meta := portalMeta(portal); meta != nil && normalizeAgentID(meta.AgentID) != normalizeAgentID(agentID) {
+					goto finalFallback
+				}
 				return portal, portal.MXID.String(), nil
 			}
 		}
 	}
+finalFallback:
 	if portal := oc.lastActivePortal(agentID); portal != nil {
 		return portal, portal.MXID.String(), nil
 	}

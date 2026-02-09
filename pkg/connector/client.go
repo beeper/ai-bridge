@@ -487,6 +487,11 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 	oc.heartbeatRunner = NewHeartbeatRunner(oc)
 	oc.cronService = oc.buildCronService()
 
+	// Seed last-heartbeat snapshot from persisted login metadata (command-only surface).
+	if meta != nil && meta.LastHeartbeatEvent != nil {
+		seedLastHeartbeatEvent(login.ID, meta.LastHeartbeatEvent)
+	}
+
 	return oc, nil
 }
 
@@ -1399,23 +1404,6 @@ func (oc *AIClient) agentModelOverride(agentID string) string {
 		return ""
 	}
 	return strings.TrimSpace(loginMeta.AgentModelOverrides[agentID])
-}
-
-//lint:ignore U1000 Staged for future agent model override wiring.
-func (oc *AIClient) setAgentModelOverride(ctx context.Context, agentID, modelID string) error {
-	if agentID == "" || oc.UserLogin == nil {
-		return errors.New("missing agent ID")
-	}
-	loginMeta := loginMetadata(oc.UserLogin)
-	if loginMeta.AgentModelOverrides == nil {
-		loginMeta.AgentModelOverrides = make(map[string]string)
-	}
-	if modelID == "" {
-		delete(loginMeta.AgentModelOverrides, agentID)
-	} else {
-		loginMeta.AgentModelOverrides[agentID] = modelID
-	}
-	return oc.UserLogin.Save(ctx)
 }
 
 // effectiveModelForAPI returns the actual model name to send to the API

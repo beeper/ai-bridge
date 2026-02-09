@@ -338,6 +338,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	}
 
 	hb := state.heartbeat
+	durationMs := time.Now().UnixMilli() - state.startedAtMs
 	storeRef := sessionStoreRef{AgentID: hb.StoreAgentID, Path: hb.StorePath}
 	rawContent := state.accumulated.String()
 	ackMax := hb.AckMaxChars
@@ -414,13 +415,15 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		if hb.UseIndicator {
 			indicator = resolveIndicatorType(status)
 		}
-		emitHeartbeatEvent(&HeartbeatEventPayload{
+		oc.emitHeartbeatEvent(&HeartbeatEventPayload{
 			TS:            time.Now().UnixMilli(),
 			Status:        status,
+			To:            hb.TargetRoom.String(),
 			Reason:        hb.Reason,
 			Channel:       hb.Channel,
 			Silent:        silent,
 			HasMedia:      hasMedia,
+			DurationMs:    durationMs,
 			IndicatorType: indicator,
 		})
 		sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: status, Silent: silent, Skipped: true})
@@ -437,13 +440,14 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 			if hb.UseIndicator {
 				indicator = resolveIndicatorType("skipped")
 			}
-			emitHeartbeatEvent(&HeartbeatEventPayload{
+			oc.emitHeartbeatEvent(&HeartbeatEventPayload{
 				TS:            time.Now().UnixMilli(),
 				Status:        "skipped",
 				Reason:        "duplicate",
 				Preview:       cleaned[:min(len(cleaned), 200)],
 				Channel:       hb.Channel,
 				HasMedia:      hasMedia,
+				DurationMs:    durationMs,
 				IndicatorType: indicator,
 			})
 			sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: "duplicate", Skipped: true})
@@ -458,13 +462,15 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		if preview == "" && hasReasoning {
 			preview = reasoningText
 		}
-		emitHeartbeatEvent(&HeartbeatEventPayload{
+		oc.emitHeartbeatEvent(&HeartbeatEventPayload{
 			TS:       time.Now().UnixMilli(),
 			Status:   "skipped",
 			Reason:   targetReason,
+			To:       hb.TargetRoom.String(),
 			Preview:  preview[:min(len(preview), 200)],
 			Channel:  hb.Channel,
 			HasMedia: hasMedia,
+			DurationMs: durationMs,
 		})
 		sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: targetReason, Skipped: true})
 		return
@@ -482,13 +488,15 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		if preview == "" && hasReasoning {
 			preview = reasoningText
 		}
-		emitHeartbeatEvent(&HeartbeatEventPayload{
+		oc.emitHeartbeatEvent(&HeartbeatEventPayload{
 			TS:            time.Now().UnixMilli(),
 			Status:        "skipped",
 			Reason:        "alerts-disabled",
+			To:            hb.TargetRoom.String(),
 			Preview:       preview[:min(len(preview), 200)],
 			Channel:       hb.Channel,
 			HasMedia:      hasMedia,
+			DurationMs:    durationMs,
 			IndicatorType: indicator,
 		})
 		sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: "alerts-disabled", Skipped: true})
@@ -521,13 +529,15 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	if preview == "" && hasReasoning {
 		preview = reasoningText
 	}
-	emitHeartbeatEvent(&HeartbeatEventPayload{
+	oc.emitHeartbeatEvent(&HeartbeatEventPayload{
 		TS:            time.Now().UnixMilli(),
 		Status:        "sent",
+		To:            hb.TargetRoom.String(),
 		Reason:        hb.Reason,
 		Preview:       preview[:min(len(preview), 200)],
 		Channel:       hb.Channel,
 		HasMedia:      hasMedia,
+		DurationMs:    durationMs,
 		IndicatorType: indicator,
 	})
 	sendOutcome(HeartbeatRunOutcome{Status: "ran", Text: cleaned, Sent: true})

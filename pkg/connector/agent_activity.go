@@ -65,7 +65,14 @@ func (oc *AIClient) lastActivePortal(agentID string) *bridgev2.Portal {
 	if room == "" {
 		return nil
 	}
-	return oc.portalByRoomID(context.Background(), id.RoomID(room))
+	portal := oc.portalByRoomID(context.Background(), id.RoomID(room))
+	// Guard against stale mappings when a room's agent assignment changes.
+	if portal != nil {
+		if meta := portalMeta(portal); meta != nil && normalizeAgentID(meta.AgentID) != normalizeAgentID(agentID) {
+			return nil
+		}
+	}
+	return portal
 }
 
 func (oc *AIClient) defaultChatPortal() *bridgev2.Portal {
