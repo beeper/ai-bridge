@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"maunium.net/go/mautrix/bridgev2/commands"
 
@@ -42,8 +43,30 @@ func fnMemory(ce *commands.Event) {
 
 	switch strings.ToLower(ce.Args[0]) {
 	case "status":
+		start := time.Now()
+		loginHash := ""
+		if client != nil && client.UserLogin != nil {
+			loginHash = hashString(string(client.UserLogin.ID))
+			if len(loginHash) > 10 {
+				loginHash = loginHash[:10]
+			}
+		}
+		agentID := resolveAgentID(meta)
+		client.Log().Info().
+			Str("cmd", "memory status").
+			Str("login", loginHash).
+			Str("agent", agentID).
+			Bool("hasPortal", ce.Portal != nil).
+			Msg("memory cmd start")
+
 		manager, errMsg := getMemorySearchManager(client, resolveAgentID(meta))
 		if manager == nil {
+			client.Log().Info().
+				Str("cmd", "memory status").
+				Str("login", loginHash).
+				Str("agent", agentID).
+				Dur("dur", time.Since(start)).
+				Msg("memory cmd disabled")
 			ce.Reply("Memory search disabled: %s", errMsg)
 			return
 		}
@@ -54,11 +77,36 @@ func fnMemory(ce *commands.Event) {
 				deep = true
 			}
 		}
+		client.Log().Info().
+			Str("cmd", "memory status").
+			Str("login", loginHash).
+			Str("agent", agentID).
+			Bool("deep", deep).
+			Msg("memory status query start")
+
 		status, err := manager.StatusDetails(ce.Ctx)
 		if err != nil {
+			client.Log().Error().
+				Str("cmd", "memory status").
+				Str("login", loginHash).
+				Str("agent", agentID).
+				Bool("deep", deep).
+				Dur("dur", time.Since(start)).
+				Err(err).
+				Msg("memory status query failed")
 			ce.Reply("Couldn't load memory status: %v", err)
 			return
 		}
+		client.Log().Info().
+			Str("cmd", "memory status").
+			Str("login", loginHash).
+			Str("agent", agentID).
+			Bool("deep", deep).
+			Dur("dur", time.Since(start)).
+			Int("files", status.Files).
+			Int("chunks", status.Chunks).
+			Msg("memory status query ok")
+
 		lines := []string{
 			"Memory status:",
 			fmt.Sprintf("Provider: %s", status.Provider),
@@ -126,7 +174,20 @@ func fnMemory(ce *commands.Event) {
 				lines = append(lines, fmt.Sprintf("Embedding probe: %t", embedOk))
 			}
 		}
-		ce.Reply(strings.Join(lines, "\n"))
+		reply := strings.Join(lines, "\n")
+		client.Log().Info().
+			Str("cmd", "memory status").
+			Str("login", loginHash).
+			Str("agent", agentID).
+			Int("bytes", len(reply)).
+			Msg("memory status reply start")
+		ce.Reply(reply)
+		client.Log().Info().
+			Str("cmd", "memory status").
+			Str("login", loginHash).
+			Str("agent", agentID).
+			Dur("dur", time.Since(start)).
+			Msg("memory cmd done")
 		return
 	case "reindex":
 		manager, errMsg := getMemorySearchManager(client, resolveAgentID(meta))

@@ -225,6 +225,8 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 	// Avoid hanging on SQLite busy/locks during indexing.
 	statusCtx, cancel := context.WithTimeout(ctx, memoryStatusTimeout)
 	defer cancel()
+	start := time.Now()
+	m.log.Info().Dur("timeout", memoryStatusTimeout).Msg("memory status: start")
 
 	workspaceDir := resolvePromptWorkspaceDir()
 	status := &MemorySearchStatus{
@@ -329,6 +331,11 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 		LastProvider:   m.batchLastProvider,
 	}
 
+	m.log.Info().
+		Dur("dur", time.Since(start)).
+		Int("files", status.Files).
+		Int("chunks", status.Chunks).
+		Msg("memory status: done")
 	return status, nil
 }
 
