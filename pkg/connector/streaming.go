@@ -1029,26 +1029,7 @@ func (oc *AIClient) emitUISourceURL(ctx context.Context, portal *bridgev2.Portal
 	if title := strings.TrimSpace(citation.Title); title != "" {
 		part["title"] = title
 	}
-	providerMeta := map[string]any{}
-	if desc := strings.TrimSpace(citation.Description); desc != "" {
-		providerMeta["description"] = desc
-	}
-	if published := strings.TrimSpace(citation.Published); published != "" {
-		providerMeta["published"] = published
-	}
-	if site := strings.TrimSpace(citation.SiteName); site != "" {
-		providerMeta["site_name"] = site
-	}
-	if author := strings.TrimSpace(citation.Author); author != "" {
-		providerMeta["author"] = author
-	}
-	if image := strings.TrimSpace(citation.Image); image != "" {
-		providerMeta["image"] = image
-	}
-	if favicon := strings.TrimSpace(citation.Favicon); favicon != "" {
-		providerMeta["favicon"] = favicon
-	}
-	if len(providerMeta) > 0 {
+	if providerMeta := citationProviderMetadata(citation); len(providerMeta) > 0 {
 		part["providerMetadata"] = providerMeta
 	}
 	oc.emitStreamEvent(ctx, portal, state, part)

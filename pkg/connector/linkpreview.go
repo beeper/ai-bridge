@@ -421,6 +421,111 @@ func (lp *LinkPreviewer) FetchPreviews(ctx context.Context, urls []string) []*Pr
 	return previews
 }
 
+// PreviewFromCitation builds a PreviewWithImage from a sourceCitation without fetching HTML.
+// It downloads the image directly from the citation's Image URL.
+func (lp *LinkPreviewer) PreviewFromCitation(ctx context.Context, urlStr string, c sourceCitation) *PreviewWithImage {
+	// Check cache first — a previous HTML-based fetch may have cached this URL.
+	if cached := globalPreviewCache.get(urlStr); cached != nil {
+		return cached
+	}
+
+	preview := &event.BeeperLinkPreview{
+		LinkPreview: event.LinkPreview{
+			CanonicalURL: c.URL,
+			Title:        summarizeText(c.Title, 30, 150),
+			Description:  summarizeText(c.Description, 50, 200),
+			SiteName:     c.SiteName,
+		},
+		MatchedURL: urlStr,
+	}
+	if preview.CanonicalURL == "" {
+		preview.CanonicalURL = urlStr
+	}
+
+	result := &PreviewWithImage{
+		Preview: preview,
+	}
+
+	// Download image from citation's Image URL if available.
+	imageURL := strings.TrimSpace(c.Image)
+	if imageURL != "" {
+		if !strings.HasPrefix(imageURL, "http") {
+			if base, err := url.Parse(urlStr); err == nil {
+				if rel, err := url.Parse(imageURL); err == nil {
+					imageURL = base.ResolveReference(rel).String()
+				}
+			}
+		}
+
+		imageData, mimeType, width, height := lp.downloadImage(ctx, imageURL)
+		if imageData != nil {
+			result.ImageData = imageData
+			result.ImageURL = imageURL
+			preview.ImageType = mimeType
+			preview.ImageSize = event.IntOrString(len(imageData))
+			preview.ImageWidth = event.IntOrString(width)
+			preview.ImageHeight = event.IntOrString(height)
+		}
+	}
+
+	globalPreviewCache.set(urlStr, result, lp.config.CacheTTL)
+	return result
+}
+
+// FetchPreviewsWithCitations fetches previews for multiple URLs, using sourceCitation
+// metadata when available to skip HTML fetching.
+func (lp *LinkPreviewer) FetchPreviewsWithCitations(ctx context.Context, urls []string, citations []sourceCitation) []*PreviewWithImage {
+	if len(urls) == 0 {
+		return nil
+	}
+
+	// Build URL -> citation index for O(1) lookups.
+	citationByURL := make(map[string]sourceCitation, len(citations))
+	for _, c := range citations {
+		u := strings.TrimSpace(c.URL)
+		if u != "" {
+			citationByURL[u] = c
+		}
+	}
+
+	var wg sync.WaitGroup
+	results := make([]*PreviewWithImage, len(urls))
+
+	for i, u := range urls {
+		wg.Add(1)
+		go func(idx int, urlStr string) {
+			defer wg.Done()
+			var preview *PreviewWithImage
+
+			// Prefer citation-based preview if available with an image.
+			if c, ok := citationByURL[urlStr]; ok && strings.TrimSpace(c.Image) != "" {
+				preview = lp.PreviewFromCitation(ctx, urlStr, c)
+			}
+
+			// Fall back to HTML-based fetch.
+			if preview == nil {
+				if p, err := lp.FetchPreview(ctx, urlStr); err == nil {
+					preview = p
+				}
+			}
+
+			if preview != nil {
+				results[idx] = preview
+			}
+		}(i, u)
+	}
+
+	wg.Wait()
+
+	var previews []*PreviewWithImage
+	for _, p := range results {
+		if p != nil {
+			previews = append(previews, p)
+		}
+	}
+	return previews
+}
+
 // UploadPreviewImages uploads images from PreviewWithImage to Matrix and returns final BeeperLinkPreviews.
 func UploadPreviewImages(ctx context.Context, previews []*PreviewWithImage, intent bridgev2.MatrixAPI, roomID id.RoomID) []*event.BeeperLinkPreview {
 	if len(previews) == 0 {
@@ -585,6 +690,21 @@ func PreviewsToMapSlice(previews []*event.BeeperLinkPreview) []map[string]any {
 		}
 		if p.ImageURL != "" {
 			m["og:image"] = string(p.ImageURL)
+		}
+		if p.ImageType != "" {
+			m["og:image:type"] = p.ImageType
+		}
+		if p.ImageWidth != 0 {
+			m["og:image:width"] = int(p.ImageWidth)
+		}
+		if p.ImageHeight != 0 {
+			m["og:image:height"] = int(p.ImageHeight)
+		}
+		if p.ImageSize != 0 {
+			m["matrix:image:size"] = int(p.ImageSize)
+		}
+		if p.ImageEncryption != nil {
+			m["beeper:image:encryption"] = p.ImageEncryption
 		}
 
 		result = append(result, m)

@@ -67,13 +67,23 @@ func executeWebSearch(ctx context.Context, args map[string]any) (*Result, error)
 	if len(resp.Results) > 0 {
 		results := make([]map[string]any, 0, len(resp.Results))
 		for _, r := range resp.Results {
-			results = append(results, map[string]any{
+			entry := map[string]any{
 				"title":       r.Title,
 				"url":         r.URL,
 				"description": r.Description,
 				"published":   r.Published,
 				"siteName":    r.SiteName,
-			})
+			}
+			if r.Author != "" {
+				entry["author"] = r.Author
+			}
+			if r.Image != "" {
+				entry["image"] = r.Image
+			}
+			if r.Favicon != "" {
+				entry["favicon"] = r.Favicon
+			}
+			results = append(results, entry)
 		}
 		payload["results"] = results
 	}

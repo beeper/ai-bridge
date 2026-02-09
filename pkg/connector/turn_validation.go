@@ -69,8 +69,10 @@ func SanitizeGoogleTurnOrdering(prompt []openai.ChatCompletionMessageParamUnion)
 	return append(system, merged...)
 }
 
-// mergeConsecutiveSameRole combines adjacent messages with the same role
-// by concatenating their text content with double newlines.
+// mergeConsecutiveSameRole combines adjacent messages with the same role.
+// For user messages, it preserves multimodal content parts (images, etc.)
+// by collecting all parts from the run into a single OfArrayOfContentParts message.
+// For assistant messages, it concatenates text bodies with double newlines.
 func mergeConsecutiveSameRole(msgs []openai.ChatCompletionMessageParamUnion) []openai.ChatCompletionMessageParamUnion {
 	if len(msgs) <= 1 {
 		return msgs
@@ -80,27 +82,115 @@ func mergeConsecutiveSameRole(msgs []openai.ChatCompletionMessageParamUnion) []o
 	i := 0
 	for i < len(msgs) {
 		role := chatMessageRole(msgs[i])
-		body := chatMessageBody(msgs[i])
 		j := i + 1
 		for j < len(msgs) && chatMessageRole(msgs[j]) == role {
-			nextBody := chatMessageBody(msgs[j])
+			j++
+		}
+
+		// Single message, no merging needed — keep as-is.
+		if j == i+1 {
+			result = append(result, msgs[i])
+			i = j
+			continue
+		}
+
+		// Multiple consecutive messages with the same role — merge them.
+		run := msgs[i:j]
+		switch role {
+		case "user":
+			result = append(result, mergeUserMessages(run))
+		case "assistant":
+			// Assistant messages are always text-only (images go in synthetic user messages).
+			var body string
+			for _, m := range run {
+				nextBody := chatMessageBody(m)
+				if nextBody != "" {
+					if body != "" {
+						body += "\n\n"
+					}
+					body += nextBody
+				}
+			}
+			result = append(result, openai.AssistantMessage(body))
+		default:
+			// For other roles, concatenate text.
+			var body string
+			for _, m := range run {
+				nextBody := chatMessageBody(m)
+				if nextBody != "" {
+					if body != "" {
+						body += "\n\n"
+					}
+					body += nextBody
+				}
+			}
+			result = append(result, openai.UserMessage(body))
+		}
+		i = j
+	}
+	return result
+}
+
+// mergeUserMessages merges a run of consecutive user messages into one,
+// preserving multimodal content parts (OfArrayOfContentParts) if any message has them.
+func mergeUserMessages(run []openai.ChatCompletionMessageParamUnion) openai.ChatCompletionMessageParamUnion {
+	// Check if any message in the run has multimodal parts.
+	hasMultimodal := false
+	for _, m := range run {
+		if m.OfUser != nil && len(m.OfUser.Content.OfArrayOfContentParts) > 0 {
+			hasMultimodal = true
+			break
+		}
+	}
+
+	// If no multimodal content, do the simple text merge.
+	if !hasMultimodal {
+		var body string
+		for _, m := range run {
+			nextBody := chatMessageBody(m)
 			if nextBody != "" {
 				if body != "" {
 					body += "\n\n"
 				}
 				body += nextBody
 			}
-			j++
 		}
-		switch role {
-		case "assistant":
-			result = append(result, openai.AssistantMessage(body))
-		default:
-			result = append(result, openai.UserMessage(body))
-		}
-		i = j
+		return openai.UserMessage(body)
 	}
-	return result
+
+	// Collect all content parts, converting plain-text messages to text parts.
+	var allParts []openai.ChatCompletionContentPartUnionParam
+	for idx, m := range run {
+		if m.OfUser == nil {
+			continue
+		}
+		if len(m.OfUser.Content.OfArrayOfContentParts) > 0 {
+			// Add a separator text part between merged messages (except the first).
+			if idx > 0 && len(allParts) > 0 {
+				allParts = append(allParts, openai.ChatCompletionContentPartUnionParam{
+					OfText: &openai.ChatCompletionContentPartTextParam{Text: "\n\n"},
+				})
+			}
+			allParts = append(allParts, m.OfUser.Content.OfArrayOfContentParts...)
+		} else if m.OfUser.Content.OfString.Value != "" {
+			if len(allParts) > 0 {
+				allParts = append(allParts, openai.ChatCompletionContentPartUnionParam{
+					OfText: &openai.ChatCompletionContentPartTextParam{Text: "\n\n"},
+				})
+			}
+			allParts = append(allParts, openai.ChatCompletionContentPartUnionParam{
+				OfText: &openai.ChatCompletionContentPartTextParam{Text: m.OfUser.Content.OfString.Value},
+			})
+		}
+	}
+
+	return openai.ChatCompletionMessageParamUnion{
+		OfUser: &openai.ChatCompletionUserMessageParam{
+			Content: openai.ChatCompletionUserMessageParamContentUnion{
+				OfArrayOfContentParts: allParts,
+			},
+		},
+	}
 }
 
 // chatMessageRole extracts the role string from a ChatCompletionMessageParamUnion.
