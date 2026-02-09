@@ -434,7 +434,8 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 	wantKeyword := mode == "auto" || mode == "keyword" || mode == "hybrid"
 	wantVector := mode == "auto" || mode == "semantic" || mode == "hybrid"
 
-	keywordResults := []memory.HybridKeywordResult{}
+	keywordResults := []memory.HybridKeywordResult{} // mergeable (chunk-level)
+	keywordDirect := []memory.SearchResult{}         // non-mergeable (file-level)
 	keywordOK := false
 	if wantKeyword {
 		if m.ftsAvailable {
@@ -443,19 +444,40 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 				keywordResults = results
 				keywordOK = true
 			}
+			// In auto mode, prefer returning fast keyword hits before paying for embeddings.
+			if mode == "auto" {
+				fast := clampInjectedChars(
+					filterAndLimit(keywordResultsToSearch(keywordResults), minScore, maxResults),
+					m.cfg.Query.MaxInjectedChars,
+				)
+				if len(fast) > 0 {
+					return fast, nil
+				}
+			}
 		}
 		if !keywordOK {
-			results, err := m.searchKeywordScan(ctx, cleaned, candidates, sources, pathPrefix)
-			if err == nil {
-				keywordResults = results
-				keywordOK = true
+			// If FTS isn't available, avoid scanning chunks for auto/keyword mode: scan files instead.
+			// Hybrid mode needs chunk IDs for merge, so it still uses chunk scan fallback.
+			if mode == "hybrid" {
+				results, err := m.searchKeywordScan(ctx, cleaned, candidates, sources, pathPrefix)
+				if err == nil {
+					keywordResults = results
+					keywordOK = true
+				}
+			} else {
+				results, err := m.searchKeywordFiles(ctx, cleaned, candidates, sources, pathPrefix)
+				if err == nil {
+					keywordDirect = results
+					keywordOK = len(results) > 0
+				}
 			}
 		}
 	}
 
 	vectorResults := []memory.HybridVectorResult{}
 	vectorOK := false
-	if wantVector && m.cfg.Store.Vector.Enabled {
+	// In auto mode, only pay for embeddings if keyword search couldn't find anything.
+	if wantVector && m.cfg.Store.Vector.Enabled && !(mode == "auto" && keywordOK) {
 		queryVec, err := m.embedQueryWithTimeout(ctx, cleaned)
 		if err != nil {
 			// For semantic-only queries, embedding failures are fatal. For auto/hybrid,
@@ -487,6 +509,9 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 	case "semantic":
 		return clampInjectedChars(filterAndLimit(vectorResultsToSearch(vectorResults), minScore, maxResults), m.cfg.Query.MaxInjectedChars), nil
 	case "keyword":
+		if len(keywordDirect) > 0 {
+			return clampInjectedChars(filterAndLimit(keywordDirect, minScore, maxResults), m.cfg.Query.MaxInjectedChars), nil
+		}
 		return clampInjectedChars(filterAndLimit(keywordResultsToSearch(keywordResults), minScore, maxResults), m.cfg.Query.MaxInjectedChars), nil
 	}
 
@@ -500,6 +525,9 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 		return clampInjectedChars(filterAndLimit(vectorResultsToSearch(vectorResults), minScore, maxResults), m.cfg.Query.MaxInjectedChars), nil
 	}
 	if keywordOK {
+		if len(keywordDirect) > 0 {
+			return clampInjectedChars(filterAndLimit(keywordDirect, minScore, maxResults), m.cfg.Query.MaxInjectedChars), nil
+		}
 		return clampInjectedChars(filterAndLimit(keywordResultsToSearch(keywordResults), minScore, maxResults), m.cfg.Query.MaxInjectedChars), nil
 	}
 	return []memory.SearchResult{}, nil
@@ -716,6 +744,95 @@ func (m *MemorySearchManager) searchKeywordScan(ctx context.Context, query strin
 		out = append(out, entry.r)
 	}
 	return out, nil
+}
+
+func (m *MemorySearchManager) searchKeywordFiles(ctx context.Context, query string, limit int, sources []string, pathPrefix string) ([]memory.SearchResult, error) {
+	if m == nil || m.db == nil || limit <= 0 {
+		return nil, nil
+	}
+	tokens := keywordTokenRE.FindAllString(query, -1)
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+	for i, t := range tokens {
+		tokens[i] = strings.ToLower(strings.TrimSpace(t))
+	}
+
+	// Overfetch so we can filter by allowlist + size cap without running multiple queries.
+	overfetch := limit * 10
+	if overfetch < 50 {
+		overfetch = 50
+	}
+	if overfetch > 500 {
+		overfetch = 500
+	}
+
+	baseArgs := []any{m.bridgeID, m.loginID, m.agentID}
+	sourceSQL, sourceArgs := sourceFilterSQL(4, sources)
+	pathSQL, pathArgs := pathPrefixFilterSQL(4+len(sourceArgs), pathPrefix)
+	args := append(baseArgs, sourceArgs...)
+	args = append(args, pathArgs...)
+
+	whereParts := make([]string, 0, len(tokens))
+	for i, token := range tokens {
+		whereParts = append(whereParts, fmt.Sprintf(" AND LOWER(content) LIKE $%d", 4+len(sourceArgs)+len(pathArgs)+i))
+		args = append(args, "%"+token+"%")
+	}
+	args = append(args, overfetch)
+
+	rows, err := m.db.Query(ctx,
+		`SELECT path, source, substr(content, 1, 8192), length(content)
+         FROM ai_memory_files
+         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`+sourceSQL+pathSQL+strings.Join(whereParts, "")+`
+         ORDER BY updated_at DESC
+         LIMIT $`+fmt.Sprintf("%d", len(args)),
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]memory.SearchResult, 0, limit)
+	for rows.Next() {
+		var path, source, content string
+		var length int
+		if err := rows.Scan(&path, &source, &content, &length); err != nil {
+			return nil, err
+		}
+		if ok, _, _ := textfs.IsAllowedTextNotePath(path); !ok {
+			continue
+		}
+		if length > textfs.NoteMaxBytesDefault() {
+			continue
+		}
+		lower := strings.ToLower(content)
+		hits := 0
+		for _, token := range tokens {
+			if strings.Contains(lower, token) {
+				hits++
+			}
+		}
+		if hits == 0 {
+			continue
+		}
+		score := float64(hits) / float64(len(tokens))
+		results = append(results, memory.SearchResult{
+			Path:      path,
+			StartLine: 1,
+			EndLine:   1,
+			Score:     score,
+			Snippet:   truncateSnippet(normalizeNewlines(content)),
+			Source:    source,
+		})
+		if len(results) >= limit {
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 func (m *MemorySearchManager) ReadFile(ctx context.Context, relPath string, from, lines *int) (map[string]any, error) {
