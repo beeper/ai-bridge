@@ -27,6 +27,8 @@ const memorySnippetMaxChars = 700
 
 var keywordTokenRE = regexp.MustCompile(`[A-Za-z0-9_]+`)
 
+const memoryStatusTimeout = 3 * time.Second
+
 type MemorySearchManager struct {
 	client       *AIClient
 	db           *dbutil.Database
@@ -220,6 +222,10 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 	if m == nil {
 		return nil, errors.New("memory search unavailable")
 	}
+	// Avoid hanging on SQLite busy/locks during indexing.
+	statusCtx, cancel := context.WithTimeout(ctx, memoryStatusTimeout)
+	defer cancel()
+
 	workspaceDir := resolvePromptWorkspaceDir()
 	status := &MemorySearchStatus{
 		Dirty:             m.dirty,
@@ -238,7 +244,7 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 	chunkArgs := []any{m.bridgeID, m.loginID, m.agentID}
 	chunkArgs = append(chunkArgs, sourceArgs...)
 	chunkArgs = append(chunkArgs, genArgs...)
-	row := m.db.QueryRow(ctx,
+	row := m.db.QueryRow(statusCtx,
 		`SELECT COUNT(*) FROM ai_memory_chunks
          WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`+sourceSQL+genSQL,
 		chunkArgs...,
@@ -247,7 +253,7 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 
 	files := 0
 	if hasSource(m.cfg.Sources, "memory") {
-		row = m.db.QueryRow(ctx,
+		row = m.db.QueryRow(statusCtx,
 			`SELECT COUNT(*) FROM ai_memory_files WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND source=$4`,
 			m.bridgeID, m.loginID, m.agentID, "memory",
 		)
@@ -256,7 +262,7 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 		files += count
 	}
 	if hasSource(m.cfg.Sources, "workspace") {
-		row = m.db.QueryRow(ctx,
+		row = m.db.QueryRow(statusCtx,
 			`SELECT COUNT(*) FROM ai_memory_files WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND source=$4`,
 			m.bridgeID, m.loginID, m.agentID, "workspace",
 		)
@@ -265,7 +271,7 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 		files += count
 	}
 	if hasSource(m.cfg.Sources, "sessions") {
-		row = m.db.QueryRow(ctx,
+		row = m.db.QueryRow(statusCtx,
 			`SELECT COUNT(*) FROM ai_memory_session_files WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
 			m.bridgeID, m.loginID, m.agentID,
 		)
@@ -275,11 +281,11 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 	}
 	status.Files = files
 
-	status.SourceCounts = buildSourceCounts(ctx, m)
+	status.SourceCounts = buildSourceCounts(statusCtx, m)
 
 	cacheStatus := &MemorySearchCacheStatus{Enabled: m.cfg.Cache.Enabled, MaxEntries: m.cfg.Cache.MaxEntries}
 	if m.cfg.Cache.Enabled {
-		row := m.db.QueryRow(ctx,
+		row := m.db.QueryRow(statusCtx,
 			`SELECT COUNT(*) FROM ai_memory_embedding_cache
              WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
 			m.bridgeID, m.loginID, m.agentID,
