@@ -15,6 +15,12 @@ func (oc *AIClient) recordAgentActivity(ctx context.Context, portal *bridgev2.Po
 	if meta.IsCronRoom {
 		return
 	}
+	// Don't update last-route from heartbeat responses — heartbeat delivery
+	// should read the route set by user activity, not overwrite it with its own
+	// delivery target. Matches clawdbot where heartbeats don't call updateLastRoute.
+	if heartbeatRunFromContext(ctx) != nil {
+		return
+	}
 	agentID := normalizeAgentID(resolveAgentID(meta))
 	if agentID == "" {
 		return

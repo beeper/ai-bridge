@@ -52,9 +52,12 @@ func (m *MemorySearchManager) notifyFileChanged(path string) {
 	if !isAllowedMemoryPath(normalized, m.cfg.ExtraPaths) {
 		return
 	}
-	m.mu.Lock()
-	m.dirty = true
-	m.mu.Unlock()
+	// TryLock: if sync() holds mu we skip setting dirty — the scheduled sync
+	// will read the filesystem and pick up changes regardless.
+	if m.mu.TryLock() {
+		m.dirty = true
+		m.mu.Unlock()
+	}
 	m.scheduleWatchSync()
 }
 

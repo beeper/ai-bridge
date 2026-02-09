@@ -29,7 +29,21 @@ func (oc *AIClient) resolveCronDeliveryTarget(agentID string, delivery *cron.Cro
 		if entry, ok := oc.getSessionEntry(context.Background(), storeRef, mainKey); ok {
 			lastChannel := strings.TrimSpace(entry.LastChannel)
 			if lastChannel == "" || strings.EqualFold(lastChannel, "matrix") {
-				target = strings.TrimSpace(entry.LastTo)
+				candidate := strings.TrimSpace(entry.LastTo)
+				// Stale agent routing guard: skip if the resolved portal is now
+				// assigned to a different agent (matches resolveHeartbeatDeliveryTarget
+				// and resolveHeartbeatSessionPortal).
+				if candidate != "" && strings.HasPrefix(candidate, "!") {
+					if p := oc.portalByRoomID(context.Background(), id.RoomID(candidate)); p != nil {
+						if meta := portalMeta(p); meta != nil && normalizeAgentID(meta.AgentID) != normalizeAgentID(agentID) {
+							// Stale — fall through to lastActivePortal / defaultChatPortal.
+						} else {
+							target = candidate
+						}
+					} else {
+						target = candidate
+					}
+				}
 			}
 		}
 		if target == "" {

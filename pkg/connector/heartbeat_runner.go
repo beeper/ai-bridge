@@ -361,10 +361,15 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	if hasExecCompletion {
 		prompt = execEventPrompt
 	}
-	systemEvents := formatSystemEvents(drainHeartbeatSystemEvents(sessionKey, storeKey))
-	if systemEvents != "" {
-		prompt = systemEvents + "\n\n" + prompt
-		persistSystemEventsSnapshot(oc.bridgeStateBackend(), oc.Log())
+	// Only drain system events when delivery is possible. If suppressSend is true
+	// (no delivery target), leave events queued for the next heartbeat that can deliver.
+	systemEvents := ""
+	if !suppressSend {
+		systemEvents = formatSystemEvents(drainHeartbeatSystemEvents(sessionKey, storeKey))
+		if systemEvents != "" {
+			prompt = systemEvents + "\n\n" + prompt
+			persistSystemEventsSnapshot(oc.bridgeStateBackend(), oc.Log())
+		}
 	}
 
 	promptMessages, err := oc.buildPromptWithHeartbeat(context.Background(), sessionPortal, promptMeta, prompt)
