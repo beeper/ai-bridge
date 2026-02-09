@@ -55,3 +55,77 @@ func TestCodex_Dispatch_RoutesByThreadTurn(t *testing.T) {
 		t.Fatalf("timeout waiting for ch2")
 	}
 }
+
+// TestCodex_Dispatch_TurnCompletedNestedTurnID verifies that turn/completed
+// notifications with turn ID nested in turn.id (no top-level turnId) are
+// routed correctly to the subscriber.
+func TestCodex_Dispatch_TurnCompletedNestedTurnID(t *testing.T) {
+	cc := &CodexClient{
+		notifCh:       make(chan codexNotif, 16),
+		notifDone:     make(chan struct{}),
+		turnSubs:      make(map[string]chan codexNotif),
+		activeTurns:   make(map[string]*codexActiveTurn),
+		loadedThreads: make(map[string]bool),
+	}
+	go cc.dispatchNotifications()
+	defer close(cc.notifDone)
+
+	ch := cc.subscribeTurn("thr1", "turn1")
+	defer cc.unsubscribeTurn("thr1", "turn1")
+
+	// Simulate turn/completed with threadId at top level but turnId nested inside turn.id.
+	params, _ := json.Marshal(map[string]any{
+		"threadId": "thr1",
+		"turn": map[string]any{
+			"id":     "turn1",
+			"status": "completed",
+		},
+	})
+	cc.notifCh <- codexNotif{Method: "turn/completed", Params: params}
+
+	select {
+	case evt := <-ch:
+		if evt.Method != "turn/completed" {
+			t.Fatalf("expected turn/completed, got %s", evt.Method)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("turn/completed with nested turn.id was not routed to subscriber")
+	}
+}
+
+func TestCodexExtractThreadTurn_NestedTurnID(t *testing.T) {
+	params, _ := json.Marshal(map[string]any{
+		"threadId": "thr1",
+		"turn": map[string]any{
+			"id":     "turn1",
+			"status": "completed",
+		},
+	})
+	threadID, turnID, ok := codexExtractThreadTurn(params)
+	if !ok {
+		t.Fatal("expected ok=true for nested turn.id")
+	}
+	if threadID != "thr1" {
+		t.Fatalf("expected threadID=thr1, got %s", threadID)
+	}
+	if turnID != "turn1" {
+		t.Fatalf("expected turnID=turn1, got %s", turnID)
+	}
+}
+
+func TestCodexExtractThreadTurn_TopLevelTurnIDTakesPrecedence(t *testing.T) {
+	params, _ := json.Marshal(map[string]any{
+		"threadId": "thr1",
+		"turnId":   "topLevel",
+		"turn": map[string]any{
+			"id": "nested",
+		},
+	})
+	_, turnID, ok := codexExtractThreadTurn(params)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if turnID != "topLevel" {
+		t.Fatalf("expected top-level turnId to take precedence, got %s", turnID)
+	}
+}

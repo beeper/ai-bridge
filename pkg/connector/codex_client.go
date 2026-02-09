@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rs/xid"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 
@@ -50,6 +51,13 @@ type codexActiveTurn struct {
 	model    string
 }
 
+type codexPendingMessage struct {
+	event  *event.Event
+	portal *bridgev2.Portal
+	meta   *PortalMetadata
+	body   string
+}
+
 type CodexClient struct {
 	UserLogin *bridgev2.UserLogin
 	connector *OpenAIConnector
@@ -80,8 +88,9 @@ type CodexClient struct {
 	toolApprovalsMu sync.Mutex
 	toolApprovals   map[string]*pendingToolApprovalCodex
 
-	roomMu      sync.Mutex
-	activeRooms map[id.RoomID]bool
+	roomMu          sync.Mutex
+	activeRooms     map[id.RoomID]bool
+	pendingMessages map[id.RoomID]*codexPendingMessage
 }
 
 func newCodexClient(login *bridgev2.UserLogin, connector *OpenAIConnector) (*CodexClient, error) {
@@ -106,7 +115,8 @@ func newCodexClient(login *bridgev2.UserLogin, connector *OpenAIConnector) (*Cod
 		loadedThreads: make(map[string]bool),
 		activeTurns:   make(map[string]*codexActiveTurn),
 		turnSubs:      make(map[string]chan codexNotif),
-		activeRooms:   make(map[id.RoomID]bool),
+		activeRooms:     make(map[id.RoomID]bool),
+		pendingMessages: make(map[id.RoomID]*codexPendingMessage),
 	}, nil
 }
 
@@ -192,6 +202,7 @@ func (cc *CodexClient) Disconnect() {
 
 	cc.roomMu.Lock()
 	cc.activeRooms = make(map[id.RoomID]bool)
+	cc.pendingMessages = make(map[id.RoomID]*codexPendingMessage)
 	cc.roomMu.Unlock()
 }
 
@@ -413,10 +424,6 @@ func (cc *CodexClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Ma
 		return nil, errors.New("portal has no room id")
 	}
 
-	if !cc.acquireRoom(roomID) {
-		return nil, messageSendStatusError(errors.New("busy"), "Codex is busy in this room. Try again.", event.MessageStatusGenericError)
-	}
-
 	// Save user message immediately; we return Pending=true.
 	userMsg := &database.Message{
 		ID:        networkid.MessageID(fmt.Sprintf("mx:%s", string(msg.Event.ID))),
@@ -439,11 +446,28 @@ func (cc *CodexClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Ma
 		cc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to insert user message")
 	}
 
+	if !cc.acquireRoom(roomID) {
+		cc.sendPendingStatus(ctx, portal, msg.Event, "Queued — waiting for current turn to finish...")
+		cc.queuePendingCodex(roomID, &codexPendingMessage{
+			event:  msg.Event,
+			portal: portal,
+			meta:   meta,
+			body:   body,
+		})
+		return &bridgev2.MatrixMessageResponse{
+			DB:      userMsg,
+			Pending: true,
+		}, nil
+	}
+
 	cc.sendPendingStatus(ctx, portal, msg.Event, "Processing...")
 
 	go func() {
-		defer cc.releaseRoom(roomID)
-		cc.runTurn(cc.backgroundContext(ctx), portal, meta, msg.Event, body)
+		func() {
+			defer cc.releaseRoom(roomID)
+			cc.runTurn(cc.backgroundContext(ctx), portal, meta, msg.Event, body)
+		}()
+		cc.processPendingCodex(roomID)
 	}()
 
 	return &bridgev2.MatrixMessageResponse{
@@ -553,6 +577,7 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 	}
 
 done:
+	log.Debug().Str("status", finishStatus).Str("thread", threadID).Str("turn", turnID).Msg("Codex turn finished")
 	state.completedAtMs = time.Now().UnixMilli()
 	// If we observed turn-level diff updates, finalize them as a dedicated tool output.
 	if diff := strings.TrimSpace(state.codexLatestDiff); diff != "" {
@@ -1235,12 +1260,18 @@ func codexExtractThreadTurn(params json.RawMessage) (threadID, turnID string, ok
 	var p struct {
 		ThreadID string `json:"threadId"`
 		TurnID   string `json:"turnId"`
+		Turn     struct {
+			ID string `json:"id"`
+		} `json:"turn"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return "", "", false
 	}
 	threadID = strings.TrimSpace(p.ThreadID)
 	turnID = strings.TrimSpace(p.TurnID)
+	if turnID == "" {
+		turnID = strings.TrimSpace(p.Turn.ID)
+	}
 	return threadID, turnID, threadID != "" && turnID != ""
 }
 
@@ -1269,6 +1300,10 @@ func (cc *CodexClient) dispatchNotifications() {
 		threadID, turnID, ok := codexExtractThreadTurn(evt.Params)
 		if !ok {
 			continue
+		}
+		if evt.Method == "turn/completed" || evt.Method == "error" {
+			cc.log.Debug().Str("method", evt.Method).Str("thread", threadID).Str("turn", turnID).
+				Msg("Codex terminal notification")
 		}
 		key := codexTurnKey(threadID, turnID)
 
@@ -1551,6 +1586,9 @@ func (cc *CodexClient) getCodexIntent(ctx context.Context, portal *bridgev2.Port
 	if portal == nil || portal.MXID == "" {
 		return nil
 	}
+	if cc.UserLogin == nil || cc.UserLogin.Bridge == nil {
+		return nil
+	}
 	ghost, err := cc.UserLogin.Bridge.GetGhostByID(ctx, codexGhostID)
 	if err != nil || ghost == nil {
 		return nil
@@ -1694,6 +1732,57 @@ func (cc *CodexClient) releaseRoom(roomID id.RoomID) {
 	cc.roomMu.Lock()
 	defer cc.roomMu.Unlock()
 	delete(cc.activeRooms, roomID)
+}
+
+func (cc *CodexClient) queuePendingCodex(roomID id.RoomID, pm *codexPendingMessage) {
+	cc.roomMu.Lock()
+	defer cc.roomMu.Unlock()
+	cc.pendingMessages[roomID] = pm
+}
+
+func (cc *CodexClient) popPendingCodex(roomID id.RoomID) *codexPendingMessage {
+	cc.roomMu.Lock()
+	defer cc.roomMu.Unlock()
+	pm := cc.pendingMessages[roomID]
+	delete(cc.pendingMessages, roomID)
+	return pm
+}
+
+func (cc *CodexClient) processPendingCodex(roomID id.RoomID) {
+	// Peek — don't remove yet so the message isn't lost on transient failures.
+	cc.roomMu.Lock()
+	pm := cc.pendingMessages[roomID]
+	cc.roomMu.Unlock()
+	if pm == nil {
+		return
+	}
+	ctx := cc.backgroundContext(context.Background())
+	if err := cc.ensureRPC(ctx); err != nil {
+		cc.log.Warn().Err(err).Stringer("room", roomID).Msg("Pending codex message: RPC unavailable")
+		return
+	}
+	meta := portalMeta(pm.portal)
+	if meta == nil {
+		// Bad portal — discard.
+		cc.popPendingCodex(roomID)
+		return
+	}
+	if err := cc.ensureCodexThreadLoaded(ctx, pm.portal, meta); err != nil {
+		cc.log.Warn().Err(err).Stringer("room", roomID).Msg("Pending codex message: thread load failed")
+		return
+	}
+	if !cc.acquireRoom(roomID) {
+		return
+	}
+	// Committed — now pop.
+	cc.popPendingCodex(roomID)
+	go func() {
+		func() {
+			defer cc.releaseRoom(roomID)
+			cc.runTurn(ctx, pm.portal, meta, pm.event, pm.body)
+		}()
+		cc.processPendingCodex(roomID)
+	}()
 }
 
 // Streaming helpers (Codex -> Matrix AI SDK chunk mapping)
@@ -1906,12 +1995,71 @@ func (cc *CodexClient) emitUIToolOutputAvailable(ctx context.Context, portal *br
 	cc.emitStreamEvent(ctx, portal, state, part)
 }
 
-func (cc *CodexClient) emitUIToolApprovalRequest(ctx context.Context, portal *bridgev2.Portal, state *streamingState, approvalID, toolCallID string) {
+func (cc *CodexClient) emitUIToolApprovalRequest(
+	ctx context.Context, portal *bridgev2.Portal, state *streamingState,
+	approvalID, toolCallID, toolName string, ttlSeconds int,
+) {
 	cc.emitStreamEvent(ctx, portal, state, map[string]any{
 		"type":       "tool-approval-request",
 		"approvalId": approvalID,
 		"toolCallId": toolCallID,
+		"toolName":   toolName,
+		"ttlSeconds": ttlSeconds,
 	})
+}
+
+// sendToolCallApprovalEvent sends a tool_call timeline event with status "approval_required"
+// so the desktop timeline can show inline approval buttons (mirrors AIClient.sendToolCallApprovalEvent).
+func (cc *CodexClient) sendToolCallApprovalEvent(
+	ctx context.Context, portal *bridgev2.Portal, state *streamingState,
+	toolCallID, toolName, approvalID string, expiresAtMs int64,
+) {
+	if portal == nil || portal.MXID == "" || state == nil {
+		return
+	}
+	if state.suppressSend {
+		return
+	}
+	intent := cc.getCodexIntent(ctx, portal)
+	if intent == nil {
+		return
+	}
+	displayTitle := toolDisplayTitle(toolName)
+	toolType := string(ToolTypeProvider)
+	if tt, ok := state.uiToolTypeByToolCallID[toolCallID]; ok {
+		toolType = string(tt)
+	}
+	toolCallData := map[string]any{
+		"call_id":                toolCallID,
+		"turn_id":                state.turnID,
+		"tool_name":              toolName,
+		"tool_type":              toolType,
+		"status":                 string(ToolStatusApprovalRequired),
+		"approval_id":            approvalID,
+		"approval_expires_at_ms": expiresAtMs,
+		"display": map[string]any{
+			"title":     displayTitle,
+			"collapsed": false,
+		},
+	}
+	eventRaw := map[string]any{
+		"body":              fmt.Sprintf("Approval required for %s", displayTitle),
+		"msgtype":           event.MsgNotice,
+		BeeperAIToolCallKey: toolCallData,
+	}
+	if state.initialEventID != "" {
+		eventRaw["m.relates_to"] = map[string]any{
+			"rel_type": RelReference,
+			"event_id": state.initialEventID.String(),
+		}
+	}
+	eventContent := &event.Content{Raw: eventRaw}
+	_, err := intent.SendMessage(ctx, portal.MXID, ToolCallEventType, eventContent, nil)
+	if err != nil {
+		cc.loggerForContext(ctx).Warn().Err(err).
+			Str("tool", toolName).Str("approval_id", approvalID).
+			Msg("Failed to send tool call approval event")
+	}
 }
 
 func (cc *CodexClient) emitUIError(ctx context.Context, portal *bridgev2.Portal, state *streamingState, errText string) {
@@ -2183,14 +2331,21 @@ func (cc *CodexClient) handleCommandApprovalRequest(ctx context.Context, req cod
 	if toolCallID == "" {
 		toolCallID = "commandExecution"
 	}
-	cc.ensureUIToolInputStart(ctx, active.portal, active.state, toolCallID, "commandExecution", true, map[string]any{
+	toolName := "commandExecution"
+	ttlSeconds := 600
+
+	cc.setApprovalStateTracking(active.state, approvalID, toolCallID, toolName)
+
+	cc.ensureUIToolInputStart(ctx, active.portal, active.state, toolCallID, toolName, true, map[string]any{
 		"command": params.Command,
 		"cwd":     params.Cwd,
 		"reason":  params.Reason,
 	})
-	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID)
-	cc.sendSystemNoticeOnce(ctx, active.portal, active.state, "codex-approval:"+approvalID, fmt.Sprintf("Approval required (%s): !ai approve %s <allow|deny> [reason]", "commandExecution", approvalID))
-	cc.registerToolApproval(approvalID, toolCallID, "commandExecution", 10*time.Minute)
+	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID, toolName, ttlSeconds)
+	cc.sendToolCallApprovalEvent(ctx, active.portal, active.state, toolCallID, toolName, approvalID,
+		time.Now().Add(time.Duration(ttlSeconds)*time.Second).UnixMilli())
+	cc.sendSystemNoticeOnce(ctx, active.portal, active.state, "codex-approval:"+approvalID, fmt.Sprintf("Approval required (%s): !ai approve %s <allow|deny> [reason]", toolName, approvalID))
+	cc.registerToolApproval(approvalID, toolCallID, toolName, time.Duration(ttlSeconds)*time.Second)
 
 	// Auto-approve in elevated=full.
 	if active.meta != nil {
@@ -2231,13 +2386,20 @@ func (cc *CodexClient) handleFileChangeApprovalRequest(ctx context.Context, req 
 	if toolCallID == "" {
 		toolCallID = "fileChange"
 	}
-	cc.ensureUIToolInputStart(ctx, active.portal, active.state, toolCallID, "fileChange", true, map[string]any{
+	toolName := "fileChange"
+	ttlSeconds := 600
+
+	cc.setApprovalStateTracking(active.state, approvalID, toolCallID, toolName)
+
+	cc.ensureUIToolInputStart(ctx, active.portal, active.state, toolCallID, toolName, true, map[string]any{
 		"reason":    params.Reason,
 		"grantRoot": params.GrantRoot,
 	})
-	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID)
-	cc.sendSystemNoticeOnce(ctx, active.portal, active.state, "codex-approval:"+approvalID, fmt.Sprintf("Approval required (%s): !ai approve %s <allow|deny> [reason]", "fileChange", approvalID))
-	cc.registerToolApproval(approvalID, toolCallID, "fileChange", 10*time.Minute)
+	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID, toolName, ttlSeconds)
+	cc.sendToolCallApprovalEvent(ctx, active.portal, active.state, toolCallID, toolName, approvalID,
+		time.Now().Add(time.Duration(ttlSeconds)*time.Second).UnixMilli())
+	cc.sendSystemNoticeOnce(ctx, active.portal, active.state, "codex-approval:"+approvalID, fmt.Sprintf("Approval required (%s): !ai approve %s <allow|deny> [reason]", toolName, approvalID))
+	cc.registerToolApproval(approvalID, toolCallID, toolName, time.Duration(ttlSeconds)*time.Second)
 
 	if active.meta != nil {
 		if lvl, _ := normalizeElevatedLevel(active.meta.ElevatedLevel); lvl == "full" {
@@ -2269,4 +2431,99 @@ func (cc *CodexClient) sendSystemNoticeOnce(ctx context.Context, portal *bridgev
 	}
 	state.codexTimelineNotices[key] = true
 	cc.sendSystemNotice(ctx, portal, message)
+}
+
+// setApprovalStateTracking populates the streaming state maps used for approval correlation.
+// It lazily initialises the maps so callers don't have to worry about nil.
+func (cc *CodexClient) setApprovalStateTracking(state *streamingState, approvalID, toolCallID, toolName string) {
+	if state == nil {
+		return
+	}
+	if state.uiToolCallIDByApproval == nil {
+		state.uiToolCallIDByApproval = make(map[string]string)
+	}
+	if state.uiToolApprovalRequested == nil {
+		state.uiToolApprovalRequested = make(map[string]bool)
+	}
+	if state.uiToolNameByToolCallID == nil {
+		state.uiToolNameByToolCallID = make(map[string]string)
+	}
+	if state.uiToolTypeByToolCallID == nil {
+		state.uiToolTypeByToolCallID = make(map[string]ToolType)
+	}
+	state.uiToolCallIDByApproval[approvalID] = toolCallID
+	state.uiToolApprovalRequested[approvalID] = true
+	state.uiToolNameByToolCallID[toolCallID] = toolName
+	state.uiToolTypeByToolCallID[toolCallID] = ToolTypeProvider
+}
+
+// --- !ai new <dir> ---
+
+func (cc *CodexClient) handleNewCodexChat(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, args []string) {
+	dir := ""
+	if len(args) >= 1 {
+		dir = strings.TrimSpace(strings.Join(args, " "))
+	}
+	if dir == "" {
+		cc.sendSystemNotice(ctx, portal, "Usage: !ai new <directory>")
+		return
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		cc.sendSystemNotice(ctx, portal, "Invalid path: "+err.Error())
+		return
+	}
+	info, err := os.Stat(absDir)
+	if err != nil || !info.IsDir() {
+		cc.sendSystemNotice(ctx, portal, "Directory not found: "+absDir)
+		return
+	}
+	cc.createAndOpenCodexChat(ctx, portal, absDir)
+}
+
+func (cc *CodexClient) createAndOpenCodexChat(ctx context.Context, fromPortal *bridgev2.Portal, cwd string) {
+	title := "Codex: " + filepath.Base(cwd)
+	portalKey := cc.nextCodexChatPortalKey()
+
+	newPortal, err := cc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		cc.sendSystemNotice(ctx, fromPortal, "Failed to create portal: "+err.Error())
+		return
+	}
+
+	newMeta := portalMeta(newPortal)
+	newMeta.IsCodexRoom = true
+	newMeta.Title = title
+	newMeta.CodexCwd = cwd
+	// Don't set CodexThreadID — ensureCodexThread will start a new one.
+
+	newPortal.RoomType = database.RoomTypeDM
+	newPortal.OtherUserID = codexGhostID
+	newPortal.Name = title
+	newPortal.NameSet = true
+	if err := newPortal.Save(ctx); err != nil {
+		cc.sendSystemNotice(ctx, fromPortal, "Failed to save portal: "+err.Error())
+		return
+	}
+
+	info := cc.composeCodexChatInfo(title)
+	if err := newPortal.CreateMatrixRoom(ctx, cc.UserLogin, info); err != nil {
+		cc.sendSystemNotice(ctx, fromPortal, "Failed to create room: "+err.Error())
+		return
+	}
+
+	// Start thread with the specified directory.
+	if err := cc.ensureCodexThread(ctx, newPortal, newMeta); err != nil {
+		cc.sendSystemNotice(ctx, fromPortal, "Failed to start Codex thread: "+err.Error())
+		return
+	}
+
+	cc.sendSystemNotice(ctx, newPortal, "Codex session started in "+cwd)
+
+	roomLink := fmt.Sprintf("https://matrix.to/#/%s", newPortal.MXID)
+	cc.sendSystemNotice(ctx, fromPortal, fmt.Sprintf("New Codex session created: %s\nDirectory: %s", roomLink, cwd))
+}
+
+func (cc *CodexClient) nextCodexChatPortalKey() networkid.PortalKey {
+	return codexChatPortalKey(cc.UserLogin.ID, fmt.Sprintf("chat-%s", xid.New().String()))
 }

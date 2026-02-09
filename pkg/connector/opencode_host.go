@@ -10,6 +10,7 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
+	"github.com/beeper/ai-bridge/pkg/matrixevents"
 	"github.com/beeper/ai-bridge/pkg/opencodebridge"
 )
 
@@ -78,23 +79,15 @@ func (oc *AIClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *bridgev
 		return
 	}
 	seq := oc.nextOpenCodeStreamSeq(turnID)
-	content := map[string]any{
-		"turn_id": turnID,
-		"seq":     seq,
-		"part":    part,
-	}
-	if targetEventID != "" {
-		content["target_event"] = targetEventID
-		content["m.relates_to"] = map[string]any{
-			"rel_type": RelReference,
-			"event_id": targetEventID,
-		}
-	}
-	if agentID != "" {
-		content["agent_id"] = agentID
+	content, err := matrixevents.BuildStreamEventEnvelope(turnID, seq, part, matrixevents.StreamEventOpts{
+		TargetEventID: targetEventID,
+		AgentID:       agentID,
+	})
+	if err != nil {
+		return
 	}
 	eventContent := &event.Content{Raw: content}
-	txnID := buildStreamEventTxnID(turnID, seq)
+	txnID := matrixevents.BuildStreamEventTxnID(turnID, seq)
 	if _, err := ephemeralSender.SendEphemeralEvent(ctx, portal.MXID, StreamEventMessageType, eventContent, txnID); err != nil {
 		partType, _ := part["type"].(string)
 		oc.loggerForContext(ctx).Warn().Err(err).

@@ -2,6 +2,8 @@ package connector
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -13,7 +15,7 @@ import (
 )
 
 const (
-	opencodeManageUsage = "`!ai opencode add [http_url] [password] [username]` | `!ai opencode list` | `!ai opencode new [instance_id_or_url] [title]` | `!ai opencode remove [instance_id_or_url]`."
+	opencodeManageUsage = "`!ai opencode add [http_url] [password] [username]` | `!ai opencode list` | `!ai opencode new [path_or_instance] [title]` | `!ai opencode remove [instance_id_or_url]`."
 )
 
 // CommandOpenCode handles the !ai opencode command.
@@ -101,6 +103,50 @@ func fnOpenCodeNew(ce *commands.Event) {
 	if !ok {
 		return
 	}
+
+	// If the first arg looks like a filesystem path, spawn a server for it.
+	if len(ce.Args) > 0 && looksLikeFilesystemPath(ce.Args[0]) {
+		candidate := ce.Args[0]
+		// Expand ~ to home directory.
+		if strings.HasPrefix(candidate, "~/") {
+			if home, err := os.UserHomeDir(); err == nil {
+				candidate = filepath.Join(home, candidate[2:])
+			}
+		}
+		instanceID, err := client.spawnOpenCodeForDir(ce.Ctx, candidate)
+		if err != nil {
+			ce.Reply("Couldn't start OpenCode for %s: %v", ce.Args[0], err)
+			return
+		}
+		title := ""
+		if len(ce.Args) > 1 {
+			title = strings.TrimSpace(strings.Join(ce.Args[1:], " "))
+		}
+		pendingTitle := strings.TrimSpace(title) == ""
+		chatResp, err := client.opencodeBridge.CreateSessionChat(ce.Ctx, instanceID, title, pendingTitle)
+		if err != nil {
+			ce.Reply("Couldn't create an OpenCode session: %v", err)
+			return
+		}
+		portal := chatResp.Portal
+		if portal == nil {
+			portal, _ = client.UserLogin.Bridge.GetPortalByKey(ce.Ctx, chatResp.PortalKey)
+		}
+		if portal != nil && portal.MXID == "" {
+			if err := portal.CreateMatrixRoom(ce.Ctx, client.UserLogin, chatResp.PortalInfo); err != nil {
+				ce.Reply("Couldn't create the room: %v", err)
+				return
+			}
+		}
+		if portal != nil && portal.MXID != "" {
+			roomLink := fmt.Sprintf("https://matrix.to/#/%s", portal.MXID)
+			ce.Reply("OpenCode session created for %s.\nOpen: %s", ce.Args[0], roomLink)
+			return
+		}
+		ce.Reply("OpenCode session created for %s.", ce.Args[0])
+		return
+	}
+
 	if client.opencodeBridge == nil {
 		ce.Reply("OpenCode isn't available on this bridge.")
 		return

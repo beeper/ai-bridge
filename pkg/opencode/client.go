@@ -21,6 +21,7 @@ type Client struct {
 	username string
 	password string
 	http     *http.Client
+	httpSSE  *http.Client // no timeout – used for long-lived SSE streams
 }
 
 // APIError captures non-2xx responses from the OpenCode server.
@@ -70,6 +71,7 @@ func NewClient(baseURL, username, password string) (*Client, error) {
 		http: &http.Client{
 			Timeout: 60 * time.Second,
 		},
+		httpSSE: &http.Client{}, // no timeout for long-lived SSE streams
 	}, nil
 }
 
@@ -248,6 +250,29 @@ func (c *Client) SendMessage(ctx context.Context, sessionID, messageID string, p
 		return nil, err
 	}
 	return &msg, nil
+}
+
+// SendMessageAsync sends a message to a session asynchronously. The server
+// returns 204 immediately; the assistant response is delivered via SSE.
+func (c *Client) SendMessageAsync(ctx context.Context, sessionID, messageID string, parts []PartInput) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return errors.New("session id is required")
+	}
+	if len(parts) == 0 {
+		return errors.New("message parts are required")
+	}
+	payload := map[string]any{
+		"parts": parts,
+	}
+	if strings.TrimSpace(messageID) != "" {
+		payload["messageID"] = strings.TrimSpace(messageID)
+	}
+	path := fmt.Sprintf("/session/%s/prompt_async", url.PathEscape(sessionID))
+	req, err := c.newRequest(ctx, http.MethodPost, path, payload)
+	if err != nil {
+		return err
+	}
+	return c.do(req, nil)
 }
 
 // IsAuthError returns true if the error is an auth error.

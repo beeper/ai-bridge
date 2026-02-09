@@ -27,7 +27,7 @@ func (c *Client) StreamEvents(ctx context.Context) (<-chan Event, <-chan error) 
 		}
 		req.Header.Set("Accept", "text/event-stream")
 
-		resp, err := c.http.Do(req)
+		resp, err := c.httpSSE.Do(req)
 		if err != nil {
 			errs <- err
 			return

@@ -154,7 +154,7 @@ func (b *Bridge) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMe
 
 	runCtx := b.host.BackgroundContext(ctx)
 	go func() {
-		response, err := b.manager.SendMessage(runCtx, meta.InstanceID, meta.SessionID, parts, msg.Event.ID)
+		err := b.manager.SendMessage(runCtx, meta.InstanceID, meta.SessionID, parts, msg.Event.ID)
 		if err != nil {
 			if trace {
 				if log := b.host.Log(); log != nil {
@@ -171,12 +171,6 @@ func (b *Bridge) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMe
 		}
 		b.maybeFinalizeOpenCodeTitle(runCtx, portal, meta, titleCandidate)
 		b.host.SendSuccessStatus(runCtx, portal, msg.Event)
-		if response != nil {
-			// The response will also be delivered via the event stream; emit immediately for low latency.
-			if inst := b.manager.getInstance(meta.InstanceID); inst != nil {
-				b.manager.handleMessageParts(runCtx, inst, portal, response.Info.Role, response)
-			}
-		}
 	}()
 
 	return &bridgev2.MatrixMessageResponse{Pending: true}, nil

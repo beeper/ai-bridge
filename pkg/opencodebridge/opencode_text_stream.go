@@ -59,6 +59,8 @@ func (m *OpenCodeManager) emitTextStreamDeltaForKind(ctx context.Context, inst *
 	if meta != nil {
 		agentID = meta.AgentID
 	}
+	m.closeStepIfOpen(ctx, inst, portal, part.SessionID, part.MessageID)
+	m.ensureTurnStarted(ctx, inst, portal, part.SessionID, part.MessageID)
 	textStarted, _, reasoningStarted, _ := inst.partTextStreamFlags(part.SessionID, part.ID)
 	started := textStarted
 	if kind == "reasoning" {

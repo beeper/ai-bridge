@@ -29,6 +29,7 @@ type openCodeLocalServer struct {
 	port     int
 	username string
 	password string
+	dir      string // resolved absolute project path ("" for config-driven default)
 }
 
 func (oc *AIClient) bootstrapOpenCode(ctx context.Context) {
@@ -44,18 +45,17 @@ func (oc *AIClient) bootstrapOpenCode(ctx context.Context) {
 	}
 }
 
-func (oc *AIClient) stopOpenCodeLocalServer() {
+func (oc *AIClient) stopOpenCodeLocalServers() {
 	if oc == nil {
 		return
 	}
-	oc.opencodeLocalMu.Lock()
-	srv := oc.opencodeLocal
-	oc.opencodeLocal = nil
-	oc.opencodeLocalMu.Unlock()
-	if srv == nil {
-		return
+	oc.opencodeLocalsMu.Lock()
+	servers := oc.opencodeLocals
+	oc.opencodeLocals = nil
+	oc.opencodeLocalsMu.Unlock()
+	for _, srv := range servers {
+		srv.stop()
 	}
-	srv.stop()
 }
 
 func (oc *AIClient) ensureOpenCodeLocalServer(ctx context.Context) error {
@@ -73,9 +73,9 @@ func (oc *AIClient) ensureOpenCodeLocalServer(ctx context.Context) error {
 		return nil
 	}
 
-	oc.opencodeLocalMu.Lock()
-	srv := oc.opencodeLocal
-	oc.opencodeLocalMu.Unlock()
+	oc.opencodeLocalsMu.Lock()
+	srv := oc.opencodeLocals[""]
+	oc.opencodeLocalsMu.Unlock()
 	if srv != nil && strings.TrimSpace(srv.baseURL) != "" {
 		return nil
 	}
@@ -208,9 +208,12 @@ func (oc *AIClient) ensureOpenCodeLocalServer(ctx context.Context) error {
 		username: username,
 		password: password,
 	}
-	oc.opencodeLocalMu.Lock()
-	oc.opencodeLocal = local
-	oc.opencodeLocalMu.Unlock()
+	oc.opencodeLocalsMu.Lock()
+	if oc.opencodeLocals == nil {
+		oc.opencodeLocals = make(map[string]*openCodeLocalServer)
+	}
+	oc.opencodeLocals[""] = local
+	oc.opencodeLocalsMu.Unlock()
 
 	if err := waitForOpenCodeServer(oc.backgroundContext(ctx), baseURL, username, password, 20*time.Second); err != nil {
 		local.stop()
@@ -325,6 +328,128 @@ func randomToken(n int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// spawnOpenCodeForDir starts (or reuses) a local OpenCode server rooted in dir.
+// It returns the instance ID of the connected server.
+func (oc *AIClient) spawnOpenCodeForDir(ctx context.Context, dir string) (string, error) {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
+	info, err := os.Stat(absDir)
+	if err != nil {
+		return "", fmt.Errorf("stat %s: %w", absDir, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", absDir)
+	}
+
+	oc.opencodeLocalsMu.Lock()
+	if oc.opencodeLocals == nil {
+		oc.opencodeLocals = make(map[string]*openCodeLocalServer)
+	}
+	existing := oc.opencodeLocals[absDir]
+	oc.opencodeLocalsMu.Unlock()
+
+	// Reuse a running server if it's still healthy.
+	if existing != nil && strings.TrimSpace(existing.baseURL) != "" {
+		if err := waitForOpenCodeServer(ctx, existing.baseURL, existing.username, existing.password, 2*time.Second); err == nil {
+			instID := opencodebridge.OpenCodeInstanceID(existing.baseURL, existing.username)
+			return instID, nil
+		}
+		// Dead — remove it and fall through to spawn a new one.
+		oc.opencodeLocalsMu.Lock()
+		if oc.opencodeLocals[absDir] == existing {
+			delete(oc.opencodeLocals, absDir)
+		}
+		oc.opencodeLocalsMu.Unlock()
+		existing.stop()
+	}
+
+	// Resolve command name from config, default to "opencode".
+	cmdName := "opencode"
+	if oc.connector != nil && oc.connector.Config.OpenCode != nil {
+		if c := strings.TrimSpace(oc.connector.Config.OpenCode.Command); c != "" {
+			cmdName = c
+		}
+	}
+	if _, err := exec.LookPath(cmdName); err != nil {
+		return "", fmt.Errorf("opencode binary not found: %w", err)
+	}
+
+	host := "127.0.0.1"
+	port, err := pickFreeTCPPort(host)
+	if err != nil {
+		return "", fmt.Errorf("pick port: %w", err)
+	}
+
+	password, err := randomToken(32)
+	if err != nil {
+		return "", fmt.Errorf("generate password: %w", err)
+	}
+	username := "opencode"
+	baseURL := fmt.Sprintf("http://%s:%d", host, port)
+
+	bg := oc.UserLogin.Bridge.BackgroundCtx
+	srvCtx, cancel := context.WithCancel(bg)
+	args := []string{"serve", "--hostname", host, "--port", strconv.Itoa(port), "--log-level", "WARN"}
+	cmd := exec.CommandContext(srvCtx, cmdName, args...)
+	cmd.Dir = absDir
+	cmd.Env = append(os.Environ(), "OPENCODE_SERVER_PASSWORD="+password)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return "", fmt.Errorf("start opencode: %w", err)
+	}
+
+	local := &openCodeLocalServer{
+		cmd:      cmd,
+		cancel:   cancel,
+		baseURL:  baseURL,
+		port:     port,
+		username: username,
+		password: password,
+		dir:      absDir,
+	}
+	oc.opencodeLocalsMu.Lock()
+	oc.opencodeLocals[absDir] = local
+	oc.opencodeLocalsMu.Unlock()
+
+	if err := waitForOpenCodeServer(ctx, baseURL, username, password, 20*time.Second); err != nil {
+		local.stop()
+		oc.opencodeLocalsMu.Lock()
+		if oc.opencodeLocals[absDir] == local {
+			delete(oc.opencodeLocals, absDir)
+		}
+		oc.opencodeLocalsMu.Unlock()
+		return "", fmt.Errorf("server not ready: %w", err)
+	}
+
+	// Ensure bridge exists and connect.
+	if oc.opencodeBridge == nil {
+		oc.opencodeBridge = opencodebridge.NewBridge(oc)
+	}
+	inst, _, err := oc.opencodeBridge.Connect(ctx, baseURL, password, username)
+	if err != nil {
+		local.stop()
+		oc.opencodeLocalsMu.Lock()
+		if oc.opencodeLocals[absDir] == local {
+			delete(oc.opencodeLocals, absDir)
+		}
+		oc.opencodeLocalsMu.Unlock()
+		return "", fmt.Errorf("connect to opencode: %w", err)
+	}
+
+	return inst.ID, nil
+}
+
+// looksLikeFilesystemPath returns true if s is unambiguously a filesystem path
+// (starts with /, ~/, ./, ../, or is exactly ".").
+func looksLikeFilesystemPath(s string) bool {
+	return s == "." || strings.HasPrefix(s, "/") || strings.HasPrefix(s, "~/") ||
+		strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../")
 }
 
 func openCodeLocalLoginDir(loginID string) string {

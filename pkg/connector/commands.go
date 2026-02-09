@@ -1080,7 +1080,7 @@ func fnMode(ce *commands.Event) {
 var CommandNew = registerAICommand(commandregistry.Definition{
 	Name:           "new",
 	Description:    "Create a new chat of the same type (agent or model)",
-	Args:           "[agent <agent_id>]",
+	Args:           "[<directory>] | [agent <agent_id>]",
 	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
@@ -1088,6 +1088,16 @@ var CommandNew = registerAICommand(commandregistry.Definition{
 })
 
 func fnNew(ce *commands.Event) {
+	meta := getPortalMeta(ce)
+	if meta != nil && meta.IsCodexRoom {
+		cc := getCodexClient(ce)
+		if cc == nil {
+			ce.Reply("Codex isn't available.")
+			return
+		}
+		go cc.handleNewCodexChat(ce.Ctx, ce.Portal, meta, ce.Args)
+		return
+	}
 	client, meta, ok := requireClientMeta(ce)
 	if !ok {
 		return

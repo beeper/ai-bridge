@@ -25,13 +25,6 @@ func opencodeToolName(part opencode.Part) string {
 	return toolName
 }
 
-func opencodeToolStreamTurnID(part opencode.Part) string {
-	if part.ID == "" {
-		return ""
-	}
-	return "opencode-tool-" + part.ID
-}
-
 func (m *OpenCodeManager) emitToolStreamDelta(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part opencode.Part, delta string) {
 	if m == nil || m.bridge == nil || portal == nil {
 		return
@@ -39,9 +32,12 @@ func (m *OpenCodeManager) emitToolStreamDelta(ctx context.Context, inst *openCod
 	if delta == "" {
 		return
 	}
-	turnID := opencodeToolStreamTurnID(part)
+	turnID := opencodeMessageStreamTurnID(part.SessionID, part.MessageID)
+	if turnID == "" {
+		turnID = "opencode-part-" + part.ID
+	}
 	toolCallID := opencodeToolCallID(part)
-	if turnID == "" || toolCallID == "" {
+	if toolCallID == "" {
 		return
 	}
 	toolName := opencodeToolName(part)
@@ -50,6 +46,7 @@ func (m *OpenCodeManager) emitToolStreamDelta(ctx context.Context, inst *openCod
 	if meta != nil {
 		agentID = meta.AgentID
 	}
+	m.ensureStepStarted(ctx, inst, portal, part.SessionID, part.MessageID)
 	started, _, _, _ := inst.partStreamFlags(part.SessionID, part.ID)
 	if !started {
 		m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, agentID, map[string]any{
@@ -68,19 +65,19 @@ func (m *OpenCodeManager) emitToolStreamDelta(ctx context.Context, inst *openCod
 	})
 }
 
-func (m *OpenCodeManager) emitToolStreamState(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part opencode.Part, status string) {
+func (m *OpenCodeManager) emitToolStreamState(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part opencode.Part, _ string) {
 	if m == nil || m.bridge == nil || portal == nil {
 		return
 	}
 	if part.State == nil {
-		if status == "completed" || status == "error" {
-			m.bridge.finishOpenCodeStream(opencodeToolStreamTurnID(part))
-		}
 		return
 	}
-	turnID := opencodeToolStreamTurnID(part)
+	turnID := opencodeMessageStreamTurnID(part.SessionID, part.MessageID)
+	if turnID == "" {
+		turnID = "opencode-part-" + part.ID
+	}
 	toolCallID := opencodeToolCallID(part)
-	if turnID == "" || toolCallID == "" {
+	if toolCallID == "" {
 		return
 	}
 	toolName := opencodeToolName(part)
@@ -89,6 +86,7 @@ func (m *OpenCodeManager) emitToolStreamState(ctx context.Context, inst *openCod
 	if meta != nil {
 		agentID = meta.AgentID
 	}
+	m.ensureStepStarted(ctx, inst, portal, part.SessionID, part.MessageID)
 	started, inputAvailable, outputAvailable, outputError := inst.partStreamFlags(part.SessionID, part.ID)
 
 	if len(part.State.Input) > 0 && !inputAvailable {
@@ -131,9 +129,5 @@ func (m *OpenCodeManager) emitToolStreamState(ctx context.Context, inst *openCod
 			"providerExecuted": false,
 		})
 		inst.setPartStreamOutputError(part.SessionID, part.ID)
-	}
-
-	if status == "completed" || status == "error" {
-		m.bridge.finishOpenCodeStream(turnID)
 	}
 }

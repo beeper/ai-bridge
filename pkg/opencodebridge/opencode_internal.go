@@ -35,15 +35,8 @@ func (b *Bridge) DispatchInternalMessage(
 	runCtx := b.host.BackgroundContext(ctx)
 	go func() {
 		parts := []opencode.PartInput{{Type: "text", Text: trimmed}}
-		response, err := b.manager.SendMessage(runCtx, meta.InstanceID, meta.SessionID, parts, eventID)
-		if err != nil {
+		if err := b.manager.SendMessage(runCtx, meta.InstanceID, meta.SessionID, parts, eventID); err != nil {
 			b.host.SendSystemNotice(runCtx, portal, "OpenCode send failed: "+err.Error())
-			return
-		}
-		if response != nil {
-			if inst := b.manager.getInstance(meta.InstanceID); inst != nil {
-				b.manager.handleMessageParts(runCtx, inst, portal, response.Info.Role, response)
-			}
 		}
 	}()
 

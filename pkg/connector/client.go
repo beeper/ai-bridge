@@ -319,8 +319,8 @@ type AIClient struct {
 
 	// OpenCode bridge (optional)
 	opencodeBridge  *opencodebridge.Bridge
-	opencodeLocalMu sync.Mutex
-	opencodeLocal   *openCodeLocalServer
+	opencodeLocalsMu sync.Mutex
+	opencodeLocals   map[string]*openCodeLocalServer // abs-path → server ("" for config-driven default)
 
 	// OpenCode stream event sequencing
 	openCodeStreamMu  sync.Mutex
@@ -1084,7 +1084,7 @@ func (oc *AIClient) Disconnect() {
 	if oc.opencodeBridge != nil {
 		oc.opencodeBridge.DisconnectAll()
 	}
-	oc.stopOpenCodeLocalServer()
+	oc.stopOpenCodeLocalServers()
 
 	if oc.cronService != nil {
 		oc.cronService.Stop()

@@ -29,6 +29,9 @@ type openCodeInstance struct {
 	connected bool
 	cancel    context.CancelFunc
 
+	disconnectMu    sync.Mutex
+	disconnectTimer *time.Timer
+
 	seenMu         sync.Mutex
 	seenMsg        map[string]map[string]string
 	seenPart       map[string]map[string]*openCodePartState
@@ -36,6 +39,14 @@ type openCodeInstance struct {
 
 	cacheMu      sync.Mutex
 	messageCache map[string]*openCodeMessageCache
+
+	turnState map[string]map[string]*openCodeTurnState
+}
+
+type openCodeTurnState struct {
+	started  bool
+	stepOpen bool
+	finished bool
 }
 
 type openCodePartState struct {
@@ -108,6 +119,12 @@ func (m *OpenCodeManager) DisconnectAll() {
 		}
 		inst.cancel = nil
 		inst.connected = false
+		inst.disconnectMu.Lock()
+		if inst.disconnectTimer != nil {
+			inst.disconnectTimer.Stop()
+			inst.disconnectTimer = nil
+		}
+		inst.disconnectMu.Unlock()
 	}
 	m.instances = make(map[string]*openCodeInstance)
 }
@@ -172,6 +189,7 @@ func (m *OpenCodeManager) Connect(ctx context.Context, baseURL, password, userna
 		seenMsg:        make(map[string]map[string]string),
 		seenPart:       make(map[string]map[string]*openCodePartState),
 		partsByMessage: make(map[string]map[string]map[string]struct{}),
+		turnState:      make(map[string]map[string]*openCodeTurnState),
 	}
 
 	m.mu.Lock()
@@ -204,6 +222,24 @@ func (m *OpenCodeManager) Connect(ctx context.Context, baseURL, password, userna
 	return inst, count, syncErr
 }
 
+func (m *OpenCodeManager) cleanupInstancePortals(ctx context.Context, inst *openCodeInstance) {
+	portals, err := m.bridge.listAllChatPortals(ctx)
+	if err != nil {
+		m.log().Warn().Err(err).Msg("Failed to list portals for cleanup")
+		return
+	}
+	for _, portal := range portals {
+		meta := m.bridge.portalMeta(portal)
+		if meta == nil || !meta.IsOpenCodeRoom || meta.InstanceID != inst.cfg.ID {
+			continue
+		}
+		if err := inst.client.DeleteSession(ctx, meta.SessionID); err != nil {
+			m.log().Warn().Err(err).Str("session", meta.SessionID).Msg("Failed to delete OpenCode session during cleanup")
+		}
+		m.bridge.host.CleanupPortal(ctx, portal, "opencode instance removed")
+	}
+}
+
 func (m *OpenCodeManager) RemoveInstance(ctx context.Context, instanceID string) error {
 	if m == nil || m.bridge == nil || m.bridge.host == nil {
 		return errors.New("opencode manager unavailable")
@@ -213,6 +249,16 @@ func (m *OpenCodeManager) RemoveInstance(ctx context.Context, instanceID string)
 		return errors.New("instance id is required")
 	}
 
+	// Read the instance before teardown so we can clean up portals/sessions
+	// while the client is still functional.
+	m.mu.RLock()
+	inst := m.instances[id]
+	m.mu.RUnlock()
+
+	if inst != nil {
+		m.cleanupInstancePortals(ctx, inst)
+	}
+
 	hadInstance := false
 	m.mu.Lock()
 	if inst := m.instances[id]; inst != nil {
@@ -220,6 +266,12 @@ func (m *OpenCodeManager) RemoveInstance(ctx context.Context, instanceID string)
 		if inst.cancel != nil {
 			inst.cancel()
 		}
+		inst.disconnectMu.Lock()
+		if inst.disconnectTimer != nil {
+			inst.disconnectTimer.Stop()
+			inst.disconnectTimer = nil
+		}
+		inst.disconnectMu.Unlock()
 		delete(m.instances, id)
 	}
 	m.mu.Unlock()
@@ -242,37 +294,36 @@ func (m *OpenCodeManager) RemoveInstance(ctx context.Context, instanceID string)
 	return m.bridge.host.SaveOpenCodeInstances(ctx, meta)
 }
 
-func (m *OpenCodeManager) SendMessage(ctx context.Context, instanceID, sessionID string, parts []opencode.PartInput, eventID id.EventID) (*opencode.MessageWithParts, error) {
+func (m *OpenCodeManager) SendMessage(ctx context.Context, instanceID, sessionID string, parts []opencode.PartInput, eventID id.EventID) error {
 	inst := m.getInstance(instanceID)
 	if inst == nil {
-		return nil, errors.New("unknown OpenCode instance")
+		return errors.New("unknown OpenCode instance")
 	}
 	if !inst.connected {
-		return nil, errors.New("OpenCode instance disconnected")
+		return errors.New("OpenCode instance disconnected")
 	}
 	if strings.TrimSpace(sessionID) == "" {
-		return nil, errors.New("session id is required")
+		return errors.New("session id is required")
 	}
 	if len(parts) == 0 {
-		return nil, errors.New("message parts are required")
+		return errors.New("message parts are required")
 	}
 
 	msgID := opencodeMessageIDForEvent(eventID)
 	if msgID != "" {
+		if inst.isSeen(sessionID, msgID) {
+			return nil // already sent
+		}
 		inst.markSeen(sessionID, msgID, "user")
 	}
 
-	response, err := inst.client.SendMessage(ctx, sessionID, msgID, parts)
-	if err != nil {
+	if err := inst.client.SendMessageAsync(ctx, sessionID, msgID, parts); err != nil {
 		if opencode.IsAuthError(err) {
 			m.setConnected(inst, false)
 		}
-		return nil, err
+		return err
 	}
-	if response != nil && response.Info.ID != "" {
-		inst.markSeen(sessionID, response.Info.ID, "assistant")
-	}
-	return response, nil
+	return nil
 }
 
 func (m *OpenCodeManager) DeleteSession(ctx context.Context, instanceID, sessionID string) error {
@@ -477,7 +528,15 @@ func (m *OpenCodeManager) handleMessageEvent(ctx context.Context, inst *openCode
 	if msg.ID == "" || msg.SessionID == "" {
 		return
 	}
+	isCompleted := msg.Time.Completed != 0
+
 	if inst.isSeen(msg.SessionID, msg.ID) {
+		if isCompleted && msg.Role != "user" {
+			portal := m.bridge.findOpenCodePortal(ctx, inst.cfg.ID, msg.SessionID)
+			if portal != nil {
+				m.emitTurnFinish(ctx, inst, portal, msg.SessionID, msg.ID, "stop")
+			}
+		}
 		return
 	}
 	full, err := inst.client.GetMessage(ctx, msg.SessionID, msg.ID)
@@ -496,8 +555,8 @@ func (m *OpenCodeManager) handleMessageEvent(ctx context.Context, inst *openCode
 		return
 	}
 	m.handleMessageParts(ctx, inst, portal, msg.Role, full)
-	if msg.Time.Completed != 0 {
-		m.bridge.finishOpenCodeStream(opencodeMessageStreamTurnID(msg.SessionID, msg.ID))
+	if isCompleted {
+		m.emitTurnFinish(ctx, inst, portal, msg.SessionID, msg.ID, "stop")
 	}
 }
 
@@ -701,12 +760,52 @@ func (m *OpenCodeManager) handleMessageRemoved(ctx context.Context, inst *openCo
 	m.bridge.emitOpenCodeMessageRemove(ctx, portal, inst.cfg.ID, messageID, role == "user")
 }
 
+const disconnectGracePeriod = 5 * time.Second
+
 func (m *OpenCodeManager) setConnected(inst *openCodeInstance, connected bool) {
 	if inst == nil {
 		return
 	}
-	inst.connected = connected
 
+	inst.disconnectMu.Lock()
+	defer inst.disconnectMu.Unlock()
+
+	if connected {
+		// Reconnected: cancel any pending disconnect timer silently.
+		if inst.disconnectTimer != nil {
+			inst.disconnectTimer.Stop()
+			inst.disconnectTimer = nil
+		}
+		if inst.connected {
+			// Already marked connected — nothing to broadcast.
+			return
+		}
+		inst.connected = true
+		m.applyConnectedState(inst, true)
+		return
+	}
+
+	// Disconnect: start a grace-period timer before notifying rooms.
+	if !inst.connected {
+		return // already disconnected
+	}
+	inst.connected = false
+
+	if inst.disconnectTimer != nil {
+		inst.disconnectTimer.Stop()
+	}
+	inst.disconnectTimer = time.AfterFunc(disconnectGracePeriod, func() {
+		inst.disconnectMu.Lock()
+		defer inst.disconnectMu.Unlock()
+		inst.disconnectTimer = nil
+		if inst.connected {
+			return // reconnected during grace period
+		}
+		m.applyConnectedState(inst, false)
+	})
+}
+
+func (m *OpenCodeManager) applyConnectedState(inst *openCodeInstance, connected bool) {
 	if m.bridge == nil || m.bridge.host == nil {
 		return
 	}
@@ -1114,6 +1213,57 @@ func (inst *openCodeInstance) removePart(sessionID, messageID, partID string) {
 				delete(inst.partsByMessage, sessionID)
 			}
 		}
+	}
+}
+
+func (inst *openCodeInstance) ensureTurnState(sessionID, messageID string) *openCodeTurnState {
+	if sessionID == "" || messageID == "" {
+		return nil
+	}
+	inst.seenMu.Lock()
+	defer inst.seenMu.Unlock()
+	if inst.turnState == nil {
+		inst.turnState = make(map[string]map[string]*openCodeTurnState)
+	}
+	sess, ok := inst.turnState[sessionID]
+	if !ok {
+		sess = make(map[string]*openCodeTurnState)
+		inst.turnState[sessionID] = sess
+	}
+	state, ok := sess[messageID]
+	if !ok {
+		state = &openCodeTurnState{}
+		sess[messageID] = state
+	}
+	return state
+}
+
+func (inst *openCodeInstance) turnStateFor(sessionID, messageID string) *openCodeTurnState {
+	inst.seenMu.Lock()
+	defer inst.seenMu.Unlock()
+	if inst.turnState == nil {
+		return nil
+	}
+	sess, ok := inst.turnState[sessionID]
+	if !ok {
+		return nil
+	}
+	return sess[messageID]
+}
+
+func (inst *openCodeInstance) removeTurnState(sessionID, messageID string) {
+	inst.seenMu.Lock()
+	defer inst.seenMu.Unlock()
+	if inst.turnState == nil {
+		return
+	}
+	sess, ok := inst.turnState[sessionID]
+	if !ok {
+		return
+	}
+	delete(sess, messageID)
+	if len(sess) == 0 {
+		delete(inst.turnState, sessionID)
 	}
 }
 

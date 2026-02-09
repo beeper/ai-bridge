@@ -69,6 +69,13 @@ func portalKeyForChat(loginID networkid.UserLoginID) networkid.PortalKey {
 	}
 }
 
+func codexChatPortalKey(loginID networkid.UserLoginID, slug string) networkid.PortalKey {
+	return networkid.PortalKey{
+		ID:       networkid.PortalID(fmt.Sprintf("codex:%s:%s", loginID, slug)),
+		Receiver: loginID,
+	}
+}
+
 func defaultCodexChatPortalKey(loginID networkid.UserLoginID) networkid.PortalKey {
 	return networkid.PortalKey{
 		ID:       networkid.PortalID(fmt.Sprintf("codex:%s:default-chat", loginID)),
