@@ -52,6 +52,11 @@ func createJob(nowMs int64, input CronJobCreate) (CronJob, error) {
 	if input.State != nil {
 		job.State = *input.State
 	}
+	// Fixed-rate default for "every": anchor to createdAtMs if missing.
+	if strings.EqualFold(strings.TrimSpace(job.Schedule.Kind), "every") && job.Schedule.AnchorMs == nil {
+		anchor := job.CreatedAtMs
+		job.Schedule.AnchorMs = &anchor
+	}
 	if job.SessionTarget == CronSessionMain {
 		job.Delivery = nil
 	}
@@ -61,7 +66,13 @@ func createJob(nowMs int64, input CronJobCreate) (CronJob, error) {
 	if err := assertDeliverySupport(job.SessionTarget, job.Delivery); err != nil {
 		return CronJob{}, err
 	}
-	job.State.NextRunAtMs = computeJobNextRunAtMs(job, nowMs)
+	// New "every" jobs run immediately once, then resume fixed-rate cadence.
+	if strings.EqualFold(strings.TrimSpace(job.Schedule.Kind), "every") {
+		next := nowMs
+		job.State.NextRunAtMs = &next
+	} else {
+		job.State.NextRunAtMs = computeJobNextRunAtMs(job, nowMs)
+	}
 	return job, nil
 }
 
@@ -264,18 +275,38 @@ func computeJobNextRunAtMs(job CronJob, nowMs int64) *int64 {
 		}
 		return &atMs
 	}
+	if strings.EqualFold(job.Schedule.Kind, "every") {
+		// Fixed-rate default: anchor to createdAtMs if not provided.
+		sched := job.Schedule
+		if sched.AnchorMs == nil {
+			anchor := job.CreatedAtMs
+			sched.AnchorMs = &anchor
+		}
+		return ComputeNextRunAtMs(sched, nowMs)
+	}
 	return ComputeNextRunAtMs(job.Schedule, nowMs)
 }
 
-func recomputeNextRuns(store *CronStoreFile, nowMs int64, log Logger) {
+// recomputeNextRuns updates derived schedule fields and clears stuck running markers.
+// It intentionally preserves overdue nextRunAtMs for recurring jobs so that if the
+// app was shut down for a while, overdue jobs run once immediately on next start.
+// Returns true if the store was mutated.
+func recomputeNextRuns(store *CronStoreFile, nowMs int64, log Logger) bool {
 	if store == nil {
-		return
+		return false
 	}
+	mutated := false
 	for idx := range store.Jobs {
 		job := store.Jobs[idx]
 		if !job.Enabled {
-			job.State.NextRunAtMs = nil
-			job.State.RunningAtMs = nil
+			if job.State.NextRunAtMs != nil {
+				job.State.NextRunAtMs = nil
+				mutated = true
+			}
+			if job.State.RunningAtMs != nil {
+				job.State.RunningAtMs = nil
+				mutated = true
+			}
 			store.Jobs[idx] = job
 			continue
 		}
@@ -284,10 +315,34 @@ func recomputeNextRuns(store *CronStoreFile, nowMs int64, log Logger) {
 				log.Warn("cron: clearing stuck running marker", map[string]any{"jobId": job.ID, "runningAtMs": *job.State.RunningAtMs})
 			}
 			job.State.RunningAtMs = nil
+			mutated = true
 		}
-		job.State.NextRunAtMs = computeJobNextRunAtMs(job, nowMs)
+		// Ensure "every" jobs have a stable anchor for fixed-rate scheduling.
+		if strings.EqualFold(strings.TrimSpace(job.Schedule.Kind), "every") && job.Schedule.AnchorMs == nil {
+			anchor := job.CreatedAtMs
+			job.Schedule.AnchorMs = &anchor
+			mutated = true
+		}
+		// Preserve overdue nextRunAtMs for recurring jobs so they run once immediately on app-open.
+		if job.State.NextRunAtMs != nil &&
+			!strings.EqualFold(strings.TrimSpace(job.Schedule.Kind), "at") &&
+			*job.State.NextRunAtMs <= nowMs {
+			// If schedule is invalid, drop nextRunAtMs so it won't loop forever.
+			if computeJobNextRunAtMs(job, nowMs) == nil {
+				job.State.NextRunAtMs = nil
+				mutated = true
+			}
+			store.Jobs[idx] = job
+			continue
+		}
+		next := computeJobNextRunAtMs(job, nowMs)
+		if (job.State.NextRunAtMs == nil) != (next == nil) || (job.State.NextRunAtMs != nil && next != nil && *job.State.NextRunAtMs != *next) {
+			job.State.NextRunAtMs = next
+			mutated = true
+		}
 		store.Jobs[idx] = job
 	}
+	return mutated
 }
 
 func nextWakeAtMs(store *CronStoreFile) *int64 {

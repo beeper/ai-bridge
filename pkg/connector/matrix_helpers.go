@@ -75,6 +75,11 @@ func (oc *AIClient) buildMatrixInboundBody(
 	roomName string,
 	isGroup bool,
 ) string {
+	// Raw mode must not inject any envelope/sender/event-id context.
+	if meta != nil && meta.IsRawMode {
+		return strings.TrimSpace(rawBody)
+	}
+
 	body := strings.TrimSpace(rawBody)
 	if body == "" {
 		return ""

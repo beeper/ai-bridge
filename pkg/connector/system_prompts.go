@@ -72,6 +72,11 @@ func (oc *AIClient) buildAdditionalSystemPrompts(
 ) []openai.ChatCompletionMessageParamUnion {
 	var out []openai.ChatCompletionMessageParamUnion
 
+	// Raw mode must be simple: no extra system hints or context injection.
+	if meta != nil && meta.IsRawMode {
+		return nil
+	}
+
 	if meta != nil && portal != nil && oc.isGroupChat(ctx, portal) {
 		activation := oc.resolveGroupActivation(meta)
 		shouldIntro := !meta.GroupIntroSent || meta.GroupActivationNeedsIntro
