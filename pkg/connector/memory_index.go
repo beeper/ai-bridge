@@ -1037,7 +1037,7 @@ func maybePruneEmbeddingCache(ctx context.Context, m *MemorySearchManager) {
 	)
 }
 
-func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float64, limit int, sources []string, pathPrefix string) ([]memory.HybridVectorResult, error) {
+func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float64, limit int, sources []string, pathPrefix string, indexGen string) ([]memory.HybridVectorResult, error) {
 	if !m.cfg.Store.Vector.Enabled {
 		return nil, nil
 	}
@@ -1046,7 +1046,7 @@ func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float
 	}
 	if m.ensureVectorTable(ctx, len(queryVec)) {
 		filterSQL, filterArgs := sourceFilterSQLQuestion(sources)
-		genSQL, genArgs := generationFilterSQLQuestion(m.indexGen)
+		genSQL, genArgs := generationFilterSQLQuestion(indexGen)
 		pathSQL, pathArgs := pathPrefixFilterSQLQuestion(pathPrefix)
 		args := []any{vectorToBlob(queryVec), m.bridgeID, m.loginID, m.agentID, m.status.Model}
 		args = append(args, filterArgs...)
@@ -1088,14 +1088,14 @@ func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float
 		if err == nil {
 			return vecResults, nil
 		}
-		m.mu.Lock()
+		m.vectorMu.Lock()
 		m.vectorError = err.Error()
-		m.mu.Unlock()
+		m.vectorMu.Unlock()
 	}
 
 	baseArgs := []any{m.bridgeID, m.loginID, m.agentID, m.status.Model}
 	filterSQL, filterArgs := sourceFilterSQL(5, sources)
-	genSQL, genArgs := generationFilterSQL(5+len(filterArgs), m.indexGen)
+	genSQL, genArgs := generationFilterSQL(5+len(filterArgs), indexGen)
 	pathSQL, pathArgs := pathPrefixFilterSQL(5+len(filterArgs)+len(genArgs), pathPrefix)
 	args := append(baseArgs, filterArgs...)
 	args = append(args, genArgs...)
@@ -1153,7 +1153,7 @@ func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float
 	return results, nil
 }
 
-func (m *MemorySearchManager) searchKeyword(ctx context.Context, query string, limit int, sources []string, pathPrefix string) ([]memory.HybridKeywordResult, error) {
+func (m *MemorySearchManager) searchKeyword(ctx context.Context, query string, limit int, sources []string, pathPrefix string, indexGen string) ([]memory.HybridKeywordResult, error) {
 	if !m.ftsAvailable || limit <= 0 {
 		return nil, nil
 	}
@@ -1163,7 +1163,7 @@ func (m *MemorySearchManager) searchKeyword(ctx context.Context, query string, l
 	}
 	baseArgs := []any{ftsQuery, m.status.Model, m.bridgeID, m.loginID, m.agentID}
 	filterSQL, filterArgs := sourceFilterSQL(6, sources)
-	genSQL, genArgs := generationFilterSQL(6+len(filterArgs), m.indexGen)
+	genSQL, genArgs := generationFilterSQL(6+len(filterArgs), indexGen)
 	pathSQL, pathArgs := pathPrefixFilterSQL(6+len(filterArgs)+len(genArgs), pathPrefix)
 	args := append(baseArgs, filterArgs...)
 	args = append(args, genArgs...)

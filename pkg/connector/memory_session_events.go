@@ -40,9 +40,12 @@ func (m *MemorySearchManager) notifySessionChanged(ctx context.Context, sessionK
 	if force && key != "" {
 		_ = m.resetSessionState(ctx, key)
 	}
-	m.mu.Lock()
-	m.sessionsDirty = true
-	m.mu.Unlock()
+	// TryLock: if sync() holds mu we skip setting sessionsDirty — the scheduled
+	// sync will pick up session changes regardless.
+	if m.mu.TryLock() {
+		m.sessionsDirty = true
+		m.mu.Unlock()
+	}
 	m.scheduleSessionSync(key)
 }
 

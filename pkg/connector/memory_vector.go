@@ -35,13 +35,13 @@ func (m *MemorySearchManager) withVectorConn(ctx context.Context, fn func(conn *
 	}
 
 	// Fast-path: if we already know the extension fails to load, don't bother grabbing a conn.
-	m.mu.Lock()
+	m.vectorMu.Lock()
 	if m.vectorExtOK != nil && !m.vectorExtOK.ok {
 		errText := m.vectorExtOK.errText
-		m.mu.Unlock()
+		m.vectorMu.Unlock()
 		return errors.New(errText)
 	}
-	m.mu.Unlock()
+	m.vectorMu.Unlock()
 
 	conn, err := m.db.RawDB.Conn(ctx)
 	if err != nil {
@@ -68,9 +68,9 @@ func (m *MemorySearchManager) loadVectorExtension(ctx context.Context, conn *sql
 	}
 
 	// Check cached result.
-	m.mu.Lock()
+	m.vectorMu.Lock()
 	status := m.vectorExtOK
-	m.mu.Unlock()
+	m.vectorMu.Unlock()
 
 	if status != nil {
 		if !status.ok {
@@ -83,17 +83,17 @@ func (m *MemorySearchManager) loadVectorExtension(ctx context.Context, conn *sql
 	// First probe: try loading and cache the result.
 	if err := m.doLoadExtension(ctx, conn, extPath); err != nil {
 		s := &vectorExtStatus{ok: false, errText: err.Error()}
-		m.mu.Lock()
+		m.vectorMu.Lock()
 		m.vectorExtOK = s
 		m.vectorError = err.Error()
-		m.mu.Unlock()
+		m.vectorMu.Unlock()
 		return err
 	}
 
 	s := &vectorExtStatus{ok: true}
-	m.mu.Lock()
+	m.vectorMu.Lock()
 	m.vectorExtOK = s
-	m.mu.Unlock()
+	m.vectorMu.Unlock()
 	return nil
 }
 
@@ -128,9 +128,9 @@ func (m *MemorySearchManager) ensureVectorTable(ctx context.Context, dims int) b
 		return err
 	})
 	if err != nil {
-		m.mu.Lock()
+		m.vectorMu.Lock()
 		m.vectorError = err.Error()
-		m.mu.Unlock()
+		m.vectorMu.Unlock()
 		return false
 	}
 	return true
@@ -190,8 +190,8 @@ func (m *MemorySearchManager) vectorAvailable() bool {
 	if m == nil || m.cfg == nil || !m.cfg.Store.Vector.Enabled {
 		return false
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.vectorMu.Lock()
+	defer m.vectorMu.Unlock()
 	if m.vectorExtOK == nil {
 		return true // not yet probed — optimistic
 	}

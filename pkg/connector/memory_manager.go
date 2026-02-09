@@ -64,6 +64,7 @@ type MemorySearchManager struct {
 	batchLastError    string
 	batchLastProvider string
 	mu                sync.Mutex
+	vectorMu          sync.Mutex // protects vectorExtOK and vectorError; separate from mu to avoid deadlock when sync() holds mu
 }
 
 type MemorySearchStatus struct {
@@ -232,9 +233,25 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 	start := time.Now()
 	m.log.Info().Dur("timeout", memoryStatusTimeout).Msg("memory status: start")
 
+	// Snapshot mutable fields under mu to avoid data races with sync().
+	m.mu.Lock()
+	dirty := m.dirty
+	indexGen := m.indexGen
+	vectorDims := m.vectorDims
+	batchEnabled := m.batchEnabled
+	batchFailures := m.batchFailures
+	batchLastError := m.batchLastError
+	batchLastProvider := m.batchLastProvider
+	m.mu.Unlock()
+
+	// Snapshot vector fields under vectorMu.
+	m.vectorMu.Lock()
+	vectorError := m.vectorError
+	m.vectorMu.Unlock()
+
 	workspaceDir := resolvePromptWorkspaceDir()
 	status := &MemorySearchStatus{
-		Dirty:             m.dirty,
+		Dirty:             dirty,
 		WorkspaceDir:      workspaceDir,
 		DBPath:            resolveMemoryDBPath(m.cfg, m.agentID),
 		Provider:          m.status.Provider,
@@ -245,7 +262,7 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 		Fallback:          m.status.Fallback,
 	}
 
-	genSQL, genArgs := generationFilterSQL(5, m.indexGen)
+	genSQL, genArgs := generationFilterSQL(5, indexGen)
 	sourceSQL, sourceArgs := sourceFilterSQL(4, m.cfg.Sources)
 	chunkArgs := []any{m.bridgeID, m.loginID, m.agentID}
 	chunkArgs = append(chunkArgs, sourceArgs...)
@@ -287,7 +304,7 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 	}
 	status.Files = files
 
-	status.SourceCounts = buildSourceCounts(statusCtx, m)
+	status.SourceCounts = buildSourceCounts(statusCtx, m, indexGen)
 
 	cacheStatus := &MemorySearchCacheStatus{Enabled: m.cfg.Cache.Enabled, MaxEntries: m.cfg.Cache.MaxEntries}
 	if m.cfg.Cache.Enabled {
@@ -310,7 +327,7 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 	if m.vectorAvailable() {
 		ready := true
 		vectorAvailablePtr = &ready
-	} else if m.vectorError != "" {
+	} else if vectorError != "" {
 		ready := false
 		vectorAvailablePtr = &ready
 	}
@@ -318,21 +335,21 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 		Enabled:       m.cfg.Store.Vector.Enabled,
 		Available:     vectorAvailablePtr,
 		ExtensionPath: m.cfg.Store.Vector.ExtensionPath,
-		LoadError:     m.vectorError,
-		Dims:          m.vectorDims,
+		LoadError:     vectorError,
+		Dims:          vectorDims,
 	}
 
 	timeoutMs := m.cfg.Remote.Batch.TimeoutMinutes * 60 * 1000
 	status.Batch = &MemorySearchBatchStatus{
-		Enabled:        m.batchEnabled,
-		Failures:       m.batchFailures,
+		Enabled:        batchEnabled,
+		Failures:       batchFailures,
 		Limit:          2,
 		Wait:           m.cfg.Remote.Batch.Wait,
 		Concurrency:    m.cfg.Remote.Batch.Concurrency,
 		PollIntervalMs: m.cfg.Remote.Batch.PollIntervalMs,
 		TimeoutMs:      timeoutMs,
-		LastError:      m.batchLastError,
-		LastProvider:   m.batchLastProvider,
+		LastError:      batchLastError,
+		LastProvider:   batchLastProvider,
 	}
 
 	m.log.Info().
@@ -343,7 +360,7 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 	return status, nil
 }
 
-func buildSourceCounts(ctx context.Context, m *MemorySearchManager) []MemorySearchSourceCount {
+func buildSourceCounts(ctx context.Context, m *MemorySearchManager, indexGen string) []MemorySearchSourceCount {
 	if m == nil {
 		return nil
 	}
@@ -370,7 +387,7 @@ func buildSourceCounts(ctx context.Context, m *MemorySearchManager) []MemorySear
 			)
 			_ = row.Scan(&count.Files)
 		}
-		genSQL, genArgs := generationFilterSQL(5, m.indexGen)
+		genSQL, genArgs := generationFilterSQL(5, indexGen)
 		args := []any{m.bridgeID, m.loginID, m.agentID, source}
 		args = append(args, genArgs...)
 		row := m.db.QueryRow(ctx,
@@ -387,20 +404,25 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 	if m == nil {
 		return nil, errors.New("memory search unavailable")
 	}
+
+	// Snapshot indexGen under mu to avoid data races with sync().
+	// TryLock: if sync() holds mu we read a potentially stale value, which is
+	// acceptable — the generation filter only affects which chunks are returned.
+	var indexGen string
+	var shouldSync bool
+	if m.mu.TryLock() {
+		indexGen = m.indexGen
+		shouldSync = m.cfg.Sync.OnSearch && (m.dirty || m.sessionsDirty)
+		m.mu.Unlock()
+	}
+
 	m.warmSession(ctx, opts.SessionKey)
-	if m.cfg.Sync.OnSearch {
-		if m.mu.TryLock() {
-			shouldSync := m.dirty || m.sessionsDirty
-			m.mu.Unlock()
-			if shouldSync {
-				go func(sessionKey string) {
-					if err := m.sync(context.Background(), sessionKey, false); err != nil {
-						m.log.Warn().Msg("memory sync failed (search): " + err.Error())
-					}
-				}(opts.SessionKey)
+	if shouldSync {
+		go func(sessionKey string) {
+			if err := m.sync(context.Background(), sessionKey, false); err != nil {
+				m.log.Warn().Msg("memory sync failed (search): " + err.Error())
 			}
-		}
-		// If TryLock fails, a sync is already running — skip.
+		}(opts.SessionKey)
 	}
 
 	mode := strings.ToLower(strings.TrimSpace(opts.Mode))
@@ -458,7 +480,7 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 	keywordOK := false
 	if wantKeyword {
 		if m.ftsAvailable {
-			results, err := m.searchKeyword(ctx, cleaned, candidates, sources, pathPrefix)
+			results, err := m.searchKeyword(ctx, cleaned, candidates, sources, pathPrefix, indexGen)
 			if err == nil {
 				keywordResults = results
 				keywordOK = true
@@ -478,7 +500,7 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 			// If FTS isn't available, avoid scanning chunks for auto/keyword mode: scan files instead.
 			// Hybrid mode needs chunk IDs for merge, so it still uses chunk scan fallback.
 			if mode == "hybrid" {
-				results, err := m.searchKeywordScan(ctx, cleaned, candidates, sources, pathPrefix)
+				results, err := m.searchKeywordScan(ctx, cleaned, candidates, sources, pathPrefix, indexGen)
 				if err == nil {
 					keywordResults = results
 					keywordOK = true
@@ -515,7 +537,7 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 				}
 			}
 			if hasVector {
-				results, err := m.searchVector(ctx, queryVec, candidates, sources, pathPrefix)
+				results, err := m.searchVector(ctx, queryVec, candidates, sources, pathPrefix, indexGen)
 				if err == nil {
 					vectorResults = results
 					vectorOK = true
@@ -658,7 +680,7 @@ func (m *MemorySearchManager) listRecentFiles(ctx context.Context, sources []str
 	return results, nil
 }
 
-func (m *MemorySearchManager) searchKeywordScan(ctx context.Context, query string, limit int, sources []string, pathPrefix string) ([]memory.HybridKeywordResult, error) {
+func (m *MemorySearchManager) searchKeywordScan(ctx context.Context, query string, limit int, sources []string, pathPrefix string, indexGen string) ([]memory.HybridKeywordResult, error) {
 	if m == nil || m.db == nil || limit <= 0 {
 		return nil, nil
 	}
@@ -681,7 +703,7 @@ func (m *MemorySearchManager) searchKeywordScan(ctx context.Context, query strin
 
 	baseArgs := []any{m.bridgeID, m.loginID, m.agentID, m.status.Model}
 	sourceSQL, sourceArgs := sourceFilterSQL(5, sources)
-	genSQL, genArgs := generationFilterSQL(5+len(sourceArgs), m.indexGen)
+	genSQL, genArgs := generationFilterSQL(5+len(sourceArgs), indexGen)
 	pathSQL, pathArgs := pathPrefixFilterSQL(5+len(sourceArgs)+len(genArgs), pathPrefix)
 	args := append(baseArgs, sourceArgs...)
 	args = append(args, genArgs...)
