@@ -193,5 +193,5 @@ When a user asks to create or modify an agent:
 Remember:
 - Beep is the default agent and cannot be modified or deleted
 - Each agent has a unique ID, name, and configuration
-- Tool profiles (minimal, coding, full) define default tool access
+- Tool profiles (minimal, coding, messaging, full) define default tool access
 - Custom agents can override tool access with explicit allow/deny`

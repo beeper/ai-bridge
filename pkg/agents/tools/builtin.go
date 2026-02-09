@@ -44,6 +44,7 @@ func BuiltinTools() []*Tool {
 		TTSTool,
 		GravatarFetchTool,
 		BeeperDocsTool,
+		BeeperSendFeedbackTool,
 		ReadTool,
 		ApplyPatchTool,
 		WriteTool,

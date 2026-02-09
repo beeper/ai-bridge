@@ -306,21 +306,6 @@ var ListModelsTool = &Tool{
 	Group: GroupSessions,
 }
 
-// ListToolsDef tool definition.
-var ListToolsDef = &Tool{
-	Tool: mcp.Tool{
-		Name:        "list_tools",
-		Description: "List all available tools and their profiles",
-		Annotations: &mcp.ToolAnnotations{Title: "List Tools"},
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	},
-	Type:  ToolTypeBuiltin,
-	Group: GroupSessions,
-}
-
 // RunInternalCommandTool tool definition.
 var RunInternalCommandTool = &Tool{
 	Tool: mcp.Tool{
@@ -545,7 +530,6 @@ func SessionTools() []*Tool {
 	return []*Tool{
 		AgentsListTool,
 		ListModelsTool,
-		ListToolsDef,
 		ModifyRoomTool,
 		SessionsListTool,
 		SessionsHistoryTool,
@@ -842,40 +826,6 @@ func (e *BossToolExecutor) ExecuteListModels(ctx context.Context, _ map[string]a
 	return JSONResult(map[string]any{
 		"models": modelList,
 		"count":  len(modelList),
-	}), nil
-}
-
-// ExecuteListTools handles the list_tools tool.
-func (e *BossToolExecutor) ExecuteListTools(ctx context.Context, _ map[string]any) (*Result, error) {
-	toolInfos, err := e.store.ListAvailableTools(ctx)
-	if err != nil {
-		return ErrorResult("list_tools", fmt.Sprintf("failed to load tools: %v", err)), nil
-	}
-
-	var toolList []map[string]any
-	for _, tool := range toolInfos {
-		toolList = append(toolList, map[string]any{
-			"name":        tool.Name,
-			"description": tool.Description,
-			"type":        string(tool.Type),
-			"group":       tool.Group,
-			"enabled":     tool.Enabled,
-		})
-	}
-
-	// Add profile descriptions
-	profiles := map[string][]string{}
-	for profile, policy := range toolpolicy.ToolProfiles {
-		if len(policy.Allow) == 0 {
-			continue
-		}
-		profiles[string(profile)] = append([]string{}, policy.Allow...)
-	}
-
-	return JSONResult(map[string]any{
-		"tools":    toolList,
-		"count":    len(toolList),
-		"profiles": profiles,
 	}), nil
 }
 

@@ -52,6 +52,9 @@ const (
 
 	BeeperDocsName        = "beeper_docs"
 	BeeperDocsDescription = "Search Beeper documentation (help.beeper.com, developers.beeper.com). Use when answering questions about Beeper features, setup, troubleshooting, configuration, or developer APIs."
+
+	BeeperSendFeedbackName        = "beeper_send_feedback"
+	BeeperSendFeedbackDescription = "Submit feedback or bug reports to Beeper. Use when the user wants to report a problem, request a feature, or send feedback about their Beeper experience."
 )
 
 // CalculatorSchema returns the JSON schema for the calculator tool.
@@ -689,5 +692,23 @@ func BeeperDocsSchema() map[string]any {
 			},
 		},
 		"required": []string{"query"},
+	}
+}
+
+// BeeperSendFeedbackSchema returns the JSON schema for the beeper_send_feedback tool.
+func BeeperSendFeedbackSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"text": map[string]any{
+				"type":        "string",
+				"description": "The feedback or bug report text to submit.",
+			},
+			"type": map[string]any{
+				"type":        "string",
+				"description": "Feedback type: 'problem' (default), 'suggestion', or 'question'.",
+			},
+		},
+		"required": []string{"text"},
 	}
 }

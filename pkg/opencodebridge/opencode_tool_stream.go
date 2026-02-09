@@ -56,6 +56,7 @@ func (m *OpenCodeManager) emitToolStreamDelta(ctx context.Context, inst *openCod
 			"type":             "tool-input-start",
 			"toolCallId":       toolCallID,
 			"toolName":         toolName,
+			"title":            toolDisplayTitle(toolName),
 			"providerExecuted": false,
 		})
 		inst.setPartStreamInputStarted(part.SessionID, part.ID)
@@ -96,6 +97,7 @@ func (m *OpenCodeManager) emitToolStreamState(ctx context.Context, inst *openCod
 				"type":             "tool-input-start",
 				"toolCallId":       toolCallID,
 				"toolName":         toolName,
+				"title":            toolDisplayTitle(toolName),
 				"providerExecuted": false,
 			})
 			inst.setPartStreamInputStarted(part.SessionID, part.ID)

@@ -282,7 +282,10 @@ func (m *MemorySearchManager) indexMemoryFiles(ctx context.Context, force bool, 
 		if path == "" {
 			continue
 		}
-		if !strings.HasSuffix(strings.ToLower(path), ".md") {
+		if ok, _, _ := textfs.IsAllowedTextNotePath(path); !ok {
+			continue
+		}
+		if len(entry.Content) > textfs.NoteMaxBytesDefault() {
 			continue
 		}
 		source := strings.ToLower(strings.TrimSpace(entry.Source))
@@ -381,7 +384,10 @@ func (m *MemorySearchManager) prepareMemoryFiles(ctx context.Context, force bool
 		if path == "" {
 			continue
 		}
-		if !strings.HasSuffix(strings.ToLower(path), ".md") {
+		if ok, _, _ := textfs.IsAllowedTextNotePath(path); !ok {
+			continue
+		}
+		if len(entry.Content) > textfs.NoteMaxBytesDefault() {
 			continue
 		}
 		source := strings.ToLower(strings.TrimSpace(entry.Source))
@@ -1322,7 +1328,7 @@ func hasSource(sources []string, target string) bool {
 
 func isExtraPath(path string, extra []string) bool {
 	for _, extraPath := range extra {
-		if strings.HasSuffix(strings.ToLower(extraPath), ".md") {
+		if ok, _, _ := textfs.IsAllowedTextNotePath(extraPath); ok {
 			if strings.EqualFold(path, extraPath) {
 				return true
 			}

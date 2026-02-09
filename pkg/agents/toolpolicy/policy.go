@@ -75,7 +75,7 @@ var ToolGroups = map[string][]string{
 		"image",
 	},
 	// ai-bridge extras (keep separate so group:openclaw stays portable with OpenClaw configs).
-	GroupAIBridge: {"gravatar_fetch", "gravatar_set", "beeper_docs", "image_generate", "tts", "calculator"},
+	GroupAIBridge: {"gravatar_fetch", "gravatar_set", "beeper_docs", "beeper_send_feedback", "image_generate", "tts", "calculator"},
 	GroupFS:         {"read", "write", "edit", "apply_patch"},
 	GroupNexus: {
 		"get_user_information",
@@ -595,7 +595,6 @@ var defaultSubagentDeny = []string{
 	"list_agents",
 	"agents_list",
 	"list_models",
-	"list_tools",
 	"gateway",
 	"cron",
 	"run_internal_command",
