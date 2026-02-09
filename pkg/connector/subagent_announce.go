@@ -51,33 +51,53 @@ func (oc *AIClient) readLatestAssistantReply(ctx context.Context, portal *bridge
 	if err != nil || len(messages) == 0 {
 		return ""
 	}
-	for i := len(messages) - 1; i >= 0; i-- {
-		meta := messageMeta(messages[i])
+	best := ""
+	bestTS := int64(0)
+	for _, msg := range messages {
+		if msg == nil {
+			continue
+		}
+		meta := messageMeta(msg)
 		if meta == nil || meta.Role != "assistant" {
 			continue
 		}
 		body := strings.TrimSpace(meta.Body)
-		if body != "" {
-			return body
+		if body == "" {
+			continue
+		}
+		ts := msg.Timestamp.UnixMilli()
+		if best == "" || ts > bestTS {
+			best = body
+			bestTS = ts
 		}
 	}
-	return ""
+	return best
 }
 
 func (oc *AIClient) resolveUsageFromMessages(messages []*database.Message) (int64, int64, int64) {
-	var inputTokens int64
-	var outputTokens int64
-	var totalTokens int64
-	for i := len(messages) - 1; i >= 0; i-- {
-		meta := messageMeta(messages[i])
+	var (
+		bestTS       int64
+		inputTokens  int64
+		outputTokens int64
+		totalTokens  int64
+	)
+	for _, msg := range messages {
+		if msg == nil {
+			continue
+		}
+		meta := messageMeta(msg)
 		if meta == nil || meta.Role != "assistant" {
 			continue
 		}
-		if meta.PromptTokens > 0 || meta.CompletionTokens > 0 {
+		if meta.PromptTokens <= 0 && meta.CompletionTokens <= 0 {
+			continue
+		}
+		ts := msg.Timestamp.UnixMilli()
+		if bestTS == 0 || ts > bestTS {
+			bestTS = ts
 			inputTokens = meta.PromptTokens
 			outputTokens = meta.CompletionTokens
 			totalTokens = meta.PromptTokens + meta.CompletionTokens
-			break
 		}
 	}
 	return inputTokens, outputTokens, totalTokens
@@ -110,10 +130,6 @@ func (oc *AIClient) buildSubagentStatsLine(ctx context.Context, portal *bridgev2
 	sessionKey := portal.MXID.String()
 	if sessionKey != "" {
 		parts = append(parts, fmt.Sprintf("sessionKey %s", sessionKey))
-	}
-	sessionID := string(portal.PortalKey.ID)
-	if sessionID != "" {
-		parts = append(parts, fmt.Sprintf("sessionId %s", sessionID))
 	}
 
 	if len(parts) == 0 {
