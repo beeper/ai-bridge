@@ -939,8 +939,10 @@ func (oc *AIClient) handleMediaMessage(
 	}
 
 	userMeta := &MessageMetadata{
-		Role: "user",
-		Body: oc.buildMatrixInboundBody(ctx, portal, meta, msg.Event, buildMediaMetadataBody(caption, config.bodySuffix, understanding), senderName, roomName, isGroup),
+		Role:     "user",
+		Body:     oc.buildMatrixInboundBody(ctx, portal, meta, msg.Event, buildMediaMetadataBody(caption, config.bodySuffix, understanding), senderName, roomName, isGroup),
+		MediaURL: string(mediaURL),
+		MimeType: mimeType,
 	}
 	if understanding != nil {
 		userMeta.MediaUnderstanding = understanding.Outputs

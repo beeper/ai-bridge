@@ -3,6 +3,7 @@ package opencodebridge
 import (
 	"strings"
 
+	"github.com/beeper/ai-bridge/pkg/agents/tools"
 	"github.com/beeper/ai-bridge/pkg/matrixevents"
 )
 
@@ -93,12 +94,8 @@ func firstNonEmptyString(values ...any) string {
 
 func toolDisplayTitle(toolName string) string {
 	toolName = strings.TrimSpace(toolName)
-	switch toolName {
-	case "web_search", "better_web_search":
-		return "Web Search"
-	case "image_generation", "image_generate":
-		return "Image Generation"
-	default:
-		return toolName
+	if t := tools.GetTool(toolName); t != nil && t.Annotations != nil && t.Annotations.Title != "" {
+		return t.Annotations.Title
 	}
+	return toolName
 }

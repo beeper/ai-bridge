@@ -88,16 +88,10 @@ func (oc *AIClient) emitToolProgress(ctx context.Context, portal *bridgev2.Porta
 
 func toolDisplayTitle(toolName string) string {
 	toolName = normalizeToolAlias(toolName)
-	switch toolName {
-	case "web_search":
-		return "Web Search"
-	case "image_generation":
-		return "Image Generation"
-	case ToolNameImageGenerate:
-		return "Image Generation"
-	default:
-		return toolName
+	if t := tools.GetTool(toolName); t != nil && t.Annotations != nil && t.Annotations.Title != "" {
+		return t.Annotations.Title
 	}
+	return toolName
 }
 
 func summarizeMessageAction(obj map[string]any) string {
@@ -532,8 +526,6 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 		result, err = executor.ExecuteListAgents(ctx, args)
 	case "list_models":
 		result, err = executor.ExecuteListModels(ctx, args)
-	case "list_tools":
-		result, err = executor.ExecuteListTools(ctx, args)
 	case "run_internal_command":
 		result, err = executor.ExecuteRunInternalCommand(ctx, args)
 	case "modify_room":

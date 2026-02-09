@@ -31,6 +31,7 @@ func builtinToolExecutors() map[string]toolExecutor {
 		ToolNameGravatarFetch:                  executeGravatarFetch,
 		ToolNameGravatarSet:                    executeGravatarSet,
 		ToolNameBeeperDocs:                     executeBeeperDocs,
+		ToolNameBeeperSendFeedback:             executeBeeperSendFeedback,
 		toolspec.NexusContactsName:             executeNexusContacts,
 		toolspec.NexusSearchContactsName:       makeNexusExecutor(nexusToolRoutes[toolspec.NexusSearchContactsName]),
 		toolspec.NexusGetContactName:           makeNexusExecutor(nexusToolRoutes[toolspec.NexusGetContactName]),

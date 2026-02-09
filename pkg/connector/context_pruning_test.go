@@ -260,15 +260,15 @@ func TestPruneContext(t *testing.T) {
 func TestToolPatternMatching(t *testing.T) {
 	t.Run("exact match", func(t *testing.T) {
 		config := &PruningConfig{
-			ToolsAllow: []string{"list_tools"},
+			ToolsAllow: []string{"list_models"},
 		}
 		pred := makeToolPrunablePredicate(config)
 
-		if !pred("list_tools") {
-			t.Error("Should match exact 'list_tools'")
+		if !pred("list_models") {
+			t.Error("Should match exact 'list_models'")
 		}
-		if pred("list_tools_background") {
-			t.Error("Should not match 'list_tools_background' with exact pattern")
+		if pred("list_models_background") {
+			t.Error("Should not match 'list_models_background' with exact pattern")
 		}
 	})
 
@@ -278,8 +278,8 @@ func TestToolPatternMatching(t *testing.T) {
 		}
 		pred := makeToolPrunablePredicate(config)
 
-		if !pred("list_tools") {
-			t.Error("Should match 'list_tools'")
+		if !pred("list_agents") {
+			t.Error("Should match 'list_agents'")
 		}
 		if !pred("list_models") {
 			t.Error("Should match 'list_models'")
@@ -339,11 +339,11 @@ func TestToolPatternMatching(t *testing.T) {
 		}
 		pred := makeToolPrunablePredicate(config)
 
-		if !pred("list_tools") {
-			t.Error("Should match lowercase 'list_tools'")
+		if !pred("list_models") {
+			t.Error("Should match lowercase 'list_models'")
 		}
-		if !pred("LIST_TOOLS") {
-			t.Error("Should match uppercase 'LIST_TOOLS'")
+		if !pred("LIST_MODELS") {
+			t.Error("Should match uppercase 'LIST_MODELS'")
 		}
 	})
 }

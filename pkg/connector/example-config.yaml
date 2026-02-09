@@ -119,6 +119,8 @@ tool_approvals:
   ttlSeconds: 600
   requireForMcp: true
   # List of builtin tool names that require approval (subject to per-tool action allowlists).
+  # Note: `message` approvals apply to Desktop API routing too (e.g. action=send/reply/edit with desktop chat hints),
+  # while Desktop read-only actions like desktop-search-* do not require approval.
   requireForTools: ["message", "cron", "gravatar_set", "create_agent", "fork_agent", "edit_agent", "delete_agent", "modify_room", "sessions_send", "sessions_spawn", "run_internal_command"]
   # Fallback when approval times out: "deny" (default) | "allow".
   # Set to "allow" for cron/automated contexts where no human can respond.
@@ -287,7 +289,9 @@ memory_search:
   # Tool policy (OpenClaw-style). Controls allow/deny lists and profiles.
   # tool_policy:
   #   profile: "full"
-  #   allow: ["group:openclaw"]
+  #   # group:openclaw is the strict OpenClaw native tool set.
+  #   # group:ai-bridge includes ai-bridge-only extras (beeper_docs, gravatar_*, tts, image_generate, calculator, etc).
+  #   allow: ["group:openclaw", "group:ai-bridge"]
   #   deny: []
   #   subagents:
   #     tools:

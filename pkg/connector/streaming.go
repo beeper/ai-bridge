@@ -768,7 +768,7 @@ func (oc *AIClient) emitUIToolInputDelta(ctx context.Context, portal *bridgev2.P
 	if toolCallID == "" {
 		return
 	}
-	oc.ensureUIToolInputStart(ctx, portal, state, toolCallID, toolName, providerExecuted, false, "", nil)
+	oc.ensureUIToolInputStart(ctx, portal, state, toolCallID, toolName, providerExecuted, false, toolDisplayTitle(toolName), nil)
 	if delta != "" {
 		oc.emitStreamEvent(ctx, portal, state, map[string]any{
 			"type":           "tool-input-delta",
@@ -782,7 +782,7 @@ func (oc *AIClient) emitUIToolInputAvailable(ctx context.Context, portal *bridge
 	if toolCallID == "" {
 		return
 	}
-	oc.ensureUIToolInputStart(ctx, portal, state, toolCallID, toolName, providerExecuted, false, "", nil)
+	oc.ensureUIToolInputStart(ctx, portal, state, toolCallID, toolName, providerExecuted, false, toolDisplayTitle(toolName), nil)
 	oc.emitStreamEvent(ctx, portal, state, map[string]any{
 		"type":             "tool-input-available",
 		"toolCallId":       toolCallID,
@@ -805,7 +805,7 @@ func (oc *AIClient) emitUIToolInputError(
 	if toolCallID == "" {
 		return
 	}
-	oc.ensureUIToolInputStart(ctx, portal, state, toolCallID, toolName, providerExecuted, dynamic, "", nil)
+	oc.ensureUIToolInputStart(ctx, portal, state, toolCallID, toolName, providerExecuted, dynamic, toolDisplayTitle(toolName), nil)
 	part := map[string]any{
 		"type":             "tool-input-error",
 		"toolCallId":       toolCallID,
@@ -1148,7 +1148,7 @@ func (oc *AIClient) upsertActiveToolFromDescriptor(
 	if tool.eventID == "" && strings.TrimSpace(tool.toolName) != "" {
 		tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
 	}
-	oc.ensureUIToolInputStart(ctx, portal, state, tool.callID, tool.toolName, desc.providerExecuted, desc.dynamic, "", nil)
+	oc.ensureUIToolInputStart(ctx, portal, state, tool.callID, tool.toolName, desc.providerExecuted, desc.dynamic, toolDisplayTitle(tool.toolName), nil)
 	return tool
 }
 
@@ -1482,6 +1482,16 @@ func (oc *AIClient) saveAssistantMessage(
 	meta *PortalMetadata,
 ) {
 	modelID := oc.effectiveModel(meta)
+
+	// Collect generated file references for multimodal history re-injection.
+	var genFiles []GeneratedFileRef
+	if len(state.generatedFiles) > 0 {
+		genFiles = make([]GeneratedFileRef, 0, len(state.generatedFiles))
+		for _, f := range state.generatedFiles {
+			genFiles = append(genFiles, GeneratedFileRef{URL: f.url, MimeType: f.mediaType})
+		}
+	}
+
 	assistantMsg := &database.Message{
 		ID:        MakeMessageID(state.initialEventID),
 		Room:      portal.PortalKey,
@@ -1503,6 +1513,7 @@ func (oc *AIClient) saveAssistantMessage(
 			HasToolCalls:       len(state.toolCalls) > 0,
 			CanonicalSchema:    "ai-sdk-ui-message-v1",
 			CanonicalUIMessage: oc.buildCanonicalUIMessage(state, meta),
+			GeneratedFiles:     genFiles,
 			// Reasoning fields (only populated by Responses API)
 			ThinkingContent:    state.reasoning.String(),
 			ThinkingTokenCount: len(strings.Fields(state.reasoning.String())),
@@ -2492,6 +2503,7 @@ func (oc *AIClient) streamingResponse(
 					resultStatus = ResultStatusError
 				} else {
 					success := 0
+					var sentURLs []string
 					for _, imageB64 := range images {
 						imageData, mimeType, err := decodeBase64Image(imageB64)
 						if err != nil {
@@ -2505,12 +2517,13 @@ func (oc *AIClient) streamingResponse(
 						}
 						recordGeneratedFile(state, mediaURL, mimeType)
 						oc.emitUIFile(ctx, portal, state, mediaURL, mimeType)
+						sentURLs = append(sentURLs, mediaURL)
 						success++
 					}
 					if success == len(images) && success > 0 {
-						displayResult = fmt.Sprintf("Images generated and sent successfully (%d)", success)
+						displayResult = fmt.Sprintf("Images generated and sent to the user (%d). Media URLs: %s", success, strings.Join(sentURLs, ", "))
 					} else if success > 0 {
-						displayResult = fmt.Sprintf("Images generated with %d/%d sent successfully", success, len(images))
+						displayResult = fmt.Sprintf("Images generated with %d/%d sent successfully. Media URLs: %s", success, len(images), strings.Join(sentURLs, ", "))
 						resultStatus = ResultStatusError
 					} else {
 						displayResult = "Error: failed to send generated images"
@@ -2534,7 +2547,7 @@ func (oc *AIClient) streamingResponse(
 					} else {
 						recordGeneratedFile(state, mediaURL, mimeType)
 						oc.emitUIFile(ctx, portal, state, mediaURL, mimeType)
-						displayResult = "Image generated and sent successfully"
+						displayResult = fmt.Sprintf("Image generated and sent to the user. Media URL: %s", mediaURL)
 					}
 				}
 				result = displayResult
@@ -3655,6 +3668,7 @@ func (oc *AIClient) streamingResponse(
 						resultStatus = ResultStatusError
 					} else {
 						success := 0
+						var sentURLs []string
 						for _, imageB64 := range images {
 							imageData, mimeType, err := decodeBase64Image(imageB64)
 							if err != nil {
@@ -3668,12 +3682,13 @@ func (oc *AIClient) streamingResponse(
 							}
 							recordGeneratedFile(state, mediaURL, mimeType)
 							oc.emitUIFile(ctx, portal, state, mediaURL, mimeType)
+							sentURLs = append(sentURLs, mediaURL)
 							success++
 						}
 						if success == len(images) && success > 0 {
-							displayResult = fmt.Sprintf("Images generated and sent successfully (%d)", success)
+							displayResult = fmt.Sprintf("Images generated and sent to the user (%d). Media URLs: %s", success, strings.Join(sentURLs, ", "))
 						} else if success > 0 {
-							displayResult = fmt.Sprintf("Images generated with %d/%d sent successfully", success, len(images))
+							displayResult = fmt.Sprintf("Images generated with %d/%d sent successfully. Media URLs: %s", success, len(images), strings.Join(sentURLs, ", "))
 							resultStatus = ResultStatusError
 						} else {
 							displayResult = "Error: failed to send generated images"
@@ -3696,7 +3711,7 @@ func (oc *AIClient) streamingResponse(
 						} else {
 							recordGeneratedFile(state, mediaURL, mimeType)
 							oc.emitUIFile(ctx, portal, state, mediaURL, mimeType)
-							displayResult = "Image generated and sent successfully"
+							displayResult = fmt.Sprintf("Image generated and sent to the user. Media URL: %s", mediaURL)
 						}
 					}
 					result = displayResult
@@ -4417,6 +4432,7 @@ func (oc *AIClient) streamChatCompletions(
 							resultStatus = ResultStatusError
 						} else {
 							success := 0
+							var sentURLs []string
 							for _, imageB64 := range images {
 								imageData, mimeType, decodeErr := decodeBase64Image(imageB64)
 								if decodeErr != nil {
@@ -4430,12 +4446,13 @@ func (oc *AIClient) streamChatCompletions(
 								}
 								recordGeneratedFile(state, mediaURL, mimeType)
 								oc.emitUIFile(ctx, portal, state, mediaURL, mimeType)
+								sentURLs = append(sentURLs, mediaURL)
 								success++
 							}
 							if success == len(images) && success > 0 {
-								result = fmt.Sprintf("Images generated and sent successfully (%d)", success)
+								result = fmt.Sprintf("Images generated and sent to the user (%d). Media URLs: %s", success, strings.Join(sentURLs, ", "))
 							} else if success > 0 {
-								result = fmt.Sprintf("Images generated with %d/%d sent successfully", success, len(images))
+								result = fmt.Sprintf("Images generated with %d/%d sent successfully. Media URLs: %s", success, len(images), strings.Join(sentURLs, ", "))
 								resultStatus = ResultStatusError
 							} else {
 								result = "Error: failed to send generated images"
@@ -4457,7 +4474,7 @@ func (oc *AIClient) streamChatCompletions(
 							} else {
 								recordGeneratedFile(state, mediaURL, mimeType)
 								oc.emitUIFile(ctx, portal, state, mediaURL, mimeType)
-								result = "Image generated and sent successfully"
+								result = fmt.Sprintf("Image generated and sent to the user. Media URL: %s", mediaURL)
 							}
 						}
 					}

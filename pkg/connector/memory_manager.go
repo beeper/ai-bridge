@@ -559,7 +559,7 @@ func (m *MemorySearchManager) listRecentFiles(ctx context.Context, sources []str
 	args = append(args, limit)
 
 	rows, err := m.db.Query(ctx,
-		`SELECT path, source, content
+		`SELECT path, source, substr(content, 1, 8192)
          FROM ai_memory_files
          WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`+sourceSQL+pathSQL+`
          ORDER BY updated_at DESC
@@ -707,8 +707,15 @@ func (m *MemorySearchManager) ReadFile(ctx context.Context, relPath string, from
 	if err != nil {
 		return nil, errors.New("path required")
 	}
-	if !strings.HasSuffix(strings.ToLower(path), ".md") {
-		return nil, errors.New("path required")
+	if ok, _, reason := textfs.IsAllowedTextNotePath(path); !ok {
+		switch reason {
+		case "missing_extension":
+			return nil, errors.New("path must include a file extension (allowed: " + strings.Join(textfs.AllowedNoteExtensions(), ", ") + ")")
+		case "unsupported_extension":
+			return nil, errors.New("unsupported file type (allowed: " + strings.Join(textfs.AllowedNoteExtensions(), ", ") + ")")
+		default:
+			return nil, errors.New("path required")
+		}
 	}
 	if !isAllowedMemoryPath(path, m.cfg.ExtraPaths) {
 		return nil, errors.New("path required")
@@ -721,6 +728,9 @@ func (m *MemorySearchManager) ReadFile(ctx context.Context, relPath string, from
 	}
 	if !found {
 		return nil, errors.New("file not found")
+	}
+	if len(entry.Content) > textfs.NoteMaxBytesDefault() {
+		return nil, fmt.Errorf("file too large to read via memory_get (%d > %d bytes)", len(entry.Content), textfs.NoteMaxBytesDefault())
 	}
 
 	content := normalizeNewlines(entry.Content)
@@ -931,9 +941,8 @@ func truncateSnippet(text string) string {
 }
 
 func isAllowedMemoryPath(path string, extraPaths []string) bool {
-	// Memory search indexes markdown notes across the virtual workspace.
-	// Callers already normalize paths; we still guard by suffix to avoid unnecessary sync triggers.
-	if strings.HasSuffix(strings.ToLower(strings.TrimSpace(path)), ".md") {
+	// Memory search indexes allowed text notes across the virtual workspace.
+	if ok, _, _ := textfs.IsAllowedTextNotePath(path); ok {
 		return true
 	}
 	if len(extraPaths) == 0 {
@@ -941,7 +950,7 @@ func isAllowedMemoryPath(path string, extraPaths []string) bool {
 	}
 	normalizedExtra := normalizeExtraPaths(extraPaths)
 	for _, extra := range normalizedExtra {
-		if strings.HasSuffix(strings.ToLower(extra), ".md") {
+		if ok, _, _ := textfs.IsAllowedTextNotePath(extra); ok {
 			if strings.EqualFold(path, extra) {
 				return true
 			}

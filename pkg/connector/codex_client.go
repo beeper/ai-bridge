@@ -2013,6 +2013,15 @@ func (cc *CodexClient) saveAssistantMessage(ctx context.Context, portal *bridgev
 	if cc == nil || portal == nil || state == nil || state.initialEventID == "" {
 		return
 	}
+	// Collect generated file references for multimodal history re-injection.
+	var genFiles []GeneratedFileRef
+	if len(state.generatedFiles) > 0 {
+		genFiles = make([]GeneratedFileRef, 0, len(state.generatedFiles))
+		for _, f := range state.generatedFiles {
+			genFiles = append(genFiles, GeneratedFileRef{URL: f.url, MimeType: f.mediaType})
+		}
+	}
+
 	assistantMsg := &database.Message{
 		ID:        MakeMessageID(state.initialEventID),
 		Room:      portal.PortalKey,
@@ -2033,6 +2042,7 @@ func (cc *CodexClient) saveAssistantMessage(ctx context.Context, portal *bridgev
 			HasToolCalls:       len(state.toolCalls) > 0,
 			CanonicalSchema:    "ai-sdk-ui-message-v1",
 			CanonicalUIMessage: cc.buildCanonicalUIMessage(state, model),
+			GeneratedFiles:     genFiles,
 			ThinkingContent:    state.reasoning.String(),
 			ThinkingTokenCount: len(strings.Fields(state.reasoning.String())),
 			PromptTokens:       state.promptTokens,
