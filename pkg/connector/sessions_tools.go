@@ -111,8 +111,8 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 		sessionKey := candidate.MXID.String()
 		entry := map[string]any{
 			"sessionKey": sessionKey,
-			"kind":    kind,
-			"channel": "matrix",
+			"kind":       kind,
+			"channel":    "matrix",
 		}
 		if label := resolveSessionLabel(candidate, meta); label != "" {
 			entry["label"] = label

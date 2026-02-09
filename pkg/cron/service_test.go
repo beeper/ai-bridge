@@ -2,36 +2,11 @@ package cron
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
-
-// failingStoreBackend returns errors on Read/Write when configured to do so.
-type failingStoreBackend struct {
-	inner     StoreBackend
-	failReads atomic.Bool
-}
-
-func (b *failingStoreBackend) Read(ctx context.Context, path string) ([]byte, bool, error) {
-	if b.failReads.Load() {
-		return nil, false, errors.New("injected read error")
-	}
-	return b.inner.Read(ctx, path)
-}
-
-func (b *failingStoreBackend) Write(ctx context.Context, path string, data []byte) error {
-	return b.inner.Write(ctx, path, data)
-}
-
-func (b *failingStoreBackend) List(ctx context.Context, prefix string) ([]StoreEntry, error) {
-	if b.failReads.Load() {
-		return nil, errors.New("injected read error")
-	}
-	return b.inner.List(ctx, prefix)
-}
 
 // testLogger captures log messages for assertions.
 type testLogger struct {
@@ -52,17 +27,6 @@ func (l *testLogger) Warn(msg string, _ ...any) {
 	l.mu.Unlock()
 }
 func (l *testLogger) Error(_ string, _ ...any) {}
-
-func (l *testLogger) hasWarning(substr string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for _, w := range l.warnings {
-		if contains(w, substr) {
-			return true
-		}
-	}
-	return false
-}
 
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {

@@ -66,13 +66,9 @@ func createJob(nowMs int64, input CronJobCreate) (CronJob, error) {
 	if err := assertDeliverySupport(job.SessionTarget, job.Delivery); err != nil {
 		return CronJob{}, err
 	}
-	// New "every" jobs run immediately once, then resume fixed-rate cadence.
-	if strings.EqualFold(strings.TrimSpace(job.Schedule.Kind), "every") {
-		next := nowMs
-		job.State.NextRunAtMs = &next
-	} else {
-		job.State.NextRunAtMs = computeJobNextRunAtMs(job, nowMs)
-	}
+	// Match OpenClaw: new "every" jobs first run is scheduled for the next interval,
+	// not immediately on creation.
+	job.State.NextRunAtMs = computeJobNextRunAtMs(job, nowMs)
 	return job, nil
 }
 
@@ -360,13 +356,6 @@ func nextWakeAtMs(store *CronStoreFile) *int64 {
 		}
 	}
 	return next
-}
-
-func isJobDue(job CronJob, nowMs int64, forced bool) bool {
-	if forced {
-		return true
-	}
-	return job.Enabled && job.State.NextRunAtMs != nil && nowMs >= *job.State.NextRunAtMs
 }
 
 func findJobIndex(jobs []CronJob, id string) int {

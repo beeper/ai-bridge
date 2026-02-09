@@ -308,8 +308,8 @@ func (oc *AIClient) listDesktopSessions(ctx context.Context, instance string, op
 		networkName := desktopSessionChannelForNetwork(account.Network)
 		entry := map[string]any{
 			"sessionKey": sessionKey,
-			"kind":    kind,
-			"channel": channelDesktopAPI,
+			"kind":       kind,
+			"channel":    channelDesktopAPI,
 		}
 		if networkName != "" && networkName != channelDesktopAPI {
 			entry["network"] = networkName
