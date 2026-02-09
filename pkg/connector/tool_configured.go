@@ -12,10 +12,7 @@ import (
 // Tool policy ("allow/deny") is handled elsewhere; these checks are about runtime
 // prerequisites like API keys and service initialization.
 
-func (oc *AIClient) effectiveSearchConfig(ctx context.Context) *search.Config {
-	if ctx == nil {
-		ctx = context.Background()
-	}
+func (oc *AIClient) effectiveSearchConfig(_ context.Context) *search.Config {
 	var cfg *search.Config
 	var meta *UserLoginMetadata
 	var connector *OpenAIConnector
@@ -32,10 +29,7 @@ func (oc *AIClient) effectiveSearchConfig(ctx context.Context) *search.Config {
 	return search.ApplyEnvDefaults(cfg).WithDefaults()
 }
 
-func (oc *AIClient) effectiveFetchConfig(ctx context.Context) *fetch.Config {
-	if ctx == nil {
-		ctx = context.Background()
-	}
+func (oc *AIClient) effectiveFetchConfig(_ context.Context) *fetch.Config {
 	var cfg *fetch.Config
 	var meta *UserLoginMetadata
 	var connector *OpenAIConnector

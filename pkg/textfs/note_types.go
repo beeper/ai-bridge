@@ -30,10 +30,6 @@ func AllowedNoteExtensions() []string {
 	return out
 }
 
-func formatAllowedNoteExtensions() string {
-	return strings.Join(AllowedNoteExtensions(), ", ")
-}
-
 // IsAllowedTextNotePath checks whether a virtual path is allowed for note indexing/reading.
 // It requires an explicit file extension in the allowlist.
 func IsAllowedTextNotePath(relPath string) (ok bool, ext string, reason string) {
