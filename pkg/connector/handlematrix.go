@@ -1452,11 +1452,18 @@ func (oc *AIClient) buildPromptForRegenerate(
 	latestUserID id.EventID,
 ) ([]openai.ChatCompletionMessageParamUnion, error) {
 	var prompt []openai.ChatCompletionMessageParamUnion
-	systemPrompt := oc.effectivePrompt(meta)
-	if systemPrompt != "" {
+	isRaw := meta != nil && meta.IsRawMode
+	systemPrompt := ""
+	if isRaw {
+		systemPrompt = oc.buildRawModeSystemPrompt(meta)
 		prompt = append(prompt, openai.SystemMessage(systemPrompt))
+	} else {
+		systemPrompt = oc.effectivePrompt(meta)
+		if systemPrompt != "" {
+			prompt = append(prompt, openai.SystemMessage(systemPrompt))
+		}
+		prompt = append(prompt, oc.buildAdditionalSystemPrompts(ctx, portal, meta)...)
 	}
-	prompt = append(prompt, oc.buildAdditionalSystemPrompts(ctx, portal, meta)...)
 
 	historyLimit := oc.historyLimit(ctx, portal, meta)
 	resetAt := int64(0)
@@ -1493,13 +1500,24 @@ func (oc *AIClient) buildPromptForRegenerate(
 			}
 
 			body := msgMeta.Body
-			if msg.MXID != "" {
+			if isRaw {
+				body = stripMessageIDHintLines(body)
+				body = StripEnvelope(body)
+			} else if msg.MXID != "" {
 				body = appendMessageIDHint(msgMeta.Body, msg.MXID)
 			}
 			switch msgMeta.Role {
 			case "assistant":
+				body = stripThinkTags(body)
+				if body == "" {
+					continue
+				}
 				prompt = append(prompt, openai.AssistantMessage(body))
 			default:
+				if isRaw {
+					body = StripEnvelope(body)
+					body = stripMessageIDHintLines(body)
+				}
 				prompt = append(prompt, openai.UserMessage(body))
 			}
 		}
@@ -1514,6 +1532,13 @@ func (oc *AIClient) buildPromptForRegenerate(
 		}
 	}
 
-	prompt = append(prompt, openai.UserMessage(appendMessageIDHint(latestUserBody, latestUserID)))
+	latest := strings.TrimSpace(latestUserBody)
+	if !isRaw {
+		latest = appendMessageIDHint(latestUserBody, latestUserID)
+	} else {
+		latest = StripEnvelope(latest)
+		latest = stripMessageIDHintLines(latest)
+	}
+	prompt = append(prompt, openai.UserMessage(latest))
 	return prompt, nil
 }

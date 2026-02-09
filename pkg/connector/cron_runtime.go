@@ -49,16 +49,55 @@ func (oc *AIClient) buildCronService() *cron.CronService {
 		Store:               storeBackend,
 		MaxConcurrentRuns:   resolveCronMaxConcurrentRuns(&oc.connector.Config),
 		CronEnabled:         resolveCronEnabled(&oc.connector.Config),
-		EnqueueSystemEvent:  oc.enqueueCronSystemEvent,
-		RequestHeartbeatNow: oc.requestHeartbeatNow,
-		RunHeartbeatOnce:    oc.runHeartbeatImmediate,
-		RunIsolatedAgentJob: oc.runCronIsolatedAgentJob,
-		OnEvent:             oc.onCronEvent,
+		ResolveJobTimeoutMs: func(job cron.CronJob) int64 { return oc.resolveCronJobTimeoutMs(job) },
+		EnqueueSystemEvent: func(ctx context.Context, text string, agentID string) error {
+			return oc.enqueueCronSystemEvent(ctx, text, agentID)
+		},
+		RequestHeartbeatNow: func(ctx context.Context, reason string) {
+			oc.requestHeartbeatNow(ctx, reason)
+		},
+		RunHeartbeatOnce: func(ctx context.Context, reason string) cron.HeartbeatRunResult {
+			return oc.runHeartbeatImmediate(ctx, reason)
+		},
+		RunIsolatedAgentJob: func(ctx context.Context, job cron.CronJob, message string) (string, string, string, error) {
+			return oc.runCronIsolatedAgentJob(ctx, job, message)
+		},
+		OnEvent: oc.onCronEvent,
 	}
 	return cron.NewCronService(deps)
 }
 
-func (oc *AIClient) enqueueCronSystemEvent(text string, agentID string) error {
+func (oc *AIClient) resolveCronJobTimeoutMs(job cron.CronJob) int64 {
+	// Default to agent defaults for isolated jobs; main jobs use a short fixed default.
+	if oc == nil {
+		return 0
+	}
+	if job.SessionTarget != cron.CronSessionIsolated {
+		return int64((10 * time.Minute) / time.Millisecond)
+	}
+
+	// Base default from config agents.defaults.timeoutSeconds (fallback 600s).
+	defaultSeconds := 600
+	if cfg := &oc.connector.Config; cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.TimeoutSeconds > 0 {
+		defaultSeconds = cfg.Agents.Defaults.TimeoutSeconds
+	}
+	timeoutSeconds := defaultSeconds
+	if job.Payload.TimeoutSeconds != nil {
+		override := *job.Payload.TimeoutSeconds
+		switch {
+		case override == 0:
+			return int64((30 * 24 * time.Hour) / time.Millisecond)
+		case override > 0:
+			timeoutSeconds = override
+		}
+	}
+	if timeoutSeconds < 1 {
+		timeoutSeconds = 1
+	}
+	return int64(timeoutSeconds) * 1000
+}
+
+func (oc *AIClient) enqueueCronSystemEvent(ctx context.Context, text string, agentID string) error {
 	if oc == nil {
 		return errors.New("missing client")
 	}
@@ -81,17 +120,18 @@ func (oc *AIClient) enqueueCronSystemEvent(text string, agentID string) error {
 	return nil
 }
 
-func (oc *AIClient) requestHeartbeatNow(reason string) {
+func (oc *AIClient) requestHeartbeatNow(ctx context.Context, reason string) {
 	if oc == nil || oc.heartbeatWake == nil {
 		return
 	}
 	oc.heartbeatWake.Request(reason, 0)
 }
 
-func (oc *AIClient) runHeartbeatImmediate(reason string) cron.HeartbeatRunResult {
+func (oc *AIClient) runHeartbeatImmediate(ctx context.Context, reason string) cron.HeartbeatRunResult {
 	if oc == nil || oc.heartbeatRunner == nil {
 		return cron.HeartbeatRunResult{Status: "skipped", Reason: "disabled"}
 	}
+	_ = ctx // currently no ctx plumbing in HeartbeatRunner
 	return oc.heartbeatRunner.run(reason)
 }
 

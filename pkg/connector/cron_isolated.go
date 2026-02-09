@@ -22,13 +22,14 @@ const (
 	cronDeliveryTimeout               = 10 * time.Second
 )
 
-func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (status string, summary string, outputText string, err error) {
+func (oc *AIClient) runCronIsolatedAgentJob(ctx context.Context, job cron.CronJob, message string) (status string, summary string, outputText string, err error) {
 	if oc == nil || oc.UserLogin == nil {
 		return "error", "", "", errors.New("missing client")
 	}
-	ctx := oc.backgroundContext(context.Background())
+	runCtx, cancel := oc.mergeCronContext(ctx)
+	defer cancel()
 	agentID := resolveCronAgentID(job.AgentID, &oc.connector.Config)
-	portal, err := oc.getOrCreateCronRoom(ctx, agentID, job.ID, job.Name)
+	portal, err := oc.getOrCreateCronRoom(runCtx, agentID, job.ID, job.Name)
 	if err != nil {
 		return "error", "", "", err
 	}
@@ -53,11 +54,9 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 		}
 	}
 
-	timeoutMs := resolveCronIsolatedTimeoutMs(job, &oc.connector.Config)
-
 	sessionKey := cronSessionKey(agentID, job.ID)
 	runID := uuid.NewString()
-	oc.updateCronSessionEntry(ctx, sessionKey, func(entry cronSessionEntry) cronSessionEntry {
+	oc.updateCronSessionEntry(runCtx, sessionKey, func(entry cronSessionEntry) cronSessionEntry {
 		entry.SessionID = runID
 		entry.UpdatedAt = time.Now().UnixMilli()
 		return entry
@@ -85,22 +84,24 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 	}
 
 	// Capture last assistant message before dispatch.
-	lastID, lastTimestamp := oc.lastAssistantMessageInfo(ctx, portal)
+	lastID, lastTimestamp := oc.lastAssistantMessageInfo(runCtx, portal)
 
-	_, _, dispatchErr := oc.dispatchInternalMessage(ctx, portal, metaSnapshot, cronMessage, "cron", false)
+	_, _, dispatchErr := oc.dispatchInternalMessage(runCtx, portal, metaSnapshot, cronMessage, "cron", false)
 	if dispatchErr != nil {
 		return "error", "", "", dispatchErr
 	}
 
-	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
-	for time.Now().Before(deadline) {
-		msg, found := oc.waitForNewAssistantMessage(ctx, portal, lastID, lastTimestamp)
+	for {
+		if err := runCtx.Err(); err != nil {
+			return "error", "", "", errors.New("cron job timed out")
+		}
+		msg, found := oc.waitForNewAssistantMessage(runCtx, portal, lastID, lastTimestamp)
 		if found {
 			body := ""
 			if msg != nil {
 				if meta := messageMeta(msg); meta != nil {
 					body = strings.TrimSpace(meta.Body)
-					oc.updateCronSessionEntry(ctx, sessionKey, func(entry cronSessionEntry) cronSessionEntry {
+					oc.updateCronSessionEntry(runCtx, sessionKey, func(entry cronSessionEntry) cronSessionEntry {
 						entry.Model = strings.TrimSpace(meta.Model)
 						entry.PromptTokens = meta.PromptTokens
 						entry.CompletionTokens = meta.CompletionTokens
@@ -144,7 +145,7 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 		if strings.TrimSpace(outputText) != "" {
 			// Bound delivery time. A blocked Matrix send can otherwise wedge the cron scheduler
 			// (which runs jobs inline on the timer goroutine).
-			deliveryCtx, cancel := context.WithTimeout(ctx, cronDeliveryTimeout)
+			deliveryCtx, cancel := context.WithTimeout(runCtx, cronDeliveryTimeout)
 			defer cancel()
 			if sendErr := oc.sendPlainAssistantMessageWithResult(deliveryCtx, target.Portal, outputText); sendErr != nil {
 				if bestEffort {
@@ -156,6 +157,31 @@ func (oc *AIClient) runCronIsolatedAgentJob(job cron.CronJob, message string) (s
 	}
 
 	return "ok", summary, outputText, nil
+}
+
+// mergeCronContext ensures cron runs are cancelled on disconnect while preserving deadlines.
+func (oc *AIClient) mergeCronContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	var base context.Context
+	if oc != nil && oc.disconnectCtx != nil {
+		base = oc.disconnectCtx
+	} else if oc != nil && oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.BackgroundCtx != nil {
+		base = oc.UserLogin.Bridge.BackgroundCtx
+	} else {
+		base = context.Background()
+	}
+
+	if model, ok := modelOverrideFromContext(ctx); ok {
+		base = withModelOverride(base, model)
+	}
+
+	var merged context.Context
+	var cancel context.CancelFunc
+	if deadline, ok := ctx.Deadline(); ok {
+		merged, cancel = context.WithDeadline(base, deadline)
+	} else {
+		merged, cancel = context.WithCancel(base)
+	}
+	return oc.loggerForContext(ctx).WithContext(merged), cancel
 }
 
 func resolveCronIsolatedTimeoutMs(job cron.CronJob, cfg *Config) int64 {

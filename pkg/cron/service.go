@@ -40,27 +40,57 @@ type CronEvent struct {
 
 // CronServiceDeps provides integration hooks.
 type CronServiceDeps struct {
-	NowMs               func() int64
-	Log                 Logger
-	StorePath           string
-	Store               StoreBackend
-	MaxConcurrentRuns   int
-	CronEnabled         bool
-	EnqueueSystemEvent  func(text string, agentID string) error
-	RequestHeartbeatNow func(reason string)
-	RunHeartbeatOnce    func(reason string) HeartbeatRunResult
-	RunIsolatedAgentJob func(job CronJob, message string) (status string, summary string, outputText string, err error)
-	OnEvent             func(evt CronEvent)
+	NowMs             func() int64
+	Log               Logger
+	StorePath         string
+	Store             StoreBackend
+	MaxConcurrentRuns int
+	CronEnabled       bool
+
+	// Optional hard timeout override (unix ms). If nil, cron derives a default from job config.
+	ResolveJobTimeoutMs func(job CronJob) int64
+
+	EnqueueSystemEvent  func(ctx context.Context, text string, agentID string) error
+	RequestHeartbeatNow func(ctx context.Context, reason string)
+	RunHeartbeatOnce    func(ctx context.Context, reason string) HeartbeatRunResult
+	RunIsolatedAgentJob func(ctx context.Context, job CronJob, message string) (status string, summary string, outputText string, err error)
+
+	OnEvent func(evt CronEvent)
 }
 
-// CronService schedules and runs jobs.
+type cronTask struct {
+	jobID  string
+	forced bool
+	resp   chan cronTaskResult
+}
+
+type cronTaskResult struct {
+	ran    bool
+	reason string
+	err    error
+}
+
+// CronService schedules jobs and runs them with a worker pool.
+// The scheduler never executes jobs inline; it only enqueues tasks.
 type CronService struct {
 	deps           CronServiceDeps
 	store          *CronStoreFile
-	timer          *time.Timer
-	running        bool
 	warnedDisabled bool
-	mu             sync.Mutex
+
+	mu      sync.Mutex
+	started bool
+	ctx     context.Context
+	cancel  context.CancelFunc
+
+	wakeCh chan struct{}
+	taskCh chan cronTask
+
+	qmu      sync.Mutex
+	queued   map[string]struct{}
+	inFlight map[string]struct{}
+
+	schedulerWg sync.WaitGroup
+	workersWg   sync.WaitGroup
 }
 
 func (c *CronService) withStoreLock(fn func() error) error {
@@ -78,23 +108,54 @@ func NewCronService(deps CronServiceDeps) *CronService {
 	return &CronService{deps: deps}
 }
 
-// Start initializes the scheduler.
+// Start initializes the scheduler. It is safe to call Start multiple times.
 func (c *CronService) Start() error {
 	return c.withStoreLock(func() error {
 		c.mu.Lock()
-		defer c.mu.Unlock()
-		if !c.deps.CronEnabled {
-			c.logInfo("cron: disabled", map[string]any{"enabled": false})
+		if c.started {
+			c.mu.Unlock()
 			return nil
 		}
-		if err := c.ensureLoaded(); err != nil {
+		if !c.deps.CronEnabled {
+			c.logInfo("cron: disabled", map[string]any{"enabled": false})
+			c.mu.Unlock()
+			return nil
+		}
+		if err := c.ensureLoadedLocked(true); err != nil {
+			c.mu.Unlock()
 			return err
 		}
-		recomputeNextRuns(c.store, c.deps.NowMs(), c.deps.Log)
-		if err := c.persist(); err != nil {
-			return err
+		// Normalize store so overdue jobs remain due (app may have been closed for days).
+		if recomputeNextRuns(c.store, c.deps.NowMs(), c.deps.Log) {
+			if err := c.persistLocked(); err != nil {
+				c.mu.Unlock()
+				return err
+			}
 		}
-		c.armTimerLocked()
+
+		c.ctx, c.cancel = context.WithCancel(context.Background())
+		c.wakeCh = make(chan struct{}, 1)
+		c.taskCh = make(chan cronTask, 1024)
+		c.queued = make(map[string]struct{})
+		c.inFlight = make(map[string]struct{})
+
+		workers := c.deps.MaxConcurrentRuns
+		if workers < 1 {
+			workers = 1
+		}
+		for i := 0; i < workers; i++ {
+			c.workersWg.Add(1)
+			go c.workerLoop()
+		}
+		c.schedulerWg.Add(1)
+		go c.schedulerLoop()
+
+		c.started = true
+		c.mu.Unlock()
+
+		// Kick once on app-open so overdue jobs enqueue immediately.
+		c.wakeScheduler()
+
 		c.logInfo("cron: started", map[string]any{
 			"enabled":      true,
 			"jobs":         len(c.store.Jobs),
@@ -104,24 +165,24 @@ func (c *CronService) Start() error {
 	})
 }
 
-// Stop stops the scheduler and waits for any in-flight job to complete.
+// Stop stops the scheduler and waits for workers to exit.
 func (c *CronService) Stop() {
-	c.logInfo("cron: stopping scheduler", nil)
 	c.mu.Lock()
-	c.stopTimerLocked()
+	if !c.started {
+		c.mu.Unlock()
+		return
+	}
+	cancel := c.cancel
+	c.started = false
 	c.mu.Unlock()
 
-	// Wait for in-flight job execution to finish (with timeout).
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		c.mu.Lock()
-		running := c.running
-		c.mu.Unlock()
-		if !running || time.Now().After(deadline) {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
+	c.logInfo("cron: stopping scheduler", nil)
+
+	if cancel != nil {
+		cancel()
 	}
+	c.schedulerWg.Wait()
+	c.workersWg.Wait()
 }
 
 // Status returns scheduler status.
@@ -133,7 +194,7 @@ func (c *CronService) Status() (bool, string, int, *int64, error) {
 	err := c.withStoreLock(func() error {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		if err := c.ensureLoaded(); err != nil {
+		if err := c.ensureLoadedLocked(false); err != nil {
 			return err
 		}
 		enabled = c.deps.CronEnabled
@@ -156,7 +217,7 @@ func (c *CronService) List(includeDisabled bool) ([]CronJob, error) {
 	err := c.withStoreLock(func() error {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		if err := c.ensureLoaded(); err != nil {
+		if err := c.ensureLoadedLocked(false); err != nil {
 			return err
 		}
 		var list []CronJob
@@ -182,7 +243,7 @@ func (c *CronService) Add(input CronJobCreate) (CronJob, error) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		c.warnIfDisabled("add")
-		if err := c.ensureLoaded(); err != nil {
+		if err := c.ensureLoadedLocked(false); err != nil {
 			return err
 		}
 		created, err := createJob(c.deps.NowMs(), input)
@@ -190,10 +251,9 @@ func (c *CronService) Add(input CronJobCreate) (CronJob, error) {
 			return err
 		}
 		c.store.Jobs = append(c.store.Jobs, created)
-		if err := c.persist(); err != nil {
+		if err := c.persistLocked(); err != nil {
 			return err
 		}
-		c.armTimerLocked()
 		c.emit(CronEvent{JobID: created.ID, Action: "added", NextRunAtMs: ptr.Val(created.State.NextRunAtMs)})
 		job = created
 		return nil
@@ -201,6 +261,7 @@ func (c *CronService) Add(input CronJobCreate) (CronJob, error) {
 	if err != nil {
 		return CronJob{}, err
 	}
+	c.wakeScheduler()
 	return job, nil
 }
 
@@ -211,7 +272,7 @@ func (c *CronService) Update(id string, patch CronJobPatch) (CronJob, error) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		c.warnIfDisabled("update")
-		if err := c.ensureLoaded(); err != nil {
+		if err := c.ensureLoadedLocked(false); err != nil {
 			return err
 		}
 		idx := findJobIndex(c.store.Jobs, id)
@@ -230,10 +291,9 @@ func (c *CronService) Update(id string, patch CronJobPatch) (CronJob, error) {
 			current.State.RunningAtMs = nil
 		}
 		c.store.Jobs[idx] = current
-		if err := c.persist(); err != nil {
+		if err := c.persistLocked(); err != nil {
 			return err
 		}
-		c.armTimerLocked()
 		c.emit(CronEvent{JobID: current.ID, Action: "updated", NextRunAtMs: ptr.Val(current.State.NextRunAtMs)})
 		job = current
 		return nil
@@ -241,6 +301,7 @@ func (c *CronService) Update(id string, patch CronJobPatch) (CronJob, error) {
 	if err != nil {
 		return CronJob{}, err
 	}
+	c.wakeScheduler()
 	return job, nil
 }
 
@@ -251,7 +312,7 @@ func (c *CronService) Remove(id string) (bool, error) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		c.warnIfDisabled("remove")
-		if err := c.ensureLoaded(); err != nil {
+		if err := c.ensureLoadedLocked(false); err != nil {
 			return err
 		}
 		before := len(c.store.Jobs)
@@ -259,10 +320,9 @@ func (c *CronService) Remove(id string) (bool, error) {
 			return job.ID == id
 		})
 		removed = len(c.store.Jobs) != before
-		if err := c.persist(); err != nil {
+		if err := c.persistLocked(); err != nil {
 			return err
 		}
-		c.armTimerLocked()
 		if removed {
 			c.emit(CronEvent{JobID: id, Action: "removed"})
 		}
@@ -271,43 +331,25 @@ func (c *CronService) Remove(id string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	c.wakeScheduler()
 	return removed, nil
 }
 
-// Run executes a job if due (or forced).
+// Run executes a job if due (or forced). This call blocks until the run completes (or errors).
 func (c *CronService) Run(id string, mode string) (bool, string, error) {
 	c.warnIfDisabled("run")
 	forced := mode == "force"
-	var reason string
-	// Phase 1: check if job is due under store lock.
-	err := c.withStoreLock(func() error {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		if err := c.ensureLoaded(); err != nil {
-			return err
-		}
-		idx := findJobIndex(c.store.Jobs, id)
-		if idx == -1 {
-			return fmt.Errorf("unknown cron job id: %s", id)
-		}
-		job := c.store.Jobs[idx]
-		if !isJobDue(job, c.deps.NowMs(), forced) {
-			reason = "not-due"
-		}
-		return nil
-	})
-	if err != nil {
+
+	resCh := make(chan cronTaskResult, 1)
+	task := cronTask{jobID: id, forced: forced, resp: resCh}
+	if err := c.enqueueTask(task, true); err != nil {
 		return false, "", err
 	}
-	if reason != "" {
-		return false, reason, nil
+	res := <-resCh
+	if res.err != nil {
+		return false, "", res.err
 	}
-	// Phase 2: execute job without store lock.
-	_, err = c.executeJobLocked(id)
-	if err != nil {
-		return false, "", err
-	}
-	return true, "", nil
+	return res.ran, res.reason, nil
 }
 
 // Wake enqueues a system event.
@@ -319,110 +361,292 @@ func (c *CronService) Wake(mode string, text string) (bool, error) {
 	if c.deps.EnqueueSystemEvent == nil {
 		return false, errors.New("enqueueSystemEvent not configured")
 	}
-	if err := c.deps.EnqueueSystemEvent(trimmed, ""); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := c.deps.EnqueueSystemEvent(ctx, trimmed, ""); err != nil {
 		return false, err
 	}
 	c.logDebug("cron: wake event enqueued", map[string]any{"mode": mode, "text": trimmed})
 	if mode == "now" && c.deps.RequestHeartbeatNow != nil {
 		c.logDebug("cron: requesting immediate heartbeat for wake", nil)
-		c.deps.RequestHeartbeatNow("wake")
+		c.deps.RequestHeartbeatNow(ctx, "wake")
 	}
 	return true, nil
 }
 
-const timerRetryDelayMs = 30_000
-
-func (c *CronService) onTimer() {
+func (c *CronService) wakeScheduler() {
 	c.mu.Lock()
-	if c.running {
-		c.armTimerWithDelayLocked(5000) // retry in 5s so the timer isn't permanently lost
-		c.mu.Unlock()
-		return
-	}
-	c.running = true
+	ch := c.wakeCh
+	ctx := c.ctx
+	started := c.started
 	c.mu.Unlock()
-
-	defer func() {
-		c.mu.Lock()
-		c.running = false
-		c.mu.Unlock()
-	}()
-
-	c.logDebug("cron: timer tick fired", nil)
-
-	// Phase 1: load store and find due jobs under store lock.
-	var due []string
-	if err := c.withStoreLock(func() error {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		// Force-reload from DB on timer tick to pick up external changes.
-		c.store = nil
-		if err := c.ensureLoaded(); err != nil {
-			return err
-		}
-		due = c.dueJobIDsLocked()
-		return nil
-	}); err != nil {
-		c.logWarn("cron: ensureLoaded failed on timer tick, retrying", map[string]any{"error": err.Error()})
-		c.mu.Lock()
-		c.armTimerWithDelayLocked(timerRetryDelayMs)
-		c.mu.Unlock()
+	if !started || ch == nil || ctx == nil {
 		return
 	}
-
-	c.logInfo("cron: timer tick processing", map[string]any{"due_jobs": len(due), "job_ids": due})
-
-	// Phase 2: execute jobs without store lock (finish() acquires it as needed).
-	for _, jobID := range due {
-		_, _ = c.executeJobLocked(jobID)
-	}
-
-	// Phase 3: re-arm timer under store lock.
-	if err := c.withStoreLock(func() error {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		c.armTimerLocked()
-		return nil
-	}); err != nil {
-		c.logWarn("cron: withStoreLock failed on timer re-arm, retrying", map[string]any{"error": err.Error()})
-		c.mu.Lock()
-		c.armTimerWithDelayLocked(timerRetryDelayMs)
-		c.mu.Unlock()
+	select {
+	case ch <- struct{}{}:
+	default:
 	}
 }
 
-func (c *CronService) dueJobIDsLocked() []string {
-	if c.store == nil {
-		return nil
+func (c *CronService) enqueueTask(task cronTask, allowForce bool) error {
+	c.mu.Lock()
+	if !c.started {
+		c.mu.Unlock()
+		return errors.New("cron scheduler not started")
 	}
-	now := c.deps.NowMs()
-	var due []string
-	for _, job := range c.store.Jobs {
-		if !job.Enabled || job.State.RunningAtMs != nil || job.State.NextRunAtMs == nil || now < *job.State.NextRunAtMs {
+	ctx := c.ctx
+	c.mu.Unlock()
+	if ctx == nil {
+		return errors.New("cron scheduler not started")
+	}
+	if task.forced && !allowForce {
+		return errors.New("forced enqueue not allowed")
+	}
+
+	if task.resp == nil && !task.forced {
+		c.qmu.Lock()
+		if _, ok := c.queued[task.jobID]; ok {
+			c.qmu.Unlock()
+			return nil
+		}
+		if _, ok := c.inFlight[task.jobID]; ok {
+			c.qmu.Unlock()
+			return nil
+		}
+		// Reserve a spot in dedupe set before we try to send.
+		c.queued[task.jobID] = struct{}{}
+		c.qmu.Unlock()
+	}
+
+	select {
+	case c.taskCh <- task:
+		return nil
+	case <-ctx.Done():
+		return errors.New("cron scheduler stopped")
+	default:
+		// If we reserved a queued marker, roll it back.
+		if task.resp == nil && !task.forced {
+			c.qmu.Lock()
+			delete(c.queued, task.jobID)
+			c.qmu.Unlock()
+		}
+		return errors.New("cron task queue full")
+	}
+}
+
+const (
+	schedulerErrorBackoff = 30 * time.Second
+	retrySoonDelay        = 1 * time.Second
+	maxTimeoutMs          = int64((1 << 31) - 1)
+)
+
+func (c *CronService) schedulerLoop() {
+	defer c.schedulerWg.Done()
+
+	var timer *time.Timer
+	var timerCh <-chan time.Time
+
+	stopTimer := func() {
+		if timer != nil {
+			timer.Stop()
+			timer = nil
+		}
+		timerCh = nil
+	}
+
+	resetTimer := func(delay time.Duration) {
+		if delay < 0 {
+			stopTimer()
+			return
+		}
+		if delay > time.Duration(maxTimeoutMs)*time.Millisecond {
+			delay = time.Duration(maxTimeoutMs) * time.Millisecond
+		}
+		if timer == nil {
+			timer = time.NewTimer(delay)
+		} else {
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(delay)
+		}
+		timerCh = timer.C
+	}
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			stopTimer()
+			return
+		case <-c.wakeCh:
+		case <-timerCh:
+			c.logDebug("cron: timer tick fired", nil)
+		}
+
+		delay, err := c.scheduleOnce()
+		if err != nil {
+			c.logWarn("cron: scheduler tick failed, retrying", map[string]any{"error": err.Error()})
+			resetTimer(schedulerErrorBackoff)
 			continue
 		}
-		due = append(due, job.ID)
+		if delay >= 0 {
+			c.logDebug("cron: timer armed", map[string]any{"delayMs": int64(delay / time.Millisecond)})
+		}
+		resetTimer(delay)
 	}
-	return due
 }
 
-func (c *CronService) executeJobLocked(jobID string) (bool, error) {
-	var deleted bool
-	c.mu.Lock()
-	if err := c.ensureLoaded(); err != nil {
-		c.mu.Unlock()
-		return false, err
+func (c *CronService) scheduleOnce() (time.Duration, error) {
+	now := c.deps.NowMs()
+
+	var due []string
+	var nextFuture *int64
+	retrySoon := false
+
+	err := c.withStoreLock(func() error {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
+		if err := c.ensureLoadedLocked(true); err != nil {
+			return err
+		}
+		// Normalize + clear stuck markers. Keep overdue nextRunAtMs so the job runs once on app-open.
+		mutated := recomputeNextRuns(c.store, now, c.deps.Log)
+		if mutated {
+			if err := c.persistLocked(); err != nil {
+				return err
+			}
+		}
+
+		for _, job := range c.store.Jobs {
+			if !job.Enabled || job.State.RunningAtMs != nil || job.State.NextRunAtMs == nil {
+				continue
+			}
+			if now >= *job.State.NextRunAtMs {
+				due = append(due, job.ID)
+			} else {
+				val := *job.State.NextRunAtMs
+				if nextFuture == nil || val < *nextFuture {
+					nextFuture = &val
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return -1, err
 	}
-	idx := findJobIndex(c.store.Jobs, jobID)
-	if idx == -1 {
-		c.mu.Unlock()
-		return false, fmt.Errorf("unknown cron job id: %s", jobID)
+
+	// Enqueue due jobs outside the store lock.
+	if len(due) > 0 {
+		c.logInfo("cron: timer tick processing", map[string]any{"due_jobs": len(due), "job_ids": due})
 	}
-	job := c.store.Jobs[idx]
-	startedAt := c.deps.NowMs()
-	if job.State.RunningAtMs != nil {
-		startedAt = *job.State.RunningAtMs
-	} else {
+	for _, id := range due {
+		if err := c.enqueueTask(cronTask{jobID: id}, false); err != nil {
+			// Queue full: retry soon. If the error is "not started" we are stopping.
+			if strings.Contains(err.Error(), "queue full") {
+				retrySoon = true
+				break
+			}
+		}
+	}
+
+	// If we have due jobs queued/in-flight, rely on worker-finished wake to re-tick.
+	if nextFuture == nil {
+		if retrySoon {
+			return retrySoonDelay, nil
+		}
+		return -1, nil
+	}
+
+	delayMs := max(0, *nextFuture-now)
+	delay := time.Duration(delayMs) * time.Millisecond
+	if retrySoon && delay > retrySoonDelay {
+		delay = retrySoonDelay
+	}
+	return delay, nil
+}
+
+func (c *CronService) workerLoop() {
+	defer c.workersWg.Done()
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case task := <-c.taskCh:
+			c.executeTask(task)
+		}
+	}
+}
+
+func (c *CronService) executeTask(task cronTask) {
+	// Dedupe accounting.
+	if task.resp == nil && !task.forced {
+		c.qmu.Lock()
+		delete(c.queued, task.jobID)
+		c.inFlight[task.jobID] = struct{}{}
+		c.qmu.Unlock()
+	} else if task.resp != nil {
+		c.qmu.Lock()
+		c.inFlight[task.jobID] = struct{}{}
+		c.qmu.Unlock()
+	}
+
+	defer func() {
+		c.qmu.Lock()
+		delete(c.inFlight, task.jobID)
+		c.qmu.Unlock()
+		// Wake scheduler to recompute next wake time / enqueue more due jobs.
+		c.wakeScheduler()
+	}()
+
+	ran, reason, err := c.executeJob(task.jobID, task.forced)
+	if task.resp != nil {
+		task.resp <- cronTaskResult{ran: ran, reason: reason, err: err}
+	}
+}
+
+func (c *CronService) executeJob(jobID string, forced bool) (bool, string, error) {
+	now := c.deps.NowMs()
+
+	// Phase 1: claim under store lock.
+	var startedAt int64
+	var snapshot CronJob
+	err := c.withStoreLock(func() error {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
+		if err := c.ensureLoadedLocked(true); err != nil {
+			return err
+		}
+		idx := findJobIndex(c.store.Jobs, jobID)
+		if idx == -1 {
+			return fmt.Errorf("unknown cron job id: %s", jobID)
+		}
+		job := c.store.Jobs[idx]
+		if !job.Enabled {
+			return errJobNotRunnable("disabled")
+		}
+
+		// If the job looks stuck, clear marker so we can run it.
+		if job.State.RunningAtMs != nil && now-*job.State.RunningAtMs > stuckRunMs {
+			job.State.RunningAtMs = nil
+		}
+		if job.State.RunningAtMs != nil {
+			return errJobNotRunnable("already-running")
+		}
+
+		if !forced {
+			if job.State.NextRunAtMs == nil || now < *job.State.NextRunAtMs {
+				return errJobNotRunnable("not-due")
+			}
+		}
+
+		startedAt = now
 		job.State.RunningAtMs = &startedAt
 		job.State.LastError = ""
 		c.store.Jobs[idx] = job
@@ -433,24 +657,42 @@ func (c *CronService) executeJobLocked(jobID string) (bool, error) {
 			"session": string(job.SessionTarget),
 			"payload": job.Payload.Kind,
 		})
-		if err := c.persistWithStoreLock(); err != nil {
+		if err := c.persistLocked(); err != nil {
 			c.logWarn("cron: failed to persist started marker", map[string]any{"jobId": job.ID, "error": err.Error()})
 		}
+		snapshot = job
+		return nil
+	})
+	if err != nil {
+		if unr, ok := asJobNotRunnable(err); ok {
+			return false, unr.reason, nil
+		}
+		return false, "", err
 	}
-	c.mu.Unlock()
 
-	finish := func(statusVal, errVal, summaryVal, outputVal string) {
-		endedAt := c.deps.NowMs()
+	// Phase 2: execute outside store lock under a hard timeout.
+	timeout := c.resolveJobTimeout(snapshot)
+	jobCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	statusVal, errVal, summaryVal, _ := c.runJob(jobCtx, snapshot)
+
+	// Phase 3: finalize under store lock.
+	var deleted bool
+	finishErr := c.withStoreLock(func() error {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		if c.store == nil {
-			return
+
+		if err := c.ensureLoadedLocked(true); err != nil {
+			return err
 		}
 		idx := findJobIndex(c.store.Jobs, jobID)
 		if idx == -1 {
-			return
+			return nil
 		}
 		job := c.store.Jobs[idx]
+		endedAt := c.deps.NowMs()
+
 		job.State.RunningAtMs = nil
 		job.State.LastRunAtMs = &startedAt
 		job.State.LastStatus = statusVal
@@ -497,119 +739,189 @@ func (c *CronService) executeJobLocked(jobID string) (bool, error) {
 		} else {
 			c.store.Jobs[idx] = job
 		}
-		if err := c.persistWithStoreLock(); err != nil {
+		if err := c.persistLocked(); err != nil {
 			c.logWarn("cron: failed to persist after job finished", map[string]any{"jobId": job.ID, "error": err.Error()})
 		}
-		c.armTimerLocked()
+		return nil
+	})
+	if finishErr != nil {
+		// Prefer surfacing execution error, but finish errors are also important.
+		if err == nil {
+			err = finishErr
+		} else {
+			c.logWarn("cron: finalize failed after run", map[string]any{"jobId": snapshot.ID, "error": finishErr.Error()})
+		}
+	}
 
-		if !shouldDelete && job.SessionTarget == CronSessionIsolated {
-			summaryText := strings.TrimSpace(summaryVal)
-			deliveryMode := CronDeliveryAnnounce
-			if job.Delivery != nil && strings.TrimSpace(string(job.Delivery.Mode)) != "" {
-				deliveryMode = job.Delivery.Mode
+	// Post summary back to main session for isolated jobs (best-effort).
+	if !deleted && snapshot.SessionTarget == CronSessionIsolated {
+		summaryText := strings.TrimSpace(summaryVal)
+		deliveryMode := CronDeliveryAnnounce
+		if snapshot.Delivery != nil && strings.TrimSpace(string(snapshot.Delivery.Mode)) != "" {
+			deliveryMode = snapshot.Delivery.Mode
+		}
+		if summaryText != "" && deliveryMode != CronDeliveryNone && c.deps.EnqueueSystemEvent != nil {
+			label := "Cron: " + summaryText
+			if statusVal != "ok" {
+				label = fmt.Sprintf("Cron (%s): %s", statusVal, summaryText)
 			}
-			if summaryText != "" && deliveryMode != CronDeliveryNone && c.deps.EnqueueSystemEvent != nil {
-				prefix := "Cron"
-				label := fmt.Sprintf("%s: %s", prefix, summaryText)
-				if statusVal != "ok" {
-					label = fmt.Sprintf("%s (%s): %s", prefix, statusVal, summaryText)
-				}
-				if err := c.deps.EnqueueSystemEvent(strings.TrimSpace(label), job.AgentID); err != nil {
-					c.logWarn("cron: failed to enqueue system event", map[string]any{"jobId": job.ID, "error": err.Error()})
-				}
-				if job.WakeMode == CronWakeNow && c.deps.RequestHeartbeatNow != nil {
-					c.deps.RequestHeartbeatNow("cron:" + job.ID + ":post")
-				}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_ = c.deps.EnqueueSystemEvent(ctx, strings.TrimSpace(label), snapshot.AgentID)
+			cancel()
+			if snapshot.WakeMode == CronWakeNow && c.deps.RequestHeartbeatNow != nil {
+				ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+				c.deps.RequestHeartbeatNow(ctx2, "cron:"+snapshot.ID+":post")
+				cancel2()
 			}
 		}
 	}
 
+	if err != nil {
+		return true, "", err
+	}
+	return true, "", nil
+}
+
+func (c *CronService) runJob(ctx context.Context, job CronJob) (statusVal, errVal, summaryVal, outputVal string) {
 	if job.SessionTarget == CronSessionMain {
 		text, reason := resolveJobPayloadTextForMain(job)
 		if strings.TrimSpace(text) == "" {
-			finish("skipped", reason, "", "")
-			return deleted, nil
+			return "skipped", reason, "", ""
 		}
 		if c.deps.EnqueueSystemEvent == nil {
-			finish("error", "enqueueSystemEvent not configured", "", "")
-			return deleted, nil
+			return "error", "enqueueSystemEvent not configured", "", ""
 		}
-		if err := c.deps.EnqueueSystemEvent(text, job.AgentID); err != nil {
-			c.logWarn("cron: failed to enqueue system event for main job", map[string]any{"jobId": job.ID, "error": err.Error()})
+		if err := c.deps.EnqueueSystemEvent(ctx, text, job.AgentID); err != nil {
+			// Enqueue failure shouldn't wedge cron; record error.
+			return "error", err.Error(), text, ""
 		}
+
 		if job.WakeMode == CronWakeNow && c.deps.RunHeartbeatOnce != nil {
 			reason := "cron:" + job.ID
-			maxWaitMs := int64(2 * 60_000)
-			startWait := c.deps.NowMs()
+			maxWait := 2 * time.Minute
+			waitStarted := time.Now()
 			for {
-				res := c.deps.RunHeartbeatOnce(reason)
+				if ctx.Err() != nil {
+					return "error", "cron job timed out", text, ""
+				}
+				res := c.deps.RunHeartbeatOnce(ctx, reason)
 				if res.Status != "skipped" || res.Reason != "requests-in-flight" {
 					switch res.Status {
 					case "ran":
-						finish("ok", "", text, "")
+						return "ok", "", text, ""
 					case "skipped":
-						finish("skipped", res.Reason, text, "")
+						return "skipped", res.Reason, text, ""
 					default:
-						finish("error", res.Reason, text, "")
+						return "error", res.Reason, text, ""
 					}
-					return deleted, nil
 				}
-				if c.deps.NowMs()-startWait > maxWaitMs {
-					finish("skipped", "timeout waiting for main lane to become idle", text, "")
-					return deleted, nil
+				if time.Since(waitStarted) > maxWait {
+					return "skipped", "timeout waiting for main lane to become idle", text, ""
 				}
 				time.Sleep(250 * time.Millisecond)
 			}
 		}
+
 		if c.deps.RequestHeartbeatNow != nil {
-			c.deps.RequestHeartbeatNow("cron:" + job.ID)
+			c.deps.RequestHeartbeatNow(ctx, "cron:"+job.ID)
 		}
-		finish("ok", "", text, "")
-		return deleted, nil
+		return "ok", "", text, ""
 	}
 
 	if strings.ToLower(job.Payload.Kind) != "agentturn" {
-		finish("skipped", "isolated job requires payload.kind=agentTurn", "", "")
-		return deleted, nil
+		return "skipped", "isolated job requires payload.kind=agentTurn", "", ""
 	}
-
 	if c.deps.RunIsolatedAgentJob == nil {
-		finish("error", "isolated cron jobs not supported", "", "")
-		return deleted, nil
+		return "error", "isolated cron jobs not supported", "", ""
 	}
-	status, summary, output, runErr := c.deps.RunIsolatedAgentJob(job, job.Payload.Message)
+	status, summary, output, runErr := c.deps.RunIsolatedAgentJob(ctx, job, job.Payload.Message)
 	if runErr != nil {
-		finish("error", runErr.Error(), summary, output)
-		return deleted, nil
+		return "error", runErr.Error(), summary, output
 	}
-	if status == "ok" {
-		finish("ok", "", summary, output)
-		return deleted, nil
+	switch status {
+	case "ok":
+		return "ok", "", summary, output
+	case "skipped":
+		return "skipped", "", summary, output
+	default:
+		return "error", "cron job failed", summary, output
 	}
-	if status == "skipped" {
-		finish("skipped", "", summary, output)
-		return deleted, nil
-	}
-	finish("error", "cron job failed", summary, output)
-	return deleted, nil
 }
 
-func (c *CronService) ensureLoaded() error {
+func (c *CronService) resolveJobTimeout(job CronJob) time.Duration {
+	if c.deps.ResolveJobTimeoutMs != nil {
+		if ms := c.deps.ResolveJobTimeoutMs(job); ms > 0 {
+			return clampDuration(time.Duration(ms) * time.Millisecond)
+		}
+	}
+
+	// Defaults: 10 minutes, with isolated override via payload.timeoutSeconds.
+	timeout := 10 * time.Minute
+	if job.SessionTarget == CronSessionIsolated {
+		timeout = 10 * time.Minute
+		if job.Payload.TimeoutSeconds != nil {
+			seconds := *job.Payload.TimeoutSeconds
+			switch {
+			case seconds == 0:
+				timeout = 30 * 24 * time.Hour
+			case seconds > 0:
+				timeout = time.Duration(seconds) * time.Second
+			}
+		}
+	}
+	return clampDuration(timeout)
+}
+
+func clampDuration(d time.Duration) time.Duration {
+	if d < 1*time.Second {
+		return 1 * time.Second
+	}
+	max := 30 * 24 * time.Hour
+	if d > max {
+		return max
+	}
+	return d
+}
+
+type jobNotRunnable struct{ reason string }
+
+func (e jobNotRunnable) Error() string { return "cron: job not runnable: " + e.reason }
+
+func errJobNotRunnable(reason string) error { return jobNotRunnable{reason: reason} }
+
+func asJobNotRunnable(err error) (jobNotRunnable, bool) {
+	var e jobNotRunnable
+	if errors.As(err, &e) {
+		return e, true
+	}
+	return jobNotRunnable{}, false
+}
+
+func (c *CronService) ensureLoadedLocked(forceReload bool) error {
+	if forceReload {
+		c.store = nil
+		clearCachedStore(c.deps.StorePath)
+	}
 	if c.store != nil {
 		return nil
 	}
-	if cached := getCachedStore(c.deps.StorePath); cached != nil {
-		c.store = cached
-		return nil
+	if !forceReload {
+		if cached := getCachedStore(c.deps.StorePath); cached != nil {
+			c.store = cached
+			return nil
+		}
 	}
 	if c.deps.Store == nil {
 		return errors.New("cron store backend not configured")
 	}
-	store, err := LoadCronStore(context.Background(), c.deps.Store, c.deps.StorePath)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	store, err := LoadCronStore(ctx, c.deps.Store, c.deps.StorePath)
 	if err != nil {
 		return err
 	}
 	c.store = &store
+
 	// fix names/description
 	mutated := false
 	for i := range c.store.Jobs {
@@ -628,34 +940,27 @@ func (c *CronService) ensureLoaded() error {
 		}
 		c.store.Jobs[i] = job
 	}
-	if mutated {
-		setCachedStore(c.deps.StorePath, c.store)
-		return c.persist()
-	}
 	setCachedStore(c.deps.StorePath, c.store)
+	if mutated {
+		return c.persistLocked()
+	}
 	return nil
 }
 
-func (c *CronService) persist() error {
+func (c *CronService) persistLocked() error {
 	if c.store == nil {
 		return nil
 	}
 	if c.deps.Store == nil {
 		return errors.New("cron store backend not configured")
 	}
-	err := SaveCronStore(context.Background(), c.deps.Store, c.deps.StorePath, *c.store)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := SaveCronStore(ctx, c.deps.Store, c.deps.StorePath, *c.store)
 	if err == nil {
 		clearCachedStore(c.deps.StorePath)
 	}
 	return err
-}
-
-// persistWithStoreLock wraps persist() with the store lock for callers that
-// don't already hold it (e.g. executeJobLocked when called outside withStoreLock).
-func (c *CronService) persistWithStoreLock() error {
-	return c.withStoreLock(func() error {
-		return c.persist()
-	})
 }
 
 func (c *CronService) warnIfDisabled(action string) {
@@ -671,47 +976,6 @@ func (c *CronService) warnIfDisabled(action string) {
 		"action":    action,
 		"storePath": c.deps.StorePath,
 	})
-}
-
-func (c *CronService) armTimerLocked() {
-	c.stopTimerLocked()
-	if !c.deps.CronEnabled {
-		c.logDebug("cron: armTimer skipped (disabled)", nil)
-		return
-	}
-	if c.store == nil {
-		c.logDebug("cron: armTimer skipped (store nil)", nil)
-		return
-	}
-	next := nextWakeAtMs(c.store)
-	if next == nil {
-		c.logDebug("cron: armTimer skipped (no next wake)", nil)
-		return
-	}
-	delayMs := max(0, *next-c.deps.NowMs())
-	const maxTimeoutMs int64 = (1 << 31) - 1
-	if delayMs > maxTimeoutMs {
-		delayMs = maxTimeoutMs
-	}
-	delay := time.Duration(delayMs) * time.Millisecond
-	c.timer = time.AfterFunc(delay, func() { c.onTimer() })
-	c.logDebug("cron: timer armed", map[string]any{"delayMs": delayMs, "nextWakeAtMs": *next})
-}
-
-func (c *CronService) armTimerWithDelayLocked(delayMs int64) {
-	c.stopTimerLocked()
-	if !c.deps.CronEnabled {
-		return
-	}
-	delay := time.Duration(max(0, delayMs)) * time.Millisecond
-	c.timer = time.AfterFunc(delay, func() { c.onTimer() })
-}
-
-func (c *CronService) stopTimerLocked() {
-	if c.timer != nil {
-		c.timer.Stop()
-		c.timer = nil
-	}
 }
 
 func (c *CronService) emit(evt CronEvent) {
@@ -738,5 +1002,3 @@ func (c *CronService) logWarn(msg string, fields map[string]any) {
 		c.deps.Log.Warn(msg, fields)
 	}
 }
-
-// utils in utils.go

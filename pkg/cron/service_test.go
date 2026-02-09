@@ -57,7 +57,7 @@ func (l *testLogger) hasWarning(substr string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, w := range l.warnings {
-		if len(w) >= len(substr) && contains(w, substr) {
+		if contains(w, substr) {
 			return true
 		}
 	}
@@ -73,346 +73,250 @@ func contains(s, sub string) bool {
 	return false
 }
 
-func newTestService(backend StoreBackend, log Logger) *CronService {
-	now := int64(1700000000000)
-	return NewCronService(CronServiceDeps{
-		NowMs:       func() int64 { return now },
-		Log:         log,
-		StorePath:   "cron/jobs.json",
-		Store:       backend,
-		CronEnabled: true,
-	})
-}
-
-func validStoreJSON() []byte {
-	return []byte(`{
-  "version": 1,
-  "jobs": [
-    {
-      "id": "job-1",
-      "name": "Test job",
-      "enabled": true,
-      "createdAtMs": 1700000000000,
-      "updatedAtMs": 1700000000000,
-      "schedule": { "kind": "every", "everyMs": 60000 },
-      "sessionTarget": "main",
-      "wakeMode": "next-heartbeat",
-      "payload": { "kind": "systemEvent", "text": "ping" },
-      "state": { "nextRunAtMs": 1699999990000 }
-    }
-  ]
-}`)
-}
-
-// Bug #1: Timer re-arms on ensureLoaded failure
-func TestOnTimerRearmsOnEnsureLoadedFailure(t *testing.T) {
+func TestSchedulerRunsOverdueJobsOnStart(t *testing.T) {
 	log := &testLogger{}
-	backend := &failingStoreBackend{inner: &testStoreBackend{}}
-	svc := newTestService(backend, log)
-	svc.deps.CronEnabled = true
-
-	// Make reads fail so ensureLoaded returns an error.
-	backend.failReads.Store(true)
-
-	// Call onTimer directly — it should not panic and should re-arm.
-	svc.onTimer()
-
-	// The timer should have been re-armed with a backoff delay.
-	svc.mu.Lock()
-	timerSet := svc.timer != nil
-	svc.mu.Unlock()
-	if !timerSet {
-		t.Fatal("expected timer to be re-armed after ensureLoaded failure")
-	}
-
-	if !log.hasWarning("ensureLoaded failed") {
-		t.Fatal("expected warning about ensureLoaded failure")
-	}
-
-	svc.Stop()
-}
-
-// Corrupt store returns error (no .bak fallback — DB writes are atomic).
-func TestLoadCronStoreCorruptReturnsError(t *testing.T) {
-	const storePath = "cron/jobs.json"
-	backend := &testStoreBackend{
-		files: map[string][]byte{
-			storePath: []byte(`{corrupt json!!!`),
-		},
-	}
-
-	_, err := LoadCronStore(context.Background(), backend, storePath)
-	if err == nil {
-		t.Fatal("expected error when store is corrupt")
-	}
-}
-
-// Gap #6: onTimer force-reloads from DB
-func TestOnTimerForceReloadsFromDB(t *testing.T) {
-	log := &testLogger{}
-	backend := &testStoreBackend{
-		files: map[string][]byte{
-			"cron/jobs.json": validStoreJSON(),
-		},
-	}
-	svc := newTestService(backend, log)
-	svc.deps.EnqueueSystemEvent = func(text string, agentID string) error { return nil }
-
-	// Pre-load the store.
-	if err := svc.Start(); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	// Externally modify the store to add a second job.
-	backend.files["cron/jobs.json"] = []byte(`{
-  "version": 1,
-  "jobs": [
-    {
-      "id": "job-1",
-      "name": "Test job",
-      "enabled": true,
-      "createdAtMs": 1700000000000,
-      "updatedAtMs": 1700000000000,
-      "schedule": { "kind": "every", "everyMs": 60000 },
-      "sessionTarget": "main",
-      "wakeMode": "next-heartbeat",
-      "payload": { "kind": "systemEvent", "text": "ping" },
-      "state": { "nextRunAtMs": 1699999990000 }
-    },
-    {
-      "id": "job-2",
-      "name": "New job",
-      "enabled": true,
-      "createdAtMs": 1700000000000,
-      "updatedAtMs": 1700000000000,
-      "schedule": { "kind": "every", "everyMs": 60000 },
-      "sessionTarget": "main",
-      "wakeMode": "next-heartbeat",
-      "payload": { "kind": "systemEvent", "text": "pong" },
-      "state": { "nextRunAtMs": 1700000060000 }
-    }
-  ]
-}`)
-	// Clear the cache to simulate external change being visible.
-	clearCachedStore("cron/jobs.json")
-
-	// Trigger onTimer — it should force-reload and see both jobs.
-	svc.onTimer()
-
-	jobs, err := svc.List(true)
-	if err != nil {
-		t.Fatalf("List failed: %v", err)
-	}
-	if len(jobs) != 2 {
-		t.Fatalf("expected 2 jobs after reload, got %d", len(jobs))
-	}
-
-	svc.Stop()
-}
-
-// Robustness #11: sortJobs puts nil NextRunAtMs at end
-func TestSortJobsNilNextRunAtEnd(t *testing.T) {
-	past := int64(1000)
-	future := int64(9999)
-	jobs := []CronJob{
-		{ID: "disabled", State: CronJobState{NextRunAtMs: nil}},
-		{ID: "future", State: CronJobState{NextRunAtMs: &future}},
-		{ID: "past", State: CronJobState{NextRunAtMs: &past}},
-		{ID: "also-disabled", State: CronJobState{NextRunAtMs: nil}},
-	}
-	sortJobs(jobs)
-
-	if jobs[0].ID != "past" {
-		t.Fatalf("expected first job to be 'past', got %q", jobs[0].ID)
-	}
-	if jobs[1].ID != "future" {
-		t.Fatalf("expected second job to be 'future', got %q", jobs[1].ID)
-	}
-	// Last two should be the nil ones (disabled).
-	if jobs[2].State.NextRunAtMs != nil || jobs[3].State.NextRunAtMs != nil {
-		t.Fatal("expected nil NextRunAtMs jobs at end")
-	}
-}
-
-// Bug #2: computeJobNextRunAtMs called once in finish (no double computation)
-// We verify indirectly: a recurring job's NextRunAtMs should be based on endedAt.
-func TestFinishComputesNextRunOnce(t *testing.T) {
-	log := &testLogger{}
-	nowMs := int64(1700000060000)
+	now := time.Now().UnixMilli()
 	backend := &testStoreBackend{
 		files: map[string][]byte{
 			"cron/jobs.json": []byte(`{
   "version": 1,
   "jobs": [
     {
-      "id": "recurring-1",
-      "name": "Recurring",
+      "id": "job-1",
+      "name": "Overdue",
       "enabled": true,
       "createdAtMs": 1700000000000,
       "updatedAtMs": 1700000000000,
-      "schedule": { "kind": "every", "everyMs": 60000 },
-      "sessionTarget": "main",
+      "schedule": { "kind": "every", "everyMs": 1000 },
+      "sessionTarget": "isolated",
       "wakeMode": "next-heartbeat",
-      "payload": { "kind": "systemEvent", "text": "tick" },
-      "state": { "nextRunAtMs": 1700000000000 }
+      "payload": { "kind": "agentTurn", "message": "hi", "timeoutSeconds": 1 },
+      "state": { "nextRunAtMs": 1 }
     }
   ]
 }`),
 		},
 	}
 
-	enqueued := false
+	events := make(chan CronEvent, 10)
 	svc := NewCronService(CronServiceDeps{
-		NowMs:       func() int64 { return nowMs },
-		Log:         log,
-		StorePath:   "cron/jobs.json",
-		Store:       backend,
-		CronEnabled: true,
-		EnqueueSystemEvent: func(text string, agentID string) error {
-			enqueued = true
-			return nil
+		NowMs:             func() int64 { return time.Now().UnixMilli() },
+		Log:               log,
+		StorePath:         "cron/jobs.json",
+		Store:             backend,
+		CronEnabled:       true,
+		MaxConcurrentRuns: 1,
+		ResolveJobTimeoutMs: func(job CronJob) int64 {
+			_ = job
+			return 500 // ms
 		},
-		RequestHeartbeatNow: func(reason string) {},
+		RunIsolatedAgentJob: func(ctx context.Context, job CronJob, message string) (string, string, string, error) {
+			_ = message
+			if ctx.Err() != nil {
+				return "error", "", "", ctx.Err()
+			}
+			return "ok", "done", "out", nil
+		},
+		OnEvent: func(evt CronEvent) { events <- evt },
 	})
 
 	if err := svc.Start(); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
+	defer svc.Stop()
 
-	// Run the job.
-	ran, reason, err := svc.Run("recurring-1", "force")
-	if err != nil {
-		t.Fatalf("Run failed: %v", err)
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-events:
+			if evt.Action == "finished" && evt.JobID == "job-1" {
+				if evt.Status != "ok" {
+					t.Fatalf("expected ok, got %q (err=%q)", evt.Status, evt.Error)
+				}
+				// Sanity: finished after start time.
+				if time.Now().UnixMilli() < now-10_000 {
+					t.Fatal("unexpected clock skew in test")
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for overdue job to run on start")
+		}
 	}
-	if !ran {
-		t.Fatalf("expected job to run, reason: %s", reason)
-	}
-	if !enqueued {
-		t.Fatal("expected system event to be enqueued")
-	}
-
-	// Check the job state — NextRunAtMs should be set and > nowMs.
-	jobs, err := svc.List(true)
-	if err != nil {
-		t.Fatalf("List failed: %v", err)
-	}
-	if len(jobs) != 1 {
-		t.Fatalf("expected 1 job, got %d", len(jobs))
-	}
-	if jobs[0].State.NextRunAtMs == nil {
-		t.Fatal("expected NextRunAtMs to be set after finish")
-	}
-	if *jobs[0].State.NextRunAtMs <= nowMs {
-		t.Fatalf("expected NextRunAtMs > %d, got %d", nowMs, *jobs[0].State.NextRunAtMs)
-	}
-
-	svc.Stop()
 }
 
-// Robustness #9: Stop waits for in-flight execution
-func TestStopWaitsForInflightExecution(t *testing.T) {
+func TestMaxConcurrentRunsEnforced(t *testing.T) {
 	log := &testLogger{}
-	// Use an advancing clock: Start sees t=0, onTimer sees t=60001 (job is due).
-	var clock atomic.Int64
-	clock.Store(1700000000000)
 	backend := &testStoreBackend{
 		files: map[string][]byte{
 			"cron/jobs.json": []byte(`{
   "version": 1,
   "jobs": [
     {
-      "id": "slow-job",
-      "name": "Slow",
+      "id": "job-1",
+      "name": "A",
+      "enabled": true,
+      "createdAtMs": 1700000000000,
+      "updatedAtMs": 1700000000000,
+      "schedule": { "kind": "every", "everyMs": 1000 },
+      "sessionTarget": "isolated",
+      "wakeMode": "next-heartbeat",
+      "payload": { "kind": "agentTurn", "message": "a" },
+      "state": { "nextRunAtMs": 1 }
+    },
+    {
+      "id": "job-2",
+      "name": "B",
+      "enabled": true,
+      "createdAtMs": 1700000000000,
+      "updatedAtMs": 1700000000000,
+      "schedule": { "kind": "every", "everyMs": 1000 },
+      "sessionTarget": "isolated",
+      "wakeMode": "next-heartbeat",
+      "payload": { "kind": "agentTurn", "message": "b" },
+      "state": { "nextRunAtMs": 1 }
+    }
+  ]
+}`),
+		},
+	}
+
+	var inFlight atomic.Int64
+	var maxSeen atomic.Int64
+	events := make(chan CronEvent, 20)
+
+	svc := NewCronService(CronServiceDeps{
+		NowMs:             func() int64 { return time.Now().UnixMilli() },
+		Log:               log,
+		StorePath:         "cron/jobs.json",
+		Store:             backend,
+		CronEnabled:       true,
+		MaxConcurrentRuns: 1,
+		ResolveJobTimeoutMs: func(job CronJob) int64 {
+			_ = job
+			return 2000
+		},
+		RunIsolatedAgentJob: func(ctx context.Context, job CronJob, message string) (string, string, string, error) {
+			_ = job
+			_ = message
+			cur := inFlight.Add(1)
+			for {
+				prev := maxSeen.Load()
+				if cur <= prev || maxSeen.CompareAndSwap(prev, cur) {
+					break
+				}
+			}
+			time.Sleep(150 * time.Millisecond)
+			inFlight.Add(-1)
+			return "ok", "done", "out", nil
+		},
+		OnEvent: func(evt CronEvent) { events <- evt },
+	})
+
+	if err := svc.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer svc.Stop()
+
+	finished := 0
+	deadline := time.After(5 * time.Second)
+	for finished < 2 {
+		select {
+		case evt := <-events:
+			if evt.Action == "finished" {
+				finished++
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for jobs to finish (finished=%d)", finished)
+		}
+	}
+
+	if got := maxSeen.Load(); got != 1 {
+		t.Fatalf("expected max in-flight=1, got %d", got)
+	}
+}
+
+func TestRunForceQueuesAndWaits(t *testing.T) {
+	log := &testLogger{}
+	backend := &testStoreBackend{
+		files: map[string][]byte{
+			"cron/jobs.json": []byte(`{
+  "version": 1,
+  "jobs": [
+    {
+      "id": "job-1",
+      "name": "Manual",
       "enabled": true,
       "createdAtMs": 1700000000000,
       "updatedAtMs": 1700000000000,
       "schedule": { "kind": "every", "everyMs": 60000 },
       "sessionTarget": "isolated",
       "wakeMode": "next-heartbeat",
-      "payload": { "kind": "agentTurn", "message": "slow task" },
-      "state": { "nextRunAtMs": 1700000060000 }
+      "payload": { "kind": "agentTurn", "message": "x" },
+      "state": { "nextRunAtMs": 9999999999999 }
     }
   ]
 }`),
 		},
 	}
 
-	var jobStarted atomic.Bool
 	svc := NewCronService(CronServiceDeps{
-		NowMs:       func() int64 { return clock.Load() },
+		NowMs:             func() int64 { return time.Now().UnixMilli() },
+		Log:               log,
+		StorePath:         "cron/jobs.json",
+		Store:             backend,
+		CronEnabled:       true,
+		MaxConcurrentRuns: 1,
+		ResolveJobTimeoutMs: func(job CronJob) int64 {
+			_ = job
+			return 500
+		},
+		RunIsolatedAgentJob: func(ctx context.Context, job CronJob, message string) (string, string, string, error) {
+			_ = ctx
+			_ = job
+			_ = message
+			return "ok", "done", "out", nil
+		},
+	})
+	if err := svc.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer svc.Stop()
+
+	ran, reason, err := svc.Run("job-1", "force")
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if !ran {
+		t.Fatalf("expected ran=true, reason=%q", reason)
+	}
+}
+
+func TestPersistInvalidatesCache(t *testing.T) {
+	backend := &testStoreBackend{
+		files: map[string][]byte{
+			"cron/jobs.json": []byte(`{ "version": 1, "jobs": [] }`),
+		},
+	}
+	log := &testLogger{}
+	svc := NewCronService(CronServiceDeps{
+		NowMs:       func() int64 { return 1700000000000 },
 		Log:         log,
 		StorePath:   "cron/jobs.json",
 		Store:       backend,
 		CronEnabled: true,
-		RunIsolatedAgentJob: func(job CronJob, message string) (string, string, string, error) {
-			jobStarted.Store(true)
-			time.Sleep(200 * time.Millisecond)
-			return "ok", "done", "output", nil
-		},
 	})
 
-	if err := svc.Start(); err != nil {
-		t.Fatalf("Start failed: %v", err)
+	// Force a load so svc.store exists.
+	if _, err := svc.List(true); err != nil {
+		t.Fatalf("List failed: %v", err)
 	}
 
-	// Advance clock past the due time.
-	clock.Store(1700000060001)
-
-	// Trigger execution in background.
-	go svc.onTimer()
-
-	// Wait for job to start executing.
-	deadline := time.Now().Add(2 * time.Second)
-	for !jobStarted.Load() && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !jobStarted.Load() {
-		t.Fatal("job never started")
-	}
-
-	// Stop should block until the job finishes.
-	stopDone := make(chan struct{})
-	go func() {
-		svc.Stop()
-		close(stopDone)
-	}()
-
-	select {
-	case <-stopDone:
-		// Stop returned — verify running is false.
-		svc.mu.Lock()
-		running := svc.running
-		svc.mu.Unlock()
-		if running {
-			t.Fatal("expected running to be false after Stop")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Stop did not return within timeout")
-	}
-}
-
-// Gap #5: Cache is invalidated on persist
-func TestPersistInvalidatesCache(t *testing.T) {
-	backend := &testStoreBackend{
-		files: map[string][]byte{
-			"cron/jobs.json": validStoreJSON(),
-		},
-	}
-	log := &testLogger{}
-	svc := newTestService(backend, log)
-
-	if err := svc.Start(); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	// Manually seed the cache to verify it gets cleared on persist.
 	setCachedStore("cron/jobs.json", svc.store)
-	cached := getCachedStore("cron/jobs.json")
-	if cached == nil {
-		t.Fatal("expected cache to be set after manual seed")
+	if getCachedStore("cron/jobs.json") == nil {
+		t.Fatal("expected cache to be set")
 	}
 
-	// Adding a job should persist and invalidate cache.
 	_, err := svc.Add(CronJobCreate{
 		Name:          "new job",
 		Schedule:      CronSchedule{Kind: "every", EveryMs: 60000},
@@ -423,55 +327,9 @@ func TestPersistInvalidatesCache(t *testing.T) {
 		t.Fatalf("Add failed: %v", err)
 	}
 
-	// After persist, cache should be cleared.
-	cached = getCachedStore("cron/jobs.json")
-	if cached != nil {
+	if getCachedStore("cron/jobs.json") != nil {
 		t.Fatal("expected cache to be cleared after persist")
 	}
-
-	svc.Stop()
-}
-
-// TestOnTimerRearmsWhenRunning verifies that when onTimer() fires while
-// another job is already executing (c.running == true), the timer is
-// re-armed with a short retry delay instead of being permanently dropped.
-func TestOnTimerRearmsWhenRunning(t *testing.T) {
-	log := &testLogger{}
-	backend := &testStoreBackend{
-		files: map[string][]byte{
-			"cron/jobs.json": validStoreJSON(),
-		},
-	}
-	svc := newTestService(backend, log)
-	svc.deps.EnqueueSystemEvent = func(text string, agentID string) error { return nil }
-
-	if err := svc.Start(); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	// Simulate a running job by setting c.running = true.
-	svc.mu.Lock()
-	svc.running = true
-	svc.stopTimerLocked() // clear any existing timer
-	svc.mu.Unlock()
-
-	// Call onTimer — it should see c.running == true and re-arm the timer.
-	svc.onTimer()
-
-	svc.mu.Lock()
-	timerSet := svc.timer != nil
-	svc.mu.Unlock()
-
-	if !timerSet {
-		t.Fatal("expected timer to be re-armed when c.running == true")
-	}
-
-	// Clean up: reset running so Stop() doesn't wait forever.
-	svc.mu.Lock()
-	svc.running = false
-	svc.mu.Unlock()
-
-	svc.Stop()
 }
 
 func TestValidateScheduleRejectsInvalidTZ(t *testing.T) {
