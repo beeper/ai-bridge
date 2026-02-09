@@ -185,23 +185,16 @@ func buildVoiceSection(params struct {
 }
 
 func buildDocsSection(params struct {
-	docsPath     string
-	isMinimal    bool
-	readToolName string
+	isMinimal     bool
+	hasBeeperDocs bool
 }) []string {
-	docsPath := strings.TrimSpace(params.docsPath)
-	if docsPath == "" || params.isMinimal {
+	if params.isMinimal || !params.hasBeeperDocs {
 		return nil
 	}
 	return []string{
-		"## Documentation",
-		fmt.Sprintf("Beeper docs: %s", docsPath),
-		"Mirror: https://docs.openclaw.ai",
-		"Source: https://github.com/openclaw/openclaw",
-		"Community: https://discord.com/invite/clawd",
-		"Find new skills: https://clawhub.com",
-		"For Beeper behavior, commands, config, or architecture: consult local docs first.",
-		"When diagnosing issues, run `beep status` yourself when possible; only ask the user if you lack access (e.g., sandboxed).",
+		"## Beeper Documentation",
+		"Use the beeper_docs tool to search help.beeper.com and developers.beeper.com when answering questions about Beeper features, setup, troubleshooting, configuration, or developer APIs.",
+		"For Beeper behavior, commands, config, or architecture: search docs first.",
 		"",
 	}
 }
@@ -289,6 +282,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"sessions_spawn":   "Spawn a sub-agent session",
 		"session_status":   "Show a !ai status-equivalent status card (usage + time + Reasoning/Verbose/Elevated); use for model-use questions (📊 session_status); optional per-session model override",
 		"image":            "Analyze an image with the configured image model",
+		"beeper_docs":      "Search Beeper docs (help.beeper.com, developers.beeper.com)",
 	}
 
 	toolOrder := []string{
@@ -490,10 +484,9 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	}{isMinimal: isMinimal, availableTool: availableTools, citationsMode: params.MemoryCitations})
 
 	docsSection := buildDocsSection(struct {
-		docsPath     string
-		isMinimal    bool
-		readToolName string
-	}{docsPath: params.DocsPath, isMinimal: isMinimal, readToolName: readToolName})
+		isMinimal     bool
+		hasBeeperDocs bool
+	}{isMinimal: isMinimal, hasBeeperDocs: availableTools["beeper_docs"]})
 
 	workspaceNotes := make([]string, 0, len(params.WorkspaceNotes))
 	for _, note := range params.WorkspaceNotes {

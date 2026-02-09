@@ -105,6 +105,7 @@ const (
 	ToolNameMemoryGet     = toolspec.MemoryGetName
 	ToolNameGravatarFetch = toolspec.GravatarFetchName
 	ToolNameGravatarSet   = toolspec.GravatarSetName
+	ToolNameBeeperDocs    = toolspec.BeeperDocsName
 	ToolNameRead          = toolspec.ReadName
 	ToolNameApplyPatch    = toolspec.ApplyPatchName
 	ToolNameWrite         = toolspec.WriteName

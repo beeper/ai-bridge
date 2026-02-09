@@ -42,7 +42,6 @@ type SystemPromptParams struct {
 	ContextFiles           []EmbeddedContextFile
 	SkillsPrompt           string
 	HeartbeatPrompt        string
-	DocsPath               string
 	WorkspaceNotes         []string
 	TTSHint                string
 	PromptMode             PromptMode

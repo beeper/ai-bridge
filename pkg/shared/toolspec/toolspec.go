@@ -49,6 +49,9 @@ const (
 	GravatarFetchDescription = "Fetch a Gravatar profile for an email address. You must provide an email address."
 	GravatarSetName          = "gravatar_set"
 	GravatarSetDescription   = "Set the primary Gravatar profile for this login."
+
+	BeeperDocsName        = "beeper_docs"
+	BeeperDocsDescription = "Search Beeper documentation (help.beeper.com, developers.beeper.com). Use when answering questions about Beeper features, setup, troubleshooting, configuration, or developer APIs."
 )
 
 // CalculatorSchema returns the JSON schema for the calculator tool.
@@ -650,5 +653,25 @@ func MemoryGetSchema() map[string]any {
 			},
 		},
 		"required": []string{"path"},
+	}
+}
+
+// BeeperDocsSchema returns the JSON schema for the beeper_docs tool.
+func BeeperDocsSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"query": map[string]any{
+				"type":        "string",
+				"description": "Search query for Beeper help documentation.",
+			},
+			"count": map[string]any{
+				"type":        "number",
+				"description": "Number of results to return (1-10).",
+				"minimum":     1,
+				"maximum":     10,
+			},
+		},
+		"required": []string{"query"},
 	}
 }

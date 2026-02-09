@@ -82,6 +82,12 @@ func (oc *AIClient) isToolAvailable(meta *PortalMetadata, toolName string) (bool
 	if isNexusCompactToolName(toolName) && !canUseNexusToolsForAgent(meta) {
 		return false, SourceAgentPolicy, "Nexus tools are restricted to the Nexus agent"
 	}
+	if toolName == ToolNameBeeperDocs {
+		loginMeta := loginMetadata(oc.UserLogin)
+		if loginMeta == nil || (loginMeta.Provider != ProviderBeeper && loginMeta.Provider != ProviderMagicProxy) {
+			return false, SourceProviderLimit, "Beeper docs only available for Beeper/MagicProxy"
+		}
+	}
 	return true, SourceGlobalDefault, ""
 }
 
