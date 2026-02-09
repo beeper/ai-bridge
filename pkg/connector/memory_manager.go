@@ -28,6 +28,8 @@ const memorySnippetMaxChars = 700
 var keywordTokenRE = regexp.MustCompile(`[A-Za-z0-9_]+`)
 
 const memoryStatusTimeout = 3 * time.Second
+const memorySearchTimeout = 10 * time.Second
+const memoryManagerInitTimeout = 10 * time.Second
 
 type MemorySearchManager struct {
 	client       *AIClient
@@ -176,8 +178,10 @@ func getMemorySearchManager(client *AIClient, agentID string) (*MemorySearchMana
 	}
 	manager.batchEnabled = cfg.Remote.Batch.Enabled
 
-	manager.ensureSchema(context.Background())
-	manager.ensureDefaultMemoryFiles(context.Background())
+	initCtx, initCancel := context.WithTimeout(context.Background(), memoryManagerInitTimeout)
+	defer initCancel()
+	manager.ensureSchema(initCtx)
+	manager.ensureDefaultMemoryFiles(initCtx)
 	manager.ensureIntervalSync()
 	memoryManagerCache.managers[cacheKey] = manager
 	return manager, ""
@@ -385,16 +389,18 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 	}
 	m.warmSession(ctx, opts.SessionKey)
 	if m.cfg.Sync.OnSearch {
-		m.mu.Lock()
-		shouldSync := m.dirty || m.sessionsDirty
-		m.mu.Unlock()
-		if shouldSync {
-			go func(sessionKey string) {
-				if err := m.sync(context.Background(), sessionKey, false); err != nil {
-					m.log.Warn().Msg("memory sync failed (search): " + err.Error())
-				}
-			}(opts.SessionKey)
+		if m.mu.TryLock() {
+			shouldSync := m.dirty || m.sessionsDirty
+			m.mu.Unlock()
+			if shouldSync {
+				go func(sessionKey string) {
+					if err := m.sync(context.Background(), sessionKey, false); err != nil {
+						m.log.Warn().Msg("memory sync failed (search): " + err.Error())
+					}
+				}(opts.SessionKey)
+			}
 		}
+		// If TryLock fails, a sync is already running — skip.
 	}
 
 	mode := strings.ToLower(strings.TrimSpace(opts.Mode))

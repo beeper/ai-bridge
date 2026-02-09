@@ -980,7 +980,7 @@ func executeImageGeneration(ctx context.Context, args map[string]any) (string, e
 						client.Log().Warn().Err(err).Int("idx", idx).Msg("async image generation decode failed")
 						continue
 					}
-					if _, mediaURL, err := client.sendGeneratedImage(bgctx, portal, imageData, mimeType, "", truncateCaption(reqCopy.Prompt, 256)); err != nil {
+					if _, mediaURL, err := client.sendGeneratedImage(bgctx, portal, imageData, mimeType, "", reqCopy.Prompt); err != nil {
 						client.Log().Warn().Err(err).Int("idx", idx).Msg("async image generation send failed")
 						continue
 					} else {
@@ -2131,7 +2131,9 @@ func executeMemorySearch(ctx context.Context, args map[string]any) (string, erro
 			}
 		}
 	}
-	results, err := manager.Search(ctx, query, opts)
+	searchCtx, searchCancel := context.WithTimeout(ctx, memorySearchTimeout)
+	defer searchCancel()
+	results, err := manager.Search(searchCtx, query, opts)
 	if err != nil {
 		payload := memorySearchOutput{
 			Results:  []memory.SearchResult{},

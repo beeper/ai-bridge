@@ -902,7 +902,7 @@ func (m *MemorySearchManager) embedChunksWithOpenAIBatch(
 	if m == nil || m.client == nil {
 		return nil, errors.New("memory search unavailable")
 	}
-	apiKey, baseURL, headers := resolveOpenAIEmbeddingConfig(m.client, m.cfg)
+	apiKey, baseURL, headers := resolveDirectOpenAIEmbeddingConfig(m.client, m.cfg)
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, errors.New("openai embeddings require api_key")
 	}

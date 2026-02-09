@@ -54,7 +54,7 @@ func TestRawModePrompt_HasSingleSystemPromptWithTimeAndWebSearch(t *testing.T) {
 	}
 }
 
-func TestRawModePrompt_MentionsWebSearchWhenEnabledAndConfigured(t *testing.T) {
+func TestRawModePrompt_NoWebSearchHintEvenWhenConfigured(t *testing.T) {
 	client := &AIClient{
 		connector: &OpenAIConnector{
 			Config: Config{
@@ -92,8 +92,8 @@ func TestRawModePrompt_MentionsWebSearchWhenEnabledAndConfigured(t *testing.T) {
 	if systemText == "" {
 		t.Fatalf("expected a system prompt")
 	}
-	if !strings.Contains(systemText, "web_search") {
-		t.Fatalf("expected system prompt to mention web_search when enabled, got: %q", systemText)
+	if strings.Contains(systemText, "web_search") {
+		t.Fatalf("raw mode should not advertise web_search (tools are never injected), got: %q", systemText)
 	}
 }
 

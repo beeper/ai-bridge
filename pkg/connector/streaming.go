@@ -2477,7 +2477,7 @@ func (oc *AIClient) streamingResponse(
 			// Extract image generation prompt for use as caption on sent images.
 			var imageCaption string
 			if prompt, err := parseToolArgsPrompt(argsJSON); err == nil {
-				imageCaption = truncateCaption(prompt, 256)
+				imageCaption = prompt
 			}
 
 			// Check for image generation result (IMAGE: / IMAGES: prefix)
@@ -3648,7 +3648,7 @@ func (oc *AIClient) streamingResponse(
 				// Extract image generation prompt for use as caption on sent images.
 				var imageCaption string
 				if prompt, err := parseToolArgsPrompt(argsJSON); err == nil {
-					imageCaption = truncateCaption(prompt, 256)
+					imageCaption = prompt
 				}
 
 				// Check for image generation result (IMAGE: / IMAGES: prefix)
@@ -4419,7 +4419,7 @@ func (oc *AIClient) streamChatCompletions(
 					// Extract image generation prompt for use as caption on sent images.
 					var imageCaption string
 					if prompt, err := parseToolArgsPrompt(argsJSON); err == nil {
-						imageCaption = truncateCaption(prompt, 256)
+						imageCaption = prompt
 					}
 
 					// Check for image generation result (IMAGE: / IMAGES: prefix)

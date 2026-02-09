@@ -77,9 +77,15 @@ func resolveDesktopInstanceName(instances map[string]DesktopAPIInstance, request
 	}
 
 	req := normalizeDesktopInstanceName(requested)
-	if req != "" && req != desktopDefaultInstance {
+	if req != "" && req != desktopDefaultInstance && req != "desktop" {
 		if _, ok := instances[req]; ok {
 			return req, nil
+		}
+		// If there's only one instance, accept any name rather than erroring.
+		if len(instances) == 1 {
+			for name := range instances {
+				return name, nil
+			}
 		}
 		return "", fmt.Errorf("desktop API instance '%s' not found", req)
 	}

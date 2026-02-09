@@ -37,10 +37,7 @@ func (oc *AIClient) sendGeneratedMedia(
 		"size":     len(data),
 	}
 
-	body := fileName
-	if caption != "" {
-		body = caption
-	}
+	body := caption
 
 	rawContent := map[string]any{
 		"msgtype":    msgType,

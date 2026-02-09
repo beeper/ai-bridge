@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strconv"
@@ -234,7 +235,9 @@ func fnMemory(ce *commands.Event) {
 				opts.MinScore = val
 			}
 		}
-		results, err := manager.Search(ce.Ctx, query, opts)
+		searchCtx, searchCancel := context.WithTimeout(ce.Ctx, memorySearchTimeout)
+		defer searchCancel()
+		results, err := manager.Search(searchCtx, query, opts)
 		if err != nil {
 			ce.Reply("Couldn't search memory: %v", err)
 			return

@@ -81,9 +81,25 @@ func TestResolveDesktopInstanceName(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown instance errors", func(t *testing.T) {
+	t.Run("single instance accepts any name", func(t *testing.T) {
 		instances := map[string]DesktopAPIInstance{
 			"work": {Token: "tok"},
+		}
+		for _, requested := range []string{"nope", "desktop", "whatever"} {
+			got, err := resolveDesktopInstanceName(instances, requested)
+			if err != nil {
+				t.Fatalf("unexpected error for requested=%q: %v", requested, err)
+			}
+			if got != "work" {
+				t.Fatalf("unexpected instance for requested=%q: got=%q want=%q", requested, got, "work")
+			}
+		}
+	})
+
+	t.Run("unknown instance errors with multiple instances", func(t *testing.T) {
+		instances := map[string]DesktopAPIInstance{
+			"work": {Token: "tok"},
+			"home": {Token: "tok"},
 		}
 		_, err := resolveDesktopInstanceName(instances, "nope")
 		if err == nil {

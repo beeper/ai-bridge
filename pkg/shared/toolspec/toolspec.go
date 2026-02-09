@@ -340,7 +340,7 @@ func MessageSchema() map[string]any {
 			},
 			"instance": map[string]any{
 				"type":        "string",
-				"description": "For desktop actions: desktop API instance name (default if omitted)",
+				"description": "For desktop actions: named instance (leave empty for default; only needed with multiple instances)",
 			},
 			"label": map[string]any{
 				"type":        "string",

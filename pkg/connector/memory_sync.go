@@ -17,7 +17,9 @@ func (m *MemorySearchManager) warmSession(ctx context.Context, sessionKey string
 	}
 	key := strings.TrimSpace(sessionKey)
 	if key != "" {
-		m.mu.Lock()
+		if !m.mu.TryLock() {
+			return // sync is running, skip — session will warm on the next call
+		}
 		if m.sessionWarm == nil {
 			m.sessionWarm = make(map[string]struct{})
 		}

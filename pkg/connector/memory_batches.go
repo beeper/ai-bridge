@@ -109,6 +109,8 @@ type geminiBatchOutputLine struct {
 	} `json:"error"`
 }
 
+// shouldUseBatch reports whether batch embedding should be used.
+// Caller must hold m.mu (called from embedChunks inside sync).
 func (m *MemorySearchManager) shouldUseBatch(provider string) bool {
 	if m == nil || m.cfg == nil || !m.cfg.Remote.Batch.Enabled {
 		return false
@@ -116,21 +118,18 @@ func (m *MemorySearchManager) shouldUseBatch(provider string) bool {
 	if provider != "openai" && provider != "gemini" {
 		return false
 	}
-	m.mu.Lock()
-	enabled := m.batchEnabled
-	m.mu.Unlock()
-	return enabled
+	return m.batchEnabled
 }
 
+// resetBatchFailures clears batch failure state.
+// Caller must hold m.mu (called from embedChunks inside sync).
 func (m *MemorySearchManager) resetBatchFailures() {
-	m.mu.Lock()
 	if m.batchFailures > 0 {
 		m.log.Debug().Msg("memory embeddings: batch recovered; resetting failure count")
 	}
 	m.batchFailures = 0
 	m.batchLastError = ""
 	m.batchLastProvider = ""
-	m.mu.Unlock()
 }
 
 type batchAttemptError struct {
@@ -182,12 +181,12 @@ func (m *MemorySearchManager) runBatchWithTimeoutRetry(provider string, run func
 	return result, err
 }
 
+// recordBatchFailure records a batch embedding failure and may disable batch mode.
+// Caller must hold m.mu (called from embedChunks inside sync).
 func (m *MemorySearchManager) recordBatchFailure(provider string, err error, attempts int, forceDisable bool) (bool, int) {
 	if m == nil {
 		return true, 0
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	increment := attempts
 	if increment < 1 {
 		increment = 1

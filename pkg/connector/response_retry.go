@@ -148,7 +148,7 @@ func (oc *AIClient) responseWithRetry(
 	}
 
 	oc.notifyMatrixSendFailure(ctx, portal, evt,
-		errors.New("exceeded retry attempts for context length"))
+		errors.New("exceeded maximum retry attempts for prompt overflow"))
 	return false, nil
 }
 

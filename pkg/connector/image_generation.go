@@ -70,13 +70,3 @@ func parseToolArgsPrompt(argsJSON string) (string, error) {
 	return strings.TrimSpace(prompt), nil
 }
 
-// truncateCaption truncates a string to maxLen characters, appending "..." if truncated.
-func truncateCaption(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	if maxLen <= 3 {
-		return s[:maxLen]
-	}
-	return s[:maxLen-3] + "..."
-}

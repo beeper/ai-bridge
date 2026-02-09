@@ -1739,9 +1739,12 @@ func (oc *AIClient) effectiveMaxTokens(meta *PortalMetadata) int {
 			maxTokens = defaultMaxTokens
 		}
 	}
-	// Cap at context window to prevent impossible requests
-	if cw := oc.getModelContextWindow(meta); cw > 0 && maxTokens > cw {
-		maxTokens = cw
+	// Cap at context window to prevent impossible requests.
+	// When max output tokens >= context window (common for thinking/reasoning
+	// models where thinking tokens count toward output), we must leave headroom
+	// for the input prompt, otherwise the API rejects the request immediately.
+	if cw := oc.getModelContextWindow(meta); cw > 0 && maxTokens >= cw {
+		maxTokens = cw * 3 / 4 // leave 25% of context window for input
 	}
 	return maxTokens
 }
