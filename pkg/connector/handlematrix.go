@@ -1470,9 +1470,13 @@ func (oc *AIClient) buildPromptForRegenerate(
 			return nil, fmt.Errorf("failed to load prompt history: %w", err)
 		}
 
+		// Determine whether to inject images into history (requires vision-capable model).
+		hasVision := oc.getModelCapabilitiesForMeta(meta).SupportsVision
+
 		// Skip the most recent messages (last user and assistant) and build from older history
 		skippedUser := false
 		skippedAssistant := false
+		includedCount := 0
 		for _, msg := range history {
 			msgMeta := messageMeta(msg)
 			// Skip commands and non-conversation messages
@@ -1500,17 +1504,36 @@ func (oc *AIClient) buildPromptForRegenerate(
 			} else if msg.MXID != "" {
 				body = appendMessageIDHint(msgMeta.Body, msg.MXID)
 			}
+
+			// Only inject images for recent messages and vision-capable models.
+			// This loop builds newest-to-oldest, so early entries are the most recent.
+			injectImages := hasVision && includedCount < maxHistoryImageMessages
+			includedCount++
+
 			switch msgMeta.Role {
 			case "assistant":
 				body = stripThinkTags(body)
 				if body == "" {
 					continue
 				}
+				// In the reverse-then-flip loop, add synthetic BEFORE assistant
+				// so it ends up AFTER the assistant in chronological order after reversal.
+				if injectImages && len(msgMeta.GeneratedFiles) > 0 {
+					if imgParts := oc.downloadGeneratedFileImages(ctx, msgMeta.GeneratedFiles); len(imgParts) > 0 {
+						prompt = append(prompt, buildSyntheticGeneratedImagesMessage(imgParts))
+					}
+				}
 				prompt = append(prompt, openai.AssistantMessage(body))
 			default:
 				if isRaw {
 					body = StripEnvelope(body)
 					body = stripMessageIDHintLines(body)
+				}
+				if injectImages && msgMeta.MediaURL != "" && isImageMimeType(msgMeta.MimeType) {
+					if imgPart := oc.downloadHistoryImage(ctx, msgMeta.MediaURL, msgMeta.MimeType); imgPart != nil {
+						prompt = append(prompt, buildMultimodalUserMessage(body, []openai.ChatCompletionContentPartUnionParam{*imgPart}))
+						continue
+					}
 				}
 				prompt = append(prompt, openai.UserMessage(body))
 			}

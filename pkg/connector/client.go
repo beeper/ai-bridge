@@ -2556,6 +2556,9 @@ func (oc *AIClient) buildPromptUpToMessage(
 			return nil, fmt.Errorf("failed to load prompt history: %w", err)
 		}
 
+		// Determine whether to inject images into history (requires vision-capable model).
+		hasVision := oc.getModelCapabilitiesForMeta(meta).SupportsVision
+
 		// Add messages up to the target message, replacing the target with newBody
 		for i := len(history) - 1; i >= 0; i-- {
 			msg := history[i]
@@ -2591,6 +2594,10 @@ func (oc *AIClient) buildPromptUpToMessage(
 				body = stripMessageIDHintLines(body)
 				body = StripEnvelope(body)
 			}
+
+			// Only inject images for recent messages and vision-capable models.
+			injectImages := hasVision && i < maxHistoryImageMessages
+
 			switch msgMeta.Role {
 			case "assistant":
 				body = stripThinkTags(body)
@@ -2598,10 +2605,21 @@ func (oc *AIClient) buildPromptUpToMessage(
 					continue
 				}
 				prompt = append(prompt, openai.AssistantMessage(body))
+				if injectImages && len(msgMeta.GeneratedFiles) > 0 {
+					if imgParts := oc.downloadGeneratedFileImages(ctx, msgMeta.GeneratedFiles); len(imgParts) > 0 {
+						prompt = append(prompt, buildSyntheticGeneratedImagesMessage(imgParts))
+					}
+				}
 			default:
 				if isRaw {
 					body = StripEnvelope(body)
 					body = stripMessageIDHintLines(body)
+				}
+				if injectImages && msgMeta.MediaURL != "" && isImageMimeType(msgMeta.MimeType) {
+					if imgPart := oc.downloadHistoryImage(ctx, msgMeta.MediaURL, msgMeta.MimeType); imgPart != nil {
+						prompt = append(prompt, buildMultimodalUserMessage(body, []openai.ChatCompletionContentPartUnionParam{*imgPart}))
+						continue
+					}
 				}
 				prompt = append(prompt, openai.UserMessage(body))
 			}

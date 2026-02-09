@@ -554,12 +554,21 @@ func (m *MemorySearchManager) listRecentFiles(ctx context.Context, sources []str
 	baseArgs := []any{m.bridgeID, m.loginID, m.agentID}
 	sourceSQL, sourceArgs := sourceFilterSQL(4, sources)
 	pathSQL, pathArgs := pathPrefixFilterSQL(4+len(sourceArgs), pathPrefix)
+	// Overfetch and filter client-side (extension allowlist, size cap).
+	overfetch := limit * 5
+	if overfetch < 50 {
+		overfetch = 50
+	}
+	if overfetch > 500 {
+		overfetch = 500
+	}
+
 	args := append(baseArgs, sourceArgs...)
 	args = append(args, pathArgs...)
-	args = append(args, limit)
+	args = append(args, overfetch)
 
 	rows, err := m.db.Query(ctx,
-		`SELECT path, source, substr(content, 1, 8192)
+		`SELECT path, source, substr(content, 1, 8192), length(content)
          FROM ai_memory_files
          WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`+sourceSQL+pathSQL+`
          ORDER BY updated_at DESC
@@ -574,8 +583,15 @@ func (m *MemorySearchManager) listRecentFiles(ctx context.Context, sources []str
 	results := make([]memory.SearchResult, 0, limit)
 	for rows.Next() {
 		var path, source, content string
-		if err := rows.Scan(&path, &source, &content); err != nil {
+		var length int
+		if err := rows.Scan(&path, &source, &content, &length); err != nil {
 			return nil, err
+		}
+		if ok, _, _ := textfs.IsAllowedTextNotePath(path); !ok {
+			continue
+		}
+		if length > textfs.NoteMaxBytesDefault() {
+			continue
 		}
 		results = append(results, memory.SearchResult{
 			Path:      path,
@@ -585,6 +601,9 @@ func (m *MemorySearchManager) listRecentFiles(ctx context.Context, sources []str
 			Snippet:   truncateSnippet(normalizeNewlines(content)),
 			Source:    source,
 		})
+		if len(results) >= limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -707,12 +726,15 @@ func (m *MemorySearchManager) ReadFile(ctx context.Context, relPath string, from
 	if err != nil {
 		return nil, errors.New("path required")
 	}
-	if ok, _, reason := textfs.IsAllowedTextNotePath(path); !ok {
+	if ok, ext, reason := textfs.IsAllowedTextNotePath(path); !ok {
 		switch reason {
 		case "missing_extension":
 			return nil, errors.New("path must include a file extension (allowed: " + strings.Join(textfs.AllowedNoteExtensions(), ", ") + ")")
 		case "unsupported_extension":
-			return nil, errors.New("unsupported file type (allowed: " + strings.Join(textfs.AllowedNoteExtensions(), ", ") + ")")
+			if ext == "" {
+				ext = "(unknown)"
+			}
+			return nil, errors.New("unsupported file type " + ext + " (allowed: " + strings.Join(textfs.AllowedNoteExtensions(), ", ") + ")")
 		default:
 			return nil, errors.New("path required")
 		}
