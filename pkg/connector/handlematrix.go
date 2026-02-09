@@ -1520,7 +1520,7 @@ func (oc *AIClient) buildPromptForRegenerate(
 				// so it ends up AFTER the assistant in chronological order after reversal.
 				if injectImages && len(msgMeta.GeneratedFiles) > 0 {
 					if imgParts := oc.downloadGeneratedFileImages(ctx, msgMeta.GeneratedFiles); len(imgParts) > 0 {
-						prompt = append(prompt, buildSyntheticGeneratedImagesMessage(imgParts))
+						prompt = append(prompt, buildSyntheticGeneratedImagesMessage(msgMeta.GeneratedFiles, imgParts))
 					}
 				}
 				prompt = append(prompt, openai.AssistantMessage(body))

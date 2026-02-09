@@ -393,6 +393,17 @@ func renderDesktopSessionMessageText(msg shared.Message, isGroup bool) (string, 
 		}
 		content = fmt.Sprintf("[attachment: %s]", attachmentType)
 	}
+	// Append media URLs for image attachments so the model can reference them
+	// for editing via image_generate's input_images parameter.
+	for _, att := range msg.Attachments {
+		attType := strings.ToLower(strings.TrimSpace(string(att.Type)))
+		if attType != "img" {
+			continue
+		}
+		if id := strings.TrimSpace(att.ID); id != "" {
+			content += fmt.Sprintf("\n[media_url: %s]", id)
+		}
+	}
 	if isGroup && !msg.IsSender {
 		senderName := strings.TrimSpace(msg.SenderName)
 		if senderName != "" {

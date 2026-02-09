@@ -973,20 +973,28 @@ func executeImageGeneration(ctx context.Context, args map[string]any) (string, e
 				}
 
 				sent := 0
+				var genRefs []GeneratedFileRef
 				for idx, imageB64 := range images {
 					imageData, mimeType, err := decodeBase64Image(imageB64)
 					if err != nil {
 						client.Log().Warn().Err(err).Int("idx", idx).Msg("async image generation decode failed")
 						continue
 					}
-					if _, _, err := client.sendGeneratedImage(bgctx, portal, imageData, mimeType, "", truncateCaption(reqCopy.Prompt, 256)); err != nil {
+					if _, mediaURL, err := client.sendGeneratedImage(bgctx, portal, imageData, mimeType, "", truncateCaption(reqCopy.Prompt, 256)); err != nil {
 						client.Log().Warn().Err(err).Int("idx", idx).Msg("async image generation send failed")
 						continue
+					} else {
+						genRefs = append(genRefs, GeneratedFileRef{URL: mediaURL, MimeType: mimeType})
 					}
 					sent++
 				}
 				if sent == 0 {
 				client.sendSystemNotice(bgctx, portal, "Image generation finished, but sending failed.")
+			}
+			// Update the parent assistant message with GeneratedFiles so the model can
+			// reference async-generated images via [media_url: ...] in subsequent turns.
+			if len(genRefs) > 0 {
+				client.updateAssistantGeneratedFiles(bgctx, portal, genRefs)
 			}
 			client.Log().Debug().Int("sent", sent).Int("total", len(images)).Msg("async image generation completed")
 		}()
