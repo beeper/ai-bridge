@@ -23,6 +23,7 @@ const (
 	GroupCalc       = "group:calc"
 	GroupBuilder    = "group:builder"
 	GroupMessaging  = "group:messaging"
+	GroupRuntime    = "group:runtime"
 	GroupSessions   = "group:sessions"
 	GroupMemory     = "group:memory"
 	GroupWeb        = "group:web"
@@ -32,6 +33,7 @@ const (
 	GroupNodes      = "group:nodes"
 	GroupStatus     = "group:status"
 	GroupOpenClaw   = "group:openclaw"
+	GroupAIBridge   = "group:ai-bridge"
 	GroupFS         = "group:fs"
 	GroupNexus      = "group:nexus"
 )
@@ -42,15 +44,38 @@ var ToolGroups = map[string][]string{
 	GroupCalc:       {"calculator"},
 	GroupBuilder:    {"create_agent", "fork_agent", "edit_agent", "delete_agent", "list_agents", "run_internal_command"},
 	GroupMessaging:  {"message"},
-	GroupSessions:   {"agents_list", "list_models", "list_tools", "modify_room", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status"},
+	// OpenClaw semantics: session management tools only.
+	GroupSessions: {"sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status"},
 	GroupMemory:     {"memory_search", "memory_get"},
+	GroupRuntime:    {"exec", "process"},
 	GroupWeb:        {"web_search", "web_fetch"},
 	GroupMedia:      {"image", "image_generate", "tts"},
 	GroupUI:         {"browser", "canvas"},
 	GroupAutomation: {"cron", "gateway"},
 	GroupNodes:      {"nodes"},
 	GroupStatus:     {"session_status"},
-	GroupOpenClaw:   {"message", "agents_list", "list_models", "list_tools", "modify_room", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "memory_search", "memory_get", "web_search", "web_fetch", "image", "gravatar_fetch", "beeper_docs"},
+	// Strict OpenClaw native tool set (excludes provider plugins + ai-bridge-only tools).
+	GroupOpenClaw: {
+		"browser",
+		"canvas",
+		"nodes",
+		"cron",
+		"message",
+		"gateway",
+		"agents_list",
+		"sessions_list",
+		"sessions_history",
+		"sessions_send",
+		"sessions_spawn",
+		"session_status",
+		"memory_search",
+		"memory_get",
+		"web_search",
+		"web_fetch",
+		"image",
+	},
+	// ai-bridge extras (keep separate so group:openclaw stays portable with OpenClaw configs).
+	GroupAIBridge: {"gravatar_fetch", "gravatar_set", "beeper_docs", "image_generate", "tts", "calculator"},
 	GroupFS:         {"read", "write", "edit", "apply_patch"},
 	GroupNexus: {
 		"get_user_information",
@@ -89,8 +114,10 @@ type toolProfilePolicy struct {
 // ToolProfiles define which tool groups each profile allows.
 var ToolProfiles = map[ToolProfileID]toolProfilePolicy{
 	ProfileMinimal:   {Allow: []string{"session_status"}},
-	ProfileCoding:    {Allow: []string{GroupFS, GroupOpenClaw}},
-	ProfileMessaging: {Allow: []string{GroupOpenClaw}},
+	// OpenClaw semantics: allow workspace tools + runtime + session tooling + memory + image.
+	ProfileCoding: {Allow: []string{GroupFS, GroupRuntime, GroupSessions, GroupMemory, "image"}},
+	// OpenClaw semantics: messaging + limited session inspection/sends.
+	ProfileMessaging: {Allow: []string{GroupMessaging, "sessions_list", "sessions_history", "sessions_send", "session_status"}},
 	ProfileFull:      {},
 	ProfileBoss:      {},
 }
@@ -179,6 +206,7 @@ func (c *ToolPolicyConfig) Clone() *ToolPolicyConfig {
 }
 
 var toolNameAliases = map[string]string{
+	"bash":        "exec",
 	"apply-patch": "apply_patch",
 }
 

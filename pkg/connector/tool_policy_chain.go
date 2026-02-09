@@ -109,6 +109,17 @@ func (oc *AIClient) buildToolPolicyContext(meta *PortalMetadata) toolPolicyConte
 		}
 	}
 
+	// Treat OpenClaw-reserved tool names as "core" for allowlist validation even if
+	// ai-bridge doesn't expose them in this runtime. This avoids unsafe behavior where
+	// an allowlist like ["exec"] or ["group:runtime"] is treated as "unknown" and gets
+	// stripped (widening access).
+	for _, name := range []string{"exec", "process", "browser", "canvas", "nodes", "gateway"} {
+		normalized := toolpolicy.NormalizeToolName(name)
+		if normalized != "" {
+			coreTools[normalized] = struct{}{}
+		}
+	}
+
 	pluginGroups := toolpolicy.BuildPluginToolGroups(toolList, func(t *agenttools.Tool) string {
 		if t == nil {
 			return ""
