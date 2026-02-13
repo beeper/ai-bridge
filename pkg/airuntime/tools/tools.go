@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	agenttools "github.com/beeper/ai-bridge/pkg/agents/tools"
+	agenttools "github.com/beeper/ai-bridge/pkg/simpleruntime/agents/tools"
 )
 
 // Executor provides a transport-agnostic way to execute tools from the shared registry.
