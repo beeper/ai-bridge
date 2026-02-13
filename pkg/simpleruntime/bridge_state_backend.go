@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"go.mau.fi/util/dbutil"
-
 )
 
 type bridgeDBBackend struct {

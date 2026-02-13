@@ -181,12 +181,3 @@ func parseChatSlug(slug string) (int, bool) {
 func MakeMessageID(eventID id.EventID) networkid.MessageID {
 	return networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID)))
 }
-
-// cronPortalKey creates a deterministic portal key for a cron job room.
-// Format: "openai:{loginID}:cron:{agentID}:{jobID}"
-func cronPortalKey(loginID networkid.UserLoginID, agentID, jobID string) networkid.PortalKey {
-	return networkid.PortalKey{
-		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:cron:%s:%s", loginID, url.PathEscape(agentID), url.PathEscape(jobID))),
-		Receiver: loginID,
-	}
-}

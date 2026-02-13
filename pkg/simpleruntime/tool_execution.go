@@ -4,16 +4,12 @@ package connector
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
-
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/toolpolicy"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/tools"
 )
 
 // activeToolCall tracks a tool call that's in progress
@@ -88,9 +84,6 @@ func (oc *AIClient) emitToolProgress(ctx context.Context, portal *bridgev2.Porta
 
 func toolDisplayTitle(toolName string) string {
 	toolName = normalizeToolAlias(toolName)
-	if t := tools.GetTool(toolName); t != nil && t.Annotations != nil && t.Annotations.Title != "" {
-		return t.Annotations.Title
-	}
 	return toolName
 }
 
@@ -385,7 +378,6 @@ func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Po
 }
 
 // executeBuiltinTool finds and executes a builtin tool by name.
-// For Builder rooms, this also handles boss agent tools. Session tools are handled for all rooms.
 func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Portal, toolName string, argsJSON string) (string, error) {
 	argsJSON = normalizeToolArgsJSON(argsJSON)
 	var args map[string]any
@@ -398,36 +390,6 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 		return "", fmt.Errorf("tool %s is not available in simple bridge", toolName)
 	}
 
-	if toolpolicy.IsOwnerOnlyToolName(toolName) {
-		senderID := ""
-		if btc := GetBridgeToolContext(ctx); btc != nil {
-			senderID = btc.SenderID
-		}
-		if !isOwnerAllowed(&oc.connector.Config, senderID) {
-			return "", errors.New("tool restricted to owner senders")
-		}
-	}
-
-	var meta *PortalMetadata
-	if portal != nil {
-		meta = portalMeta(portal)
-	}
-
-	if (isNexusToolName(toolName) || isNexusCompactToolName(toolName)) && !canUseNexusToolsForAgent(meta) {
-		return "", fmt.Errorf("tool %s is restricted to the Nexus agent", toolName)
-	}
-
-	// Route MCP tools through the MCP bridge when configured.
-	if oc.shouldUseMCPTool(ctx, toolName) {
-		return oc.executeMCPTool(ctx, toolName, args)
-	}
-	// Check if this is a Boss room or a session tool - use boss tool executor
-	if (meta != nil && hasBossAgent(meta)) || oc.isBuilderRoom(portal) || tools.IsSessionTool(toolName) || tools.IsBossTool(toolName) {
-		if result := oc.executeBossTool(ctx, portal, toolName, args); result != nil {
-			return result.Content, result.Error
-		}
-	}
-
 	// Standard builtin tools
 	for _, tool := range BuiltinTools() {
 		if tool.Name == toolName {
@@ -435,119 +397,4 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 		}
 	}
 	return "", fmt.Errorf("unknown tool: %s", toolName)
-}
-
-// bossToolResult holds the result from a boss tool execution.
-type bossToolResult struct {
-	Content string
-	Error   error
-}
-
-// executeBossTool attempts to execute a boss agent tool.
-// Returns nil if the tool is not a boss tool.
-func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal, toolName string, args map[string]any) *bossToolResult {
-	// Create boss tool executor with store adapter
-	store := NewBossStoreAdapter(oc)
-	executor := tools.NewBossToolExecutor(store)
-
-	var result *tools.Result
-	var err error
-
-	if toolName == "run_internal_command" {
-		if roomID, ok := args["room_id"].(string); !ok || strings.TrimSpace(roomID) == "" {
-			if portal != nil && portal.MXID != "" {
-				args["room_id"] = portal.MXID.String()
-			}
-		}
-	}
-	if toolName == "sessions_spawn" {
-		result, err = oc.executeSessionsSpawn(ctx, portal, args)
-		if err != nil {
-			return &bossToolResult{Error: err}
-		}
-		content := result.Text()
-		if result.Status == tools.ResultError {
-			return &bossToolResult{Error: fmt.Errorf("%s", content)}
-		}
-		return &bossToolResult{Content: content}
-	}
-	if toolName == "sessions_list" {
-		result, err = oc.executeSessionsList(ctx, portal, args)
-		if err != nil {
-			return &bossToolResult{Error: err}
-		}
-		content := result.Text()
-		if result.Status == tools.ResultError {
-			return &bossToolResult{Error: fmt.Errorf("%s", content)}
-		}
-		return &bossToolResult{Content: content}
-	}
-	if toolName == "sessions_history" {
-		result, err = oc.executeSessionsHistory(ctx, portal, args)
-		if err != nil {
-			return &bossToolResult{Error: err}
-		}
-		content := result.Text()
-		if result.Status == tools.ResultError {
-			return &bossToolResult{Error: fmt.Errorf("%s", content)}
-		}
-		return &bossToolResult{Content: content}
-	}
-	if toolName == "sessions_send" {
-		result, err = oc.executeSessionsSend(ctx, portal, args)
-		if err != nil {
-			return &bossToolResult{Error: err}
-		}
-		content := result.Text()
-		if result.Status == tools.ResultError {
-			return &bossToolResult{Error: fmt.Errorf("%s", content)}
-		}
-		return &bossToolResult{Content: content}
-	}
-	if toolName == "agents_list" {
-		result, err = oc.executeAgentsList(ctx, portal, args)
-		if err != nil {
-			return &bossToolResult{Error: err}
-		}
-		content := result.Text()
-		if result.Status == tools.ResultError {
-			return &bossToolResult{Error: fmt.Errorf("%s", content)}
-		}
-		return &bossToolResult{Content: content}
-	}
-
-	switch toolName {
-	case "create_agent":
-		result, err = executor.ExecuteCreateAgent(ctx, args)
-	case "fork_agent":
-		result, err = executor.ExecuteForkAgent(ctx, args)
-	case "edit_agent":
-		result, err = executor.ExecuteEditAgent(ctx, args)
-	case "delete_agent":
-		result, err = executor.ExecuteDeleteAgent(ctx, args)
-	case "list_agents":
-		result, err = executor.ExecuteListAgents(ctx, args)
-	case "list_models":
-		result, err = executor.ExecuteListModels(ctx, args)
-	case "run_internal_command":
-		result, err = executor.ExecuteRunInternalCommand(ctx, args)
-	case "modify_room":
-		result, err = executor.ExecuteModifyRoom(ctx, args)
-	default:
-		return nil // Not a boss tool
-	}
-
-	if err != nil {
-		return &bossToolResult{Error: err}
-	}
-	if result == nil {
-		return &bossToolResult{Content: ""}
-	}
-
-	// Extract content from result
-	content := result.Text()
-	if result.Status == tools.ResultError {
-		return &bossToolResult{Error: fmt.Errorf("%s", content)}
-	}
-	return &bossToolResult{Content: content}
 }

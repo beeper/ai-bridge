@@ -3,8 +3,6 @@ package connector
 import (
 	"regexp"
 	"strings"
-
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 )
 
 const mentionBackspaceChar = "\u0008"
@@ -28,7 +26,7 @@ func normalizeMentionPatterns(patterns []string) []string {
 	return out
 }
 
-func deriveMentionPatterns(identity *agents.Identity) []string {
+func deriveMentionPatterns(identity *AgentIdentity) []string {
 	if identity == nil {
 		return nil
 	}
@@ -48,7 +46,7 @@ func deriveMentionPatterns(identity *agents.Identity) []string {
 	return []string{`\b@?` + re + `\b`}
 }
 
-func resolveMentionPatterns(cfg *Config, agent *agents.AgentDefinition) []string {
+func resolveMentionPatterns(cfg *Config, agent *AgentDefinition) []string {
 	if cfg != nil && cfg.Messages != nil && cfg.Messages.GroupChat != nil {
 		if cfg.Messages.GroupChat.MentionPatterns != nil {
 			return cfg.Messages.GroupChat.MentionPatterns
@@ -60,7 +58,7 @@ func resolveMentionPatterns(cfg *Config, agent *agents.AgentDefinition) []string
 	return nil
 }
 
-func buildMentionRegexes(cfg *Config, agent *agents.AgentDefinition) []*regexp.Regexp {
+func buildMentionRegexes(cfg *Config, agent *AgentDefinition) []*regexp.Regexp {
 	patterns := normalizeMentionPatterns(resolveMentionPatterns(cfg, agent))
 	if len(patterns) == 0 {
 		return nil

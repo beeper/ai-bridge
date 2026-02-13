@@ -3,8 +3,6 @@ package connector
 import (
 	"context"
 	"strings"
-
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 )
 
 func resolveChannelResponsePrefix(cfg *Config) string {
@@ -52,7 +50,7 @@ func resolveIdentityNameForPrefix(oc *AIClient, agentID string) string {
 	}
 	resolved := strings.TrimSpace(agentID)
 	if resolved == "" {
-		resolved = agents.DefaultAgentID
+		resolved = defaultAgentID
 	}
 	store := NewAgentStoreAdapter(oc)
 	if agent, err := store.GetAgentByID(context.Background(), resolved); err == nil && agent != nil {

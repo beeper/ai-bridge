@@ -3,19 +3,16 @@ package connector
 import (
 	"context"
 	"errors"
-	"strings"
-
-	agents "github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
-	agenttools "github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/tools"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/id"
+	"strings"
 )
 
 // Simple bridge keeps model-chat behavior as source of truth.
 // Agent-specific hooks are retained as safe no-op compatibility paths while legacy
 // callsites are being removed.
-func (oc *AIClient) resolveAgentDisplayName(_ context.Context, agent *agents.AgentDefinition) string {
+func (oc *AIClient) resolveAgentDisplayName(_ context.Context, agent *AgentDefinition) string {
 	if agent == nil {
 		return ""
 	}
@@ -29,15 +26,15 @@ type AgentStoreAdapter struct{}
 
 func NewAgentStoreAdapter(*AIClient) *AgentStoreAdapter { return &AgentStoreAdapter{} }
 
-func (s *AgentStoreAdapter) LoadAgents(context.Context) (map[string]*agents.AgentDefinition, error) {
-	return map[string]*agents.AgentDefinition{}, nil
+func (s *AgentStoreAdapter) LoadAgents(context.Context) (map[string]*AgentDefinition, error) {
+	return map[string]*AgentDefinition{}, nil
 }
 
-func (s *AgentStoreAdapter) GetAgentByID(context.Context, string) (*agents.AgentDefinition, error) {
+func (s *AgentStoreAdapter) GetAgentByID(context.Context, string) (*AgentDefinition, error) {
 	return nil, errors.New("agent not found")
 }
 
-func (oc *AIClient) agentDefaultModel(*agents.AgentDefinition) string {
+func (oc *AIClient) agentDefaultModel(*AgentDefinition) string {
 	if oc == nil {
 		return ""
 	}
@@ -66,8 +63,8 @@ func seedLastHeartbeatEvent(networkid.UserLoginID, *HeartbeatEventPayload) {}
 
 func (oc *AIClient) recordAgentActivity(context.Context, *bridgev2.Portal, *PortalMetadata) {}
 
-func resolveHeartbeatPrompt(*Config, *HeartbeatConfig, *agents.AgentDefinition) string { return "" }
-func resolveHeartbeatConfig(*Config, string) *HeartbeatConfig                          { return nil }
+func resolveHeartbeatPrompt(*Config, *HeartbeatConfig, *AgentDefinition) string { return "" }
+func resolveHeartbeatConfig(*Config, string) *HeartbeatConfig                   { return nil }
 
 func readStringArgAny(args map[string]any, key string) string {
 	if args == nil {
@@ -137,14 +134,6 @@ func (oc *AIClient) executeMCPTool(context.Context, string, map[string]any) (str
 }
 
 func NewBossStoreAdapter(*AIClient) any { return nil }
-
-func (oc *AIClient) executeSessionsSpawn(context.Context, *bridgev2.Portal, map[string]any) (*agenttools.Result, error) {
-	return agenttools.ErrorResult("sessions_spawn", "not available in simple bridge"), nil
-}
-
-func (oc *AIClient) executeAgentsList(context.Context, *bridgev2.Portal, map[string]any) (*agenttools.Result, error) {
-	return agenttools.ErrorResult("agents_list", "not available in simple bridge"), nil
-}
 
 func notifyWorkspaceFileChanged(context.Context, string) {}
 

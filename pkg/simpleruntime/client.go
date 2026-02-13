@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,8 +29,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
-
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 )
 
 var (
@@ -1249,7 +1246,7 @@ func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 			agent, err := store.GetAgentByID(context.Background(), agentID)
 			if err == nil && agent != nil {
 				// Boss agent rooms always use the Boss model - no overrides allowed
-				if agents.IsBossAgent(agentID) && agent.Model.Primary != "" {
+				if isBossAgent(agentID) && agent.Model.Primary != "" {
 					return ResolveAlias(agent.Model.Primary)
 				}
 				// For other agents, room override takes priority, then agent model
@@ -1429,9 +1426,6 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		return ""
 	}
 
-	timezone, _ := oc.resolveUserTimezone()
-
-	workspaceDir := resolvePromptWorkspaceDir()
 	var extraParts []string
 	if strings.TrimSpace(agent.SystemPrompt) != "" {
 		extraParts = append(extraParts, strings.TrimSpace(agent.SystemPrompt))
@@ -1441,81 +1435,11 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 	}
 	extraSystemPrompt := strings.Join(extraParts, "\n\n")
 
-	// Build params for prompt generation (OpenClaw template)
-	params := agents.SystemPromptParams{
-		WorkspaceDir:      workspaceDir,
-		ExtraSystemPrompt: extraSystemPrompt,
-		UserTimezone:      timezone,
-		PromptMode:        agent.PromptMode,
-		HeartbeatPrompt:   resolveHeartbeatPrompt(&oc.connector.Config, resolveHeartbeatConfig(&oc.connector.Config, agent.ID), agent),
+	prompt := strings.TrimSpace(extraSystemPrompt)
+	if prompt == "" {
+		prompt = defaultRawModeSystemPrompt
 	}
-	params.UserIdentitySupplement = oc.gravatarContext()
-	params.ContextFiles = oc.buildBootstrapContextFiles(ctx, agentID, meta)
-	availableTools := oc.buildAvailableTools(meta)
-	if len(availableTools) > 0 {
-		toolNames := make([]string, 0, len(availableTools))
-		toolSummaries := make(map[string]string)
-		for _, tool := range availableTools {
-			if !tool.Enabled {
-				continue
-			}
-			toolNames = append(toolNames, tool.Name)
-			if strings.TrimSpace(tool.Description) != "" {
-				toolSummaries[strings.ToLower(tool.Name)] = tool.Description
-			}
-		}
-		params.ToolNames = toolNames
-		params.ToolSummaries = toolSummaries
-	}
-
-	// Build capabilities list from metadata
-	var caps []string
-	if meta.Capabilities.SupportsVision {
-		caps = append(caps, "vision")
-	}
-	if meta.Capabilities.SupportsToolCalling {
-		caps = append(caps, "tools")
-	}
-	if meta.Capabilities.SupportsReasoning {
-		caps = append(caps, "reasoning")
-	}
-	if meta.Capabilities.SupportsAudio {
-		caps = append(caps, "audio")
-	}
-	if meta.Capabilities.SupportsVideo {
-		caps = append(caps, "video")
-	}
-
-	host, _ := os.Hostname()
-	params.RuntimeInfo = &agents.RuntimeInfo{
-		AgentID:      agent.ID,
-		Host:         host,
-		OS:           runtime.GOOS,
-		Arch:         runtime.GOARCH,
-		Node:         runtime.Version(),
-		Model:        oc.effectiveModel(meta),
-		DefaultModel: oc.defaultModelForProvider(),
-		Channel:      "matrix",
-		Capabilities: caps,
-		RepoRoot:     "",
-	}
-
-	// Reaction guidance - default to minimal for group chats
-	if portal != nil && oc.isGroupChat(ctx, portal) {
-		params.ReactionGuidance = &agents.ReactionGuidance{
-			Level:   "minimal",
-			Channel: "matrix",
-		}
-	}
-
-	// Reasoning hints and level
-	params.ReasoningTagHint = meta.Capabilities.SupportsReasoning && meta.EmitThinking
-	params.ReasoningLevel = resolvePromptReasoningLevel(meta)
-
-	// Default thinking level (OpenClaw-style): low for reasoning-capable models, otherwise off.
-	params.DefaultThinkLevel = oc.defaultThinkLevel(meta)
-
-	return agents.BuildSystemPrompt(params)
+	return prompt
 }
 
 // effectiveTemperature returns the temperature to use.

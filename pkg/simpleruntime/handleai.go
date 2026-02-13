@@ -188,8 +188,8 @@ func (oc *AIClient) hasPortalMessages(ctx context.Context, portal *bridgev2.Port
 		return true
 	}
 
-	// Use a small lookback window so we can ignore "non-user" internal messages (e.g. welcome notices,
-	// subagent triggers) when deciding whether the chat is "empty enough" to auto-greet.
+	// Use a small lookback window so we can ignore internal non-user messages
+	// when deciding whether the chat is "empty enough" to auto-greet.
 	history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, 10)
 	if err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to check portal message history")

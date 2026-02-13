@@ -10,8 +10,6 @@ import (
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/format"
 	"maunium.net/go/mautrix/id"
-
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 )
 
 const maxMatrixEventBodyBytes = 60000 // Safety margin below Matrix's ~65KB limit
@@ -147,7 +145,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 
 	// Check response mode - raw mode skips directive processing
 	responseMode := oc.getAgentResponseMode(meta)
-	if responseMode == agents.ResponseModeRaw {
+	if responseMode == "raw" {
 		// Raw mode: send content directly without directive processing
 		rendered := format.RenderMarkdown(rawContent, true, true)
 		replyTo := id.EventID("")
@@ -343,14 +341,11 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	rawContent := state.accumulated.String()
 	ackMax := hb.AckMaxChars
 	if ackMax < 0 {
-		ackMax = agents.DefaultMaxAckChars
+		ackMax = 512
 	}
 
-	shouldSkip, strippedText, didStrip := agents.StripHeartbeatTokenWithMode(
-		rawContent,
-		agents.StripHeartbeatModeHeartbeat,
-		ackMax,
-	)
+	_ = ackMax
+	shouldSkip, strippedText, didStrip := false, rawContent, false
 	finalText := rawContent
 	if didStrip {
 		finalText = strippedText
@@ -399,9 +394,9 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		oc.restoreHeartbeatUpdatedAt(storeRef, hb.SessionKey, hb.PrevUpdatedAt)
 		silent := true
 		if hb.ShowOk && deliverable {
-			heartbeatOk := agents.HeartbeatToken
+			heartbeatOk := heartbeatToken
 			if responsePrefix != "" {
-				heartbeatOk = responsePrefix + " " + agents.HeartbeatToken
+				heartbeatOk = responsePrefix + " " + heartbeatToken
 			}
 			oc.sendPlainAssistantMessage(ctx, portal, heartbeatOk)
 			silent = false
@@ -564,8 +559,8 @@ func (oc *AIClient) sendPlainAssistantMessage(ctx context.Context, portal *bridg
 	_ = oc.sendPlainAssistantMessageWithResult(ctx, portal, text)
 }
 
-// sendPlainAssistantMessageWithResult is used by cron/heartbeat delivery paths where failures should be
-// observable by the caller (e.g. so the cron scheduler doesn't get stuck on a blocked send forever).
+// sendPlainAssistantMessageWithResult is used by background delivery paths where failures should be
+// observable by the caller.
 func (oc *AIClient) sendPlainAssistantMessageWithResult(ctx context.Context, portal *bridgev2.Portal, text string) error {
 	if portal == nil || portal.MXID == "" {
 		return nil
@@ -575,7 +570,7 @@ func (oc *AIClient) sendPlainAssistantMessageWithResult(ctx context.Context, por
 		return fmt.Errorf("missing intent")
 	}
 
-	// Best-effort: cron/heartbeat delivery may target rooms where the ghost isn't currently joined.
+	// Best-effort: background delivery may target rooms where the ghost isn't currently joined.
 	// EnsureJoined is typically a no-op when already in the room.
 	if err := intent.EnsureJoined(ctx, portal.MXID); err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Stringer("room_id", portal.MXID).Msg("Failed to ensure assistant ghost is joined")
@@ -896,10 +891,10 @@ func generateOutboundLinkPreviews(ctx context.Context, text string, intent bridg
 // getAgentResponseMode returns the response mode for the current agent.
 // Defaults to ResponseModeNatural if not set.
 // IsRawMode on the portal overrides all other settings (for playground rooms).
-func (oc *AIClient) getAgentResponseMode(meta *PortalMetadata) agents.ResponseMode {
+func (oc *AIClient) getAgentResponseMode(meta *PortalMetadata) string {
 	// IsRawMode flag takes priority (set by playground command)
 	if meta.IsRawMode {
-		return agents.ResponseModeRaw
+		return "raw"
 	}
 
 	agentID := resolveAgentID(meta)
@@ -913,6 +908,5 @@ func (oc *AIClient) getAgentResponseMode(meta *PortalMetadata) agents.ResponseMo
 		}
 	}
 
-	// Default to natural mode (OpenClaw-style)
-	return agents.ResponseModeNatural
+	return "natural"
 }

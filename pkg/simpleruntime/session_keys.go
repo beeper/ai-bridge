@@ -2,8 +2,6 @@ package connector
 
 import (
 	"strings"
-
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 )
 
 const (
@@ -31,7 +29,7 @@ func normalizeMainKey(raw string) string {
 func buildAgentMainSessionKey(agentID string, mainKey string) string {
 	normalized := normalizeAgentID(agentID)
 	if normalized == "" {
-		normalized = normalizeAgentID(agents.DefaultAgentID)
+		normalized = normalizeAgentID(defaultAgentID)
 	}
 	return "agent:" + normalized + ":" + normalizeMainKey(mainKey)
 }
@@ -47,7 +45,7 @@ func resolveAgentMainSessionKey(cfg *Config, agentID string) string {
 func resolveAgentIdFromSessionKey(sessionKey string) string {
 	parsed := parseAgentSessionKey(sessionKey)
 	if parsed == "" {
-		return normalizeAgentID(agents.DefaultAgentID)
+		return normalizeAgentID(defaultAgentID)
 	}
 	return normalizeAgentID(parsed)
 }
@@ -64,9 +62,6 @@ func toAgentStoreSessionKey(agentID string, requestKey string, mainKey string) s
 	if strings.HasPrefix(lowered, "agent:") {
 		return lowered
 	}
-	if strings.HasPrefix(lowered, "subagent:") {
-		return "agent:" + normalizeAgentID(agentID) + ":" + lowered
-	}
 	return "agent:" + normalizeAgentID(agentID) + ":" + lowered
 }
 
@@ -81,7 +76,7 @@ func canonicalizeMainSessionAlias(cfg *Config, agentID string, sessionKey string
 	}
 	normalizedAgent := normalizeAgentID(agentID)
 	if normalizedAgent == "" {
-		normalizedAgent = normalizeAgentID(agents.DefaultAgentID)
+		normalizedAgent = normalizeAgentID(defaultAgentID)
 	}
 	normalizedMain := normalizeMainKey(mainKey)
 	agentMainKey := buildAgentMainSessionKey(normalizedAgent, normalizedMain)

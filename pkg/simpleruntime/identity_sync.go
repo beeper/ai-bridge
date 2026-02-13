@@ -2,10 +2,8 @@ package connector
 
 import (
 	"context"
-	"strings"
-
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 	"github.com/beeper/ai-bridge/pkg/textfs"
+	"strings"
 )
 
 func maybeRefreshAgentIdentity(ctx context.Context, rawPath string) {
@@ -16,7 +14,7 @@ func maybeRefreshAgentIdentity(ctx context.Context, rawPath string) {
 	if err != nil {
 		return
 	}
-	if !strings.EqualFold(normalized, agents.DefaultIdentityFilename) {
+	if !strings.EqualFold(normalized, "IDENTITY.md") {
 		return
 	}
 	btc := GetBridgeToolContext(ctx)

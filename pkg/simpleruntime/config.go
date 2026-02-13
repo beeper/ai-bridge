@@ -6,8 +6,6 @@ import (
 
 	"go.mau.fi/util/configupgrade"
 	"go.mau.fi/util/ptr"
-
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 )
 
 //go:embed example-config.yaml
@@ -16,22 +14,21 @@ var exampleNetworkConfig string
 // Config represents the connector-specific configuration that is nested under
 // the `network:` block in the main bridge config.
 type Config struct {
-	Beeper        BeeperConfig                       `yaml:"beeper"`
-	Providers     ProvidersConfig                    `yaml:"providers"`
-	Models        *ModelsConfig                      `yaml:"models"`
-	Bridge        BridgeConfig                       `yaml:"bridge"`
-	Tools         ToolProvidersConfig                `yaml:"tools"`
-	ToolApprovals *ToolApprovalsRuntimeConfig        `yaml:"tool_approvals"`
-	Agents        *AgentsConfig                      `yaml:"agents"`
-	Channels      *ChannelsConfig                    `yaml:"channels"`
-	Cron          *CronConfig                        `yaml:"cron"`
-	Messages      *MessagesConfig                    `yaml:"messages"`
-	Commands      *CommandsConfig                    `yaml:"commands"`
-	Session       *SessionConfig                     `yaml:"session"`
+	Beeper        BeeperConfig                `yaml:"beeper"`
+	Providers     ProvidersConfig             `yaml:"providers"`
+	Models        *ModelsConfig               `yaml:"models"`
+	Bridge        BridgeConfig                `yaml:"bridge"`
+	Tools         ToolProvidersConfig         `yaml:"tools"`
+	ToolApprovals *ToolApprovalsRuntimeConfig `yaml:"tool_approvals"`
+	Agents        *AgentsConfig               `yaml:"agents"`
+	Channels      *ChannelsConfig             `yaml:"channels"`
+	Messages      *MessagesConfig             `yaml:"messages"`
+	Commands      *CommandsConfig             `yaml:"commands"`
+	Session       *SessionConfig              `yaml:"session"`
 
 	// Global settings
-	DefaultSystemPrompt string              `yaml:"default_system_prompt"`
-	ModelCacheDuration  time.Duration       `yaml:"model_cache_duration"`
+	DefaultSystemPrompt string        `yaml:"default_system_prompt"`
+	ModelCacheDuration  time.Duration `yaml:"model_cache_duration"`
 
 	// Context pruning configuration (OpenClaw-style)
 	Pruning *PruningConfig `yaml:"pruning"`
@@ -69,7 +66,6 @@ func (c *ToolApprovalsRuntimeConfig) WithDefaults() *ToolApprovalsRuntimeConfig 
 	if len(c.RequireForTools) == 0 {
 		c.RequireForTools = []string{
 			"message",
-			"cron",
 			"gravatar_set",
 
 			// Boss/session mutation tools
@@ -94,17 +90,16 @@ type AgentsConfig struct {
 
 // AgentDefaultsConfig defines default agent settings.
 type AgentDefaultsConfig struct {
-	Subagents         *agents.SubagentConfig `yaml:"subagents"`
-	SkipBootstrap     bool                   `yaml:"skip_bootstrap"`
-	BootstrapMaxChars int                    `yaml:"bootstrap_max_chars"`
-	TimeoutSeconds    int                    `yaml:"timeoutSeconds"`
-	Heartbeat         *HeartbeatConfig       `yaml:"heartbeat"`
-	UserTimezone      string                 `yaml:"userTimezone"`
-	EnvelopeTimezone  string                 `yaml:"envelopeTimezone"`  // local|utc|user|IANA
-	EnvelopeTimestamp string                 `yaml:"envelopeTimestamp"` // on|off
-	EnvelopeElapsed   string                 `yaml:"envelopeElapsed"`   // on|off
-	TypingMode        string                 `yaml:"typingMode"`        // never|instant|thinking|message
-	TypingIntervalSec *int                   `yaml:"typingIntervalSeconds"`
+	SkipBootstrap     bool             `yaml:"skip_bootstrap"`
+	BootstrapMaxChars int              `yaml:"bootstrap_max_chars"`
+	TimeoutSeconds    int              `yaml:"timeoutSeconds"`
+	Heartbeat         *HeartbeatConfig `yaml:"heartbeat"`
+	UserTimezone      string           `yaml:"userTimezone"`
+	EnvelopeTimezone  string           `yaml:"envelopeTimezone"`  // local|utc|user|IANA
+	EnvelopeTimestamp string           `yaml:"envelopeTimestamp"` // on|off
+	EnvelopeElapsed   string           `yaml:"envelopeElapsed"`   // on|off
+	TypingMode        string           `yaml:"typingMode"`        // never|instant|thinking|message
+	TypingIntervalSec *int             `yaml:"typingIntervalSeconds"`
 }
 
 // AgentEntryConfig defines per-agent overrides (OpenClaw-style).
@@ -132,13 +127,6 @@ type HeartbeatActiveHoursConfig struct {
 	Start    string `yaml:"start"`
 	End      string `yaml:"end"`
 	Timezone string `yaml:"timezone"`
-}
-
-// CronConfig configures cron scheduling (OpenClaw-style).
-type CronConfig struct {
-	Enabled           *bool  `yaml:"enabled"`
-	Store             string `yaml:"store"`
-	MaxConcurrentRuns int    `yaml:"maxConcurrentRuns"`
 }
 
 // ChannelsConfig defines per-channel settings (OpenClaw-style subset for Matrix).
@@ -223,7 +211,6 @@ type ToolProvidersConfig struct {
 	Fetch  *FetchConfig      `yaml:"fetch"`
 	Media  *MediaToolsConfig `yaml:"media"`
 	Nexus  *NexusToolsConfig `yaml:"nexus"`
-	MCP    *MCPToolsConfig   `yaml:"mcp"`
 	VFS    *VFSToolsConfig   `yaml:"vfs"`
 }
 
@@ -231,15 +218,9 @@ type ToolProvidersConfig struct {
 type NexusToolsConfig struct {
 	Enabled        *bool  `yaml:"enabled"`
 	BaseURL        string `yaml:"base_url"`
-	MCPEndpoint    string `yaml:"mcp_endpoint"`
 	Token          string `yaml:"token"`
 	AuthType       string `yaml:"auth_type"` // bearer | apikey
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
-}
-
-// MCPToolsConfig configures generic MCP behavior.
-type MCPToolsConfig struct {
-	EnableStdio bool `yaml:"enable_stdio"`
 }
 
 // VFSToolsConfig configures virtual filesystem tools.
@@ -542,11 +523,6 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Int, "inbound", "dedupe_max_size")
 	helper.Copy(configupgrade.Int, "inbound", "default_debounce_ms")
 
-	// Cron configuration
-	helper.Copy(configupgrade.Bool, "cron", "enabled")
-	helper.Copy(configupgrade.Str, "cron", "store")
-	helper.Copy(configupgrade.Int, "cron", "maxConcurrentRuns")
-
 	// Messages configuration
 	helper.Copy(configupgrade.Str, "messages", "responsePrefix")
 	helper.Copy(configupgrade.List, "commands", "ownerAllowFrom")
@@ -637,11 +613,9 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "cache_ttl_seconds")
 	helper.Copy(configupgrade.Bool, "tools", "nexus", "enabled")
 	helper.Copy(configupgrade.Str, "tools", "nexus", "base_url")
-	helper.Copy(configupgrade.Str, "tools", "nexus", "mcp_endpoint")
 	helper.Copy(configupgrade.Str, "tools", "nexus", "token")
 	helper.Copy(configupgrade.Str, "tools", "nexus", "auth_type")
 	helper.Copy(configupgrade.Int, "tools", "nexus", "timeout_seconds")
-	helper.Copy(configupgrade.Bool, "tools", "mcp", "enable_stdio")
 
 	// Tool policy (OpenClaw-style)
 }

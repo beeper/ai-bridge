@@ -62,7 +62,6 @@ func (oc *AIClient) responseWithRetry(
 			if !autoCompactionAttempted {
 				autoCompactionAttempted = true
 
-
 				// Get context window from model
 				contextWindow := oc.getModelContextWindow(meta)
 				if contextWindow <= 0 {

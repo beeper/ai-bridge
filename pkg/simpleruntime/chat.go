@@ -11,8 +11,6 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/tools"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 
 	"maunium.net/go/mautrix/bridgev2"
@@ -43,7 +41,7 @@ func hasBossAgent(meta *PortalMetadata) bool {
 	if meta == nil {
 		return false
 	}
-	return agents.IsBossAgent(meta.AgentID)
+	return isBossAgent(meta.AgentID)
 }
 
 func (oc *AIClient) isSimpleProfile() bool {
@@ -117,27 +115,17 @@ func (oc *AIClient) modelContacts(ctx context.Context, query string) ([]*bridgev
 func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	names := oc.toolNamesForPortal(meta)
 	var toolsList []ToolInfo
+	builtinByName := map[string]ToolDefinition{}
+	for _, tool := range BuiltinTools() {
+		builtinByName[tool.Name] = tool
+	}
 
 	for _, name := range names {
-		metaTool := tools.GetTool(name)
 		displayName := name
 		description := ""
 		toolType := "builtin"
-		if metaTool != nil {
-			description = metaTool.Description
-			if metaTool.Annotations != nil && metaTool.Annotations.Title != "" {
-				displayName = metaTool.Annotations.Title
-			}
-			if metaTool.Type != "" {
-				toolType = string(metaTool.Type)
-			}
-		} else if oc != nil {
-			lookupCtx, cancel := context.WithTimeout(context.Background(), mcpDiscoveryTimeout)
-			if dynamicTool, ok := oc.lookupMCPToolDefinition(lookupCtx, name); ok {
-				description = dynamicTool.Description
-				toolType = string(ToolTypeMCP)
-			}
-			cancel()
+		if tool, ok := builtinByName[name]; ok {
+			description = tool.Description
 		}
 		description = oc.toolDescriptionForPortal(meta, name, description)
 
@@ -377,11 +365,11 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 }
 
 // resolveAgentIdentifier resolves an agent to a ghost and optionally creates a chat
-func (oc *AIClient) resolveAgentIdentifier(ctx context.Context, agent *agents.AgentDefinition, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
+func (oc *AIClient) resolveAgentIdentifier(ctx context.Context, agent *AgentDefinition, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
 	return oc.resolveAgentIdentifierWithModel(ctx, agent, "", createChat)
 }
 
-func (oc *AIClient) resolveAgentIdentifierWithModel(ctx context.Context, agent *agents.AgentDefinition, modelID string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
+func (oc *AIClient) resolveAgentIdentifierWithModel(ctx context.Context, agent *AgentDefinition, modelID string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
 	explicitModel := modelID != ""
 	if modelID == "" {
 		modelID = oc.agentDefaultModel(agent)
@@ -452,11 +440,11 @@ func (oc *AIClient) resolveModelIdentifier(ctx context.Context, modelID string, 
 }
 
 // createAgentChat creates a new chat room for an agent
-func (oc *AIClient) createAgentChat(ctx context.Context, agent *agents.AgentDefinition) (*bridgev2.CreateChatResponse, error) {
+func (oc *AIClient) createAgentChat(ctx context.Context, agent *AgentDefinition) (*bridgev2.CreateChatResponse, error) {
 	return oc.createAgentChatWithModel(ctx, agent, "", false)
 }
 
-func (oc *AIClient) createAgentChatWithModel(ctx context.Context, agent *agents.AgentDefinition, modelID string, applyModelOverride bool) (*bridgev2.CreateChatResponse, error) {
+func (oc *AIClient) createAgentChatWithModel(ctx context.Context, agent *AgentDefinition, modelID string, applyModelOverride bool) (*bridgev2.CreateChatResponse, error) {
 	if modelID == "" {
 		modelID = oc.agentDefaultModel(agent)
 	}
@@ -490,7 +478,7 @@ func (oc *AIClient) createAgentChatWithModel(ctx context.Context, agent *agents.
 	portal.OtherUserID = agentGhostID
 	agentAvatar := strings.TrimSpace(agent.AvatarURL)
 	if agentAvatar == "" {
-		agentAvatar = strings.TrimSpace(agents.DefaultAgentAvatarMXC)
+		agentAvatar = ""
 	}
 	if agentAvatar != "" {
 		portal.AvatarID = networkid.AvatarID(agentAvatar)
@@ -633,7 +621,7 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 	portal.OtherUserID = modelUserID(modelID)
 	portal.Name = title
 	portal.NameSet = true
-	defaultAvatar := strings.TrimSpace(agents.DefaultAgentAvatarMXC)
+	defaultAvatar := ""
 	if defaultAvatar != "" {
 		portal.AvatarID = networkid.AvatarID(defaultAvatar)
 		portal.AvatarMXC = id.ContentURIString(defaultAvatar)
@@ -790,7 +778,7 @@ func (oc *AIClient) handleNewChat(
 	oc.createAndOpenModelChat(runCtx, portal, modelID)
 }
 
-func (oc *AIClient) resolveAgentModelForNewChat(ctx context.Context, agent *agents.AgentDefinition, preferredModel string) (string, error) {
+func (oc *AIClient) resolveAgentModelForNewChat(ctx context.Context, agent *AgentDefinition, preferredModel string) (string, error) {
 	if preferredModel != "" {
 		if ok, _ := oc.validateModel(ctx, preferredModel); ok {
 			return preferredModel, nil
@@ -817,7 +805,7 @@ func (oc *AIClient) resolveAgentModelForNewChat(ctx context.Context, agent *agen
 	return "", errors.New("no available model")
 }
 
-func (oc *AIClient) createAndOpenAgentChat(ctx context.Context, portal *bridgev2.Portal, agent *agents.AgentDefinition, modelID string, modelOverride bool) {
+func (oc *AIClient) createAndOpenAgentChat(ctx context.Context, portal *bridgev2.Portal, agent *AgentDefinition, modelID string, modelOverride bool) {
 	agentName := oc.resolveAgentDisplayName(ctx, agent)
 	chatResp, err := oc.createAgentChatWithModel(ctx, agent, modelID, modelOverride)
 	if err != nil {
@@ -901,20 +889,10 @@ func (oc *AIClient) createForkedChat(
 
 		agentName := agentID
 		agentAvatar := ""
-		// Try preset first - guaranteed to work for built-in agents (like "beeper")
-		if preset := agents.GetPresetByID(agentID); preset != nil {
-			agentName = oc.resolveAgentDisplayName(ctx, preset)
-			agentAvatar = preset.AvatarURL
-		} else {
-			// Custom agent - need Matrix state lookup
-			store := NewAgentStoreAdapter(oc)
-			if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil {
-				agentName = oc.resolveAgentDisplayName(ctx, agent)
-				agentAvatar = agent.AvatarURL
-			}
-		}
-		if strings.TrimSpace(agentAvatar) == "" {
-			agentAvatar = strings.TrimSpace(agents.DefaultAgentAvatarMXC)
+		store := NewAgentStoreAdapter(oc)
+		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil {
+			agentName = oc.resolveAgentDisplayName(ctx, agent)
+			agentAvatar = agent.AvatarURL
 		}
 		if agentAvatar != "" {
 			portal.AvatarID = networkid.AvatarID(agentAvatar)
@@ -1036,11 +1014,7 @@ func (oc *AIClient) chatInfoFromPortal(ctx context.Context, portal *bridgev2.Por
 	}
 
 	agentName := agentID
-	// Try preset first - guaranteed to work for built-in agents (like "beeper")
-	if preset := agents.GetPresetByID(agentID); preset != nil {
-		agentName = oc.resolveAgentDisplayName(ctx, preset)
-	} else if ctx != nil {
-		// Custom agent - need Matrix state lookup
+	if ctx != nil {
 		store := NewAgentStoreAdapter(oc)
 		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil {
 			agentName = oc.resolveAgentDisplayName(ctx, agent)
@@ -1826,84 +1800,15 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		return err
 	}
 
-	if oc.isSimpleProfile() {
-		modelID := oc.effectiveModel(nil)
-		if modelID == "" {
-			return errors.New("no default model configured")
-		}
-
-		portal, chatInfo, err := oc.initPortalForChat(ctx, PortalInitOpts{
-			ModelID:      modelID,
-			Title:        "New AI Chat",
-			SystemPrompt: defaultRawModeSystemPrompt,
-			PortalKey:    &defaultPortalKey,
-		})
-		if err != nil {
-			existingPortal, existingErr := oc.UserLogin.Bridge.GetExistingPortalByKey(ctx, defaultPortalKey)
-			if existingErr == nil && existingPortal != nil {
-				loginMeta.DefaultChatPortalID = string(existingPortal.PortalKey.ID)
-				if err := oc.UserLogin.Save(ctx); err != nil {
-					oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to persist default chat portal ID")
-				}
-				if existingPortal.MXID != "" {
-					oc.loggerForContext(ctx).Debug().Stringer("portal", existingPortal.PortalKey).Msg("Existing default chat already has MXID")
-					return nil
-				}
-				info := oc.chatInfoFromPortal(ctx, existingPortal)
-				oc.loggerForContext(ctx).Info().Stringer("portal", existingPortal.PortalKey).Msg("Default chat missing MXID; creating Matrix room")
-				createErr := existingPortal.CreateMatrixRoom(ctx, oc.UserLogin, info)
-				if createErr != nil {
-					oc.loggerForContext(ctx).Err(createErr).Msg("Failed to create Matrix room for default chat")
-					return createErr
-				}
-				oc.sendWelcomeMessage(ctx, existingPortal)
-				oc.loggerForContext(ctx).Info().Stringer("portal", existingPortal.PortalKey).Msg("New AI Chat room created")
-				return nil
-			}
-			oc.loggerForContext(ctx).Err(err).Msg("Failed to create default portal")
-			return err
-		}
-
-		pm := portalMeta(portal)
-		pm.AgentID = ""
-		pm.SystemPrompt = defaultRawModeSystemPrompt
-		pm.IsRawMode = true
-		portal.OtherUserID = modelUserID(modelID)
-		if err := portal.Save(ctx); err != nil {
-			oc.loggerForContext(ctx).Err(err).Msg("Failed to save simple default chat metadata")
-			return err
-		}
-
-		loginMeta.DefaultChatPortalID = string(portal.PortalKey.ID)
-		if err := oc.UserLogin.Save(ctx); err != nil {
-			oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to persist default chat portal ID")
-		}
-		err = portal.CreateMatrixRoom(ctx, oc.UserLogin, chatInfo)
-		if err != nil {
-			oc.loggerForContext(ctx).Err(err).Msg("Failed to create Matrix room for default chat")
-			return err
-		}
-		oc.sendWelcomeMessage(ctx, portal)
-		oc.loggerForContext(ctx).Info().Stringer("portal", portal.PortalKey).Msg("New AI Chat room created")
-		return nil
-	}
-
-	// Create default chat with Beep agent
-	beeperAgent := agents.GetBeeperAI()
-	if beeperAgent == nil {
-		return errors.New("beeper AI agent not found")
-	}
-
-	// Determine model from agent config or use default
-	modelID := beeperAgent.Model.Primary
+	modelID := oc.effectiveModel(nil)
 	if modelID == "" {
-		modelID = oc.effectiveModel(nil)
+		return errors.New("no default model configured")
 	}
 
 	portal, chatInfo, err := oc.initPortalForChat(ctx, PortalInitOpts{
 		ModelID:      modelID,
 		Title:        "New AI Chat",
-		SystemPrompt: beeperAgent.SystemPrompt,
+		SystemPrompt: defaultRawModeSystemPrompt,
 		PortalKey:    &defaultPortalKey,
 	})
 	if err != nil {
@@ -1932,24 +1837,17 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		return err
 	}
 
-	// Set agent-specific metadata
+	// Set simple room metadata.
 	pm := portalMeta(portal)
-	pm.AgentID = beeperAgent.ID
-	if beeperAgent.SystemPrompt != "" {
-		pm.SystemPrompt = beeperAgent.SystemPrompt
-	}
-
-	// Update the OtherUserID to be the agent ghost
-	agentGhostID := agentUserID(beeperAgent.ID)
-	portal.OtherUserID = agentGhostID
+	pm.AgentID = ""
+	pm.SystemPrompt = defaultRawModeSystemPrompt
+	pm.IsRawMode = true
+	portal.OtherUserID = modelUserID(modelID)
 
 	if err := portal.Save(ctx); err != nil {
 		oc.loggerForContext(ctx).Err(err).Msg("Failed to save portal with agent config")
 		return err
 	}
-
-	// Update chat info members to use agent ghost only
-	oc.applyAgentChatInfo(chatInfo, beeperAgent.ID, oc.resolveAgentDisplayName(ctx, beeperAgent), modelID)
 
 	loginMeta.DefaultChatPortalID = string(portal.PortalKey.ID)
 	if err := oc.UserLogin.Save(ctx); err != nil {
