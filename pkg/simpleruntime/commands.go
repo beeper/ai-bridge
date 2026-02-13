@@ -397,7 +397,6 @@ func fnCommands(ce *commands.Event) {
 			"- `!ai context [1-100]`\n" +
 			"- `!ai tokens [1-16384]`\n" +
 			"- `!ai mode [messages|responses]`\n" +
-			"- `!ai tools [on|off] [tool]`\n" +
 			"- `!ai typing [never|instant|thinking|message|off|reset|interval <seconds>]`\n" +
 			"- `!ai debounce [ms|off|default]`\n\n" +
 			"Controls:\n" +
@@ -420,18 +419,9 @@ func fnCommands(ce *commands.Event) {
 			"Playground:\n" +
 			"- `!ai playground new [model]` — Create a new AI chat\n" +
 			"- `!ai playground list` — List available models\n\n" +
-			"Agents:\n" +
-			"- `!ai agent [id|none]`\n" +
-			"- `!ai agents`\n" +
-			"- `!ai create-agent <id> <name> [model] [system prompt...]`\n" +
-			"- `!ai delete-agent <id>`\n" +
-			"- `!ai manage`\n\n" +
 			"Integrations:\n" +
-			"- MCP: `!ai mcp ...`\n" +
-			"- Clay: `!ai clay ...`\n" +
 			"- Desktop API: `!ai desktop-api ...`\n" +
-			"- Gravatar: `!ai gravatar ...`\n" +
-			"- Memory (admin): `!ai memory ...`\n\n" +
+			"- Gravatar: `!ai gravatar ...`\n\n" +
 			"Use `!help` for the full command list from the command processor.",
 	)
 }
