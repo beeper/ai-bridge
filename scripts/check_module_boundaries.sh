@@ -33,4 +33,9 @@ for imports in "$runtime_imports" "$simple_imports" "$aiproxy_imports"; do
   fi
 done
 
+simple_bridge_deps="$(go list -deps ./bridges/simple/cmd/bridge)"
+if echo "$simple_bridge_deps" | rg -q 'github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/(agents|cron|memory)'; then
+  fail "simple bridge must not depend on pkg/simpleruntime/simpledeps/*"
+fi
+
 echo "module boundary checks passed"
