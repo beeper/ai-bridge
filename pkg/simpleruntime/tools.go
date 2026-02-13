@@ -25,7 +25,6 @@ import (
 	"github.com/beeper/ai-bridge/pkg/shared/calc"
 	"github.com/beeper/ai-bridge/pkg/shared/media"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
-	"github.com/beeper/ai-bridge/pkg/textfs"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
@@ -1766,38 +1765,6 @@ Chat: %s%s%s`,
 
 const textFSMaxBytes = 256 * 1024
 
-const (
-	// Protect DB-backed virtual FS tools from hanging indefinitely (e.g. DB locks / slow IO).
-	textFSToolTimeout = 10 * time.Second
-
-	// Post-write side effects should never block tool completion.
-	textFSPostWriteTimeout = 5 * time.Second
-)
-
-func textFSStore(ctx context.Context) (*textfs.Store, error) {
-	btc := GetBridgeToolContext(ctx)
-	if btc == nil {
-		return nil, errors.New("file tool requires bridge context")
-	}
-	meta := portalMeta(btc.Portal)
-	agentID := resolveAgentID(meta)
-	if agentID == "" {
-		agentID = "default"
-	}
-	db := btc.Client.UserLogin.Bridge.DB.Database
-	bridgeID := string(btc.Client.UserLogin.Bridge.DB.BridgeID)
-	loginID := string(btc.Client.UserLogin.ID)
-	return textfs.NewStore(db, bridgeID, loginID, agentID), nil
-}
-
-func detachedBridgeToolContext(ctx context.Context) context.Context {
-	base := context.Background()
-	if btc := GetBridgeToolContext(ctx); btc != nil {
-		base = WithBridgeToolContext(base, btc)
-	}
-	return base
-}
-
 func readStringArg(args map[string]any, keys ...string) (string, bool) {
 	for _, key := range keys {
 		if raw, ok := args[key]; ok {
@@ -1834,171 +1801,23 @@ func readIntArg(args map[string]any, keys ...string) (int, bool) {
 
 // executeReadFile handles the read tool.
 func executeReadFile(ctx context.Context, args map[string]any) (string, error) {
-	store, err := textFSStore(ctx)
-	if err != nil {
-		return "", err
-	}
-	path, ok := readStringArg(args, "path", "file_path")
-	if !ok {
-		return "", errors.New("missing or invalid 'path' argument")
-	}
-	offset, _ := readIntArg(args, "offset")
-	limit, _ := readIntArg(args, "limit")
-
-	readCtx, cancel := context.WithTimeout(ctx, textFSToolTimeout)
-	defer cancel()
-	entry, found, err := store.Read(readCtx, path)
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return "", fmt.Errorf("file not found: %s", path)
-	}
-
-	content := strings.ReplaceAll(entry.Content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\r", "\n")
-	lines := strings.Split(content, "\n")
-	totalLines := len(lines)
-	startLine := 1
-	if offset > 0 {
-		startLine = offset
-	}
-	if startLine > totalLines {
-		return "", fmt.Errorf("offset %d is beyond end of file (%d lines total)", startLine, totalLines)
-	}
-	startIdx := startLine - 1
-	endIdx := totalLines
-	if limit > 0 {
-		endIdx = startIdx + limit
-		if endIdx > totalLines {
-			endIdx = totalLines
-		}
-	}
-	selected := strings.Join(lines[startIdx:endIdx], "\n")
-	trunc := textfs.TruncateHead(selected, textfs.DefaultMaxLines, textfs.DefaultMaxBytes)
-	if trunc.FirstLineExceedsLimit {
-		return fmt.Sprintf("[Line %d exceeds %s limit. Use offset/limit to read smaller sections.]", startLine, textfs.FormatSize(textfs.DefaultMaxBytes)), nil
-	}
-
-	output := trunc.Content
-	var notices []string
-	if endIdx < totalLines {
-		notices = append(notices, fmt.Sprintf("Showing lines %d-%d of %d. Use offset=%d to continue", startLine, endIdx, totalLines, endIdx+1))
-	}
-	if trunc.TruncatedBy == "bytes" {
-		notices = append(notices, fmt.Sprintf("%s limit reached", textfs.FormatSize(textfs.DefaultMaxBytes)))
-	}
-	if len(notices) > 0 {
-		output += "\n\n[" + strings.Join(notices, ". ") + "]"
-	}
-	return output, nil
+	_ = ctx
+	_ = args
+	return "", errors.New("read is not available in the simple bridge")
 }
 
 // executeWriteFile handles the write tool.
 func executeWriteFile(ctx context.Context, args map[string]any) (string, error) {
-	store, err := textFSStore(ctx)
-	if err != nil {
-		return "", err
-	}
-	path, ok := readStringArg(args, "path", "file_path")
-	if !ok {
-		return "", errors.New("missing or invalid 'path' argument")
-	}
-	content, ok := args["content"].(string)
-	if !ok {
-		return "", errors.New("missing or invalid 'content' argument")
-	}
-	if len(content) > textFSMaxBytes {
-		return "", fmt.Errorf("content exceeds %s limit", textfs.FormatSize(textFSMaxBytes))
-	}
-	writeCtx, cancel := context.WithTimeout(ctx, textFSToolTimeout)
-	defer cancel()
-	entry, err := store.Write(writeCtx, path, content)
-	if err != nil {
-		return "", err
-	}
-	if entry != nil {
-		// Detach post-write work so slow Matrix/DB operations can't stall tool completion.
-		go func(path string) {
-			bg, cancel := context.WithTimeout(detachedBridgeToolContext(ctx), textFSPostWriteTimeout)
-			defer cancel()
-			notifyWorkspaceFileChanged(bg, path)
-			maybeRefreshAgentIdentity(bg, path)
-		}(entry.Path)
-	}
-	return fmt.Sprintf("Wrote %d bytes to %s.", len([]byte(content)), path), nil
+	_ = ctx
+	_ = args
+	return "", errors.New("write is not available in the simple bridge")
 }
 
 // executeEditFile handles the edit tool.
 func executeEditFile(ctx context.Context, args map[string]any) (string, error) {
-	store, err := textFSStore(ctx)
-	if err != nil {
-		return "", err
-	}
-	path, ok := readStringArg(args, "path", "file_path")
-	if !ok {
-		return "", errors.New("missing or invalid 'path' argument")
-	}
-	oldText, ok := readStringArg(args, "oldText", "old_string")
-	if !ok {
-		return "", errors.New("missing or invalid 'oldText' argument")
-	}
-	newText, ok := readStringArg(args, "newText", "new_string")
-	if !ok {
-		return "", errors.New("missing or invalid 'newText' argument")
-	}
-
-	readCtx, cancel := context.WithTimeout(ctx, textFSToolTimeout)
-	defer cancel()
-	entry, found, err := store.Read(readCtx, path)
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return "", fmt.Errorf("file not found: %s", path)
-	}
-
-	original := entry.Content
-	normalized := strings.ReplaceAll(original, "\r\n", "\n")
-	normalized = strings.ReplaceAll(normalized, "\r", "\n")
-	oldNormalized := strings.ReplaceAll(oldText, "\r\n", "\n")
-	oldNormalized = strings.ReplaceAll(oldNormalized, "\r", "\n")
-	newNormalized := strings.ReplaceAll(newText, "\r\n", "\n")
-	newNormalized = strings.ReplaceAll(newNormalized, "\r", "\n")
-
-	if oldNormalized == "" {
-		return "", errors.New("oldText must not be empty")
-	}
-	count := strings.Count(normalized, oldNormalized)
-	if count == 0 {
-		return "", fmt.Errorf("couldn't find the exact text in %s", path)
-	}
-	if count > 1 {
-		return "", fmt.Errorf("found %d occurrences in %s; make the match unique", count, path)
-	}
-
-	updated := strings.Replace(normalized, oldNormalized, newNormalized, 1)
-	if strings.Contains(original, "\r\n") {
-		updated = strings.ReplaceAll(updated, "\n", "\r\n")
-	}
-	if len(updated) > textFSMaxBytes {
-		return "", fmt.Errorf("content exceeds %s limit", textfs.FormatSize(textFSMaxBytes))
-	}
-	writeCtx, cancel := context.WithTimeout(ctx, textFSToolTimeout)
-	defer cancel()
-	entry, err = store.Write(writeCtx, path, updated)
-	if err != nil {
-		return "", err
-	}
-	if entry != nil {
-		go func(path string) {
-			bg, cancel := context.WithTimeout(detachedBridgeToolContext(ctx), textFSPostWriteTimeout)
-			defer cancel()
-			notifyWorkspaceFileChanged(bg, path)
-			maybeRefreshAgentIdentity(bg, path)
-		}(entry.Path)
-	}
-	return fmt.Sprintf("Replaced text in %s.", path), nil
+	_ = ctx
+	_ = args
+	return "", errors.New("edit is not available in the simple bridge")
 }
 
 // GetBuiltinTool returns a builtin tool by name, or nil if not found
