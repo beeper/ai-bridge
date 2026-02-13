@@ -1,5 +1,3 @@
-//go:build agentic
-
 package connector
 
 type ResolvedHeartbeatVisibility struct {
