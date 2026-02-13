@@ -885,8 +885,8 @@ func fnMode(ce *commands.Event) {
 // CommandNew handles the !ai new command
 var CommandNew = registerAICommand(commandregistry.Definition{
 	Name:           "new",
-	Description:    "Create a new chat (model-first, optional agent override)",
-	Args:           "[model] | [agent <agent_id>]",
+	Description:    "Create a new chat (model-first)",
+	Args:           "[model]",
 	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,
