@@ -24,7 +24,7 @@ require (
 	maunium.net/go/mautrix v0.26.3-0.20260129174719-d2364b382275
 )
 
-require github.com/beeper/ai-bridge/modules/runtime v0.0.0-20260209155641-adfecbb4ed29 // indirect
+require github.com/beeper/ai-bridge/modules/runtime v0.0.0-20260209155641-adfecbb4ed29
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
@@ -59,8 +59,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	maunium.net/go/mauflag v1.0.0 // indirect
 )
-
-replace github.com/beeper/ai-bridge/modules/core => ./modules/core
 
 replace github.com/beeper/ai-bridge/modules/contracts => ./modules/contracts
 

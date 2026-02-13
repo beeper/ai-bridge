@@ -5,7 +5,6 @@ use (
 	./bridges/simple
 	./modules/aiproxy
 	./modules/contracts
-	./modules/core
 	./modules/runtime
 	./modules/simple
 )

@@ -13,6 +13,7 @@ require (
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/beeper/ai-bridge v0.0.0-20260209155641-adfecbb4ed29 // indirect
 	github.com/beeper/ai-bridge/modules/contracts v0.0.0-20260209155641-adfecbb4ed29 // indirect
+	github.com/beeper/ai-bridge/modules/runtime v0.0.0-20260209155641-adfecbb4ed29 // indirect
 	github.com/beeper/desktop-api-go v0.2.0 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/coreos/go-systemd/v22 v22.6.0 // indirect

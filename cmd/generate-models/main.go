@@ -144,8 +144,8 @@ type ModelCapabilities struct {
 
 func main() {
 	token := flag.String("openrouter-token", "", "OpenRouter API token")
-	outputFile := flag.String("output", "pkg/connector/models_generated.go", "Output Go file")
-	jsonFile := flag.String("json", "pkg/connector/beeper_models.json", "Output JSON file for clients")
+	outputFile := flag.String("output", "pkg/simpleruntime/models_generated.go", "Output Go file")
+	jsonFile := flag.String("json", "pkg/simpleruntime/beeper_models.json", "Output JSON file for clients")
 	flag.Parse()
 
 	if *token == "" {
