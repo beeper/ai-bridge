@@ -205,7 +205,7 @@ func restoreSystemEventsFromDisk(backend CronStoreBackend, log *zerolog.Logger) 
 		}
 		existing := systemEvents[key]
 		if existing != nil && len(existing.queue) > 0 {
-			continue // don't overwrite events already in memory
+			continue // don't overwrite events already inprocess
 		}
 		events := make([]SystemEvent, len(pq.Events))
 		for i, pe := range pq.Events {

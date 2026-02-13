@@ -2002,7 +2002,6 @@ func (oc *AIClient) HandleMatrixMessageRemove(ctx context.Context, msg *bridgev2
 		oc.loggerForContext(ctx).Warn().Err(err).Stringer("event_id", msg.TargetMessage.MXID).Msg("Failed to delete message from database")
 		return err
 	}
-	oc.notifySessionMemoryChange(ctx, msg.Portal, portalMeta(msg.Portal), true)
 
 	return nil
 }

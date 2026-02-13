@@ -6,7 +6,6 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	"github.com/beeper/ai-bridge/modules/contracts/matrixevents"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/toolpolicy"
 )
 
@@ -678,32 +677,7 @@ type AgentDefinitionContent struct {
 	IdentityName    string                       `json:"identity_name,omitempty"`
 	IdentityPersona string                       `json:"identity_persona,omitempty"`
 	IsPreset        bool                         `json:"is_preset,omitempty"`
-	MemorySearch    *agents.MemorySearchConfig   `json:"memory_search,omitempty"`
 	HeartbeatPrompt string                       `json:"heartbeat_prompt,omitempty"`
 	CreatedAt       int64                        `json:"created_at"`
 	UpdatedAt       int64                        `json:"updated_at"`
-}
-
-// MemoryFactContent stores a memory fact in a timeline event
-type MemoryFactContent struct {
-	FactID     string   `json:"fact_id"`
-	Content    string   `json:"content"`
-	Keywords   []string `json:"keywords,omitempty"`
-	Category   string   `json:"category,omitempty"`    // preference, decision, entity, fact, other
-	Importance float64  `json:"importance,omitempty"`  // 0-1, default 0.5
-	Source     string   `json:"source,omitempty"`      // user, assistant, system
-	SourceRoom string   `json:"source_room,omitempty"` // Room where the memory was created
-	CreatedAt  int64    `json:"created_at"`
-	UpdatedAt  int64    `json:"updated_at,omitempty"`
-}
-
-// MemoryIndexEntry represents a single entry in the memory index
-type MemoryIndexEntry struct {
-	FactID     string   `json:"fact_id"`
-	EventID    string   `json:"event_id"`
-	Keywords   []string `json:"keywords"`
-	Category   string   `json:"category,omitempty"`
-	Importance float64  `json:"importance"`
-	Preview    string   `json:"preview"` // First 100 chars
-	CreatedAt  int64    `json:"created_at"`
 }

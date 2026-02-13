@@ -62,7 +62,6 @@ func (oc *AIClient) responseWithRetry(
 			if !autoCompactionAttempted {
 				autoCompactionAttempted = true
 
-				oc.maybeRunMemoryFlush(ctx, portal, meta, currentPrompt)
 
 				// Get context window from model
 				contextWindow := oc.getModelContextWindow(meta)
