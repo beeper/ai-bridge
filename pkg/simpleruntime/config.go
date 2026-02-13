@@ -8,7 +8,6 @@ import (
 	"go.mau.fi/util/ptr"
 
 	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/toolpolicy"
 )
 
 //go:embed example-config.yaml
@@ -23,7 +22,6 @@ type Config struct {
 	Bridge        BridgeConfig                       `yaml:"bridge"`
 	Tools         ToolProvidersConfig                `yaml:"tools"`
 	ToolApprovals *ToolApprovalsRuntimeConfig        `yaml:"tool_approvals"`
-	ToolPolicy    *toolpolicy.GlobalToolPolicyConfig `yaml:"tool_policy"`
 	Agents        *AgentsConfig                      `yaml:"agents"`
 	Channels      *ChannelsConfig                    `yaml:"channels"`
 	Cron          *CronConfig                        `yaml:"cron"`
@@ -646,5 +644,4 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Bool, "tools", "mcp", "enable_stdio")
 
 	// Tool policy (OpenClaw-style)
-	helper.Copy(configupgrade.Map, "tool_policy")
 }

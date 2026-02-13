@@ -6,7 +6,6 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	"github.com/beeper/ai-bridge/modules/contracts/matrixevents"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/toolpolicy"
 )
 
 // init registers custom AI event types with mautrix's TypeMap
@@ -671,7 +670,7 @@ type AgentDefinitionContent struct {
 	ModelFallback   []string                     `json:"model_fallback,omitempty"`
 	SystemPrompt    string                       `json:"system_prompt,omitempty"`
 	PromptMode      string                       `json:"prompt_mode,omitempty"`
-	Tools           *toolpolicy.ToolPolicyConfig `json:"tools,omitempty"`
+	Tools           map[string]any               `json:"tools,omitempty"`
 	Temperature     float64                      `json:"temperature,omitempty"`
 	ReasoningEffort string                       `json:"reasoning_effort,omitempty"`
 	IdentityName    string                       `json:"identity_name,omitempty"`

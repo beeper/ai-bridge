@@ -282,10 +282,6 @@ type AIClient struct {
 	groupHistoryBuffers map[id.RoomID]*groupHistoryBuffer
 	groupHistoryMu      sync.Mutex
 
-	// Subagent runs (sessions_spawn)
-	subagentRuns   map[string]*subagentRun
-	subagentRunsMu sync.Mutex
-
 	// Compactor handles intelligent context compaction with LLM summarization
 	compactor     *Compactor
 	compactorOnce sync.Once
@@ -383,7 +379,6 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		activeRooms:         make(map[id.RoomID]bool),
 		pendingQueues:       make(map[id.RoomID]*pendingQueue),
 		activeRoomRuns:      make(map[id.RoomID]*roomRunState),
-		subagentRuns:        make(map[string]*subagentRun),
 		groupHistoryBuffers: make(map[id.RoomID]*groupHistoryBuffer),
 		userTypingState:     make(map[id.RoomID]userTypingState),
 		queueTyping:         make(map[id.RoomID]*TypingController),
@@ -1039,10 +1034,6 @@ func (oc *AIClient) Disconnect() {
 	clear(oc.activeRoomRuns)
 	oc.activeRoomRunsMu.Unlock()
 
-	oc.subagentRunsMu.Lock()
-	clear(oc.subagentRuns)
-	oc.subagentRunsMu.Unlock()
-
 	oc.groupHistoryMu.Lock()
 	clear(oc.groupHistoryBuffers)
 	oc.groupHistoryMu.Unlock()
@@ -1460,10 +1451,6 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 	}
 	params.UserIdentitySupplement = oc.gravatarContext()
 	params.ContextFiles = oc.buildBootstrapContextFiles(ctx, agentID, meta)
-	if meta != nil && strings.TrimSpace(meta.SubagentParentRoomID) != "" {
-		params.PromptMode = agents.PromptModeMinimal
-	}
-
 	availableTools := oc.buildAvailableTools(meta)
 	if len(availableTools) > 0 {
 		toolNames := make([]string, 0, len(availableTools))

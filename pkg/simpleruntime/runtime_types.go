@@ -10,8 +10,6 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
-type subagentRun struct{}
-
 type pendingToolApproval struct {
 	ID string
 }

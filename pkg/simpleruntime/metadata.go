@@ -59,7 +59,6 @@ type ServiceTokens struct {
 	Perplexity          string                        `json:"perplexity,omitempty"`
 	DesktopAPI          string                        `json:"desktop_api,omitempty"`
 	DesktopAPIInstances map[string]DesktopAPIInstance `json:"desktop_api_instances,omitempty"`
-	MCPServers          map[string]MCPServerConfig    `json:"mcp_servers,omitempty"`
 }
 
 type DesktopAPIInstance struct {
@@ -69,34 +68,13 @@ type DesktopAPIInstance struct {
 
 // MCPServerConfig stores one MCP server connection for a login.
 // The map key in ServiceTokens.MCPServers is the server name.
-type MCPServerConfig struct {
-	Transport string   `json:"transport,omitempty"` // streamable_http|stdio
-	Endpoint  string   `json:"endpoint,omitempty"`  // streamable HTTP endpoint
-	Command   string   `json:"command,omitempty"`   // stdio command path/binary
-	Args      []string `json:"args,omitempty"`      // stdio command args
-	AuthType  string   `json:"auth_type,omitempty"` // bearer|apikey|none
-	Token     string   `json:"token,omitempty"`
-	AuthURL   string   `json:"auth_url,omitempty"` // Optional browser auth URL for manual token retrieval.
-	Connected bool     `json:"connected,omitempty"`
-	Kind      string   `json:"kind,omitempty"` // generic|nexus
-}
-
 // ToolApprovalsConfig stores per-login persisted tool approval rules.
 // This is used by the tool approval system to support "always allow" decisions.
 type ToolApprovalsConfig struct {
-	// MCPAlwaysAllow contains exact-match allow rules for MCP approvals.
-	// Matching is done on normalized (trim + lowercase) server label + tool name.
-	MCPAlwaysAllow []MCPAlwaysAllowRule `json:"mcp_always_allow,omitempty"`
-
 	// BuiltinAlwaysAllow contains exact-match allow rules for builtin tool approvals.
 	// Matching is done on normalized (trim + lowercase) tool name + action.
 	// Action "" means "any action".
 	BuiltinAlwaysAllow []BuiltinAlwaysAllowRule `json:"builtin_always_allow,omitempty"`
-}
-
-type MCPAlwaysAllowRule struct {
-	ServerLabel string `json:"server_label,omitempty"`
-	ToolName    string `json:"tool_name,omitempty"`
 }
 
 type BuiltinAlwaysAllowRule struct {
@@ -206,13 +184,10 @@ type PortalMetadata struct {
 	SessionBootstrapByAgent    map[string]int64 `json:"session_bootstrap_by_agent,omitempty"`
 
 	// Agent-related metadata
-	AgentID              string `json:"agent_id,omitempty"`                // Which agent is the ghost for this room
-	AgentPrompt          string `json:"agent_prompt,omitempty"`            // Cached prompt for the assigned agent
-	IsBuilderRoom        bool   `json:"is_builder_room,omitempty"`         // True if this is the Manage AI Chats room (protected from overrides)
-	IsRawMode            bool   `json:"is_raw_mode,omitempty"`             // True if this is a playground/raw mode room (no directive processing)
-	IsCronRoom           bool   `json:"is_cron_room,omitempty"`            // True if this is a hidden cron room
-	CronJobID            string `json:"cron_job_id,omitempty"`             // Cron job ID for cron rooms
-	SubagentParentRoomID string `json:"subagent_parent_room_id,omitempty"` // Parent room ID for subagent sessions
+	AgentID       string `json:"agent_id,omitempty"`        // Which agent is the ghost for this room
+	AgentPrompt   string `json:"agent_prompt,omitempty"`    // Cached prompt for the assigned agent
+	IsBuilderRoom bool   `json:"is_builder_room,omitempty"` // True if this is the Manage AI Chats room (protected from overrides)
+	IsRawMode     bool   `json:"is_raw_mode,omitempty"`     // True if this is a playground/raw mode room (no directive processing)
 
 	// Ack reaction config - similar to OpenClaw's ack reactions
 	AckReactionEmoji       string `json:"ack_reaction_emoji,omitempty"`        // Emoji to react with when message received (e.g., "👀", "🤔"). Empty = disabled.
