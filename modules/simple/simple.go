@@ -16,7 +16,7 @@ func Profile() runtime.BridgeProfile {
 			CreateDM:       true,
 			LookupUsername: true,
 			ContactList:    true,
-			Search:         false,
+			Search:         true,
 		},
 	}
 }

@@ -16,6 +16,7 @@ var simpleCommandSet = map[string]struct{}{
 	"model":         {},
 	"models":        {},
 	"new":           {},
+	"playground":    {},
 	"queue":         {},
 	"reasoning":     {},
 	"regenerate":    {},

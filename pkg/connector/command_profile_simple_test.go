@@ -8,7 +8,7 @@ func TestSimpleProfileCommandSurface(t *testing.T) {
 		NetworkID: "ai-simple",
 	})
 
-	allowed := []string{"model", "status", "send"}
+	allowed := []string{"model", "status", "send", "playground"}
 	for _, name := range allowed {
 		if !oc.shouldRegisterCommand(name) {
 			t.Fatalf("expected command %q to be enabled for simple profile", name)

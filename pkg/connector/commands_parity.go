@@ -8,7 +8,7 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2/commands"
 
-	"github.com/beeper/ai-bridge/pkg/connector/commandregistry"
+	"github.com/beeper/ai-bridge/modules/runtime/commandregistry"
 )
 
 // CommandStatus handles the !ai status command.
