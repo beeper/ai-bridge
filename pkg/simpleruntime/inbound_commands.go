@@ -58,7 +58,7 @@ func normalizeElevatedLevel(raw string) (string, bool) {
 		return "off", true
 	case "full", "auto", "auto-approve", "autoapprove":
 		return "full", true
-	case "ask", "prompt", "approval", "approve":
+	case "ask", "prompt":
 		return "ask", true
 	case "on", "true", "yes", "1":
 		return "on", true

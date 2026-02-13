@@ -96,13 +96,12 @@ const (
 type ToolStatus string
 
 const (
-	ToolStatusPending          ToolStatus = "pending"
-	ToolStatusRunning          ToolStatus = "running"
-	ToolStatusCompleted        ToolStatus = "completed"
-	ToolStatusFailed           ToolStatus = "failed"
-	ToolStatusTimeout          ToolStatus = "timeout"
-	ToolStatusCancelled        ToolStatus = "cancelled"
-	ToolStatusApprovalRequired ToolStatus = "approval_required"
+	ToolStatusPending   ToolStatus = "pending"
+	ToolStatusRunning   ToolStatus = "running"
+	ToolStatusCompleted ToolStatus = "completed"
+	ToolStatusFailed    ToolStatus = "failed"
+	ToolStatusTimeout   ToolStatus = "timeout"
+	ToolStatusCancelled ToolStatus = "cancelled"
 )
 
 // ResultStatus represents the status of a tool result
@@ -122,7 +121,6 @@ const (
 	ToolTypeBuiltin  ToolType = "builtin"
 	ToolTypeProvider ToolType = "provider"
 	ToolTypeFunction ToolType = "function"
-	ToolTypeMCP      ToolType = "mcp"
 )
 
 const (
@@ -246,15 +244,8 @@ type ToolCallData struct {
 	// Reference to result event (set after completion)
 	ResultEvent string `json:"result_event,omitempty"`
 
-	// MCP-specific fields
-	MCPServer string `json:"mcp_server,omitempty"`
-
 	// Timing
 	Timing *TimingInfo `json:"timing,omitempty"`
-
-	// Approval flow
-	RequiresApproval bool          `json:"requires_approval,omitempty"`
-	Approval         *ApprovalInfo `json:"approval,omitempty"`
 }
 
 // ToolDisplay contains display hints for tool rendering
@@ -262,12 +253,6 @@ type ToolDisplay struct {
 	Title     string `json:"title,omitempty"`
 	Icon      string `json:"icon,omitempty"` // mxc:// URL
 	Collapsed bool   `json:"collapsed,omitempty"`
-}
-
-// ApprovalInfo contains approval request details
-type ApprovalInfo struct {
-	Reason  string   `json:"reason,omitempty"`
-	Actions []string `json:"actions,omitempty"`
 }
 
 // ToolResultContent represents a tool result timeline event
@@ -543,7 +528,7 @@ type RoomSettingsEventContent struct {
 type ToolInfo struct {
 	Name        string        `json:"name"`
 	DisplayName string        `json:"display_name"` // Human-readable name for UI
-	Type        string        `json:"type"`         // "builtin", "provider", "plugin", "mcp"
+	Type        string        `json:"type"`         // "builtin", "provider", "plugin"
 	Description string        `json:"description,omitempty"`
 	Enabled     bool          `json:"enabled"`
 	Available   bool          `json:"available"`        // Based on model capabilities and provider

@@ -68,6 +68,6 @@ func formatElevatedAck(level string) string {
 	case "full":
 		return formatSystemAck("Elevated mode set to full (auto-approve).")
 	default:
-		return formatSystemAck("Elevated mode set to ask (approvals may still apply).")
+		return formatSystemAck("Elevated mode set to ask.")
 	}
 }

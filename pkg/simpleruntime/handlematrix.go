@@ -17,16 +17,6 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
-type approvalDecisionPayload struct {
-	ApprovalID string
-	Decision   string
-	Reason     string
-}
-
-func parseApprovalDecision(raw map[string]any) *approvalDecisionPayload {
-	return nil
-}
-
 func unsupportedMessageStatus(err error) error {
 	return bridgev2.WrapErrorInStatus(err).
 		WithStatus(event.MessageStatusFail).
@@ -113,8 +103,6 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		logCtx.Debug().Msg("Ignoring bot message")
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 	}
-
-	_ = parseApprovalDecision(msg.Event.Content.Raw)
 
 	// Normalize sticker events to image handling
 	msgType := msg.Content.MsgType

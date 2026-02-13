@@ -168,8 +168,6 @@ func responsesToolNames(tools []responses.ToolUnionParam) []string {
 			names = append(names, "image_generation")
 		} else if tool.OfLocalShell != nil || tool.OfShell != nil {
 			names = append(names, "shell")
-		} else if tool.OfMcp != nil {
-			names = append(names, "mcp")
 		} else if tool.OfApplyPatch != nil {
 			names = append(names, "apply_patch")
 		}

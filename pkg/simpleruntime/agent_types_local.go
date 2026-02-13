@@ -18,29 +18,22 @@ type AgentIdentity struct {
 	MentionPatterns []string `json:"mention_patterns,omitempty"`
 }
 
-type AgentSubagentConfig struct {
-	Model       string   `json:"model,omitempty"`
-	Thinking    string   `json:"thinking,omitempty"`
-	AllowAgents []string `json:"allowAgents,omitempty"`
-}
-
 type AgentDefinition struct {
-	ID              string               `json:"id,omitempty"`
-	Name            string               `json:"name,omitempty"`
-	Description     string               `json:"description,omitempty"`
-	AvatarURL       string               `json:"avatar_url,omitempty"`
-	Model           AgentModelInfo       `json:"model,omitempty"`
-	Identity        *AgentIdentity       `json:"identity,omitempty"`
-	SystemPrompt    string               `json:"system_prompt,omitempty"`
-	Tools           map[string]any       `json:"tools,omitempty"`
-	Subagents       *AgentSubagentConfig `json:"subagents,omitempty"`
-	PromptMode      string               `json:"prompt_mode,omitempty"`
-	ResponseMode    string               `json:"response_mode,omitempty"`
-	Temperature     float64              `json:"temperature,omitempty"`
-	ReasoningEffort string               `json:"reasoning_effort,omitempty"`
-	HeartbeatPrompt string               `json:"heartbeat_prompt,omitempty"`
-	CreatedAt       int64                `json:"created_at,omitempty"`
-	UpdatedAt       int64                `json:"updated_at,omitempty"`
+	ID              string         `json:"id,omitempty"`
+	Name            string         `json:"name,omitempty"`
+	Description     string         `json:"description,omitempty"`
+	AvatarURL       string         `json:"avatar_url,omitempty"`
+	Model           AgentModelInfo `json:"model,omitempty"`
+	Identity        *AgentIdentity `json:"identity,omitempty"`
+	SystemPrompt    string         `json:"system_prompt,omitempty"`
+	Tools           map[string]any `json:"tools,omitempty"`
+	PromptMode      string         `json:"prompt_mode,omitempty"`
+	ResponseMode    string         `json:"response_mode,omitempty"`
+	Temperature     float64        `json:"temperature,omitempty"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
+	HeartbeatPrompt string         `json:"heartbeat_prompt,omitempty"`
+	CreatedAt       int64          `json:"created_at,omitempty"`
+	UpdatedAt       int64          `json:"updated_at,omitempty"`
 }
 
 func (a *AgentDefinition) Clone() *AgentDefinition {
