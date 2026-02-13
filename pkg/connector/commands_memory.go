@@ -10,7 +10,7 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2/commands"
 
-	"github.com/beeper/ai-bridge/pkg/connector/commandregistry"
+	"github.com/beeper/ai-bridge/modules/runtime/commandregistry"
 	"github.com/beeper/ai-bridge/pkg/memory"
 	"github.com/beeper/ai-bridge/pkg/textfs"
 )

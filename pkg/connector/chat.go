@@ -46,6 +46,73 @@ func hasBossAgent(meta *PortalMetadata) bool {
 	return agents.IsBossAgent(meta.AgentID)
 }
 
+func (oc *AIClient) isSimpleProfile() bool {
+	if oc == nil || oc.connector == nil {
+		return false
+	}
+	return strings.TrimSpace(oc.connector.bridgePolicy().NetworkID) == "ai-simple"
+}
+
+func modelMatchesQuery(model *ModelInfo, query string) bool {
+	if model == nil || query == "" {
+		return false
+	}
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return false
+	}
+	if strings.Contains(strings.ToLower(model.ID), q) ||
+		strings.Contains(strings.ToLower(model.Name), q) ||
+		strings.Contains(strings.ToLower(model.Description), q) ||
+		strings.Contains(strings.ToLower(model.Provider), q) {
+		return true
+	}
+	for _, ident := range modelContactIdentifiers(model.ID, model) {
+		if strings.Contains(strings.ToLower(ident), q) {
+			return true
+		}
+	}
+	return false
+}
+
+func (oc *AIClient) modelContacts(ctx context.Context, query string) ([]*bridgev2.ResolveIdentifierResponse, error) {
+	models, err := oc.listAvailableModels(ctx, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load models: %w", err)
+	}
+
+	query = strings.ToLower(strings.TrimSpace(query))
+	contacts := make([]*bridgev2.ResolveIdentifierResponse, 0, len(models))
+	for i := range models {
+		model := &models[i]
+		if model.ID == "" {
+			continue
+		}
+		if query != "" && !modelMatchesQuery(model, query) {
+			continue
+		}
+
+		userID := modelUserID(model.ID)
+		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
+		if err != nil {
+			oc.loggerForContext(ctx).Warn().Err(err).Str("model", model.ID).Msg("Failed to get ghost for model")
+			continue
+		}
+		oc.ensureGhostDisplayNameWithGhost(ctx, ghost, model.ID, model)
+
+		contacts = append(contacts, &bridgev2.ResolveIdentifierResponse{
+			UserID: userID,
+			UserInfo: &bridgev2.UserInfo{
+				Name:        ptr.Ptr(modelContactName(model.ID, model)),
+				IsBot:       ptr.Ptr(false),
+				Identifiers: modelContactIdentifiers(model.ID, model),
+			},
+			Ghost: ghost,
+		})
+	}
+	return contacts, nil
+}
+
 // buildAvailableTools returns a list of ToolInfo for all tools based on tool policy.
 func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	names := oc.toolNamesForPortal(meta)
@@ -118,6 +185,14 @@ func (oc *AIClient) canUseImageGeneration() bool {
 
 // SearchUsers searches available AI agents by name/ID
 func (oc *AIClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.ResolveIdentifierResponse, error) {
+	if oc.isSimpleProfile() {
+		if strings.TrimSpace(query) == "" {
+			return nil, nil
+		}
+		oc.loggerForContext(ctx).Debug().Str("query", query).Msg("Model search requested")
+		return oc.modelContacts(ctx, query)
+	}
+
 	oc.loggerForContext(ctx).Debug().Str("query", query).Msg("Agent search requested")
 
 	query = strings.ToLower(strings.TrimSpace(query))
@@ -172,6 +247,10 @@ func (oc *AIClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.
 // GetContactList returns a list of available AI agents and models as contacts
 func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
 	oc.loggerForContext(ctx).Debug().Msg("Contact list requested")
+
+	if oc.isSimpleProfile() {
+		return oc.modelContacts(ctx, "")
+	}
 
 	// Load agents
 	store := NewAgentStoreAdapter(oc)
@@ -252,6 +331,21 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 	id := strings.TrimSpace(identifier)
 	if id == "" {
 		return nil, errors.New("identifier is required")
+	}
+
+	if modelID := parseModelFromGhostID(id); modelID != "" {
+		return oc.resolveModelIdentifier(ctx, modelID, createChat)
+	}
+
+	if oc.isSimpleProfile() {
+		resolved, valid, err := oc.resolveModelID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if valid && resolved != "" {
+			return oc.resolveModelIdentifier(ctx, resolved, createChat)
+		}
+		return oc.resolveModelIdentifier(ctx, id, createChat)
 	}
 
 	store := NewAgentStoreAdapter(oc)
@@ -649,34 +743,61 @@ func (oc *AIClient) handleNewChat(
 ) {
 	runCtx := oc.backgroundContext(ctx)
 
-	const usage = "Usage: !ai new [agent <agent_id>]"
+	simpleProfile := oc.isSimpleProfile()
+	usage := "Usage: !ai new [model]"
+	if !simpleProfile {
+		usage = "Usage: !ai new [model] | !ai new agent <agent_id>"
+	}
 
-	if len(args) >= 2 {
+	if len(args) > 0 {
 		cmd := strings.ToLower(args[0])
-		if cmd != "agent" {
+		if cmd == "agent" {
+			if simpleProfile {
+				oc.sendSystemNotice(runCtx, portal, usage)
+				return
+			}
+			if len(args) != 2 {
+				oc.sendSystemNotice(runCtx, portal, usage)
+				return
+			}
+			targetID := args[1]
+			if targetID == "" {
+				oc.sendSystemNotice(runCtx, portal, usage)
+				return
+			}
+			store := NewAgentStoreAdapter(oc)
+			agent, err := store.GetAgentByID(runCtx, targetID)
+			if err != nil || agent == nil {
+				oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Agent not found: %s", targetID))
+				return
+			}
+			modelID, err := oc.resolveAgentModelForNewChat(runCtx, agent, "")
+			if err != nil {
+				oc.sendSystemNotice(runCtx, portal, err.Error())
+				return
+			}
+			oc.createAndOpenAgentChat(runCtx, portal, agent, modelID, false)
+			return
+		}
+
+		if len(args) != 1 {
 			oc.sendSystemNotice(runCtx, portal, usage)
 			return
 		}
-		targetID := args[1]
-		if targetID == "" || len(args) > 2 {
-			oc.sendSystemNotice(runCtx, portal, usage)
-			return
-		}
-		store := NewAgentStoreAdapter(oc)
-		agent, err := store.GetAgentByID(runCtx, targetID)
-		if err != nil || agent == nil {
-			oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Agent not found: %s", targetID))
-			return
-		}
-		modelID, err := oc.resolveAgentModelForNewChat(runCtx, agent, "")
+		modelID := strings.TrimSpace(args[0])
+		resolvedModelID, valid, err := oc.resolveModelID(runCtx, modelID)
 		if err != nil {
 			oc.sendSystemNotice(runCtx, portal, err.Error())
 			return
 		}
-		oc.createAndOpenAgentChat(runCtx, portal, agent, modelID, false)
-		return
-	} else if len(args) == 1 {
-		oc.sendSystemNotice(runCtx, portal, usage)
+		if valid && resolvedModelID != "" {
+			modelID = resolvedModelID
+		}
+		if ok, _ := oc.validateModel(runCtx, modelID); !ok {
+			oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("That model isn't available: %s", modelID))
+			return
+		}
+		oc.createAndOpenModelChat(runCtx, portal, modelID)
 		return
 	}
 
@@ -686,7 +807,7 @@ func (oc *AIClient) handleNewChat(
 		return
 	}
 	agentID := resolveAgentID(meta)
-	if agentID != "" {
+	if agentID != "" && !simpleProfile {
 		store := NewAgentStoreAdapter(oc)
 		agent, err := store.GetAgentByID(runCtx, agentID)
 		if err != nil || agent == nil {
@@ -1604,7 +1725,7 @@ func (oc *AIClient) bootstrap(ctx context.Context) {
 		// Don't return - still create the default chat (matches other bridge patterns)
 	}
 
-	// Create default chat room with Beep agent
+	// Create default chat room for the active bridge profile.
 	if err := oc.ensureDefaultChat(logCtx); err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure default chat")
 		// Continue anyway - default chat is optional
@@ -1749,6 +1870,68 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 		}
 		oc.sendWelcomeMessage(ctx, defaultPortal)
 		return err
+	}
+
+	if oc.isSimpleProfile() {
+		modelID := oc.effectiveModel(nil)
+		if modelID == "" {
+			return errors.New("no default model configured")
+		}
+
+		portal, chatInfo, err := oc.initPortalForChat(ctx, PortalInitOpts{
+			ModelID:      modelID,
+			Title:        "New AI Chat",
+			SystemPrompt: defaultRawModeSystemPrompt,
+			PortalKey:    &defaultPortalKey,
+		})
+		if err != nil {
+			existingPortal, existingErr := oc.UserLogin.Bridge.GetExistingPortalByKey(ctx, defaultPortalKey)
+			if existingErr == nil && existingPortal != nil {
+				loginMeta.DefaultChatPortalID = string(existingPortal.PortalKey.ID)
+				if err := oc.UserLogin.Save(ctx); err != nil {
+					oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to persist default chat portal ID")
+				}
+				if existingPortal.MXID != "" {
+					oc.loggerForContext(ctx).Debug().Stringer("portal", existingPortal.PortalKey).Msg("Existing default chat already has MXID")
+					return nil
+				}
+				info := oc.chatInfoFromPortal(ctx, existingPortal)
+				oc.loggerForContext(ctx).Info().Stringer("portal", existingPortal.PortalKey).Msg("Default chat missing MXID; creating Matrix room")
+				createErr := existingPortal.CreateMatrixRoom(ctx, oc.UserLogin, info)
+				if createErr != nil {
+					oc.loggerForContext(ctx).Err(createErr).Msg("Failed to create Matrix room for default chat")
+					return createErr
+				}
+				oc.sendWelcomeMessage(ctx, existingPortal)
+				oc.loggerForContext(ctx).Info().Stringer("portal", existingPortal.PortalKey).Msg("New AI Chat room created")
+				return nil
+			}
+			oc.loggerForContext(ctx).Err(err).Msg("Failed to create default portal")
+			return err
+		}
+
+		pm := portalMeta(portal)
+		pm.AgentID = ""
+		pm.SystemPrompt = defaultRawModeSystemPrompt
+		pm.IsRawMode = true
+		portal.OtherUserID = modelUserID(modelID)
+		if err := portal.Save(ctx); err != nil {
+			oc.loggerForContext(ctx).Err(err).Msg("Failed to save simple default chat metadata")
+			return err
+		}
+
+		loginMeta.DefaultChatPortalID = string(portal.PortalKey.ID)
+		if err := oc.UserLogin.Save(ctx); err != nil {
+			oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to persist default chat portal ID")
+		}
+		err = portal.CreateMatrixRoom(ctx, oc.UserLogin, chatInfo)
+		if err != nil {
+			oc.loggerForContext(ctx).Err(err).Msg("Failed to create Matrix room for default chat")
+			return err
+		}
+		oc.sendWelcomeMessage(ctx, portal)
+		oc.loggerForContext(ctx).Info().Stringer("portal", portal.PortalKey).Msg("New AI Chat room created")
+		return nil
 	}
 
 	// Create default chat with Beep agent

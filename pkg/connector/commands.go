@@ -12,9 +12,9 @@ import (
 	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
+	"github.com/beeper/ai-bridge/modules/runtime/commandregistry"
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
-	"github.com/beeper/ai-bridge/pkg/connector/commandregistry"
 )
 
 // HelpSectionAI is the help section for AI-related commands
@@ -1078,8 +1078,8 @@ func fnMode(ce *commands.Event) {
 // CommandNew handles the !ai new command
 var CommandNew = registerAICommand(commandregistry.Definition{
 	Name:           "new",
-	Description:    "Create a new chat of the same type (agent or model)",
-	Args:           "[<directory>] | [agent <agent_id>]",
+	Description:    "Create a new chat (model-first, optional agent override)",
+	Args:           "[model] | [agent <agent_id>]",
 	Section:        HelpSectionAI,
 	RequiresPortal: true,
 	RequiresLogin:  true,

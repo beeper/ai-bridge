@@ -4,7 +4,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
-	"github.com/beeper/ai-bridge/pkg/connector/commandregistry"
+	"github.com/beeper/ai-bridge/modules/runtime/commandregistry"
 )
 
 // CommandManage handles the !ai manage command.
