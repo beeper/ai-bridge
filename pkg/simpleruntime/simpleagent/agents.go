@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	policypkg "github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/toolpolicy"
 	toolspkg "github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/tools"
 )
 
@@ -32,7 +31,7 @@ type AgentDefinition struct {
 	Model           ModelInfo                   `json:"model,omitempty"`
 	Identity        *Identity                   `json:"identity,omitempty"`
 	SystemPrompt    string                      `json:"system_prompt,omitempty"`
-	Tools           *policypkg.ToolPolicyConfig `json:"tools,omitempty"`
+	Tools           map[string]any              `json:"tools,omitempty"`
 	Subagents       *SubagentConfig             `json:"subagents,omitempty"`
 	IsPreset        bool                        `json:"is_preset,omitempty"`
 	PromptMode      PromptMode                  `json:"prompt_mode,omitempty"`
