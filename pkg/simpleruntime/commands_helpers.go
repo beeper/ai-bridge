@@ -1,10 +1,10 @@
 package connector
 
 import (
+	"strings"
+
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/commands"
-
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
 )
 
 func requireClientMeta(ce *commands.Event) (*AIClient, *PortalMetadata, bool) {
@@ -35,7 +35,7 @@ func requirePortal(ce *commands.Event) (*bridgev2.Portal, bool) {
 }
 
 func rejectBossOverrides(ce *commands.Event, meta *PortalMetadata, message string) bool {
-	if agents.IsBossAgent(resolveAgentID(meta)) {
+	if strings.EqualFold(strings.TrimSpace(meta.AgentID), "boss") {
 		ce.Reply(message)
 		return true
 	}
