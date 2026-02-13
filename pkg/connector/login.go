@@ -14,7 +14,7 @@ import (
 
 // Provider constants - all use OpenAI SDK with different base URLs
 const (
-	ProviderBeeper     = "beeper"      // Beeper's OpenRouter proxy
+	ProviderBeeper     = "beeper"      // Legacy alias for magic_proxy
 	ProviderOpenAI     = "openai"      // Direct OpenAI API
 	ProviderOpenRouter = "openrouter"  // Direct OpenRouter API
 	ProviderMagicProxy = "magic_proxy" // Magic Proxy (OpenRouter-compatible)
@@ -55,7 +55,7 @@ func (ol *OpenAILogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
 		if baseURL == "" || apiKey == "" {
 			return nil, &ErrBaseURLRequired
 		}
-		return ol.finishLogin(ctx, ProviderBeeper, apiKey, baseURL, nil)
+		return ol.finishLogin(ctx, ProviderMagicProxy, apiKey, baseURL, nil)
 	case ProviderMagicProxy:
 		return nil, &ErrBaseURLRequired
 	case FlowCustom:
@@ -90,7 +90,7 @@ func (ol *OpenAILogin) SubmitUserInput(ctx context.Context, input map[string]str
 		if apiKey == "" {
 			return nil, &ErrAPIKeyRequired
 		}
-		return ol.finishLogin(ctx, ProviderBeeper, apiKey, baseURL, nil)
+		return ol.finishLogin(ctx, ProviderMagicProxy, apiKey, baseURL, nil)
 	case ProviderMagicProxy:
 		link := strings.TrimSpace(input["magic_proxy_link"])
 		baseURL, apiKey, err := parseMagicProxyLink(link)
@@ -211,6 +211,7 @@ func (ol *OpenAILogin) credentialsStep() *bridgev2.LoginStep {
 }
 
 func (ol *OpenAILogin) finishLogin(ctx context.Context, provider, apiKey, baseURL string, serviceTokens *ServiceTokens) (*bridgev2.LoginStep, error) {
+	provider = canonicalProviderID(provider)
 	apiKey = strings.TrimSpace(apiKey)
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if ol.User == nil {
@@ -313,6 +314,19 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, provider, apiKey, baseUR
 			UserLogin:   login,
 		},
 	}, nil
+}
+
+func canonicalProviderID(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case ProviderBeeper, ProviderMagicProxy:
+		return ProviderMagicProxy
+	case ProviderOpenRouter:
+		return ProviderOpenRouter
+	case ProviderOpenAI:
+		return ProviderOpenAI
+	default:
+		return provider
+	}
 }
 
 func (ol *OpenAILogin) resolveCustomLogin(input map[string]string) (string, string, *ServiceTokens, error) {

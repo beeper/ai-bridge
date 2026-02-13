@@ -403,10 +403,6 @@ func (oc *OpenAIConnector) GetDBMetaTypes() database.MetaTypes {
 
 func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
 	meta := loginMetadata(login)
-	if !oc.loginFlowAllowed(providerToFlowID(meta.Provider)) {
-		login.Client = &brokenLoginClient{UserLogin: login, Reason: "This login type is not supported by this bridge."}
-		return nil
-	}
 
 	key := strings.TrimSpace(oc.resolveProviderAPIKey(meta))
 	if key == "" {
@@ -487,26 +483,18 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 
 // Package-level flow definitions (use Provider* constants as flow IDs)
 func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
-	flows := make([]bridgev2.LoginFlow, 0, 4)
-	if oc.loginFlowAllowed(ProviderBeeper) {
-		flows = append(flows, bridgev2.LoginFlow{ID: ProviderBeeper, Name: "Beeper AI"})
+	return []bridgev2.LoginFlow{
+		{ID: ProviderMagicProxy, Name: "Magic Proxy"},
+		{ID: FlowCustom, Name: "Manual"},
 	}
-	if oc.loginFlowAllowed(ProviderMagicProxy) {
-		flows = append(flows, bridgev2.LoginFlow{ID: ProviderMagicProxy, Name: "Magic Proxy"})
-	}
-	if oc.loginFlowAllowed(FlowCustom) {
-		flows = append(flows, bridgev2.LoginFlow{ID: FlowCustom, Name: "Manual"})
-	}
-	return flows
 }
 
 func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
 	// Compatibility aliases: some clients may still request historic provider IDs.
 	if flowID == ProviderOpenAI || flowID == ProviderOpenRouter {
 		flowID = FlowCustom
-	}
-	if !oc.loginFlowAllowed(flowID) {
-		return nil, fmt.Errorf("login flow %s is not available", flowID)
+	} else if flowID == ProviderBeeper {
+		flowID = ProviderMagicProxy
 	}
 	// Validate by checking if flowID is in available flows
 	flows := oc.GetLoginFlows()

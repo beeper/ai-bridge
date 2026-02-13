@@ -15,36 +15,6 @@ type BridgePolicy struct {
 
 	ProvisioningEnabled bool
 	ResolveIdentifier   bridgev2.ResolveIdentifierCapabilities
-
-	AllowedCommands   map[string]struct{}
-	AllowedLoginFlows map[string]struct{}
-}
-
-func normalizeAllowSet(in map[string]struct{}) map[string]struct{} {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]struct{}, len(in))
-	for value := range in {
-		trimmed := strings.ToLower(strings.TrimSpace(value))
-		if trimmed == "" {
-			continue
-		}
-		out[trimmed] = struct{}{}
-	}
-	return out
-}
-
-func BuildAllowSet(values ...string) map[string]struct{} {
-	out := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		trimmed := strings.ToLower(strings.TrimSpace(value))
-		if trimmed == "" {
-			continue
-		}
-		out[trimmed] = struct{}{}
-	}
-	return out
 }
 
 func defaultBridgePolicy() BridgePolicy {
@@ -68,9 +38,7 @@ func normalizeBridgePolicy(policy BridgePolicy) BridgePolicy {
 		strings.TrimSpace(policy.NetworkID) == "" &&
 		strings.TrimSpace(policy.BeeperBridgeType) == "" &&
 		!policy.ProvisioningEnabled &&
-		policy.ResolveIdentifier == (bridgev2.ResolveIdentifierCapabilities{}) &&
-		len(policy.AllowedCommands) == 0 &&
-		len(policy.AllowedLoginFlows) == 0
+		policy.ResolveIdentifier == (bridgev2.ResolveIdentifierCapabilities{})
 	if isZero {
 		return def
 	}
@@ -87,8 +55,6 @@ func normalizeBridgePolicy(policy BridgePolicy) BridgePolicy {
 	if policy.ResolveIdentifier == (bridgev2.ResolveIdentifierCapabilities{}) {
 		policy.ResolveIdentifier = def.ResolveIdentifier
 	}
-	policy.AllowedCommands = normalizeAllowSet(policy.AllowedCommands)
-	policy.AllowedLoginFlows = normalizeAllowSet(policy.AllowedLoginFlows)
 	return policy
 }
 
@@ -106,24 +72,6 @@ func (oc *OpenAIConnector) bridgePolicy() BridgePolicy {
 	return normalizeBridgePolicy(oc.policy)
 }
 
-func (oc *OpenAIConnector) commandAllowed(commandName string) bool {
-	allowed := oc.bridgePolicy().AllowedCommands
-	if len(allowed) == 0 {
-		return true
-	}
-	_, ok := allowed[strings.ToLower(strings.TrimSpace(commandName))]
-	return ok
-}
-
-func (oc *OpenAIConnector) loginFlowAllowed(flowID string) bool {
-	allowed := oc.bridgePolicy().AllowedLoginFlows
-	if len(allowed) == 0 {
-		return true
-	}
-	_, ok := allowed[strings.ToLower(strings.TrimSpace(flowID))]
-	return ok
-}
-
 func (oc *OpenAIConnector) shouldBootstrapChats() bool {
 	return oc.bridgePolicy().ResolveIdentifier.CreateDM
 }
@@ -131,7 +79,7 @@ func (oc *OpenAIConnector) shouldBootstrapChats() bool {
 func providerToFlowID(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case ProviderBeeper:
-		return ProviderBeeper
+		return ProviderMagicProxy
 	case ProviderMagicProxy:
 		return ProviderMagicProxy
 	default:
