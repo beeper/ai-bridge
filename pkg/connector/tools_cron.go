@@ -310,7 +310,7 @@ func injectCronContext(job *cron.CronJobCreate, btc *BridgeToolContext) {
 	// Avoid pinning delivery to internal/hidden rooms (cron rooms, builder rooms, etc.).
 	// For those contexts, leave delivery.to empty so runtime routing can fall back to
 	// last activity or the default chat portal.
-	sourceInternal := meta != nil && (meta.IsCronRoom || meta.IsBuilderRoom || meta.IsCodexRoom || meta.IsOpenCodeRoom)
+	sourceInternal := meta != nil && (meta.IsCronRoom || meta.IsBuilderRoom)
 
 	// For isolated announce jobs created from a room, pin delivery target to that room.
 	// This avoids depending on "last activity" metadata for routing.

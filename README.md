@@ -1,43 +1,27 @@
-# AI Bridge
+# ai-bridge
 
-AI Bridge is a Matrix-ish bridge for Beeper that brings AI Chats into your favorite chat app.
+Shared AI bridge foundation plus the simple Matrix bridge binary.
 
-Batteries included - one click setup (for [Beeper Plus](https://www.beeper.com/plus)), all models. It also comes with a faithful Go port of [OpenClaw](https://github.com/openclaw/openclaw) (formerly knows as Moltbot (formerly known as Clawdbot)) called Beep.
+## Repository scope
 
-Coming soon to Beeper Desktop as an experiment. Join the [Developer Community](beeper://connect) on [Matrix](https://matrix.to/#/#beeper-developers:beeper.com?via=beeper.com) for early access.
+This repo contains:
+- shared modules (`modules/contracts`, `modules/core`)
+- shared runtime/tool/helper packages (`pkg/*`)
+- simple bridge binary (`bridges/simple`)
 
-Connect all your chats with one click and manage your inbox with agents. Supports image generation, reminders, web search, memory, Clay.earth integration. Create basic AI Chats to talk to models with no tools and customizable system prompt.
+Dedicated products live in sibling repos:
+- `../beep` (agentic)
+- `../beeper-codex` (codex-only)
+- `../beeper-opencode` (opencode-only)
 
-Made by humans using agentic coding.
+## Dependency policy
 
-## Status
-
-Experimental Matrix ↔ AI bridge for Beeper, built on top of [mautrix/bridgev2](https://pkg.go.dev/maunium.net/go/mautrix/bridgev2). Works best with alpha versions of Beeper Desktop. Supports any OpenAI-compatible provider (including OpenRouter).
-
-## Highlights
-
-- Multi-provider routing with prefixed model IDs (e.g. `openai/...`, `anthropic/...`)
-- Per-model chats (each model shows up as its own contact)
-- Streaming responses
-- Multimodal input (images, PDFs, audio, video) when supported by the model
-- Per-room settings (model, temperature, system prompt, context limits, tools)
-- Login flows for Beeper, Magic Proxy, or custom (BYOK)
-- OpenClaw-style memory search (stored in the bridge DB)
-
-## Docs
-
-- `docs/matrix-ai-matrix-spec-v1.md`: Full Matrix transport spec (events, streaming, approvals, state, and schema examples).
+Downstream repos pin `github.com/beeper/ai-bridge` by SHA-based pseudo versions.
+Local `replace` directives are only for development workspaces.
 
 ## Build
 
-Requires libolm for encryption support.
-
 ```bash
 ./build.sh
-```
-
-Or use Docker:
-
-```bash
-docker build -t ai .
+./build-bridges.sh
 ```

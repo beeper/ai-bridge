@@ -42,18 +42,6 @@ func fnStatus(ce *commands.Event) {
 		return
 	}
 
-	if meta.IsCodexRoom {
-		cc := getCodexClient(ce)
-		if cc == nil {
-			ce.Reply("Codex isn't available for this login. Try again.")
-			return
-		}
-		threadID := strings.TrimSpace(meta.CodexThreadID)
-		cwd := strings.TrimSpace(meta.CodexCwd)
-		ce.Reply("Codex: logged_in=%v thread_id=%s cwd=%s", cc.IsLoggedIn(), threadID, cwd)
-		return
-	}
-
 	client := getAIClient(ce)
 	if client == nil {
 		ce.Reply("Couldn't load AI settings. Try again.")
@@ -140,30 +128,6 @@ func fnApprove(ce *commands.Event) {
 		return
 	}
 
-	if meta.IsCodexRoom {
-		cc := getCodexClient(ce)
-		if cc == nil {
-			ce.Reply("Codex isn't available for this login. Try again.")
-			return
-		}
-		err := cc.resolveToolApproval(approvalID, ToolApprovalDecisionCodex{
-			Approve:   approve,
-			Reason:    reason,
-			DecidedAt: time.Now(),
-			DecidedBy: ce.User.MXID,
-		})
-		if err != nil {
-			ce.Reply("%s", formatSystemAck(err.Error()))
-			return
-		}
-		if approve {
-			ce.Reply("%s", formatSystemAck("Approved."))
-		} else {
-			ce.Reply("%s", formatSystemAck("Denied."))
-		}
-		return
-	}
-
 	client := getAIClient(ce)
 	if client == nil {
 		ce.Reply("Couldn't load AI settings. Try again.")
@@ -212,20 +176,6 @@ func fnReset(ce *commands.Event) {
 		return
 	}
 
-	if meta.IsCodexRoom {
-		cc := getCodexClient(ce)
-		if cc == nil {
-			ce.Reply("Codex isn't available for this login. Try again.")
-			return
-		}
-		if err := cc.resetThread(ce.Ctx, portal, meta); err != nil {
-			ce.Reply("%s", formatSystemAck("Couldn't start a new Codex thread: "+err.Error()))
-		} else {
-			ce.Reply("%s", formatSystemAck("New Codex thread started."))
-		}
-		return
-	}
-
 	client := getAIClient(ce)
 	if client == nil {
 		ce.Reply("Couldn't load AI settings. Try again.")
@@ -266,10 +216,6 @@ func fnStop(ce *commands.Event) {
 		ce.Reply("Couldn't load room settings. Try again.")
 		return
 	}
-	if meta.IsCodexRoom {
-		ce.Reply("%s", formatSystemAck("Stop is not supported in Codex rooms."))
-		return
-	}
 	client, _, ok := requireClientMeta(ce)
 	if !ok {
 		return
@@ -298,11 +244,6 @@ func fnQueue(ce *commands.Event) {
 	if !ok {
 		return
 	}
-	if meta.IsCodexRoom {
-		ce.Reply("%s", formatSystemAck("Queue settings aren't supported in Codex rooms."))
-		return
-	}
-
 	queueSettings, _, storeRef, sessionKey := client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", QueueInlineOptions{})
 
 	if len(ce.Args) == 0 || strings.EqualFold(strings.TrimSpace(ce.Args[0]), "status") {
@@ -386,10 +327,6 @@ func fnThink(ce *commands.Event) {
 	if !ok {
 		return
 	}
-	if meta.IsCodexRoom {
-		ce.Reply("%s", formatSystemAck("Thinking level isn't supported in Codex rooms."))
-		return
-	}
 	if len(ce.Args) == 0 {
 		ce.Reply("Thinking: %s", client.defaultThinkLevel(meta))
 		return
@@ -419,10 +356,6 @@ var CommandVerbose = registerAICommand(commandregistry.Definition{
 func fnVerbose(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
 	if !ok {
-		return
-	}
-	if meta.IsCodexRoom {
-		ce.Reply("%s", formatSystemAck("Verbosity isn't supported in Codex rooms."))
 		return
 	}
 	if len(ce.Args) == 0 {
@@ -457,10 +390,6 @@ var CommandReasoning = registerAICommand(commandregistry.Definition{
 func fnReasoning(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
 	if !ok {
-		return
-	}
-	if meta.IsCodexRoom {
-		ce.Reply("%s", formatSystemAck("Reasoning settings aren't supported in Codex rooms."))
 		return
 	}
 	if len(ce.Args) == 0 {
@@ -502,10 +431,6 @@ func fnElevated(ce *commands.Event) {
 	if !ok {
 		return
 	}
-	if meta.IsCodexRoom {
-		ce.Reply("%s", formatSystemAck("Elevated mode isn't supported in Codex rooms."))
-		return
-	}
 	if len(ce.Args) == 0 {
 		current := meta.ElevatedLevel
 		if current == "" {
@@ -538,10 +463,6 @@ var CommandActivation = registerAICommand(commandregistry.Definition{
 func fnActivation(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
 	if !ok {
-		return
-	}
-	if meta.IsCodexRoom {
-		ce.Reply("%s", formatSystemAck("Activation isn't supported in Codex rooms."))
 		return
 	}
 	isGroup := client.isGroupChat(ce.Ctx, ce.Portal)
@@ -579,10 +500,6 @@ var CommandSend = registerAICommand(commandregistry.Definition{
 func fnSend(ce *commands.Event) {
 	client, meta, ok := requireClientMeta(ce)
 	if !ok {
-		return
-	}
-	if meta.IsCodexRoom {
-		ce.Reply("%s", formatSystemAck("Send policy isn't supported in Codex rooms."))
 		return
 	}
 	if len(ce.Args) == 0 {

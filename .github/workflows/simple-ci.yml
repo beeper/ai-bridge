@@ -1,0 +1,22 @@
+name: simple-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install libolm
+        run: sudo apt-get update && sudo apt-get install -y libolm-dev libolm3
+      - name: Boundary checks
+        run: ./scripts/check_module_boundaries.sh
+      - name: Go test
+        run: go test ./...
+      - name: Build simple bridge
+        run: go build -o ./ai-simple ./bridges/simple/cmd/bridge

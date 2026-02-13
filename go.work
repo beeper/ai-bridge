@@ -1,0 +1,8 @@
+go 1.24.0
+
+use (
+	.
+	./bridges/simple
+	./modules/contracts
+	./modules/core
+)

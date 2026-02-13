@@ -1,0 +1,29 @@
+# Simple bridge profile config
+homeserver:
+  address: https://matrix-client.example.com
+  domain: example.com
+
+appservice:
+  address: http://localhost:29345
+  hostname: 0.0.0.0
+  port: 29345
+  database: ai-simple.db
+  id: ai-simple
+  bot:
+    username: ai_simple
+    displayname: "AI Simple Bridge"
+  as_token: "GENERATE-A-TOKEN"
+  hs_token: "GENERATE-A-TOKEN"
+
+network:
+  beeper:
+    base_url: ""
+    token: ""
+  providers:
+    beeper:
+      default_model: "anthropic/claude-opus-4.6"
+    openrouter:
+      default_model: "anthropic/claude-opus-4.6"
+    openai:
+      default_model: "openai/gpt-5.2"
+  default_system_prompt: "You are a helpful assistant."

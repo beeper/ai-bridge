@@ -40,13 +40,6 @@ func (oc *AIClient) PreHandleMatrixReaction(ctx context.Context, msg *bridgev2.M
 	if content == nil {
 		return bridgev2.MatrixReactionPreResponse{}, bridgev2.ErrReactionsNotSupported
 	}
-	if msg.Portal != nil {
-		meta := portalMeta(msg.Portal)
-		if meta != nil && meta.IsOpenCodeRoom {
-			return bridgev2.MatrixReactionPreResponse{}, bridgev2.ErrReactionsNotSupported
-		}
-	}
-
 	emoji := variationselector.Remove(content.RelatesTo.Key)
 	return bridgev2.MatrixReactionPreResponse{
 		SenderID:     oc.matrixSenderID(msg.Event.Sender),
