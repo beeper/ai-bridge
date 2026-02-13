@@ -2,13 +2,10 @@ package connector
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/textfs"
 	"github.com/google/uuid"
 )
 
@@ -38,7 +35,10 @@ type sessionStoreRef struct {
 	Path    string
 }
 
-var sessionStoreLocks sync.Map
+var (
+	sessionStoreLocks sync.Map
+	sessionStores     sync.Map // key -> *sessionStore
+)
 
 func sessionStoreLockKey(ref sessionStoreRef) string {
 	agent := strings.TrimSpace(ref.AgentID)
@@ -80,59 +80,46 @@ func resolveSessionStorePath(cfg *Config, agentID string) string {
 		expanded = strings.TrimPrefix(expanded, "~")
 		expanded = strings.TrimPrefix(expanded, "/")
 	}
-	if normalized, err := textfs.NormalizePath(expanded); err == nil {
-		return normalized
+	expanded = strings.TrimPrefix(strings.TrimSpace(expanded), "/")
+	if expanded == "" {
+		return defaultSessionStorePath
 	}
-	return defaultSessionStorePath
+	return expanded
 }
 
-func (oc *AIClient) sessionTextFSStore(agentID string) (*textfs.Store, error) {
-	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.DB == nil {
-		return nil, errors.New("session store not available")
+func loadSessionStoreFromMemory(ref sessionStoreRef) sessionStore {
+	key := sessionStoreLockKey(ref)
+	if raw, ok := sessionStores.Load(key); ok {
+		if st, ok := raw.(*sessionStore); ok && st != nil {
+			copyStore := sessionStore{Sessions: map[string]sessionEntry{}}
+			for k, v := range st.Sessions {
+				copyStore.Sessions[k] = v
+			}
+			return copyStore
+		}
 	}
-	bridgeID := string(oc.UserLogin.Bridge.DB.BridgeID)
-	loginID := string(oc.UserLogin.ID)
-	normalized := normalizeAgentID(agentID)
-	if normalized == "" {
-		normalized = normalizeAgentID(defaultAgentID)
-	}
-	return textfs.NewStore(oc.UserLogin.Bridge.DB.Database, bridgeID, loginID, normalized), nil
+	return sessionStore{Sessions: map[string]sessionEntry{}}
 }
 
-func (oc *AIClient) loadSessionStore(ctx context.Context, ref sessionStoreRef) (sessionStore, error) {
-	store := sessionStore{Sessions: map[string]sessionEntry{}}
-	textStore, err := oc.sessionTextFSStore(ref.AgentID)
-	if err != nil {
-		return store, err
-	}
-	entry, found, err := textStore.Read(ctx, ref.Path)
-	if err != nil || !found {
-		return store, nil
-	}
-	if err := json.Unmarshal([]byte(entry.Content), &store); err != nil {
-		oc.Log().Warn().Err(err).Str("path", ref.Path).Msg("session store: JSON unmarshal failed, returning empty store")
-		return sessionStore{Sessions: map[string]sessionEntry{}}, nil
-	}
+func saveSessionStoreToMemory(ref sessionStoreRef, store sessionStore) {
 	if store.Sessions == nil {
 		store.Sessions = map[string]sessionEntry{}
 	}
-	return store, nil
+	key := sessionStoreLockKey(ref)
+	copyStore := &sessionStore{Sessions: map[string]sessionEntry{}}
+	for k, v := range store.Sessions {
+		copyStore.Sessions[k] = v
+	}
+	sessionStores.Store(key, copyStore)
 }
 
-func (oc *AIClient) saveSessionStore(ctx context.Context, ref sessionStoreRef, store sessionStore) error {
-	if store.Sessions == nil {
-		store.Sessions = map[string]sessionEntry{}
-	}
-	payload, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return err
-	}
-	textStore, err := oc.sessionTextFSStore(ref.AgentID)
-	if err != nil {
-		return err
-	}
-	_, err = textStore.Write(ctx, ref.Path, string(payload))
-	return err
+func (oc *AIClient) loadSessionStore(_ context.Context, ref sessionStoreRef) (sessionStore, error) {
+	return loadSessionStoreFromMemory(ref), nil
+}
+
+func (oc *AIClient) saveSessionStore(_ context.Context, ref sessionStoreRef, store sessionStore) error {
+	saveSessionStoreToMemory(ref, store)
+	return nil
 }
 
 func (oc *AIClient) getSessionEntry(ctx context.Context, ref sessionStoreRef, sessionKey string) (sessionEntry, bool) {
@@ -219,7 +206,7 @@ func mergeSessionEntry(existing sessionEntry, patch sessionEntry) sessionEntry {
 	return next
 }
 
-// resolveSessionStoreRef returns the session store ref (agent + store path) used for this agent.
+// resolveSessionStoreRef returns the session store ref used for this session key space.
 func (oc *AIClient) resolveSessionStoreRef(agentID string) sessionStoreRef {
 	cfg := (*Config)(nil)
 	if oc != nil && oc.connector != nil {
