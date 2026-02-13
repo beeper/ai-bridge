@@ -893,7 +893,6 @@ var CommandNew = registerAICommand(commandregistry.Definition{
 })
 
 func fnNew(ce *commands.Event) {
-	meta := getPortalMeta(ce)
 	client, meta, ok := requireClientMeta(ce)
 	if !ok {
 		return
