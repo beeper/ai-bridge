@@ -40,7 +40,6 @@ type AgentDefinition struct {
 	Temperature     float64                     `json:"temperature,omitempty"`
 	ReasoningEffort string                      `json:"reasoning_effort,omitempty"`
 	HeartbeatPrompt string                      `json:"heartbeat_prompt,omitempty"`
-	MemorySearch    *MemorySearchConfig         `json:"memory_search,omitempty"`
 	CreatedAt       int64                       `json:"created_at,omitempty"`
 	UpdatedAt       int64                       `json:"updated_at,omitempty"`
 }
@@ -104,92 +103,6 @@ type SoulEvilConfig struct {
 	Enabled bool `json:"enabled,omitempty"`
 }
 
-type MemorySearchConfig struct {
-	Enabled      *bool                     `json:"enabled,omitempty"`
-	Provider     string                    `json:"provider,omitempty"`
-	Model        string                    `json:"model,omitempty"`
-	BaseURL      string                    `json:"base_url,omitempty"`
-	APIKey       string                    `json:"api_key,omitempty"`
-	Citations    string                    `json:"citations,omitempty"`
-	Fallback     string                    `json:"fallback,omitempty"`
-	Sources      []string                  `json:"sources,omitempty"`
-	ExtraPaths   []string                  `json:"extra_paths,omitempty"`
-	Experimental *MemorySearchExperimental `json:"experimental,omitempty"`
-	Store        *MemorySearchStore        `json:"store,omitempty"`
-	Chunking     *MemorySearchChunking     `json:"chunking,omitempty"`
-	Sync         *MemorySearchSync         `json:"sync,omitempty"`
-	Query        *MemorySearchQuery        `json:"query,omitempty"`
-	Cache        *MemorySearchCache        `json:"cache,omitempty"`
-	Remote       *MemorySearchRemote       `json:"remote,omitempty"`
-}
-
-type MemorySearchExperimental struct {
-	SessionMemory *bool `json:"session_memory,omitempty"`
-}
-
-type MemorySearchStore struct {
-	Vector *MemorySearchStoreVector `json:"vector,omitempty"`
-}
-
-type MemorySearchStoreVector struct {
-	Enabled       *bool  `json:"enabled,omitempty"`
-	ExtensionPath string `json:"extension_path,omitempty"`
-}
-
-type MemorySearchChunking struct {
-	Tokens  int `json:"tokens,omitempty"`
-	Overlap int `json:"overlap,omitempty"`
-}
-
-type MemorySearchSync struct {
-	OnSessionStart  *bool                     `json:"on_session_start,omitempty"`
-	OnSearch        *bool                     `json:"on_search,omitempty"`
-	Watch           *bool                     `json:"watch,omitempty"`
-	WatchDebounceMs int                       `json:"watch_debounce_ms,omitempty"`
-	IntervalMinutes int                       `json:"interval_minutes,omitempty"`
-	Sessions        *MemorySearchSyncSessions `json:"sessions,omitempty"`
-}
-
-type MemorySearchSyncSessions struct {
-	DeltaBytes    int `json:"delta_bytes,omitempty"`
-	DeltaMessages int `json:"delta_messages,omitempty"`
-	RetentionDays int `json:"retention_days,omitempty"`
-}
-
-type MemorySearchQuery struct {
-	MaxResults       int                      `json:"max_results,omitempty"`
-	MinScore         float64                  `json:"min_score,omitempty"`
-	MaxInjectedChars int                      `json:"max_injected_chars,omitempty"`
-	Hybrid           *MemorySearchQueryHybrid `json:"hybrid,omitempty"`
-}
-
-type MemorySearchQueryHybrid struct {
-	Enabled             *bool   `json:"enabled,omitempty"`
-	VectorWeight        float64 `json:"vector_weight,omitempty"`
-	TextWeight          float64 `json:"text_weight,omitempty"`
-	CandidateMultiplier int     `json:"candidate_multiplier,omitempty"`
-}
-
-type MemorySearchCache struct {
-	Enabled    *bool `json:"enabled,omitempty"`
-	MaxEntries int   `json:"max_entries,omitempty"`
-}
-
-type MemorySearchRemote struct {
-	BaseURL string                   `json:"base_url,omitempty"`
-	APIKey  string                   `json:"api_key,omitempty"`
-	Headers map[string]string        `json:"headers,omitempty"`
-	Batch   *MemorySearchRemoteBatch `json:"batch,omitempty"`
-}
-
-type MemorySearchRemoteBatch struct {
-	Enabled        *bool `json:"enabled,omitempty"`
-	Wait           *bool `json:"wait,omitempty"`
-	Concurrency    int   `json:"concurrency,omitempty"`
-	PollIntervalMs int   `json:"poll_interval_ms,omitempty"`
-	TimeoutMinutes int   `json:"timeout_minutes,omitempty"`
-}
-
 type AgentStore interface {
 	LoadAgents(context.Context) (map[string]*AgentDefinition, error)
 	SaveAgent(context.Context, *AgentDefinition) error
@@ -238,7 +151,6 @@ type SystemPromptParams struct {
 	UserTimezone           string                `json:"user_timezone,omitempty"`
 	PromptMode             PromptMode            `json:"prompt_mode,omitempty"`
 	HeartbeatPrompt        string                `json:"heartbeat_prompt,omitempty"`
-	MemoryCitations        string                `json:"memory_citations,omitempty"`
 	UserIdentitySupplement string                `json:"user_identity_supplement,omitempty"`
 	ContextFiles           []EmbeddedContextFile `json:"context_files,omitempty"`
 	ToolNames              []string              `json:"tool_names,omitempty"`

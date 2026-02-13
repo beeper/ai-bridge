@@ -3,10 +3,8 @@ package connector
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
-	"github.com/openai/openai-go/v3"
 	agents "github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 	agenttools "github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/tools"
 	"maunium.net/go/mautrix/bridgev2"
@@ -64,22 +62,14 @@ func (oc *AIClient) isToolAllowedByPolicy(*PortalMetadata, string) bool {
 
 func purgeLoginDataBestEffort(context.Context, *bridgev2.UserLogin) {}
 
-func (oc *AIClient) notifySessionMemoryChange(context.Context, *bridgev2.Portal, *PortalMetadata, bool) {}
-
 func (oc *AIClient) buildCronService() cronServiceRuntime { return nil }
 
 func seedLastHeartbeatEvent(networkid.UserLoginID, *HeartbeatEventPayload) {}
-
-func stopMemoryManagersForLogin(string, string) {}
 
 func (oc *AIClient) recordAgentActivity(context.Context, *bridgev2.Portal, *PortalMetadata) {}
 
 func resolveHeartbeatPrompt(*Config, *HeartbeatConfig, *agents.AgentDefinition) string { return "" }
 func resolveHeartbeatConfig(*Config, string) *HeartbeatConfig                          { return nil }
-
-func (oc *AIClient) injectMemoryContext(_ context.Context, _ *bridgev2.Portal, _ *PortalMetadata, messages []openai.ChatCompletionMessageParamUnion) []openai.ChatCompletionMessageParamUnion {
-	return messages
-}
 
 func readStringArgAny(args map[string]any, key string) string {
 	if args == nil {
@@ -112,8 +102,6 @@ func (oc *AIClient) recordHeartbeatText(sessionStoreRef, string, string, int64) 
 
 func (oc *AIClient) resolveAgentIdentityName(context.Context, string) string { return "" }
 
-func (oc *AIClient) maybeRunMemoryFlush(context.Context, ...any) {}
-
 func (oc *AIClient) setApprovalSnapshotEvent(string, id.EventID, ...any) {}
 
 func (oc *AIClient) toolApprovalsTTLSeconds() int { return 0 }
@@ -144,14 +132,10 @@ func (oc *AIClient) waitToolApproval(context.Context, string) (ToolApprovalDecis
 
 func (oc *AIClient) toolApprovalsAskFallback() string { return "deny" }
 
-func resolveMemorySearchConfig(*AIClient, string) (*MemorySearchConfig, error) {
-	return nil, fmt.Errorf("memory search disabled in simple bridge")
-}
-
 func (oc *AIClient) shouldUseMCPTool(context.Context, string) bool { return false }
 
 func (oc *AIClient) executeMCPTool(context.Context, string, map[string]any) (string, error) {
-	return "", fmt.Errorf("mcp tools are disabled in simple bridge")
+	return "", errors.New("mcp tools are disabled in simple bridge")
 }
 
 func NewBossStoreAdapter(*AIClient) any { return nil }
@@ -164,17 +148,7 @@ func (oc *AIClient) executeAgentsList(context.Context, *bridgev2.Portal, map[str
 	return agenttools.ErrorResult("agents_list", "not available in simple bridge"), nil
 }
 
-func notifyMemoryFileChanged(context.Context, string) {}
-
-type memorySearchManager interface {
-	Search(context.Context, string, MemorySearchOptions) ([]MemorySearchResult, error)
-	Status() MemoryProviderStatus
-	ReadFile(context.Context, string, *int, *int) (map[string]any, error)
-}
-
-func getMemorySearchManager(*AIClient, string) (memorySearchManager, string) {
-	return nil, "memory search disabled in simple bridge"
-}
+func notifyWorkspaceFileChanged(context.Context, string) {}
 
 func canUseNexusToolsForAgent(*PortalMetadata) bool { return false }
 

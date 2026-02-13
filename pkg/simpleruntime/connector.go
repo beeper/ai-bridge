@@ -68,7 +68,7 @@ func (oc *OpenAIConnector) Stop(ctx context.Context) {
 func (oc *OpenAIConnector) Start(ctx context.Context) error {
 	oc.applyRuntimeDefaults()
 
-	// Ensure all stored logins are loaded into the in-memory cache early.
+	// Ensure all stored logins are loaded into the inprocess cache early.
 	// bridgev2's provisioning logout endpoint uses GetCachedUserLoginByID, so if logins
 	// haven't been loaded yet, clients may be unable to remove accounts.
 	oc.primeUserLoginCache(ctx)
@@ -441,7 +441,7 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 			oc.clientsMu.Unlock()
 			client, err := newAIClient(login, oc, key)
 			if err != nil {
-				// Keep the existing client if it's already in-memory; allow the login to stay cached/deletable.
+				// Keep the existing client if it's already inprocess; allow the login to stay cached/deletable.
 				oc.clientsMu.Lock()
 				existing.UserLogin = login
 				login.Client = existing

@@ -128,36 +128,6 @@ const (
 	ToolApprovalKindBuiltin ToolApprovalKind = "builtin"
 )
 
-const memorySearchTimeout = 3 * time.Second
-
-type MemorySearchOptions struct {
-	SessionKey string
-	MinScore   float64
-	Mode       string
-	MaxResults int
-	PathPrefix string
-	Sources    []string
-}
-
-type MemoryFallbackStatus struct {
-	Provider string `json:"provider,omitempty"`
-	Reason   string `json:"reason,omitempty"`
-}
-
-type MemoryProviderStatus struct {
-	Provider string                `json:"provider,omitempty"`
-	Model    string                `json:"model,omitempty"`
-	Fallback *MemoryFallbackStatus `json:"fallback,omitempty"`
-}
-
-type MemorySearchResult struct {
-	Path      string  `json:"path,omitempty"`
-	Snippet   string  `json:"snippet,omitempty"`
-	StartLine int     `json:"start_line,omitempty"`
-	EndLine   int     `json:"end_line,omitempty"`
-	Score     float64 `json:"score,omitempty"`
-}
-
 type ToolApprovalDecision struct {
 	Approve   bool
 	Always    bool

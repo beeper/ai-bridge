@@ -648,7 +648,6 @@ func (oc *AIClient) dispatchOrQueue(
 			}()
 			oc.dispatchCompletionInternal(runCtx, evt, portal, metaSnapshot, promptMessages)
 		}(metaSnapshot)
-		oc.notifySessionMemoryChange(ctx, portal, meta, false)
 		return userMessage, true
 	}
 
@@ -683,7 +682,6 @@ func (oc *AIClient) dispatchOrQueue(
 					queueItem.pending.PendingSent = true
 					pendingSent = true
 				}
-				oc.notifySessionMemoryChange(ctx, portal, meta, false)
 				return userMessage, true
 			}
 		}
@@ -717,7 +715,6 @@ func (oc *AIClient) dispatchOrQueue(
 	if evt != nil && !pendingSent {
 		oc.sendQueueAcceptedSuccess(ctx, portal, evt, queueItem.pending.StatusEvents)
 	}
-	oc.notifySessionMemoryChange(ctx, portal, meta, false)
 	return userMessage, true
 }
 
@@ -1056,13 +1053,6 @@ func (oc *AIClient) Disconnect() {
 	}
 	if oc.heartbeatRunner != nil {
 		oc.heartbeatRunner.Stop()
-	}
-
-	// Stop all memory search managers for this login (releases goroutines/timers).
-	if oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.DB != nil {
-		bridgeID := string(oc.UserLogin.Bridge.DB.BridgeID)
-		loginID := string(oc.UserLogin.ID)
-		stopMemoryManagersForLogin(bridgeID, loginID)
 	}
 
 	// Clean up per-room maps to prevent unbounded growth
@@ -1496,9 +1486,6 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 		UserTimezone:      timezone,
 		PromptMode:        agent.PromptMode,
 		HeartbeatPrompt:   resolveHeartbeatPrompt(&oc.connector.Config, resolveHeartbeatConfig(&oc.connector.Config, agent.ID), agent),
-	}
-	if oc.connector != nil && oc.connector.Config.Memory != nil {
-		params.MemoryCitations = strings.TrimSpace(oc.connector.Config.Memory.Citations)
 	}
 	params.UserIdentitySupplement = oc.gravatarContext()
 	params.ContextFiles = oc.buildBootstrapContextFiles(ctx, agentID, meta)
@@ -2256,7 +2243,6 @@ func (oc *AIClient) buildPromptWithLinkContext(
 		return nil, err
 	}
 	if meta == nil || !meta.IsRawMode {
-		prompt = oc.injectMemoryContext(ctx, portal, meta, prompt)
 	}
 
 	// Build final message with link context
@@ -2368,7 +2354,6 @@ func (oc *AIClient) buildPromptWithMedia(
 	}
 	isRaw := meta != nil && meta.IsRawMode
 	if !isRaw {
-		prompt = oc.injectMemoryContext(ctx, portal, meta, prompt)
 	}
 
 	captionWithID := strings.TrimSpace(caption)
