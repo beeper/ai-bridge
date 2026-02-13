@@ -22,8 +22,8 @@ func nexusConfigured(cfg *NexusToolsConfig) bool {
 	return strings.TrimSpace(cfg.BaseURL) != "" && strings.TrimSpace(cfg.Token) != ""
 }
 
-func cronRunLogEntryFromEvent(evt CronEvent) CronRunLogEntry {
-	return CronRunLogEntry{
+func cronRunLogEntryFromEvent(evt StateEvent) StateRunLogEntry {
+	return StateRunLogEntry{
 		TS:          time.Now().UnixMilli(),
 		JobID:       evt.JobID,
 		Action:      evt.Action,

@@ -304,8 +304,7 @@ type AIClient struct {
 	queueTypingMu sync.Mutex
 	queueTyping   map[id.RoomID]*TypingController
 
-	// Cron + heartbeat
-	cronService     cronServiceRuntime
+	// Heartbeat runtime
 	heartbeatRunner *HeartbeatRunner
 	heartbeatWake   *HeartbeatWake
 
@@ -460,7 +459,6 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 
 	oc.heartbeatWake = &HeartbeatWake{log: oc.log}
 	oc.heartbeatRunner = NewHeartbeatRunner(oc)
-	oc.cronService = oc.buildCronService()
 
 	// Seed last-heartbeat snapshot from persisted login metadata (command-only surface).
 	if meta != nil && meta.LastHeartbeatEvent != nil {
@@ -1009,30 +1007,6 @@ func (oc *AIClient) Connect(ctx context.Context) {
 	if oc.heartbeatRunner != nil {
 		oc.heartbeatRunner.Start()
 	}
-	if oc.cronService != nil {
-		if err := oc.cronService.Start(); err != nil {
-			oc.loggerForContext(ctx).Warn().Err(err).Msg("cron: failed to start scheduler, scheduling retry")
-			go oc.retryCronStart(oc.disconnectCtx)
-		}
-	}
-}
-
-func (oc *AIClient) retryCronStart(ctx context.Context) {
-	delays := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second, 60 * time.Second}
-	for _, d := range delays {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(d):
-		}
-		if err := oc.cronService.Start(); err != nil {
-			oc.loggerForContext(ctx).Warn().Err(err).Dur("retryDelay", d).Msg("cron: start retry failed")
-			continue
-		}
-		oc.loggerForContext(ctx).Info().Msg("cron: start retry succeeded")
-		return
-	}
-	oc.loggerForContext(ctx).Error().Msg("cron: all start retries exhausted")
 }
 
 func (oc *AIClient) Disconnect() {
@@ -1048,9 +1022,6 @@ func (oc *AIClient) Disconnect() {
 	}
 	oc.loggedIn.Store(false)
 
-	if oc.cronService != nil {
-		oc.cronService.Stop()
-	}
 	if oc.heartbeatRunner != nil {
 		oc.heartbeatRunner.Stop()
 	}

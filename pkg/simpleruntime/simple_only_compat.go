@@ -62,8 +62,6 @@ func (oc *AIClient) isToolAllowedByPolicy(*PortalMetadata, string) bool {
 
 func purgeLoginDataBestEffort(context.Context, *bridgev2.UserLogin) {}
 
-func (oc *AIClient) buildCronService() cronServiceRuntime { return nil }
-
 func seedLastHeartbeatEvent(networkid.UserLoginID, *HeartbeatEventPayload) {}
 
 func (oc *AIClient) recordAgentActivity(context.Context, *bridgev2.Portal, *PortalMetadata) {}

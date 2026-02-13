@@ -16,11 +16,6 @@ type pendingToolApproval struct {
 	ID string
 }
 
-type cronServiceRuntime interface {
-	Start() error
-	Stop()
-}
-
 type HeartbeatWake struct {
 	log zerolog.Logger
 }
@@ -138,18 +133,18 @@ type ToolApprovalDecision struct {
 
 func (oc *AIClient) resolveToolApproval(id.RoomID, string, ToolApprovalDecision) error { return nil }
 
-type CronStoreEntry struct {
+type StateStoreEntry struct {
 	Key  string
 	Data []byte
 }
 
-type CronStoreBackend interface {
+type StateStoreBackend interface {
 	Read(context.Context, string) ([]byte, bool, error)
 	Write(context.Context, string, []byte) error
-	List(context.Context, string) ([]CronStoreEntry, error)
+	List(context.Context, string) ([]StateStoreEntry, error)
 }
 
-type CronEvent struct {
+type StateEvent struct {
 	JobID       string
 	Action      string
 	Status      string
@@ -160,7 +155,7 @@ type CronEvent struct {
 	NextRunAtMs int64
 }
 
-type CronRunLogEntry struct {
+type StateRunLogEntry struct {
 	TS          int64
 	JobID       string
 	Action      string
