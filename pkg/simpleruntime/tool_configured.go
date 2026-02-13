@@ -95,7 +95,7 @@ func (oc *AIClient) isMemorySearchExplicitlyDisabled(meta *PortalMetadata) (bool
 		// tool is disabled. Treat both as unavailable here.
 		return true, err.Error()
 	}
-	if cfg == nil || !cfg.Enabled {
+	if cfg == nil || cfg.Enabled == nil || !*cfg.Enabled {
 		return true, "Memory search disabled"
 	}
 	return false, ""
