@@ -554,11 +554,5 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "max_chars")
 	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "max_redirects")
 	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "cache_ttl_seconds")
-	helper.Copy(configupgrade.Bool, "tools", "nexus", "enabled")
-	helper.Copy(configupgrade.Str, "tools", "nexus", "base_url")
-	helper.Copy(configupgrade.Str, "tools", "nexus", "token")
-	helper.Copy(configupgrade.Str, "tools", "nexus", "auth_type")
-	helper.Copy(configupgrade.Int, "tools", "nexus", "timeout_seconds")
-
 	// Tool policy (OpenClaw-style)
 }

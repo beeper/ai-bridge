@@ -87,9 +87,6 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 			Msg("Inbound matrix message received")
 	}
 
-	// Track last active room per agent for heartbeat routing
-	oc.recordAgentActivity(ctx, portal, meta)
-
 	// Check deduplication - skip if we've already processed this event
 	if oc.inboundDedupeCache != nil {
 		dedupeKey := oc.buildDedupeKey(portal.MXID, msg.Event.ID)
