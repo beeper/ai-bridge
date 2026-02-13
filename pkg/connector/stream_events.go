@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/matrixevents"
+	"github.com/beeper/ai-bridge/modules/contracts/matrixevents"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2"

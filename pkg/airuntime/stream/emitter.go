@@ -3,7 +3,7 @@ package stream
 import (
 	"context"
 
-	"github.com/beeper/ai-bridge/pkg/matrixevents"
+	"github.com/beeper/ai-bridge/modules/contracts/matrixevents"
 	"github.com/beeper/ai-bridge/pkg/matrixtransport"
 
 	"maunium.net/go/mautrix/event"

@@ -1,7 +1,7 @@
 package main
 
 import (
-	core "github.com/beeper/ai-bridge/modules/core"
+	"github.com/beeper/ai-bridge/modules/simple"
 	"maunium.net/go/mautrix/bridgev2/matrix/mxmain"
 )
 
@@ -18,7 +18,7 @@ var m = mxmain.BridgeMain{
 	Description: "A Matrix↔AI bridge for Beeper built on mautrix-go bridgev2.",
 	URL:         "https://github.com/beeper/ai-bridge",
 	Version:     "0.1.0",
-	Connector:   core.NewConnector(core.BridgeSimple),
+	Connector:   simple.NewConnector(),
 }
 
 func main() {
