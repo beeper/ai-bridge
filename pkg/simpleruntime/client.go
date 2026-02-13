@@ -440,11 +440,6 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 	oc.heartbeatWake = &HeartbeatWake{log: oc.log}
 	oc.heartbeatRunner = NewHeartbeatRunner(oc)
 
-	// Seed last-heartbeat snapshot from persisted login metadata (command-only surface).
-	if meta != nil && meta.LastHeartbeatEvent != nil {
-		seedLastHeartbeatEvent(login.ID, meta.LastHeartbeatEvent)
-	}
-
 	return oc, nil
 }
 

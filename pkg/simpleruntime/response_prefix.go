@@ -58,7 +58,7 @@ func resolveIdentityNameForPrefix(oc *AIClient, agentID string) string {
 			return strings.TrimSpace(agent.Identity.Name)
 		}
 	}
-	return oc.resolveAgentIdentityName(context.Background(), resolved)
+	return ""
 }
 
 func buildResponsePrefixContext(oc *AIClient, agentID string, meta *PortalMetadata) ResponsePrefixContext {

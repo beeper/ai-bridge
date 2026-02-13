@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/networkid"
 	"strings"
 )
 
@@ -54,13 +53,6 @@ func (oc *AIClient) isToolAllowedByPolicy(*PortalMetadata, string) bool {
 
 func purgeLoginDataBestEffort(context.Context, *bridgev2.UserLogin) {}
 
-func seedLastHeartbeatEvent(networkid.UserLoginID, *HeartbeatEventPayload) {}
-
-func (oc *AIClient) recordAgentActivity(context.Context, *bridgev2.Portal, *PortalMetadata) {}
-
-func resolveHeartbeatPrompt(*Config, *HeartbeatConfig, *AgentDefinition) string { return "" }
-func resolveHeartbeatConfig(*Config, string) *HeartbeatConfig                   { return nil }
-
 func readStringArgAny(args map[string]any, key string) string {
 	if args == nil {
 		return ""
@@ -83,14 +75,6 @@ func formatCronTime(value string) string {
 	}
 	return value
 }
-
-func (oc *AIClient) restoreHeartbeatUpdatedAt(sessionStoreRef, string, int64) {}
-
-func (oc *AIClient) isDuplicateHeartbeat(sessionStoreRef, string, string, int64) bool { return false }
-
-func (oc *AIClient) recordHeartbeatText(sessionStoreRef, string, string, int64) {}
-
-func (oc *AIClient) resolveAgentIdentityName(context.Context, string) string { return "" }
 
 func (oc *AIClient) enabledBuiltinToolsForModel(context.Context, *PortalMetadata) []ToolDefinition {
 	return []ToolDefinition{}

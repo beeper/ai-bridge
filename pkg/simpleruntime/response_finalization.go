@@ -306,7 +306,6 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Stringer("initial_event_id", state.initialEventID).Msg("Failed to send final assistant turn")
 	} else {
-		oc.recordAgentActivity(ctx, portal, meta)
 		oc.loggerForContext(ctx).Debug().
 			Str("initial_event_id", state.initialEventID.String()).
 			Str("turn_id", state.turnID).
@@ -391,7 +390,6 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	}
 
 	if shouldSkipMain && !hasContent && !hasReasoning {
-		oc.restoreHeartbeatUpdatedAt(storeRef, hb.SessionKey, hb.PrevUpdatedAt)
 		silent := true
 		if hb.ShowOk && deliverable {
 			heartbeatOk := heartbeatToken
@@ -426,29 +424,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	}
 
 	// Deduplicate identical heartbeat content within 24h
-	if hasContent && !shouldSkipMain && !hasMedia {
-		if oc.isDuplicateHeartbeat(storeRef, hb.SessionKey, cleaned, state.startedAtMs) {
-			oc.restoreHeartbeatUpdatedAt(storeRef, hb.SessionKey, hb.PrevUpdatedAt)
-			oc.redactInitialStreamingMessage(ctx, portal, intent, state)
-			state.pendingImages = nil
-			indicator := (*HeartbeatIndicatorType)(nil)
-			if hb.UseIndicator {
-				indicator = resolveIndicatorType("skipped")
-			}
-			oc.emitHeartbeatEvent(&HeartbeatEventPayload{
-				TS:            time.Now().UnixMilli(),
-				Status:        "skipped",
-				Reason:        "duplicate",
-				Preview:       cleaned[:min(len(cleaned), 200)],
-				Channel:       hb.Channel,
-				HasMedia:      hasMedia,
-				DurationMs:    durationMs,
-				IndicatorType: indicator,
-			})
-			sendOutcome(HeartbeatRunOutcome{Status: "ran", Reason: "duplicate", Skipped: true})
-			return
-		}
-	}
+	_ = storeRef
 
 	if !deliverable {
 		oc.redactInitialStreamingMessage(ctx, portal, intent, state)
@@ -472,7 +448,6 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	}
 
 	if !hb.ShowAlerts {
-		oc.restoreHeartbeatUpdatedAt(storeRef, hb.SessionKey, hb.PrevUpdatedAt)
 		oc.redactInitialStreamingMessage(ctx, portal, intent, state)
 		state.pendingImages = nil
 		indicator := (*HeartbeatIndicatorType)(nil)
@@ -512,9 +487,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 	}
 
 	// Record heartbeat for dedupe
-	if hb.SessionKey != "" && cleaned != "" && !shouldSkipMain {
-		oc.recordHeartbeatText(storeRef, hb.SessionKey, cleaned, state.startedAtMs)
-	}
+	_ = hb.SessionKey
 
 	indicator := (*HeartbeatIndicatorType)(nil)
 	if hb.UseIndicator {
@@ -588,7 +561,6 @@ func (oc *AIClient) sendPlainAssistantMessageWithResult(ctx context.Context, por
 		oc.loggerForContext(ctx).Warn().Err(err).Stringer("room_id", portal.MXID).Msg("Failed to send plain assistant message")
 		return err
 	}
-	oc.recordAgentActivity(ctx, portal, portalMeta(portal))
 	return nil
 }
 
@@ -843,7 +815,6 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 	if _, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil); err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Stringer("initial_event_id", state.initialEventID).Msg("Failed to send final assistant turn (raw mode)")
 	} else {
-		oc.recordAgentActivity(ctx, portal, meta)
 		oc.loggerForContext(ctx).Debug().
 			Str("initial_event_id", state.initialEventID.String()).
 			Str("turn_id", state.turnID).
