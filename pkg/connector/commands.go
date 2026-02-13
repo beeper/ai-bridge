@@ -430,7 +430,6 @@ func fnCommands(ce *commands.Event) {
 			"- MCP: `!ai mcp ...`\n" +
 			"- Clay: `!ai clay ...`\n" +
 			"- Desktop API: `!ai desktop-api ...`\n" +
-			"- OpenCode: `!ai opencode ...` (alias: `!ai openconnect ...`)\n" +
 			"- Gravatar: `!ai gravatar ...`\n" +
 			"- Memory (admin): `!ai memory ...`\n\n" +
 			"Use `!help` for the full command list from the command processor.",
@@ -1089,15 +1088,6 @@ var CommandNew = registerAICommand(commandregistry.Definition{
 
 func fnNew(ce *commands.Event) {
 	meta := getPortalMeta(ce)
-	if meta != nil && meta.IsCodexRoom {
-		cc := getCodexClient(ce)
-		if cc == nil {
-			ce.Reply("Codex isn't available.")
-			return
-		}
-		go cc.handleNewCodexChat(ce.Ctx, ce.Portal, meta, ce.Args)
-		return
-	}
 	client, meta, ok := requireClientMeta(ce)
 	if !ok {
 		return

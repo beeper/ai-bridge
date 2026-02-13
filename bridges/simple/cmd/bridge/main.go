@@ -5,8 +5,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2/matrix/mxmain"
 )
 
-// Information to find out exactly which commit the bridge was built from.
-// These are filled at build time with the -X linker flag.
 var (
 	Tag       = "unknown"
 	Commit    = "unknown"
@@ -14,8 +12,8 @@ var (
 )
 
 var m = mxmain.BridgeMain{
-	Name:        "ai",
-	Description: "A Matrix↔AI bridge for Beeper built on mautrix-go bridgev2.",
+	Name:        "ai-simple",
+	Description: "Simple Matrix↔AI bridge.",
 	URL:         "https://github.com/beeper/ai-bridge",
 	Version:     "0.1.0",
 	Connector:   core.NewConnector(core.BridgeSimple),

@@ -233,7 +233,7 @@ func (oc *AIClient) scheduleAutoGreeting(ctx context.Context, portal *bridgev2.P
 	if meta == nil || meta.AutoGreetingSent {
 		return
 	}
-	if meta.IsBuilderRoom || meta.IsCronRoom || meta.IsOpenCodeRoom {
+	if meta.IsBuilderRoom || meta.IsCronRoom {
 		return
 	}
 	if normalizeSendPolicyMode(meta.SendPolicy) == "deny" {
@@ -274,7 +274,7 @@ func (oc *AIClient) scheduleAutoGreeting(ctx context.Context, portal *bridgev2.P
 				oc.Log().Debug().Stringer("room_id", roomID).Msg("auto-greeting loop exiting: already sent or no meta")
 				return
 			}
-			if currentMeta.IsBuilderRoom || currentMeta.IsCronRoom || currentMeta.IsOpenCodeRoom {
+			if currentMeta.IsBuilderRoom || currentMeta.IsCronRoom {
 				oc.Log().Debug().Stringer("room_id", roomID).Msg("auto-greeting loop exiting: special room type")
 				return
 			}

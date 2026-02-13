@@ -4,7 +4,7 @@ if [[ -z "$GID" ]]; then
 	GID="$UID"
 fi
 
-BINARY_NAME=/usr/bin/ai
+BINARY_NAME="${BINARY_NAME:-/usr/bin/ai}"
 
 function fixperms {
 	chown -R $UID:$GID /data

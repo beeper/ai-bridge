@@ -40,10 +40,12 @@ type OpenAIConnector struct {
 
 	clientsMu sync.Mutex
 	clients   map[networkid.UserLoginID]bridgev2.NetworkAPI
+	policy    BridgePolicy
 }
 
 func (oc *OpenAIConnector) Init(bridge *bridgev2.Bridge) {
 	oc.br = bridge
+	oc.policy = normalizeBridgePolicy(oc.policy)
 	oc.clientsMu.Lock()
 	if oc.clients == nil {
 		oc.clients = make(map[networkid.UserLoginID]bridgev2.NetworkAPI)
@@ -83,7 +85,9 @@ func (oc *OpenAIConnector) Start(ctx context.Context) error {
 	oc.registerCustomEventHandlers()
 
 	// Initialize provisioning API endpoints
-	oc.initProvisioning()
+	if oc.bridgePolicy().ProvisioningEnabled {
+		oc.initProvisioning()
+	}
 
 	return nil
 }
@@ -109,54 +113,6 @@ func (oc *OpenAIConnector) applyRuntimeDefaults() {
 	}
 	if oc.Config.Bridge.CommandPrefix == "" {
 		oc.Config.Bridge.CommandPrefix = "!ai"
-	}
-	if oc.Config.Codex == nil {
-		oc.Config.Codex = &CodexConfig{}
-	}
-	if oc.Config.Codex.Enabled == nil {
-		v := true
-		oc.Config.Codex.Enabled = &v
-	}
-	if strings.TrimSpace(oc.Config.Codex.Command) == "" {
-		oc.Config.Codex.Command = "codex"
-	}
-	if strings.TrimSpace(oc.Config.Codex.DefaultModel) == "" {
-		oc.Config.Codex.DefaultModel = "gpt-5.1-codex"
-	}
-	if oc.Config.Codex.NetworkAccess == nil {
-		v := true
-		oc.Config.Codex.NetworkAccess = &v
-	}
-	if oc.Config.Codex.ClientInfo == nil {
-		oc.Config.Codex.ClientInfo = &CodexClientInfo{}
-	}
-	if strings.TrimSpace(oc.Config.Codex.ClientInfo.Name) == "" {
-		oc.Config.Codex.ClientInfo.Name = "ai_bridge_matrix"
-	}
-	if strings.TrimSpace(oc.Config.Codex.ClientInfo.Title) == "" {
-		oc.Config.Codex.ClientInfo.Title = "AI Bridge (Matrix)"
-	}
-	if strings.TrimSpace(oc.Config.Codex.ClientInfo.Version) == "" {
-		oc.Config.Codex.ClientInfo.Version = "0.1.0"
-	}
-	if oc.Config.OpenCode != nil {
-		if oc.Config.OpenCode.Enabled == nil {
-			v := true
-			oc.Config.OpenCode.Enabled = &v
-		}
-		if oc.Config.OpenCode.AutoStart == nil {
-			v := false
-			oc.Config.OpenCode.AutoStart = &v
-		}
-		if strings.TrimSpace(oc.Config.OpenCode.Command) == "" {
-			oc.Config.OpenCode.Command = "opencode"
-		}
-		if strings.TrimSpace(oc.Config.OpenCode.Hostname) == "" {
-			oc.Config.OpenCode.Hostname = "127.0.0.1"
-		}
-		if strings.TrimSpace(oc.Config.OpenCode.Username) == "" {
-			oc.Config.OpenCode.Username = "opencode"
-		}
 	}
 	if oc.Config.Pruning == nil {
 		oc.Config.Pruning = DefaultPruningConfig()
@@ -384,16 +340,12 @@ func sendStateEventSuccessStatus(ctx context.Context, portal *bridgev2.Portal, e
 }
 
 func (oc *OpenAIConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
+	policy := oc.bridgePolicy()
 	return &bridgev2.NetworkGeneralCapabilities{
 		// Enable disappearing messages - we just delete from Matrix and DB
 		DisappearingMessages: true,
 		Provisioning: bridgev2.ProvisioningCapabilities{
-			ResolveIdentifier: bridgev2.ResolveIdentifierCapabilities{
-				CreateDM:       true,
-				LookupUsername: true,
-				ContactList:    true,
-				Search:         true,
-			},
+			ResolveIdentifier: policy.ResolveIdentifier,
 		},
 	}
 }
@@ -416,12 +368,13 @@ func (oc *OpenAIConnector) FillPortalBridgeInfo(portal *bridgev2.Portal, content
 }
 
 func (oc *OpenAIConnector) GetName() bridgev2.BridgeName {
+	policy := oc.bridgePolicy()
 	return bridgev2.BridgeName{
-		DisplayName:          "Beeper AI",
+		DisplayName:          policy.Name,
 		NetworkURL:           "https://www.beeper.com/ai",
 		NetworkIcon:          "mxc://beeper.com/51a668657dd9e0132cc823ad9402c6c2d0fc3321",
-		NetworkID:            "ai",
-		BeeperBridgeType:     "ai",
+		NetworkID:            policy.NetworkID,
+		BeeperBridgeType:     policy.BeeperBridgeType,
 		DefaultPort:          29345,
 		DefaultCommandPrefix: oc.Config.Bridge.CommandPrefix,
 	}
@@ -450,36 +403,8 @@ func (oc *OpenAIConnector) GetDBMetaTypes() database.MetaTypes {
 
 func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
 	meta := loginMetadata(login)
-	if strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderCodex) {
-		// Codex uses its own auth/tokens stored under CODEX_HOME. No OpenAI API key is required here.
-		if oc.Config.Codex != nil && oc.Config.Codex.Enabled != nil && !*oc.Config.Codex.Enabled {
-			login.Client = &brokenLoginClient{UserLogin: login, Reason: "Codex integration is disabled in the configuration."}
-			return nil
-		}
-
-		oc.clientsMu.Lock()
-		if existingAPI := oc.clients[login.ID]; existingAPI != nil {
-			if existing, ok := existingAPI.(*CodexClient); ok {
-				// Keep using one Codex client instance per login ID.
-				existing.UserLogin = login
-				login.Client = existing
-				oc.clientsMu.Unlock()
-				return nil
-			}
-			// Type mismatch: rebuild.
-			delete(oc.clients, login.ID)
-		}
-		oc.clientsMu.Unlock()
-
-		client, err := newCodexClient(login, oc)
-		if err != nil {
-			login.Client = &brokenLoginClient{UserLogin: login, Reason: "Couldn't initialize Codex for this login. Remove and re-add the account."}
-			return nil
-		}
-		oc.clientsMu.Lock()
-		oc.clients[login.ID] = client
-		oc.clientsMu.Unlock()
-		login.Client = client
+	if !oc.loginFlowAllowed(providerToFlowID(meta.Provider)) {
+		login.Client = &brokenLoginClient{UserLogin: login, Reason: "This login type is not supported by this bridge."}
 		return nil
 	}
 
@@ -504,7 +429,9 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 			oc.clients[login.ID] = client
 			oc.clientsMu.Unlock()
 			login.Client = client
-			client.scheduleBootstrap()
+			if oc.shouldBootstrapChats() {
+				client.scheduleBootstrap()
+			}
 			return nil
 		}
 
@@ -536,7 +463,9 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 		existing.UserLogin = login
 		login.Client = existing
 		oc.clientsMu.Unlock()
-		existing.scheduleBootstrap()
+		if oc.shouldBootstrapChats() {
+			existing.scheduleBootstrap()
+		}
 		return nil
 	}
 	oc.clientsMu.Unlock()
@@ -550,38 +479,34 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 	oc.clients[login.ID] = client
 	oc.clientsMu.Unlock()
 	login.Client = client
-	client.scheduleBootstrap()
+	if oc.shouldBootstrapChats() {
+		client.scheduleBootstrap()
+	}
 	return nil
 }
 
 // Package-level flow definitions (use Provider* constants as flow IDs)
 func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
-	flows := []bridgev2.LoginFlow{
-		{ID: ProviderBeeper, Name: "Beeper AI"},
-		{ID: ProviderMagicProxy, Name: "Magic Proxy"},
-		{ID: FlowCustom, Name: "Manual"},
+	flows := make([]bridgev2.LoginFlow, 0, 4)
+	if oc.loginFlowAllowed(ProviderBeeper) {
+		flows = append(flows, bridgev2.LoginFlow{ID: ProviderBeeper, Name: "Beeper AI"})
 	}
-	if oc.Config.Codex != nil && (oc.Config.Codex.Enabled == nil || *oc.Config.Codex.Enabled) {
-		flows = append(flows, bridgev2.LoginFlow{
-			ID:          ProviderCodex,
-			Name:        "Codex",
-			Description: "Use a local Codex install via codex app-server (stdio).",
-		})
+	if oc.loginFlowAllowed(ProviderMagicProxy) {
+		flows = append(flows, bridgev2.LoginFlow{ID: ProviderMagicProxy, Name: "Magic Proxy"})
+	}
+	if oc.loginFlowAllowed(FlowCustom) {
+		flows = append(flows, bridgev2.LoginFlow{ID: FlowCustom, Name: "Manual"})
 	}
 	return flows
 }
 
 func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
-	if flowID == ProviderCodex {
-		if oc.Config.Codex != nil && oc.Config.Codex.Enabled != nil && !*oc.Config.Codex.Enabled {
-			return nil, fmt.Errorf("login flow %s is not available", flowID)
-		}
-		return &CodexLogin{User: user, Connector: oc, FlowID: flowID}, nil
-	}
-	// Compatibility aliases: some clients may still request these historic flow IDs even though
-	// we intentionally keep the UI limited to Beeper AI, Magic Proxy, Custom, Codex.
+	// Compatibility aliases: some clients may still request historic provider IDs.
 	if flowID == ProviderOpenAI || flowID == ProviderOpenRouter {
 		flowID = FlowCustom
+	}
+	if !oc.loginFlowAllowed(flowID) {
+		return nil, fmt.Errorf("login flow %s is not available", flowID)
 	}
 	// Validate by checking if flowID is in available flows
 	flows := oc.GetLoginFlows()

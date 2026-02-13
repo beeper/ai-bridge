@@ -39,15 +39,6 @@ func (oc *AIClient) dispatchInternalMessage(
 			Str("source", strings.TrimSpace(source)).
 			Msg("Dispatching internal message")
 	}
-	if meta.IsOpenCodeRoom {
-		if oc.opencodeBridge == nil {
-			return "", false, errors.New("OpenCode integration is not available")
-		}
-		if trace {
-			oc.loggerForContext(ctx).Debug().Stringer("portal", portal.PortalKey).Msg("Routing internal message to OpenCode")
-		}
-		return oc.opencodeBridge.DispatchInternalMessage(ctx, portal, oc.PortalMeta(portal), body)
-	}
 	trimmed := strings.TrimSpace(body)
 	if trimmed == "" {
 		return "", false, errors.New("message body is required")

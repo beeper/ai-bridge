@@ -26,7 +26,7 @@ func shouldExcludeModelVisiblePortal(meta *PortalMetadata) bool {
 	if meta == nil {
 		return false
 	}
-	if meta.IsCronRoom || meta.IsBuilderRoom || meta.IsOpenCodeRoom {
+	if meta.IsCronRoom || meta.IsBuilderRoom {
 		return true
 	}
 	return strings.TrimSpace(meta.SubagentParentRoomID) != ""
@@ -130,15 +130,6 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 			}
 			if model != "" {
 				entry["model"] = model
-			}
-			if meta.IsOpenCodeRoom {
-				entry["source"] = "opencode"
-				if meta.OpenCodeInstanceID != "" {
-					entry["opencodeInstanceID"] = meta.OpenCodeInstanceID
-				}
-				if meta.OpenCodeSessionID != "" {
-					entry["opencodeSessionID"] = meta.OpenCodeSessionID
-				}
 			}
 		}
 		if messageLimit > 0 {

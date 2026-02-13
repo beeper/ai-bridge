@@ -7,8 +7,6 @@ import (
 	"go.mau.fi/util/random"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
-
-	"github.com/beeper/ai-bridge/pkg/opencodebridge"
 )
 
 // ModelCache stores available models (cached in UserLoginMetadata)
@@ -112,11 +110,6 @@ type UserLoginMetadata struct {
 	Provider             string         `json:"provider,omitempty"` // Selected provider (beeper, openai, openrouter)
 	APIKey               string         `json:"api_key,omitempty"`
 	BaseURL              string         `json:"base_url,omitempty"`               // Per-user API endpoint
-	CodexHome            string         `json:"codex_home,omitempty"`             // Isolated CODEX_HOME for this login (provider=codex)
-	CodexHomeManaged     bool           `json:"codex_home_managed,omitempty"`     // True if we created this CODEX_HOME (false for existing ~/.codex)
-	CodexCommand         string         `json:"codex_command,omitempty"`          // Optional per-login codex binary override
-	CodexAuthMode        string         `json:"codex_auth_mode,omitempty"`        // chatgpt|apiKey|existing
-	CodexAccountEmail    string         `json:"codex_account_email,omitempty"`    // Optional, from account/read
 	TitleGenerationModel string         `json:"title_generation_model,omitempty"` // Model to use for generating chat titles
 	NextChatIndex        int            `json:"next_chat_index,omitempty"`
 	DefaultChatPortalID  string         `json:"default_chat_portal_id,omitempty"`
@@ -152,14 +145,6 @@ type UserLoginMetadata struct {
 	HeartbeatState map[string]HeartbeatState `json:"heartbeat_state,omitempty"`
 	// LastHeartbeatEvent is the last emitted heartbeat event for this login (command-only debug surface).
 	LastHeartbeatEvent *HeartbeatEventPayload `json:"last_heartbeat_event,omitempty"`
-
-	// OpenCode instances connected for this login (keyed by instance ID).
-	OpenCodeInstances map[string]*opencodebridge.OpenCodeInstance `json:"opencode_instances,omitempty"`
-
-	// OpenCode managed local server (optional).
-	OpenCodeLocalPort     int    `json:"opencode_local_port,omitempty"`
-	OpenCodeLocalUsername string `json:"opencode_local_username,omitempty"`
-	OpenCodeLocalPassword string `json:"opencode_local_password,omitempty"`
 
 	// Provider health tracking
 	ConsecutiveErrors int   `json:"consecutive_errors,omitempty"`
@@ -231,18 +216,6 @@ type PortalMetadata struct {
 	IsCronRoom           bool   `json:"is_cron_room,omitempty"`            // True if this is a hidden cron room
 	CronJobID            string `json:"cron_job_id,omitempty"`             // Cron job ID for cron rooms
 	SubagentParentRoomID string `json:"subagent_parent_room_id,omitempty"` // Parent room ID for subagent sessions
-
-	// OpenCode session metadata
-	IsOpenCodeRoom       bool   `json:"is_opencode_room,omitempty"`
-	OpenCodeInstanceID   string `json:"opencode_instance_id,omitempty"`
-	OpenCodeSessionID    string `json:"opencode_session_id,omitempty"`
-	OpenCodeReadOnly     bool   `json:"opencode_read_only,omitempty"`
-	OpenCodeTitlePending bool   `json:"opencode_title_pending,omitempty"`
-
-	// Codex app-server session metadata (isolated, does not integrate with OpenCode sessions list).
-	IsCodexRoom   bool   `json:"is_codex_room,omitempty"`
-	CodexThreadID string `json:"codex_thread_id,omitempty"`
-	CodexCwd      string `json:"codex_cwd,omitempty"`
 
 	// Ack reaction config - similar to OpenClaw's ack reactions
 	AckReactionEmoji       string `json:"ack_reaction_emoji,omitempty"`        // Emoji to react with when message received (e.g., "👀", "🤔"). Empty = disabled.

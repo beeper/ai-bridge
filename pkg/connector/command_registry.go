@@ -23,6 +23,9 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 			if handler == nil || handler.Func == nil {
 				continue
 			}
+			if !oc.commandAllowed(handler.Name) {
+				continue
+			}
 			original := handler.Func
 			handler.Func = func(ce *commands.Event) {
 				senderID := ""
@@ -43,9 +46,15 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 	}
 
 	names := aiCommandRegistry.Names()
+	filtered := make([]string, 0, len(names))
+	for _, name := range names {
+		if oc.commandAllowed(name) {
+			filtered = append(filtered, name)
+		}
+	}
 	oc.br.Log.Info().
 		Str("section", HelpSectionAI.Name).
 		Int("section_order", HelpSectionAI.Order).
-		Strs("commands", names).
-		Msg("Registered AI commands: " + strings.Join(names, ", "))
+		Strs("commands", filtered).
+		Msg("Registered AI commands: " + strings.Join(filtered, ", "))
 }

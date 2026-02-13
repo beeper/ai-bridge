@@ -53,32 +53,9 @@ func normalizeBaseURLForLoginID(baseURL string) string {
 	return strings.ToLower(clean)
 }
 
-func makeCodexUserLoginID(mxid id.UserID, instanceID string) networkid.UserLoginID {
-	escaped := url.PathEscape(string(mxid))
-	instanceID = strings.TrimSpace(instanceID)
-	if instanceID == "" {
-		instanceID = xid.New().String()
-	}
-	return networkid.UserLoginID(fmt.Sprintf("codex:%s:%s", escaped, instanceID))
-}
-
 func portalKeyForChat(loginID networkid.UserLoginID) networkid.PortalKey {
 	return networkid.PortalKey{
 		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:%s", loginID, xid.New().String())),
-		Receiver: loginID,
-	}
-}
-
-func codexChatPortalKey(loginID networkid.UserLoginID, slug string) networkid.PortalKey {
-	return networkid.PortalKey{
-		ID:       networkid.PortalID(fmt.Sprintf("codex:%s:%s", loginID, slug)),
-		Receiver: loginID,
-	}
-}
-
-func defaultCodexChatPortalKey(loginID networkid.UserLoginID) networkid.PortalKey {
-	return networkid.PortalKey{
-		ID:       networkid.PortalID(fmt.Sprintf("codex:%s:default-chat", loginID)),
 		Receiver: loginID,
 	}
 }
