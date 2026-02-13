@@ -110,13 +110,6 @@ func (oc *AIClient) isTTSConfigured() (bool, string) {
 	return true, ""
 }
 
-func (oc *AIClient) isCronConfigured() (bool, string) {
-	if oc == nil || oc.cronService == nil {
-		return false, "Cron service not available"
-	}
-	return true, ""
-}
-
 func searchEnabled(flag *bool) bool {
 	if flag == nil {
 		return true

@@ -95,9 +95,6 @@ const ToolNameImageGenerate = toolspec.ImageGenerateName
 // ToolNameSessionStatus is the name of the session status tool.
 const ToolNameSessionStatus = toolspec.SessionStatusName
 
-// ToolNameCron is the name of the cron tool.
-const ToolNameCron = toolspec.CronName
-
 const (
 	ToolNameGravatarFetch      = toolspec.GravatarFetchName
 	ToolNameGravatarSet        = toolspec.GravatarSetName

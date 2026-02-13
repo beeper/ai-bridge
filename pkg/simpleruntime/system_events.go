@@ -158,7 +158,7 @@ func snapshotSystemEvents() persistedSystemEvents {
 	return snap
 }
 
-func persistSystemEventsSnapshot(backend CronStoreBackend, log *zerolog.Logger) {
+func persistSystemEventsSnapshot(backend StateStoreBackend, log *zerolog.Logger) {
 	if backend == nil {
 		return
 	}
@@ -177,7 +177,7 @@ func persistSystemEventsSnapshot(backend CronStoreBackend, log *zerolog.Logger) 
 	}
 }
 
-func restoreSystemEventsFromDisk(backend CronStoreBackend, log *zerolog.Logger) {
+func restoreSystemEventsFromDisk(backend StateStoreBackend, log *zerolog.Logger) {
 	if backend == nil {
 		return
 	}
