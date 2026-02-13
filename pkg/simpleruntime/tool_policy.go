@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents/toolpolicy"
-	agenttools "github.com/beeper/ai-bridge/pkg/simpleruntime/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/toolpolicy"
+	agenttools "github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/tools"
 )
 
 func canUseNexusToolsForAgent(meta *PortalMetadata) bool {

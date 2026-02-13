@@ -11,8 +11,8 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/tools"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 
 	"maunium.net/go/mautrix/bridgev2"

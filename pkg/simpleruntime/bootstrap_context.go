@@ -1,3 +1,5 @@
+//go:build agentic
+
 package connector
 
 import (
@@ -6,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
 	"github.com/beeper/ai-bridge/pkg/textfs"
 )
 

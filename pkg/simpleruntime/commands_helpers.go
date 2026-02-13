@@ -4,7 +4,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/commands"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
 )
 
 func requireClientMeta(ce *commands.Event) (*AIClient, *PortalMetadata, bool) {

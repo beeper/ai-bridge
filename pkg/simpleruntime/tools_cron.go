@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
-	agenttools "github.com/beeper/ai-bridge/pkg/simpleruntime/agents/tools"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/cron"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
+	agenttools "github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/cron"
 )
 
 func executeCron(ctx context.Context, args map[string]any) (string, error) {

@@ -7,8 +7,8 @@ import (
 	"go.mau.fi/util/configupgrade"
 	"go.mau.fi/util/ptr"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents/toolpolicy"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/toolpolicy"
 )
 
 //go:embed example-config.yaml

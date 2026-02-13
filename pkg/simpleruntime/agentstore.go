@@ -1,3 +1,5 @@
+//go:build agentic
+
 package connector
 
 import (
@@ -16,8 +18,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/tools"
 )
 
 // AgentStoreAdapter implements agents.AgentStore with UserLogin metadata as source of truth.

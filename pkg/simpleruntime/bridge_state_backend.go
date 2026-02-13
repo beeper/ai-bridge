@@ -9,7 +9,7 @@ import (
 
 	"go.mau.fi/util/dbutil"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/cron"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/cron"
 )
 
 type bridgeDBBackend struct {

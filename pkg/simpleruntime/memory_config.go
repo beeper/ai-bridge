@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/memory"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/memory/embedding"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/memory"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/memory/embedding"
 	"github.com/beeper/ai-bridge/pkg/shared/httputil"
 )
 

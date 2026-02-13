@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
 )
 
 func resolveChannelResponsePrefix(cfg *Config) string {

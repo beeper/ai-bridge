@@ -15,8 +15,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/memory"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/memory/embedding"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/memory"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/memory/embedding"
 	"github.com/beeper/ai-bridge/pkg/textfs"
 )
 

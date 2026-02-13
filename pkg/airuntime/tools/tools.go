@@ -4,17 +4,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	agenttools "github.com/beeper/ai-bridge/pkg/simpleruntime/agents/tools"
 )
+
+type Result struct {
+	Status  string
+	Content string
+}
+
+type Tool struct {
+	Execute func(context.Context, map[string]any) (*Result, error)
+}
+
+type ToolRegistry interface {
+	Get(string) *Tool
+}
 
 // Executor provides a transport-agnostic way to execute tools from the shared registry.
 // Higher layers (bridge/bot) provide policy + per-room enablement checks.
 type Executor struct {
-	Registry *agenttools.Registry
+	Registry ToolRegistry
 }
 
-func (e *Executor) Execute(ctx context.Context, toolName string, input map[string]any) (*agenttools.Result, error) {
+func (e *Executor) Execute(ctx context.Context, toolName string, input map[string]any) (*Result, error) {
 	if e == nil || e.Registry == nil {
 		return nil, errors.New("missing tool registry")
 	}

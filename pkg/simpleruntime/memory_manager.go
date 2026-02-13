@@ -19,7 +19,7 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/dbutil"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/memory"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/memory"
 	"github.com/beeper/ai-bridge/pkg/textfs"
 )
 
