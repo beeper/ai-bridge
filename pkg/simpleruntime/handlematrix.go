@@ -15,8 +15,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
-
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 )
 
 type approvalDecisionPayload struct {
@@ -231,7 +229,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		Int("raw_len", len(rawBodyOriginal)).
 		Msg("Inbound message metadata resolved")
 
-	var agentDef *agents.AgentDefinition
+	var agentDef *AgentDefinition
 	if agentID := resolveAgentID(meta); agentID != "" {
 		store := NewAgentStoreAdapter(oc)
 		if agent, err := store.GetAgentByID(ctx, agentID); err == nil {
@@ -774,7 +772,7 @@ func (oc *AIClient) handleMediaMessage(
 		caption = config.defaultCaption
 	}
 
-	agentDef := (*agents.AgentDefinition)(nil)
+	agentDef := (*AgentDefinition)(nil)
 	if agentID := resolveAgentID(meta); agentID != "" {
 		store := NewAgentStoreAdapter(oc)
 		if agent, err := store.GetAgentByID(ctx, agentID); err == nil {
@@ -1001,7 +999,7 @@ func (oc *AIClient) handleTextFileMessage(
 	}
 
 	isGroup := oc.isGroupChat(ctx, portal)
-	agentDef := (*agents.AgentDefinition)(nil)
+	agentDef := (*AgentDefinition)(nil)
 	if agentID := resolveAgentID(meta); agentID != "" {
 		store := NewAgentStoreAdapter(oc)
 		if agent, err := store.GetAgentByID(ctx, agentID); err == nil {

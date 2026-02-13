@@ -8,10 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 	"github.com/beeper/ai-bridge/pkg/textfs"
+	"github.com/google/uuid"
 )
 
 const defaultSessionStorePath = "sessions/sessions.json"
@@ -71,7 +69,7 @@ func resolveSessionStorePath(cfg *Config, agentID string) string {
 	}
 	normalizedAgent := normalizeAgentID(agentID)
 	if normalizedAgent == "" {
-		normalizedAgent = normalizeAgentID(agents.DefaultAgentID)
+		normalizedAgent = normalizeAgentID(defaultAgentID)
 	}
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -96,7 +94,7 @@ func (oc *AIClient) sessionTextFSStore(agentID string) (*textfs.Store, error) {
 	loginID := string(oc.UserLogin.ID)
 	normalized := normalizeAgentID(agentID)
 	if normalized == "" {
-		normalized = normalizeAgentID(agents.DefaultAgentID)
+		normalized = normalizeAgentID(defaultAgentID)
 	}
 	return textfs.NewStore(oc.UserLogin.Bridge.DB.Database, bridgeID, loginID, normalized), nil
 }
@@ -229,7 +227,7 @@ func (oc *AIClient) resolveSessionStoreRef(agentID string) sessionStoreRef {
 	}
 	normalized := normalizeAgentID(agentID)
 	if normalized == "" {
-		normalized = normalizeAgentID(agents.DefaultAgentID)
+		normalized = normalizeAgentID(defaultAgentID)
 	}
 	path := resolveSessionStorePath(cfg, normalized)
 	return sessionStoreRef{AgentID: normalized, Path: path}

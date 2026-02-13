@@ -10,11 +10,6 @@ type SimpleConfig struct {
 	EnableWebSearch bool
 }
 
-// AgenticConfig is the agentic bridge-specific config surface.
-type AgenticConfig struct {
-	EnableMemory bool
-}
-
 const (
 	EventAssistantTurn = "com.beeper.ai.assistant_turn"
 	EventStream        = "com.beeper.ai.stream_event"

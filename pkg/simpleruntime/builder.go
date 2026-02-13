@@ -8,8 +8,6 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
-
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 )
 
 // Builder room constants
@@ -73,7 +71,7 @@ func (oc *AIClient) ensureBuilderRoom(ctx context.Context) error {
 
 // createBuilderRoom creates the "Manage AI Chats" room portal and chat info.
 func (oc *AIClient) createBuilderRoom(ctx context.Context) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
-	bossAgent := agents.GetBossAgent()
+	bossAgent := getBossAgent()
 
 	// Use a standard chat initialization with the management room title
 	opts := PortalInitOpts{
@@ -89,7 +87,7 @@ func (oc *AIClient) createBuilderRoom(ctx context.Context) (*bridgev2.Portal, *b
 	pm := portalMeta(portal)
 	pm.Slug = BuilderRoomSlug // Override slug to "builder"
 	pm.AgentID = bossAgent.ID
-	pm.SystemPrompt = agents.BossSystemPrompt
+	pm.SystemPrompt = defaultRawModeSystemPrompt
 	pm.Model = bossAgent.Model.Primary // Explicit model - always use Boss agent's model
 	pm.IsBuilderRoom = true            // Mark as protected from overrides
 

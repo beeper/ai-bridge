@@ -1,7 +1,6 @@
 package connector
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -19,16 +18,6 @@ var CommandStatus = registerAICommand(commandregistry.Definition{
 	RequiresPortal: true,
 	RequiresLogin:  true,
 	Handler:        fnStatus,
-})
-
-// CommandLastHeartbeat handles the !ai last-heartbeat command.
-var CommandLastHeartbeat = registerAICommand(commandregistry.Definition{
-	Name:           "last-heartbeat",
-	Description:    "Show the last heartbeat event for this login",
-	Section:        HelpSectionAI,
-	RequiresPortal: false,
-	RequiresLogin:  true,
-	Handler:        fnLastHeartbeat,
 })
 
 func fnStatus(ce *commands.Event) {
@@ -50,31 +39,6 @@ func fnStatus(ce *commands.Event) {
 	isGroup := client.isGroupChat(ce.Ctx, portal)
 	queueSettings, _, _, _ := client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", QueueInlineOptions{})
 	ce.Reply("%s", client.buildStatusText(ce.Ctx, portal, meta, isGroup, queueSettings))
-}
-
-func fnLastHeartbeat(ce *commands.Event) {
-	client, ok := requireClient(ce)
-	if !ok {
-		return
-	}
-	evt := getLastHeartbeatEventForLogin(client.UserLogin)
-	if evt == nil {
-		ce.Reply("No heartbeat yet.")
-		return
-	}
-	pretty, err := json.MarshalIndent(evt, "", "  ")
-	if err != nil {
-		ce.Reply("Failed to serialize last heartbeat: %s", err.Error())
-		return
-	}
-	// Keep replies bounded; fall back to compact JSON if needed.
-	if len(pretty) > 8000 {
-		compact, err2 := json.Marshal(evt)
-		if err2 == nil {
-			pretty = compact
-		}
-	}
-	ce.Reply("```json\n%s\n```", string(pretty))
 }
 
 // CommandApprove handles the !ai approve command.

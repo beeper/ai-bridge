@@ -30,23 +30,23 @@ func (h *HeartbeatRunner) run(string) HeartbeatRunResult {
 }
 
 type HeartbeatRunConfig struct {
-	StoreAgentID    string
-	StorePath       string
-	SessionKey      string
-	TargetRoom      id.RoomID
-	TargetReason    string
-	Reason          string
-	Channel         string
-	ResponsePrefix  string
-	ShowOk          bool
-	ShowAlerts      bool
-	UseIndicator    bool
+	StoreAgentID     string
+	StorePath        string
+	SessionKey       string
+	TargetRoom       id.RoomID
+	TargetReason     string
+	Reason           string
+	Channel          string
+	ResponsePrefix   string
+	ShowOk           bool
+	ShowAlerts       bool
+	UseIndicator     bool
 	IncludeReasoning bool
-	ExecEvent       bool
-	SuppressSave    bool
-	SuppressSend    bool
-	PrevUpdatedAt   int64
-	AckMaxChars     int
+	ExecEvent        bool
+	SuppressSave     bool
+	SuppressSend     bool
+	PrevUpdatedAt    int64
+	AckMaxChars      int
 }
 
 type HeartbeatRunOutcome struct {
@@ -76,15 +76,15 @@ const (
 )
 
 type HeartbeatEventPayload struct {
-	TS            int64                  `json:"ts,omitempty"`
-	Status        string                 `json:"status,omitempty"`
-	Reason        string                 `json:"reason,omitempty"`
-	To            string                 `json:"to,omitempty"`
-	Preview       string                 `json:"preview,omitempty"`
-	Channel       string                 `json:"channel,omitempty"`
-	Silent        bool                   `json:"silent,omitempty"`
-	HasMedia      bool                   `json:"has_media,omitempty"`
-	DurationMs    int64                  `json:"duration_ms,omitempty"`
+	TS            int64                   `json:"ts,omitempty"`
+	Status        string                  `json:"status,omitempty"`
+	Reason        string                  `json:"reason,omitempty"`
+	To            string                  `json:"to,omitempty"`
+	Preview       string                  `json:"preview,omitempty"`
+	Channel       string                  `json:"channel,omitempty"`
+	Silent        bool                    `json:"silent,omitempty"`
+	HasMedia      bool                    `json:"has_media,omitempty"`
+	DurationMs    int64                   `json:"duration_ms,omitempty"`
 	IndicatorType *HeartbeatIndicatorType `json:"indicator_type,omitempty"`
 }
 
