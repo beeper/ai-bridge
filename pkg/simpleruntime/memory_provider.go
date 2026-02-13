@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/memory"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/memory/embedding"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simplememory"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simplememory/embedding"
 )
 
 type memoryProviderResult struct {

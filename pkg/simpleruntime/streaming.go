@@ -23,8 +23,8 @@ import (
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/tools"
 )
 
 // streamingState tracks the state of a streaming response

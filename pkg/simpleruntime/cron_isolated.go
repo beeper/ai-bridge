@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/cron"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simplecron"
 )
 
 const (

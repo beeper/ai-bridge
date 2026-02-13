@@ -12,8 +12,8 @@ import (
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/toolpolicy"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/toolpolicy"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/tools"
 )
 
 // activeToolCall tracks a tool call that's in progress

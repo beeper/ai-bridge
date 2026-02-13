@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/memory"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simplememory"
 )
 
 const (

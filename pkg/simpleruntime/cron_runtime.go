@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/cron"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simplecron"
 )
 
 func resolveCronEnabled(cfg *Config) bool {

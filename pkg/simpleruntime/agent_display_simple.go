@@ -3,7 +3,7 @@ package connector
 import (
 	"context"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 )
 
 func (oc *AIClient) resolveAgentDisplayName(_ context.Context, agent *agents.AgentDefinition) string {

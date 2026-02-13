@@ -3,7 +3,7 @@ package connector
 import (
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 )
 
 func hasExplicitHeartbeatAgents(cfg *Config) bool {

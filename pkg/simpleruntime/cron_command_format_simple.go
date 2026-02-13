@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/cron"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simplecron"
 )
 
 func formatCronStatusText(enabled bool, storePath string, jobCount int, _ *int64) string {
