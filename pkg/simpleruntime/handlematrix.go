@@ -24,41 +24,7 @@ type approvalDecisionPayload struct {
 }
 
 func parseApprovalDecision(raw map[string]any) *approvalDecisionPayload {
-	if raw == nil {
-		return nil
-	}
-	payloadRaw, ok := raw["com.beeper.ai.approval_decision"]
-	if !ok || payloadRaw == nil {
-		return nil
-	}
-	payloadMap, ok := payloadRaw.(map[string]any)
-	if !ok {
-		return nil
-	}
-	approvalID := strings.TrimSpace(readStringArgAny(payloadMap, "approvalId"))
-	decision := strings.TrimSpace(readStringArgAny(payloadMap, "decision"))
-	reason := strings.TrimSpace(readStringArgAny(payloadMap, "reason"))
-	if approvalID == "" || decision == "" {
-		return nil
-	}
-	return &approvalDecisionPayload{
-		ApprovalID: approvalID,
-		Decision:   decision,
-		Reason:     reason,
-	}
-}
-
-func approvalDecisionFromString(decision string) (approve bool, always bool, ok bool) {
-	switch strings.ToLower(strings.TrimSpace(decision)) {
-	case "allow", "approve", "yes", "y", "true", "1", "once":
-		return true, false, true
-	case "always", "always-allow", "allow-always":
-		return true, true, true
-	case "deny", "no", "n", "false", "0", "reject":
-		return false, false, true
-	default:
-		return false, false, false
-	}
+	return nil
 }
 
 func unsupportedMessageStatus(err error) error {
@@ -148,25 +114,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 	}
 
-	if decision := parseApprovalDecision(msg.Event.Content.Raw); decision != nil {
-		approve, always, ok := approvalDecisionFromString(decision.Decision)
-		if !ok {
-			logCtx.Warn().Str("decision", decision.Decision).Msg("Unknown approval decision")
-			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-		}
-		err := oc.resolveToolApproval(portal.MXID, decision.ApprovalID, ToolApprovalDecision{
-			Approve:   approve,
-			Always:    always,
-			Reason:    decision.Reason,
-			DecidedAt: time.Now(),
-			DecidedBy: msg.Event.Sender,
-		})
-		if err != nil {
-			logCtx.Warn().Err(err).Str("approval_id", decision.ApprovalID).Msg("Failed to resolve approval decision")
-			oc.sendApprovalRejectionEvent(ctx, portal, decision.ApprovalID, err)
-		}
-		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-	}
+	_ = parseApprovalDecision(msg.Event.Content.Raw)
 
 	// Normalize sticker events to image handling
 	msgType := msg.Content.MsgType
