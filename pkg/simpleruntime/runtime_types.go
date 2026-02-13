@@ -2,17 +2,12 @@ package connector
 
 import (
 	"context"
-	"time"
 
 	"github.com/rs/zerolog"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/id"
 )
-
-type pendingToolApproval struct {
-	ID string
-}
 
 type HeartbeatWake struct {
 	log zerolog.Logger
@@ -111,25 +106,6 @@ func getLastHeartbeatEventForLogin(login *bridgev2.UserLogin) *HeartbeatEventPay
 	meta := loginMetadata(login)
 	return meta.LastHeartbeatEvent
 }
-
-const mcpDiscoveryTimeout = 2 * time.Second
-
-type ToolApprovalKind string
-
-const (
-	ToolApprovalKindMCP     ToolApprovalKind = "mcp"
-	ToolApprovalKindBuiltin ToolApprovalKind = "builtin"
-)
-
-type ToolApprovalDecision struct {
-	Approve   bool
-	Always    bool
-	Reason    string
-	DecidedAt time.Time
-	DecidedBy id.UserID
-}
-
-func (oc *AIClient) resolveToolApproval(id.RoomID, string, ToolApprovalDecision) error { return nil }
 
 type StateStoreEntry struct {
 	Key  string

@@ -171,151 +171,22 @@ func (oc *AIClient) canUseImageGeneration() bool {
 	}
 }
 
-// SearchUsers searches available AI agents by name/ID
+// SearchUsers returns model contacts that match the query.
 func (oc *AIClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.ResolveIdentifierResponse, error) {
-	if oc.isSimpleProfile() {
-		if strings.TrimSpace(query) == "" {
-			return nil, nil
-		}
-		oc.loggerForContext(ctx).Debug().Str("query", query).Msg("Model search requested")
-		return oc.modelContacts(ctx, query)
-	}
-
-	oc.loggerForContext(ctx).Debug().Str("query", query).Msg("Agent search requested")
-
-	query = strings.ToLower(strings.TrimSpace(query))
+	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, nil
 	}
-
-	// Load agents
-	store := NewAgentStoreAdapter(oc)
-	agentsMap, err := store.LoadAgents(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load agents: %w", err)
-	}
-
-	// Filter agents by query (match ID, name, or description)
-	var results []*bridgev2.ResolveIdentifierResponse
-	for _, agent := range agentsMap {
-		agentName := oc.resolveAgentDisplayName(ctx, agent)
-		// Check if query matches agent ID, name, or description (case-insensitive)
-		if !strings.Contains(strings.ToLower(agent.ID), query) &&
-			!strings.Contains(strings.ToLower(agentName), query) &&
-			!strings.Contains(strings.ToLower(agent.Description), query) {
-			continue
-		}
-
-		modelID := oc.agentDefaultModel(agent)
-		userID := agentUserID(agent.ID)
-		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
-		if err != nil {
-			oc.loggerForContext(ctx).Warn().Err(err).Str("agent", agent.ID).Msg("Failed to get ghost for search result")
-			continue
-		}
-
-		displayName := agentName
-		oc.ensureAgentGhostDisplayName(ctx, agent.ID, modelID, agentName)
-
-		results = append(results, &bridgev2.ResolveIdentifierResponse{
-			UserID: userID,
-			UserInfo: &bridgev2.UserInfo{
-				Name:        ptr.Ptr(displayName),
-				IsBot:       ptr.Ptr(true),
-				Identifiers: []string{agent.ID},
-			},
-			Ghost: ghost,
-		})
-	}
-
-	oc.loggerForContext(ctx).Info().Str("query", query).Int("results", len(results)).Msg("Agent search completed")
-	return results, nil
+	return oc.modelContacts(ctx, query)
 }
 
-// GetContactList returns a list of available AI agents and models as contacts
+// GetContactList returns model contacts only.
 func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
-	oc.loggerForContext(ctx).Debug().Msg("Contact list requested")
-
-	if oc.isSimpleProfile() {
-		return oc.modelContacts(ctx, "")
-	}
-
-	// Load agents
-	store := NewAgentStoreAdapter(oc)
-	agentsMap, err := store.LoadAgents(ctx)
-	if err != nil {
-		oc.loggerForContext(ctx).Error().Err(err).Msg("Failed to load agents")
-		return nil, fmt.Errorf("failed to load agents: %w", err)
-	}
-
-	// Create a contact for each agent
-	contacts := make([]*bridgev2.ResolveIdentifierResponse, 0, len(agentsMap))
-
-	for _, agent := range agentsMap {
-		// Get or create ghost for this agent
-		modelID := oc.agentDefaultModel(agent)
-		userID := agentUserID(agent.ID)
-		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
-		if err != nil {
-			oc.loggerForContext(ctx).Warn().Err(err).Str("agent", agent.ID).Msg("Failed to get ghost for agent")
-			continue
-		}
-
-		// Update ghost display name
-		agentName := oc.resolveAgentDisplayName(ctx, agent)
-		displayName := agentName
-		oc.ensureAgentGhostDisplayName(ctx, agent.ID, modelID, agentName)
-
-		contacts = append(contacts, &bridgev2.ResolveIdentifierResponse{
-			UserID: userID,
-			UserInfo: &bridgev2.UserInfo{
-				Name:        ptr.Ptr(displayName),
-				IsBot:       ptr.Ptr(true),
-				Identifiers: []string{agent.ID},
-			},
-			Ghost: ghost,
-		})
-	}
-
-	// Add contacts for available models
-	models, err := oc.listAvailableModels(ctx, false)
-	if err != nil {
-		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to load model contact list")
-	} else {
-		for i := range models {
-			model := &models[i]
-			if model.ID == "" {
-				continue
-			}
-			userID := modelUserID(model.ID)
-			ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
-			if err != nil {
-				oc.loggerForContext(ctx).Warn().Err(err).Str("model", model.ID).Msg("Failed to get ghost for model")
-				continue
-			}
-
-			// Ensure ghost display name is set before returning
-			oc.ensureGhostDisplayNameWithGhost(ctx, ghost, model.ID, model)
-
-			contacts = append(contacts, &bridgev2.ResolveIdentifierResponse{
-				UserID: userID,
-				UserInfo: &bridgev2.UserInfo{
-					Name:        ptr.Ptr(modelContactName(model.ID, model)),
-					IsBot:       ptr.Ptr(false),
-					Identifiers: modelContactIdentifiers(model.ID, model),
-				},
-				Ghost: ghost,
-			})
-		}
-	}
-
-	oc.loggerForContext(ctx).Info().Int("count", len(contacts)).Msg("Returning contact list")
-	return contacts, nil
+	return oc.modelContacts(ctx, "")
 }
 
-// ResolveIdentifier resolves an agent ID to a ghost and optionally creates a chat
+// ResolveIdentifier resolves a model identifier to a ghost and optionally creates a chat.
 func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	// Identifier can be an agent ID (e.g., "beeper", "boss") or model ID for backwards compatibility
 	id := strings.TrimSpace(identifier)
 	if id == "" {
 		return nil, errors.New("identifier is required")
@@ -324,36 +195,6 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 	if modelID := parseModelFromGhostID(id); modelID != "" {
 		return oc.resolveModelIdentifier(ctx, modelID, createChat)
 	}
-
-	if oc.isSimpleProfile() {
-		resolved, valid, err := oc.resolveModelID(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		if valid && resolved != "" {
-			return oc.resolveModelIdentifier(ctx, resolved, createChat)
-		}
-		return oc.resolveModelIdentifier(ctx, id, createChat)
-	}
-
-	store := NewAgentStoreAdapter(oc)
-
-	// Check if identifier is an agent ghost ID (agent-{id})
-	if agentID, ok := parseAgentFromGhostID(id); ok {
-		agent, err := store.GetAgentByID(ctx, agentID)
-		if err != nil || agent == nil {
-			return nil, fmt.Errorf("agent '%s' not found", agentID)
-		}
-		return oc.resolveAgentIdentifier(ctx, agent, createChat)
-	}
-
-	// Try to find as agent first (bare agent ID like "beeper", "boss")
-	agent, err := store.GetAgentByID(ctx, id)
-	if err == nil && agent != nil {
-		return oc.resolveAgentIdentifier(ctx, agent, createChat)
-	}
-
-	// Fallback: try as model ID for backwards compatibility
 	resolved, valid, err := oc.resolveModelID(ctx, id)
 	if err != nil {
 		return nil, err

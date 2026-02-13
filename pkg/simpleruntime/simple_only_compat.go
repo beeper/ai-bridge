@@ -5,7 +5,6 @@ import (
 	"errors"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
-	"maunium.net/go/mautrix/id"
 	"strings"
 )
 
@@ -43,10 +42,6 @@ func (oc *AIClient) agentDefaultModel(*AgentDefinition) string {
 
 func (oc *AIClient) toolNamesForPortal(*PortalMetadata) []string {
 	return []string{ToolNameWebSearch}
-}
-
-func (oc *AIClient) lookupMCPToolDefinition(context.Context, string) (ToolDefinition, bool) {
-	return ToolDefinition{}, false
 }
 
 func (oc *AIClient) isToolAvailable(*PortalMetadata, string) (bool, SettingSource, string) {
@@ -97,53 +92,10 @@ func (oc *AIClient) recordHeartbeatText(sessionStoreRef, string, string, int64) 
 
 func (oc *AIClient) resolveAgentIdentityName(context.Context, string) string { return "" }
 
-func (oc *AIClient) setApprovalSnapshotEvent(string, id.EventID, ...any) {}
-
-func (oc *AIClient) toolApprovalsTTLSeconds() int { return 0 }
-
-func (oc *AIClient) registerToolApproval(any) {}
-
-func (oc *AIClient) toolApprovalsRuntimeEnabled() bool { return false }
-
-func (oc *AIClient) toolApprovalsRequireForMCP() bool { return false }
-
-func (oc *AIClient) isMcpAlwaysAllowed(string, string) bool { return false }
-
 func (oc *AIClient) enabledBuiltinToolsForModel(context.Context, *PortalMetadata) []ToolDefinition {
 	return []ToolDefinition{}
 }
 
 func (oc *AIClient) isToolEnabled(*PortalMetadata, string) bool { return false }
 
-func (oc *AIClient) builtinToolApprovalRequirement(string, map[string]any) (bool, string) {
-	return false, ""
-}
-
-func (oc *AIClient) isBuiltinAlwaysAllowed(string, string) bool { return false }
-
-func (oc *AIClient) waitToolApproval(context.Context, string) (ToolApprovalDecision, string, bool) {
-	return ToolApprovalDecision{}, "", false
-}
-
-func (oc *AIClient) toolApprovalsAskFallback() string { return "deny" }
-
-func (oc *AIClient) shouldUseMCPTool(context.Context, string) bool { return false }
-
-func (oc *AIClient) executeMCPTool(context.Context, string, map[string]any) (string, error) {
-	return "", errors.New("mcp tools are disabled in simple bridge")
-}
-
-func NewBossStoreAdapter(*AIClient) any { return nil }
-
 func notifyWorkspaceFileChanged(context.Context, string) {}
-
-func canUseNexusToolsForAgent(*PortalMetadata) bool { return false }
-
-var (
-	ErrApprovalOnlyOwner      = errors.New("approval only owner")
-	ErrApprovalWrongRoom      = errors.New("approval wrong room")
-	ErrApprovalExpired        = errors.New("approval expired")
-	ErrApprovalUnknown        = errors.New("approval unknown")
-	ErrApprovalAlreadyHandled = errors.New("approval already handled")
-	ErrApprovalMissingID      = errors.New("approval missing id")
-)

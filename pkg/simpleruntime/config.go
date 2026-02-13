@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"go.mau.fi/util/configupgrade"
-	"go.mau.fi/util/ptr"
 )
 
 //go:embed example-config.yaml
@@ -14,17 +13,16 @@ var exampleNetworkConfig string
 // Config represents the connector-specific configuration that is nested under
 // the `network:` block in the main bridge config.
 type Config struct {
-	Beeper        BeeperConfig                `yaml:"beeper"`
-	Providers     ProvidersConfig             `yaml:"providers"`
-	Models        *ModelsConfig               `yaml:"models"`
-	Bridge        BridgeConfig                `yaml:"bridge"`
-	Tools         ToolProvidersConfig         `yaml:"tools"`
-	ToolApprovals *ToolApprovalsRuntimeConfig `yaml:"tool_approvals"`
-	Agents        *AgentsConfig               `yaml:"agents"`
-	Channels      *ChannelsConfig             `yaml:"channels"`
-	Messages      *MessagesConfig             `yaml:"messages"`
-	Commands      *CommandsConfig             `yaml:"commands"`
-	Session       *SessionConfig              `yaml:"session"`
+	Beeper    BeeperConfig        `yaml:"beeper"`
+	Providers ProvidersConfig     `yaml:"providers"`
+	Models    *ModelsConfig       `yaml:"models"`
+	Bridge    BridgeConfig        `yaml:"bridge"`
+	Tools     ToolProvidersConfig `yaml:"tools"`
+	Agents    *AgentsConfig       `yaml:"agents"`
+	Channels  *ChannelsConfig     `yaml:"channels"`
+	Messages  *MessagesConfig     `yaml:"messages"`
+	Commands  *CommandsConfig     `yaml:"commands"`
+	Session   *SessionConfig      `yaml:"session"`
 
 	// Global settings
 	DefaultSystemPrompt string        `yaml:"default_system_prompt"`
@@ -38,48 +36,6 @@ type Config struct {
 
 	// Inbound message processing configuration
 	Inbound *InboundConfig `yaml:"inbound"`
-}
-
-// ToolApprovalsRuntimeConfig controls runtime behaviour for tool approvals.
-// This gates OpenAI MCP approvals (mcp_approval_request) and selected dangerous builtin tools.
-type ToolApprovalsRuntimeConfig struct {
-	Enabled         *bool    `yaml:"enabled"`
-	TTLSeconds      int      `yaml:"ttlSeconds"`
-	RequireForMCP   *bool    `yaml:"requireForMcp"`
-	RequireForTools []string `yaml:"requireForTools"`
-	AskFallback     string   `yaml:"askFallback"` // "deny" (default) | "allow"
-}
-
-func (c *ToolApprovalsRuntimeConfig) WithDefaults() *ToolApprovalsRuntimeConfig {
-	if c == nil {
-		c = &ToolApprovalsRuntimeConfig{}
-	}
-	if c.Enabled == nil {
-		c.Enabled = ptr.Ptr(true)
-	}
-	if c.TTLSeconds <= 0 {
-		c.TTLSeconds = 600
-	}
-	if c.RequireForMCP == nil {
-		c.RequireForMCP = ptr.Ptr(true)
-	}
-	if len(c.RequireForTools) == 0 {
-		c.RequireForTools = []string{
-			"message",
-			"gravatar_set",
-
-			// Boss/session mutation tools
-			"create_agent",
-			"fork_agent",
-			"edit_agent",
-			"delete_agent",
-			"modify_room",
-			"sessions_send",
-			"sessions_spawn",
-			"run_internal_command",
-		}
-	}
-	return c
 }
 
 // AgentsConfig configures agent defaults (OpenClaw-style).
@@ -210,17 +166,7 @@ type ToolProvidersConfig struct {
 	Search *SearchConfig     `yaml:"search"`
 	Fetch  *FetchConfig      `yaml:"fetch"`
 	Media  *MediaToolsConfig `yaml:"media"`
-	Nexus  *NexusToolsConfig `yaml:"nexus"`
 	VFS    *VFSToolsConfig   `yaml:"vfs"`
-}
-
-// NexusToolsConfig configures Nexus tool bridging to a clay-nexus backend.
-type NexusToolsConfig struct {
-	Enabled        *bool  `yaml:"enabled"`
-	BaseURL        string `yaml:"base_url"`
-	Token          string `yaml:"token"`
-	AuthType       string `yaml:"auth_type"` // bearer | apikey
-	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
 // VFSToolsConfig configures virtual filesystem tools.
@@ -480,9 +426,6 @@ func upgradeConfig(helper configupgrade.Helper) {
 	// Global settings
 	helper.Copy(configupgrade.Str, "default_system_prompt")
 	helper.Copy(configupgrade.Str, "model_cache_duration")
-	// Tool approvals
-	helper.Copy(configupgrade.Map, "tool_approvals")
-
 	// Bridge-specific configuration
 	helper.Copy(configupgrade.Str, "bridge", "command_prefix")
 	helper.Copy(configupgrade.Bool, "bridge", "log_ephemeral_events")

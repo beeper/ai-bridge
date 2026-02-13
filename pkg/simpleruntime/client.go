@@ -306,17 +306,6 @@ type AIClient struct {
 	modelCatalogLoaded bool
 	modelCatalogCache  []ModelCatalogEntry
 
-	// MCP tool cache
-	mcpToolsMu        sync.Mutex
-	mcpTools          []ToolDefinition
-	mcpToolSet        map[string]struct{}
-	mcpToolServer     map[string]string
-	mcpToolsFetchedAt time.Time
-
-	// Tool approvals (e.g. OpenAI MCP approval requests)
-	toolApprovalsMu sync.Mutex
-	toolApprovals   map[string]*pendingToolApproval // approvalID -> pending approval
-
 	// Per-login cancellation: cancelled when this login disconnects.
 	// All goroutines using backgroundContext() will be cancelled on disconnect.
 	disconnectCtx    context.Context
@@ -379,7 +368,6 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		groupHistoryBuffers: make(map[id.RoomID]*groupHistoryBuffer),
 		userTypingState:     make(map[id.RoomID]userTypingState),
 		queueTyping:         make(map[id.RoomID]*TypingController),
-		toolApprovals:       make(map[string]*pendingToolApproval),
 	}
 
 	// Initialize inbound message processing with config values

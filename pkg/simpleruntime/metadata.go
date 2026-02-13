@@ -66,26 +66,10 @@ type DesktopAPIInstance struct {
 	BaseURL string `json:"base_url,omitempty"`
 }
 
-// MCPServerConfig stores one MCP server connection for a login.
-// The map key in ServiceTokens.MCPServers is the server name.
-// ToolApprovalsConfig stores per-login persisted tool approval rules.
-// This is used by the tool approval system to support "always allow" decisions.
-type ToolApprovalsConfig struct {
-	// BuiltinAlwaysAllow contains exact-match allow rules for builtin tool approvals.
-	// Matching is done on normalized (trim + lowercase) tool name + action.
-	// Action "" means "any action".
-	BuiltinAlwaysAllow []BuiltinAlwaysAllowRule `json:"builtin_always_allow,omitempty"`
-}
-
-type BuiltinAlwaysAllowRule struct {
-	ToolName string `json:"tool_name,omitempty"`
-	Action   string `json:"action,omitempty"`
-}
-
 // UserLoginMetadata is stored on each login row to keep per-user settings.
 type UserLoginMetadata struct {
 	Persona              string         `json:"persona,omitempty"`
-	Provider             string         `json:"provider,omitempty"` // Selected provider (beeper, openai, openrouter)
+	Provider             string         `json:"provider,omitempty"` // Selected provider
 	APIKey               string         `json:"api_key,omitempty"`
 	BaseURL              string         `json:"base_url,omitempty"`               // Per-user API endpoint
 	TitleGenerationModel string         `json:"title_generation_model,omitempty"` // Model to use for generating chat titles
@@ -106,9 +90,6 @@ type UserLoginMetadata struct {
 
 	// Optional per-login tokens for external services
 	ServiceTokens *ServiceTokens `json:"service_tokens,omitempty"`
-
-	// Tool approval rules (e.g. "always allow" decisions for MCP approvals or dangerous builtin tools).
-	ToolApprovals *ToolApprovalsConfig `json:"tool_approvals,omitempty"`
 
 	// AgentModelOverrides stores per-agent model overrides (agent ID -> model ID).
 	AgentModelOverrides map[string]string `json:"agent_model_overrides,omitempty"`
@@ -287,7 +268,7 @@ type GeneratedFileRef struct {
 type ToolCallMetadata struct {
 	CallID        string         `json:"call_id"`
 	ToolName      string         `json:"tool_name"`
-	ToolType      string         `json:"tool_type"` // builtin, provider, function, mcp
+	ToolType      string         `json:"tool_type"` // builtin, provider, function
 	Input         map[string]any `json:"input,omitempty"`
 	Output        map[string]any `json:"output,omitempty"`
 	Status        string         `json:"status"`                  // pending, running, completed, failed, timeout, cancelled

@@ -72,25 +72,20 @@ type streamingState struct {
 	suppressSend      bool
 
 	// AI SDK UIMessage stream tracking
-	uiStarted               bool
-	uiFinished              bool
-	uiTextID                string
-	uiReasoningID           string
-	uiStepOpen              bool
-	uiStepCount             int
-	uiToolStarted           map[string]bool
-	uiSourceURLSeen         map[string]bool
-	uiSourceDocumentSeen    map[string]bool
-	uiFileSeen              map[string]bool
-	uiToolCallIDByApproval  map[string]string
-	uiToolApprovalRequested map[string]bool
-	uiToolNameByToolCallID  map[string]string
-	uiToolTypeByToolCallID  map[string]ToolType
-	uiToolOutputFinalized   map[string]bool
-
-	// Pending MCP approvals to resolve before the turn can continue.
-	pendingMcpApprovals     []mcpApprovalRequest
-	pendingMcpApprovalsSeen map[string]bool
+	uiStarted              bool
+	uiFinished             bool
+	uiTextID               string
+	uiReasoningID          string
+	uiStepOpen             bool
+	uiStepCount            int
+	uiToolStarted          map[string]bool
+	uiSourceURLSeen        map[string]bool
+	uiSourceDocumentSeen   map[string]bool
+	uiFileSeen             map[string]bool
+	uiToolCallIDByApproval map[string]string
+	uiToolNameByToolCallID map[string]string
+	uiToolTypeByToolCallID map[string]ToolType
+	uiToolOutputFinalized  map[string]bool
 
 	// Avoid logging repeated missing-ephemeral warnings.
 	streamEphemeralUnsupported bool
@@ -107,13 +102,6 @@ type streamingState struct {
 	timelineNotices map[string]bool
 }
 
-type mcpApprovalRequest struct {
-	approvalID  string
-	toolCallID  string
-	toolName    string
-	serverLabel string
-}
-
 // newStreamingState creates a new streaming state with initialized fields
 func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID id.EventID, senderID string, roomID id.RoomID) *streamingState {
 	agentID := ""
@@ -121,26 +109,24 @@ func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID 
 		agentID = resolveAgentID(meta)
 	}
 	state := &streamingState{
-		turnID:                  NewTurnID(),
-		agentID:                 agentID,
-		startedAtMs:             time.Now().UnixMilli(),
-		firstToken:              true,
-		sourceEventID:           sourceEventID,
-		senderID:                senderID,
-		roomID:                  roomID,
-		statusSentIDs:           make(map[id.EventID]bool),
-		replyAccumulator:        newStreamingDirectiveAccumulator(),
-		uiToolStarted:           make(map[string]bool),
-		uiSourceURLSeen:         make(map[string]bool),
-		uiSourceDocumentSeen:    make(map[string]bool),
-		uiFileSeen:              make(map[string]bool),
-		uiToolCallIDByApproval:  make(map[string]string),
-		uiToolApprovalRequested: make(map[string]bool),
-		uiToolNameByToolCallID:  make(map[string]string),
-		uiToolTypeByToolCallID:  make(map[string]ToolType),
-		uiToolOutputFinalized:   make(map[string]bool),
-		pendingMcpApprovalsSeen: make(map[string]bool),
-		timelineNotices:         make(map[string]bool),
+		turnID:                 NewTurnID(),
+		agentID:                agentID,
+		startedAtMs:            time.Now().UnixMilli(),
+		firstToken:             true,
+		sourceEventID:          sourceEventID,
+		senderID:               senderID,
+		roomID:                 roomID,
+		statusSentIDs:          make(map[id.EventID]bool),
+		replyAccumulator:       newStreamingDirectiveAccumulator(),
+		uiToolStarted:          make(map[string]bool),
+		uiSourceURLSeen:        make(map[string]bool),
+		uiSourceDocumentSeen:   make(map[string]bool),
+		uiFileSeen:             make(map[string]bool),
+		uiToolCallIDByApproval: make(map[string]string),
+		uiToolNameByToolCallID: make(map[string]string),
+		uiToolTypeByToolCallID: make(map[string]ToolType),
+		uiToolOutputFinalized:  make(map[string]bool),
+		timelineNotices:        make(map[string]bool),
 	}
 	if meta != nil && normalizeSendPolicyMode(meta.SendPolicy) == "deny" {
 		state.suppressSend = true
@@ -501,33 +487,6 @@ func deriveToolDescriptorForOutputItem(item responses.ResponseOutputItemUnion, s
 		desc.dynamic = true
 		desc.input = parseJSONOrRaw(item.Input)
 		desc.ok = desc.toolName != ""
-	case "mcp_call":
-		desc.toolName = "mcp." + strings.TrimSpace(item.Name)
-		desc.toolType = ToolTypeMCP
-		desc.providerExecuted = true
-		desc.dynamic = true
-		if approvalID := strings.TrimSpace(item.ApprovalRequestID); approvalID != "" && state != nil {
-			if mapped := strings.TrimSpace(state.uiToolCallIDByApproval[approvalID]); mapped != "" {
-				desc.callID = mapped
-			}
-		}
-		desc.input = parseJSONOrRaw(item.Arguments)
-		desc.ok = strings.TrimSpace(item.Name) != ""
-	case "mcp_list_tools":
-		desc.toolName = "mcp.list_tools"
-		desc.toolType = ToolTypeMCP
-		desc.providerExecuted = true
-		desc.dynamic = true
-		desc.input = map[string]any{}
-		desc.ok = true
-	case "mcp_approval_request":
-		desc.toolName = "mcp." + strings.TrimSpace(item.Name)
-		desc.toolType = ToolTypeMCP
-		desc.providerExecuted = true
-		desc.dynamic = true
-		desc.callID = NewCallID()
-		desc.input = parseJSONOrRaw(item.Arguments)
-		desc.ok = strings.TrimSpace(item.Name) != ""
 	default:
 		desc.ok = false
 	}
@@ -576,30 +535,6 @@ func responseOutputItemResultPayload(item responses.ResponseOutputItemUnion) any
 			"status": item.Status,
 			"result": item.Result,
 		}
-	case "mcp_call":
-		result := map[string]any{
-			"type":        "call",
-			"serverLabel": item.ServerLabel,
-			"name":        item.Name,
-			"arguments":   item.Arguments,
-			"status":      item.Status,
-		}
-		if output := strings.TrimSpace(item.Output.OfString); output != "" {
-			result["output"] = parseJSONOrRaw(output)
-		}
-		if strings.TrimSpace(item.Error) != "" {
-			result["error"] = item.Error
-		}
-		return result
-	case "mcp_list_tools":
-		result := map[string]any{
-			"serverLabel": item.ServerLabel,
-			"tools":       item.Tools,
-		}
-		if strings.TrimSpace(item.Error) != "" {
-			result["error"] = item.Error
-		}
-		return result
 	case "shell_call_output":
 		if output := item.Output.OfResponseFunctionShellToolCallOutputOutputArray; len(output) > 0 {
 			return map[string]any{"output": output}
@@ -852,139 +787,6 @@ func (oc *AIClient) emitUIToolInputError(
 	oc.emitStreamEvent(ctx, portal, state, part)
 }
 
-func (oc *AIClient) emitUIToolApprovalRequest(
-	ctx context.Context,
-	portal *bridgev2.Portal,
-	state *streamingState,
-	approvalID string,
-	toolCallID string,
-	toolName string,
-	targetEventID id.EventID,
-	ttlSeconds int,
-) {
-	if strings.TrimSpace(approvalID) == "" || strings.TrimSpace(toolCallID) == "" {
-		return
-	}
-	if state == nil {
-		// Without a streaming state we can't track approvals or emit stream events safely.
-		return
-	}
-	state.uiToolCallIDByApproval[approvalID] = toolCallID
-	oc.emitStreamEvent(ctx, portal, state, map[string]any{
-		"type":       "tool-approval-request",
-		"approvalId": approvalID,
-		"toolCallId": toolCallID,
-		"toolName":   toolName,
-		"ttlSeconds": ttlSeconds,
-	})
-
-	// Send a second tool_call timeline event with approval data so the desktop
-	// ToolEventGrouper can render inline approval buttons.
-	approvalExpiresAtMs := int64(0)
-	if ttlSeconds > 0 {
-		approvalExpiresAtMs = time.Now().Add(time.Duration(ttlSeconds) * time.Second).UnixMilli()
-	}
-	oc.sendToolCallApprovalEvent(ctx, portal, state, toolCallID, toolName, approvalID, approvalExpiresAtMs)
-
-	// Back-compat fallback: many clients either don't support or don't render our
-	// ephemeral stream events. If approvals are required, give the user a clear,
-	// timeline-visible way to proceed (!ai approve or UI card).
-	if state.suppressSend {
-		return
-	}
-	if portal == nil || portal.MXID == "" {
-		return
-	}
-	// Avoid spamming the timeline for the same approval. The ephemeral event is
-	// still emitted above (so capable clients can render the native UI).
-	if state.timelineNotices == nil {
-		state.timelineNotices = make(map[string]bool)
-	}
-	noticeKey := "approval:" + approvalID
-	if state.timelineNotices[noticeKey] {
-		return
-	}
-	state.timelineNotices[noticeKey] = true
-
-	if strings.TrimSpace(toolName) == "" {
-		toolName = "tool"
-	}
-	mins := 0
-	if ttlSeconds > 0 {
-		mins = (ttlSeconds + 59) / 60
-	}
-	expires := ""
-	if mins > 0 {
-		expires = fmt.Sprintf(" Expires in %d min.", mins)
-	}
-	body := fmt.Sprintf(
-		"Approval required to run %s. Type !ai approve %s allow|always|deny.%s",
-		toolName,
-		approvalID,
-		expires,
-	)
-	expiresAtMs := int64(0)
-	if ttlSeconds > 0 {
-		expiresAtMs = time.Now().Add(time.Duration(ttlSeconds) * time.Second).UnixMilli()
-	}
-
-	uiMessage := map[string]any{
-		"id":   "approval:" + approvalID,
-		"role": "assistant",
-		"metadata": map[string]any{
-			"turn_id":      state.turnID,
-			"approval_id":  approvalID,
-			"tool_call_id": toolCallID,
-			// Allows clients to disable the UI locally even if the snapshot isn't edited on timeout.
-			"approval_expires_at_ms": expiresAtMs,
-		},
-		"parts": []map[string]any{
-			{
-				"type":       "dynamic-tool",
-				"toolName":   toolName,
-				"toolCallId": toolCallID,
-				"state":      "approval-requested",
-				"approval": map[string]any{
-					"id":          approvalID,
-					"expiresAtMs": expiresAtMs,
-				},
-			},
-		},
-	}
-
-	raw := map[string]any{
-		"body":       body,
-		"msgtype":    event.MsgNotice,
-		BeeperAIKey:  uiMessage,
-		"m.mentions": map[string]any{},
-	}
-	if targetEventID != "" {
-		raw["m.relates_to"] = map[string]any{
-			"rel_type": RelReference,
-			"event_id": targetEventID.String(),
-		}
-	}
-	content := &event.Content{Raw: raw}
-
-	// Prefer sending as the model/assistant identity if possible (so the message
-	// reads as part of the assistant's flow), but fall back to the bridge bot.
-	if intent := oc.getModelIntent(ctx, portal); intent != nil {
-		if resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, content, nil); err == nil {
-			if resp != nil && resp.EventID != "" {
-				oc.setApprovalSnapshotEvent(approvalID, resp.EventID, false)
-			}
-			return
-		}
-	}
-	if oc != nil && oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.Bot != nil {
-		if resp, err := oc.UserLogin.Bridge.Bot.SendMessage(ctx, portal.MXID, event.EventMessage, content, nil); err == nil {
-			if resp != nil && resp.EventID != "" {
-				oc.setApprovalSnapshotEvent(approvalID, resp.EventID, true)
-			}
-		}
-	}
-}
-
 func (oc *AIClient) emitUIToolOutputAvailable(ctx context.Context, portal *bridgev2.Portal, state *streamingState, toolCallID string, output any, providerExecuted bool, preliminary bool) {
 	if toolCallID == "" {
 		return
@@ -1192,76 +994,6 @@ func (oc *AIClient) handleResponseOutputItemAdded(
 		return
 	}
 
-	if item.Type == "mcp_approval_request" {
-		approvalID := strings.TrimSpace(item.ID)
-		if approvalID == "" {
-			approvalID = NewCallID()
-		}
-		state.uiToolCallIDByApproval[approvalID] = tool.callID
-		if tool.input.Len() == 0 {
-			tool.input.WriteString(stringifyJSONValue(desc.input))
-		}
-		oc.emitUIToolInputAvailable(ctx, portal, state, tool.callID, tool.toolName, desc.input, true)
-		if !state.pendingMcpApprovalsSeen[approvalID] {
-			state.pendingMcpApprovalsSeen[approvalID] = true
-			parsed := item.AsMcpApprovalRequest()
-			serverLabel := strings.TrimSpace(parsed.ServerLabel)
-			mcpToolName := strings.TrimSpace(parsed.Name)
-			state.pendingMcpApprovals = append(state.pendingMcpApprovals, mcpApprovalRequest{
-				approvalID:  approvalID,
-				toolCallID:  tool.callID,
-				toolName:    tool.toolName,
-				serverLabel: serverLabel,
-			})
-			ttl := time.Duration(oc.toolApprovalsTTLSeconds()) * time.Second
-			oc.registerToolApproval(struct {
-				ApprovalID string
-				RoomID     id.RoomID
-				TurnID     string
-
-				ToolCallID string
-				ToolName   string
-
-				ToolKind     ToolApprovalKind
-				RuleToolName string
-				ServerLabel  string
-				Action       string
-
-				TTL time.Duration
-			}{
-				ApprovalID:   approvalID,
-				RoomID:       state.roomID,
-				TurnID:       state.turnID,
-				ToolCallID:   tool.callID,
-				ToolName:     tool.toolName,
-				ToolKind:     ToolApprovalKindMCP,
-				RuleToolName: mcpToolName,
-				ServerLabel:  serverLabel,
-				TTL:          ttl,
-			})
-
-			// If approvals are disabled, not required, or already always-allowed, auto-approve without prompting.
-			// Otherwise emit an approval request to the UI.
-			needsApproval := oc.toolApprovalsRuntimeEnabled() && oc.toolApprovalsRequireForMCP() && !oc.isMcpAlwaysAllowed(serverLabel, mcpToolName)
-			if needsApproval && state != nil && state.heartbeat != nil {
-				needsApproval = false
-			}
-			if needsApproval {
-				if state != nil && !state.uiToolApprovalRequested[approvalID] {
-					state.uiToolApprovalRequested[approvalID] = true
-					oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, tool.toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
-				}
-			} else {
-				_ = oc.resolveToolApproval(state.roomID, approvalID, ToolApprovalDecision{
-					Approve:   true,
-					DecidedAt: time.Now(),
-					DecidedBy: oc.UserLogin.UserMXID,
-				})
-			}
-		}
-		return
-	}
-
 	if desc.input != nil {
 		if tool.input.Len() == 0 {
 			tool.input.WriteString(stringifyJSONValue(desc.input))
@@ -1294,74 +1026,6 @@ func (oc *AIClient) handleResponseOutputItemDone(
 		return
 	}
 	if state.uiToolOutputFinalized[tool.callID] {
-		return
-	}
-
-	if item.Type == "mcp_approval_request" {
-		approvalID := strings.TrimSpace(item.ID)
-		if approvalID == "" {
-			approvalID = NewCallID()
-		}
-		state.uiToolCallIDByApproval[approvalID] = tool.callID
-		if tool.input.Len() == 0 {
-			tool.input.WriteString(stringifyJSONValue(desc.input))
-		}
-		oc.emitUIToolInputAvailable(ctx, portal, state, tool.callID, tool.toolName, desc.input, true)
-		if !state.pendingMcpApprovalsSeen[approvalID] {
-			state.pendingMcpApprovalsSeen[approvalID] = true
-			parsed := item.AsMcpApprovalRequest()
-			serverLabel := strings.TrimSpace(parsed.ServerLabel)
-			mcpToolName := strings.TrimSpace(parsed.Name)
-			state.pendingMcpApprovals = append(state.pendingMcpApprovals, mcpApprovalRequest{
-				approvalID:  approvalID,
-				toolCallID:  tool.callID,
-				toolName:    tool.toolName,
-				serverLabel: serverLabel,
-			})
-			ttl := time.Duration(oc.toolApprovalsTTLSeconds()) * time.Second
-			oc.registerToolApproval(struct {
-				ApprovalID string
-				RoomID     id.RoomID
-				TurnID     string
-
-				ToolCallID string
-				ToolName   string
-
-				ToolKind     ToolApprovalKind
-				RuleToolName string
-				ServerLabel  string
-				Action       string
-
-				TTL time.Duration
-			}{
-				ApprovalID:   approvalID,
-				RoomID:       state.roomID,
-				TurnID:       state.turnID,
-				ToolCallID:   tool.callID,
-				ToolName:     tool.toolName,
-				ToolKind:     ToolApprovalKindMCP,
-				RuleToolName: mcpToolName,
-				ServerLabel:  serverLabel,
-				TTL:          ttl,
-			})
-
-			needsApproval := oc.toolApprovalsRuntimeEnabled() && oc.toolApprovalsRequireForMCP() && !oc.isMcpAlwaysAllowed(serverLabel, mcpToolName)
-			if needsApproval && state != nil && state.heartbeat != nil {
-				needsApproval = false
-			}
-			if needsApproval {
-				if state != nil && !state.uiToolApprovalRequested[approvalID] {
-					state.uiToolApprovalRequested[approvalID] = true
-					oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, tool.toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
-				}
-			} else {
-				_ = oc.resolveToolApproval(state.roomID, approvalID, ToolApprovalDecision{
-					Approve:   true,
-					DecidedAt: time.Now(),
-					DecidedBy: oc.UserLogin.UserMXID,
-				})
-			}
-		}
 		return
 	}
 
@@ -1906,7 +1570,6 @@ func (oc *AIClient) streamingResponse(
 		if streamEvent.Type != "error" {
 			oc.markMessageSendSuccess(ctx, portal, evt, state)
 		}
-
 		switch streamEvent.Type {
 		case "response.created", "response.queued", "response.in_progress":
 			if strings.TrimSpace(streamEvent.Response.ID) != "" {
@@ -1994,83 +1657,6 @@ func (oc *AIClient) streamingResponse(
 					tool.input.WriteString(streamEvent.Code)
 				}
 				oc.emitUIToolInputAvailable(ctx, portal, state, tool.callID, tool.toolName, parseJSONOrRaw(tool.input.String()), true)
-			}
-
-		case "response.mcp_call_arguments.delta":
-			tool, exists := activeTools[streamEvent.ItemID]
-			if !exists {
-				itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-				if itemDesc.ok {
-					tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-				}
-			}
-			if tool != nil {
-				tool.input.WriteString(streamEvent.Delta)
-				oc.emitUIToolInputDelta(ctx, portal, state, tool.callID, tool.toolName, streamEvent.Delta, true)
-			}
-
-		case "response.mcp_call_arguments.done":
-			tool, exists := activeTools[streamEvent.ItemID]
-			if !exists {
-				itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-				if itemDesc.ok {
-					tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-				}
-			}
-			if tool != nil {
-				if tool.input.Len() == 0 && strings.TrimSpace(streamEvent.Arguments) != "" {
-					tool.input.WriteString(streamEvent.Arguments)
-				}
-				oc.emitUIToolInputAvailable(ctx, portal, state, tool.callID, tool.toolName, parseJSONOrRaw(tool.input.String()), true)
-			}
-
-		case "response.mcp_call.failed":
-			tool, exists := activeTools[streamEvent.ItemID]
-			if !exists {
-				itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-				if itemDesc.ok {
-					tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-				}
-			}
-			if tool != nil {
-				if state != nil && state.uiToolOutputFinalized[tool.callID] {
-					break
-				}
-				errorText := strings.TrimSpace(streamEvent.Item.Error)
-				if errorText == "" {
-					errorText = "MCP tool call failed"
-				}
-				denied := outputItemLooksDenied(streamEvent.Item)
-				if denied {
-					oc.emitUIToolOutputDenied(ctx, portal, state, tool.callID)
-				} else {
-					oc.emitUIToolOutputError(ctx, portal, state, tool.callID, errorText, true)
-				}
-
-				output := map[string]any{}
-				if denied {
-					output["status"] = "denied"
-				} else {
-					output["error"] = errorText
-				}
-				resultPayload := errorText
-				if denied && resultPayload == "" {
-					resultPayload = "Denied"
-				}
-				resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, resultPayload, ResultStatusError)
-				state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-					CallID:        tool.callID,
-					ToolName:      tool.toolName,
-					ToolType:      string(tool.toolType),
-					Output:        output,
-					Status:        string(ToolStatusFailed),
-					ResultStatus:  string(ResultStatusError),
-					ErrorMessage:  errorText,
-					StartedAtMs:   tool.startedAtMs,
-					CompletedAtMs: time.Now().UnixMilli(),
-					CallEventID:   string(tool.eventID),
-					ResultEventID: string(resultEventID),
-				})
 			}
 
 		case "response.output_text.delta":
@@ -2253,110 +1839,6 @@ func (oc *AIClient) streamingResponse(
 				resultStatus = ResultStatusError
 				result = fmt.Sprintf("Error: tool %s is disabled", toolName)
 			} else {
-				// Tool approval gating for dangerous builtin tools.
-				if argsObj, ok := inputMap.(map[string]any); ok {
-					required, action := oc.builtinToolApprovalRequirement(toolName, argsObj)
-					if required && oc.isBuiltinAlwaysAllowed(toolName, action) {
-						required = false
-					}
-					if required && state.heartbeat != nil {
-						required = false
-					}
-					if required {
-						approvalID := NewCallID()
-						ttl := time.Duration(oc.toolApprovalsTTLSeconds()) * time.Second
-						oc.registerToolApproval(struct {
-							ApprovalID string
-							RoomID     id.RoomID
-							TurnID     string
-
-							ToolCallID string
-							ToolName   string
-
-							ToolKind     ToolApprovalKind
-							RuleToolName string
-							ServerLabel  string
-							Action       string
-
-							TTL time.Duration
-						}{
-							ApprovalID:   approvalID,
-							RoomID:       state.roomID,
-							TurnID:       state.turnID,
-							ToolCallID:   tool.callID,
-							ToolName:     toolName,
-							ToolKind:     ToolApprovalKindBuiltin,
-							RuleToolName: toolName,
-							Action:       action,
-							TTL:          ttl,
-						})
-						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
-						decision, _, ok := oc.waitToolApproval(ctx, approvalID)
-						if !ok {
-							if oc.toolApprovalsAskFallback() == "allow" {
-								decision = ToolApprovalDecision{Approve: true, Reason: "fallback"}
-							} else {
-								decision = ToolApprovalDecision{Approve: false, Reason: "timeout"}
-							}
-						}
-						if !decision.Approve {
-							resultStatus = ResultStatusDenied
-							result = "Denied by user"
-							oc.emitUIToolOutputDenied(ctx, portal, state, tool.callID)
-						}
-					}
-				} else {
-					// If we couldn't parse args as JSON object, still gate by tool name.
-					required, action := oc.builtinToolApprovalRequirement(toolName, nil)
-					if required && oc.isBuiltinAlwaysAllowed(toolName, action) {
-						required = false
-					}
-					if required && state.heartbeat != nil {
-						required = false
-					}
-					if required {
-						approvalID := NewCallID()
-						ttl := time.Duration(oc.toolApprovalsTTLSeconds()) * time.Second
-						oc.registerToolApproval(struct {
-							ApprovalID   string
-							RoomID       id.RoomID
-							TurnID       string
-							ToolCallID   string
-							ToolName     string
-							ToolKind     ToolApprovalKind
-							RuleToolName string
-							ServerLabel  string
-							Action       string
-							TTL          time.Duration
-						}{
-							ApprovalID:   approvalID,
-							RoomID:       state.roomID,
-							TurnID:       state.turnID,
-							ToolCallID:   tool.callID,
-							ToolName:     toolName,
-							ToolKind:     ToolApprovalKindBuiltin,
-							RuleToolName: toolName,
-							Action:       action,
-							TTL:          ttl,
-						})
-						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
-						decision, _, ok := oc.waitToolApproval(ctx, approvalID)
-						if !ok {
-							if oc.toolApprovalsAskFallback() == "allow" {
-								decision = ToolApprovalDecision{Approve: true, Reason: "fallback"}
-							} else {
-								decision = ToolApprovalDecision{Approve: false, Reason: "timeout"}
-							}
-						}
-						if !decision.Approve {
-							resultStatus = ResultStatusDenied
-							result = "Denied by user"
-							oc.emitUIToolOutputDenied(ctx, portal, state, tool.callID)
-						}
-					}
-				}
-
-				// If denied, skip tool execution but still send a tool result to the model.
 				if resultStatus != ResultStatusDenied {
 					// Wrap context with bridge info for tools that need it (e.g., channel-edit, react)
 					toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
@@ -2632,167 +2114,6 @@ func (oc *AIClient) streamingResponse(
 				ResultEventID: string(resultEventID),
 			})
 
-		case "response.mcp_list_tools.in_progress":
-			callID := strings.TrimSpace(streamEvent.ItemID)
-			if callID == "" {
-				callID = NewCallID()
-			}
-			tool, exists := activeTools[streamEvent.ItemID]
-			if !exists {
-				tool = &activeToolCall{
-					callID:      callID,
-					toolName:    "mcp.list_tools",
-					toolType:    ToolTypeMCP,
-					startedAtMs: time.Now().UnixMilli(),
-					itemID:      streamEvent.ItemID,
-				}
-				activeTools[streamEvent.ItemID] = tool
-				tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
-			}
-			oc.emitUIToolInputDelta(ctx, portal, state, tool.callID, tool.toolName, "", true)
-
-		case "response.mcp_list_tools.completed":
-			tool, exists := activeTools[streamEvent.ItemID]
-			callID := strings.TrimSpace(streamEvent.ItemID)
-			if callID == "" {
-				callID = NewCallID()
-			}
-			if exists && tool != nil {
-				callID = tool.callID
-			}
-			if state != nil && state.uiToolOutputFinalized[callID] {
-				break
-			}
-			if !exists {
-				tool = &activeToolCall{
-					callID:      callID,
-					toolName:    "mcp.list_tools",
-					toolType:    ToolTypeMCP,
-					startedAtMs: time.Now().UnixMilli(),
-					itemID:      streamEvent.ItemID,
-				}
-				activeTools[streamEvent.ItemID] = tool
-				tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
-			}
-			output := map[string]any{"status": "completed"}
-			oc.emitUIToolOutputAvailable(ctx, portal, state, callID, output, true, false)
-
-			resultJSON, _ := json.Marshal(output)
-			resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, string(resultJSON), ResultStatusSuccess)
-			state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-				CallID:        callID,
-				ToolName:      "mcp.list_tools",
-				ToolType:      string(tool.toolType),
-				Output:        output,
-				Status:        string(ToolStatusCompleted),
-				ResultStatus:  string(ResultStatusSuccess),
-				StartedAtMs:   tool.startedAtMs,
-				CompletedAtMs: time.Now().UnixMilli(),
-				CallEventID:   string(tool.eventID),
-				ResultEventID: string(resultEventID),
-			})
-
-		case "response.mcp_list_tools.failed":
-			tool, exists := activeTools[streamEvent.ItemID]
-			callID := strings.TrimSpace(streamEvent.ItemID)
-			if callID == "" {
-				callID = NewCallID()
-			}
-			if exists && tool != nil {
-				callID = tool.callID
-			}
-			if state != nil && state.uiToolOutputFinalized[callID] {
-				break
-			}
-			if !exists {
-				tool = &activeToolCall{
-					callID:      callID,
-					toolName:    "mcp.list_tools",
-					toolType:    ToolTypeMCP,
-					startedAtMs: time.Now().UnixMilli(),
-					itemID:      streamEvent.ItemID,
-				}
-				activeTools[streamEvent.ItemID] = tool
-				tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
-			}
-			errText := "MCP list tools failed"
-			oc.emitUIToolOutputError(ctx, portal, state, callID, errText, true)
-
-			resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, errText, ResultStatusError)
-			state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-				CallID:        callID,
-				ToolName:      "mcp.list_tools",
-				ToolType:      string(tool.toolType),
-				Output:        map[string]any{"error": errText},
-				Status:        string(ToolStatusFailed),
-				ResultStatus:  string(ResultStatusError),
-				ErrorMessage:  errText,
-				StartedAtMs:   tool.startedAtMs,
-				CompletedAtMs: time.Now().UnixMilli(),
-				CallEventID:   string(tool.eventID),
-				ResultEventID: string(resultEventID),
-			})
-
-		case "response.mcp_call.in_progress":
-			callID := strings.TrimSpace(streamEvent.ItemID)
-			if callID == "" {
-				callID = NewCallID()
-			}
-			tool, exists := activeTools[streamEvent.ItemID]
-			if !exists {
-				tool = &activeToolCall{
-					callID:      callID,
-					toolName:    "mcp.call",
-					toolType:    ToolTypeMCP,
-					startedAtMs: time.Now().UnixMilli(),
-					itemID:      streamEvent.ItemID,
-				}
-				activeTools[streamEvent.ItemID] = tool
-				tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
-			}
-			oc.emitUIToolInputDelta(ctx, portal, state, tool.callID, tool.toolName, "", true)
-
-		case "response.mcp_call.completed":
-			tool, exists := activeTools[streamEvent.ItemID]
-			callID := strings.TrimSpace(streamEvent.ItemID)
-			if callID == "" {
-				callID = NewCallID()
-			}
-			if exists && tool != nil {
-				callID = tool.callID
-			}
-			if state != nil && state.uiToolOutputFinalized[callID] {
-				break
-			}
-			if !exists {
-				tool = &activeToolCall{
-					callID:      callID,
-					toolName:    "mcp.call",
-					toolType:    ToolTypeMCP,
-					startedAtMs: time.Now().UnixMilli(),
-					itemID:      streamEvent.ItemID,
-				}
-				activeTools[streamEvent.ItemID] = tool
-				tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
-			}
-			output := map[string]any{"status": "completed"}
-			oc.emitUIToolOutputAvailable(ctx, portal, state, callID, output, true, false)
-
-			resultJSON, _ := json.Marshal(output)
-			resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, string(resultJSON), ResultStatusSuccess)
-			state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-				CallID:        callID,
-				ToolName:      "mcp.call",
-				ToolType:      string(tool.toolType),
-				Output:        output,
-				Status:        string(ToolStatusCompleted),
-				ResultStatus:  string(ResultStatusSuccess),
-				StartedAtMs:   tool.startedAtMs,
-				CompletedAtMs: time.Now().UnixMilli(),
-				CallEventID:   string(tool.eventID),
-				ResultEventID: string(resultEventID),
-			})
-
 		case "response.web_search_call.searching", "response.web_search_call.in_progress":
 			touchTyping()
 			if typingSignals != nil {
@@ -3030,10 +2351,10 @@ func (oc *AIClient) streamingResponse(
 		return false, nil, &PreDeltaError{Err: err}
 	}
 
-	// If there are pending tool outputs or MCP approvals, send them back to the API for continuation.
+	// If there are pending tool outputs, send them back to the API for continuation.
 	// This loop continues until the model generates a response without additional tool actions.
 	continuationRound := 0
-	for (len(state.pendingFunctionOutputs) > 0 || len(state.pendingMcpApprovals) > 0) && state.responseID != "" {
+	for len(state.pendingFunctionOutputs) > 0 && state.responseID != "" {
 		// Check for context cancellation before starting a new continuation round
 		if ctx.Err() != nil {
 			state.finishReason = "cancelled"
@@ -3062,37 +2383,11 @@ func (oc *AIClient) streamingResponse(
 		}
 		log.Debug().
 			Int("pending_outputs", len(state.pendingFunctionOutputs)).
-			Int("pending_approvals", len(state.pendingMcpApprovals)).
 			Str("previous_response_id", state.responseID).
 			Msg("Continuing response with pending tool actions")
 
 		pendingOutputs := append([]functionCallOutput(nil), state.pendingFunctionOutputs...)
-		pendingApprovals := append([]mcpApprovalRequest(nil), state.pendingMcpApprovals...)
-
-		approvalInputs := make([]responses.ResponseInputItemUnionParam, 0, len(pendingApprovals))
-		for _, approval := range pendingApprovals {
-			decision, _, ok := oc.waitToolApproval(ctx, approval.approvalID)
-			if !ok {
-				if oc.toolApprovalsAskFallback() == "allow" {
-					decision = ToolApprovalDecision{Approve: true, Reason: "fallback"}
-				} else {
-					decision = ToolApprovalDecision{Approve: false, Reason: "timeout"}
-				}
-			}
-			item := responses.ResponseInputItemParamOfMcpApprovalResponse(approval.approvalID, decision.Approve)
-			if decision.Reason != "" && item.OfMcpApprovalResponse != nil {
-				item.OfMcpApprovalResponse.Reason = param.NewOpt(decision.Reason)
-			}
-			approvalInputs = append(approvalInputs, item)
-
-			if !decision.Approve {
-				// Optimistically mark as denied in the UI; the provider may emit a denial later as well.
-				oc.emitUIToolOutputDenied(ctx, portal, state, approval.toolCallID)
-			}
-		}
-
-		// Build continuation request with tool outputs + approval responses
-		continuationParams := oc.buildContinuationParams(ctx, state, meta, pendingOutputs, approvalInputs)
+		continuationParams := oc.buildContinuationParams(ctx, state, meta, pendingOutputs)
 
 		// OpenRouter Responses API is stateless; persist tool calls in base input.
 		if oc.isOpenRouterProvider() && len(state.baseInput) > 0 {
@@ -3105,9 +2400,6 @@ func (oc *AIClient) streamingResponse(
 					state.baseInput = append(state.baseInput, responses.ResponseInputItemParamOfFunctionCall(args, output.callID, output.name))
 				}
 				state.baseInput = append(state.baseInput, buildFunctionCallOutputItem(output.callID, output.output, true))
-			}
-			for _, approval := range approvalInputs {
-				state.baseInput = append(state.baseInput, approval)
 			}
 		}
 
@@ -3131,13 +2423,11 @@ func (oc *AIClient) streamingResponse(
 		}
 		// Clear pending inputs only once continuation stream has actually started.
 		state.pendingFunctionOutputs = nil
-		state.pendingMcpApprovals = nil
 		oc.emitUIStepStart(ctx, portal, state)
 
 		// Process continuation stream events
 		for stream.Next() {
 			streamEvent := stream.Current()
-
 			switch streamEvent.Type {
 			case "response.created", "response.queued", "response.in_progress":
 				if strings.TrimSpace(streamEvent.Response.ID) != "" {
@@ -3225,83 +2515,6 @@ func (oc *AIClient) streamingResponse(
 						tool.input.WriteString(streamEvent.Code)
 					}
 					oc.emitUIToolInputAvailable(ctx, portal, state, tool.callID, tool.toolName, parseJSONOrRaw(tool.input.String()), true)
-				}
-
-			case "response.mcp_call_arguments.delta":
-				tool, exists := activeTools[streamEvent.ItemID]
-				if !exists {
-					itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-					if itemDesc.ok {
-						tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-					}
-				}
-				if tool != nil {
-					tool.input.WriteString(streamEvent.Delta)
-					oc.emitUIToolInputDelta(ctx, portal, state, tool.callID, tool.toolName, streamEvent.Delta, true)
-				}
-
-			case "response.mcp_call_arguments.done":
-				tool, exists := activeTools[streamEvent.ItemID]
-				if !exists {
-					itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-					if itemDesc.ok {
-						tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-					}
-				}
-				if tool != nil {
-					if tool.input.Len() == 0 && strings.TrimSpace(streamEvent.Arguments) != "" {
-						tool.input.WriteString(streamEvent.Arguments)
-					}
-					oc.emitUIToolInputAvailable(ctx, portal, state, tool.callID, tool.toolName, parseJSONOrRaw(tool.input.String()), true)
-				}
-
-			case "response.mcp_call.failed":
-				tool, exists := activeTools[streamEvent.ItemID]
-				if !exists {
-					itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-					if itemDesc.ok {
-						tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-					}
-				}
-				if tool != nil {
-					if state != nil && state.uiToolOutputFinalized[tool.callID] {
-						break
-					}
-					errorText := strings.TrimSpace(streamEvent.Item.Error)
-					if errorText == "" {
-						errorText = "MCP tool call failed"
-					}
-					denied := outputItemLooksDenied(streamEvent.Item)
-					if denied {
-						oc.emitUIToolOutputDenied(ctx, portal, state, tool.callID)
-					} else {
-						oc.emitUIToolOutputError(ctx, portal, state, tool.callID, errorText, true)
-					}
-
-					output := map[string]any{}
-					if denied {
-						output["status"] = "denied"
-					} else {
-						output["error"] = errorText
-					}
-					resultPayload := errorText
-					if denied && resultPayload == "" {
-						resultPayload = "Denied"
-					}
-					resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, resultPayload, ResultStatusError)
-					state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-						CallID:        tool.callID,
-						ToolName:      tool.toolName,
-						ToolType:      string(tool.toolType),
-						Output:        output,
-						Status:        string(ToolStatusFailed),
-						ResultStatus:  string(ResultStatusError),
-						ErrorMessage:  errorText,
-						StartedAtMs:   tool.startedAtMs,
-						CompletedAtMs: time.Now().UnixMilli(),
-						CallEventID:   string(tool.eventID),
-						ResultEventID: string(resultEventID),
-					})
 				}
 
 			case "response.output_text.delta":
@@ -3483,56 +2696,6 @@ func (oc *AIClient) streamingResponse(
 					resultStatus = ResultStatusError
 					result = fmt.Sprintf("Error: tool %s is disabled", toolName)
 				} else {
-					// Tool approval gating for dangerous builtin tools.
-					argsObj, _ := inputMap.(map[string]any)
-					required, action := oc.builtinToolApprovalRequirement(toolName, argsObj)
-					if required && oc.isBuiltinAlwaysAllowed(toolName, action) {
-						required = false
-					}
-					if required && state.heartbeat != nil {
-						required = false
-					}
-					if required {
-						approvalID := NewCallID()
-						ttl := time.Duration(oc.toolApprovalsTTLSeconds()) * time.Second
-						oc.registerToolApproval(struct {
-							ApprovalID   string
-							RoomID       id.RoomID
-							TurnID       string
-							ToolCallID   string
-							ToolName     string
-							ToolKind     ToolApprovalKind
-							RuleToolName string
-							ServerLabel  string
-							Action       string
-							TTL          time.Duration
-						}{
-							ApprovalID:   approvalID,
-							RoomID:       state.roomID,
-							TurnID:       state.turnID,
-							ToolCallID:   tool.callID,
-							ToolName:     toolName,
-							ToolKind:     ToolApprovalKindBuiltin,
-							RuleToolName: toolName,
-							Action:       action,
-							TTL:          ttl,
-						})
-						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
-						decision, _, ok := oc.waitToolApproval(ctx, approvalID)
-						if !ok {
-							if oc.toolApprovalsAskFallback() == "allow" {
-								decision = ToolApprovalDecision{Approve: true, Reason: "fallback"}
-							} else {
-								decision = ToolApprovalDecision{Approve: false, Reason: "timeout"}
-							}
-						}
-						if !decision.Approve {
-							resultStatus = ResultStatusDenied
-							result = "Denied by user"
-							oc.emitUIToolOutputDenied(ctx, portal, state, tool.callID)
-						}
-					}
-
 					if resultStatus != ResultStatusDenied {
 						toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
 							Client:        oc,
@@ -3791,13 +2954,12 @@ func (oc *AIClient) streamingResponse(
 }
 
 // buildContinuationParams builds params for continuing a response after tool execution
-// and/or after responding to tool approval requests.
+// and/or after responding to pending tool outputs.
 func (oc *AIClient) buildContinuationParams(
 	ctx context.Context,
 	state *streamingState,
 	meta *PortalMetadata,
 	pendingOutputs []functionCallOutput,
-	approvalInputs []responses.ResponseInputItemUnionParam,
 ) responses.ResponseNewParams {
 	params := responses.ResponseNewParams{
 		Model:           shared.ResponsesModel(oc.effectiveModelForAPI(meta)),
@@ -3818,9 +2980,6 @@ func (oc *AIClient) buildContinuationParams(
 	if isOpenRouter && len(state.baseInput) > 0 {
 		// OpenRouter Responses API is stateless: include full history plus tool calls.
 		input = append(input, state.baseInput...)
-	}
-	for _, approval := range approvalInputs {
-		input = append(input, approval)
 	}
 	for _, output := range pendingOutputs {
 		if isOpenRouter && output.name != "" {
@@ -4220,57 +3379,6 @@ func (oc *AIClient) streamChatCompletions(
 					result = fmt.Sprintf("Error: tool %s is not enabled", toolName)
 					resultStatus = ResultStatusError
 				} else {
-					// Tool approval gating for dangerous builtin tools.
-					var argsObj map[string]any
-					_ = json.Unmarshal([]byte(argsJSON), &argsObj)
-					required, action := oc.builtinToolApprovalRequirement(toolName, argsObj)
-					if required && oc.isBuiltinAlwaysAllowed(toolName, action) {
-						required = false
-					}
-					if required && state.heartbeat != nil {
-						required = false
-					}
-					if required {
-						approvalID := NewCallID()
-						ttl := time.Duration(oc.toolApprovalsTTLSeconds()) * time.Second
-						oc.registerToolApproval(struct {
-							ApprovalID   string
-							RoomID       id.RoomID
-							TurnID       string
-							ToolCallID   string
-							ToolName     string
-							ToolKind     ToolApprovalKind
-							RuleToolName string
-							ServerLabel  string
-							Action       string
-							TTL          time.Duration
-						}{
-							ApprovalID:   approvalID,
-							RoomID:       state.roomID,
-							TurnID:       state.turnID,
-							ToolCallID:   tool.callID,
-							ToolName:     toolName,
-							ToolKind:     ToolApprovalKindBuiltin,
-							RuleToolName: toolName,
-							Action:       action,
-							TTL:          ttl,
-						})
-						oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
-						decision, _, ok := oc.waitToolApproval(ctx, approvalID)
-						if !ok {
-							if oc.toolApprovalsAskFallback() == "allow" {
-								decision = ToolApprovalDecision{Approve: true, Reason: "fallback"}
-							} else {
-								decision = ToolApprovalDecision{Approve: false, Reason: "timeout"}
-							}
-						}
-						if !decision.Approve {
-							resultStatus = ResultStatusDenied
-							result = "Denied by user"
-							oc.emitUIToolOutputDenied(ctx, portal, state, tool.callID)
-						}
-					}
-
 					if resultStatus != ResultStatusDenied {
 						var err error
 						result, err = oc.executeBuiltinTool(toolCtx, portal, toolName, argsJSON)
