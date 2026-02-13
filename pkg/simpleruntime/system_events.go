@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simplecron"
 )
 
 type SystemEvent struct {
@@ -160,7 +158,7 @@ func snapshotSystemEvents() persistedSystemEvents {
 	return snap
 }
 
-func persistSystemEventsSnapshot(backend cron.StoreBackend, log *zerolog.Logger) {
+func persistSystemEventsSnapshot(backend CronStoreBackend, log *zerolog.Logger) {
 	if backend == nil {
 		return
 	}
@@ -179,7 +177,7 @@ func persistSystemEventsSnapshot(backend cron.StoreBackend, log *zerolog.Logger)
 	}
 }
 
-func restoreSystemEventsFromDisk(backend cron.StoreBackend, log *zerolog.Logger) {
+func restoreSystemEventsFromDisk(backend CronStoreBackend, log *zerolog.Logger) {
 	if backend == nil {
 		return
 	}
