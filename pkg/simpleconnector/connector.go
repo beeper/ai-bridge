@@ -2,7 +2,7 @@ package simpleconnector
 
 import (
 	"github.com/beeper/ai-bridge/modules/runtime"
-	base "github.com/beeper/ai-bridge/pkg/connector"
+	base "github.com/beeper/ai-bridge/pkg/simpleruntime"
 )
 
 type OpenAIConnector = base.OpenAIConnector
