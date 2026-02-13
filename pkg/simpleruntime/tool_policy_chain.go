@@ -6,9 +6,9 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/toolpolicy"
-	agenttools "github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/toolpolicy"
+	agenttools "github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/tools"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 )
 

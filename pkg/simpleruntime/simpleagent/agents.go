@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	policypkg "github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/toolpolicy"
-	toolspkg "github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/tools"
+	policypkg "github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/toolpolicy"
+	toolspkg "github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/tools"
 )
 
 type ModelInfo struct {

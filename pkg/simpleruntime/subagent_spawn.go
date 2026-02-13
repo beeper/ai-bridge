@@ -14,8 +14,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/tools"
 )
 
 func normalizeAgentID(value string) string {

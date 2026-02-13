@@ -7,7 +7,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/cron"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simplecron"
 )
 
 type HeartbeatWakeHandler func(reason string) cron.HeartbeatRunResult

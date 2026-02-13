@@ -11,7 +11,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/commands"
 
 	"github.com/beeper/ai-bridge/modules/runtime/commandregistry"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/memory"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simplememory"
 	"github.com/beeper/ai-bridge/pkg/textfs"
 )
 
