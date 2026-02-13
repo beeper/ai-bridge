@@ -11,7 +11,7 @@ import (
 	"maunium.net/go/mautrix/format"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
 )
 
 const maxMatrixEventBodyBytes = 60000 // Safety margin below Matrix's ~65KB limit

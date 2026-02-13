@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/memory"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/memory"
 	"github.com/beeper/ai-bridge/pkg/shared/calc"
 	"github.com/beeper/ai-bridge/pkg/shared/media"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"

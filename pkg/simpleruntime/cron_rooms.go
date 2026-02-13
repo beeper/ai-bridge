@@ -8,7 +8,7 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
 )
 
 func (oc *AIClient) getOrCreateCronRoom(ctx context.Context, agentID, jobID, jobName string) (*bridgev2.Portal, error) {

@@ -13,8 +13,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"github.com/beeper/ai-bridge/modules/runtime/commandregistry"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents/toolpolicy"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/toolpolicy"
 )
 
 // HelpSectionAI is the help section for AI-related commands

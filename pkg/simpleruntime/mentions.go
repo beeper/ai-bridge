@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
 )
 
 const mentionBackspaceChar = "\u0008"

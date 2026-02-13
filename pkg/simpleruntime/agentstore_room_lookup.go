@@ -1,3 +1,5 @@
+//go:build agentic
+
 package connector
 
 import (

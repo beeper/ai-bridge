@@ -1,3 +1,5 @@
+//go:build agentic
+
 package connector
 
 import (
@@ -5,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/cron"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/cron"
 )
 
 func formatCronStatusText(enabled bool, storePath string, jobCount int, nextWakeAtMs *int64) string {

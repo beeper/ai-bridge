@@ -6,8 +6,8 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents"
+	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/agents/tools"
 )
 
 type agentListEntry struct {
