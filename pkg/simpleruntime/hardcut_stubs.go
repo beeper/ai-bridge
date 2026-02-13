@@ -11,8 +11,6 @@ import (
 
 	agents "github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
 	agenttools "github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent/tools"
-	cron "github.com/beeper/ai-bridge/pkg/simpleruntime/simplecron"
-	memory "github.com/beeper/ai-bridge/pkg/simpleruntime/simplememory"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/id"
@@ -21,6 +19,11 @@ import (
 type subagentRun struct{}
 
 type pendingToolApproval struct{}
+
+type cronServiceRuntime interface {
+	Start() error
+	Stop()
+}
 
 type HeartbeatWake struct {
 	log zerolog.Logger
@@ -33,8 +36,8 @@ type HeartbeatRunner struct{}
 func NewHeartbeatRunner(*AIClient) *HeartbeatRunner { return &HeartbeatRunner{} }
 func (h *HeartbeatRunner) Start()                   {}
 func (h *HeartbeatRunner) Stop()                    {}
-func (h *HeartbeatRunner) run(string) cron.HeartbeatRunResult {
-	return cron.HeartbeatRunResult{Status: "skipped", Reason: "disabled"}
+func (h *HeartbeatRunner) run(string) HeartbeatRunResult {
+	return HeartbeatRunResult{Status: "skipped", Reason: "disabled"}
 }
 
 type HeartbeatRunConfig struct {
@@ -64,6 +67,11 @@ type HeartbeatRunOutcome struct {
 	Sent    bool
 	Skipped bool
 	Silent  bool
+}
+
+type HeartbeatRunResult struct {
+	Status string `json:"status,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type heartbeatRunContext struct {
@@ -277,8 +285,8 @@ func (oc *AIClient) executeAgentsList(context.Context, *bridgev2.Portal, map[str
 func notifyMemoryFileChanged(context.Context, string) {}
 
 type memorySearchManager interface {
-	Search(context.Context, string, memory.SearchOptions) ([]memory.SearchResult, error)
-	Status() memory.ProviderStatus
+	Search(context.Context, string, MemorySearchOptions) ([]MemorySearchResult, error)
+	Status() MemoryProviderStatus
 	ReadFile(context.Context, string, *int, *int) (map[string]any, error)
 }
 
@@ -288,9 +296,37 @@ func getMemorySearchManager(*AIClient, string) (memorySearchManager, string) {
 
 const memorySearchTimeout = 3 * time.Second
 
+type MemorySearchOptions struct {
+	SessionKey string
+	MinScore   float64
+	Mode       string
+	MaxResults int
+	PathPrefix string
+	Sources    []string
+}
+
+type MemoryFallbackStatus struct {
+	Provider string `json:"provider,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+type MemoryProviderStatus struct {
+	Provider string                `json:"provider,omitempty"`
+	Model    string                `json:"model,omitempty"`
+	Fallback *MemoryFallbackStatus `json:"fallback,omitempty"`
+}
+
+type MemorySearchResult struct {
+	Path      string  `json:"path,omitempty"`
+	Snippet   string  `json:"snippet,omitempty"`
+	StartLine int     `json:"start_line,omitempty"`
+	EndLine   int     `json:"end_line,omitempty"`
+	Score     float64 `json:"score,omitempty"`
+}
+
 func (oc *AIClient) notifySessionMemoryChange(context.Context, *bridgev2.Portal, *PortalMetadata, bool) {}
 
-func (oc *AIClient) buildCronService() *cron.CronService { return nil }
+func (oc *AIClient) buildCronService() cronServiceRuntime { return nil }
 
 func seedLastHeartbeatEvent(networkid.UserLoginID, *HeartbeatEventPayload) {}
 
@@ -307,3 +343,37 @@ type ToolApprovalDecision struct {
 }
 
 func (oc *AIClient) resolveToolApproval(id.RoomID, string, ToolApprovalDecision) error { return nil }
+
+type CronStoreEntry struct {
+	Key  string
+	Data []byte
+}
+
+type CronStoreBackend interface {
+	Read(context.Context, string) ([]byte, bool, error)
+	Write(context.Context, string, []byte) error
+	List(context.Context, string) ([]CronStoreEntry, error)
+}
+
+type CronEvent struct {
+	JobID       string
+	Action      string
+	Status      string
+	Error       string
+	Summary     string
+	RunAtMs     int64
+	DurationMs  int64
+	NextRunAtMs int64
+}
+
+type CronRunLogEntry struct {
+	TS          int64
+	JobID       string
+	Action      string
+	Status      string
+	Error       string
+	Summary     string
+	RunAtMs     int64
+	DurationMs  int64
+	NextRunAtMs int64
+}

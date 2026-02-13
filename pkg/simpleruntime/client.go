@@ -32,7 +32,6 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/ai-bridge/pkg/simpleruntime/simpleagent"
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simplecron"
 )
 
 var (
@@ -306,7 +305,7 @@ type AIClient struct {
 	queueTyping   map[id.RoomID]*TypingController
 
 	// Cron + heartbeat
-	cronService     *cron.CronService
+	cronService     cronServiceRuntime
 	heartbeatRunner *HeartbeatRunner
 	heartbeatWake   *HeartbeatWake
 

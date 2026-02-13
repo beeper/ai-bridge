@@ -22,7 +22,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/simpleruntime/simplememory"
 	"github.com/beeper/ai-bridge/pkg/shared/calc"
 	"github.com/beeper/ai-bridge/pkg/shared/media"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
@@ -114,10 +113,10 @@ const (
 )
 
 type memorySearchOutput struct {
-	Results   []memory.SearchResult  `json:"results"`
+	Results   []MemorySearchResult   `json:"results"`
 	Provider  string                 `json:"provider,omitempty"`
 	Model     string                 `json:"model,omitempty"`
-	Fallback  *memory.FallbackStatus `json:"fallback,omitempty"`
+	Fallback  *MemoryFallbackStatus  `json:"fallback,omitempty"`
 	Citations string                 `json:"citations,omitempty"`
 	Disabled  bool                   `json:"disabled,omitempty"`
 	Error     string                 `json:"error,omitempty"`
@@ -2084,7 +2083,7 @@ func executeMemorySearch(ctx context.Context, args map[string]any) (string, erro
 	manager, errMsg := getMemorySearchManager(btc.Client, agentID)
 	if manager == nil {
 		payload := memorySearchOutput{
-			Results:  []memory.SearchResult{},
+			Results:  []MemorySearchResult{},
 			Disabled: true,
 			Error:    errMsg,
 		}
@@ -2092,7 +2091,7 @@ func executeMemorySearch(ctx context.Context, args map[string]any) (string, erro
 		return string(output), nil
 	}
 
-	opts := memory.SearchOptions{
+	opts := MemorySearchOptions{
 		SessionKey: btc.Portal.PortalKey.String(),
 		MinScore:   math.NaN(),
 		Mode:       mode,
@@ -2136,7 +2135,7 @@ func executeMemorySearch(ctx context.Context, args map[string]any) (string, erro
 	results, err := manager.Search(searchCtx, query, opts)
 	if err != nil {
 		payload := memorySearchOutput{
-			Results:  []memory.SearchResult{},
+			Results:  []MemorySearchResult{},
 			Disabled: true,
 			Error:    err.Error(),
 		}
@@ -2260,11 +2259,11 @@ func shouldIncludeMemoryCitations(ctx context.Context, client *AIClient, portal 
 	return !client.isGroupChat(ctx, portal)
 }
 
-func decorateMemorySearchResults(results []memory.SearchResult, include bool) []memory.SearchResult {
+func decorateMemorySearchResults(results []MemorySearchResult, include bool) []MemorySearchResult {
 	if !include || len(results) == 0 {
 		return results
 	}
-	out := make([]memory.SearchResult, 0, len(results))
+	out := make([]MemorySearchResult, 0, len(results))
 	for _, entry := range results {
 		next := entry
 		citation := formatMemoryCitation(entry)
@@ -2281,7 +2280,7 @@ func decorateMemorySearchResults(results []memory.SearchResult, include bool) []
 	return out
 }
 
-func formatMemoryCitation(entry memory.SearchResult) string {
+func formatMemoryCitation(entry MemorySearchResult) string {
 	if strings.TrimSpace(entry.Path) == "" {
 		return ""
 	}

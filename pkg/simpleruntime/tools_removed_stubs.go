@@ -3,8 +3,6 @@ package connector
 import (
 	"strings"
 	"time"
-
-	cron "github.com/beeper/ai-bridge/pkg/simpleruntime/simplecron"
 )
 
 const defaultNexusTimeoutSeconds = 30
@@ -24,8 +22,8 @@ func nexusConfigured(cfg *NexusToolsConfig) bool {
 	return strings.TrimSpace(cfg.BaseURL) != "" && strings.TrimSpace(cfg.Token) != ""
 }
 
-func cronRunLogEntryFromEvent(evt cron.CronEvent) cron.CronRunLogEntry {
-	return cron.CronRunLogEntry{
+func cronRunLogEntryFromEvent(evt CronEvent) CronRunLogEntry {
+	return CronRunLogEntry{
 		TS:          time.Now().UnixMilli(),
 		JobID:       evt.JobID,
 		Action:      evt.Action,
