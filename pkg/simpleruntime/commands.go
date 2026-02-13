@@ -331,7 +331,6 @@ func fnCommands(ce *commands.Event) {
 			"- `!ai send on|off|inherit`\n" +
 			"- `!ai queue status|reset|<mode> [debounce:<dur>] [cap:<n>] [drop:<old|new|summarize>]`\n\n" +
 			"Session actions:\n" +
-			"- `!ai approve <approvalId> <allow|always|deny> [reason]`\n" +
 			"- `!ai new` — New chat of the same type\n" +
 			"- `!ai reset` — Reset this session/thread\n" +
 			"- `!ai stop` — Abort the current run\n" +

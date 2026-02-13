@@ -4,7 +4,6 @@ import "strings"
 
 var simpleCommandSet = map[string]struct{}{
 	"activation":    {},
-	"approve":       {},
 	"commands":      {},
 	"config":        {},
 	"context":       {},
