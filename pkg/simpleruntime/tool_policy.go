@@ -5,10 +5,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents"
 	"github.com/beeper/ai-bridge/pkg/simpleruntime/agents/toolpolicy"
 	agenttools "github.com/beeper/ai-bridge/pkg/simpleruntime/agents/tools"
-	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 )
 
 func canUseNexusToolsForAgent(meta *PortalMetadata) bool {
@@ -48,6 +48,16 @@ func (oc *AIClient) isToolAllowedByPolicy(meta *PortalMetadata, toolName string)
 }
 
 func (oc *AIClient) isToolAvailable(meta *PortalMetadata, toolName string) (bool, SettingSource, string) {
+	if oc != nil && oc.isSimpleProfile() {
+		if strings.TrimSpace(toolName) != toolspec.WebSearchName {
+			return false, SourceGlobalDefault, "Simple bridge only supports web_search"
+		}
+		if ok, reason := oc.isWebSearchConfigured(context.Background()); !ok {
+			return false, SourceProviderLimit, reason
+		}
+		return true, SourceGlobalDefault, ""
+	}
+
 	if meta == nil {
 		return false, SourceGlobalDefault, "Missing room metadata"
 	}
@@ -197,6 +207,10 @@ func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
 }
 
 func (oc *AIClient) toolNamesForPortal(meta *PortalMetadata) []string {
+	if oc != nil && oc.isSimpleProfile() {
+		return []string{toolspec.WebSearchName}
+	}
+
 	nameSet := make(map[string]struct{})
 	for _, tool := range BuiltinTools() {
 		nameSet[tool.Name] = struct{}{}

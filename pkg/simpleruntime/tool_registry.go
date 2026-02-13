@@ -3,9 +3,7 @@ package connector
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
-	agenttools "github.com/beeper/ai-bridge/pkg/simpleruntime/agents/tools"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 )
 
@@ -56,25 +54,15 @@ func builtinToolExecutors() map[string]toolExecutor {
 }
 
 func buildBuiltinToolDefinitions() []ToolDefinition {
-	executors := builtinToolExecutors()
-	builtin := agenttools.BuiltinTools()
-	defs := make([]ToolDefinition, 0, len(builtin))
-	for _, tool := range builtin {
-		if tool == nil || tool.Name == "" {
-			continue
-		}
-		exec := executors[tool.Name]
-		if exec == nil {
-			panic(fmt.Sprintf("missing executor for builtin tool %q", tool.Name))
-		}
-		defs = append(defs, ToolDefinition{
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters:  toolSchemaToMap(tool.InputSchema),
-			Execute:     exec,
-		})
+	// Simple bridge intentionally exposes only web_search as a callable tool.
+	return []ToolDefinition{
+		{
+			Name:        toolspec.WebSearchName,
+			Description: toolspec.WebSearchDescription,
+			Parameters:  toolspec.WebSearchSchema(),
+			Execute:     executeWebSearch,
+		},
 	}
-	return defs
 }
 
 func toolSchemaToMap(schema any) map[string]any {

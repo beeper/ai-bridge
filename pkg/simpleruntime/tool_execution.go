@@ -394,6 +394,9 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 	}
 
 	toolName = normalizeToolAlias(toolName)
+	if oc != nil && oc.isSimpleProfile() && toolName != ToolNameWebSearch {
+		return "", fmt.Errorf("tool %s is not available in simple bridge", toolName)
+	}
 
 	if toolpolicy.IsOwnerOnlyToolName(toolName) {
 		senderID := ""
