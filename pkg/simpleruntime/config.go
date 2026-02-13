@@ -102,7 +102,6 @@ type AgentDefaultsConfig struct {
 	SkipBootstrap     bool                   `yaml:"skip_bootstrap"`
 	BootstrapMaxChars int                    `yaml:"bootstrap_max_chars"`
 	TimeoutSeconds    int                    `yaml:"timeoutSeconds"`
-	SoulEvil          *agents.SoulEvilConfig `yaml:"soul_evil"`
 	Heartbeat         *HeartbeatConfig       `yaml:"heartbeat"`
 	UserTimezone      string                 `yaml:"userTimezone"`
 	EnvelopeTimezone  string                 `yaml:"envelopeTimezone"`  // local|utc|user|IANA
