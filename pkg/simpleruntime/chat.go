@@ -743,40 +743,12 @@ func (oc *AIClient) handleNewChat(
 ) {
 	runCtx := oc.backgroundContext(ctx)
 
-	simpleProfile := oc.isSimpleProfile()
 	usage := "Usage: !ai new [model]"
-	if !simpleProfile {
-		usage = "Usage: !ai new [model] | !ai new agent <agent_id>"
-	}
 
 	if len(args) > 0 {
 		cmd := strings.ToLower(args[0])
 		if cmd == "agent" {
-			if simpleProfile {
-				oc.sendSystemNotice(runCtx, portal, usage)
-				return
-			}
-			if len(args) != 2 {
-				oc.sendSystemNotice(runCtx, portal, usage)
-				return
-			}
-			targetID := args[1]
-			if targetID == "" {
-				oc.sendSystemNotice(runCtx, portal, usage)
-				return
-			}
-			store := NewAgentStoreAdapter(oc)
-			agent, err := store.GetAgentByID(runCtx, targetID)
-			if err != nil || agent == nil {
-				oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Agent not found: %s", targetID))
-				return
-			}
-			modelID, err := oc.resolveAgentModelForNewChat(runCtx, agent, "")
-			if err != nil {
-				oc.sendSystemNotice(runCtx, portal, err.Error())
-				return
-			}
-			oc.createAndOpenAgentChat(runCtx, portal, agent, modelID, false)
+			oc.sendSystemNotice(runCtx, portal, "Agent mode is not available in the simple bridge. Use `!ai new [model]`.")
 			return
 		}
 
@@ -806,24 +778,6 @@ func (oc *AIClient) handleNewChat(
 		oc.sendSystemNotice(runCtx, portal, "Couldn't read current room settings.")
 		return
 	}
-	agentID := resolveAgentID(meta)
-	if agentID != "" && !simpleProfile {
-		store := NewAgentStoreAdapter(oc)
-		agent, err := store.GetAgentByID(runCtx, agentID)
-		if err != nil || agent == nil {
-			oc.sendSystemNotice(runCtx, portal, fmt.Sprintf("Agent not found: %s", agentID))
-			return
-		}
-		modelID, err := oc.resolveAgentModelForNewChat(runCtx, agent, oc.effectiveModel(meta))
-		if err != nil {
-			oc.sendSystemNotice(runCtx, portal, err.Error())
-			return
-		}
-		modelOverride := meta != nil && meta.Model != ""
-		oc.createAndOpenAgentChat(runCtx, portal, agent, modelID, modelOverride)
-		return
-	}
-
 	modelID := oc.effectiveModel(meta)
 	if modelID == "" {
 		oc.sendSystemNotice(runCtx, portal, "No model configured for this room.")

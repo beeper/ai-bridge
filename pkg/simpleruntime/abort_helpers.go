@@ -24,7 +24,7 @@ func (oc *AIClient) abortRoom(ctx context.Context, portal *bridgev2.Portal, meta
 	}
 	oc.cancelRoomRun(portal.MXID)
 	oc.clearPendingQueue(portal.MXID)
-	stopped := oc.stopSubagentRuns(portal.MXID)
+	stopped := 0
 	if meta != nil {
 		meta.AbortedLastRun = true
 		oc.savePortalQuiet(ctx, portal, "abort")
