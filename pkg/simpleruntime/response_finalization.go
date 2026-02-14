@@ -277,7 +277,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	}
 
 	// Send edit event with m.replace relation and m.new_content
-	// Outer body/formatted_body use a short fallback — Desktop only reads m.new_content for m.replace events.
+	// Outer body/formatted_body use a short fallback; clients read m.new_content for m.replace events.
 	eventRawContent := map[string]any{
 		"msgtype":        event.MsgText,
 		"body":           "* AI response",
@@ -792,7 +792,7 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 		"parts":    parts,
 	}
 
-	// Outer body/formatted_body use a short fallback — Desktop only reads m.new_content for m.replace events.
+	// Outer body/formatted_body use a short fallback; clients read m.new_content for m.replace events.
 	rawContent2 := map[string]any{
 		"msgtype":                       event.MsgText,
 		"body":                          "* AI response",
