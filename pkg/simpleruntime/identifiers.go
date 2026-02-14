@@ -95,7 +95,30 @@ func portalMeta(portal *bridgev2.Portal) *PortalMetadata {
 // resolveAgentID always returns empty in the simple runtime.
 // Agent assignment is intentionally disabled.
 func resolveAgentID(meta *PortalMetadata) string {
+	if meta == nil {
+		return ""
+	}
+	return strings.TrimSpace(meta.AgentID)
+}
+
+func agentUserID(agentID string) networkid.UserID {
+	if trimmed := strings.TrimSpace(agentID); trimmed != "" {
+		return networkid.UserID(fmt.Sprintf("agent-%s", url.PathEscape(trimmed)))
+	}
 	return ""
+}
+
+func parseAgentFromGhostID(ghostID string) (string, bool) {
+	if suffix, ok := strings.CutPrefix(ghostID, "agent-"); ok {
+		if agentID, err := url.PathUnescape(suffix); err == nil {
+			return agentID, true
+		}
+	}
+	return "", false
+}
+
+func hasAssignedAgent(meta *PortalMetadata) bool {
+	return resolveAgentID(meta) != ""
 }
 
 func messageMeta(msg *database.Message) *MessageMetadata {
