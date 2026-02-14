@@ -52,18 +52,11 @@ type UserDefaults struct {
 
 // ServiceTokens stores optional per-login credentials for external services.
 type ServiceTokens struct {
-	OpenAI              string                        `json:"openai,omitempty"`
-	OpenRouter          string                        `json:"openrouter,omitempty"`
-	Exa                 string                        `json:"exa,omitempty"`
-	Brave               string                        `json:"brave,omitempty"`
-	Perplexity          string                        `json:"perplexity,omitempty"`
-	DesktopAPI          string                        `json:"desktop_api,omitempty"`
-	DesktopAPIInstances map[string]DesktopAPIInstance `json:"desktop_api_instances,omitempty"`
-}
-
-type DesktopAPIInstance struct {
-	Token   string `json:"token,omitempty"`
-	BaseURL string `json:"base_url,omitempty"`
+	OpenAI     string `json:"openai,omitempty"`
+	OpenRouter string `json:"openrouter,omitempty"`
+	Exa        string `json:"exa,omitempty"`
+	Brave      string `json:"brave,omitempty"`
+	Perplexity string `json:"perplexity,omitempty"`
 }
 
 // UserLoginMetadata is stored on each login row to keep per-user settings.
@@ -110,8 +103,7 @@ type UserLoginMetadata struct {
 	LastErrorAt       int64 `json:"last_error_at,omitempty"` // Unix timestamp
 
 	// Extra holds bridge-specific login metadata that the core engine
-	// carries opaquely. Beep uses this for additional service tokens,
-	// MCP server configs, etc.
+	// carries opaquely.
 	Extra any `json:"extra,omitempty"`
 }
 
@@ -193,8 +185,7 @@ type PortalMetadata struct {
 	LastCacheTTLRefresh int64 `json:"last_cache_ttl_refresh,omitempty"` // Unix millis of last cache-eligible request
 
 	// Extra holds bridge-specific metadata that the core engine carries
-	// opaquely. Beep uses this for cron rooms, subagent parents, memory
-	// flush state, etc.
+	// opaquely.
 	Extra any `json:"extra,omitempty"`
 }
 

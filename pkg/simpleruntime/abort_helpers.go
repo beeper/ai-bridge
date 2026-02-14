@@ -11,9 +11,9 @@ func formatAbortNotice(stopped int) string {
 	if stopped <= 0 {
 		return "Agent was aborted."
 	}
-	label := "sub-agents"
+	label := "related tasks"
 	if stopped == 1 {
-		label = "sub-agent"
+		label = "related task"
 	}
 	return fmt.Sprintf("Agent was aborted. Stopped %d %s.", stopped, label)
 }

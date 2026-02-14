@@ -4,7 +4,7 @@ import (
 	_ "embed"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/aiutil"
+	"github.com/beeper/ai-bridge/pkg/core/aiutil"
 	"go.mau.fi/util/configupgrade"
 )
 
@@ -38,8 +38,7 @@ type Config struct {
 	Inbound *InboundConfig `yaml:"inbound"`
 
 	// Extra holds bridge-specific config that the core engine carries
-	// opaquely. Beep uses this for memory, cron, tool-approval, and
-	// MCP-related settings.
+	// opaquely.
 	Extra any `yaml:"-"`
 }
 

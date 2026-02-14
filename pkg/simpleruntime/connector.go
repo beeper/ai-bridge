@@ -33,6 +33,22 @@ var (
 	_ bridgev2.PortalBridgeInfoFillingNetwork = (*OpenAIConnector)(nil)
 )
 
+// ConnectorHooks allows downstream bridges to inject behavior at key lifecycle points.
+type ConnectorHooks interface {
+	OnStart(ctx context.Context) error
+	OnNewClient(client *AIClient) error
+	RegisterCommands(proc *commands.Processor)
+	RegisterEventHandlers(conn *matrix.Connector)
+}
+
+// AIClientHooks allows downstream bridges to inject behavior into the message handling pipeline.
+type AIClientHooks interface {
+	BeforeResponse(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) error
+	AfterResponse(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) error
+	GetExtraSystemPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) string
+	AdditionalTools(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) []ToolDefinition
+}
+
 // OpenAIConnector wires mautrix bridgev2 to the OpenAI chat APIs.
 type OpenAIConnector struct {
 	br     *bridgev2.Bridge
@@ -40,8 +56,41 @@ type OpenAIConnector struct {
 
 	clientsMu sync.Mutex
 	clients   map[networkid.UserLoginID]bridgev2.NetworkAPI
-	policy    BridgePolicy
+	policy        BridgePolicy
+	hooks         ConnectorHooks
+	clientFactory ClientFactory
 }
+
+// Bridge returns the underlying bridgev2.Bridge instance.
+func (oc *OpenAIConnector) Bridge() *bridgev2.Bridge { return oc.br }
+
+// GetClient returns the NetworkAPI for a given user login ID.
+func (oc *OpenAIConnector) GetClient(id networkid.UserLoginID) (bridgev2.NetworkAPI, bool) {
+	oc.clientsMu.Lock()
+	defer oc.clientsMu.Unlock()
+	client, ok := oc.clients[id]
+	return client, ok
+}
+
+// SetClient registers a NetworkAPI for a given user login ID.
+func (oc *OpenAIConnector) SetClient(id networkid.UserLoginID, client bridgev2.NetworkAPI) {
+	oc.clientsMu.Lock()
+	defer oc.clientsMu.Unlock()
+	if oc.clients == nil {
+		oc.clients = make(map[networkid.UserLoginID]bridgev2.NetworkAPI)
+	}
+	oc.clients[id] = client
+}
+
+// RemoveClient removes the NetworkAPI for a given user login ID.
+func (oc *OpenAIConnector) RemoveClient(id networkid.UserLoginID) {
+	oc.clientsMu.Lock()
+	defer oc.clientsMu.Unlock()
+	delete(oc.clients, id)
+}
+
+// SetHooks sets the ConnectorHooks for this connector.
+func (oc *OpenAIConnector) SetHooks(hooks ConnectorHooks) { oc.hooks = hooks }
 
 func (oc *OpenAIConnector) Init(bridge *bridgev2.Bridge) {
 	oc.br = bridge
@@ -76,6 +125,9 @@ func (oc *OpenAIConnector) Start(ctx context.Context) error {
 	// Register AI commands with the command processor
 	if proc, ok := oc.br.Commands.(*commands.Processor); ok {
 		oc.registerCommands(proc)
+		if oc.hooks != nil {
+			oc.hooks.RegisterCommands(proc)
+		}
 		oc.br.Log.Info().Msg("Registered AI commands with command processor")
 	} else {
 		oc.br.Log.Warn().Type("commands_type", oc.br.Commands).Msg("Failed to register AI commands: command processor type assertion failed")
@@ -83,10 +135,22 @@ func (oc *OpenAIConnector) Start(ctx context.Context) error {
 
 	// Register custom Matrix event handlers
 	oc.registerCustomEventHandlers()
+	if oc.hooks != nil {
+		if matrixConn, ok := oc.br.Matrix.(*matrix.Connector); ok {
+			oc.hooks.RegisterEventHandlers(matrixConn)
+		}
+	}
 
 	// Initialize provisioning API endpoints
 	if oc.bridgePolicy().ProvisioningEnabled {
 		oc.initProvisioning()
+	}
+
+	// Call downstream hooks
+	if oc.hooks != nil {
+		if err := oc.hooks.OnStart(ctx); err != nil {
+			return fmt.Errorf("connector hooks OnStart: %w", err)
+		}
 	}
 
 	return nil
@@ -146,7 +210,7 @@ func (oc *OpenAIConnector) registerCustomEventHandlers() {
 	// Register handler for direct room settings state events
 	matrixConnector.EventProcessor.On(RoomSettingsEventType, oc.handleRoomSettingsEvent)
 
-	// Register handler for BeeperSendState wrapper events (desktop E2EE state updates)
+	// Register handler for BeeperSendState wrapper events.
 	matrixConnector.EventProcessor.On(event.BeeperSendState, oc.handleBeeperSendStateEvent)
 
 	oc.br.Log.Info().
@@ -274,8 +338,7 @@ func (oc *OpenAIConnector) processRoomSettingsContent(
 	logEvent.Msg("Updated room settings from state event")
 }
 
-// handleBeeperSendStateEvent processes com.beeper.send_state wrapper events
-// This is used by the desktop client to send state events in encrypted rooms
+// handleBeeperSendStateEvent processes com.beeper.send_state wrapper events.
 func (oc *OpenAIConnector) handleBeeperSendStateEvent(ctx context.Context, evt *event.Event) {
 	log := oc.br.Log.With().
 		Str("component", "beeper_send_state_handler").
@@ -395,6 +458,35 @@ func (oc *OpenAIConnector) GetDBMetaTypes() database.MetaTypes {
 	}
 }
 
+// createClient uses the clientFactory if set, otherwise falls back to newAIClient.
+func (oc *OpenAIConnector) createClient(login *bridgev2.UserLogin, key string) (bridgev2.NetworkAPI, error) {
+	if oc.clientFactory != nil {
+		return oc.clientFactory(login, oc, key)
+	}
+	return newAIClient(login, oc, key)
+}
+
+// getBaseAIClient extracts the *AIClient from a NetworkAPI.
+// Supports both direct *AIClient and wrapper types from downstream bridges
+// (any type implementing GetBaseAIClient() *AIClient).
+func getBaseAIClient(api bridgev2.NetworkAPI) (*AIClient, bool) {
+	if client, ok := api.(*AIClient); ok {
+		return client, true
+	}
+	if wrapper, ok := api.(interface{ GetBaseAIClient() *AIClient }); ok {
+		base := wrapper.GetBaseAIClient()
+		return base, base != nil
+	}
+	return nil, false
+}
+
+// scheduleBootstrapIfNeeded calls scheduleBootstrap on the base AIClient if available.
+func scheduleBootstrapIfNeeded(api bridgev2.NetworkAPI) {
+	if base, ok := getBaseAIClient(api); ok {
+		base.scheduleBootstrap()
+	}
+}
+
 func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
 	meta := loginMetadata(login)
 
@@ -405,12 +497,12 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 	}
 	oc.clientsMu.Lock()
 	if existingAPI := oc.clients[login.ID]; existingAPI != nil {
-		existing, ok := existingAPI.(*AIClient)
+		existing, ok := getBaseAIClient(existingAPI)
 		if !ok || existing == nil {
 			// Type mismatch: rebuild.
 			delete(oc.clients, login.ID)
 			oc.clientsMu.Unlock()
-			client, err := newAIClient(login, oc, key)
+			client, err := oc.createClient(login, key)
 			if err != nil {
 				login.Client = &brokenLoginClient{UserLogin: login, Reason: "Couldn't initialize this login. Remove and re-add the account."}
 				return nil
@@ -420,7 +512,7 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 			oc.clientsMu.Unlock()
 			login.Client = client
 			if oc.shouldBootstrapChats() {
-				client.scheduleBootstrap()
+				scheduleBootstrapIfNeeded(client)
 			}
 			return nil
 		}
@@ -433,12 +525,12 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 			existingBaseURL != strings.TrimRight(strings.TrimSpace(meta.BaseURL), "/")
 		if needsRebuild {
 			oc.clientsMu.Unlock()
-			client, err := newAIClient(login, oc, key)
+			client, err := oc.createClient(login, key)
 			if err != nil {
 				// Keep the existing client if it's already inprocess; allow the login to stay cached/deletable.
 				oc.clientsMu.Lock()
 				existing.UserLogin = login
-				login.Client = existing
+				login.Client = existingAPI
 				oc.clientsMu.Unlock()
 				return nil
 			}
@@ -446,21 +538,21 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 			oc.clients[login.ID] = client
 			oc.clientsMu.Unlock()
 			login.Client = client
-			client.scheduleBootstrap()
+			scheduleBootstrapIfNeeded(client)
 			return nil
 		}
 		// Keep using one client instance per login ID when provider settings have not changed.
 		existing.UserLogin = login
-		login.Client = existing
+		login.Client = existingAPI
 		oc.clientsMu.Unlock()
 		if oc.shouldBootstrapChats() {
-			existing.scheduleBootstrap()
+			scheduleBootstrapIfNeeded(existingAPI)
 		}
 		return nil
 	}
 	oc.clientsMu.Unlock()
 
-	client, err := newAIClient(login, oc, key)
+	client, err := oc.createClient(login, key)
 	if err != nil {
 		login.Client = &brokenLoginClient{UserLogin: login, Reason: "Couldn't initialize this login. Remove and re-add the account."}
 		return nil
@@ -470,7 +562,7 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 	oc.clientsMu.Unlock()
 	login.Client = client
 	if oc.shouldBootstrapChats() {
-		client.scheduleBootstrap()
+		scheduleBootstrapIfNeeded(client)
 	}
 	return nil
 }

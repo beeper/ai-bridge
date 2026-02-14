@@ -8,17 +8,17 @@ import (
 )
 
 // StreamingHooks defines extension points for the streaming engine.
-// Beep overrides these to inject MCP tools, tool approval gating,
-// and memory flush behavior. The simple bridge uses NoopStreamingHooks.
+// Downstream bridges can override these for custom behavior.
+// The simple bridge uses NoopStreamingHooks.
 type StreamingHooks interface {
 	// AdditionalTools returns extra tool parameters to include in API requests.
 	// Called during buildResponsesAPIParams after builtin tools are added.
-	// Beep uses this to inject MCP tool definitions.
+	// Downstream bridges can inject additional tool definitions.
 	AdditionalTools(ctx context.Context, meta *PortalMetadata) []responses.ToolUnionParam
 
 	// OnContinuationPreSend is called before each continuation round in the
 	// streaming loop. It may modify the pending function outputs (e.g. to
-	// inject MCP approval items) and return additional input items to prepend
+	// inject bridge-specific events) and return additional input items to prepend
 	// to the continuation request.
 	OnContinuationPreSend(ctx context.Context, state *streamingState, outputs []functionCallOutput) (extraInput responses.ResponseInputParam, modifiedOutputs []functionCallOutput)
 
@@ -27,12 +27,11 @@ type StreamingHooks interface {
 	ShouldContinue(state *streamingState) bool
 
 	// OnToolCallComplete is called after a builtin tool finishes execution,
-	// before the result is recorded for continuation. Beep uses this for
-	// tool-approval gating.
+	// before the result is recorded for continuation.
 	OnToolCallComplete(ctx context.Context, toolCallID, toolName string, state *streamingState)
 
 	// OnStreamFinished is called after the streaming response is fully
-	// complete (messages sent, state saved). Beep uses this for memory flush.
+	// complete (messages sent, state saved).
 	OnStreamFinished(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata)
 }
 
