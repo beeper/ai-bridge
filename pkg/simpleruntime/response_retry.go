@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/beeper/ai-bridge/pkg/aierrors"
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
@@ -15,7 +16,7 @@ const (
 )
 
 // responseFunc is the signature for response handlers that can be retried on context length errors
-type responseFunc func(ctx context.Context, evt *event.Event, portal *bridgev2.Portal, meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (bool, *ContextLengthError, error)
+type responseFunc func(ctx context.Context, evt *event.Event, portal *bridgev2.Portal, meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (bool, *aierrors.ContextLengthError, error)
 
 // responseWithRetry wraps a response function with context length retry logic
 // It first tries auto-compaction (LLM summarization) before falling back to reactive truncation
@@ -182,7 +183,7 @@ func (oc *AIClient) selectResponseFn(meta *PortalMetadata, prompt []openai.ChatC
 func (oc *AIClient) notifyContextLengthExceeded(
 	ctx context.Context,
 	portal *bridgev2.Portal,
-	cle *ContextLengthError,
+	cle *aierrors.ContextLengthError,
 	willRetry bool,
 ) {
 	var message string

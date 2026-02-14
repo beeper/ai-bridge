@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/aierrors"
+	"github.com/beeper/ai-bridge/pkg/aimodels"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
@@ -36,11 +38,11 @@ func (oc *AIClient) dispatchCompletionInternal(
 // notifyMatrixSendFailure sends an error status back to Matrix
 func (oc *AIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, err error) {
 	// Check for auth errors (401/403) - trigger reauth with StateBadCredentials
-	if IsAuthError(err) {
+	if aierrors.IsAuthError(err) {
 		oc.loggedIn.Store(false)
 		oc.UserLogin.BridgeState.Send(status.BridgeState{
 			StateEvent: status.StateBadCredentials,
-			Error:      AIAuthFailed,
+			Error:      aierrors.AIAuthFailed,
 			Message:    "Authentication failed. Sign in again.",
 			Info: map[string]any{
 				"error": err.Error(),
@@ -49,19 +51,19 @@ func (oc *AIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev
 	}
 
 	// Check for billing errors - send transient disconnect with billing message
-	if IsBillingError(err) {
+	if aierrors.IsBillingError(err) {
 		oc.UserLogin.BridgeState.Send(status.BridgeState{
 			StateEvent: status.StateTransientDisconnect,
-			Error:      AIBillingError,
+			Error:      aierrors.AIBillingError,
 			Message:    "There's a billing issue with the AI provider. Check your account or credits.",
 		})
 	}
 
 	// Check for rate limit or overloaded errors - send transient disconnect
-	if IsRateLimitError(err) || IsOverloadedError(err) {
+	if aierrors.IsRateLimitError(err) || aierrors.IsOverloadedError(err) {
 		oc.UserLogin.BridgeState.Send(status.BridgeState{
 			StateEvent: status.StateTransientDisconnect,
-			Error:      AIRateLimited,
+			Error:      aierrors.AIRateLimited,
 			Message:    "You're sending requests too quickly. Wait a moment, then try again.",
 		})
 	}
@@ -72,7 +74,7 @@ func (oc *AIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev
 	}
 
 	// Use FormatUserFacingError for consistent, user-friendly error messages
-	errorMessage := FormatUserFacingError(err)
+	errorMessage := aierrors.FormatUserFacingError(err)
 
 	if evt != nil {
 		status := messageStatusForError(err)
@@ -111,7 +113,7 @@ func (oc *AIClient) recordProviderError(ctx context.Context) {
 	if meta.ConsecutiveErrors >= healthWarningThreshold {
 		oc.UserLogin.BridgeState.Send(status.BridgeState{
 			StateEvent: status.StateTransientDisconnect,
-			Error:      AIProviderError,
+			Error:      aierrors.AIProviderError,
 			Message:    fmt.Sprintf("The AI provider failed %d requests in a row", meta.ConsecutiveErrors),
 		})
 	}
@@ -379,7 +381,7 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 	}
 
 	if meta.AgentID == "" {
-		displayName := modelContactName(meta.Model, oc.findModelInfo(meta.Model))
+		displayName := aimodels.ModelContactName(meta.Model, oc.findModelInfo(meta.Model))
 		oc.sendSystemNotice(bgCtx, portal, fmt.Sprintf("You are chatting with %s. AI can make mistakes.", displayName))
 	} else {
 		oc.sendSystemNotice(bgCtx, portal, "AI can make mistakes.")

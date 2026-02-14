@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 
+	"github.com/beeper/ai-bridge/pkg/aierrors"
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
@@ -51,12 +52,12 @@ func (oc *AIClient) responseWithRetryAndReasoningFallback(
 			return false, nil
 		}
 		lastErr = err
-		if !IsReasoningError(err) {
+		if !aierrors.IsReasoningError(err) {
 			return false, err
 		}
 
 		// Check if we should try a lower reasoning level
-		fallbackLevel := FallbackReasoningLevel(currentLevel)
+		fallbackLevel := aierrors.FallbackReasoningLevel(currentLevel)
 		if fallbackLevel == "" || attemptedLevels[fallbackLevel] {
 			// No more fallbacks available or already tried
 			return false, lastErr
@@ -71,4 +72,4 @@ func (oc *AIClient) responseWithRetryAndReasoningFallback(
 	return false, nil
 }
 
-// Note: Reasoning error detection uses IsReasoningError on response errors.
+// Note: Reasoning error detection uses aierrors.IsReasoningError on response errors.

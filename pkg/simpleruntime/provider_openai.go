@@ -20,6 +20,9 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/random"
 
+	"github.com/beeper/ai-bridge/pkg/aimodels"
+	"github.com/beeper/ai-bridge/pkg/aiprovider"
+	"github.com/beeper/ai-bridge/pkg/aiutil"
 	"github.com/beeper/ai-bridge/pkg/shared/httputil"
 )
 
@@ -35,7 +38,7 @@ type pdfEngineContextKey struct{}
 
 // GetPDFEngineFromContext retrieves the PDF engine override from context
 func GetPDFEngineFromContext(ctx context.Context) string {
-	return contextValue[string](ctx, pdfEngineContextKey{})
+	return aiutil.ContextValue[string](ctx, pdfEngineContextKey{})
 }
 
 // WithPDFEngine adds a PDF engine override to the context
@@ -498,10 +501,10 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 				continue
 			}
 
-			fullModelID := AddModelPrefix(BackendOpenAI, model.ID)
+			fullModelID := aimodels.AddModelPrefix(aimodels.BackendOpenAI, model.ID)
 			models = append(models, ModelInfo{
 				ID:                  fullModelID,
-				Name:                GetModelDisplayName(fullModelID),
+				Name:                aimodels.GetModelDisplayName(fullModelID),
 				Provider:            "openai",
 				API:                 "openai-responses",
 				SupportsVision:      strings.Contains(model.ID, "vision") || strings.Contains(model.ID, "4o") || strings.Contains(model.ID, "4-turbo"),
@@ -823,7 +826,7 @@ func MakeToolDedupMiddleware(log zerolog.Logger) option.Middleware {
 }
 
 // ToOpenAITools converts tool definitions to OpenAI Responses API format
-func ToOpenAITools(tools []ToolDefinition, strictMode ToolStrictMode, log *zerolog.Logger) []responses.ToolUnionParam {
+func ToOpenAITools(tools []aiprovider.ToolDefinition, strictMode ToolStrictMode, log *zerolog.Logger) []responses.ToolUnionParam {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -858,7 +861,7 @@ func ToOpenAITools(tools []ToolDefinition, strictMode ToolStrictMode, log *zerol
 }
 
 // ToOpenAIChatTools converts tool definitions to OpenAI Chat Completions tool format.
-func ToOpenAIChatTools(tools []ToolDefinition, log *zerolog.Logger) []openai.ChatCompletionToolUnionParam {
+func ToOpenAIChatTools(tools []aiprovider.ToolDefinition, log *zerolog.Logger) []openai.ChatCompletionToolUnionParam {
 	if len(tools) == 0 {
 		return nil
 	}

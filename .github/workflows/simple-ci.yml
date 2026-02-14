@@ -18,5 +18,5 @@ jobs:
         run: ./scripts/check_module_boundaries.sh
       - name: Go test
         run: go test ./...
-      - name: Build simple bridge
-        run: go build -o ./ai-simple ./bridges/simple/cmd/bridge
+      - name: Build ai bridge
+        run: go build -o ./ai-bridge ./bridges/ai/cmd/bridge

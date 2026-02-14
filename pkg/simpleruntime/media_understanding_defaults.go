@@ -1,57 +1,23 @@
 package connector
 
+import "github.com/beeper/ai-bridge/pkg/aimedia"
+
 const (
-	mediaMB                        = 1024 * 1024
-	defaultMediaMaxChars           = 500
-	defaultMediaConcurrency        = 2
-	defaultVideoMaxBase64Bytes     = 70 * mediaMB
-	defaultImageUnderstandingLimit = 1024
+	mediaMB                        = aimedia.MediaMB
+	defaultMediaMaxChars           = aimedia.DefaultMediaMaxChars
+	defaultMediaConcurrency        = aimedia.DefaultMediaConcurrency
+	defaultVideoMaxBase64Bytes     = aimedia.DefaultVideoMaxBase64Bytes
+	defaultImageUnderstandingLimit = aimedia.DefaultImageUnderstandingLimit
 )
 
-var defaultMaxCharsByCapability = map[MediaUnderstandingCapability]int{
-	MediaCapabilityImage: defaultMediaMaxChars,
-	MediaCapabilityAudio: 0,
-	MediaCapabilityVideo: defaultMediaMaxChars,
-}
+var defaultMaxCharsByCapability = aimedia.DefaultMaxCharsByCapability
+var defaultMaxBytesByCapability = aimedia.DefaultMaxBytesByCapability
+var defaultTimeoutSecondsByCapability = aimedia.DefaultTimeoutSecondsByCapability
+var defaultPromptByCapability = aimedia.DefaultPromptByCapability
+var defaultAudioModelsByProvider = aimedia.DefaultAudioModelsByProvider
 
-var defaultMaxBytesByCapability = map[MediaUnderstandingCapability]int{
-	MediaCapabilityImage: 10 * mediaMB,
-	MediaCapabilityAudio: 20 * mediaMB,
-	MediaCapabilityVideo: 50 * mediaMB,
-}
+const defaultOpenRouterGoogleModel = aimedia.DefaultOpenRouterGoogleModel
 
-var defaultTimeoutSecondsByCapability = map[MediaUnderstandingCapability]int{
-	MediaCapabilityImage: 60,
-	MediaCapabilityAudio: 60,
-	MediaCapabilityVideo: 120,
-}
+var defaultImageModelsByProvider = aimedia.DefaultImageModelsByProvider
 
-var defaultPromptByCapability = map[MediaUnderstandingCapability]string{
-	MediaCapabilityImage: "Describe the image.",
-	MediaCapabilityAudio: "Transcribe the audio.",
-	MediaCapabilityVideo: "Describe the video.",
-}
-
-var defaultAudioModelsByProvider = map[string]string{
-	"groq":     "whisper-large-v3-turbo",
-	"openai":   "gpt-4o-transcribe",
-	"deepgram": "nova-3",
-}
-
-const defaultOpenRouterGoogleModel = "google/gemini-3-flash-preview"
-
-var defaultImageModelsByProvider = map[string]string{
-	"openai":     "gpt-5-mini",
-	"openrouter": defaultOpenRouterGoogleModel,
-}
-
-func resolveVideoMaxBase64Bytes(maxBytes int) int {
-	if maxBytes <= 0 {
-		return defaultVideoMaxBase64Bytes
-	}
-	expanded := int(float64(maxBytes) * (4.0 / 3.0))
-	if expanded > defaultVideoMaxBase64Bytes {
-		return defaultVideoMaxBase64Bytes
-	}
-	return expanded
-}
+var resolveVideoMaxBase64Bytes = aimedia.ResolveVideoMaxBase64Bytes

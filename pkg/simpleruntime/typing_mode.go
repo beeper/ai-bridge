@@ -3,33 +3,22 @@ package connector
 import (
 	"strings"
 	"time"
+
+	"github.com/beeper/ai-bridge/pkg/aityping"
 )
 
-type TypingMode string
+type TypingMode = aityping.TypingMode
 
 const (
-	TypingModeNever    TypingMode = "never"
-	TypingModeInstant  TypingMode = "instant"
-	TypingModeThinking TypingMode = "thinking"
-	TypingModeMessage  TypingMode = "message"
+	TypingModeNever    = aityping.TypingModeNever
+	TypingModeInstant  = aityping.TypingModeInstant
+	TypingModeThinking = aityping.TypingModeThinking
+	TypingModeMessage  = aityping.TypingModeMessage
 )
 
 const defaultTypingInterval = 6 * time.Second
 
-func normalizeTypingMode(raw string) (TypingMode, bool) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "never":
-		return TypingModeNever, true
-	case "instant":
-		return TypingModeInstant, true
-	case "thinking":
-		return TypingModeThinking, true
-	case "message":
-		return TypingModeMessage, true
-	default:
-	}
-	return "", false
-}
+var normalizeTypingMode = aityping.NormalizeTypingMode
 
 func (oc *AIClient) resolveTypingMode(meta *PortalMetadata, ctx *TypingContext, isHeartbeat bool) TypingMode {
 	if isHeartbeat {
@@ -38,22 +27,6 @@ func (oc *AIClient) resolveTypingMode(meta *PortalMetadata, ctx *TypingContext, 
 	if meta != nil {
 		if mode, ok := normalizeTypingMode(meta.TypingMode); ok {
 			return mode
-		}
-	}
-	agentID := normalizeAgentID(resolveAgentID(meta))
-	if oc != nil && oc.connector != nil && oc.connector.Config.Agents != nil {
-		for _, entry := range oc.connector.Config.Agents.List {
-			if normalizeAgentID(entry.ID) != agentID {
-				continue
-			}
-			if mode, ok := normalizeTypingMode(entry.TypingMode); ok {
-				return mode
-			}
-		}
-		if defaults := oc.connector.Config.Agents.Defaults; defaults != nil {
-			if mode, ok := normalizeTypingMode(defaults.TypingMode); ok {
-				return mode
-			}
 		}
 	}
 	isGroup := false
@@ -76,25 +49,6 @@ func (oc *AIClient) resolveTypingInterval(meta *PortalMetadata) time.Duration {
 			return 0
 		}
 		return interval
-	}
-	agentID := normalizeAgentID(resolveAgentID(meta))
-	if oc != nil && oc.connector != nil && oc.connector.Config.Agents != nil {
-		for _, entry := range oc.connector.Config.Agents.List {
-			if normalizeAgentID(entry.ID) != agentID {
-				continue
-			}
-			if entry.TypingIntervalSec != nil {
-				interval = time.Duration(*entry.TypingIntervalSec) * time.Second
-				if interval <= 0 {
-					return 0
-				}
-				return interval
-			}
-			break
-		}
-		if defaults := oc.connector.Config.Agents.Defaults; defaults != nil && defaults.TypingIntervalSec != nil {
-			interval = time.Duration(*defaults.TypingIntervalSec) * time.Second
-		}
 	}
 	if interval <= 0 {
 		return 0

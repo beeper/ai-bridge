@@ -13,6 +13,8 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
+
+	"github.com/beeper/ai-bridge/pkg/aimodels"
 )
 
 type mediaUnderstandingResult struct {
@@ -760,7 +762,7 @@ func (oc *AIClient) describeImageWithEntry(
 			},
 		},
 	}
-	modelIDForAPI := oc.modelIDForAPI(ResolveAlias(modelID))
+	modelIDForAPI := oc.modelIDForAPI(aimodels.ResolveAlias(modelID))
 	var resp *GenerateResponse
 	if entryProvider == "openrouter" && normalizeMediaProviderID(loginMetadata(oc.UserLogin).Provider) != "openrouter" {
 		resp, err = oc.generateWithOpenRouter(ctx, modelIDForAPI, messages)
@@ -913,7 +915,7 @@ func (oc *AIClient) describeVideoWithEntry(
 				},
 			},
 		}
-		modelIDForAPI := oc.modelIDForAPI(ResolveAlias(modelID))
+		modelIDForAPI := oc.modelIDForAPI(aimodels.ResolveAlias(modelID))
 		var resp *GenerateResponse
 		currentProvider := normalizeMediaProviderID(loginMetadata(oc.UserLogin).Provider)
 		if currentProvider != "" && currentProvider != providerID {

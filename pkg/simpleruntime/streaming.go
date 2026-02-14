@@ -13,6 +13,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/beeper/ai-bridge/pkg/aierrors"
+	"github.com/beeper/ai-bridge/pkg/aitokens"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
@@ -1371,13 +1373,18 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 	// Model-only chats use a simple prompt without tools to avoid context overflow on small models.
 	hasAgent := resolveAgentID(meta) != ""
 	if meta.Capabilities.SupportsToolCalling && hasAgent {
-		enabledTools := oc.enabledBuiltinToolsForModel(ctx, meta)
+		enabledTools := oc.agentResolver.EnabledBuiltinToolsForModel(ctx, meta)
 		if len(enabledTools) > 0 {
 			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
-			params.Tools = append(params.Tools, ToOpenAITools(enabledTools, strictMode, &oc.log)...)
+			params.Tools = append(params.Tools, ToOpenAITools(toProviderToolDefs(enabledTools), strictMode, &oc.log)...)
 			log.Debug().Int("count", len(enabledTools)).Msg("Added builtin function tools")
 		}
 
+		// Allow hooks to inject additional tool definitions (e.g. MCP tools).
+		if extra := oc.streamingHooks.AdditionalTools(ctx, meta); len(extra) > 0 {
+			params.Tools = append(params.Tools, extra...)
+			log.Debug().Int("count", len(extra)).Msg("Added hook-provided tools")
+		}
 	}
 
 	if oc.isOpenRouterProvider() {
@@ -1399,18 +1406,18 @@ func (oc *AIClient) streamingResponseWithToolSchemaFallback(
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	messages []openai.ChatCompletionMessageParamUnion,
-) (bool, *ContextLengthError, error) {
+) (bool, *aierrors.ContextLengthError, error) {
 	success, cle, err := oc.streamingResponse(ctx, evt, portal, meta, messages)
 	if success || cle != nil || err == nil {
 		return success, cle, err
 	}
-	if IsToolUniquenessError(err) {
+	if aierrors.IsToolUniquenessError(err) {
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Duplicate tool names rejected; retrying with chat completions")
 		success, cle, chatErr := oc.streamChatCompletions(ctx, evt, portal, meta, messages)
 		if success || cle != nil || chatErr == nil {
 			return success, cle, chatErr
 		}
-		if IsToolSchemaError(chatErr) || IsToolUniquenessError(chatErr) {
+		if aierrors.IsToolSchemaError(chatErr) || aierrors.IsToolUniquenessError(chatErr) {
 			oc.loggerForContext(ctx).Warn().Err(chatErr).Msg("Chat completions tools rejected; retrying without tools")
 			if meta != nil {
 				metaCopy := *meta
@@ -1421,13 +1428,13 @@ func (oc *AIClient) streamingResponseWithToolSchemaFallback(
 		}
 		return success, cle, chatErr
 	}
-	if IsToolSchemaError(err) {
+	if aierrors.IsToolSchemaError(err) {
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Responses tool schema rejected; falling back to chat completions")
 		success, cle, chatErr := oc.streamChatCompletions(ctx, evt, portal, meta, messages)
 		if success || cle != nil || chatErr == nil {
 			return success, cle, chatErr
 		}
-		if IsToolSchemaError(chatErr) {
+		if aierrors.IsToolSchemaError(chatErr) {
 			oc.loggerForContext(ctx).Warn().Err(chatErr).Msg("Chat completions tool schema rejected; retrying without tools")
 			if meta != nil {
 				metaCopy := *meta
@@ -1438,7 +1445,7 @@ func (oc *AIClient) streamingResponseWithToolSchemaFallback(
 		}
 		return success, cle, chatErr
 	}
-	if IsNoResponseChunksError(err) {
+	if aierrors.IsNoResponseChunksError(err) {
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Responses streaming returned no chunks; retrying without tools")
 		if meta != nil && meta.Capabilities.SupportsToolCalling {
 			metaCopy := *meta
@@ -1465,7 +1472,7 @@ func (oc *AIClient) streamingResponse(
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	messages []openai.ChatCompletionMessageParamUnion,
-) (bool, *ContextLengthError, error) {
+) (bool, *aierrors.ContextLengthError, error) {
 	portalID := ""
 	if portal != nil {
 		portalID = string(portal.ID)
@@ -1550,7 +1557,7 @@ func (oc *AIClient) streamingResponse(
 	if stream == nil {
 		initErr := errors.New("responses streaming not available")
 		logResponsesFailure(log, initErr, params, meta, messages, "stream_init")
-		return false, nil, &PreDeltaError{Err: initErr}
+		return false, nil, &aierrors.PreDeltaError{Err: initErr}
 	}
 
 	// Store base input for OpenRouter stateless continuations
@@ -1690,7 +1697,7 @@ func (oc *AIClient) streamingResponse(
 								state.finishReason = "error"
 								oc.emitUIError(ctx, portal, state, errText)
 								oc.emitUIFinish(ctx, portal, state, meta)
-								return false, nil, &PreDeltaError{Err: errors.New(errText)}
+								return false, nil, &aierrors.PreDeltaError{Err: errors.New(errText)}
 							}
 						}
 					}
@@ -1719,7 +1726,7 @@ func (oc *AIClient) streamingResponse(
 						state.finishReason = "error"
 						oc.emitUIError(ctx, portal, state, errText)
 						oc.emitUIFinish(ctx, portal, state, meta)
-						return false, nil, &PreDeltaError{Err: errors.New(errText)}
+						return false, nil, &aierrors.PreDeltaError{Err: errors.New(errText)}
 					}
 				}
 			}
@@ -1836,7 +1843,7 @@ func (oc *AIClient) streamingResponse(
 
 			resultStatus := ResultStatusSuccess
 			var result string
-			if !oc.isToolEnabled(meta, toolName) {
+			if !oc.agentResolver.IsToolEnabled(meta, toolName) {
 				resultStatus = ResultStatusError
 				result = fmt.Sprintf("Error: tool %s is disabled", toolName)
 			} else {
@@ -1968,6 +1975,8 @@ func (oc *AIClient) streamingResponse(
 			} else if resultStatus != ResultStatusDenied {
 				oc.emitUIToolOutputError(ctx, portal, state, tool.callID, result, tool.toolType == ToolTypeProvider)
 			}
+
+			oc.streamingHooks.OnToolCallComplete(ctx, tool.callID, toolName, state)
 
 			// Normalize input for storage
 			inputMapForMeta := map[string]any{}
@@ -2308,14 +2317,14 @@ func (oc *AIClient) streamingResponse(
 			logResponsesFailure(log, apiErr, params, meta, messages, "stream_event_error")
 			// Check for context length error
 			if strings.Contains(streamEvent.Message, "context_length") || strings.Contains(streamEvent.Message, "token") {
-				return false, &ContextLengthError{
+				return false, &aierrors.ContextLengthError{
 					OriginalError: fmt.Errorf("%s", streamEvent.Message),
 				}, nil
 			}
 			if state.initialEventID != "" {
-				return false, nil, &NonFallbackError{Err: apiErr}
+				return false, nil, &aierrors.NonFallbackError{Err: apiErr}
 			}
-			return false, nil, &PreDeltaError{Err: apiErr}
+			return false, nil, &aierrors.PreDeltaError{Err: apiErr}
 		default:
 			// Ignore unknown events
 		}
@@ -2335,11 +2344,11 @@ func (oc *AIClient) streamingResponse(
 			oc.emitUIAbort(ctx, portal, state, "cancelled")
 			oc.emitUIFinish(ctx, portal, state, meta)
 			if state.initialEventID != "" {
-				return false, nil, &NonFallbackError{Err: err}
+				return false, nil, &aierrors.NonFallbackError{Err: err}
 			}
-			return false, nil, &PreDeltaError{Err: err}
+			return false, nil, &aierrors.PreDeltaError{Err: err}
 		}
-		cle := ParseContextLengthError(err)
+		cle := aierrors.ParseContextLengthError(err)
 		if cle != nil {
 			return false, cle, nil
 		}
@@ -2347,15 +2356,15 @@ func (oc *AIClient) streamingResponse(
 		oc.emitUIError(ctx, portal, state, err.Error())
 		oc.emitUIFinish(ctx, portal, state, meta)
 		if state.initialEventID != "" {
-			return false, nil, &NonFallbackError{Err: err}
+			return false, nil, &aierrors.NonFallbackError{Err: err}
 		}
-		return false, nil, &PreDeltaError{Err: err}
+		return false, nil, &aierrors.PreDeltaError{Err: err}
 	}
 
 	// If there are pending tool outputs, send them back to the API for continuation.
 	// This loop continues until the model generates a response without additional tool actions.
 	continuationRound := 0
-	for len(state.pendingFunctionOutputs) > 0 && state.responseID != "" {
+	for len(state.pendingFunctionOutputs) > 0 && state.responseID != "" && oc.streamingHooks.ShouldContinue(state) {
 		// Check for context cancellation before starting a new continuation round
 		if ctx.Err() != nil {
 			state.finishReason = "cancelled"
@@ -2365,9 +2374,9 @@ func (oc *AIClient) streamingResponse(
 			oc.emitUIAbort(ctx, portal, state, "cancelled")
 			oc.emitUIFinish(ctx, portal, state, meta)
 			if state.initialEventID != "" {
-				return false, nil, &NonFallbackError{Err: ctx.Err()}
+				return false, nil, &aierrors.NonFallbackError{Err: ctx.Err()}
 			}
-			return false, nil, &PreDeltaError{Err: ctx.Err()}
+			return false, nil, &aierrors.PreDeltaError{Err: ctx.Err()}
 		}
 
 		continuationRound++
@@ -2378,9 +2387,9 @@ func (oc *AIClient) streamingResponse(
 			oc.emitUIError(ctx, portal, state, err.Error())
 			oc.emitUIFinish(ctx, portal, state, meta)
 			if state.initialEventID != "" {
-				return false, nil, &NonFallbackError{Err: err}
+				return false, nil, &aierrors.NonFallbackError{Err: err}
 			}
-			return false, nil, &PreDeltaError{Err: err}
+			return false, nil, &aierrors.PreDeltaError{Err: err}
 		}
 		log.Debug().
 			Int("pending_outputs", len(state.pendingFunctionOutputs)).
@@ -2388,7 +2397,14 @@ func (oc *AIClient) streamingResponse(
 			Msg("Continuing response with pending tool actions")
 
 		pendingOutputs := append([]functionCallOutput(nil), state.pendingFunctionOutputs...)
+
+		// Allow hooks to modify outputs or inject extra input items (e.g. MCP approvals).
+		extraInput, pendingOutputs := oc.streamingHooks.OnContinuationPreSend(ctx, state, pendingOutputs)
+
 		continuationParams := oc.buildContinuationParams(ctx, state, meta, pendingOutputs)
+		if len(extraInput) > 0 {
+			continuationParams.Input.OfInputItemList = append(extraInput, continuationParams.Input.OfInputItemList...)
+		}
 
 		// OpenRouter Responses API is stateless; persist tool calls in base input.
 		if oc.isOpenRouterProvider() && len(state.baseInput) > 0 {
@@ -2418,9 +2434,9 @@ func (oc *AIClient) streamingResponse(
 			oc.emitUIError(ctx, portal, state, initErr.Error())
 			oc.emitUIFinish(ctx, portal, state, meta)
 			if state.initialEventID != "" {
-				return false, nil, &NonFallbackError{Err: initErr}
+				return false, nil, &aierrors.NonFallbackError{Err: initErr}
 			}
-			return false, nil, &PreDeltaError{Err: initErr}
+			return false, nil, &aierrors.PreDeltaError{Err: initErr}
 		}
 		// Clear pending inputs only once continuation stream has actually started.
 		state.pendingFunctionOutputs = nil
@@ -2546,7 +2562,7 @@ func (oc *AIClient) streamingResponse(
 									state.finishReason = "error"
 									oc.emitUIError(ctx, portal, state, errText)
 									oc.emitUIFinish(ctx, portal, state, meta)
-									return false, nil, &PreDeltaError{Err: errors.New(errText)}
+									return false, nil, &aierrors.PreDeltaError{Err: errors.New(errText)}
 								}
 							}
 						}
@@ -2572,7 +2588,7 @@ func (oc *AIClient) streamingResponse(
 							state.finishReason = "error"
 							oc.emitUIError(ctx, portal, state, errText)
 							oc.emitUIFinish(ctx, portal, state, meta)
-							return false, nil, &PreDeltaError{Err: errors.New(errText)}
+							return false, nil, &aierrors.PreDeltaError{Err: errors.New(errText)}
 						}
 					}
 				}
@@ -2693,7 +2709,7 @@ func (oc *AIClient) streamingResponse(
 
 				resultStatus := ResultStatusSuccess
 				var result string
-				if !oc.isToolEnabled(meta, toolName) {
+				if !oc.agentResolver.IsToolEnabled(meta, toolName) {
 					resultStatus = ResultStatusError
 					result = fmt.Sprintf("Error: tool %s is disabled", toolName)
 				} else {
@@ -2821,6 +2837,8 @@ func (oc *AIClient) streamingResponse(
 					oc.emitUIToolOutputError(ctx, portal, state, tool.callID, result, tool.toolType == ToolTypeProvider)
 				}
 
+				oc.streamingHooks.OnToolCallComplete(ctx, tool.callID, toolName, state)
+
 				inputMapForMeta := map[string]any{}
 				if parsed, ok := inputMap.(map[string]any); ok {
 					inputMapForMeta = parsed
@@ -2872,9 +2890,9 @@ func (oc *AIClient) streamingResponse(
 				oc.emitUIFinish(ctx, portal, state, meta)
 				logResponsesFailure(log, apiErr, continuationParams, meta, messages, "continuation_event_error")
 				if state.initialEventID != "" {
-					return false, nil, &NonFallbackError{Err: apiErr}
+					return false, nil, &aierrors.NonFallbackError{Err: apiErr}
 				}
-				return false, nil, &PreDeltaError{Err: apiErr}
+				return false, nil, &aierrors.PreDeltaError{Err: apiErr}
 			default:
 				// Ignore unknown events
 			}
@@ -2892,17 +2910,17 @@ func (oc *AIClient) streamingResponse(
 				oc.emitUIAbort(ctx, portal, state, "cancelled")
 				oc.emitUIFinish(ctx, portal, state, meta)
 				if state.initialEventID != "" {
-					return false, nil, &NonFallbackError{Err: err}
+					return false, nil, &aierrors.NonFallbackError{Err: err}
 				}
-				return false, nil, &PreDeltaError{Err: err}
+				return false, nil, &aierrors.PreDeltaError{Err: err}
 			}
 			state.finishReason = "error"
 			oc.emitUIError(ctx, portal, state, err.Error())
 			oc.emitUIFinish(ctx, portal, state, meta)
 			if state.initialEventID != "" {
-				return false, nil, &NonFallbackError{Err: err}
+				return false, nil, &aierrors.NonFallbackError{Err: err}
 			}
-			return false, nil, &PreDeltaError{Err: err}
+			return false, nil, &aierrors.PreDeltaError{Err: err}
 		}
 	}
 
@@ -2950,6 +2968,7 @@ func (oc *AIClient) streamingResponse(
 	// Generate room title after first response
 	oc.maybeGenerateTitle(ctx, portal, state.accumulated.String())
 
+	oc.streamingHooks.OnStreamFinished(ctx, portal, state, meta)
 	oc.recordProviderSuccess(ctx)
 	return true, nil, nil
 }
@@ -3017,10 +3036,10 @@ func (oc *AIClient) buildContinuationParams(
 	// Model-only chats use a simple prompt without tools to avoid context overflow on small models.
 	agentID := resolveAgentID(meta)
 	if meta.Capabilities.SupportsToolCalling && agentID != "" {
-		enabledTools := oc.enabledBuiltinToolsForModel(ctx, meta)
+		enabledTools := oc.agentResolver.EnabledBuiltinToolsForModel(ctx, meta)
 		if len(enabledTools) > 0 {
 			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
-			params.Tools = append(params.Tools, ToOpenAITools(enabledTools, strictMode, &oc.log)...)
+			params.Tools = append(params.Tools, ToOpenAITools(toProviderToolDefs(enabledTools), strictMode, &oc.log)...)
 		}
 	}
 
@@ -3070,7 +3089,7 @@ func (oc *AIClient) streamChatCompletions(
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	messages []openai.ChatCompletionMessageParamUnion,
-) (bool, *ContextLengthError, error) {
+) (bool, *aierrors.ContextLengthError, error) {
 	portalID := ""
 	if portal != nil {
 		portalID = string(portal.ID)
@@ -3161,9 +3180,9 @@ func (oc *AIClient) streamChatCompletions(
 		// Model-only chats use a simple prompt without tools to avoid context overflow on small models.
 		chatHasAgent := resolveAgentID(meta) != ""
 		if meta.Capabilities.SupportsToolCalling && chatHasAgent {
-			enabledTools := oc.enabledBuiltinToolsForModel(ctx, meta)
+			enabledTools := oc.agentResolver.EnabledBuiltinToolsForModel(ctx, meta)
 			if len(enabledTools) > 0 {
-				params.Tools = append(params.Tools, ToOpenAIChatTools(enabledTools, &oc.log)...)
+				params.Tools = append(params.Tools, ToOpenAIChatTools(toProviderToolDefs(enabledTools), &oc.log)...)
 			}
 			params.Tools = dedupeChatToolParams(params.Tools)
 		}
@@ -3172,7 +3191,7 @@ func (oc *AIClient) streamChatCompletions(
 		if stream == nil {
 			initErr := errors.New("chat completions streaming not available")
 			logChatCompletionsFailure(log, initErr, params, meta, currentMessages, "stream_init")
-			return false, nil, &PreDeltaError{Err: initErr}
+			return false, nil, &aierrors.PreDeltaError{Err: initErr}
 		}
 
 		// Track active tool calls by index
@@ -3225,7 +3244,7 @@ func (oc *AIClient) streamChatCompletions(
 										state.finishReason = "error"
 										oc.emitUIError(ctx, portal, state, errText)
 										oc.emitUIFinish(ctx, portal, state, meta)
-										return false, nil, &PreDeltaError{Err: errors.New(errText)}
+										return false, nil, &aierrors.PreDeltaError{Err: errors.New(errText)}
 									}
 								}
 							}
@@ -3301,11 +3320,11 @@ func (oc *AIClient) streamChatCompletions(
 				oc.emitUIAbort(ctx, portal, state, "cancelled")
 				oc.emitUIFinish(ctx, portal, state, meta)
 				if state.initialEventID != "" {
-					return false, nil, &NonFallbackError{Err: err}
+					return false, nil, &aierrors.NonFallbackError{Err: err}
 				}
-				return false, nil, &PreDeltaError{Err: err}
+				return false, nil, &aierrors.PreDeltaError{Err: err}
 			}
-			if cle := ParseContextLengthError(err); cle != nil {
+			if cle := aierrors.ParseContextLengthError(err); cle != nil {
 				return false, cle, nil
 			}
 			logChatCompletionsFailure(log, err, params, meta, currentMessages, "stream_err")
@@ -3313,9 +3332,9 @@ func (oc *AIClient) streamChatCompletions(
 			oc.emitUIError(ctx, portal, state, err.Error())
 			oc.emitUIFinish(ctx, portal, state, meta)
 			if state.initialEventID != "" {
-				return false, nil, &NonFallbackError{Err: err}
+				return false, nil, &aierrors.NonFallbackError{Err: err}
 			}
-			return false, nil, &PreDeltaError{Err: err}
+			return false, nil, &aierrors.PreDeltaError{Err: err}
 		}
 
 		// Execute any accumulated tool calls
@@ -3376,7 +3395,7 @@ func (oc *AIClient) streamChatCompletions(
 
 				result := ""
 				resultStatus := ResultStatusSuccess
-				if !oc.isToolEnabled(meta, toolName) {
+				if !oc.agentResolver.IsToolEnabled(meta, toolName) {
 					result = fmt.Sprintf("Error: tool %s is not enabled", toolName)
 					resultStatus = ResultStatusError
 				} else {
@@ -3598,7 +3617,7 @@ func (oc *AIClient) convertToResponsesInput(messages []openai.ChatCompletionMess
 	for _, msg := range messages {
 		if msg.OfTool != nil {
 			toolCallID := strings.TrimSpace(msg.OfTool.ToolCallID)
-			content := strings.TrimSpace(extractToolContent(msg.OfTool.Content))
+			content := strings.TrimSpace(aitokens.ExtractToolContent(msg.OfTool.Content))
 			if toolCallID != "" && content != "" {
 				input = append(input, responses.ResponseInputItemUnionParam{
 					OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
@@ -3702,7 +3721,7 @@ func (oc *AIClient) convertToResponsesInput(messages []openai.ChatCompletionMess
 			continue
 		}
 
-		content, role := extractMessageContent(msg)
+		content, role := aitokens.ExtractMessageContent(msg)
 		if role == "" || content == "" {
 			continue
 		}

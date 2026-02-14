@@ -1,4 +1,4 @@
-package connector
+package aiutil
 
 import (
 	"context"
@@ -6,9 +6,9 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// loggerFromContext returns the logger from the context if available,
+// LoggerFromContext returns the logger from the context if available,
 // otherwise falls back to the provided logger.
-func loggerFromContext(ctx context.Context, fallback *zerolog.Logger) *zerolog.Logger {
+func LoggerFromContext(ctx context.Context, fallback *zerolog.Logger) *zerolog.Logger {
 	if ctx != nil {
 		if ctxLog := zerolog.Ctx(ctx); ctxLog != nil && ctxLog.GetLevel() != zerolog.Disabled {
 			return ctxLog

@@ -40,21 +40,6 @@ func (oc *AIClient) resolveEnvelopeFormatOptions() EnvelopeFormatOptions {
 	if oc == nil || oc.connector == nil {
 		return opts
 	}
-	if oc.connector.Config.Agents != nil && oc.connector.Config.Agents.Defaults != nil {
-		def := oc.connector.Config.Agents.Defaults
-		if strings.TrimSpace(def.EnvelopeTimezone) != "" {
-			opts.Timezone = strings.TrimSpace(def.EnvelopeTimezone)
-		}
-		if strings.EqualFold(strings.TrimSpace(def.EnvelopeTimestamp), "off") {
-			opts.IncludeTimestamp = false
-		}
-		if strings.EqualFold(strings.TrimSpace(def.EnvelopeElapsed), "off") {
-			opts.IncludeElapsed = false
-		}
-		if strings.TrimSpace(def.UserTimezone) != "" {
-			opts.UserTimezone = strings.TrimSpace(def.UserTimezone)
-		}
-	}
 	if strings.TrimSpace(opts.UserTimezone) == "" {
 		if tz, _ := oc.resolveUserTimezone(); tz != "" {
 			opts.UserTimezone = tz

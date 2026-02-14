@@ -1,8 +1,10 @@
-package connector
+package aiqueue
 
 import (
 	"fmt"
 	"strings"
+
+	"github.com/beeper/ai-bridge/pkg/aiutil"
 )
 
 type QueueDirective struct {
@@ -23,11 +25,11 @@ type QueueDirective struct {
 	HasDrop      bool
 }
 
-func parseQueueDebounce(raw string) *int {
+func ParseQueueDebounce(raw string) *int {
 	if strings.TrimSpace(raw) == "" {
 		return nil
 	}
-	parsed, err := parseDurationMs(raw, "ms")
+	parsed, err := aiutil.ParseDurationMs(raw, "ms")
 	if err != nil {
 		return nil
 	}
@@ -38,7 +40,7 @@ func parseQueueDebounce(raw string) *int {
 	return &value
 }
 
-func parseQueueCap(raw string) *int {
+func ParseQueueCap(raw string) *int {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil
@@ -53,7 +55,7 @@ func parseQueueCap(raw string) *int {
 	return &value
 }
 
-func parseQueueDirectiveArgs(raw string) (consumed int, result QueueDirective) {
+func ParseQueueDirectiveArgs(raw string) (consumed int, result QueueDirective) {
 	i := 0
 	for i < len(raw) && raw[i] <= ' ' {
 		i++
@@ -101,7 +103,7 @@ func parseQueueDirectiveArgs(raw string) (consumed int, result QueueDirective) {
 			}
 			if len(parts) > 1 {
 				result.RawDebounce = parts[1]
-				result.DebounceMs = parseQueueDebounce(parts[1])
+				result.DebounceMs = ParseQueueDebounce(parts[1])
 				result.HasOptions = true
 				result.HasDebounce = true
 			}
@@ -114,7 +116,7 @@ func parseQueueDirectiveArgs(raw string) (consumed int, result QueueDirective) {
 			}
 			if len(parts) > 1 {
 				result.RawCap = parts[1]
-				result.Cap = parseQueueCap(parts[1])
+				result.Cap = ParseQueueCap(parts[1])
 				result.HasOptions = true
 				result.HasCap = true
 			}
@@ -127,7 +129,7 @@ func parseQueueDirectiveArgs(raw string) (consumed int, result QueueDirective) {
 			}
 			if len(parts) > 1 {
 				result.RawDrop = parts[1]
-				if policy, ok := normalizeQueueDropPolicy(parts[1]); ok {
+				if policy, ok := NormalizeQueueDropPolicy(parts[1]); ok {
 					result.DropPolicy = &policy
 				}
 				result.HasOptions = true
@@ -135,7 +137,7 @@ func parseQueueDirectiveArgs(raw string) (consumed int, result QueueDirective) {
 			}
 			continue
 		}
-		if mode, ok := normalizeQueueMode(token); ok {
+		if mode, ok := NormalizeQueueMode(token); ok {
 			result.QueueMode = mode
 			result.RawMode = token
 			continue

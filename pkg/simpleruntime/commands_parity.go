@@ -8,6 +8,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/commands"
 
 	"github.com/beeper/ai-bridge/modules/runtime/commandregistry"
+	"github.com/beeper/ai-bridge/pkg/aiqueue"
 )
 
 // CommandStatus handles the !ai status command.
@@ -37,7 +38,7 @@ func fnStatus(ce *commands.Event) {
 		return
 	}
 	isGroup := client.isGroupChat(ce.Ctx, portal)
-	queueSettings, _, _, _ := client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", QueueInlineOptions{})
+	queueSettings, _, _, _ := client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
 	ce.Reply("%s", client.buildStatusText(ce.Ctx, portal, meta, isGroup, queueSettings))
 }
 
@@ -130,10 +131,10 @@ func fnQueue(ce *commands.Event) {
 	if !ok {
 		return
 	}
-	queueSettings, _, storeRef, sessionKey := client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", QueueInlineOptions{})
+	queueSettings, _, storeRef, sessionKey := client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
 
 	if len(ce.Args) == 0 || strings.EqualFold(strings.TrimSpace(ce.Args[0]), "status") {
-		ce.Reply("%s", buildQueueStatusLine(queueSettings))
+		ce.Reply("%s", aiqueue.BuildQueueStatusLine(queueSettings))
 		return
 	}
 
@@ -150,13 +151,13 @@ func fnQueue(ce *commands.Event) {
 			})
 		}
 		client.clearPendingQueue(portal.MXID)
-		queueSettings, _, _, _ = client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", QueueInlineOptions{})
-		ce.Reply("%s", buildQueueStatusLine(queueSettings))
+		queueSettings, _, _, _ = client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
+		ce.Reply("%s", aiqueue.BuildQueueStatusLine(queueSettings))
 		return
 	}
 
 	raw := strings.TrimSpace(strings.Join(ce.Args, " "))
-	_, directive := parseQueueDirectiveArgs(raw)
+	_, directive := aiqueue.ParseQueueDirectiveArgs(raw)
 	if directive.HasDebounce && directive.DebounceMs == nil {
 		ce.Reply("Invalid debounce \"%s\". Use ms/s/m (e.g. debounce:1500ms, debounce:2s).", directive.RawDebounce)
 		return
@@ -193,8 +194,8 @@ func fnQueue(ce *commands.Event) {
 		})
 	}
 
-	queueSettings, _, _, _ = client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", QueueInlineOptions{})
-	ce.Reply("%s", buildQueueStatusLine(queueSettings))
+	queueSettings, _, _, _ = client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
+	ce.Reply("%s", aiqueue.BuildQueueStatusLine(queueSettings))
 }
 
 // CommandThink handles the !ai think command.

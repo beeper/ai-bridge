@@ -1,16 +1,20 @@
 package connector
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/beeper/ai-bridge/pkg/aiqueue"
+)
 
 type queueResolveParams struct {
 	cfg        *Config
 	channel    string
 	session    *sessionEntry
-	inlineMode QueueMode
-	inlineOpts QueueInlineOptions
+	inlineMode aiqueue.QueueMode
+	inlineOpts aiqueue.QueueInlineOptions
 }
 
-func resolveQueueSettings(params queueResolveParams) QueueSettings {
+func resolveQueueSettings(params queueResolveParams) aiqueue.QueueSettings {
 	channel := strings.TrimSpace(strings.ToLower(params.channel))
 	cfg := params.cfg
 	queueCfg := (*QueueConfig)(nil)
@@ -20,26 +24,26 @@ func resolveQueueSettings(params queueResolveParams) QueueSettings {
 
 	resolvedMode := params.inlineMode
 	if resolvedMode == "" && params.session != nil {
-		if mode, ok := normalizeQueueMode(params.session.QueueMode); ok {
+		if mode, ok := aiqueue.NormalizeQueueMode(params.session.QueueMode); ok {
 			resolvedMode = mode
 		}
 	}
 	if resolvedMode == "" && queueCfg != nil {
 		if channel != "" && queueCfg.ByChannel != nil {
 			if raw, ok := queueCfg.ByChannel[channel]; ok {
-				if mode, ok := normalizeQueueMode(raw); ok {
+				if mode, ok := aiqueue.NormalizeQueueMode(raw); ok {
 					resolvedMode = mode
 				}
 			}
 		}
 		if resolvedMode == "" {
-			if mode, ok := normalizeQueueMode(queueCfg.Mode); ok {
+			if mode, ok := aiqueue.NormalizeQueueMode(queueCfg.Mode); ok {
 				resolvedMode = mode
 			}
 		}
 	}
 	if resolvedMode == "" {
-		resolvedMode = DefaultQueueMode
+		resolvedMode = aiqueue.DefaultQueueMode
 	}
 
 	debounce := (*int)(nil)
@@ -58,7 +62,7 @@ func resolveQueueSettings(params queueResolveParams) QueueSettings {
 		}
 	}
 
-	debounceMs := DefaultQueueDebounceMs
+	debounceMs := aiqueue.DefaultQueueDebounceMs
 	if debounce != nil {
 		debounceMs = *debounce
 		if debounceMs < 0 {
@@ -74,30 +78,30 @@ func resolveQueueSettings(params queueResolveParams) QueueSettings {
 	} else if queueCfg != nil && queueCfg.Cap != nil {
 		capValue = queueCfg.Cap
 	}
-	cap := DefaultQueueCap
+	cap := aiqueue.DefaultQueueCap
 	if capValue != nil {
 		if *capValue > 0 {
 			cap = *capValue
 		}
 	}
 
-	dropPolicy := QueueDropPolicy("")
+	dropPolicy := aiqueue.QueueDropPolicy("")
 	if params.inlineOpts.DropPolicy != nil {
 		dropPolicy = *params.inlineOpts.DropPolicy
 	} else if params.session != nil {
-		if policy, ok := normalizeQueueDropPolicy(params.session.QueueDrop); ok {
+		if policy, ok := aiqueue.NormalizeQueueDropPolicy(params.session.QueueDrop); ok {
 			dropPolicy = policy
 		}
 	} else if queueCfg != nil {
-		if policy, ok := normalizeQueueDropPolicy(queueCfg.Drop); ok {
+		if policy, ok := aiqueue.NormalizeQueueDropPolicy(queueCfg.Drop); ok {
 			dropPolicy = policy
 		}
 	}
 	if dropPolicy == "" {
-		dropPolicy = DefaultQueueDrop
+		dropPolicy = aiqueue.DefaultQueueDrop
 	}
 
-	return QueueSettings{
+	return aiqueue.QueueSettings{
 		Mode:       resolvedMode,
 		DebounceMs: debounceMs,
 		Cap:        cap,

@@ -15,6 +15,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
+
+	"github.com/beeper/ai-bridge/pkg/aiqueue"
 )
 
 func unsupportedMessageStatus(err error) error {
@@ -164,14 +166,13 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 
 	var agentDef *AgentDefinition
 	if agentID := resolveAgentID(meta); agentID != "" {
-		store := NewAgentStoreAdapter(oc)
-		if agent, err := store.GetAgentByID(ctx, agentID); err == nil {
+		if agent, err := oc.agentResolver.GetAgent(ctx, agentID); err == nil {
 			agentDef = agent
 		}
 	}
 	mentionRegexes := buildMentionRegexes(&oc.connector.Config, agentDef)
 
-	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
+	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
 
 	commandBody := rawBody
 	if isGroup {
@@ -521,7 +522,7 @@ func (oc *AIClient) regenerateFromEdit(
 		}
 	}
 
-	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
+	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
 	isGroup := oc.isGroupChat(ctx, portal)
 	pending := pendingMessage{
 		Event:       evt,
@@ -692,7 +693,7 @@ func (oc *AIClient) handleMediaMessage(
 	if trace {
 		logCtx.Debug().Bool("supports_media", supportsMedia).Msg("Media capability check")
 	}
-	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
+	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
 
 	// Get caption (body is usually the filename or caption)
 	rawCaption := strings.TrimSpace(msg.Content.Body)
@@ -707,8 +708,7 @@ func (oc *AIClient) handleMediaMessage(
 
 	agentDef := (*AgentDefinition)(nil)
 	if agentID := resolveAgentID(meta); agentID != "" {
-		store := NewAgentStoreAdapter(oc)
-		if agent, err := store.GetAgentByID(ctx, agentID); err == nil {
+		if agent, err := oc.agentResolver.GetAgent(ctx, agentID); err == nil {
 			agentDef = agent
 		}
 	}
@@ -914,7 +914,7 @@ func (oc *AIClient) handleTextFileMessage(
 	if msg == nil {
 		return nil, errors.New("missing matrix event for text file message")
 	}
-	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
+	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
 
 	rawCaption := strings.TrimSpace(msg.Content.Body)
 	fileName := strings.TrimSpace(msg.Content.FileName)
@@ -934,8 +934,7 @@ func (oc *AIClient) handleTextFileMessage(
 	isGroup := oc.isGroupChat(ctx, portal)
 	agentDef := (*AgentDefinition)(nil)
 	if agentID := resolveAgentID(meta); agentID != "" {
-		store := NewAgentStoreAdapter(oc)
-		if agent, err := store.GetAgentByID(ctx, agentID); err == nil {
+		if agent, err := oc.agentResolver.GetAgent(ctx, agentID); err == nil {
 			agentDef = agent
 		}
 	}
@@ -1256,7 +1255,7 @@ func (oc *AIClient) handleRegenerate(
 		return
 	}
 
-	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(runCtx, portal, meta, "", QueueInlineOptions{})
+	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(runCtx, portal, meta, "", aiqueue.QueueInlineOptions{})
 	isGroup := oc.isGroupChat(runCtx, portal)
 	pending := pendingMessage{
 		Event:         evt,

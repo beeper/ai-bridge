@@ -1,38 +1,27 @@
 package connector
 
-import "strings"
+import "github.com/beeper/ai-bridge/pkg/aimodels"
 
-type ModelAPI string
+// Type and constant aliases so that in-package code can use short names.
+type ModelAPI = aimodels.ModelAPI
 
 const (
-	ModelAPIResponses       ModelAPI = "responses"
-	ModelAPIChatCompletions ModelAPI = "chat_completions"
+	ModelAPIResponses       = aimodels.ModelAPIResponses
+	ModelAPIChatCompletions = aimodels.ModelAPIChatCompletions
 )
 
-func normalizeModelAPI(value string) ModelAPI {
-	normalized := strings.TrimSpace(strings.ToLower(value))
-	switch normalized {
-	case "responses", "openai-responses", "openai_responses":
-		return ModelAPIResponses
-	case "chat_completions", "chat-completions", "openai-completions", "openai_completions":
-		return ModelAPIChatCompletions
-	default:
-		return ""
-	}
-}
-
-func (oc *AIClient) resolveModelAPI(meta *PortalMetadata) ModelAPI {
+func (oc *AIClient) resolveModelAPI(meta *PortalMetadata) aimodels.ModelAPI {
 	modelID := oc.effectiveModel(meta)
 	if info := oc.findModelInfo(modelID); info != nil {
-		if api := normalizeModelAPI(info.API); api != "" {
-			if oc.isOpenRouterProvider() && api == ModelAPIResponses {
-				return ModelAPIChatCompletions
+		if api := aimodels.NormalizeModelAPI(info.API); api != "" {
+			if oc.isOpenRouterProvider() && api == aimodels.ModelAPIResponses {
+				return aimodels.ModelAPIChatCompletions
 			}
 			return api
 		}
 	}
 	if oc.isOpenRouterProvider() {
-		return ModelAPIChatCompletions
+		return aimodels.ModelAPIChatCompletions
 	}
-	return ModelAPIResponses
+	return aimodels.ModelAPIResponses
 }

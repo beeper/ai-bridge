@@ -108,6 +108,11 @@ type UserLoginMetadata struct {
 	// Provider health tracking
 	ConsecutiveErrors int   `json:"consecutive_errors,omitempty"`
 	LastErrorAt       int64 `json:"last_error_at,omitempty"` // Unix timestamp
+
+	// Extra holds bridge-specific login metadata that the core engine
+	// carries opaquely. Beep uses this for additional service tokens,
+	// MCP server configs, etc.
+	Extra any `json:"extra,omitempty"`
 }
 
 // HeartbeatState tracks last heartbeat delivery for dedupe.
@@ -186,6 +191,11 @@ type PortalMetadata struct {
 
 	// Anthropic prompt cache TTL tracking
 	LastCacheTTLRefresh int64 `json:"last_cache_ttl_refresh,omitempty"` // Unix millis of last cache-eligible request
+
+	// Extra holds bridge-specific metadata that the core engine carries
+	// opaquely. Beep uses this for cron rooms, subagent parents, memory
+	// flush state, etc.
+	Extra any `json:"extra,omitempty"`
 }
 
 func clonePortalMetadata(src *PortalMetadata) *PortalMetadata {

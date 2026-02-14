@@ -10,7 +10,7 @@ set -e
 
 # Parse arguments
 OPENROUTER_TOKEN=""
-OUTPUT_FILE="pkg/connector/beeper_models_generated.go"
+OUTPUT_FILE="pkg/aimodels/beeper_models_generated.go"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  --openrouter-token=TOKEN  OpenRouter API token (required)"
-      echo "  --output=FILE             Output file path (default: pkg/connector/beeper_models_generated.go)"
+      echo "  --output=FILE             Output file path (default: pkg/aimodels/beeper_models_generated.go)"
       exit 0
       ;;
     *)

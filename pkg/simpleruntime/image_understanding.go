@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"maunium.net/go/mautrix/event"
+
+	"github.com/beeper/ai-bridge/pkg/aimodels"
 )
 
 const (
@@ -55,8 +57,7 @@ func (oc *AIClient) resolveUnderstandingModel(
 		return ""
 	}
 
-	store := NewAgentStoreAdapter(oc)
-	agent, err := store.GetAgentByID(ctx, agentID)
+	agent, err := oc.agentResolver.GetAgent(ctx, agentID)
 	if err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Str("agent_id", agentID).Msg(fmt.Sprintf("Failed to load agent for %s understanding", logLabel))
 		return ""
@@ -67,7 +68,7 @@ func (oc *AIClient) resolveUnderstandingModel(
 
 	candidates := collectModelCandidates(agent.Model.Primary, agent.Model.Fallbacks)
 	for _, candidate := range candidates {
-		resolved := ResolveAlias(candidate)
+		resolved := aimodels.ResolveAlias(candidate)
 		if resolved == "" {
 			continue
 		}

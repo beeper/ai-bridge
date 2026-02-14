@@ -1,4 +1,4 @@
-package connector
+package aiutil
 
 import (
 	"errors"
@@ -10,7 +10,9 @@ import (
 
 var durationRe = regexp.MustCompile(`^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$`)
 
-func parseDurationMs(raw string, defaultUnit string) (int64, error) {
+// ParseDurationMs parses a human-friendly duration string and returns milliseconds.
+// Supports units: ms, s, m, h, d. If no unit is given, defaultUnit is used.
+func ParseDurationMs(raw string, defaultUnit string) (int64, error) {
 	trimmed := strings.TrimSpace(strings.ToLower(raw))
 	if trimmed == "" {
 		return 0, errors.New("invalid duration (empty)")

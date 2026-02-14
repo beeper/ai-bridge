@@ -4,15 +4,17 @@ import (
 	"context"
 
 	"maunium.net/go/mautrix/bridgev2"
+
+	"github.com/beeper/ai-bridge/pkg/aiqueue"
 )
 
 func (oc *AIClient) resolveQueueSettingsForPortal(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
-	inlineMode QueueMode,
-	inlineOpts QueueInlineOptions,
-) (QueueSettings, *sessionEntry, sessionStoreRef, string) {
+	inlineMode aiqueue.QueueMode,
+	inlineOpts aiqueue.QueueInlineOptions,
+) (aiqueue.QueueSettings, *sessionEntry, sessionStoreRef, string) {
 	agentID := normalizeAgentID(resolveAgentID(meta))
 	storeRef := oc.resolveSessionStoreRef(agentID)
 	sessionKey := ""
