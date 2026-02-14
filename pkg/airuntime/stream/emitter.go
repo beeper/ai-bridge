@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/beeper/ai-bridge/modules/contracts/matrixevents"
-	"github.com/beeper/ai-bridge/pkg/matrixtransport"
+	"github.com/beeper/ai-bridge/pkg/matrixai/matrixtransport"
 
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"

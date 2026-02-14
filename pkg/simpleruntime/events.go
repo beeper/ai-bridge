@@ -6,7 +6,7 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	"github.com/beeper/ai-bridge/modules/contracts/matrixevents"
-	"github.com/beeper/ai-bridge/pkg/aimodels"
+	"github.com/beeper/ai-bridge/pkg/core/aimodels"
 )
 
 // init registers custom AI event types with mautrix's TypeMap

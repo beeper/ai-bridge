@@ -13,7 +13,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/ai-bridge/pkg/aiqueue"
+	"github.com/beeper/ai-bridge/pkg/core/aiqueue"
 )
 
 func (oc *AIClient) dispatchInternalMessage(

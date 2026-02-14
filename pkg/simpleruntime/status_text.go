@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/aiqueue"
-	"github.com/beeper/ai-bridge/pkg/aitokens"
+	"github.com/beeper/ai-bridge/pkg/core/aiqueue"
+	"github.com/beeper/ai-bridge/pkg/core/aitokens"
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
 )

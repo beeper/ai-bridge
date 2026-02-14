@@ -1,7 +1,7 @@
 package connector
 
 import (
-	"github.com/beeper/ai-bridge/pkg/aiprovider"
+	"github.com/beeper/ai-bridge/pkg/core/aiprovider"
 )
 
 // Backward-compatible type aliases that delegate to pkg/aiprovider.

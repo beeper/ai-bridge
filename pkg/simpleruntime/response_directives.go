@@ -6,7 +6,7 @@ import (
 
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/ai-bridge/pkg/shared/stringutil"
+	"github.com/beeper/ai-bridge/pkg/core/shared/stringutil"
 )
 
 // SilentReplyToken is the token the agent uses to indicate no response is needed.

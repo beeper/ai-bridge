@@ -18,9 +18,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/aimodels"
-	"github.com/beeper/ai-bridge/pkg/aiqueue"
-	"github.com/beeper/ai-bridge/pkg/aiutil"
+	"github.com/beeper/ai-bridge/pkg/core/aimodels"
+	"github.com/beeper/ai-bridge/pkg/core/aiqueue"
+	"github.com/beeper/ai-bridge/pkg/core/aiutil"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/rs/zerolog"
@@ -263,10 +263,8 @@ type AIClient struct {
 	// Provider abstraction layer - all providers use OpenAI SDK
 	provider AIProvider
 
-	// Extension hooks for streaming engine and agent resolution.
-	// Defaults are set during client init (NoopStreamingHooks / SimpleAgentResolver).
+	// Extension hooks for streaming engine.
 	streamingHooks StreamingHooks
-	agentResolver  AgentResolver
 
 	loggedIn      atomic.Bool
 	chatLock      sync.Mutex
@@ -287,10 +285,6 @@ type AIClient struct {
 	// Pending group history buffers (mention-gated group context).
 	groupHistoryBuffers map[id.RoomID]*groupHistoryBuffer
 	groupHistoryMu      sync.Mutex
-
-	// Compactor handles intelligent context compaction with LLM summarization
-	compactor     *Compactor
-	compactorOnce sync.Once
 
 	// Message deduplication cache
 	inboundDedupeCache *aiutil.DedupeCache
@@ -319,7 +313,16 @@ type AIClient struct {
 	// All goroutines using backgroundContext() will be cancelled on disconnect.
 	disconnectCtx    context.Context
 	disconnectCancel context.CancelFunc
+
+	// Extension hooks for downstream bridges (e.g. beep's agentic layer).
+	clientHooks AIClientHooks
 }
+
+// Connector returns the OpenAIConnector that owns this client.
+func (oc *AIClient) Connector() *OpenAIConnector { return oc.connector }
+
+// SetClientHooks sets the AIClientHooks for this client.
+func (oc *AIClient) SetClientHooks(hooks AIClientHooks) { oc.clientHooks = hooks }
 
 // pendingMessageType indicates what kind of pending message this is
 type pendingMessageType string
@@ -379,8 +382,6 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		queueTyping:         make(map[id.RoomID]*TypingController),
 		streamingHooks:      NoopStreamingHooks{},
 	}
-	oc.agentResolver = &SimpleAgentResolver{client: oc}
-
 	// Initialize inbound message processing with config values
 	inboundCfg := connector.Config.Inbound.WithDefaults()
 	oc.inboundDedupeCache = aiutil.NewDedupeCache(inboundCfg.DedupeTTL, inboundCfg.DedupeMaxSize)
@@ -450,6 +451,13 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 
 	oc.heartbeatWake = &HeartbeatWake{log: oc.log}
 	oc.heartbeatRunner = NewHeartbeatRunner(oc)
+
+	// Notify downstream hooks about the new client
+	if connector.hooks != nil {
+		if err := connector.hooks.OnNewClient(oc); err != nil {
+			return nil, fmt.Errorf("connector hooks OnNewClient: %w", err)
+		}
+	}
 
 	return oc, nil
 }
@@ -988,8 +996,6 @@ func (oc *AIClient) Connect(ctx context.Context) {
 		Message:    "Connected",
 	})
 
-	restoreSystemEventsFromDisk(oc.bridgeStateBackend(), oc.Log())
-
 	if oc.heartbeatRunner != nil {
 		oc.heartbeatRunner.Start()
 	}
@@ -1103,35 +1109,6 @@ func (oc *AIClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*
 func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	ghostID := string(ghost.ID)
 
-	// Parse agent from ghost ID (format: "agent-{id}")
-	if agentID, ok := parseAgentFromGhostID(ghostID); ok {
-		agent, err := oc.agentResolver.GetAgent(ctx, agentID)
-		displayName := "Unknown Agent"
-		modelID := oc.agentModelOverride(agentID)
-		if err == nil && agent != nil {
-			displayName = oc.agentResolver.ResolveAgentDisplayName(ctx, agent)
-			if displayName == "" {
-				displayName = agent.Name
-			}
-			if displayName == "" {
-				displayName = agent.ID
-			}
-			if modelID == "" && agent.Model.Primary != "" {
-				modelID = aimodels.ResolveAlias(agent.Model.Primary)
-			}
-		}
-		identifiers := []string{agentID}
-		if modelID != "" {
-			identifiers = append(identifiers, aimodels.ModelContactIdentifiers(modelID, oc.findModelInfo(modelID))...)
-		}
-		return &bridgev2.UserInfo{
-			Name:         ptr.Ptr(displayName),
-			IsBot:        ptr.Ptr(true),
-			Identifiers:  aimodels.UniqueStrings(identifiers),
-			ExtraUpdates: updateGhostLastSync,
-		}, nil
-	}
-
 	// Parse model from ghost ID (format: "model-{escaped-model-id}")
 	if modelID := parseModelFromGhostID(ghostID); modelID != "" {
 		info := oc.findModelInfo(modelID)
@@ -1227,35 +1204,9 @@ func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 }
 
 // effectiveModel returns the full prefixed model ID (e.g., "openai/gpt-5.2")
-// Priority: Room → Agent → User → Provider → Global
-// Exception: Boss agent rooms always use the Boss agent's model (no overrides)
+// Priority: Room → User → Provider → Global
 func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
-	// Check if an agent is assigned
-	if meta != nil {
-		agentID := resolveAgentID(meta)
-		if agentID != "" {
-			// Load the agent to get its model
-			agent, err := oc.agentResolver.GetAgent(context.Background(), agentID)
-			if err == nil && agent != nil {
-				// Boss agent rooms always use the Boss model - no overrides allowed
-				if oc.agentResolver.IsBossAgent(agentID) && agent.Model.Primary != "" {
-					return aimodels.ResolveAlias(agent.Model.Primary)
-				}
-				// For other agents, room override takes priority, then agent model
-				if meta.Model != "" {
-					return aimodels.ResolveAlias(meta.Model)
-				}
-				if override := oc.agentModelOverride(agentID); override != "" {
-					return aimodels.ResolveAlias(override)
-				}
-				if agent.Model.Primary != "" {
-					return aimodels.ResolveAlias(agent.Model.Primary)
-				}
-			}
-		}
-	}
-
-	// Room-level model override (for rooms without an agent)
+	// Room-level model override
 	if meta != nil && meta.Model != "" {
 		return aimodels.ResolveAlias(meta.Model)
 	}
@@ -1271,14 +1222,8 @@ func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 }
 
 func (oc *AIClient) agentModelOverride(agentID string) string {
-	if agentID == "" || oc.UserLogin == nil {
-		return ""
-	}
-	loginMeta := loginMetadata(oc.UserLogin)
-	if loginMeta == nil || loginMeta.AgentModelOverrides == nil {
-		return ""
-	}
-	return strings.TrimSpace(loginMeta.AgentModelOverrides[agentID])
+	_ = agentID
+	return ""
 }
 
 // effectiveModelForAPI returns the actual model name to send to the API
@@ -1351,14 +1296,7 @@ func (oc *AIClient) effectivePrompt(meta *PortalMetadata) string {
 			base = oc.connector.Config.DefaultSystemPrompt
 		}
 	}
-	gravatarContext := oc.gravatarContext()
-	if gravatarContext == "" {
-		return base
-	}
-	if strings.TrimSpace(base) == "" {
-		return gravatarContext
-	}
-	return fmt.Sprintf("%s\n\n%s", base, gravatarContext)
+	return base
 }
 
 // getLinkPreviewConfig returns the link preview configuration, with defaults filled in.
@@ -1397,40 +1335,12 @@ func getLinkPreviewConfig(connectorConfig *Config) LinkPreviewConfig {
 	return config
 }
 
-// effectiveAgentPrompt returns the system prompt for the agent assigned to the room.
-// This uses BuildSystemPrompt to generate a full prompt with room context when an agent is configured.
-// Returns empty string if no agent is configured.
+// effectiveAgentPrompt is disabled in the simple runtime.
 func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) string {
-	if meta == nil {
-		return ""
-	}
-
-	agentID := resolveAgentID(meta)
-	if agentID == "" {
-		return ""
-	}
-
-	// Load the agent
-	agent, err := oc.agentResolver.GetAgent(ctx, agentID)
-	if err != nil || agent == nil {
-		oc.loggerForContext(ctx).Warn().Err(err).Str("agent", agentID).Msg("Failed to load agent for prompt")
-		return ""
-	}
-
-	var extraParts []string
-	if strings.TrimSpace(agent.SystemPrompt) != "" {
-		extraParts = append(extraParts, strings.TrimSpace(agent.SystemPrompt))
-	}
-	if meta != nil && strings.TrimSpace(meta.SystemPrompt) != "" {
-		extraParts = append(extraParts, strings.TrimSpace(meta.SystemPrompt))
-	}
-	extraSystemPrompt := strings.Join(extraParts, "\n\n")
-
-	prompt := strings.TrimSpace(extraSystemPrompt)
-	if prompt == "" {
-		prompt = defaultRawModeSystemPrompt
-	}
-	return prompt
+	_ = ctx
+	_ = portal
+	_ = meta
+	return ""
 }
 
 // effectiveTemperature returns the temperature to use.
@@ -2667,76 +2577,14 @@ func (oc *AIClient) ensureGhostDisplayNameWithGhost(ctx context.Context, ghost *
 	}
 }
 
-// ensureAgentGhostDisplayName ensures the agent ghost has its display name set.
-func (oc *AIClient) ensureAgentGhostDisplayName(ctx context.Context, agentID, modelID, agentName string) {
-	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, agentUserID(agentID))
-	if err != nil || ghost == nil {
-		return
-	}
-	displayName := agentName
-	var avatar *bridgev2.Avatar
-	if agentID != "" {
-		if agent, err := oc.agentResolver.GetAgent(ctx, agentID); err == nil && agent != nil {
-			avatarURL := strings.TrimSpace(agent.AvatarURL)
-			if avatarURL != "" {
-				avatar = &bridgev2.Avatar{
-					ID:  networkid.AvatarID(avatarURL),
-					MXC: id.ContentURIString(avatarURL),
-				}
-			}
-		}
-	}
-	shouldUpdate := ghost.Name == "" || !ghost.NameSet || ghost.Name != displayName
-	if avatar != nil {
-		if !ghost.AvatarSet || ghost.AvatarMXC != avatar.MXC || ghost.AvatarID != avatar.ID {
-			shouldUpdate = true
-		}
-	} else if ghost.AvatarMXC != "" && ghost.AvatarSet {
-		avatar = &bridgev2.Avatar{Remove: true}
-		shouldUpdate = true
-	}
-	if shouldUpdate {
-		ghost.UpdateInfo(ctx, &bridgev2.UserInfo{
-			Name:        ptr.Ptr(displayName),
-			IsBot:       ptr.Ptr(true),
-			Identifiers: aimodels.ModelContactIdentifiers(modelID, oc.findModelInfo(modelID)),
-			Avatar:      avatar,
-		})
-		oc.loggerForContext(ctx).Debug().Str("agent", agentID).Str("model", modelID).Str("name", displayName).Msg("Updated agent ghost display name")
-	}
-}
-
-// getModelIntent returns the Matrix intent for the current model or agent's ghost in the portal.
-// If an agent is configured for the room, returns the agent ghost's intent.
-// Otherwise, falls back to the model ghost's intent.
+// getModelIntent returns the Matrix intent for the current model ghost in the portal.
 func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal) bridgev2.MatrixAPI {
 	meta := portalMeta(portal)
 
-	// Check if an agent is configured for this room
-	agentID := resolveAgentID(meta)
-
-	// Use agent ghost if an agent is configured
-	if agentID != "" {
-		modelID := oc.effectiveModel(meta)
-		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, agentUserID(agentID))
-		if err == nil && ghost != nil {
-			// Ensure the ghost has a display name set
-			agent, _ := oc.agentResolver.GetAgent(ctx, agentID)
-			if agent != nil {
-				agentName := oc.agentResolver.ResolveAgentDisplayName(ctx, agent)
-				oc.ensureAgentGhostDisplayName(ctx, agentID, modelID, agentName)
-			}
-			return ghost.Intent
-		}
-		oc.loggerForContext(ctx).Warn().Err(err).Str("agent", agentID).Msg("Failed to get agent ghost, falling back to model")
-	}
-
 	// Fall back to model ghost
 	modelID := oc.effectiveModel(meta)
-	if agentID == "" {
-		if override, ok := modelOverrideFromContext(ctx); ok {
-			modelID = override
-		}
+	if override, ok := modelOverrideFromContext(ctx); ok {
+		modelID = override
 	}
 	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, modelUserID(modelID))
 	if err != nil {

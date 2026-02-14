@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/beeper/ai-bridge/pkg/aierrors"
+	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
@@ -30,7 +30,6 @@ func (oc *AIClient) responseWithRetry(
 	logLabel string,
 ) (bool, error) {
 	currentPrompt := prompt
-	autoCompactionAttempted := false
 
 	for attempt := range maxRetryAttempts {
 		success, cle, err := responseFn(ctx, evt, portal, meta, currentPrompt)
@@ -45,7 +44,7 @@ func (oc *AIClient) responseWithRetry(
 			return false, err
 		}
 
-		// If we got a context length error, try auto-compaction first, then truncation
+		// If we got a context length error, try truncation
 		if cle != nil {
 			oc.loggerForContext(ctx).Info().Int("attempt", attempt+1).Int("requested_tokens", cle.RequestedTokens).Int("max_tokens", cle.ModelMaxTokens).Str("log_label", logLabel).Msg("Context length exceeded, attempting recovery")
 			// In Responses conversation mode, previous_response_id can accumulate hidden server-side
@@ -59,73 +58,7 @@ func (oc *AIClient) responseWithRetry(
 				continue
 			}
 
-			// Try auto-compaction first (only once per retry loop)
-			if !autoCompactionAttempted {
-				autoCompactionAttempted = true
-
-				// Get context window from model
-				contextWindow := oc.getModelContextWindow(meta)
-				if contextWindow <= 0 {
-					contextWindow = 128000 // Default fallback
-				}
-
-				// Emit compaction start event
-				sessionID := string(portal.MXID)
-				oc.emitCompactionStatus(ctx, portal, &CompactionEvent{
-					Type:           CompactionEventStart,
-					SessionID:      sessionID,
-					MessagesBefore: len(currentPrompt),
-				})
-
-				// Attempt auto-compaction with LLM summarization
-				compactor := oc.getCompactor()
-				result, compacted, compactionSuccess := compactor.CompactOnOverflow(
-					ctx,
-					sessionID,
-					currentPrompt,
-					contextWindow,
-					cle.RequestedTokens,
-				)
-
-				if compactionSuccess && len(compacted) > 2 {
-					if meta != nil {
-						meta.CompactionCount++
-						oc.savePortalQuiet(ctx, portal, "compaction count")
-					}
-					// Emit compaction end event
-					oc.emitCompactionStatus(ctx, portal, &CompactionEvent{
-						Type:           CompactionEventEnd,
-						SessionID:      sessionID,
-						MessagesBefore: result.MessagesBefore,
-						MessagesAfter:  result.MessagesAfter,
-						TokensBefore:   result.TokensBefore,
-						TokensAfter:    result.TokensAfter,
-						Summary:        result.Summary,
-						WillRetry:      true,
-					})
-
-					oc.loggerForContext(ctx).Info().
-						Int("messages_before", result.MessagesBefore).
-						Int("messages_after", result.MessagesAfter).
-						Int("tokens_before", result.TokensBefore).
-						Int("tokens_after", result.TokensAfter).
-						Msg("Auto-compaction succeeded, retrying with compacted context")
-
-					currentPrompt = compacted
-					continue
-				}
-
-				// Compaction failed or didn't help enough
-				oc.emitCompactionStatus(ctx, portal, &CompactionEvent{
-					Type:      CompactionEventEnd,
-					SessionID: sessionID,
-					Error:     "compaction did not reduce context sufficiently",
-				})
-
-				oc.loggerForContext(ctx).Warn().Msg("Auto-compaction did not help, falling back to reactive truncation")
-			}
-
-			// Fall back to reactive truncation
+			// Reactive truncation
 			truncated := oc.truncatePrompt(currentPrompt)
 			if len(truncated) <= 2 {
 				return false, cle
@@ -138,7 +71,7 @@ func (oc *AIClient) responseWithRetry(
 				Int("attempt", attempt+1).
 				Int("new_prompt_len", len(currentPrompt)).
 				Str("log_label", logLabel).
-				Msg("Retrying Responses API with truncated context")
+				Msg("Retrying with truncated context")
 			continue
 		}
 
@@ -217,74 +150,3 @@ func (oc *AIClient) truncatePrompt(
 	return smartTruncatePrompt(prompt, 0.5)
 }
 
-// getCompactor returns the compactor instance, creating it lazily if needed
-func (oc *AIClient) getCompactor() *Compactor {
-	oc.compactorOnce.Do(func() {
-		// Build compaction config from pruning config
-		var compactionConfig *CompactionConfig
-		if oc.connector.Config.Pruning != nil {
-			compactionConfig = &CompactionConfig{
-				PruningConfig: oc.connector.Config.Pruning,
-			}
-		} else {
-			compactionConfig = DefaultCompactionConfig()
-		}
-
-		oc.compactor = NewCompactor(&oc.api, oc.log, compactionConfig)
-
-		// Use a fast model for summarization
-		if oc.isOpenRouterProvider() {
-			oc.compactor.SetSummarizationModel("anthropic/claude-opus-4.6")
-		}
-	})
-	return oc.compactor
-}
-
-// emitCompactionStatus sends a compaction status event to the room
-func (oc *AIClient) emitCompactionStatus(ctx context.Context, portal *bridgev2.Portal, evt *CompactionEvent) {
-	if portal == nil || portal.MXID == "" {
-		return
-	}
-	intent := oc.getModelIntent(ctx, portal)
-	if intent == nil {
-		return
-	}
-
-	content := map[string]any{
-		"type":       string(evt.Type),
-		"session_id": evt.SessionID,
-	}
-
-	if evt.MessagesBefore > 0 {
-		content["messages_before"] = evt.MessagesBefore
-	}
-	if evt.MessagesAfter > 0 {
-		content["messages_after"] = evt.MessagesAfter
-	}
-	if evt.TokensBefore > 0 {
-		content["tokens_before"] = evt.TokensBefore
-	}
-	if evt.TokensAfter > 0 {
-		content["tokens_after"] = evt.TokensAfter
-	}
-	if evt.Summary != "" {
-		content["summary"] = evt.Summary
-	}
-	if evt.WillRetry {
-		content["will_retry"] = evt.WillRetry
-	}
-	if evt.Error != "" {
-		content["error"] = evt.Error
-	}
-	if evt.Duration > 0 {
-		content["duration_ms"] = evt.Duration.Milliseconds()
-	}
-
-	eventContent := &event.Content{Raw: content}
-
-	if _, err := intent.SendMessage(ctx, portal.MXID, CompactionStatusEventType, eventContent, nil); err != nil {
-		oc.loggerForContext(ctx).Warn().Err(err).
-			Str("type", string(evt.Type)).
-			Msg("Failed to emit compaction status event")
-	}
-}

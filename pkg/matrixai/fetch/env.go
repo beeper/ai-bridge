@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/shared/stringutil"
+	"github.com/beeper/ai-bridge/pkg/core/shared/stringutil"
 )
 
 // ConfigFromEnv builds a fetch config using environment variables.

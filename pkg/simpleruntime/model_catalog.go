@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/aimodels"
+	"github.com/beeper/ai-bridge/pkg/core/aimodels"
 )
 
 const (

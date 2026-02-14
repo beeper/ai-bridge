@@ -1,21 +1,14 @@
 package simpleconnector
 
 import (
-	"github.com/beeper/ai-bridge/modules/runtime"
 	base "github.com/beeper/ai-bridge/pkg/simpleruntime"
 )
 
 type OpenAIConnector = base.OpenAIConnector
 
-// New builds the simple bridge connector from the shared base connector.
-func New(profile runtime.BridgeProfile) *base.OpenAIConnector {
+// New builds the simple bridge connector with the given policy.
+func New(policy base.BridgePolicy) *base.OpenAIConnector {
 	oc := &base.OpenAIConnector{}
-	oc.SetPolicy(base.BridgePolicy{
-		Name:                profile.Name,
-		NetworkID:           profile.NetworkID,
-		BeeperBridgeType:    profile.BeeperBridgeType,
-		ProvisioningEnabled: profile.ProvisioningEnabled,
-		ResolveIdentifier:   profile.ResolveIdentifier,
-	})
+	oc.SetPolicy(policy)
 	return oc
 }

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/beeper/ai-bridge/pkg/shared/exa"
+	"github.com/beeper/ai-bridge/pkg/core/shared/exa"
 )
 
 func TestExaProviderFetchUsesConfigMaxCharsByDefault(t *testing.T) {

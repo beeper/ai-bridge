@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/aierrors"
-	"github.com/beeper/ai-bridge/pkg/aimodels"
+	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
+	"github.com/beeper/ai-bridge/pkg/core/aimodels"
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
@@ -36,29 +36,7 @@ func (oc *AIClient) modelFallbackChain(ctx context.Context, meta *PortalMetadata
 		return dedupeModels([]string{aimodels.ResolveAlias(meta.Model)})
 	}
 
-	agentID := ""
-	if meta != nil {
-		agentID = meta.AgentID
-	}
-
-	if agentID != "" {
-		agent, err := oc.agentResolver.GetAgent(ctx, agentID)
-		if err == nil && agent != nil {
-			var models []string
-			if strings.TrimSpace(agent.Model.Primary) != "" {
-				models = append(models, aimodels.ResolveAlias(agent.Model.Primary))
-			}
-			for _, fb := range agent.Model.Fallbacks {
-				if strings.TrimSpace(fb) == "" {
-					continue
-				}
-				models = append(models, aimodels.ResolveAlias(fb))
-			}
-			return dedupeModels(models)
-		}
-	}
-
-	// No agent fallbacks - use the effective model only.
+	// Simple runtime uses model-only fallback.
 	return dedupeModels([]string{oc.effectiveModel(meta)})
 }
 

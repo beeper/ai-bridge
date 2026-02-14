@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/matrixtransport"
+	"github.com/beeper/ai-bridge/pkg/matrixai/matrixtransport"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2"

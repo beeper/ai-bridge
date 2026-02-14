@@ -3,7 +3,7 @@ package connector
 import (
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
+	"github.com/beeper/ai-bridge/pkg/core/shared/toolspec"
 )
 
 func (oc *AIClient) toolDescriptionForPortal(meta *PortalMetadata, toolName string, fallback string) string {

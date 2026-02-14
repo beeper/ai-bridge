@@ -1,7 +1,7 @@
 package connector
 
 import (
-	"github.com/beeper/ai-bridge/pkg/aierrors"
+	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
 	"maunium.net/go/mautrix/event"
 )
 

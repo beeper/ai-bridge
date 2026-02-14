@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/aiutil"
+	"github.com/beeper/ai-bridge/pkg/core/aiutil"
 )
 
 type QueueDirective struct {

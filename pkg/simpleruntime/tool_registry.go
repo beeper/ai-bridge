@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
+	"github.com/beeper/ai-bridge/pkg/core/shared/toolspec"
 )
 
 type toolExecutor func(ctx context.Context, args map[string]any) (string, error)

@@ -24,9 +24,6 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 			if handler == nil || handler.Func == nil {
 				continue
 			}
-			if !oc.shouldRegisterCommand(handler.Name) {
-				continue
-			}
 			original := handler.Func
 			handler.Func = func(ce *commands.Event) {
 				senderID := ""

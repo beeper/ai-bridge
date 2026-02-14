@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/aiqueue"
+	"github.com/beeper/ai-bridge/pkg/core/aiqueue"
 )
 
 type queueSummaryState struct {

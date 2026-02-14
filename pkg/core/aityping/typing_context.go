@@ -3,7 +3,7 @@ package aityping
 import (
 	"context"
 
-	"github.com/beeper/ai-bridge/pkg/aiutil"
+	"github.com/beeper/ai-bridge/pkg/core/aiutil"
 )
 
 // TypingContext carries group-chat and mention state for typing decisions.

@@ -1,8 +1,6 @@
 package connector
 
 import (
-	"strings"
-
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/commands"
 )
@@ -35,9 +33,8 @@ func requirePortal(ce *commands.Event) (*bridgev2.Portal, bool) {
 }
 
 func rejectBossOverrides(ce *commands.Event, meta *PortalMetadata, message string) bool {
-	if strings.EqualFold(strings.TrimSpace(meta.AgentID), "boss") {
-		ce.Reply(message)
-		return true
-	}
+	_ = ce
+	_ = meta
+	_ = message
 	return false
 }

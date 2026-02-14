@@ -26,40 +26,17 @@ func normalizeMentionPatterns(patterns []string) []string {
 	return out
 }
 
-func deriveMentionPatterns(identity *AgentIdentity) []string {
-	if identity == nil {
-		return nil
-	}
-	name := strings.TrimSpace(identity.Name)
-	if name == "" {
-		return nil
-	}
-	parts := strings.Fields(name)
-	escaped := make([]string, 0, len(parts))
-	for _, part := range parts {
-		escaped = append(escaped, regexp.QuoteMeta(part))
-	}
-	re := strings.Join(escaped, `\s+`)
-	if re == "" {
-		re = regexp.QuoteMeta(name)
-	}
-	return []string{`\b@?` + re + `\b`}
-}
-
-func resolveMentionPatterns(cfg *Config, agent *AgentDefinition) []string {
+func resolveMentionPatterns(cfg *Config) []string {
 	if cfg != nil && cfg.Messages != nil && cfg.Messages.GroupChat != nil {
 		if cfg.Messages.GroupChat.MentionPatterns != nil {
 			return cfg.Messages.GroupChat.MentionPatterns
 		}
 	}
-	if agent != nil && agent.Identity != nil {
-		return deriveMentionPatterns(agent.Identity)
-	}
 	return nil
 }
 
-func buildMentionRegexes(cfg *Config, agent *AgentDefinition) []*regexp.Regexp {
-	patterns := normalizeMentionPatterns(resolveMentionPatterns(cfg, agent))
+func buildMentionRegexes(cfg *Config) []*regexp.Regexp {
+	patterns := normalizeMentionPatterns(resolveMentionPatterns(cfg))
 	if len(patterns) == 0 {
 		return nil
 	}

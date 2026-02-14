@@ -3,7 +3,7 @@ package connector
 import (
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/aiqueue"
+	"github.com/beeper/ai-bridge/pkg/core/aiqueue"
 )
 
 type queueResolveParams struct {

@@ -3,7 +3,7 @@ package connector
 import (
 	"context"
 
-	"github.com/beeper/ai-bridge/pkg/aiutil"
+	"github.com/beeper/ai-bridge/pkg/core/aiutil"
 	"maunium.net/go/mautrix/event"
 )
 

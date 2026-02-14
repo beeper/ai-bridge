@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/aitokens"
+	"github.com/beeper/ai-bridge/pkg/core/aitokens"
 	"github.com/openai/openai-go/v3"
 )
 

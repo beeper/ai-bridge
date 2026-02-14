@@ -151,9 +151,6 @@ func (m *OpenAIRemoteMessage) ConvertMessage(ctx context.Context, portal *bridge
 		if m.Metadata.TurnID != "" {
 			uiMetadata["turn_id"] = m.Metadata.TurnID
 		}
-		if m.Metadata.AgentID != "" {
-			uiMetadata["agent_id"] = m.Metadata.AgentID
-		}
 		if model != "" {
 			uiMetadata["model"] = model
 		}

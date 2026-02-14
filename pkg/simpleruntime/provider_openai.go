@@ -20,10 +20,10 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/random"
 
-	"github.com/beeper/ai-bridge/pkg/aimodels"
-	"github.com/beeper/ai-bridge/pkg/aiprovider"
-	"github.com/beeper/ai-bridge/pkg/aiutil"
-	"github.com/beeper/ai-bridge/pkg/shared/httputil"
+	"github.com/beeper/ai-bridge/pkg/core/aimodels"
+	"github.com/beeper/ai-bridge/pkg/core/aiprovider"
+	"github.com/beeper/ai-bridge/pkg/core/aiutil"
+	"github.com/beeper/ai-bridge/pkg/core/shared/httputil"
 )
 
 // OpenAIProvider implements AIProvider for OpenAI's API

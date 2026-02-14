@@ -38,8 +38,18 @@ if echo "$ai_bridge_deps" | rg -q 'github.com/beeper/ai-bridge/pkg/simpleruntime
   fail "ai bridge must not depend on pkg/simpleruntime/simpledeps/*"
 fi
 
+# pkg/core/ must never import mautrix (Matrix-free AI primitives).
+if rg -q '"maunium.net/go/mautrix' pkg/core/; then
+  fail "pkg/core/ must not import mautrix"
+fi
+
+# pkg/matrixai/ must not import simpleruntime or bridge-specific code.
+if rg -q 'github.com/beeper/ai-bridge/pkg/simpleruntime' pkg/matrixai/; then
+  fail "pkg/matrixai/ must not import simpleruntime"
+fi
+
 # Shared pkg/* packages must not import simpleruntime or dedicated repos.
-shared_pkgs=(aierrors aimedia aimodels aiprovider aiqueue aitokens aityping aiutil linkpreview)
+shared_pkgs=(core/aierrors core/aimedia core/aimodels core/aiprovider core/aiqueue core/aitokens core/aityping core/aiutil matrixai/linkpreview)
 for pkg in "${shared_pkgs[@]}"; do
   pkg_imports="$(go list -f '{{join .Imports "\n"}}' "./pkg/$pkg/" 2>/dev/null || true)"
   if [ -n "$pkg_imports" ]; then

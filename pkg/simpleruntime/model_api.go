@@ -1,6 +1,6 @@
 package connector
 
-import "github.com/beeper/ai-bridge/pkg/aimodels"
+import "github.com/beeper/ai-bridge/pkg/core/aimodels"
 
 // Type and constant aliases so that in-package code can use short names.
 type ModelAPI = aimodels.ModelAPI

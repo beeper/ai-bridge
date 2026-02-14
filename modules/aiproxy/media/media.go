@@ -1,6 +1,6 @@
 package media
 
-import basemedia "github.com/beeper/ai-bridge/pkg/shared/media"
+import basemedia "github.com/beeper/ai-bridge/pkg/core/shared/media"
 
 func ParseDataURI(dataURI string) (string, string, error) {
 	return basemedia.ParseDataURI(dataURI)
