@@ -264,7 +264,7 @@ func MessageSchema() map[string]any {
 			},
 			"user_id": map[string]any{
 				"type":        "string",
-				"description": "For action=member-info: the Matrix user ID to look up (e.g., @user:server.com)",
+				"description": "For action=member-info: the user ID to look up.",
 			},
 			"thread_id": map[string]any{
 				"type":        "string",
