@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/aiutil"
 	"go.mau.fi/util/configupgrade"
 )
 
@@ -18,8 +19,7 @@ type Config struct {
 	Models    *ModelsConfig       `yaml:"models"`
 	Bridge    BridgeConfig        `yaml:"bridge"`
 	Tools     ToolProvidersConfig `yaml:"tools"`
-	Agents    *AgentsConfig       `yaml:"agents"`
-	Channels  *ChannelsConfig     `yaml:"channels"`
+	Channels *ChannelsConfig `yaml:"channels"`
 	Messages  *MessagesConfig     `yaml:"messages"`
 	Commands  *CommandsConfig     `yaml:"commands"`
 	Session   *SessionConfig      `yaml:"session"`
@@ -36,53 +36,11 @@ type Config struct {
 
 	// Inbound message processing configuration
 	Inbound *InboundConfig `yaml:"inbound"`
-}
 
-// AgentsConfig configures agent defaults (OpenClaw-style).
-type AgentsConfig struct {
-	Defaults *AgentDefaultsConfig `yaml:"defaults"`
-	List     []AgentEntryConfig   `yaml:"list"`
-}
-
-// AgentDefaultsConfig defines default agent settings.
-type AgentDefaultsConfig struct {
-	SkipBootstrap     bool             `yaml:"skip_bootstrap"`
-	BootstrapMaxChars int              `yaml:"bootstrap_max_chars"`
-	TimeoutSeconds    int              `yaml:"timeoutSeconds"`
-	Heartbeat         *HeartbeatConfig `yaml:"heartbeat"`
-	UserTimezone      string           `yaml:"userTimezone"`
-	EnvelopeTimezone  string           `yaml:"envelopeTimezone"`  // local|utc|user|IANA
-	EnvelopeTimestamp string           `yaml:"envelopeTimestamp"` // on|off
-	EnvelopeElapsed   string           `yaml:"envelopeElapsed"`   // on|off
-	TypingMode        string           `yaml:"typingMode"`        // never|instant|thinking|message
-	TypingIntervalSec *int             `yaml:"typingIntervalSeconds"`
-}
-
-// AgentEntryConfig defines per-agent overrides (OpenClaw-style).
-type AgentEntryConfig struct {
-	ID                string           `yaml:"id"`
-	Heartbeat         *HeartbeatConfig `yaml:"heartbeat"`
-	TypingMode        string           `yaml:"typingMode"` // never|instant|thinking|message
-	TypingIntervalSec *int             `yaml:"typingIntervalSeconds"`
-}
-
-// HeartbeatConfig configures periodic heartbeat runs (OpenClaw-style).
-type HeartbeatConfig struct {
-	Every            *string                     `yaml:"every"`
-	ActiveHours      *HeartbeatActiveHoursConfig `yaml:"activeHours"`
-	Model            *string                     `yaml:"model"`
-	Session          *string                     `yaml:"session"`
-	Target           *string                     `yaml:"target"`
-	To               *string                     `yaml:"to"`
-	Prompt           *string                     `yaml:"prompt"`
-	AckMaxChars      *int                        `yaml:"ackMaxChars"`
-	IncludeReasoning *bool                       `yaml:"includeReasoning"`
-}
-
-type HeartbeatActiveHoursConfig struct {
-	Start    string `yaml:"start"`
-	End      string `yaml:"end"`
-	Timezone string `yaml:"timezone"`
+	// Extra holds bridge-specific config that the core engine carries
+	// opaquely. Beep uses this for memory, cron, tool-approval, and
+	// MCP-related settings.
+	Extra any `yaml:"-"`
 }
 
 // ChannelsConfig defines per-channel settings (OpenClaw-style subset for Matrix).
@@ -347,10 +305,10 @@ func (c *InboundConfig) WithDefaults() *InboundConfig {
 		c = &InboundConfig{}
 	}
 	if c.DedupeTTL <= 0 {
-		c.DedupeTTL = DefaultDedupeTTL
+		c.DedupeTTL = aiutil.DefaultDedupeTTL
 	}
 	if c.DedupeMaxSize <= 0 {
-		c.DedupeMaxSize = DefaultDedupeMaxSize
+		c.DedupeMaxSize = aiutil.DefaultDedupeMaxSize
 	}
 	if c.DefaultDebounceMs <= 0 {
 		c.DefaultDebounceMs = DefaultDebounceMs
@@ -480,20 +438,6 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Str, "session", "scope")
 	helper.Copy(configupgrade.Str, "session", "mainKey")
 	helper.Copy(configupgrade.Str, "session", "store")
-
-	// Agents heartbeat configuration
-	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "every")
-	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "prompt")
-	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "model")
-	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "session")
-	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "target")
-	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "to")
-	helper.Copy(configupgrade.Int, "agents", "defaults", "heartbeat", "ackMaxChars")
-	helper.Copy(configupgrade.Bool, "agents", "defaults", "heartbeat", "includeReasoning")
-	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "activeHours", "start")
-	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "activeHours", "end")
-	helper.Copy(configupgrade.Str, "agents", "defaults", "heartbeat", "activeHours", "timezone")
-	helper.Copy(configupgrade.List, "agents", "list")
 
 	// Channels heartbeat visibility
 	helper.Copy(configupgrade.Bool, "channels", "defaults", "heartbeat", "showOk")

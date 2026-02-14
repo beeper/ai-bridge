@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/aiqueue"
+	"github.com/beeper/ai-bridge/pkg/aitokens"
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
 )
@@ -17,7 +19,7 @@ func (oc *AIClient) buildStatusText(
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	isGroup bool,
-	queueSettings QueueSettings,
+	queueSettings aiqueue.QueueSettings,
 ) string {
 	if meta == nil || portal == nil {
 		return "Status unavailable"
@@ -241,7 +243,7 @@ func (oc *AIClient) buildContextStatus(ctx context.Context, portal *bridgev2.Por
 	systemPrompt := oc.effectivePrompt(meta)
 	if systemPrompt != "" {
 		sysTokens := 0
-		if count, err := EstimateTokens([]openai.ChatCompletionMessageParamUnion{openai.SystemMessage(systemPrompt)}, modelID); err == nil {
+		if count, err := aitokens.EstimateTokens([]openai.ChatCompletionMessageParamUnion{openai.SystemMessage(systemPrompt)}, modelID); err == nil {
 			sysTokens = count
 		}
 		sysLine := fmt.Sprintf("System prompt: %d chars", len(systemPrompt))
@@ -313,7 +315,7 @@ func (oc *AIClient) estimatePromptTokens(ctx context.Context, portal *bridgev2.P
 	if err != nil {
 		return 0
 	}
-	count, err := EstimateTokens(prompt, oc.effectiveModel(meta))
+	count, err := aitokens.EstimateTokens(prompt, oc.effectiveModel(meta))
 	if err != nil {
 		return 0
 	}

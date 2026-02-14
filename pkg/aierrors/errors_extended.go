@@ -1,4 +1,4 @@
-package connector
+package aierrors
 
 import (
 	"encoding/json"
@@ -105,8 +105,8 @@ func FallbackReasoningLevel(current string) string {
 	}
 }
 
-// containsAnyPattern checks if the lowercased error message contains any of the given patterns.
-func containsAnyPattern(err error, patterns []string) bool {
+// ContainsAnyPattern checks if the lowercased error message contains any of the given patterns.
+func ContainsAnyPattern(err error, patterns []string) bool {
 	if err == nil {
 		return false
 	}
@@ -126,7 +126,7 @@ func IsCompactionFailureError(err error) bool {
 	if ParseContextLengthError(err) == nil {
 		return false
 	}
-	return containsAnyPattern(err, []string{
+	return ContainsAnyPattern(err, []string{
 		"summarization failed",
 		"auto-compaction",
 		"compaction failed",
@@ -136,7 +136,7 @@ func IsCompactionFailureError(err error) bool {
 
 // IsBillingError checks if the error is a billing/payment error (402)
 func IsBillingError(err error) bool {
-	return containsAnyPattern(err, []string{
+	return ContainsAnyPattern(err, []string{
 		"402",
 		"payment required",
 		"insufficient credits",
@@ -151,7 +151,7 @@ func IsBillingError(err error) bool {
 
 // IsOverloadedError checks if the error indicates the service is overloaded
 func IsOverloadedError(err error) bool {
-	return containsAnyPattern(err, []string{
+	return ContainsAnyPattern(err, []string{
 		"overloaded_error",
 		"\"overloaded_error\"",
 		"overloaded",
@@ -163,7 +163,7 @@ func IsOverloadedError(err error) bool {
 
 // IsTimeoutError checks if the error is a timeout error
 func IsTimeoutError(err error) bool {
-	return containsAnyPattern(err, []string{
+	return ContainsAnyPattern(err, []string{
 		"timeout",
 		"timed out",
 		"deadline exceeded",
@@ -179,7 +179,7 @@ func IsTimeoutError(err error) bool {
 
 // IsImageError checks if the error is related to image size or dimensions
 func IsImageError(err error) bool {
-	return containsAnyPattern(err, []string{
+	return ContainsAnyPattern(err, []string{
 		"image exceeds",
 		"image dimensions exceed",
 		"image too large",
@@ -190,7 +190,7 @@ func IsImageError(err error) bool {
 
 // IsReasoningError checks if the error is related to unsupported reasoning/thinking levels
 func IsReasoningError(err error) bool {
-	return containsAnyPattern(err, []string{
+	return ContainsAnyPattern(err, []string{
 		"reasoning",
 		"thinking",
 		"extended thinking",
@@ -200,7 +200,7 @@ func IsReasoningError(err error) bool {
 
 // IsRoleOrderingError checks if the error is related to message role ordering conflicts
 func IsRoleOrderingError(err error) bool {
-	return containsAnyPattern(err, []string{
+	return ContainsAnyPattern(err, []string{
 		"incorrect role information",
 		"roles must alternate",
 		"consecutive user",
@@ -211,7 +211,7 @@ func IsRoleOrderingError(err error) bool {
 // IsMissingToolCallInputError checks if the error indicates a corrupted session
 // where tool call inputs are missing (e.g., from interrupted streaming).
 func IsMissingToolCallInputError(err error) bool {
-	return containsAnyPattern(err, []string{
+	return ContainsAnyPattern(err, []string{
 		"tool_call.input",
 		"tool_use.input",
 		"input is a required property",
@@ -222,7 +222,7 @@ func IsMissingToolCallInputError(err error) bool {
 // IsToolUseIDFormatError checks if the error is caused by an invalid tool_use ID format
 // (e.g., when IDs from one provider are replayed to another).
 func IsToolUseIDFormatError(err error) bool {
-	return containsAnyPattern(err, []string{
+	return ContainsAnyPattern(err, []string{
 		"tool_use_id",
 		"tool_use.id",
 		"tool_call_id",

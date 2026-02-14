@@ -1,4 +1,4 @@
-package connector
+package aiqueue
 
 import "strings"
 
@@ -41,7 +41,7 @@ type QueueInlineOptions struct {
 	DropPolicy *QueueDropPolicy
 }
 
-func normalizeQueueMode(raw string) (QueueMode, bool) {
+func NormalizeQueueMode(raw string) (QueueMode, bool) {
 	cleaned := strings.TrimSpace(strings.ToLower(raw))
 	switch cleaned {
 	case "queue", "queued":
@@ -61,7 +61,7 @@ func normalizeQueueMode(raw string) (QueueMode, bool) {
 	}
 }
 
-func normalizeQueueDropPolicy(raw string) (QueueDropPolicy, bool) {
+func NormalizeQueueDropPolicy(raw string) (QueueDropPolicy, bool) {
 	cleaned := strings.TrimSpace(strings.ToLower(raw))
 	switch cleaned {
 	case "old", "oldest":

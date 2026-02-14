@@ -1,4 +1,4 @@
-package connector
+package aitokens
 
 import (
 	"strings"
@@ -13,8 +13,8 @@ var (
 	tokenizerCacheMu sync.RWMutex
 )
 
-// getTokenizer returns a cached tiktoken encoder for the given model
-func getTokenizer(model string) (*tiktoken.Tiktoken, error) {
+// GetTokenizer returns a cached tiktoken encoder for the given model
+func GetTokenizer(model string) (*tiktoken.Tiktoken, error) {
 	tokenizerCacheMu.RLock()
 	if tkm, ok := tokenizerCache[model]; ok {
 		tokenizerCacheMu.RUnlock()
@@ -46,7 +46,7 @@ func getTokenizer(model string) (*tiktoken.Tiktoken, error) {
 // EstimateTokens counts tokens for a list of chat messages
 // Based on OpenAI's cookbook: https://github.com/openai/openai-cookbook
 func EstimateTokens(messages []openai.ChatCompletionMessageParamUnion, model string) (int, error) {
-	tkm, err := getTokenizer(model)
+	tkm, err := GetTokenizer(model)
 	if err != nil {
 		return 0, err
 	}
@@ -59,7 +59,7 @@ func EstimateTokens(messages []openai.ChatCompletionMessageParamUnion, model str
 		numTokens += tokensPerMessage
 
 		// Extract content and role from the message using the union type fields
-		content, role := extractMessageContent(msg)
+		content, role := ExtractMessageContent(msg)
 		numTokens += len(tkm.Encode(content, nil, nil))
 		numTokens += len(tkm.Encode(role, nil, nil))
 	}
@@ -69,39 +69,39 @@ func EstimateTokens(messages []openai.ChatCompletionMessageParamUnion, model str
 	return numTokens, nil
 }
 
-// extractMessageContent extracts the text content and role from a message
-func extractMessageContent(msg openai.ChatCompletionMessageParamUnion) (content, role string) {
+// ExtractMessageContent extracts the text content and role from a message
+func ExtractMessageContent(msg openai.ChatCompletionMessageParamUnion) (content, role string) {
 	// Check each possible field in the union
 	if msg.OfSystem != nil {
 		role = "system"
-		content = extractSystemContent(msg.OfSystem.Content)
+		content = ExtractSystemContent(msg.OfSystem.Content)
 		return
 	}
 	if msg.OfUser != nil {
 		role = "user"
-		content = extractUserContent(msg.OfUser.Content)
+		content = ExtractUserContent(msg.OfUser.Content)
 		return
 	}
 	if msg.OfAssistant != nil {
 		role = "assistant"
-		content = extractAssistantContent(msg.OfAssistant.Content)
+		content = ExtractAssistantContent(msg.OfAssistant.Content)
 		return
 	}
 	if msg.OfDeveloper != nil {
 		role = "developer"
-		content = extractDeveloperContent(msg.OfDeveloper.Content)
+		content = ExtractDeveloperContent(msg.OfDeveloper.Content)
 		return
 	}
 	if msg.OfTool != nil {
 		role = "tool"
-		content = extractToolContent(msg.OfTool.Content)
+		content = ExtractToolContent(msg.OfTool.Content)
 		return
 	}
 	return "", ""
 }
 
-// extractSystemContent extracts text from ChatCompletionSystemMessageParamContentUnion
-func extractSystemContent(content openai.ChatCompletionSystemMessageParamContentUnion) string {
+// ExtractSystemContent extracts text from ChatCompletionSystemMessageParamContentUnion
+func ExtractSystemContent(content openai.ChatCompletionSystemMessageParamContentUnion) string {
 	// Try OfString first (most common case)
 	if content.OfString.Value != "" {
 		return content.OfString.Value
@@ -117,8 +117,8 @@ func extractSystemContent(content openai.ChatCompletionSystemMessageParamContent
 	return ""
 }
 
-// extractUserContent extracts text from ChatCompletionUserMessageParamContentUnion
-func extractUserContent(content openai.ChatCompletionUserMessageParamContentUnion) string {
+// ExtractUserContent extracts text from ChatCompletionUserMessageParamContentUnion
+func ExtractUserContent(content openai.ChatCompletionUserMessageParamContentUnion) string {
 	// Try OfString first
 	if content.OfString.Value != "" {
 		return content.OfString.Value
@@ -136,8 +136,8 @@ func extractUserContent(content openai.ChatCompletionUserMessageParamContentUnio
 	return ""
 }
 
-// extractAssistantContent extracts text from ChatCompletionAssistantMessageParamContentUnion
-func extractAssistantContent(content openai.ChatCompletionAssistantMessageParamContentUnion) string {
+// ExtractAssistantContent extracts text from ChatCompletionAssistantMessageParamContentUnion
+func ExtractAssistantContent(content openai.ChatCompletionAssistantMessageParamContentUnion) string {
 	// Try OfString first
 	if content.OfString.Value != "" {
 		return content.OfString.Value
@@ -155,8 +155,8 @@ func extractAssistantContent(content openai.ChatCompletionAssistantMessageParamC
 	return ""
 }
 
-// extractDeveloperContent extracts text from ChatCompletionDeveloperMessageParamContentUnion
-func extractDeveloperContent(content openai.ChatCompletionDeveloperMessageParamContentUnion) string {
+// ExtractDeveloperContent extracts text from ChatCompletionDeveloperMessageParamContentUnion
+func ExtractDeveloperContent(content openai.ChatCompletionDeveloperMessageParamContentUnion) string {
 	if content.OfString.Value != "" {
 		return content.OfString.Value
 	}
@@ -170,8 +170,8 @@ func extractDeveloperContent(content openai.ChatCompletionDeveloperMessageParamC
 	return ""
 }
 
-// extractToolContent extracts text from ChatCompletionToolMessageParamContentUnion
-func extractToolContent(content openai.ChatCompletionToolMessageParamContentUnion) string {
+// ExtractToolContent extracts text from ChatCompletionToolMessageParamContentUnion
+func ExtractToolContent(content openai.ChatCompletionToolMessageParamContentUnion) string {
 	if content.OfString.Value != "" {
 		return content.OfString.Value
 	}
@@ -187,7 +187,7 @@ func extractToolContent(content openai.ChatCompletionToolMessageParamContentUnio
 
 // EstimateSingleMessageTokens estimates tokens for a single string
 func EstimateSingleMessageTokens(text string, model string) (int, error) {
-	tkm, err := getTokenizer(model)
+	tkm, err := GetTokenizer(model)
 	if err != nil {
 		return 0, err
 	}

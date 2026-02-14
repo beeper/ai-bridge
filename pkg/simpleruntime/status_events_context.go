@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 
+	"github.com/beeper/ai-bridge/pkg/aiutil"
 	"maunium.net/go/mautrix/event"
 )
 
@@ -17,7 +18,7 @@ func withStatusEvents(ctx context.Context, events []*event.Event) context.Contex
 }
 
 func statusEventsFromContext(ctx context.Context) []*event.Event {
-	return contextValue[[]*event.Event](ctx, statusEventsKey{})
+	return aiutil.ContextValue[[]*event.Event](ctx, statusEventsKey{})
 }
 
 func withQueueAcceptedStatus(ctx context.Context) context.Context {
@@ -25,5 +26,5 @@ func withQueueAcceptedStatus(ctx context.Context) context.Context {
 }
 
 func queueAcceptedStatusFromContext(ctx context.Context) bool {
-	return contextValue[bool](ctx, queueAcceptedStatusKey{})
+	return aiutil.ContextValue[bool](ctx, queueAcceptedStatusKey{})
 }

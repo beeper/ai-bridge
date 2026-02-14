@@ -1,4 +1,4 @@
-module github.com/beeper/ai-bridge/bridges/simple
+module github.com/beeper/ai-bridge/bridges/ai
 
 go 1.24.0
 

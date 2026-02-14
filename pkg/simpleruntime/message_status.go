@@ -1,14 +1,17 @@
 package connector
 
-import "maunium.net/go/mautrix/event"
+import (
+	"github.com/beeper/ai-bridge/pkg/aierrors"
+	"maunium.net/go/mautrix/event"
+)
 
 func messageStatusForError(err error) event.MessageStatus {
 	switch {
-	case IsAuthError(err),
-		IsBillingError(err),
-		IsModelNotFound(err),
-		ParseContextLengthError(err) != nil,
-		IsImageError(err):
+	case aierrors.IsAuthError(err),
+		aierrors.IsBillingError(err),
+		aierrors.IsModelNotFound(err),
+		aierrors.ParseContextLengthError(err) != nil,
+		aierrors.IsImageError(err):
 		return event.MessageStatusFail
 	default:
 		return event.MessageStatusRetriable
@@ -17,13 +20,13 @@ func messageStatusForError(err error) event.MessageStatus {
 
 func messageStatusReasonForError(err error) event.MessageStatusReason {
 	switch {
-	case IsAuthError(err), IsBillingError(err):
+	case aierrors.IsAuthError(err), aierrors.IsBillingError(err):
 		return event.MessageStatusNoPermission
-	case IsModelNotFound(err):
+	case aierrors.IsModelNotFound(err):
 		return event.MessageStatusUnsupported
-	case ParseContextLengthError(err) != nil, IsImageError(err):
+	case aierrors.ParseContextLengthError(err) != nil, aierrors.IsImageError(err):
 		return event.MessageStatusUnsupported
-	case IsRateLimitError(err), IsOverloadedError(err), IsTimeoutError(err), IsServerError(err):
+	case aierrors.IsRateLimitError(err), aierrors.IsOverloadedError(err), aierrors.IsTimeoutError(err), aierrors.IsServerError(err):
 		return event.MessageStatusNetworkError
 	default:
 		return event.MessageStatusGenericError

@@ -850,7 +850,7 @@ func generateOutboundLinkPreviews(ctx context.Context, text string, intent bridg
 
 	var previewsWithImages []*PreviewWithImage
 	if len(citations) > 0 {
-		previewsWithImages = previewer.FetchPreviewsWithCitations(fetchCtx, urls, citations)
+		previewsWithImages = previewer.FetchPreviewsWithCitations(fetchCtx, urls, sourceCitationsToLinkpreviewCitations(citations))
 	} else {
 		previewsWithImages = previewer.FetchPreviews(fetchCtx, urls)
 	}
@@ -871,8 +871,7 @@ func (oc *AIClient) getAgentResponseMode(meta *PortalMetadata) string {
 	agentID := resolveAgentID(meta)
 
 	if agentID != "" {
-		store := NewAgentStoreAdapter(oc)
-		if agent, err := store.GetAgentByID(context.Background(), agentID); err == nil && agent != nil {
+		if agent, err := oc.agentResolver.GetAgent(context.Background(), agentID); err == nil && agent != nil {
 			if agent.ResponseMode != "" {
 				return agent.ResponseMode
 			}

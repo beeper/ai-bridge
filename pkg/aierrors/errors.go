@@ -1,4 +1,4 @@
-package connector
+package aierrors
 
 import (
 	"errors"
@@ -23,6 +23,8 @@ const (
 	AIOverloaded     status.BridgeStateErrorCode = "ai-overloaded"
 	AITimeout        status.BridgeStateErrorCode = "ai-timeout"
 	AIImageError     status.BridgeStateErrorCode = "ai-image-error"
+	AIUnknownError   status.BridgeStateErrorCode = "ai-unknown-error"
+	AIServerError    status.BridgeStateErrorCode = "ai-server-error"
 )
 
 // BridgeStateHumanErrors provides human-readable messages for AI bridge error codes
@@ -36,6 +38,8 @@ var BridgeStateHumanErrors = map[status.BridgeStateErrorCode]string{
 	AIOverloaded:     "The AI service is busy right now. Try again in a moment.",
 	AITimeout:        "The request timed out. Try again.",
 	AIImageError:     "That image is too large or has unsupported dimensions for this model.",
+	AIUnknownError:   "An unexpected error occurred. Try again.",
+	AIServerError:    "The AI server encountered an error. Try again later.",
 }
 
 var (
@@ -86,6 +90,31 @@ var (
 		ErrCode:    "IO.AI_BRIDGE.MODEL_NOT_FOUND",
 		Err:        "That model isn't available.",
 		StatusCode: http.StatusNotFound,
+	}
+	ErrBeeperAuthRequired = bridgev2.RespError{
+		ErrCode:    "IO.AI_BRIDGE.BEEPER_AUTH_REQUIRED",
+		Err:        "Beeper authentication required.",
+		StatusCode: http.StatusUnauthorized,
+	}
+	ErrMessageEmpty = bridgev2.RespError{
+		ErrCode:    "IO.AI_BRIDGE.MESSAGE_EMPTY",
+		Err:        "Message is empty.",
+		StatusCode: http.StatusBadRequest,
+	}
+	ErrNoInputProvided = bridgev2.RespError{
+		ErrCode:    "IO.AI_BRIDGE.NO_INPUT",
+		Err:        "No input provided.",
+		StatusCode: http.StatusBadRequest,
+	}
+	ErrPortalNotFound = bridgev2.RespError{
+		ErrCode:    "IO.AI_BRIDGE.PORTAL_NOT_FOUND",
+		Err:        "Chat not found.",
+		StatusCode: http.StatusNotFound,
+	}
+	ErrLoginRequired = bridgev2.RespError{
+		ErrCode:    "IO.AI_BRIDGE.LOGIN_REQUIRED",
+		Err:        "Login required.",
+		StatusCode: http.StatusUnauthorized,
 	}
 )
 
@@ -278,7 +307,7 @@ func IsRateLimitError(err error) bool {
 			return true
 		}
 	}
-	return containsAnyPattern(err, []string{
+	return ContainsAnyPattern(err, []string{
 		"resource_exhausted",
 		"quota exceeded",
 		"usage limit",
@@ -306,7 +335,7 @@ func IsAuthError(err error) bool {
 			return true
 		}
 	}
-	return containsAnyPattern(err, []string{
+	return ContainsAnyPattern(err, []string{
 		"invalid api key",
 		"invalid_api_key",
 		"incorrect api key",
@@ -385,4 +414,18 @@ func IsNoResponseChunksError(err error) bool {
 		err = errors.Unwrap(err)
 	}
 	return false
+}
+
+// NonFallbackError marks an error as ineligible for model fallback.
+// This is used when partial output has already been sent.
+type NonFallbackError struct {
+	Err error
+}
+
+func (e *NonFallbackError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *NonFallbackError) Unwrap() error {
+	return e.Err
 }

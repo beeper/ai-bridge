@@ -7,6 +7,8 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/beeper/ai-bridge/pkg/aiprovider"
+	"github.com/beeper/ai-bridge/pkg/aiutil"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/id"
@@ -18,6 +20,19 @@ type ToolDefinition struct {
 	Description string
 	Parameters  map[string]any
 	Execute     func(ctx context.Context, args map[string]any) (string, error)
+}
+
+// toProviderToolDefs extracts the provider-facing fields from connector ToolDefinitions.
+func toProviderToolDefs(tools []ToolDefinition) []aiprovider.ToolDefinition {
+	out := make([]aiprovider.ToolDefinition, len(tools))
+	for i, t := range tools {
+		out[i] = aiprovider.ToolDefinition{
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  t.Parameters,
+		}
+	}
+	return out
 }
 
 // BridgeToolContext carries runtime data for tool execution.
@@ -44,7 +59,7 @@ func WithBridgeToolContext(ctx context.Context, btc *BridgeToolContext) context.
 }
 
 func GetBridgeToolContext(ctx context.Context) *BridgeToolContext {
-	return contextValue[*BridgeToolContext](ctx, bridgeToolContextKey{})
+	return aiutil.ContextValue[*BridgeToolContext](ctx, bridgeToolContextKey{})
 }
 
 // BuiltinTools returns builtin tools enabled by this bridge profile.

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/aierrors"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 )
@@ -22,13 +23,6 @@ const (
 )
 
 const beeperBasePath = "/_matrix/client/unstable/com.beeper.ai"
-
-var beeperDomains = []string{
-	"beeper.com",
-	"beeper-dev.com",
-	"beeper-staging.com",
-	"beeper.localtest.me",
-}
 
 var (
 	_ bridgev2.LoginProcess          = (*OpenAILogin)(nil)
@@ -49,15 +43,8 @@ func (ol *OpenAILogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
 	}
 
 	switch ol.FlowID {
-	case ProviderBeeper:
-		baseURL := ol.Connector.resolveBeeperBaseURL(nil)
-		apiKey := ol.Connector.resolveBeeperToken(nil)
-		if baseURL == "" || apiKey == "" {
-			return nil, &ErrBaseURLRequired
-		}
-		return ol.finishLogin(ctx, ProviderMagicProxy, apiKey, baseURL, nil)
 	case ProviderMagicProxy:
-		return nil, &ErrBaseURLRequired
+		return nil, &aierrors.ErrBaseURLRequired
 	case FlowCustom:
 		provider, apiKey, serviceTokens, err := ol.resolveCustomLogin(nil)
 		if err != nil {
@@ -73,24 +60,6 @@ func (ol *OpenAILogin) Cancel() {}
 
 func (ol *OpenAILogin) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
 	switch ol.FlowID {
-	case ProviderBeeper:
-		baseURL := strings.TrimRight(strings.TrimSpace(ol.Connector.Config.Beeper.BaseURL), "/")
-		if baseURL == "" {
-			domain := strings.TrimSpace(input["beeper_domain"])
-			if domain == "" {
-				return nil, &ErrBaseURLRequired
-			}
-			baseURL = beeperBaseURLFromDomain(domain)
-		}
-		baseURL = normalizeBeeperBaseURL(baseURL)
-		apiKey := strings.TrimSpace(ol.Connector.Config.Beeper.Token)
-		if apiKey == "" {
-			apiKey = strings.TrimSpace(input["beeper_token"])
-		}
-		if apiKey == "" {
-			return nil, &ErrAPIKeyRequired
-		}
-		return ol.finishLogin(ctx, ProviderMagicProxy, apiKey, baseURL, nil)
 	case ProviderMagicProxy:
 		link := strings.TrimSpace(input["magic_proxy_link"])
 		baseURL, apiKey, err := parseMagicProxyLink(link)
@@ -126,25 +95,6 @@ func (ol *OpenAILogin) SubmitUserInput(ctx context.Context, input map[string]str
 func (ol *OpenAILogin) credentialsStep() *bridgev2.LoginStep {
 	var fields []bridgev2.LoginInputDataField
 	switch ol.FlowID {
-	case ProviderBeeper:
-		if strings.TrimSpace(ol.Connector.Config.Beeper.BaseURL) == "" {
-			fields = append(fields, bridgev2.LoginInputDataField{
-				Type:         bridgev2.LoginInputFieldTypeSelect,
-				ID:           "beeper_domain",
-				Name:         "Beeper",
-				Description:  fmt.Sprintf("Select your Beeper domain (%s).", strings.Join(beeperDomains, ", ")),
-				DefaultValue: "beeper.com",
-				Options:      beeperDomains,
-			})
-		}
-		if strings.TrimSpace(ol.Connector.Config.Beeper.Token) == "" {
-			fields = append(fields, bridgev2.LoginInputDataField{
-				Type:        bridgev2.LoginInputFieldTypeToken,
-				ID:          "beeper_token",
-				Name:        "Beeper AI key",
-				Description: "Beeper AI needs a key to connect to Beeper servers. Requires Beeper Plus.",
-			})
-		}
 	case ProviderMagicProxy:
 		fields = append(fields, bridgev2.LoginInputDataField{
 			Type: bridgev2.LoginInputFieldTypeURL,
@@ -296,7 +246,7 @@ func (ol *OpenAILogin) finishLogin(ctx context.Context, provider, apiKey, baseUR
 		valCtx, valCancel := context.WithTimeout(ctx, 5*time.Second)
 		_, valErr := aiClient.listAvailableModels(valCtx, true)
 		valCancel()
-		if valErr != nil && IsAuthError(valErr) {
+		if valErr != nil && aierrors.IsAuthError(valErr) {
 			return nil, errors.New("invalid API key: authentication failed")
 		}
 		// Non-auth errors (network, timeout) are acceptable - the key may still be valid
@@ -355,7 +305,7 @@ func (ol *OpenAILogin) resolveCustomLogin(input map[string]string) (string, stri
 	}
 
 	if openrouterToken == "" && openaiToken == "" {
-		return "", "", nil, &ErrOpenAIOrOpenRouterRequired
+		return "", "", nil, &aierrors.ErrOpenAIOrOpenRouterRequired
 	}
 
 	provider := ProviderOpenAI
@@ -406,32 +356,21 @@ func serviceTokensEmpty(tokens *ServiceTokens) bool {
 		strings.TrimSpace(tokens.DesktopAPI) == ""
 }
 
-func beeperBaseURLFromDomain(domain string) string {
-	domain = strings.TrimSpace(domain)
-	if domain == "" {
-		return ""
-	}
-	if !strings.HasPrefix(domain, "matrix.") {
-		domain = "matrix." + domain
-	}
-	return "https://" + domain + beeperBasePath
-}
-
 func parseMagicProxyLink(raw string) (string, string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return "", "", &ErrBaseURLRequired
+		return "", "", &aierrors.ErrBaseURLRequired
 	}
 	if !strings.Contains(trimmed, "://") {
 		trimmed = "https://" + trimmed
 	}
 	parsed, err := url.Parse(trimmed)
 	if err != nil || strings.TrimSpace(parsed.Host) == "" {
-		return "", "", &ErrBaseURLRequired
+		return "", "", &aierrors.ErrBaseURLRequired
 	}
 	token := strings.TrimSpace(parsed.Fragment)
 	if token == "" {
-		return "", "", &ErrAPIKeyRequired
+		return "", "", &aierrors.ErrAPIKeyRequired
 	}
 	scheme := strings.TrimSpace(parsed.Scheme)
 	if scheme == "" {
@@ -443,7 +382,7 @@ func parseMagicProxyLink(raw string) (string, string, error) {
 	}
 	baseURL = normalizeMagicProxyBaseURL(baseURL)
 	if baseURL == "" {
-		return "", "", &ErrBaseURLRequired
+		return "", "", &aierrors.ErrBaseURLRequired
 	}
 	return baseURL, token, nil
 }

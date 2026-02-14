@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/aitokens"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
@@ -432,14 +433,14 @@ func (c *Compactor) generateSummary(ctx context.Context, messages []openai.ChatC
 		switch {
 		case msg.OfUser != nil:
 			conversation.WriteString("User: ")
-			conversation.WriteString(extractUserContent(msg.OfUser.Content))
+			conversation.WriteString(aitokens.ExtractUserContent(msg.OfUser.Content))
 			conversation.WriteString("\n\n")
 		case msg.OfAssistant != nil:
 			conversation.WriteString("Assistant: ")
-			conversation.WriteString(extractAssistantContent(msg.OfAssistant.Content))
+			conversation.WriteString(aitokens.ExtractAssistantContent(msg.OfAssistant.Content))
 			conversation.WriteString("\n\n")
 		case msg.OfTool != nil:
-			content := extractToolContent(msg.OfTool.Content)
+			content := aitokens.ExtractToolContent(msg.OfTool.Content)
 			// Truncate long tool results for summary input
 			if len(content) > 1000 {
 				content = content[:500] + "\n...[truncated]...\n" + content[len(content)-500:]
@@ -550,7 +551,7 @@ func (c *Compactor) generateFallbackSummary(messages []openai.ChatCompletionMess
 		case msg.OfUser != nil:
 			userMsgs++
 			// Extract first few words as potential topic
-			content := extractUserContent(msg.OfUser.Content)
+			content := aitokens.ExtractUserContent(msg.OfUser.Content)
 			if len(content) > 100 {
 				content = content[:100]
 			}

@@ -12,6 +12,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/id"
+
+	"github.com/beeper/ai-bridge/pkg/aiqueue"
 )
 
 func (oc *AIClient) dispatchInternalMessage(
@@ -94,7 +96,7 @@ func (oc *AIClient) dispatchInternalMessage(
 		summaryLine: trimmed,
 		enqueuedAt:  time.Now().UnixMilli(),
 	}
-	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", QueueInlineOptions{})
+	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
 
 	if oc.acquireRoom(portal.MXID) {
 		metaSnapshot := clonePortalMetadata(meta)
@@ -110,8 +112,8 @@ func (oc *AIClient) dispatchInternalMessage(
 		return eventID, false, nil
 	}
 
-	shouldSteer := queueSettings.Mode == QueueModeSteer || queueSettings.Mode == QueueModeSteerBacklog
-	if queueSettings.Mode == QueueModeInterrupt {
+	shouldSteer := queueSettings.Mode == aiqueue.QueueModeSteer || queueSettings.Mode == aiqueue.QueueModeSteerBacklog
+	if queueSettings.Mode == aiqueue.QueueModeInterrupt {
 		oc.cancelRoomRun(portal.MXID)
 		oc.clearPendingQueue(portal.MXID)
 	}
@@ -121,7 +123,7 @@ func (oc *AIClient) dispatchInternalMessage(
 			queueItem.prompt = appendMessageIDHint(queueItem.prompt, pending.Event.ID)
 		}
 		if oc.enqueueSteerQueue(portal.MXID, queueItem) {
-			if queueSettings.Mode != QueueModeSteerBacklog {
+			if queueSettings.Mode != aiqueue.QueueModeSteerBacklog {
 				if trace {
 					oc.loggerForContext(ctx).Debug().Stringer("portal", portal.PortalKey).Msg("Steered internal message into active run")
 				}
@@ -129,7 +131,7 @@ func (oc *AIClient) dispatchInternalMessage(
 			}
 		}
 	}
-	if queueSettings.Mode == QueueModeSteerBacklog {
+	if queueSettings.Mode == aiqueue.QueueModeSteerBacklog {
 		queueItem.backlogAfter = true
 	}
 	if trace {

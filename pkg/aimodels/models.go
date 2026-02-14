@@ -1,4 +1,4 @@
-package connector
+package aimodels
 
 import (
 	"strings"
@@ -21,11 +21,20 @@ const (
 	DefaultModelBeeper     = "anthropic/claude-opus-4.6"
 )
 
+// Provider constants duplicated from the connector package so that
+// DefaultModelForProvider can be used without importing the connector.
+const (
+	ProviderBeeper     = "beeper"
+	ProviderOpenAI     = "openai"
+	ProviderOpenRouter = "openrouter"
+	ProviderMagicProxy = "magic_proxy"
+)
+
 // ParseModelPrefix extracts the backend and actual model ID from a prefixed model
 // Examples:
-//   - "openai/gpt-5.2" → (BackendOpenAI, "gpt-5.2")
-//   - "anthropic/claude-sonnet-4.5" (no routing prefix) → ("", "anthropic/claude-sonnet-4.5")
-//   - "gpt-4o" (no prefix) → ("", "gpt-4o")
+//   - "openai/gpt-5.2" -> (BackendOpenAI, "gpt-5.2")
+//   - "anthropic/claude-sonnet-4.5" (no routing prefix) -> ("", "anthropic/claude-sonnet-4.5")
+//   - "gpt-4o" (no prefix) -> ("", "gpt-4o")
 func ParseModelPrefix(modelID string) (backend ModelBackend, actualModel string) {
 	parts := strings.SplitN(modelID, "/", 2)
 	if len(parts) != 2 {

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+
+	"github.com/beeper/ai-bridge/pkg/aimodels"
 )
 
 const (
@@ -170,8 +172,8 @@ func (oc *AIClient) implicitModelCatalogEntries(meta *UserLoginMetadata) []Model
 }
 
 func modelCatalogEntriesFromManifest(filter func(provider string) bool) []ModelCatalogEntry {
-	out := make([]ModelCatalogEntry, 0, len(ModelManifest.Models))
-	for _, info := range ModelManifest.Models {
+	out := make([]ModelCatalogEntry, 0, len(aimodels.ModelManifest.Models))
+	for _, info := range aimodels.ModelManifest.Models {
 		provider, modelID := splitModelProvider(info.ID)
 		if provider == "" || modelID == "" {
 			continue

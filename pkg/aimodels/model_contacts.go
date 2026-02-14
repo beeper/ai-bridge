@@ -1,18 +1,18 @@
-package connector
+package aimodels
 
 import (
 	"net/url"
 	"strings"
 )
 
-func modelContactName(modelID string, info *ModelInfo) string {
+func ModelContactName(modelID string, info *ModelInfo) string {
 	if info != nil && info.Name != "" {
 		return info.Name
 	}
 	return GetModelDisplayName(modelID)
 }
 
-func modelContactProvider(modelID string, info *ModelInfo) string {
+func ModelContactProvider(modelID string, info *ModelInfo) string {
 	if info != nil && info.Provider != "" {
 		return info.Provider
 	}
@@ -22,13 +22,13 @@ func modelContactProvider(modelID string, info *ModelInfo) string {
 	return ""
 }
 
-func modelContactIdentifiers(modelID string, info *ModelInfo) []string {
+func ModelContactIdentifiers(modelID string, info *ModelInfo) []string {
 	identifiers := []string{modelID}
-	name := modelContactName(modelID, info)
+	name := ModelContactName(modelID, info)
 	if name != "" && name != modelID {
 		identifiers = append(identifiers, name)
 	}
-	if provider := modelContactProvider(modelID, info); provider != "" {
+	if provider := ModelContactProvider(modelID, info); provider != "" {
 		if name != "" {
 			identifiers = append(identifiers, provider+"/"+name)
 		}
@@ -37,13 +37,13 @@ func modelContactIdentifiers(modelID string, info *ModelInfo) []string {
 			identifiers = append(identifiers, provider+"/"+modelID)
 		}
 	}
-	if openRouterURL := modelContactOpenRouterURL(modelID, info); openRouterURL != "" {
+	if openRouterURL := ModelContactOpenRouterURL(modelID, info); openRouterURL != "" {
 		identifiers = append(identifiers, "uri:"+openRouterURL)
 	}
-	return uniqueStrings(identifiers)
+	return UniqueStrings(identifiers)
 }
 
-func modelContactOpenRouterURL(modelID string, info *ModelInfo) string {
+func ModelContactOpenRouterURL(modelID string, info *ModelInfo) string {
 	if modelID == "" {
 		return ""
 	}
@@ -61,10 +61,10 @@ func modelContactOpenRouterURL(modelID string, info *ModelInfo) string {
 	if backend, actual := ParseModelPrefix(modelID); backend == BackendOpenRouter {
 		modelID = actual
 	}
-	return openRouterModelURL(modelID)
+	return OpenRouterModelURL(modelID)
 }
 
-func openRouterModelURL(modelID string) string {
+func OpenRouterModelURL(modelID string) string {
 	if modelID == "" {
 		return ""
 	}
@@ -75,7 +75,7 @@ func openRouterModelURL(modelID string) string {
 	return "https://openrouter.ai/models/" + strings.Join(parts, "/")
 }
 
-func uniqueStrings(values []string) []string {
+func UniqueStrings(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	result := make([]string, 0, len(values))
 	for _, value := range values {

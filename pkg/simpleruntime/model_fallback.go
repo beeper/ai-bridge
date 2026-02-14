@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/beeper/ai-bridge/pkg/aierrors"
+	"github.com/beeper/ai-bridge/pkg/aimodels"
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
@@ -13,31 +15,17 @@ import (
 // shouldFallbackOnError determines if a model fallback should be attempted.
 // Mirrors OpenClaw's fallback triggers (auth, rate limits, timeouts).
 func shouldFallbackOnError(err error) bool {
-	var nf *NonFallbackError
+	var nf *aierrors.NonFallbackError
 	if errors.As(err, &nf) {
 		return false
 	}
-	return IsAuthError(err) ||
-		IsRateLimitError(err) ||
-		IsTimeoutError(err) ||
-		IsOverloadedError(err) ||
-		IsBillingError(err) ||
-		IsModelNotFound(err) ||
-		IsServerError(err)
-}
-
-// NonFallbackError marks an error as ineligible for model fallback.
-// This is used when partial output has already been sent.
-type NonFallbackError struct {
-	Err error
-}
-
-func (e *NonFallbackError) Error() string {
-	return e.Err.Error()
-}
-
-func (e *NonFallbackError) Unwrap() error {
-	return e.Err
+	return aierrors.IsAuthError(err) ||
+		aierrors.IsRateLimitError(err) ||
+		aierrors.IsTimeoutError(err) ||
+		aierrors.IsOverloadedError(err) ||
+		aierrors.IsBillingError(err) ||
+		aierrors.IsModelNotFound(err) ||
+		aierrors.IsServerError(err)
 }
 
 // modelFallbackChain returns the model chain to try in order.
@@ -45,7 +33,7 @@ func (e *NonFallbackError) Unwrap() error {
 func (oc *AIClient) modelFallbackChain(ctx context.Context, meta *PortalMetadata) []string {
 	// Explicit room-level model overrides should not fall back.
 	if meta != nil && strings.TrimSpace(meta.Model) != "" {
-		return dedupeModels([]string{ResolveAlias(meta.Model)})
+		return dedupeModels([]string{aimodels.ResolveAlias(meta.Model)})
 	}
 
 	agentID := ""
@@ -54,18 +42,17 @@ func (oc *AIClient) modelFallbackChain(ctx context.Context, meta *PortalMetadata
 	}
 
 	if agentID != "" {
-		store := NewAgentStoreAdapter(oc)
-		agent, err := store.GetAgentByID(ctx, agentID)
+		agent, err := oc.agentResolver.GetAgent(ctx, agentID)
 		if err == nil && agent != nil {
 			var models []string
 			if strings.TrimSpace(agent.Model.Primary) != "" {
-				models = append(models, ResolveAlias(agent.Model.Primary))
+				models = append(models, aimodels.ResolveAlias(agent.Model.Primary))
 			}
 			for _, fb := range agent.Model.Fallbacks {
 				if strings.TrimSpace(fb) == "" {
 					continue
 				}
-				models = append(models, ResolveAlias(fb))
+				models = append(models, aimodels.ResolveAlias(fb))
 			}
 			return dedupeModels(models)
 		}
@@ -140,7 +127,7 @@ func (oc *AIClient) responseWithModelFallbackDynamic(
 			Err(err).
 			Str("failed_model", modelID).
 			Str("next_model", modelChain[idx+1]).
-			Str("failover_reason", string(ClassifyFailoverReason(err))).
+			Str("failover_reason", string(aierrors.ClassifyFailoverReason(err))).
 			Msg("Model failed; falling back to next model")
 	}
 }

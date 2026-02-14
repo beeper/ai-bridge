@@ -12,8 +12,8 @@ var (
 )
 
 var m = mxmain.BridgeMain{
-	Name:        "ai-simple",
-	Description: "Simple Matrix↔AI bridge.",
+	Name:        "ai",
+	Description: "Matrix↔AI bridge.",
 	URL:         "https://github.com/beeper/ai-bridge",
 	Version:     "0.1.0",
 	Connector:   simple.NewConnector(),

@@ -53,8 +53,7 @@ func resolveIdentityNameForPrefix(oc *AIClient, agentID string) string {
 	if resolved == "" {
 		resolved = defaultAgentID
 	}
-	store := NewAgentStoreAdapter(oc)
-	if agent, err := store.GetAgentByID(context.Background(), resolved); err == nil && agent != nil {
+	if agent, err := oc.agentResolver.GetAgent(context.Background(), resolved); err == nil && agent != nil {
 		if agent.Identity != nil && strings.TrimSpace(agent.Identity.Name) != "" {
 			return strings.TrimSpace(agent.Identity.Name)
 		}

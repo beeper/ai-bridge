@@ -3,10 +3,12 @@ package connector
 import (
 	"strconv"
 	"strings"
+
+	"github.com/beeper/ai-bridge/pkg/aiqueue"
 )
 
 type queueSummaryState struct {
-	DropPolicy   QueueDropPolicy
+	DropPolicy   aiqueue.QueueDropPolicy
 	DroppedCount int
 	SummaryLines []string
 }
@@ -24,7 +26,7 @@ func elideQueueText(text string, limit int) string {
 	if limit <= 1 {
 		return text[:1]
 	}
-	return strings.TrimRight(text[:limit-1], " \t\r\n") + "…"
+	return strings.TrimRight(text[:limit-1], " \t\r\n") + "\u2026"
 }
 
 func buildQueueSummaryLine(text string, limit int) string {
@@ -43,7 +45,7 @@ func applyQueueDropPolicy[T any](params struct {
 	if params.Queue.Cap <= 0 || len(params.Queue.Items) < params.Queue.Cap {
 		return true
 	}
-	if params.Queue.DropPolicy == QueueDropNew {
+	if params.Queue.DropPolicy == aiqueue.QueueDropNew {
 		return false
 	}
 	dropCount := len(params.Queue.Items) - params.Queue.Cap + 1
@@ -52,7 +54,7 @@ func applyQueueDropPolicy[T any](params struct {
 	}
 	dropped := params.Queue.Items[:dropCount]
 	params.Queue.Items = params.Queue.Items[dropCount:]
-	if params.Queue.DropPolicy == QueueDropSummarize {
+	if params.Queue.DropPolicy == aiqueue.QueueDropSummarize {
 		for _, item := range dropped {
 			params.Queue.DroppedCount++
 			summary := strings.TrimSpace(params.Summarize(item))
@@ -75,7 +77,7 @@ func applyQueueDropPolicy[T any](params struct {
 }
 
 func buildQueueSummaryPrompt(state *pendingQueue, noun string) string {
-	if state == nil || state.dropPolicy != QueueDropSummarize || state.droppedCount <= 0 {
+	if state == nil || state.dropPolicy != aiqueue.QueueDropSummarize || state.droppedCount <= 0 {
 		return ""
 	}
 	title := "[Queue overflow] Dropped " + itoa(state.droppedCount) + " " + noun

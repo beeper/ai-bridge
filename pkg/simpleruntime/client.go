@@ -18,6 +18,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/aimodels"
+	"github.com/beeper/ai-bridge/pkg/aiqueue"
+	"github.com/beeper/ai-bridge/pkg/aiutil"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/rs/zerolog"
@@ -260,6 +263,11 @@ type AIClient struct {
 	// Provider abstraction layer - all providers use OpenAI SDK
 	provider AIProvider
 
+	// Extension hooks for streaming engine and agent resolution.
+	// Defaults are set during client init (NoopStreamingHooks / SimpleAgentResolver).
+	streamingHooks StreamingHooks
+	agentResolver  AgentResolver
+
 	loggedIn      atomic.Bool
 	chatLock      sync.Mutex
 	bootstrapOnce sync.Once // Ensures bootstrap only runs once per client instance
@@ -285,7 +293,7 @@ type AIClient struct {
 	compactorOnce sync.Once
 
 	// Message deduplication cache
-	inboundDedupeCache *DedupeCache
+	inboundDedupeCache *aiutil.DedupeCache
 
 	// Message debouncer for combining rapid messages
 	inboundDebouncer *Debouncer
@@ -369,11 +377,13 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		groupHistoryBuffers: make(map[id.RoomID]*groupHistoryBuffer),
 		userTypingState:     make(map[id.RoomID]userTypingState),
 		queueTyping:         make(map[id.RoomID]*TypingController),
+		streamingHooks:      NoopStreamingHooks{},
 	}
+	oc.agentResolver = &SimpleAgentResolver{client: oc}
 
 	// Initialize inbound message processing with config values
 	inboundCfg := connector.Config.Inbound.WithDefaults()
-	oc.inboundDedupeCache = NewDedupeCache(inboundCfg.DedupeTTL, inboundCfg.DedupeMaxSize)
+	oc.inboundDedupeCache = aiutil.NewDedupeCache(inboundCfg.DedupeTTL, inboundCfg.DedupeMaxSize)
 	debounceMs := oc.resolveInboundDebounceMs("matrix")
 	log.Info().
 		Dur("dedupe_ttl", inboundCfg.DedupeTTL).
@@ -491,7 +501,7 @@ func (oc *AIClient) releaseRoom(roomID id.RoomID) {
 }
 
 // queuePendingMessage adds a message to the pending queue for later processing.
-func (oc *AIClient) queuePendingMessage(roomID id.RoomID, item pendingQueueItem, settings QueueSettings) bool {
+func (oc *AIClient) queuePendingMessage(roomID id.RoomID, item pendingQueueItem, settings aiqueue.QueueSettings) bool {
 	enqueued := oc.enqueuePendingItem(roomID, item, settings)
 	if enqueued {
 		snapshot := oc.getQueueSnapshot(roomID)
@@ -567,12 +577,12 @@ func (oc *AIClient) dispatchOrQueue(
 	meta *PortalMetadata,
 	userMessage *database.Message,
 	queueItem pendingQueueItem,
-	queueSettings QueueSettings,
+	queueSettings aiqueue.QueueSettings,
 	promptMessages []openai.ChatCompletionMessageParamUnion,
 ) (dbMessage *database.Message, isPending bool) {
 	roomID := portal.MXID
-	shouldSteer := queueSettings.Mode == QueueModeSteer || queueSettings.Mode == QueueModeSteerBacklog
-	shouldFollowup := queueSettings.Mode == QueueModeFollowup || queueSettings.Mode == QueueModeCollect || queueSettings.Mode == QueueModeSteerBacklog
+	shouldSteer := queueSettings.Mode == aiqueue.QueueModeSteer || queueSettings.Mode == aiqueue.QueueModeSteerBacklog
+	shouldFollowup := queueSettings.Mode == aiqueue.QueueModeFollowup || queueSettings.Mode == aiqueue.QueueModeCollect || queueSettings.Mode == aiqueue.QueueModeSteerBacklog
 	trace := traceEnabled(meta)
 	if trace {
 		oc.loggerForContext(ctx).Debug().
@@ -582,7 +592,7 @@ func (oc *AIClient) dispatchOrQueue(
 			Bool("has_event", evt != nil).
 			Msg("Dispatching inbound message")
 	}
-	if queueSettings.Mode == QueueModeInterrupt {
+	if queueSettings.Mode == aiqueue.QueueModeInterrupt {
 		oc.cancelRoomRun(roomID)
 		oc.clearPendingQueue(roomID)
 	}
@@ -672,7 +682,7 @@ func (oc *AIClient) dispatchOrQueue(
 		}
 	}
 
-	if queueSettings.Mode == QueueModeSteerBacklog {
+	if queueSettings.Mode == aiqueue.QueueModeSteerBacklog {
 		queueItem.backlogAfter = true
 	}
 	if trace {
@@ -700,12 +710,12 @@ func (oc *AIClient) dispatchOrQueueWithStatus(
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	queueItem pendingQueueItem,
-	queueSettings QueueSettings,
+	queueSettings aiqueue.QueueSettings,
 	promptMessages []openai.ChatCompletionMessageParamUnion,
 ) {
 	roomID := portal.MXID
-	shouldSteer := queueSettings.Mode == QueueModeSteer || queueSettings.Mode == QueueModeSteerBacklog
-	shouldFollowup := queueSettings.Mode == QueueModeFollowup || queueSettings.Mode == QueueModeCollect || queueSettings.Mode == QueueModeSteerBacklog
+	shouldSteer := queueSettings.Mode == aiqueue.QueueModeSteer || queueSettings.Mode == aiqueue.QueueModeSteerBacklog
+	shouldFollowup := queueSettings.Mode == aiqueue.QueueModeFollowup || queueSettings.Mode == aiqueue.QueueModeCollect || queueSettings.Mode == aiqueue.QueueModeSteerBacklog
 	trace := traceEnabled(meta)
 	if trace {
 		oc.loggerForContext(ctx).Debug().
@@ -715,7 +725,7 @@ func (oc *AIClient) dispatchOrQueueWithStatus(
 			Bool("has_event", evt != nil).
 			Msg("Dispatching inbound message with status")
 	}
-	if queueSettings.Mode == QueueModeInterrupt {
+	if queueSettings.Mode == aiqueue.QueueModeInterrupt {
 		oc.cancelRoomRun(roomID)
 		oc.clearPendingQueue(roomID)
 	}
@@ -763,7 +773,7 @@ func (oc *AIClient) dispatchOrQueueWithStatus(
 		}
 	}
 
-	if queueSettings.Mode == QueueModeSteerBacklog {
+	if queueSettings.Mode == aiqueue.QueueModeSteerBacklog {
 		queueItem.backlogAfter = true
 	}
 	if trace {
@@ -847,7 +857,7 @@ func (oc *AIClient) processPendingQueue(ctx context.Context, roomID id.RoomID) {
 		var promptMessages []openai.ChatCompletionMessageParamUnion
 		var err error
 
-		if actionSnapshot.mode == QueueModeCollect && len(actionSnapshot.items) > 0 {
+		if actionSnapshot.mode == aiqueue.QueueModeCollect && len(actionSnapshot.items) > 0 {
 			count := len(actionSnapshot.items)
 			if count > 1 {
 				firstKey := oc.queueThreadKey(actionSnapshot.items[0].pending.Event)
@@ -1095,12 +1105,11 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 
 	// Parse agent from ghost ID (format: "agent-{id}")
 	if agentID, ok := parseAgentFromGhostID(ghostID); ok {
-		store := NewAgentStoreAdapter(oc)
-		agent, err := store.GetAgentByID(ctx, agentID)
+		agent, err := oc.agentResolver.GetAgent(ctx, agentID)
 		displayName := "Unknown Agent"
 		modelID := oc.agentModelOverride(agentID)
 		if err == nil && agent != nil {
-			displayName = oc.resolveAgentDisplayName(ctx, agent)
+			displayName = oc.agentResolver.ResolveAgentDisplayName(ctx, agent)
 			if displayName == "" {
 				displayName = agent.Name
 			}
@@ -1108,17 +1117,17 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 				displayName = agent.ID
 			}
 			if modelID == "" && agent.Model.Primary != "" {
-				modelID = ResolveAlias(agent.Model.Primary)
+				modelID = aimodels.ResolveAlias(agent.Model.Primary)
 			}
 		}
 		identifiers := []string{agentID}
 		if modelID != "" {
-			identifiers = append(identifiers, modelContactIdentifiers(modelID, oc.findModelInfo(modelID))...)
+			identifiers = append(identifiers, aimodels.ModelContactIdentifiers(modelID, oc.findModelInfo(modelID))...)
 		}
 		return &bridgev2.UserInfo{
 			Name:         ptr.Ptr(displayName),
 			IsBot:        ptr.Ptr(true),
-			Identifiers:  uniqueStrings(identifiers),
+			Identifiers:  aimodels.UniqueStrings(identifiers),
 			ExtraUpdates: updateGhostLastSync,
 		}, nil
 	}
@@ -1127,9 +1136,9 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 	if modelID := parseModelFromGhostID(ghostID); modelID != "" {
 		info := oc.findModelInfo(modelID)
 		return &bridgev2.UserInfo{
-			Name:         ptr.Ptr(modelContactName(modelID, info)),
+			Name:         ptr.Ptr(aimodels.ModelContactName(modelID, info)),
 			IsBot:        ptr.Ptr(false),
-			Identifiers:  modelContactIdentifiers(modelID, info),
+			Identifiers:  aimodels.ModelContactIdentifiers(modelID, info),
 			ExtraUpdates: updateGhostLastSync,
 		}, nil
 	}
@@ -1226,22 +1235,21 @@ func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 		agentID := resolveAgentID(meta)
 		if agentID != "" {
 			// Load the agent to get its model
-			store := NewAgentStoreAdapter(oc)
-			agent, err := store.GetAgentByID(context.Background(), agentID)
+			agent, err := oc.agentResolver.GetAgent(context.Background(), agentID)
 			if err == nil && agent != nil {
 				// Boss agent rooms always use the Boss model - no overrides allowed
-				if isBossAgent(agentID) && agent.Model.Primary != "" {
-					return ResolveAlias(agent.Model.Primary)
+				if oc.agentResolver.IsBossAgent(agentID) && agent.Model.Primary != "" {
+					return aimodels.ResolveAlias(agent.Model.Primary)
 				}
 				// For other agents, room override takes priority, then agent model
 				if meta.Model != "" {
-					return ResolveAlias(meta.Model)
+					return aimodels.ResolveAlias(meta.Model)
 				}
 				if override := oc.agentModelOverride(agentID); override != "" {
-					return ResolveAlias(override)
+					return aimodels.ResolveAlias(override)
 				}
 				if agent.Model.Primary != "" {
-					return ResolveAlias(agent.Model.Primary)
+					return aimodels.ResolveAlias(agent.Model.Primary)
 				}
 			}
 		}
@@ -1249,13 +1257,13 @@ func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 
 	// Room-level model override (for rooms without an agent)
 	if meta != nil && meta.Model != "" {
-		return ResolveAlias(meta.Model)
+		return aimodels.ResolveAlias(meta.Model)
 	}
 
 	// User-level default
 	loginMeta := loginMetadata(oc.UserLogin)
 	if loginMeta.Defaults != nil && loginMeta.Defaults.Model != "" {
-		return ResolveAlias(loginMeta.Defaults.Model)
+		return aimodels.ResolveAlias(loginMeta.Defaults.Model)
 	}
 
 	// Provider default from config
@@ -1286,7 +1294,7 @@ func (oc *AIClient) effectiveModelForAPI(meta *PortalMetadata) string {
 	}
 
 	// Direct OpenAI provider needs the prefix stripped
-	_, actualModel := ParseModelPrefix(modelID)
+	_, actualModel := aimodels.ParseModelPrefix(modelID)
 	return actualModel
 }
 
@@ -1298,7 +1306,7 @@ func (oc *AIClient) modelIDForAPI(modelID string) string {
 	if loginMeta.Provider == ProviderOpenRouter || loginMeta.Provider == ProviderBeeper || loginMeta.Provider == ProviderMagicProxy {
 		return modelID
 	}
-	_, actualModel := ParseModelPrefix(modelID)
+	_, actualModel := aimodels.ParseModelPrefix(modelID)
 	return actualModel
 }
 
@@ -1312,19 +1320,19 @@ func (oc *AIClient) defaultModelForProvider() string {
 		if providers.OpenAI.DefaultModel != "" {
 			return providers.OpenAI.DefaultModel
 		}
-		return DefaultModelOpenAI
+		return aimodels.DefaultModelOpenAI
 	case ProviderOpenRouter, ProviderMagicProxy:
 		if providers.OpenRouter.DefaultModel != "" {
 			return providers.OpenRouter.DefaultModel
 		}
-		return DefaultModelOpenRouter
+		return aimodels.DefaultModelOpenRouter
 	case ProviderBeeper:
 		if providers.Beeper.DefaultModel != "" {
 			return providers.Beeper.DefaultModel
 		}
-		return DefaultModelBeeper
+		return aimodels.DefaultModelBeeper
 	default:
-		return DefaultModelOpenRouter
+		return aimodels.DefaultModelOpenRouter
 	}
 }
 
@@ -1403,8 +1411,7 @@ func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.P
 	}
 
 	// Load the agent
-	store := NewAgentStoreAdapter(oc)
-	agent, err := store.GetAgentByID(ctx, agentID)
+	agent, err := oc.agentResolver.GetAgent(ctx, agentID)
 	if err != nil || agent == nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Str("agent", agentID).Msg("Failed to load agent for prompt")
 		return ""
@@ -1628,7 +1635,7 @@ func (oc *AIClient) resolveModelID(ctx context.Context, modelID string) (string,
 		return "", true, nil
 	}
 
-	normalized = ResolveAlias(normalized)
+	normalized = aimodels.ResolveAlias(normalized)
 
 	models, err := oc.listAvailableModels(ctx, false)
 	if err == nil && len(models) > 0 {
@@ -1659,7 +1666,7 @@ func (oc *AIClient) resolveModelID(ctx context.Context, modelID string) (string,
 				for _, model := range models {
 					modelProvider := model.Provider
 					if modelProvider == "" {
-						if backend, _ := ParseModelPrefix(model.ID); backend != "" {
+						if backend, _ := aimodels.ParseModelPrefix(model.ID); backend != "" {
 							modelProvider = string(backend)
 						}
 					}
@@ -1704,13 +1711,13 @@ func resolveModelIDFromManifest(modelID string) string {
 		return ""
 	}
 
-	normalized = ResolveAlias(normalized)
-	if _, ok := ModelManifest.Models[normalized]; ok {
+	normalized = aimodels.ResolveAlias(normalized)
+	if _, ok := aimodels.ModelManifest.Models[normalized]; ok {
 		return normalized
 	}
 
 	lower := strings.ToLower(normalized)
-	for id, info := range ModelManifest.Models {
+	for id, info := range aimodels.ModelManifest.Models {
 		if strings.ToLower(id) == lower {
 			return id
 		}
@@ -1727,11 +1734,11 @@ func resolveModelIDFromManifest(modelID string) string {
 			if strings.EqualFold(providerPart, ProviderOpenRouter) ||
 				strings.EqualFold(providerPart, ProviderBeeper) ||
 				strings.EqualFold(providerPart, ProviderMagicProxy) {
-				if _, ok := ModelManifest.Models[rest]; ok {
+				if _, ok := aimodels.ModelManifest.Models[rest]; ok {
 					return rest
 				}
 				restLower := strings.ToLower(rest)
-				for id, info := range ModelManifest.Models {
+				for id, info := range aimodels.ModelManifest.Models {
 					if strings.EqualFold(id, rest) ||
 						strings.EqualFold(info.Name, rest) ||
 						strings.HasSuffix(strings.ToLower(id), "/"+restLower) {
@@ -1745,7 +1752,7 @@ func resolveModelIDFromManifest(modelID string) string {
 	if !strings.Contains(normalized, "/") {
 		var match string
 		needle := strings.ToLower(normalized)
-		for id := range ModelManifest.Models {
+		for id := range aimodels.ModelManifest.Models {
 			if strings.HasSuffix(strings.ToLower(id), "/"+needle) {
 				if match != "" && match != id {
 					return ""
@@ -2649,12 +2656,12 @@ func (oc *AIClient) ensureGhostDisplayNameWithGhost(ctx context.Context, ghost *
 	if ghost == nil {
 		return
 	}
-	displayName := modelContactName(modelID, info)
+	displayName := aimodels.ModelContactName(modelID, info)
 	if ghost.Name == "" || !ghost.NameSet || ghost.Name != displayName {
 		ghost.UpdateInfo(ctx, &bridgev2.UserInfo{
 			Name:        ptr.Ptr(displayName),
 			IsBot:       ptr.Ptr(false),
-			Identifiers: modelContactIdentifiers(modelID, info),
+			Identifiers: aimodels.ModelContactIdentifiers(modelID, info),
 		})
 		oc.loggerForContext(ctx).Debug().Str("model", modelID).Str("name", displayName).Msg("Updated ghost display name")
 	}
@@ -2669,8 +2676,7 @@ func (oc *AIClient) ensureAgentGhostDisplayName(ctx context.Context, agentID, mo
 	displayName := agentName
 	var avatar *bridgev2.Avatar
 	if agentID != "" {
-		store := NewAgentStoreAdapter(oc)
-		if agent, err := store.GetAgentByID(ctx, agentID); err == nil && agent != nil {
+		if agent, err := oc.agentResolver.GetAgent(ctx, agentID); err == nil && agent != nil {
 			avatarURL := strings.TrimSpace(agent.AvatarURL)
 			if avatarURL != "" {
 				avatar = &bridgev2.Avatar{
@@ -2693,7 +2699,7 @@ func (oc *AIClient) ensureAgentGhostDisplayName(ctx context.Context, agentID, mo
 		ghost.UpdateInfo(ctx, &bridgev2.UserInfo{
 			Name:        ptr.Ptr(displayName),
 			IsBot:       ptr.Ptr(true),
-			Identifiers: modelContactIdentifiers(modelID, oc.findModelInfo(modelID)),
+			Identifiers: aimodels.ModelContactIdentifiers(modelID, oc.findModelInfo(modelID)),
 			Avatar:      avatar,
 		})
 		oc.loggerForContext(ctx).Debug().Str("agent", agentID).Str("model", modelID).Str("name", displayName).Msg("Updated agent ghost display name")
@@ -2715,10 +2721,9 @@ func (oc *AIClient) getModelIntent(ctx context.Context, portal *bridgev2.Portal)
 		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, agentUserID(agentID))
 		if err == nil && ghost != nil {
 			// Ensure the ghost has a display name set
-			store := NewAgentStoreAdapter(oc)
-			agent, _ := store.GetAgentByID(ctx, agentID)
+			agent, _ := oc.agentResolver.GetAgent(ctx, agentID)
 			if agent != nil {
-				agentName := oc.resolveAgentDisplayName(ctx, agent)
+				agentName := oc.agentResolver.ResolveAgentDisplayName(ctx, agent)
 				oc.ensureAgentGhostDisplayName(ctx, agentID, modelID, agentName)
 			}
 			return ghost.Intent
@@ -2756,7 +2761,7 @@ func (oc *AIClient) ensureModelInRoom(ctx context.Context, portal *bridgev2.Port
 }
 
 func (oc *AIClient) loggerForContext(ctx context.Context) *zerolog.Logger {
-	return loggerFromContext(ctx, &oc.log)
+	return aiutil.LoggerFromContext(ctx, &oc.log)
 }
 
 // logEphemeralVerbose returns true when per-event ephemeral logging is enabled via config.
@@ -2951,7 +2956,7 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 		enqueuedAt:      time.Now().UnixMilli(),
 		rawEventContent: rawEventContent,
 	}
-	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(statusCtx, last.Portal, last.Meta, "", QueueInlineOptions{})
+	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(statusCtx, last.Portal, last.Meta, "", aiqueue.QueueInlineOptions{})
 
 	_, _ = oc.dispatchOrQueue(statusCtx, last.Event, last.Portal, last.Meta, nil, queueItem, queueSettings, promptMessages)
 

@@ -33,9 +33,23 @@ for imports in "$runtime_imports" "$simple_imports" "$aiproxy_imports"; do
   fi
 done
 
-simple_bridge_deps="$(go list -deps ./bridges/simple/cmd/bridge)"
-if echo "$simple_bridge_deps" | rg -q 'github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/(agents|cron|memory)'; then
-  fail "simple bridge must not depend on pkg/simpleruntime/simpledeps/*"
+ai_bridge_deps="$(go list -deps ./bridges/ai/cmd/bridge)"
+if echo "$ai_bridge_deps" | rg -q 'github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/(agents|cron|memory)'; then
+  fail "ai bridge must not depend on pkg/simpleruntime/simpledeps/*"
 fi
+
+# Shared pkg/* packages must not import simpleruntime or dedicated repos.
+shared_pkgs=(aierrors aimedia aimodels aiprovider aiqueue aitokens aityping aiutil linkpreview)
+for pkg in "${shared_pkgs[@]}"; do
+  pkg_imports="$(go list -f '{{join .Imports "\n"}}' "./pkg/$pkg/" 2>/dev/null || true)"
+  if [ -n "$pkg_imports" ]; then
+    if echo "$pkg_imports" | rg -q 'github.com/beeper/ai-bridge/pkg/simpleruntime'; then
+      fail "pkg/$pkg must not import simpleruntime"
+    fi
+    if echo "$pkg_imports" | rg -q 'github.com/(batuhan/beeper-codex|batuhan/beeper-opencode|beeper/beep)'; then
+      fail "pkg/$pkg must not import dedicated runtime repos"
+    fi
+  fi
+done
 
 echo "module boundary checks passed"

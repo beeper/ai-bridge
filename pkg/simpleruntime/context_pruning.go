@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/aitokens"
 	"github.com/openai/openai-go/v3"
 )
 
@@ -143,10 +144,10 @@ type messageInfo struct {
 func estimateMessageChars(msg openai.ChatCompletionMessageParamUnion) int {
 	switch {
 	case msg.OfSystem != nil:
-		return len(extractSystemContent(msg.OfSystem.Content))
+		return len(aitokens.ExtractSystemContent(msg.OfSystem.Content))
 
 	case msg.OfUser != nil:
-		chars := len(extractUserContent(msg.OfUser.Content))
+		chars := len(aitokens.ExtractUserContent(msg.OfUser.Content))
 		// Add image estimates
 		for _, part := range msg.OfUser.Content.OfArrayOfContentParts {
 			if part.OfImageURL != nil {
@@ -156,7 +157,7 @@ func estimateMessageChars(msg openai.ChatCompletionMessageParamUnion) int {
 		return chars
 
 	case msg.OfAssistant != nil:
-		chars := len(extractAssistantContent(msg.OfAssistant.Content))
+		chars := len(aitokens.ExtractAssistantContent(msg.OfAssistant.Content))
 		// Add tool call arguments
 		for _, tc := range msg.OfAssistant.ToolCalls {
 			if tc.OfFunction != nil {
@@ -166,7 +167,7 @@ func estimateMessageChars(msg openai.ChatCompletionMessageParamUnion) int {
 		return chars
 
 	case msg.OfTool != nil:
-		return len(extractToolContent(msg.OfTool.Content))
+		return len(aitokens.ExtractToolContent(msg.OfTool.Content))
 	}
 	return 0
 }
@@ -432,7 +433,7 @@ func PruneContext(
 		if msg.OfTool == nil {
 			continue
 		}
-		content := extractToolContent(msg.OfTool.Content)
+		content := aitokens.ExtractToolContent(msg.OfTool.Content)
 		if len(content) <= cfg.SoftTrimMaxChars {
 			continue
 		}
