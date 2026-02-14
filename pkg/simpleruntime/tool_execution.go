@@ -62,26 +62,6 @@ func parseToolOutputPayload(result string) map[string]any {
 	return map[string]any{"result": parsed}
 }
 
-// emitToolProgress sends a tool progress update event
-func (oc *AIClient) emitToolProgress(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall, status ToolStatus, message string, percent int) {
-	if state == nil || tool == nil {
-		return
-	}
-	oc.emitStreamEvent(ctx, portal, state, map[string]any{
-		"type": "data-tool-progress",
-		"data": map[string]any{
-			"call_id":   tool.callID,
-			"tool_name": tool.toolName,
-			"status":    string(status),
-			"progress": map[string]any{
-				"message": message,
-				"percent": percent,
-			},
-		},
-		"transient": true,
-	})
-}
-
 func toolDisplayTitle(toolName string) string {
 	toolName = normalizeToolAlias(toolName)
 	return toolName
@@ -200,7 +180,7 @@ func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Port
 		Str("tool", tool.toolName).
 		Msg("Sent tool call timeline event")
 
-	// Expose the Matrix event ID to the streaming UI so Desktop can react to the tool call event.
+	// Expose the Matrix event ID to the streaming UI so clients can react to the tool call event.
 	if state != nil && tool != nil && strings.TrimSpace(tool.callID) != "" && resp.EventID != "" {
 		oc.emitStreamEvent(ctx, portal, state, map[string]any{
 			"type": "data-tool-call-event",
