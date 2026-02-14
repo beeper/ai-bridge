@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/aierrors"
+	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 )
@@ -341,19 +341,11 @@ func serviceTokensEmpty(tokens *ServiceTokens) bool {
 	if tokens == nil {
 		return true
 	}
-	if len(tokens.DesktopAPIInstances) > 0 {
-		for _, instance := range tokens.DesktopAPIInstances {
-			if strings.TrimSpace(instance.Token) != "" || strings.TrimSpace(instance.BaseURL) != "" {
-				return false
-			}
-		}
-	}
 	return strings.TrimSpace(tokens.OpenAI) == "" &&
 		strings.TrimSpace(tokens.OpenRouter) == "" &&
 		strings.TrimSpace(tokens.Exa) == "" &&
 		strings.TrimSpace(tokens.Brave) == "" &&
-		strings.TrimSpace(tokens.Perplexity) == "" &&
-		strings.TrimSpace(tokens.DesktopAPI) == ""
+		strings.TrimSpace(tokens.Perplexity) == ""
 }
 
 func parseMagicProxyLink(raw string) (string, string, error) {

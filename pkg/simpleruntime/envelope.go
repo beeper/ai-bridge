@@ -152,7 +152,7 @@ func formatAgentEnvelope(params struct {
 // envelopePrefixRE matches the [Channel ...] envelope prefix added by formatAgentEnvelope.
 // This covers known channel names used across platforms.
 var envelopePrefixRE = regexp.MustCompile(
-	`^\[(?:Desktop|Desktop API|WebChat|WhatsApp|Telegram|Signal|Slack|Discord|iMessage|Matrix|Teams|SMS|Google Chat|Zalo|BlueBubbles|Channel)[\s\S]*?\]\s*`,
+	`^\[(?:WebChat|WhatsApp|Telegram|Signal|Slack|Discord|iMessage|Matrix|Teams|SMS|Google Chat|Zalo|BlueBubbles|Channel)[\s\S]*?\]\s*`,
 )
 
 // StripEnvelope removes the [Channel Timestamp] envelope prefix from a message body.

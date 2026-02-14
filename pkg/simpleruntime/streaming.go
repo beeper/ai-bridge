@@ -13,8 +13,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/beeper/ai-bridge/pkg/aierrors"
-	"github.com/beeper/ai-bridge/pkg/aitokens"
+	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
+	"github.com/beeper/ai-bridge/pkg/core/aitokens"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
@@ -1380,7 +1380,7 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 			log.Debug().Int("count", len(enabledTools)).Msg("Added builtin function tools")
 		}
 
-		// Allow hooks to inject additional tool definitions (e.g. MCP tools).
+		// Allow hooks to inject additional tool definitions.
 		if extra := oc.streamingHooks.AdditionalTools(ctx, meta); len(extra) > 0 {
 			params.Tools = append(params.Tools, extra...)
 			log.Debug().Int("count", len(extra)).Msg("Added hook-provided tools")
@@ -1968,7 +1968,7 @@ func (oc *AIClient) streamingResponse(
 				output:    result,
 			})
 
-			// Emit UI tool output immediately so the desktop sees the tool
+			// Emit UI tool output immediately so clients see the tool
 			// as completed without waiting for the timeline event send.
 			if resultStatus == ResultStatusSuccess {
 				oc.emitUIToolOutputAvailable(ctx, portal, state, tool.callID, result, tool.toolType == ToolTypeProvider, false)
@@ -2398,7 +2398,7 @@ func (oc *AIClient) streamingResponse(
 
 		pendingOutputs := append([]functionCallOutput(nil), state.pendingFunctionOutputs...)
 
-		// Allow hooks to modify outputs or inject extra input items (e.g. MCP approvals).
+		// Allow hooks to modify outputs or inject extra input items.
 		extraInput, pendingOutputs := oc.streamingHooks.OnContinuationPreSend(ctx, state, pendingOutputs)
 
 		continuationParams := oc.buildContinuationParams(ctx, state, meta, pendingOutputs)
@@ -2829,7 +2829,7 @@ func (oc *AIClient) streamingResponse(
 					output:    result,
 				})
 
-				// Emit UI tool output immediately so the desktop sees the tool
+				// Emit UI tool output immediately so clients see the tool
 				// as completed without waiting for the timeline event send.
 				if resultStatus == ResultStatusSuccess {
 					oc.emitUIToolOutputAvailable(ctx, portal, state, tool.callID, result, tool.toolType == ToolTypeProvider, false)
