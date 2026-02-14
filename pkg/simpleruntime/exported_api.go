@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -42,161 +43,159 @@ func (oc *AIClient) SetStreamingHooks(h StreamingHooks) { oc.streamingHooks = h 
 // GetStreamingHooks returns the streaming hooks for this client.
 func (oc *AIClient) GetStreamingHooks() StreamingHooks { return oc.streamingHooks }
 
-// GetHeartbeatRunner returns the heartbeat runner for this client.
-func (oc *AIClient) GetHeartbeatRunner() *HeartbeatRunner { return oc.heartbeatRunner }
-
-// SetHeartbeatRunner replaces the heartbeat runner for this client.
-func (oc *AIClient) SetHeartbeatRunner(r *HeartbeatRunner) { oc.heartbeatRunner = r }
-
-// GetHeartbeatWake returns the heartbeat wake signal for this client.
-func (oc *AIClient) GetHeartbeatWake() *HeartbeatWake { return oc.heartbeatWake }
-
-// SetHeartbeatWake replaces the heartbeat wake signal for this client.
-func (oc *AIClient) SetHeartbeatWake(w *HeartbeatWake) { oc.heartbeatWake = w }
 
 // ============================================================================
-// AIClient exported method wrappers (for downstream bridge embedding)
+// AIClient exported methods (used by downstream bridges via struct embedding)
 // ============================================================================
 
-// ExportedSendSystemNotice sends a system notice to a portal.
-func (oc *AIClient) ExportedSendSystemNotice(ctx context.Context, portal *bridgev2.Portal, text string) {
+// SendSystemNotice sends a system notice to a portal.
+func (oc *AIClient) SendSystemNotice(ctx context.Context, portal *bridgev2.Portal, text string) {
 	oc.sendSystemNotice(ctx, portal, text)
 }
 
-// ExportedLoggerForContext returns the logger enriched with context metadata.
-func (oc *AIClient) ExportedLoggerForContext(ctx context.Context) *zerolog.Logger {
+// LoggerForContext returns the logger enriched with context metadata.
+func (oc *AIClient) LoggerForContext(ctx context.Context) *zerolog.Logger {
 	return oc.loggerForContext(ctx)
 }
 
-// ExportedBackgroundContext returns a context that survives request cancellation.
-func (oc *AIClient) ExportedBackgroundContext(ctx context.Context) context.Context {
+// BackgroundContext returns a context that survives request cancellation.
+func (oc *AIClient) BackgroundContext(ctx context.Context) context.Context {
 	return oc.backgroundContext(ctx)
 }
 
-// ExportedEffectiveModel returns the effective model ID for a portal.
-func (oc *AIClient) ExportedEffectiveModel(meta *PortalMetadata) string {
+// EffectiveModel returns the effective model ID for a portal.
+func (oc *AIClient) EffectiveModel(meta *PortalMetadata) string {
 	return oc.effectiveModel(meta)
 }
 
-// ExportedResolveModelID validates and resolves a model ID.
-func (oc *AIClient) ExportedResolveModelID(ctx context.Context, modelID string) (string, bool, error) {
+// AgentModelOverride returns the model override for a given agent.
+func (oc *AIClient) AgentModelOverride(agentID string) string {
+	return oc.agentModelOverride(agentID)
+}
+
+// ResolveModelID validates and resolves a model ID.
+func (oc *AIClient) ResolveModelID(ctx context.Context, modelID string) (string, bool, error) {
 	return oc.resolveModelID(ctx, modelID)
 }
 
-// ExportedResolveUserTimezone returns the user's timezone name and location.
-func (oc *AIClient) ExportedResolveUserTimezone() (string, *time.Location) {
+// ResolveUserTimezone returns the user's timezone name and location.
+func (oc *AIClient) ResolveUserTimezone() (string, *time.Location) {
 	return oc.resolveUserTimezone()
 }
 
-// ExportedResolveVisionModelForImage returns the vision model for image understanding.
-func (oc *AIClient) ExportedResolveVisionModelForImage(ctx context.Context, meta *PortalMetadata) (string, bool) {
+// ResolveVisionModelForImage returns the vision model for image understanding.
+func (oc *AIClient) ResolveVisionModelForImage(ctx context.Context, meta *PortalMetadata) (string, bool) {
 	return oc.resolveVisionModelForImage(ctx, meta)
 }
 
-// ExportedFindModelInfo looks up model information by ID.
-func (oc *AIClient) ExportedFindModelInfo(modelID string) *ModelInfo {
+// FindModelInfo looks up model information by ID.
+func (oc *AIClient) FindModelInfo(modelID string) *ModelInfo {
 	return oc.findModelInfo(modelID)
 }
 
-// ExportedGetModelContextWindow returns the context window size for the portal's model.
-func (oc *AIClient) ExportedGetModelContextWindow(meta *PortalMetadata) int {
+// GetModelContextWindow returns the context window size for the portal's model.
+func (oc *AIClient) GetModelContextWindow(meta *PortalMetadata) int {
 	return oc.getModelContextWindow(meta)
 }
 
-// ExportedModelFallbackChain returns the fallback model chain for a portal.
-func (oc *AIClient) ExportedModelFallbackChain(ctx context.Context, meta *PortalMetadata) []string {
+// ModelFallbackChain returns the fallback model chain for a portal.
+func (oc *AIClient) ModelFallbackChain(ctx context.Context, meta *PortalMetadata) []string {
 	return oc.modelFallbackChain(ctx, meta)
 }
 
-// ExportedOverrideModel returns portal metadata with the model overridden.
-func (oc *AIClient) ExportedOverrideModel(meta *PortalMetadata, modelID string) *PortalMetadata {
+// OverrideModel returns portal metadata with the model overridden.
+func (oc *AIClient) OverrideModel(meta *PortalMetadata, modelID string) *PortalMetadata {
 	return oc.overrideModel(meta, modelID)
 }
 
-// ExportedImplicitModelCatalogEntries returns implicit model catalog entries.
-func (oc *AIClient) ExportedImplicitModelCatalogEntries(meta *UserLoginMetadata) []ModelCatalogEntry {
+// ImplicitModelCatalogEntries returns implicit model catalog entries.
+func (oc *AIClient) ImplicitModelCatalogEntries(meta *UserLoginMetadata) []ModelCatalogEntry {
 	return oc.implicitModelCatalogEntries(meta)
 }
 
-// ExportedCanUseImageGeneration checks if image generation is available.
-func (oc *AIClient) ExportedCanUseImageGeneration() bool {
+// CanUseImageGeneration checks if image generation is available.
+func (oc *AIClient) CanUseImageGeneration() bool {
 	return oc.canUseImageGeneration()
 }
 
-// ExportedBridgeStateBackend returns the state store backend.
-func (oc *AIClient) ExportedBridgeStateBackend() StateStoreBackend {
+// BridgeStateBackend returns the state store backend.
+func (oc *AIClient) BridgeStateBackend() StateStoreBackend {
 	return oc.bridgeStateBackend()
 }
 
-// ExportedEnsureModelInRoom ensures the AI ghost is present in the portal room.
-func (oc *AIClient) ExportedEnsureModelInRoom(ctx context.Context, portal *bridgev2.Portal) error {
+// EnsureModelInRoom ensures the AI ghost is present in the portal room.
+func (oc *AIClient) EnsureModelInRoom(ctx context.Context, portal *bridgev2.Portal) error {
 	return oc.ensureModelInRoom(ctx, portal)
 }
 
-// ExportedGetModelIntent returns the Matrix API for the model ghost.
-func (oc *AIClient) ExportedGetModelIntent(ctx context.Context, portal *bridgev2.Portal) bridgev2.MatrixAPI {
+// GetModelIntent returns the Matrix API for the model ghost.
+func (oc *AIClient) GetModelIntent(ctx context.Context, portal *bridgev2.Portal) bridgev2.MatrixAPI {
 	return oc.getModelIntent(ctx, portal)
 }
 
-// ExportedCancelRoomRun cancels the active room run for a room.
-func (oc *AIClient) ExportedCancelRoomRun(roomID id.RoomID) bool {
+// CancelRoomRun cancels the active room run for a room.
+func (oc *AIClient) CancelRoomRun(roomID id.RoomID) bool {
 	return oc.cancelRoomRun(roomID)
 }
 
-// ExportedClearPendingQueue clears the pending message queue for a room.
-func (oc *AIClient) ExportedClearPendingQueue(roomID id.RoomID) {
+// ClearPendingQueue clears the pending message queue for a room.
+func (oc *AIClient) ClearPendingQueue(roomID id.RoomID) {
 	oc.clearPendingQueue(roomID)
 }
 
-// ExportedEmitHeartbeatEvent persists a heartbeat event payload.
-func (oc *AIClient) ExportedEmitHeartbeatEvent(evt *HeartbeatEventPayload) {
+// EmitHeartbeatEvent persists a heartbeat event payload.
+func (oc *AIClient) EmitHeartbeatEvent(evt *HeartbeatEventPayload) {
 	oc.emitHeartbeatEvent(evt)
 }
 
-// ExportedSavePortalQuiet saves a portal without sending Matrix events.
-func (oc *AIClient) ExportedSavePortalQuiet(ctx context.Context, portal *bridgev2.Portal, action string) {
+// SavePortalQuiet saves a portal without sending Matrix events.
+func (oc *AIClient) SavePortalQuiet(ctx context.Context, portal *bridgev2.Portal, action string) {
 	oc.savePortalQuiet(ctx, portal, action)
 }
 
-// ExportedSendWelcomeMessage sends the welcome message to a new chat.
-func (oc *AIClient) ExportedSendWelcomeMessage(ctx context.Context, portal *bridgev2.Portal) {
+// SendWelcomeMessage sends the welcome message to a new chat.
+func (oc *AIClient) SendWelcomeMessage(ctx context.Context, portal *bridgev2.Portal) {
 	oc.sendWelcomeMessage(ctx, portal)
 }
 
-// ExportedSetRoomNameNoSave sets the room name without persisting.
-func (oc *AIClient) ExportedSetRoomNameNoSave(ctx context.Context, portal *bridgev2.Portal, name string) error {
+// SetRoomNameNoSave sets the room name without persisting.
+func (oc *AIClient) SetRoomNameNoSave(ctx context.Context, portal *bridgev2.Portal, name string) error {
 	return oc.setRoomNameNoSave(ctx, portal, name)
 }
 
-// ExportedSendPlainAssistantMessage sends a plain text assistant message.
-func (oc *AIClient) ExportedSendPlainAssistantMessage(ctx context.Context, portal *bridgev2.Portal, text string) error {
+// SendPlainAssistantMessage sends a plain text assistant message.
+func (oc *AIClient) SendPlainAssistantMessage(ctx context.Context, portal *bridgev2.Portal, text string) error {
 	return oc.sendPlainAssistantMessageWithResult(ctx, portal, text)
 }
 
-// ExportedExecuteBuiltinTool executes a named builtin tool.
-func (oc *AIClient) ExportedExecuteBuiltinTool(ctx context.Context, portal *bridgev2.Portal, toolName string, argsJSON string) (string, error) {
+// ExecuteBuiltinTool executes a named builtin tool.
+func (oc *AIClient) ExecuteBuiltinTool(ctx context.Context, portal *bridgev2.Portal, toolName string, argsJSON string) (string, error) {
 	return oc.executeBuiltinTool(ctx, portal, toolName, argsJSON)
 }
 
-// ExportedListAllChatPortals lists all chat portals for this user.
-func (oc *AIClient) ExportedListAllChatPortals(ctx context.Context) ([]*bridgev2.Portal, error) {
+// ListAllChatPortals lists all chat portals for this user.
+func (oc *AIClient) ListAllChatPortals(ctx context.Context) ([]*bridgev2.Portal, error) {
 	return oc.listAllChatPortals(ctx)
 }
 
-// ExportedBuildPrompt builds the complete prompt for a portal conversation.
-func (oc *AIClient) ExportedBuildPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, latest string, eventID id.EventID) ([]openai.ChatCompletionMessageParamUnion, error) {
+// BuildPrompt builds the complete prompt for a portal conversation.
+func (oc *AIClient) BuildPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, latest string, eventID id.EventID) ([]openai.ChatCompletionMessageParamUnion, error) {
 	return oc.buildPrompt(ctx, portal, meta, latest, eventID)
 }
 
-// ExportedInitPortalForChat initializes a portal for a new chat.
-func (oc *AIClient) ExportedInitPortalForChat(ctx context.Context, opts PortalInitOpts) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
+// CreateAgentChatWithModel creates a new chat with the given agent and optional model.
+// Returns an error in simple runtime — agentic bridges override via hooks.
+func (oc *AIClient) CreateAgentChatWithModel(ctx context.Context, agent *AgentDefinition, modelID string, applyModelOverride bool) (*bridgev2.CreateChatResponse, error) {
+	return nil, fmt.Errorf("agent chat creation is not available in simple bridge mode")
+}
+
+// InitPortalForChat initializes a portal for a new chat.
+func (oc *AIClient) InitPortalForChat(ctx context.Context, opts PortalInitOpts) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
 	return oc.initPortalForChat(ctx, opts)
 }
 
-// ExportedMarkMessageSendSuccess marks a streaming message as sent.
-func (oc *AIClient) ExportedMarkMessageSendSuccess(ctx context.Context, portal *bridgev2.Portal, evt *event.Event) {
-	// streamingState cannot be passed from outside, so we call with nil state.
-	// This exported variant is for simple cases where streaming state is not needed.
+// MarkMessageSendSuccess marks a streaming message as sent.
+func (oc *AIClient) MarkMessageSendSuccess(ctx context.Context, portal *bridgev2.Portal, evt *event.Event) {
 	oc.markMessageSendSuccess(ctx, portal, evt, nil)
 }
 
@@ -209,8 +208,8 @@ func (oc *AIClient) SetDisconnectCtx(ctx context.Context, cancel context.CancelF
 	oc.disconnectCancel = cancel
 }
 
-// ExportedClearActiveRoomsAndQueues clears in-flight rooms and pending queues (for logout).
-func (oc *AIClient) ExportedClearActiveRoomsAndQueues() {
+// ClearActiveRoomsAndQueues clears in-flight rooms and pending queues (for logout).
+func (oc *AIClient) ClearActiveRoomsAndQueues() {
 	oc.activeRoomsMu.Lock()
 	clear(oc.activeRooms)
 	oc.activeRoomsMu.Unlock()
@@ -220,28 +219,28 @@ func (oc *AIClient) ExportedClearActiveRoomsAndQueues() {
 	oc.pendingQueuesMu.Unlock()
 }
 
-// ExportedResolveServiceConfig returns the service config for the current login.
-func (oc *AIClient) ExportedResolveServiceConfig() ServiceConfigMap {
+// ResolveServiceConfig returns the service config for the current login.
+func (oc *AIClient) ResolveServiceConfig() ServiceConfigMap {
 	return oc.connector.resolveServiceConfig(loginMetadata(oc.UserLogin))
 }
 
-// ExportedBuildBasePrompt builds only the base prompt (system + history) for a portal.
-func (oc *AIClient) ExportedBuildBasePrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) ([]openai.ChatCompletionMessageParamUnion, error) {
+// BuildBasePrompt builds only the base prompt (system + history) for a portal.
+func (oc *AIClient) BuildBasePrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) ([]openai.ChatCompletionMessageParamUnion, error) {
 	return oc.buildBasePrompt(ctx, portal, meta)
 }
 
-// ExportedDispatchInternalMessage dispatches an internal message to a portal.
-func (oc *AIClient) ExportedDispatchInternalMessage(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, body, source string, excludeFromHistory bool) (id.EventID, bool, error) {
+// DispatchInternalMessage dispatches an internal message to a portal.
+func (oc *AIClient) DispatchInternalMessage(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, body, source string, excludeFromHistory bool) (id.EventID, bool, error) {
 	return oc.dispatchInternalMessage(ctx, portal, meta, body, source, excludeFromHistory)
 }
 
-// ExportedDownloadAndEncodeMedia downloads an mxc URL and returns base64 + MIME type.
-func (oc *AIClient) ExportedDownloadAndEncodeMedia(ctx context.Context, mxcURL string, encryptedFile *event.EncryptedFileInfo, maxSizeMB int) (string, string, error) {
+// DownloadAndEncodeMedia downloads an mxc URL and returns base64 + MIME type.
+func (oc *AIClient) DownloadAndEncodeMedia(ctx context.Context, mxcURL string, encryptedFile *event.EncryptedFileInfo, maxSizeMB int) (string, string, error) {
 	return oc.downloadAndEncodeMedia(ctx, mxcURL, encryptedFile, maxSizeMB)
 }
 
-// ExportedHasQueuedItems checks if a room has any pending queued items.
-func (oc *AIClient) ExportedHasQueuedItems(roomID id.RoomID) (hasItems bool, droppedCount int) {
+// HasQueuedItems checks if a room has any pending queued items.
+func (oc *AIClient) HasQueuedItems(roomID id.RoomID) (hasItems bool, droppedCount int) {
 	q := oc.getQueueSnapshot(roomID)
 	if q == nil {
 		return false, 0
@@ -249,26 +248,26 @@ func (oc *AIClient) ExportedHasQueuedItems(roomID id.RoomID) (hasItems bool, dro
 	return len(q.items) > 0 || q.droppedCount > 0, q.droppedCount
 }
 
-// ExportedListAvailableModels lists all available models.
-func (oc *AIClient) ExportedListAvailableModels(ctx context.Context, forceRefresh bool) ([]ModelInfo, error) {
+// ListAvailableModels lists all available models.
+func (oc *AIClient) ListAvailableModels(ctx context.Context, forceRefresh bool) ([]ModelInfo, error) {
 	return oc.listAvailableModels(ctx, forceRefresh)
 }
 
-// ExportedModelIDForAPI returns the model ID suitable for API calls.
-func (oc *AIClient) ExportedModelIDForAPI(modelID string) string {
+// ModelIDForAPI returns the model ID suitable for API calls.
+func (oc *AIClient) ModelIDForAPI(modelID string) string {
 	return oc.modelIDForAPI(modelID)
 }
 
 // ResponseFunc is the exported alias for the response handler type.
 type ResponseFunc = responseFunc
 
-// ExportedSelectResponseFn selects the appropriate response function and log label.
-func (oc *AIClient) ExportedSelectResponseFn(meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (ResponseFunc, string) {
+// SelectResponseFn selects the appropriate response function and log label.
+func (oc *AIClient) SelectResponseFn(meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (ResponseFunc, string) {
 	return oc.selectResponseFn(meta, prompt)
 }
 
-// ExportedResponseWithRetryAndReasoningFallback runs response with retry and reasoning fallback.
-func (oc *AIClient) ExportedResponseWithRetryAndReasoningFallback(
+// ResponseWithRetryAndReasoningFallback runs response with retry and reasoning fallback.
+func (oc *AIClient) ResponseWithRetryAndReasoningFallback(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -280,8 +279,8 @@ func (oc *AIClient) ExportedResponseWithRetryAndReasoningFallback(
 	return oc.responseWithRetryAndReasoningFallback(ctx, evt, portal, meta, prompt, responseFn, logLabel)
 }
 
-// ExportedStreamingResponseWithRetry runs a streaming response with retry logic.
-func (oc *AIClient) ExportedStreamingResponseWithRetry(
+// StreamingResponseWithRetry runs a streaming response with retry logic.
+func (oc *AIClient) StreamingResponseWithRetry(
 	ctx context.Context,
 	evt *event.Event,
 	portal *bridgev2.Portal,
@@ -291,37 +290,77 @@ func (oc *AIClient) ExportedStreamingResponseWithRetry(
 	oc.streamingResponseWithRetry(ctx, evt, portal, meta, prompt)
 }
 
-// ExportedSendPlainAssistantMessageWithResult sends a plain assistant message and returns error.
-func (oc *AIClient) ExportedSendPlainAssistantMessageWithResult(ctx context.Context, portal *bridgev2.Portal, text string) error {
+// SendPlainAssistantMessageWithResult sends a plain assistant message and returns error.
+func (oc *AIClient) SendPlainAssistantMessageWithResult(ctx context.Context, portal *bridgev2.Portal, text string) error {
 	return oc.sendPlainAssistantMessageWithResult(ctx, portal, text)
 }
 
-// ExportedSetRoomSystemPrompt sets the room's system prompt and saves.
-func (oc *AIClient) ExportedSetRoomSystemPrompt(ctx context.Context, portal *bridgev2.Portal, prompt string) error {
+// SetRoomSystemPrompt sets the room's system prompt and saves.
+func (oc *AIClient) SetRoomSystemPrompt(ctx context.Context, portal *bridgev2.Portal, prompt string) error {
 	return oc.setRoomSystemPrompt(ctx, portal, prompt)
 }
 
-// ExportedSetRoomSystemPromptNoSave sets the room's system prompt without saving.
-func (oc *AIClient) ExportedSetRoomSystemPromptNoSave(ctx context.Context, portal *bridgev2.Portal, prompt string) error {
+// SetRoomSystemPromptNoSave sets the room's system prompt without saving.
+func (oc *AIClient) SetRoomSystemPromptNoSave(ctx context.Context, portal *bridgev2.Portal, prompt string) error {
 	return oc.setRoomSystemPromptNoSave(ctx, portal, prompt)
 }
 
-// ExportedSetRoomTopic sets the room topic.
-func (oc *AIClient) ExportedSetRoomTopic(ctx context.Context, portal *bridgev2.Portal, topic string) error {
+// SetRoomTopic sets the room topic.
+func (oc *AIClient) SetRoomTopic(ctx context.Context, portal *bridgev2.Portal, topic string) error {
 	return oc.setRoomTopic(ctx, portal, topic)
 }
 
-// ExportedSetRoomName sets the room name (with save).
-func (oc *AIClient) ExportedSetRoomName(ctx context.Context, portal *bridgev2.Portal, name string) error {
+// SetRoomName sets the room name (with save).
+func (oc *AIClient) SetRoomName(ctx context.Context, portal *bridgev2.Portal, name string) error {
 	return oc.setRoomName(ctx, portal, name)
+}
+
+// EnsureAgentGhostDisplayName ensures the agent ghost has its display name set.
+// No-op in simple runtime. Agentic bridges override.
+func (oc *AIClient) EnsureAgentGhostDisplayName(ctx context.Context, agentID, modelID, agentName string) {
+	// no-op: agents are not a simple-bridge concept
+}
+
+// CreateAgentChat creates a new chat for the given agent. Disabled in simple runtime.
+func (oc *AIClient) CreateAgentChat(ctx context.Context, agent *AgentDefinition) (*bridgev2.CreateChatResponse, error) {
+	return nil, fmt.Errorf("agent chat creation is not available in simple bridge mode")
 }
 
 // ToolExecutor is the exported alias for the builtin tool executor signature.
 type ToolExecutor = toolExecutor
 
+// BuildPromptWithLinkContext builds a prompt with link preview context.
+func (oc *AIClient) BuildPromptWithLinkContext(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	latest string,
+	rawEventContent map[string]any,
+	eventID id.EventID,
+) ([]openai.ChatCompletionMessageParamUnion, error) {
+	return oc.buildPromptWithLinkContext(ctx, portal, meta, latest, rawEventContent, eventID)
+}
+
+// BuildMatrixInboundBody builds the message body for an inbound Matrix event.
+func (oc *AIClient) BuildMatrixInboundBody(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	evt *event.Event,
+	rawBody string,
+	senderName string,
+	roomName string,
+	isGroup bool,
+) string {
+	return oc.buildMatrixInboundBody(ctx, portal, meta, evt, rawBody, senderName, roomName, isGroup)
+}
+
 // ============================================================================
 // OpenAIConnector exported resolver methods
 // ============================================================================
+
+// ApplyRuntimeDefaults applies default configuration values.
+func (oc *OpenAIConnector) ApplyRuntimeDefaults() { oc.applyRuntimeDefaults() }
 
 // Policy returns the BridgePolicy for this connector.
 func (oc *OpenAIConnector) Policy() BridgePolicy { return oc.policy }
@@ -370,6 +409,25 @@ func (oc *OpenAIConnector) ResolveProxyRoot(meta *UserLoginMetadata) string {
 func (oc *OpenAIConnector) ResolveExaProxyBaseURL(meta *UserLoginMetadata) string {
 	return oc.resolveExaProxyBaseURL(meta)
 }
+
+// ============================================================================
+// Test-accessible constants and helpers
+// ============================================================================
+
+// DefaultRawModeSystemPrompt is the default system prompt for model-only (raw) rooms.
+const DefaultRawModeSystemPrompt = defaultRawModeSystemPrompt
+
+// BuildSessionIdentityHint builds the session identity hint from portal and metadata.
+var BuildSessionIdentityHint = buildSessionIdentityHint
+
+// SessionGreetingPrompt is the greeting prompt for new sessions.
+const SessionGreetingPrompt = sessionGreetingPrompt
+
+// MaybePrependSessionGreeting prepends a session greeting if applicable.
+var MaybePrependSessionGreeting = maybePrependSessionGreeting
+
+// FormatHeartbeatSummary formats a heartbeat summary string.
+var FormatHeartbeatSummary = formatHeartbeatSummary
 
 // ============================================================================
 // Exported helper functions

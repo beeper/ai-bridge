@@ -45,6 +45,26 @@ func ParseModelFromGhostID(ghostID string) string {
 	return parseModelFromGhostID(ghostID)
 }
 
+// ResolveAgentID returns the agent assigned to the portal metadata.
+func ResolveAgentID(meta *PortalMetadata) string {
+	return resolveAgentID(meta)
+}
+
+// AgentUserID returns the ghost UserID reserved for an agent.
+func AgentUserID(agentID string) networkid.UserID {
+	return agentUserID(agentID)
+}
+
+// ParseAgentFromGhostID extracts the agent ID from a ghost user ID.
+func ParseAgentFromGhostID(ghostID string) (string, bool) {
+	return parseAgentFromGhostID(ghostID)
+}
+
+// HasAssignedAgent reports whether the portal metadata targets an agent.
+func HasAssignedAgent(meta *PortalMetadata) bool {
+	return hasAssignedAgent(meta)
+}
+
 // JoinProxyPath joins a base URL and suffix path.
 func JoinProxyPath(base, suffix string) string {
 	return joinProxyPath(base, suffix)

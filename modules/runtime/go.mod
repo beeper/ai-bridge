@@ -2,10 +2,7 @@ module github.com/beeper/ai-bridge/modules/runtime
 
 go 1.24.0
 
-require (
-	github.com/beeper/ai-bridge/modules/contracts v0.0.0-20260209155641-adfecbb4ed29
-	maunium.net/go/mautrix v0.26.3-0.20260129174719-d2364b382275
-)
+require maunium.net/go/mautrix v0.26.3-0.20260129174719-d2364b382275
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect

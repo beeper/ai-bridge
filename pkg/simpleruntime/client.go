@@ -1226,6 +1226,27 @@ func (oc *AIClient) agentModelOverride(agentID string) string {
 	return ""
 }
 
+func (oc *AIClient) ensureAgentGhostDisplayName(ctx context.Context, agentID, modelID, agentName string) {
+	_ = ctx
+	_ = agentID
+	_ = modelID
+	_ = agentName
+	// Agent ghosts are not explicitly managed in the simpleruntime build.
+}
+
+func (oc *AIClient) createAgentChatWithModel(
+	ctx context.Context,
+	agent *AgentDefinition,
+	modelID string,
+	applyModelOverride bool,
+) (*bridgev2.CreateChatResponse, error) {
+	_ = ctx
+	_ = agent
+	_ = modelID
+	_ = applyModelOverride
+	return nil, errors.New("agent chats are not supported in simpleruntime")
+}
+
 // effectiveModelForAPI returns the actual model name to send to the API
 // For OpenRouter/Beeper, returns the full model ID (e.g., "openai/gpt-5.2")
 // For direct providers, strips the prefix (e.g., "openai/gpt-5.2" → "gpt-5.2")
