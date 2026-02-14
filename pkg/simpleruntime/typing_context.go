@@ -3,7 +3,7 @@ package connector
 import (
 	"context"
 
-	"github.com/beeper/ai-bridge/pkg/aityping"
+	"github.com/beeper/ai-bridge/pkg/core/aityping"
 )
 
 type TypingContext = aityping.TypingContext

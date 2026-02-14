@@ -14,7 +14,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/ai-bridge/pkg/aimodels"
+	"github.com/beeper/ai-bridge/pkg/core/aimodels"
 )
 
 type mediaUnderstandingResult struct {

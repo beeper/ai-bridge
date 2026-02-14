@@ -868,15 +868,5 @@ func (oc *AIClient) getAgentResponseMode(meta *PortalMetadata) string {
 		return "raw"
 	}
 
-	agentID := resolveAgentID(meta)
-
-	if agentID != "" {
-		if agent, err := oc.agentResolver.GetAgent(context.Background(), agentID); err == nil && agent != nil {
-			if agent.ResponseMode != "" {
-				return agent.ResponseMode
-			}
-		}
-	}
-
 	return "natural"
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 
-	"github.com/beeper/ai-bridge/pkg/aiprovider"
+	"github.com/beeper/ai-bridge/pkg/core/aiprovider"
 )
 
 // Backward-compatible type aliases that delegate to pkg/aiprovider.

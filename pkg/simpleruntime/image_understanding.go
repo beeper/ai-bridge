@@ -8,7 +8,6 @@ import (
 
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/ai-bridge/pkg/aimodels"
 )
 
 const (
@@ -18,10 +17,7 @@ const (
 )
 
 func (oc *AIClient) canUseMediaUnderstanding(meta *PortalMetadata) bool {
-	if meta == nil || meta.IsRawMode {
-		return false
-	}
-	return hasAssignedAgent(meta)
+	return meta != nil && !meta.IsRawMode
 }
 
 type modelCapsFilter func(ModelCapabilities) bool
@@ -50,32 +46,6 @@ func (oc *AIClient) resolveUnderstandingModel(
 ) string {
 	if !oc.canUseMediaUnderstanding(meta) {
 		return ""
-	}
-
-	agentID := resolveAgentID(meta)
-	if agentID == "" {
-		return ""
-	}
-
-	agent, err := oc.agentResolver.GetAgent(ctx, agentID)
-	if err != nil {
-		oc.loggerForContext(ctx).Warn().Err(err).Str("agent_id", agentID).Msg(fmt.Sprintf("Failed to load agent for %s understanding", logLabel))
-		return ""
-	}
-	if agent == nil {
-		return ""
-	}
-
-	candidates := collectModelCandidates(agent.Model.Primary, agent.Model.Fallbacks)
-	for _, candidate := range candidates {
-		resolved := aimodels.ResolveAlias(candidate)
-		if resolved == "" {
-			continue
-		}
-		caps := getModelCapabilities(resolved, oc.findModelInfo(resolved))
-		if supportsCaps(caps) {
-			return resolved
-		}
 	}
 
 	loginMeta := loginMetadata(oc.UserLogin)

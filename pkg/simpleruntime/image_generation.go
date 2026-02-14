@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/shared/media"
+	"github.com/beeper/ai-bridge/pkg/core/shared/media"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"

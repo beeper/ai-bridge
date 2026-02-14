@@ -9,7 +9,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/ai-bridge/pkg/aiqueue"
+	"github.com/beeper/ai-bridge/pkg/core/aiqueue"
 )
 
 type pendingQueueItem struct {

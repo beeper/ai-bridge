@@ -1,10 +1,7 @@
 //lint:file-ignore U1000 Hard-cut compatibility: pending full dead-code deletion.
 package connector
 
-import (
-	"context"
-	"strings"
-)
+import "strings"
 
 func resolveChannelResponsePrefix(cfg *Config) string {
 	if cfg == nil || cfg.Channels == nil {
@@ -45,21 +42,7 @@ func resolveResponsePrefixRaw(oc *AIClient, cfg *Config, meta *PortalMetadata) s
 	return strings.TrimSpace(cfg.Messages.ResponsePrefix)
 }
 
-func resolveIdentityNameForPrefix(oc *AIClient, agentID string) string {
-	if oc == nil {
-		return ""
-	}
-	resolved := strings.TrimSpace(agentID)
-	if resolved == "" {
-		resolved = defaultAgentID
-	}
-	if agent, err := oc.agentResolver.GetAgent(context.Background(), resolved); err == nil && agent != nil {
-		if agent.Identity != nil && strings.TrimSpace(agent.Identity.Name) != "" {
-			return strings.TrimSpace(agent.Identity.Name)
-		}
-	}
-	return ""
-}
+func resolveIdentityNameForPrefix(_ *AIClient, _ string) string { return "" }
 
 func buildResponsePrefixContext(oc *AIClient, agentID string, meta *PortalMetadata) ResponsePrefixContext {
 	ctx := ResponsePrefixContext{
@@ -87,22 +70,6 @@ func buildResponsePrefixContext(oc *AIClient, agentID string, meta *PortalMetada
 	}
 	ctx.ThinkingLevel = think
 	return ctx
-}
-
-func resolveResponsePrefixForHeartbeat(oc *AIClient, cfg *Config, agentID string, meta *PortalMetadata) string {
-	raw := resolveResponsePrefixRaw(oc, cfg, meta)
-	if raw == "" {
-		return ""
-	}
-	if strings.EqualFold(raw, "auto") {
-		name := resolveIdentityNameForPrefix(oc, agentID)
-		if name == "" {
-			return ""
-		}
-		return "[" + name + "]"
-	}
-	ctx := buildResponsePrefixContext(oc, agentID, meta)
-	return resolveResponsePrefixTemplate(raw, ctx)
 }
 
 func resolveResponsePrefixForReply(oc *AIClient, cfg *Config, meta *PortalMetadata) string {

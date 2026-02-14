@@ -107,13 +107,9 @@ type streamingState struct {
 
 // newStreamingState creates a new streaming state with initialized fields
 func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID id.EventID, senderID string, roomID id.RoomID) *streamingState {
-	agentID := ""
-	if meta != nil {
-		agentID = resolveAgentID(meta)
-	}
 	state := &streamingState{
 		turnID:                 NewTurnID(),
-		agentID:                agentID,
+		agentID:                "",
 		startedAtMs:            time.Now().UnixMilli(),
 		firstToken:             true,
 		sourceEventID:          sourceEventID,
@@ -250,9 +246,8 @@ func recordGeneratedFile(state *streamingState, url, mediaType string) {
 
 func (oc *AIClient) buildUIMessageMetadata(state *streamingState, meta *PortalMetadata, includeUsage bool) map[string]any {
 	metadata := map[string]any{
-		"model":    oc.effectiveModel(meta),
-		"turn_id":  state.turnID,
-		"agent_id": state.agentID,
+		"model":   oc.effectiveModel(meta),
+		"turn_id": state.turnID,
 	}
 	if includeUsage {
 		metadata["usage"] = map[string]any{
@@ -1185,7 +1180,6 @@ func (oc *AIClient) saveAssistantMessage(
 			FinishReason:       state.finishReason,
 			Model:              modelID,
 			TurnID:             state.turnID,
-			AgentID:            state.agentID,
 			ToolCalls:          state.toolCalls,
 			StartedAtMs:        state.startedAtMs,
 			FirstTokenAtMs:     state.firstTokenAtMs,
@@ -1278,9 +1272,6 @@ func (oc *AIClient) buildCanonicalUIMessage(state *streamingState, meta *PortalM
 	if state.turnID != "" {
 		metadata["turn_id"] = state.turnID
 	}
-	if state.agentID != "" {
-		metadata["agent_id"] = state.agentID
-	}
 	if model := oc.effectiveModel(meta); model != "" {
 		metadata["model"] = model
 	}
@@ -1369,11 +1360,11 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 		Str("detected_provider", loginMetadata(oc.UserLogin).Provider).
 		Msg("Provider detection for tool filtering")
 
-	// Add builtin function tools only for agent chats that support tool calling.
-	// Model-only chats use a simple prompt without tools to avoid context overflow on small models.
-	hasAgent := resolveAgentID(meta) != ""
-	if meta.Capabilities.SupportsToolCalling && hasAgent {
-		enabledTools := oc.agentResolver.EnabledBuiltinToolsForModel(ctx, meta)
+	// Add builtin function tools when tool calling is supported.
+	if meta.Capabilities.SupportsToolCalling {
+		enabledTools := GetEnabledBuiltinTools(func(name string) bool {
+			return isBuiltinToolEnabled(meta, name)
+		})
 		if len(enabledTools) > 0 {
 			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
 			params.Tools = append(params.Tools, ToOpenAITools(toProviderToolDefs(enabledTools), strictMode, &oc.log)...)
@@ -1843,7 +1834,7 @@ func (oc *AIClient) streamingResponse(
 
 			resultStatus := ResultStatusSuccess
 			var result string
-			if !oc.agentResolver.IsToolEnabled(meta, toolName) {
+			if !isBuiltinToolEnabled(meta, toolName) {
 				resultStatus = ResultStatusError
 				result = fmt.Sprintf("Error: tool %s is disabled", toolName)
 			} else {
@@ -2709,7 +2700,7 @@ func (oc *AIClient) streamingResponse(
 
 				resultStatus := ResultStatusSuccess
 				var result string
-				if !oc.agentResolver.IsToolEnabled(meta, toolName) {
+				if !isBuiltinToolEnabled(meta, toolName) {
 					resultStatus = ResultStatusError
 					result = fmt.Sprintf("Error: tool %s is disabled", toolName)
 				} else {
@@ -3032,11 +3023,11 @@ func (oc *AIClient) buildContinuationParams(
 		}
 	}
 
-	// Add builtin function tools only for agent chats that support tool calling.
-	// Model-only chats use a simple prompt without tools to avoid context overflow on small models.
-	agentID := resolveAgentID(meta)
-	if meta.Capabilities.SupportsToolCalling && agentID != "" {
-		enabledTools := oc.agentResolver.EnabledBuiltinToolsForModel(ctx, meta)
+	// Add builtin function tools when tool calling is supported.
+	if meta.Capabilities.SupportsToolCalling {
+		enabledTools := GetEnabledBuiltinTools(func(name string) bool {
+			return isBuiltinToolEnabled(meta, name)
+		})
 		if len(enabledTools) > 0 {
 			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
 			params.Tools = append(params.Tools, ToOpenAITools(toProviderToolDefs(enabledTools), strictMode, &oc.log)...)
@@ -3176,11 +3167,11 @@ func (oc *AIClient) streamChatCompletions(
 		if temp := oc.effectiveTemperature(meta); temp > 0 {
 			params.Temperature = openai.Float(temp)
 		}
-		// Add tools only for agent chats that support tool calling.
-		// Model-only chats use a simple prompt without tools to avoid context overflow on small models.
-		chatHasAgent := resolveAgentID(meta) != ""
-		if meta.Capabilities.SupportsToolCalling && chatHasAgent {
-			enabledTools := oc.agentResolver.EnabledBuiltinToolsForModel(ctx, meta)
+		// Add tools when tool calling is supported.
+		if meta.Capabilities.SupportsToolCalling {
+			enabledTools := GetEnabledBuiltinTools(func(name string) bool {
+				return isBuiltinToolEnabled(meta, name)
+			})
 			if len(enabledTools) > 0 {
 				params.Tools = append(params.Tools, ToOpenAIChatTools(toProviderToolDefs(enabledTools), &oc.log)...)
 			}
@@ -3395,7 +3386,7 @@ func (oc *AIClient) streamChatCompletions(
 
 				result := ""
 				resultStatus := ResultStatusSuccess
-				if !oc.agentResolver.IsToolEnabled(meta, toolName) {
+				if !isBuiltinToolEnabled(meta, toolName) {
 					result = fmt.Sprintf("Error: tool %s is not enabled", toolName)
 					resultStatus = ResultStatusError
 				} else {

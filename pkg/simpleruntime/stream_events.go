@@ -28,7 +28,6 @@ func buildStreamEventEnvelope(state *streamingState, part map[string]any) (turnI
 
 	env, err := matrixevents.BuildStreamEventEnvelope(turnID, seq, part, matrixevents.StreamEventOpts{
 		TargetEventID: state.initialEventID.String(),
-		AgentID:       state.agentID,
 	})
 	if err != nil {
 		return "", 0, nil, false

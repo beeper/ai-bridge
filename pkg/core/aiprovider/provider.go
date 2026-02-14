@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/aimodels"
+	"github.com/beeper/ai-bridge/pkg/core/aimodels"
 )
 
 // AIProvider defines a common interface for OpenAI-compatible AI providers

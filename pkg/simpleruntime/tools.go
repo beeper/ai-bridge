@@ -7,9 +7,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/aiprovider"
-	"github.com/beeper/ai-bridge/pkg/aiutil"
-	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
+	"github.com/beeper/ai-bridge/pkg/core/aiprovider"
+	"github.com/beeper/ai-bridge/pkg/core/aiutil"
+	"github.com/beeper/ai-bridge/pkg/core/shared/toolspec"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/id"
 )
@@ -88,6 +88,22 @@ func GetEnabledBuiltinTools(isToolEnabled func(string) bool) []ToolDefinition {
 		}
 	}
 	return enabled
+}
+
+func isBuiltinToolEnabled(meta *PortalMetadata, name string) bool {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return false
+	}
+	if meta == nil || len(meta.DisabledTools) == 0 {
+		return true
+	}
+	for _, disabled := range meta.DisabledTools {
+		if strings.EqualFold(strings.TrimSpace(disabled), trimmed) {
+			return false
+		}
+	}
+	return true
 }
 
 func executeWebSearch(ctx context.Context, args map[string]any) (string, error) {

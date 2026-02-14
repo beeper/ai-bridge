@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/beeper/ai-bridge/pkg/shared/exa"
+	"github.com/beeper/ai-bridge/pkg/core/shared/exa"
 )
 
 func TestExaProviderSearchUsesHighlightMaxCharacters(t *testing.T) {

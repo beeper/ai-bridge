@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/aierrors"
-	"github.com/beeper/ai-bridge/pkg/aimodels"
+	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
+	"github.com/beeper/ai-bridge/pkg/core/aimodels"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"

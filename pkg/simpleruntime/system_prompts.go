@@ -97,10 +97,6 @@ func (oc *AIClient) buildAdditionalSystemPrompts(
 		}
 	}
 
-	if accountHint := oc.buildDesktopAccountHintPrompt(ctx); accountHint != "" {
-		out = append(out, openai.SystemMessage(accountHint))
-	}
-
 	if ident := buildSessionIdentityHint(portal, meta); ident != "" {
 		out = append(out, openai.SystemMessage(ident))
 	}

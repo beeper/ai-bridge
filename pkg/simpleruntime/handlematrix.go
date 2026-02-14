@@ -16,7 +16,7 @@ import (
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/ai-bridge/pkg/aiqueue"
+	"github.com/beeper/ai-bridge/pkg/core/aiqueue"
 )
 
 func unsupportedMessageStatus(err error) error {
@@ -164,13 +164,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		Int("raw_len", len(rawBodyOriginal)).
 		Msg("Inbound message metadata resolved")
 
-	var agentDef *AgentDefinition
-	if agentID := resolveAgentID(meta); agentID != "" {
-		if agent, err := oc.agentResolver.GetAgent(ctx, agentID); err == nil {
-			agentDef = agent
-		}
-	}
-	mentionRegexes := buildMentionRegexes(&oc.connector.Config, agentDef)
+	mentionRegexes := buildMentionRegexes(&oc.connector.Config)
 
 	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
 
@@ -646,12 +640,12 @@ func (oc *AIClient) handleMediaMessage(
 			ok = true
 		case isTextFileMime(mimeType):
 			if !oc.canUseMediaUnderstanding(meta) {
-				return nil, unsupportedMessageStatus(errors.New("text file understanding is only available when an agent is assigned and raw mode is off"))
+				return nil, unsupportedMessageStatus(errors.New("text file understanding is only available when raw mode is off"))
 			}
 			return oc.handleTextFileMessage(ctx, msg, portal, meta, string(mediaURL), mimeType, pendingSent)
 		case mimeType == "" || mimeType == "application/octet-stream":
 			if !oc.canUseMediaUnderstanding(meta) {
-				return nil, unsupportedMessageStatus(errors.New("text file understanding is only available when an agent is assigned and raw mode is off"))
+				return nil, unsupportedMessageStatus(errors.New("text file understanding is only available when raw mode is off"))
 			}
 			return oc.handleTextFileMessage(ctx, msg, portal, meta, string(mediaURL), mimeType, pendingSent)
 		}
@@ -706,13 +700,7 @@ func (oc *AIClient) handleMediaMessage(
 		caption = config.defaultCaption
 	}
 
-	agentDef := (*AgentDefinition)(nil)
-	if agentID := resolveAgentID(meta); agentID != "" {
-		if agent, err := oc.agentResolver.GetAgent(ctx, agentID); err == nil {
-			agentDef = agent
-		}
-	}
-	mentionRegexes := buildMentionRegexes(&oc.connector.Config, agentDef)
+	mentionRegexes := buildMentionRegexes(&oc.connector.Config)
 	replyCtx := extractInboundReplyContext(msg.Event)
 	botMXID := oc.resolveBotMXID(ctx, portal, meta)
 	explicitMention := false
@@ -801,7 +789,7 @@ func (oc *AIClient) handleMediaMessage(
 			return dispatchTextOnly(understanding.Body)
 		}
 
-		// If model lacks vision but agent supports image understanding, analyze image first.
+		// If model lacks vision, analyze image first with a compatible fallback model.
 		if msgType == event.MsgImage {
 			visionModel, visionFallback := oc.resolveVisionModelForImage(ctx, meta)
 			if visionFallback && visionModel != "" {
@@ -820,7 +808,7 @@ func (oc *AIClient) handleMediaMessage(
 			}
 		}
 
-		// If model lacks audio but agent supports audio understanding, analyze audio first.
+		// If model lacks audio input, analyze audio first with a compatible fallback model.
 		if msgType == event.MsgAudio {
 			audioModel, audioFallback := oc.resolveAudioModelForInput(ctx, meta)
 			if audioFallback && audioModel != "" {
@@ -932,13 +920,7 @@ func (oc *AIClient) handleTextFileMessage(
 	}
 
 	isGroup := oc.isGroupChat(ctx, portal)
-	agentDef := (*AgentDefinition)(nil)
-	if agentID := resolveAgentID(meta); agentID != "" {
-		if agent, err := oc.agentResolver.GetAgent(ctx, agentID); err == nil {
-			agentDef = agent
-		}
-	}
-	mentionRegexes := buildMentionRegexes(&oc.connector.Config, agentDef)
+	mentionRegexes := buildMentionRegexes(&oc.connector.Config)
 	replyCtx := extractInboundReplyContext(msg.Event)
 	botMXID := oc.resolveBotMXID(ctx, portal, meta)
 	explicitMention := false
@@ -1195,7 +1177,7 @@ func (oc *AIClient) handleToolsCommand(
 	case "list":
 		oc.showToolsStatus(runCtx, portal, meta)
 	case "on", "enable", "true", "1", "off", "disable", "false", "0":
-		oc.sendSystemNotice(runCtx, portal, "Per-tool toggles aren't supported anymore. Update tool policy in agent settings or the global tool_policy config.")
+		oc.sendSystemNotice(runCtx, portal, "Per-tool toggles aren't supported anymore. Update the global tool policy config.")
 	default:
 		oc.sendSystemNotice(runCtx, portal, "Usage:\n"+
 			"• !ai tools - Show current tool status\n"+

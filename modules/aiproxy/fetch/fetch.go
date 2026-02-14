@@ -3,7 +3,7 @@ package fetch
 import (
 	"context"
 
-	basefetch "github.com/beeper/ai-bridge/pkg/fetch"
+	basefetch "github.com/beeper/ai-bridge/pkg/matrixai/fetch"
 )
 
 type Request = basefetch.Request

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/shared/httputil"
+	"github.com/beeper/ai-bridge/pkg/core/shared/httputil"
 )
 
 type braveProvider struct {

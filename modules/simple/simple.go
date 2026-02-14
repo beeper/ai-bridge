@@ -1,13 +1,13 @@
 package simple
 
 import (
-	"github.com/beeper/ai-bridge/modules/runtime"
 	"github.com/beeper/ai-bridge/pkg/simpleconnector"
+	base "github.com/beeper/ai-bridge/pkg/simpleruntime"
 	"maunium.net/go/mautrix/bridgev2"
 )
 
-func Profile() runtime.BridgeProfile {
-	return runtime.BridgeProfile{
+func NewConnector() *simpleconnector.OpenAIConnector {
+	return simpleconnector.New(base.BridgePolicy{
 		Name:                "Beeper AI (Simple)",
 		NetworkID:           "ai-simple",
 		BeeperBridgeType:    "ai-simple",
@@ -18,9 +18,5 @@ func Profile() runtime.BridgeProfile {
 			ContactList:    true,
 			Search:         true,
 		},
-	}
-}
-
-func NewConnector() *simpleconnector.OpenAIConnector {
-	return simpleconnector.New(Profile())
+	})
 }

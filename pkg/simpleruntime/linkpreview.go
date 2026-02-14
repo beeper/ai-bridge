@@ -3,7 +3,7 @@ package connector
 import (
 	"context"
 
-	"github.com/beeper/ai-bridge/pkg/linkpreview"
+	"github.com/beeper/ai-bridge/pkg/matrixai/linkpreview"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"

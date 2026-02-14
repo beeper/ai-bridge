@@ -94,19 +94,10 @@ func fnModel(ce *commands.Event) {
 		return
 	}
 
-	if rejectBossOverrides(ce, meta, "Can't change the model in a room managed by the Boss agent.") {
-		return
-	}
-
 	modelID := ce.Args[0]
 	valid, err := client.validateModel(ce.Ctx, modelID)
 	if err != nil || !valid {
 		ce.Reply("That model isn't available: %s", modelID)
-		return
-	}
-
-	if strings.TrimSpace(meta.AgentID) != "" {
-		ce.Reply("Can't set the room model while an agent is assigned. Edit the agent instead.")
 		return
 	}
 
@@ -144,10 +135,6 @@ func fnTemp(ce *commands.Event) {
 		return
 	}
 
-	if rejectBossOverrides(ce, meta, "Can't change the temperature in a room managed by the Boss agent.") {
-		return
-	}
-
 	var temp float64
 	if _, err := fmt.Sscanf(ce.Args[0], "%f", &temp); err != nil || temp < 0 || temp > 2 {
 		ce.Reply("Invalid temperature. Must be between 0 and 2.")
@@ -182,11 +169,8 @@ func fnSystemPrompt(ce *commands.Event) {
 	}
 
 	if len(ce.Args) == 0 {
-		// Show full constructed prompt (agent + room levels merged)
-		fullPrompt := client.effectiveAgentPrompt(ce.Ctx, ce.Portal, meta)
-		if fullPrompt == "" {
-			fullPrompt = client.effectivePrompt(meta)
-		}
+		// Show full room-level prompt.
+		fullPrompt := client.effectivePrompt(meta)
 		if fullPrompt == "" {
 			fullPrompt = "(none)"
 		}
@@ -196,10 +180,6 @@ func fnSystemPrompt(ce *commands.Event) {
 			fullPrompt = fullPrompt[:500] + "...\n\n(truncated, full prompt is " + strconv.Itoa(totalLen) + " chars)"
 		}
 		ce.Reply("Current system prompt:\n%s", fullPrompt)
-		return
-	}
-
-	if rejectBossOverrides(ce, meta, "Can't change the system prompt in a room managed by the Boss agent.") {
 		return
 	}
 
@@ -285,19 +265,6 @@ var CommandConfig = registerAICommand(commandregistry.Definition{
 	Handler:        fnConfig,
 })
 
-// CommandDesktopAPI handles the !ai desktop-api command
-var CommandDesktopAPI = registerAICommand(commandregistry.Definition{
-	Name:           "desktop-api",
-	Description:    "Manage Beeper Desktop API instances",
-	Args:           "<add|list|remove> [args]",
-	Section:        HelpSectionAI,
-	RequiresPortal: false,
-	RequiresLogin:  true,
-	Handler:        fnDesktopAPI,
-})
-
-const desktopAPIManageUsage = "`!ai desktop-api list` | `!ai desktop-api add <token> [baseURL]` | `!ai desktop-api add <name> <token> [baseURL]` | `!ai desktop-api remove [name]`."
-
 var CommandCommands = registerAICommand(commandregistry.Definition{
 	Name:           "commands",
 	Aliases:        []string{"cmds"},
@@ -341,9 +308,6 @@ func fnCommands(ce *commands.Event) {
 			"Playground:\n" +
 			"- `!ai playground new [model]` — Create a new AI chat\n" +
 			"- `!ai playground list` — List available models\n\n" +
-			"Integrations:\n" +
-			"- Desktop API: `!ai desktop-api ...`\n" +
-			"- Gravatar: `!ai gravatar ...`\n\n" +
 			"Use `!help` for the full command list from the command processor.",
 	)
 }
@@ -369,320 +333,6 @@ func fnConfig(ce *commands.Event) {
 		client.effectiveModel(meta), tempLabel, client.historyLimit(ce.Ctx, ce.Portal, meta),
 		client.effectiveMaxTokens(meta), roomCaps.SupportsVision, mode)
 	ce.Reply(config)
-}
-
-func fnSetDesktopAPIToken(ce *commands.Event) {
-	client, ok := requireClient(ce)
-	if !ok {
-		return
-	}
-	login := client.UserLogin
-	if login == nil {
-		ce.Reply("You're not signed in. Sign in and try again.")
-		return
-	}
-	meta := loginMetadata(login)
-	if meta == nil {
-		ce.Reply("Couldn't load your settings. Try again.")
-		return
-	}
-
-	if len(ce.Args) == 0 {
-		instances := client.desktopAPIInstances()
-		if len(instances) == 0 {
-			ce.Reply("Desktop API instances: none configured")
-			return
-		}
-		lines := make([]string, 0, len(instances))
-		for _, name := range client.desktopAPIInstanceNames() {
-			config := instances[name]
-			status := "set"
-			if strings.TrimSpace(config.Token) == "" {
-				status = "missing token"
-			}
-			if strings.TrimSpace(config.BaseURL) != "" {
-				lines = append(lines, fmt.Sprintf("- %s: %s (base URL %s)", name, status, strings.TrimSpace(config.BaseURL)))
-			} else {
-				lines = append(lines, fmt.Sprintf("- %s: %s", name, status))
-			}
-		}
-		ce.Reply("Desktop API instances:\n%s", strings.Join(lines, "\n"))
-		return
-	}
-
-	token := strings.TrimSpace(ce.Args[0])
-	baseURL := ""
-	if len(ce.Args) > 1 {
-		baseURL = strings.TrimSpace(strings.Join(ce.Args[1:], " "))
-	}
-	if token == "" {
-		ce.Reply("Usage: `!ai desktop-api add <token> [baseURL]`.")
-		return
-	}
-	if strings.EqualFold(token, "clear") || strings.EqualFold(token, "none") || strings.EqualFold(token, "unset") {
-		if meta.ServiceTokens == nil {
-			meta.ServiceTokens = &ServiceTokens{}
-		}
-		meta.ServiceTokens.DesktopAPI = ""
-		if meta.ServiceTokens.DesktopAPIInstances != nil {
-			delete(meta.ServiceTokens.DesktopAPIInstances, desktopDefaultInstance)
-		}
-		if err := login.Save(ce.Ctx); err != nil {
-			ce.Reply("Couldn't clear the Desktop API token: %s", err)
-			return
-		}
-		ce.Reply("Desktop API token cleared")
-		return
-	}
-
-	if meta.ServiceTokens == nil {
-		meta.ServiceTokens = &ServiceTokens{}
-	}
-	meta.ServiceTokens.DesktopAPI = token
-	if meta.ServiceTokens.DesktopAPIInstances == nil {
-		meta.ServiceTokens.DesktopAPIInstances = map[string]DesktopAPIInstance{}
-	}
-	defaultConfig := meta.ServiceTokens.DesktopAPIInstances[desktopDefaultInstance]
-	defaultConfig.Token = token
-	if baseURL != "" {
-		defaultConfig.BaseURL = baseURL
-	}
-	meta.ServiceTokens.DesktopAPIInstances[desktopDefaultInstance] = defaultConfig
-	if err := login.Save(ce.Ctx); err != nil {
-		ce.Reply("Couldn't save the Desktop API token: %s", err)
-		return
-	}
-	if baseURL != "" {
-		ce.Reply("Desktop API token saved (base URL %s)", baseURL)
-		return
-	}
-	ce.Reply("Desktop API token saved")
-}
-
-func fnAddDesktopAPIInstance(ce *commands.Event) {
-	client, ok := requireClient(ce)
-	if !ok {
-		return
-	}
-	login := client.UserLogin
-	if login == nil {
-		ce.Reply("You're not signed in. Sign in and try again.")
-		return
-	}
-	meta := loginMetadata(login)
-	if meta == nil {
-		ce.Reply("Couldn't load your settings. Try again.")
-		return
-	}
-	if len(ce.Args) < 2 {
-		ce.Reply("Usage: `!ai desktop-api add <name> <token> [baseURL]`.")
-		return
-	}
-	name := normalizeDesktopInstanceName(ce.Args[0])
-	if name == "" {
-		ce.Reply("Instance name is required")
-		return
-	}
-	token := strings.TrimSpace(ce.Args[1])
-	if token == "" {
-		ce.Reply("Token is required")
-		return
-	}
-	baseURL := ""
-	if len(ce.Args) > 2 {
-		baseURL = strings.TrimSpace(strings.Join(ce.Args[2:], " "))
-	}
-	if meta.ServiceTokens == nil {
-		meta.ServiceTokens = &ServiceTokens{}
-	}
-	if meta.ServiceTokens.DesktopAPIInstances == nil {
-		meta.ServiceTokens.DesktopAPIInstances = map[string]DesktopAPIInstance{}
-	}
-	config := meta.ServiceTokens.DesktopAPIInstances[name]
-	config.Token = token
-	if baseURL != "" {
-		config.BaseURL = baseURL
-	}
-	meta.ServiceTokens.DesktopAPIInstances[name] = config
-	if name == desktopDefaultInstance {
-		meta.ServiceTokens.DesktopAPI = token
-	}
-	if err := login.Save(ce.Ctx); err != nil {
-		ce.Reply("Couldn't save the Desktop API instance: %s", err)
-		return
-	}
-	if baseURL != "" {
-		ce.Reply("Desktop API instance '%s' saved (base URL %s)", name, baseURL)
-		return
-	}
-	ce.Reply("Desktop API instance '%s' saved", name)
-}
-
-func fnRemoveDesktopAPIInstance(ce *commands.Event) {
-	client, ok := requireClient(ce)
-	if !ok {
-		return
-	}
-	login := client.UserLogin
-	if login == nil {
-		ce.Reply("You're not signed in. Sign in and try again.")
-		return
-	}
-	meta := loginMetadata(login)
-	if meta == nil {
-		ce.Reply("Couldn't load your settings. Try again.")
-		return
-	}
-	name := ""
-	if len(ce.Args) == 0 {
-		if meta.ServiceTokens == nil || len(meta.ServiceTokens.DesktopAPIInstances) == 0 {
-			ce.Reply("Desktop API instances: none configured")
-			return
-		}
-		if len(meta.ServiceTokens.DesktopAPIInstances) > 1 {
-			ce.Reply("Multiple Desktop API instances configured. Provide a name. Use `!ai desktop-api list`.")
-			return
-		}
-		for instanceName := range meta.ServiceTokens.DesktopAPIInstances {
-			name = instanceName
-			break
-		}
-	} else {
-		name = normalizeDesktopInstanceName(strings.Join(ce.Args, " "))
-		if name == "" {
-			ce.Reply("Instance name is required")
-			return
-		}
-	}
-	if meta.ServiceTokens == nil || meta.ServiceTokens.DesktopAPIInstances == nil {
-		ce.Reply("Desktop API instance '%s' not found", name)
-		return
-	}
-	if _, ok := meta.ServiceTokens.DesktopAPIInstances[name]; !ok {
-		ce.Reply("Desktop API instance '%s' not found", name)
-		return
-	}
-	delete(meta.ServiceTokens.DesktopAPIInstances, name)
-	if name == desktopDefaultInstance {
-		meta.ServiceTokens.DesktopAPI = ""
-	}
-	if len(meta.ServiceTokens.DesktopAPIInstances) == 0 {
-		meta.ServiceTokens.DesktopAPIInstances = nil
-	}
-	if err := login.Save(ce.Ctx); err != nil {
-		ce.Reply("Couldn't remove the Desktop API instance: %s", err)
-		return
-	}
-	ce.Reply("Desktop API instance '%s' removed", name)
-}
-
-func fnListDesktopAPIInstances(ce *commands.Event) {
-	client, ok := requireClient(ce)
-	if !ok {
-		return
-	}
-	instances := client.desktopAPIInstances()
-	if len(instances) == 0 {
-		ce.Reply("Desktop API instances: none configured")
-		return
-	}
-	lines := make([]string, 0, len(instances))
-	for _, name := range client.desktopAPIInstanceNames() {
-		config := instances[name]
-		status := "set"
-		if strings.TrimSpace(config.Token) == "" {
-			status = "missing token"
-		}
-		if strings.TrimSpace(config.BaseURL) != "" {
-			lines = append(lines, fmt.Sprintf("- %s: %s (base URL %s)", name, status, strings.TrimSpace(config.BaseURL)))
-		} else {
-			lines = append(lines, fmt.Sprintf("- %s: %s", name, status))
-		}
-	}
-	ce.Reply("Desktop API instances:\n%s", strings.Join(lines, "\n"))
-}
-
-func fnDesktopAPI(ce *commands.Event) {
-	if len(ce.Args) == 0 {
-		ce.Reply("Usage: %s", desktopAPIManageUsage)
-		return
-	}
-
-	sub := strings.ToLower(strings.TrimSpace(ce.Args[0]))
-	switch sub {
-	case "list", "ls":
-		ce.Args = ce.Args[1:]
-		fnListDesktopAPIInstances(ce)
-		return
-	case "add", "set":
-		parsedName, parsedToken, parsedBaseURL, parsedErr := parseDesktopAPIAddArgs(ce.Args[1:])
-		if parsedErr != nil {
-			ce.Reply("Usage: `!ai desktop-api add <token> [baseURL]` or `!ai desktop-api add <name> <token> [baseURL]`.")
-			return
-		}
-		if parsedName == "" || parsedName == desktopDefaultInstance {
-			nextArgs := []string{parsedToken}
-			if parsedBaseURL != "" {
-				nextArgs = append(nextArgs, parsedBaseURL)
-			}
-			ce.Args = nextArgs
-			fnSetDesktopAPIToken(ce)
-			return
-		}
-		nextArgs := []string{parsedName, parsedToken}
-		if parsedBaseURL != "" {
-			nextArgs = append(nextArgs, parsedBaseURL)
-		}
-		ce.Args = nextArgs
-		fnAddDesktopAPIInstance(ce)
-		return
-	case "remove", "rm", "delete":
-		ce.Args = ce.Args[1:]
-		fnRemoveDesktopAPIInstance(ce)
-		return
-	default:
-		ce.Reply("Usage: %s", desktopAPIManageUsage)
-	}
-}
-
-func parseDesktopAPIAddArgs(args []string) (name, token, baseURL string, err error) {
-	if len(args) == 0 {
-		return "", "", "", errors.New("missing args")
-	}
-
-	trimmed := make([]string, 0, len(args))
-	for _, raw := range args {
-		part := strings.TrimSpace(raw)
-		if part != "" {
-			trimmed = append(trimmed, part)
-		}
-	}
-	if len(trimmed) == 0 {
-		return "", "", "", errors.New("missing args")
-	}
-
-	switch len(trimmed) {
-	case 1:
-		return desktopDefaultInstance, trimmed[0], "", nil
-	case 2:
-		if isLikelyHTTPURL(trimmed[1]) {
-			return desktopDefaultInstance, trimmed[0], trimmed[1], nil
-		}
-		return normalizeDesktopInstanceName(trimmed[0]), trimmed[1], "", nil
-	default:
-		name = normalizeDesktopInstanceName(trimmed[0])
-		token = trimmed[1]
-		baseURL = strings.TrimSpace(strings.Join(trimmed[2:], " "))
-		if token == "" {
-			return "", "", "", errors.New("missing token")
-		}
-		return name, token, baseURL, nil
-	}
-}
-
-func isLikelyHTTPURL(raw string) bool {
-	value := strings.TrimSpace(strings.ToLower(raw))
-	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")
 }
 
 // CommandDebounce handles the !ai debounce command
@@ -1091,79 +741,5 @@ func fnTimezone(ce *commands.Event) {
 			return
 		}
 		ce.Reply("Timezone set to %s.", tz)
-	}
-}
-
-// CommandGravatar handles the !ai gravatar command
-var CommandGravatar = registerAICommand(commandregistry.Definition{
-	Name:           "gravatar",
-	Description:    "Fetch or set the Gravatar profile for this login",
-	Args:           "[fetch|set] [email]",
-	Section:        HelpSectionAI,
-	RequiresPortal: true,
-	RequiresLogin:  true,
-	Handler:        fnGravatar,
-})
-
-func fnGravatar(ce *commands.Event) {
-	client, _, ok := requireClientMeta(ce)
-	if !ok {
-		return
-	}
-
-	if len(ce.Args) == 0 {
-		loginMeta := loginMetadata(client.UserLogin)
-		if loginMeta == nil || loginMeta.Gravatar == nil || loginMeta.Gravatar.Primary == nil {
-			ce.Reply("No Gravatar profile set. Use `!ai gravatar set <email>`.")
-			return
-		}
-		ce.Reply(formatGravatarMarkdown(loginMeta.Gravatar.Primary, "primary"))
-		return
-	}
-
-	action := strings.ToLower(strings.TrimSpace(ce.Args[0]))
-	switch action {
-	case "fetch":
-		email := ""
-		if len(ce.Args) > 1 {
-			email = ce.Args[1]
-		}
-		if strings.TrimSpace(email) == "" {
-			loginMeta := loginMetadata(client.UserLogin)
-			if loginMeta != nil && loginMeta.Gravatar != nil && loginMeta.Gravatar.Primary != nil {
-				email = loginMeta.Gravatar.Primary.Email
-			}
-		}
-		if strings.TrimSpace(email) == "" {
-			ce.Reply("Email is required. Usage: `!ai gravatar fetch <email>`.")
-			return
-		}
-		profile, err := fetchGravatarProfile(ce.Ctx, email)
-		if err != nil {
-			ce.Reply("Couldn't fetch the Gravatar profile: %s", err.Error())
-			return
-		}
-		ce.Reply(formatGravatarMarkdown(profile, "fetched"))
-		return
-	case "set":
-		if len(ce.Args) < 2 || strings.TrimSpace(ce.Args[1]) == "" {
-			ce.Reply("Email is required. Usage: `!ai gravatar set <email>`.")
-			return
-		}
-		profile, err := fetchGravatarProfile(ce.Ctx, ce.Args[1])
-		if err != nil {
-			ce.Reply("Couldn't fetch the Gravatar profile: %s", err.Error())
-			return
-		}
-		state := ensureGravatarState(loginMetadata(client.UserLogin))
-		state.Primary = profile
-		if err := client.UserLogin.Save(ce.Ctx); err != nil {
-			ce.Reply("Couldn't save the Gravatar profile: %s", err.Error())
-			return
-		}
-		ce.Reply(formatGravatarMarkdown(profile, "primary set"))
-		return
-	default:
-		ce.Reply("Usage: `!ai gravatar fetch <email>` or `!ai gravatar set <email>`.")
 	}
 }

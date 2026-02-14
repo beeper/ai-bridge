@@ -3,7 +3,7 @@ package fetch
 import (
 	"context"
 
-	"github.com/beeper/ai-bridge/pkg/shared/registry"
+	"github.com/beeper/ai-bridge/pkg/core/shared/registry"
 )
 
 // Provider fetches readable content for a given backend.

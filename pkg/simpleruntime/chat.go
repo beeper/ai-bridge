@@ -12,8 +12,8 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 
-	"github.com/beeper/ai-bridge/pkg/aimodels"
-	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
+	"github.com/beeper/ai-bridge/pkg/core/aimodels"
+	"github.com/beeper/ai-bridge/pkg/core/shared/toolspec"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -31,13 +31,6 @@ const (
 
 // defaultRawModeSystemPrompt is the default system prompt for model-only (raw) rooms.
 const defaultRawModeSystemPrompt = "You are a helpful assistant."
-
-func hasAssignedAgent(meta *PortalMetadata) bool {
-	if meta == nil {
-		return false
-	}
-	return meta.AgentID != ""
-}
 
 func (oc *AIClient) isSimpleProfile() bool {
 	if oc == nil || oc.connector == nil {
@@ -108,7 +101,10 @@ func (oc *AIClient) modelContacts(ctx context.Context, query string) ([]*bridgev
 
 // buildAvailableTools returns a list of ToolInfo for all tools based on tool policy.
 func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
-	names := oc.agentResolver.ToolNamesForPortal(meta)
+	var names []string
+	for _, tool := range BuiltinTools() {
+		names = append(names, tool.Name)
+	}
 	var toolsList []ToolInfo
 	builtinByName := map[string]ToolDefinition{}
 	for _, tool := range BuiltinTools() {
@@ -124,15 +120,13 @@ func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 		}
 		description = oc.toolDescriptionForPortal(meta, name, description)
 
-		available, source, reason := oc.agentResolver.IsToolAvailable(meta, name)
-		allowed := oc.agentResolver.IsToolAllowedByPolicy(meta, name)
-		enabled := available && allowed
-
-		if !allowed {
-			source = SourceAgentPolicy
-			if reason == "" {
-				reason = "Disabled by tool policy"
-			}
+		available := true
+		enabled := isBuiltinToolEnabled(meta, name)
+		source := SourceGlobalDefault
+		reason := ""
+		if !enabled {
+			source = SourceRoomOverride
+			reason = "Disabled for this room"
 		}
 
 		toolsList = append(toolsList, ToolInfo{
@@ -200,47 +194,6 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 	return oc.resolveModelIdentifier(ctx, id, createChat)
 }
 
-// resolveAgentIdentifier resolves an agent to a ghost and optionally creates a chat
-func (oc *AIClient) resolveAgentIdentifier(ctx context.Context, agent *AgentDefinition, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	return oc.resolveAgentIdentifierWithModel(ctx, agent, "", createChat)
-}
-
-func (oc *AIClient) resolveAgentIdentifierWithModel(ctx context.Context, agent *AgentDefinition, modelID string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	explicitModel := modelID != ""
-	if modelID == "" {
-		modelID = oc.agentResolver.AgentDefaultModel(agent)
-	}
-	userID := agentUserID(agent.ID)
-	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get ghost: %w", err)
-	}
-
-	agentName := oc.agentResolver.ResolveAgentDisplayName(ctx, agent)
-	displayName := agentName
-	oc.ensureAgentGhostDisplayName(ctx, agent.ID, modelID, agentName)
-
-	var chatResp *bridgev2.CreateChatResponse
-	if createChat {
-		oc.loggerForContext(ctx).Info().Str("agent", agent.ID).Msg("Creating new chat for agent")
-		chatResp, err = oc.createAgentChatWithModel(ctx, agent, modelID, explicitModel)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create chat: %w", err)
-		}
-	}
-
-	return &bridgev2.ResolveIdentifierResponse{
-		UserID: userID,
-		UserInfo: &bridgev2.UserInfo{
-			Name:        ptr.Ptr(displayName),
-			IsBot:       ptr.Ptr(true),
-			Identifiers: []string{agent.ID},
-		},
-		Ghost: ghost,
-		Chat:  chatResp,
-	}, nil
-}
-
 // resolveModelIdentifier resolves a model ID to a ghost (backwards compatibility)
 func (oc *AIClient) resolveModelIdentifier(ctx context.Context, modelID string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
 	// Get or create ghost
@@ -272,72 +225,6 @@ func (oc *AIClient) resolveModelIdentifier(ctx context.Context, modelID string, 
 		},
 		Ghost: ghost,
 		Chat:  chatResp,
-	}, nil
-}
-
-// createAgentChat creates a new chat room for an agent
-func (oc *AIClient) createAgentChat(ctx context.Context, agent *AgentDefinition) (*bridgev2.CreateChatResponse, error) {
-	return oc.createAgentChatWithModel(ctx, agent, "", false)
-}
-
-func (oc *AIClient) createAgentChatWithModel(ctx context.Context, agent *AgentDefinition, modelID string, applyModelOverride bool) (*bridgev2.CreateChatResponse, error) {
-	if modelID == "" {
-		modelID = oc.agentResolver.AgentDefaultModel(agent)
-	}
-
-	agentName := oc.agentResolver.ResolveAgentDisplayName(ctx, agent)
-	portal, chatInfo, err := oc.initPortalForChat(ctx, PortalInitOpts{
-		ModelID:      modelID,
-		Title:        fmt.Sprintf("Chat with %s", agentName),
-		SystemPrompt: agent.SystemPrompt,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Set agent-specific metadata
-	pm := portalMeta(portal)
-	pm.AgentID = agent.ID
-	if agent.SystemPrompt != "" {
-		pm.SystemPrompt = agent.SystemPrompt
-	}
-	if agent.ReasoningEffort != "" {
-		pm.ReasoningEffort = agent.ReasoningEffort
-	}
-	if !applyModelOverride {
-		pm.Model = ""
-	}
-
-	agentGhostID := agentUserID(agent.ID)
-
-	// Update the OtherUserID to be the agent ghost
-	portal.OtherUserID = agentGhostID
-	agentAvatar := strings.TrimSpace(agent.AvatarURL)
-	if agentAvatar == "" {
-		agentAvatar = ""
-	}
-	if agentAvatar != "" {
-		portal.AvatarID = networkid.AvatarID(agentAvatar)
-		portal.AvatarMXC = id.ContentURIString(agentAvatar)
-	}
-
-	if err := portal.Save(ctx); err != nil {
-		return nil, fmt.Errorf("failed to save portal with agent config: %w", err)
-	}
-
-	// Update chat info members to use agent ghost only
-	oc.applyAgentChatInfo(chatInfo, agent.ID, agentName, modelID)
-
-	// Rooms created via provisioning (ResolveIdentifier/CreateDM) won't go through our explicit
-	// post-CreateMatrixRoom call sites. Schedule the welcome notice + auto-greeting for when the
-	// Matrix room ID becomes available.
-	oc.scheduleWelcomeMessage(ctx, portal.PortalKey)
-
-	return &bridgev2.CreateChatResponse{
-		PortalKey: portal.PortalKey,
-		// Return the full ChatInfo so bridgev2 can apply ExtraUpdates (initial room state,
-		// welcome notice, etc.) when creating the Matrix room via provisioning (CreateDM).
-		PortalInfo: chatInfo,
 	}, nil
 }
 
@@ -438,8 +325,6 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 			ReasoningEffort:     opts.CopyFrom.ReasoningEffort,
 			Capabilities:        opts.CopyFrom.Capabilities,
 			ConversationMode:    opts.CopyFrom.ConversationMode,
-			AgentID:             opts.CopyFrom.AgentID,
-			AgentPrompt:         opts.CopyFrom.AgentPrompt,
 		}
 		modelID = opts.CopyFrom.Model
 	} else {
@@ -556,8 +441,8 @@ func (oc *AIClient) handleFork(
 	))
 }
 
-// handleNewChat creates a new chat using the current room's agent/model,
-// or an explicitly provided agent/model.
+// handleNewChat creates a new chat using the current room model,
+// or an explicitly provided model.
 func (oc *AIClient) handleNewChat(
 	ctx context.Context,
 	_ *event.Event,
@@ -570,12 +455,6 @@ func (oc *AIClient) handleNewChat(
 	usage := "Usage: !ai new [model]"
 
 	if len(args) > 0 {
-		cmd := strings.ToLower(args[0])
-		if cmd == "agent" {
-			oc.sendSystemNotice(runCtx, portal, "Agent mode is not available in the simple bridge. Use `!ai new [model]`.")
-			return
-		}
-
 		if len(args) != 1 {
 			oc.sendSystemNotice(runCtx, portal, usage)
 			return
@@ -612,66 +491,6 @@ func (oc *AIClient) handleNewChat(
 		return
 	}
 	oc.createAndOpenModelChat(runCtx, portal, modelID)
-}
-
-func (oc *AIClient) resolveAgentModelForNewChat(ctx context.Context, agent *AgentDefinition, preferredModel string) (string, error) {
-	if preferredModel != "" {
-		if ok, _ := oc.validateModel(ctx, preferredModel); ok {
-			return preferredModel, nil
-		}
-	}
-
-	if agent != nil {
-		defaultModel := oc.agentResolver.AgentDefaultModel(agent)
-		if ok, _ := oc.validateModel(ctx, defaultModel); ok {
-			return defaultModel, nil
-		}
-	}
-
-	fallback := oc.effectiveModel(nil)
-	if fallback != "" {
-		if ok, _ := oc.validateModel(ctx, fallback); ok {
-			return fallback, nil
-		}
-	}
-
-	if preferredModel != "" {
-		return "", fmt.Errorf("that model isn't available: %s", preferredModel)
-	}
-	return "", errors.New("no available model")
-}
-
-func (oc *AIClient) createAndOpenAgentChat(ctx context.Context, portal *bridgev2.Portal, agent *AgentDefinition, modelID string, modelOverride bool) {
-	agentName := oc.agentResolver.ResolveAgentDisplayName(ctx, agent)
-	chatResp, err := oc.createAgentChatWithModel(ctx, agent, modelID, modelOverride)
-	if err != nil {
-		oc.sendSystemNotice(ctx, portal, "Couldn't create the chat: "+err.Error())
-		return
-	}
-
-	newPortal, err := oc.UserLogin.Bridge.GetPortalByKey(ctx, chatResp.PortalKey)
-	if err != nil || newPortal == nil {
-		msg := "Couldn't open the new chat."
-		if err != nil {
-			msg = "Couldn't open the new chat: " + err.Error()
-		}
-		oc.sendSystemNotice(ctx, portal, msg)
-		return
-	}
-
-	chatInfo := chatResp.PortalInfo
-	if err := newPortal.CreateMatrixRoom(ctx, oc.UserLogin, chatInfo); err != nil {
-		oc.sendSystemNotice(ctx, portal, "Couldn't create the room: "+err.Error())
-		return
-	}
-
-	oc.sendWelcomeMessage(ctx, newPortal)
-
-	roomLink := fmt.Sprintf("https://matrix.to/#/%s", newPortal.MXID)
-	oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
-		"New %s chat created.\nOpen: %s",
-		agentName, roomLink,
-	))
 }
 
 func (oc *AIClient) createAndOpenModelChat(ctx context.Context, portal *bridgev2.Portal, modelID string) {
@@ -713,31 +532,6 @@ func (oc *AIClient) createForkedChat(
 	})
 	if err != nil {
 		return nil, nil, err
-	}
-
-	agentID := sourceMeta.AgentID
-	if agentID != "" {
-		pm := portalMeta(portal)
-		pm.AgentID = agentID
-
-		modelID := oc.effectiveModel(pm)
-		portal.OtherUserID = agentUserID(agentID)
-
-		agentName := agentID
-		agentAvatar := ""
-		if agent, err := oc.agentResolver.GetAgent(ctx, agentID); err == nil && agent != nil {
-			agentName = oc.agentResolver.ResolveAgentDisplayName(ctx, agent)
-			agentAvatar = agent.AvatarURL
-		}
-		if agentAvatar != "" {
-			portal.AvatarID = networkid.AvatarID(agentAvatar)
-			portal.AvatarMXC = id.ContentURIString(agentAvatar)
-		}
-		oc.applyAgentChatInfo(chatInfo, agentID, agentName, modelID)
-
-		if err := portal.Save(ctx); err != nil {
-			return nil, nil, err
-		}
 	}
 
 	return portal, chatInfo, nil
@@ -843,19 +637,7 @@ func (oc *AIClient) chatInfoFromPortal(ctx context.Context, portal *bridgev2.Por
 	}
 	chatInfo := oc.composeChatInfo(title, modelID)
 
-	agentID := resolveAgentID(meta)
-	if agentID == "" {
-		return chatInfo
-	}
-
-	agentName := agentID
-	if ctx != nil {
-		if agent, err := oc.agentResolver.GetAgent(ctx, agentID); err == nil && agent != nil {
-			agentName = oc.agentResolver.ResolveAgentDisplayName(ctx, agent)
-		}
-	}
-
-	oc.applyAgentChatInfo(chatInfo, agentID, agentName, modelID)
+	_ = ctx
 	return chatInfo
 }
 
@@ -917,54 +699,10 @@ func (oc *AIClient) composeChatInfo(title, modelID string) *bridgev2.ChatInfo {
 }
 
 func (oc *AIClient) applyAgentChatInfo(chatInfo *bridgev2.ChatInfo, agentID, agentName, modelID string) {
-	if chatInfo == nil || agentID == "" {
-		return
-	}
-	if modelID == "" {
-		modelID = oc.effectiveModel(nil)
-	}
-
-	agentGhostID := agentUserID(agentID)
-	agentDisplayName := agentName
-
-	members := chatInfo.Members
-	if members == nil {
-		members = &bridgev2.ChatMemberList{}
-	}
-	if members.MemberMap == nil {
-		members.MemberMap = make(bridgev2.ChatMemberMap)
-	}
-	members.OtherUserID = agentGhostID
-
-	humanID := humanUserID(oc.UserLogin.ID)
-	humanMember := members.MemberMap[humanID]
-	humanMember.EventSender = bridgev2.EventSender{
-		IsFromMe:    true,
-		SenderLogin: oc.UserLogin.ID,
-	}
-
-	agentMember := members.MemberMap[agentGhostID]
-	agentMember.EventSender = bridgev2.EventSender{
-		Sender:      agentGhostID,
-		SenderLogin: oc.UserLogin.ID,
-	}
-	modelInfo := oc.findModelInfo(modelID)
-	agentMember.UserInfo = &bridgev2.UserInfo{
-		Name:        ptr.Ptr(agentDisplayName),
-		IsBot:       ptr.Ptr(true),
-		Identifiers: aimodels.ModelContactIdentifiers(modelID, modelInfo),
-	}
-	agentMember.MemberEventExtra = map[string]any{
-		"displayname":            agentDisplayName,
-		"com.beeper.ai.model_id": modelID,
-		"com.beeper.ai.agent":    agentID,
-	}
-
-	members.MemberMap = bridgev2.ChatMemberMap{
-		humanID:      humanMember,
-		agentGhostID: agentMember,
-	}
-	chatInfo.Members = members
+	_ = chatInfo
+	_ = agentID
+	_ = agentName
+	_ = modelID
 }
 
 // updatePortalConfig applies room settings to portal metadata with optimistic updates.
@@ -1000,10 +738,6 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 	if config.ConversationMode != "" {
 		meta.ConversationMode = config.ConversationMode
 	}
-	if config.AgentID != "" {
-		meta.AgentID = config.AgentID
-	}
-
 	meta.LastRoomStateSync = time.Now().Unix()
 
 	// Persist changes
@@ -1036,20 +770,9 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 	return nil
 }
 
-// handleModelSwitch generates membership change events when switching models
-// This creates leave/join events to show the model transition in the room timeline
-// For agent rooms, it updates the agent ghost metadata.
+// handleModelSwitch generates membership change events when switching models.
 func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Portal, oldModel, newModel string) {
 	if oldModel == newModel || oldModel == "" || newModel == "" {
-		return
-	}
-
-	meta := portalMeta(portal)
-	agentID := resolveAgentID(meta)
-
-	// Check if this is an agent room - update agent ghost metadata
-	if agentID != "" {
-		oc.handleAgentModelSwitch(ctx, portal, agentID, oldModel, newModel)
 		return
 	}
 
@@ -1143,115 +866,23 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 	}
 }
 
-// handleAgentModelSwitch handles model switching for agent rooms.
-// Keeps a single agent ghost and updates member metadata.
+// handleAgentModelSwitch is disabled in the simple runtime.
 func (oc *AIClient) handleAgentModelSwitch(ctx context.Context, portal *bridgev2.Portal, agentID, oldModel, newModel string) {
-	// Get the agent to determine display name
-	agent, err := oc.agentResolver.GetAgent(ctx, agentID)
-	if err != nil || agent == nil {
-		oc.loggerForContext(ctx).Warn().Err(err).Str("agent", agentID).Msg("Agent not found for model switch")
-		return
-	}
-
-	oc.loggerForContext(ctx).Info().
-		Str("agent", agentID).
-		Str("old_model", oldModel).
-		Str("new_model", newModel).
-		Stringer("portal", portal.PortalKey).
-		Msg("Handling agent model switch")
-
-	ghostID := agentUserID(agentID)
-	agentName := oc.agentResolver.ResolveAgentDisplayName(ctx, agent)
-	displayName := agentName
-	oldModelName := aimodels.ModelContactName(oldModel, oc.findModelInfo(oldModel))
-	newModelName := aimodels.ModelContactName(newModel, oc.findModelInfo(newModel))
-	oldGhostID := portal.OtherUserID
-
-	// Update member metadata for the agent ghost
-	memberMap := bridgev2.ChatMemberMap{
-		ghostID: {
-			EventSender: bridgev2.EventSender{
-				Sender:      ghostID,
-				SenderLogin: oc.UserLogin.ID,
-			},
-			Membership: event.MembershipJoin,
-			UserInfo: &bridgev2.UserInfo{
-				Name:        ptr.Ptr(displayName),
-				IsBot:       ptr.Ptr(true),
-				Identifiers: aimodels.ModelContactIdentifiers(newModel, oc.findModelInfo(newModel)),
-			},
-			MemberEventExtra: map[string]any{
-				"displayname":            displayName,
-				"com.beeper.ai.model_id": newModel,
-				"com.beeper.ai.agent":    agentID,
-			},
-		},
-	}
-	if oldGhostID != "" && oldGhostID != ghostID {
-		memberMap[oldGhostID] = bridgev2.ChatMember{
-			EventSender: bridgev2.EventSender{
-				Sender:      oldGhostID,
-				SenderLogin: oc.UserLogin.ID,
-			},
-			Membership:     event.MembershipLeave,
-			PrevMembership: event.MembershipJoin,
-		}
-	}
-	memberChanges := &bridgev2.ChatMemberList{MemberMap: memberMap}
-
-	// Update portal's OtherUserID to agent ghost
-	portal.OtherUserID = ghostID
-	oc.ensureAgentGhostDisplayName(ctx, agentID, newModel, agentName)
-
-	// Queue the ChatInfoChange event
-	evt := &simplevent.ChatInfoChange{
-		EventMeta: simplevent.EventMeta{
-			Type:      bridgev2.RemoteEventChatInfoChange,
-			PortalKey: portal.PortalKey,
-			Timestamp: time.Now(),
-			LogContext: func(c zerolog.Context) zerolog.Context {
-				return c.Str("action", "agent_model_switch").
-					Str("agent", agentID).
-					Str("old_model", oldModel).
-					Str("new_model", newModel)
-			},
-		},
-		ChatInfoChange: &bridgev2.ChatInfoChange{
-			MemberChanges: memberChanges,
-		},
-	}
-
-	oc.UserLogin.QueueRemoteEvent(evt)
-
-	// Send a notice about the model change
-	notice := fmt.Sprintf("Switched model from %s to %s", oldModelName, newModelName)
-	oc.sendSystemNotice(ctx, portal, notice)
-
-	// Update bridge info and capabilities
-	portal.UpdateBridgeInfo(ctx)
-	portal.UpdateCapabilities(ctx, oc.UserLogin, true)
-
-	// Ensure only 1 AI ghost in room
-	if err := oc.ensureSingleAIGhost(ctx, portal); err != nil {
-		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure single AI ghost after agent model switch")
-	}
+	_ = ctx
+	_ = portal
+	_ = agentID
+	_ = oldModel
+	_ = newModel
 }
 
-// ensureSingleAIGhost ensures only 1 model/agent ghost is in the room at a time.
+// ensureSingleAIGhost ensures only one model ghost is in the room at a time.
 // Updates portal.OtherUserID if it doesn't match the expected ghost.
 func (oc *AIClient) ensureSingleAIGhost(ctx context.Context, portal *bridgev2.Portal) error {
 	meta := portalMeta(portal)
 
 	// Determine which ghost SHOULD be in the room
-	var expectedGhostID networkid.UserID
-	agentID := resolveAgentID(meta)
-
 	modelID := oc.effectiveModel(meta)
-	if agentID != "" {
-		expectedGhostID = agentUserID(agentID)
-	} else {
-		expectedGhostID = modelUserID(modelID)
-	}
+	expectedGhostID := modelUserID(modelID)
 
 	// Update portal.OtherUserID if mismatched
 	if portal.OtherUserID != expectedGhostID {
@@ -1409,7 +1040,7 @@ func (oc *AIClient) broadcastSettings(ctx context.Context, portal *bridgev2.Port
 		MaxCompletionTokens: meta.MaxCompletionTokens,
 		ReasoningEffort:     meta.ReasoningEffort,
 		ConversationMode:    meta.ConversationMode,
-		AgentID:             meta.AgentID,
+		AgentID:             "",
 	}
 
 	bot := oc.UserLogin.Bridge.Bot
@@ -1672,13 +1303,12 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 
 	// Set simple room metadata.
 	pm := portalMeta(portal)
-	pm.AgentID = ""
 	pm.SystemPrompt = defaultRawModeSystemPrompt
 	pm.IsRawMode = true
 	portal.OtherUserID = modelUserID(modelID)
 
 	if err := portal.Save(ctx); err != nil {
-		oc.loggerForContext(ctx).Err(err).Msg("Failed to save portal with agent config")
+		oc.loggerForContext(ctx).Err(err).Msg("Failed to save portal config")
 		return err
 	}
 

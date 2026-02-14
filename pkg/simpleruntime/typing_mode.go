@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/aityping"
+	"github.com/beeper/ai-bridge/pkg/core/aityping"
 )
 
 type TypingMode = aityping.TypingMode

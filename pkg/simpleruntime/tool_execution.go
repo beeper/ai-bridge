@@ -150,10 +150,6 @@ func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Port
 		toolCallData["input"] = input
 	}
 
-	if state.agentID != "" {
-		toolCallData["agent_id"] = state.agentID
-	}
-
 	eventRaw := map[string]any{
 		"body":              fmt.Sprintf("Calling %s...", displayTitle),
 		"msgtype":           event.MsgNotice,
@@ -236,10 +232,6 @@ func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Po
 			"expandable":       len(result) > 200,
 			"default_expanded": len(result) <= 500,
 		},
-	}
-
-	if state.agentID != "" {
-		toolResultData["agent_id"] = state.agentID
 	}
 
 	if output := parseToolOutputPayload(result); len(output) > 0 {

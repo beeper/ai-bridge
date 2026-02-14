@@ -3,7 +3,7 @@ package search
 import (
 	"context"
 
-	basesearch "github.com/beeper/ai-bridge/pkg/search"
+	basesearch "github.com/beeper/ai-bridge/pkg/matrixai/search"
 )
 
 type Request = basesearch.Request
