@@ -138,7 +138,7 @@ func (oc *AIClient) buildStatusText(
 	sb.WriteString(queueLine + "\n")
 
 	typingCtx := &TypingContext{IsGroup: isGroup, WasMentioned: !isGroup}
-	typingMode := oc.resolveTypingMode(meta, typingCtx, false)
+	typingMode := oc.resolveTypingMode(meta, typingCtx)
 	typingInterval := oc.resolveTypingInterval(meta)
 	typingLine := fmt.Sprintf(
 		"Typing: mode=%s interval=%s",
