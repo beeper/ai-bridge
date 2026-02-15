@@ -18,7 +18,7 @@ const (
 	ProviderBeeper     = "beeper"      // Legacy alias for magic_proxy
 	ProviderOpenAI     = "openai"      // Direct OpenAI API
 	ProviderOpenRouter = "openrouter"  // Direct OpenRouter API
-	ProviderMagicProxy = "magic_proxy" // Magic Proxy (OpenRouter-compatible)
+	ProviderMagicProxy = "magic_proxy" // Magic Proxy (OpenRouter-style)
 	FlowCustom         = "custom"      // Custom login flow (provider resolved during login)
 )
 

@@ -7,7 +7,7 @@ import (
 	"github.com/beeper/ai-bridge/pkg/core/aimodels"
 )
 
-// AIProvider defines a common interface for OpenAI-compatible AI providers
+// AIProvider defines a common interface for OpenAI-style AI providers
 type AIProvider interface {
 	// Name returns the provider name (e.g., "openai", "openrouter")
 	Name() string

@@ -14,6 +14,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
 
+	"github.com/beeper/ai-bridge/pkg/core/aimedia"
 	"github.com/beeper/ai-bridge/pkg/core/aimodels"
 )
 
@@ -243,7 +244,7 @@ func (oc *AIClient) resolveAutoAudioEntry(cfg *MediaUnderstandingConfig) *MediaU
 	if key := oc.resolveMediaProviderAPIKey("google", "", ""); key != "" || hasProviderAuthHeader("google", headers) {
 		return &MediaUnderstandingModelConfig{
 			Provider: "google",
-			Model:    defaultGoogleAudioModel,
+			Model:    aimedia.DefaultGoogleAudioModel,
 		}
 	}
 
@@ -335,7 +336,7 @@ func (oc *AIClient) resolveKeyMediaEntry(
 		if oc.hasMediaProviderAuth("google", cfg) {
 			return &MediaUnderstandingModelConfig{
 				Provider: "google",
-				Model:    defaultGoogleVideoModel,
+				Model:    aimedia.DefaultGoogleVideoModel,
 			}
 		}
 	case MediaCapabilityAudio:
@@ -356,19 +357,6 @@ func (oc *AIClient) hasMediaProviderAuth(providerID string, cfg *MediaUnderstand
 	}
 	key := oc.resolveMediaProviderAPIKey(providerID, "", "")
 	return strings.TrimSpace(key) != ""
-}
-
-func providerSupportsCapability(providerID string, capability MediaUnderstandingCapability) bool {
-	caps, ok := mediaProviderCapabilities[providerID]
-	if !ok {
-		return false
-	}
-	for _, cap := range caps {
-		if cap == capability {
-			return true
-		}
-	}
-	return false
 }
 
 func splitModelProvider(modelID string) (string, string) {
@@ -836,7 +824,7 @@ func (oc *AIClient) transcribeAudioWithEntry(
 	var text string
 	switch providerID {
 	case "openai", "groq":
-		text, err = transcribeOpenAICompatibleAudio(ctx, request)
+		text, err = transcribeOpenAIAudio(ctx, request)
 	case "deepgram":
 		query := resolveProviderQuery("deepgram", capCfg, entry)
 		text, err = transcribeDeepgramAudio(ctx, request, query)
@@ -1034,7 +1022,7 @@ func resolveOpenRouterMediaBaseURL(oc *AIClient) string {
 
 func resolveOpenAIMediaBaseURL(oc *AIClient) string {
 	if oc == nil || oc.connector == nil {
-		return defaultOpenAITranscriptionBaseURL
+		return aimedia.DefaultOpenAITranscriptionBaseURL
 	}
 	if oc.UserLogin != nil && oc.UserLogin.Metadata != nil {
 		services := oc.connector.resolveServiceConfig(loginMetadata(oc.UserLogin))
@@ -1046,47 +1034,11 @@ func resolveOpenAIMediaBaseURL(oc *AIClient) string {
 	if base != "" {
 		return strings.TrimRight(base, "/")
 	}
-	return defaultOpenAITranscriptionBaseURL
+	return aimedia.DefaultOpenAITranscriptionBaseURL
 }
 
-func resolveMediaBaseURL(cfg *MediaUnderstandingConfig, entry MediaUnderstandingModelConfig) string {
-	if strings.TrimSpace(entry.BaseURL) != "" {
-		return entry.BaseURL
-	}
-	if cfg != nil && strings.TrimSpace(cfg.BaseURL) != "" {
-		return cfg.BaseURL
-	}
-	return ""
-}
-
-func mergeMediaHeaders(cfg *MediaUnderstandingConfig, entry MediaUnderstandingModelConfig) map[string]string {
-	merged := map[string]string{}
-	if cfg != nil {
-		for key, value := range cfg.Headers {
-			merged[key] = value
-		}
-	}
-	for key, value := range entry.Headers {
-		merged[key] = value
-	}
-	return merged
-}
-
-func hasProviderAuthHeader(providerID string, headers map[string]string) bool {
-	for key := range headers {
-		switch strings.ToLower(key) {
-		case "authorization":
-			if providerID == "openai" || providerID == "groq" || providerID == "deepgram" || providerID == "openrouter" {
-				return true
-			}
-		case "x-goog-api-key":
-			if providerID == "google" {
-				return true
-			}
-		}
-	}
-	return false
-}
+var resolveMediaBaseURL = aimedia.ResolveBaseURL
+var mergeMediaHeaders = aimedia.MergeHeaders
 
 func resolveProfiledEnvKey(base string, profile string) string {
 	if base == "" || strings.TrimSpace(profile) == "" {

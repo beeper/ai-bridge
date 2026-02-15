@@ -789,7 +789,7 @@ func (oc *AIClient) handleMediaMessage(
 			return dispatchTextOnly(understanding.Body)
 		}
 
-		// If model lacks vision, analyze image first with a compatible fallback model.
+		// If model lacks vision, analyze image first with a supported fallback model.
 		if msgType == event.MsgImage {
 			visionModel, visionFallback := oc.resolveVisionModelForImage(ctx, meta)
 			if visionFallback && visionModel != "" {
@@ -808,7 +808,7 @@ func (oc *AIClient) handleMediaMessage(
 			}
 		}
 
-		// If model lacks audio input, analyze audio first with a compatible fallback model.
+		// If model lacks audio input, analyze audio first with a supported fallback model.
 		if msgType == event.MsgAudio {
 			audioModel, audioFallback := oc.resolveAudioModelForInput(ctx, meta)
 			if audioFallback && audioModel != "" {

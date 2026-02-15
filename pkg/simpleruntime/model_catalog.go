@@ -118,7 +118,7 @@ func (oc *AIClient) implicitModelCatalogEntries(meta *UserLoginMetadata) []Model
 	}
 	switch meta.Provider {
 	case ProviderMagicProxy:
-		// Magic Proxy is OpenRouter-compatible. It should expose the same model catalog
+		// Magic Proxy is OpenRouter-style. It should expose the same model catalog
 		// as OpenRouter when an API key is present.
 		if strings.TrimSpace(oc.connector.resolveOpenRouterAPIKey(meta)) == "" {
 			return nil

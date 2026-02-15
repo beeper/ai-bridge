@@ -9,7 +9,7 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
-// Backward-compatible type aliases that delegate to pkg/linkpreview.
+// Type aliases that delegate to pkg/linkpreview.
 type (
 	LinkPreviewConfig = linkpreview.Config
 	PreviewWithImage  = linkpreview.PreviewWithImage

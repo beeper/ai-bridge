@@ -1,4 +1,4 @@
-//lint:file-ignore U1000 Hard-cut compatibility: pending full dead-code deletion.
+//lint:file-ignore U1000 Hard-cut cleanup: pending full dead-code deletion.
 package connector
 
 import (
@@ -194,7 +194,7 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 	return oc.resolveModelIdentifier(ctx, id, createChat)
 }
 
-// resolveModelIdentifier resolves a model ID to a ghost (backwards compatibility)
+// resolveModelIdentifier resolves a model ID to a ghost.
 func (oc *AIClient) resolveModelIdentifier(ctx context.Context, modelID string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
 	// Get or create ghost
 	userID := modelUserID(modelID)

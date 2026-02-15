@@ -7,7 +7,7 @@ import (
 
 var nonAlphanumericRE = regexp.MustCompile(`[^a-zA-Z0-9]`)
 
-// SanitizeToolCallID cleans a tool call ID for provider compatibility.
+// SanitizeToolCallID cleans a tool call ID for provider requirements.
 //
 // Modes:
 //   - "strict": strips all non-alphanumeric characters, preserves "call_" prefix

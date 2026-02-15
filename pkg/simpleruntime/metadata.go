@@ -203,9 +203,9 @@ type MessageMetadata struct {
 	// Tool call tracking
 	ToolCalls []ToolCallMetadata `json:"tool_calls,omitempty"` // List of tool calls in this turn
 
-	// Canonical internal schema payload (AI SDK compatible).
+	// Canonical internal schema payload (AI SDK).
 	CanonicalSchema    string         `json:"canonical_schema,omitempty"`     // e.g. ai-sdk-ui-message-v1
-	CanonicalUIMessage map[string]any `json:"canonical_ui_message,omitempty"` // AI SDK UIMessage-compatible payload
+	CanonicalUIMessage map[string]any `json:"canonical_ui_message,omitempty"` // AI SDK UIMessage payload
 
 	// Timing information
 	StartedAtMs    int64 `json:"started_at_ms,omitempty"`     // Unix ms when generation started

@@ -54,8 +54,8 @@ type OpenAIConnector struct {
 	br     *bridgev2.Bridge
 	Config Config
 
-	clientsMu sync.Mutex
-	clients   map[networkid.UserLoginID]bridgev2.NetworkAPI
+	clientsMu     sync.Mutex
+	clients       map[networkid.UserLoginID]bridgev2.NetworkAPI
 	policy        BridgePolicy
 	hooks         ConnectorHooks
 	clientFactory ClientFactory
@@ -576,7 +576,7 @@ func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
 }
 
 func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
-	// Compatibility aliases: some clients may still request historic provider IDs.
+	// Provider aliases: some clients may still request historic provider IDs.
 	if flowID == ProviderOpenAI || flowID == ProviderOpenRouter {
 		flowID = FlowCustom
 	} else if flowID == ProviderBeeper {

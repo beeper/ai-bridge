@@ -45,7 +45,6 @@ func ParseModelFromGhostID(ghostID string) string {
 	return parseModelFromGhostID(ghostID)
 }
 
-
 // JoinProxyPath joins a base URL and suffix path.
 func JoinProxyPath(base, suffix string) string {
 	return joinProxyPath(base, suffix)

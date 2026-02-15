@@ -43,6 +43,16 @@ if rg -q '"maunium.net/go/mautrix' pkg/core/; then
   fail "pkg/core/ must not import mautrix"
 fi
 
+# Disallow compatibility/shim files in active runtime paths.
+if rg --files pkg modules bridges | rg -qi '(_compat\.go$|(^|/)compat_|(^|/)shim_|_shim\.go$)'; then
+  fail "compatibility/shim filenames are not allowed in pkg/, modules/, or bridges/"
+fi
+
+# Disallow compatibility/shim markers in active runtime paths.
+if rg -n 'compat|shim|alias wrapper|legacy adapter' pkg modules bridges -g'*.go' -g'*.md' >/dev/null; then
+  fail "compatibility/shim markers are not allowed in active runtime paths"
+fi
+
 # pkg/matrixai/ must not import simpleruntime or bridge-specific code.
 if rg -q 'github.com/beeper/ai-bridge/pkg/simpleruntime' pkg/matrixai/; then
   fail "pkg/matrixai/ must not import simpleruntime"
