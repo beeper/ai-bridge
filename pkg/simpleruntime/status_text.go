@@ -90,10 +90,6 @@ func (oc *AIClient) buildStatusText(
 	if verbose == "" {
 		verbose = "off"
 	}
-	elevated := strings.TrimSpace(meta.ElevatedLevel)
-	if elevated == "" {
-		elevated = "off"
-	}
 	sendPolicy := normalizeSendPolicyMode(meta.SendPolicy)
 	if sendPolicy == "" {
 		sendPolicy = "allow"
@@ -108,11 +104,10 @@ func (oc *AIClient) buildStatusText(
 		conversationMode = "default"
 	}
 	sb.WriteString(fmt.Sprintf(
-		"Options: think=%s reasoning=%s verbose=%s elevated=%s send=%s response=%s conversation=%s\n",
+		"Options: think=%s reasoning=%s verbose=%s send=%s response=%s conversation=%s\n",
 		thinking,
 		reasoning,
 		verbose,
-		elevated,
 		sendLabel,
 		responseMode,
 		conversationMode,

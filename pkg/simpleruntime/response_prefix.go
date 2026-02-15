@@ -43,9 +43,7 @@ func resolveResponsePrefixRaw(oc *AIClient, cfg *Config, meta *PortalMetadata) s
 }
 
 func buildResponsePrefixContext(oc *AIClient, meta *PortalMetadata) ResponsePrefixContext {
-	ctx := ResponsePrefixContext{
-		IdentityName: "",
-	}
+	ctx := ResponsePrefixContext{}
 	if oc == nil {
 		return ctx
 	}

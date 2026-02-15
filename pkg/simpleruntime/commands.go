@@ -293,7 +293,6 @@ func fnCommands(ce *commands.Event) {
 			"- `!ai think off|minimal|low|medium|high|xhigh`\n" +
 			"- `!ai verbose on|off|full`\n" +
 			"- `!ai reasoning off|on|low|medium|high|xhigh`\n" +
-			"- `!ai elevated off|on|ask|full`\n" +
 			"- `!ai activation mention|always` (group chats)\n" +
 			"- `!ai send on|off|inherit`\n" +
 			"- `!ai queue status|reset|<mode> [debounce:<dur>] [cap:<n>] [drop:<old|new|summarize>]`\n\n" +

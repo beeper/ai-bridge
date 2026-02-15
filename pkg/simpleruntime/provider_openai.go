@@ -527,7 +527,7 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	return models, nil
 }
 
-// defaultOpenAIModels returns an empty list (model catalog is provided via VFS).
+// defaultOpenAIModels returns an empty list (model catalog is fetched at runtime).
 func defaultOpenAIModels() []ModelInfo {
 	return nil
 }

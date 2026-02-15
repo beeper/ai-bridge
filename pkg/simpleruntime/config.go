@@ -22,7 +22,6 @@ type Config struct {
 	Channels  *ChannelsConfig     `yaml:"channels"`
 	Messages  *MessagesConfig     `yaml:"messages"`
 	Commands  *CommandsConfig     `yaml:"commands"`
-	Session   *SessionConfig      `yaml:"session"`
 
 	// Global settings
 	DefaultSystemPrompt string        `yaml:"default_system_prompt"`
@@ -103,30 +102,12 @@ type QueueConfig struct {
 	Drop                string            `yaml:"drop"`
 }
 
-// SessionConfig configures session store behavior (OpenClaw-style).
-type SessionConfig struct {
-	Scope   string `yaml:"scope"`
-	MainKey string `yaml:"mainKey"`
-	Store   string `yaml:"store"`
-}
 
 // ToolProvidersConfig configures external tool providers like search and fetch.
 type ToolProvidersConfig struct {
 	Search *SearchConfig     `yaml:"search"`
 	Fetch  *FetchConfig      `yaml:"fetch"`
 	Media  *MediaToolsConfig `yaml:"media"`
-	VFS    *VFSToolsConfig   `yaml:"vfs"`
-}
-
-// VFSToolsConfig configures virtual filesystem tools.
-type VFSToolsConfig struct {
-	ApplyPatch *ApplyPatchToolsConfig `yaml:"apply_patch"`
-}
-
-// ApplyPatchToolsConfig configures apply_patch availability.
-type ApplyPatchToolsConfig struct {
-	Enabled     *bool    `yaml:"enabled"`
-	AllowModels []string `yaml:"allow_models"`
 }
 
 // MediaUnderstandingScopeMatch defines match criteria for media understanding scope rules.
@@ -424,11 +405,6 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Map, "messages", "queue", "debounceMsByChannel")
 	helper.Copy(configupgrade.Int, "messages", "queue", "cap")
 	helper.Copy(configupgrade.Str, "messages", "queue", "drop")
-
-	// Session configuration (OpenClaw-style)
-	helper.Copy(configupgrade.Str, "session", "scope")
-	helper.Copy(configupgrade.Str, "session", "mainKey")
-	helper.Copy(configupgrade.Str, "session", "store")
 
 	// Channels
 	helper.Copy(configupgrade.Str, "channels", "defaults", "responsePrefix")
