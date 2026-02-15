@@ -333,7 +333,7 @@ func (oc *AIClient) redactInitialStreamingMessage(ctx context.Context, portal *b
 		},
 	}, nil)
 	if err != nil {
-		oc.loggerForContext(ctx).Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact heartbeat reply message")
+		oc.loggerForContext(ctx).Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact initial streaming message")
 	}
 }
 
