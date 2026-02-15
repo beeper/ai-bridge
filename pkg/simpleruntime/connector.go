@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/matrixai/brokenlogin"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/configupgrade"
 
@@ -492,7 +493,7 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 
 	key := strings.TrimSpace(oc.resolveProviderAPIKey(meta))
 	if key == "" {
-		login.Client = &brokenLoginClient{UserLogin: login, Reason: "No API key available for this login. Sign in again or remove this account."}
+		login.Client = brokenlogin.New(login, "No API key available for this login. Sign in again or remove this account.")
 		return nil
 	}
 	oc.clientsMu.Lock()
@@ -504,7 +505,7 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 			oc.clientsMu.Unlock()
 			client, err := oc.createClient(login, key)
 			if err != nil {
-				login.Client = &brokenLoginClient{UserLogin: login, Reason: "Couldn't initialize this login. Remove and re-add the account."}
+				login.Client = brokenlogin.New(login, "Couldn't initialize this login. Remove and re-add the account.")
 				return nil
 			}
 			oc.clientsMu.Lock()
@@ -554,7 +555,7 @@ func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 
 	client, err := oc.createClient(login, key)
 	if err != nil {
-		login.Client = &brokenLoginClient{UserLogin: login, Reason: "Couldn't initialize this login. Remove and re-add the account."}
+		login.Client = brokenlogin.New(login, "Couldn't initialize this login. Remove and re-add the account.")
 		return nil
 	}
 	oc.clientsMu.Lock()
