@@ -63,11 +63,7 @@ func (oc *AIClient) buildStatusText(
 	}
 
 	sessionKey := portal.MXID.String()
-	agentID := resolveAgentID(meta)
-	entry := oc.getSessionEntryMaybe(ctx, agentID, sessionKey)
-	if entry != nil && entry.UpdatedAt > 0 {
-		sb.WriteString(fmt.Sprintf("Session: %s (updated %s)\n", sessionKey, formatAge(time.Now().UnixMilli()-entry.UpdatedAt)))
-	} else if sessionKey != "" {
+	if sessionKey != "" {
 		sb.WriteString(fmt.Sprintf("Session: %s\n", sessionKey))
 	}
 
@@ -162,8 +158,6 @@ func (oc *AIClient) buildStatusText(
 	}
 	sb.WriteString(typingLine + "\n")
 
-	// Command-only heartbeat surface (OpenClaw parity: show last heartbeat snapshot for debugging).
-	sb.WriteString(formatHeartbeatSummary(time.Now().UnixMilli(), getLastHeartbeatEventForLogin(oc.UserLogin)) + "\n")
 
 	return strings.TrimSpace(sb.String())
 }
@@ -322,14 +316,7 @@ func (oc *AIClient) estimatePromptTokens(ctx context.Context, portal *bridgev2.P
 	return count
 }
 
-func (oc *AIClient) getSessionEntryMaybe(ctx context.Context, agentID, sessionKey string) *sessionEntry {
-	if oc == nil || sessionKey == "" {
-		return nil
-	}
-	ref := oc.resolveSessionStoreRef(agentID)
-	if entry, ok := oc.getSessionEntry(ctx, ref, sessionKey); ok {
-		return &entry
-	}
+func (oc *AIClient) getSessionEntryMaybe(_ context.Context, _, _ string) any {
 	return nil
 }
 

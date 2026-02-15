@@ -68,11 +68,8 @@ type streamingState struct {
 	// Used when a tool continuation resumes a previously-started assistant message.
 	needsTextSeparator bool
 
-	// Heartbeat handling
-	heartbeat         *HeartbeatRunConfig
-	heartbeatResultCh chan HeartbeatRunOutcome
-	suppressSave      bool
-	suppressSend      bool
+	suppressSave bool
+	suppressSend bool
 
 	// AI SDK UIMessage stream tracking
 	uiStarted              bool
@@ -129,16 +126,6 @@ func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID 
 	}
 	if meta != nil && normalizeSendPolicyMode(meta.SendPolicy) == "deny" {
 		state.suppressSend = true
-	}
-	if hb := heartbeatRunFromContext(ctx); hb != nil {
-		state.heartbeat = hb.Config
-		state.heartbeatResultCh = hb.ResultCh
-		if hb.Config != nil && hb.Config.SuppressSave {
-			state.suppressSave = true
-		}
-		if hb.Config != nil && hb.Config.SuppressSend {
-			state.suppressSend = true
-		}
 	}
 	return state
 }
@@ -1508,16 +1495,15 @@ func (oc *AIClient) streamingResponse(
 	var typingCtrl *TypingController
 	var typingSignals *TypingSignaler
 	touchTyping := func() {}
-	isHeartbeat := state.heartbeat != nil
-	if !state.suppressSend && !isHeartbeat {
-		mode := oc.resolveTypingMode(meta, typingContextFromContext(ctx), isHeartbeat)
+	if !state.suppressSend {
+		mode := oc.resolveTypingMode(meta, typingContextFromContext(ctx), false)
 		interval := oc.resolveTypingInterval(meta)
 		if interval > 0 && mode != TypingModeNever {
 			typingCtrl = NewTypingController(oc, ctx, portal, TypingControllerOptions{
 				Interval: interval,
 				TTL:      typingTTL,
 			})
-			typingSignals = NewTypingSignaler(typingCtrl, mode, isHeartbeat)
+			typingSignals = NewTypingSignaler(typingCtrl, mode, false)
 			touchTyping = func() {
 				typingCtrl.RefreshTTL()
 			}
@@ -1678,7 +1664,7 @@ func (oc *AIClient) streamingResponse(
 					if state.firstToken && state.visibleAccumulated.Len() > 0 {
 						state.firstToken = false
 						state.firstTokenAtMs = time.Now().UnixMilli()
-						if !state.suppressSend && !isHeartbeat {
+						if !state.suppressSend {
 							// Ensure ghost display name is set before sending the first message
 							oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
 							state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.visibleAccumulated.String(), state.turnID, state.replyTarget)
@@ -1707,7 +1693,7 @@ func (oc *AIClient) streamingResponse(
 			if state.firstToken && state.reasoning.Len() > 0 {
 				state.firstToken = false
 				state.firstTokenAtMs = time.Now().UnixMilli()
-				if !state.suppressSend && !isHeartbeat {
+				if !state.suppressSend {
 					oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
 					// Send empty initial message - will be replaced with content later
 					state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID, state.replyTarget)
@@ -2544,7 +2530,7 @@ func (oc *AIClient) streamingResponse(
 						if state.firstToken && state.visibleAccumulated.Len() > 0 {
 							state.firstToken = false
 							state.firstTokenAtMs = time.Now().UnixMilli()
-							if !state.suppressSend && !isHeartbeat {
+							if !state.suppressSend {
 								oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
 								state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.visibleAccumulated.String(), state.turnID, state.replyTarget)
 								if state.initialEventID == "" {
@@ -2570,7 +2556,7 @@ func (oc *AIClient) streamingResponse(
 				if state.firstToken && state.reasoning.Len() > 0 {
 					state.firstToken = false
 					state.firstTokenAtMs = time.Now().UnixMilli()
-					if !state.suppressSend && !isHeartbeat {
+					if !state.suppressSend {
 						oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
 						state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, "...", state.turnID, state.replyTarget)
 						if state.initialEventID == "" {
@@ -2939,7 +2925,7 @@ func (oc *AIClient) streamingResponse(
 	oc.emitUIFinish(ctx, portal, state, meta)
 
 	// Send final message to persist complete content with metadata (including reasoning)
-	if state.initialEventID != "" || state.heartbeat != nil {
+	if state.initialEventID != "" {
 		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
 		if state.initialEventID != "" && !state.suppressSave {
 			oc.saveAssistantMessage(ctx, log, portal, state, meta)
@@ -3118,16 +3104,15 @@ func (oc *AIClient) streamChatCompletions(
 	var typingCtrl *TypingController
 	var typingSignals *TypingSignaler
 	touchTyping := func() {}
-	isHeartbeat := state.heartbeat != nil
-	if !state.suppressSend && !isHeartbeat {
-		mode := oc.resolveTypingMode(meta, typingContextFromContext(ctx), isHeartbeat)
+	if !state.suppressSend {
+		mode := oc.resolveTypingMode(meta, typingContextFromContext(ctx), false)
 		interval := oc.resolveTypingInterval(meta)
 		if interval > 0 && mode != TypingModeNever {
 			typingCtrl = NewTypingController(oc, ctx, portal, TypingControllerOptions{
 				Interval: interval,
 				TTL:      typingTTL,
 			})
-			typingSignals = NewTypingSignaler(typingCtrl, mode, isHeartbeat)
+			typingSignals = NewTypingSignaler(typingCtrl, mode, false)
 			touchTyping = func() {
 				typingCtrl.RefreshTTL()
 			}
@@ -3226,7 +3211,7 @@ func (oc *AIClient) streamChatCompletions(
 							if state.firstToken && state.visibleAccumulated.Len() > 0 {
 								state.firstToken = false
 								state.firstTokenAtMs = time.Now().UnixMilli()
-								if !state.suppressSend && !isHeartbeat {
+								if !state.suppressSend {
 									oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
 									state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.visibleAccumulated.String(), state.turnID, state.replyTarget)
 									if state.initialEventID == "" {

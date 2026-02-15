@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -68,10 +67,6 @@ func (oc *AIClient) EffectiveModel(meta *PortalMetadata) string {
 	return oc.effectiveModel(meta)
 }
 
-// AgentModelOverride returns the model override for a given agent.
-func (oc *AIClient) AgentModelOverride(agentID string) string {
-	return oc.agentModelOverride(agentID)
-}
 
 // ResolveModelID validates and resolves a model ID.
 func (oc *AIClient) ResolveModelID(ctx context.Context, modelID string) (string, bool, error) {
@@ -118,11 +113,6 @@ func (oc *AIClient) CanUseImageGeneration() bool {
 	return oc.canUseImageGeneration()
 }
 
-// BridgeStateBackend returns the state store backend.
-func (oc *AIClient) BridgeStateBackend() StateStoreBackend {
-	return oc.bridgeStateBackend()
-}
-
 // EnsureModelInRoom ensures the AI ghost is present in the portal room.
 func (oc *AIClient) EnsureModelInRoom(ctx context.Context, portal *bridgev2.Portal) error {
 	return oc.ensureModelInRoom(ctx, portal)
@@ -141,11 +131,6 @@ func (oc *AIClient) CancelRoomRun(roomID id.RoomID) bool {
 // ClearPendingQueue clears the pending message queue for a room.
 func (oc *AIClient) ClearPendingQueue(roomID id.RoomID) {
 	oc.clearPendingQueue(roomID)
-}
-
-// EmitHeartbeatEvent persists a heartbeat event payload.
-func (oc *AIClient) EmitHeartbeatEvent(evt *HeartbeatEventPayload) {
-	oc.emitHeartbeatEvent(evt)
 }
 
 // SavePortalQuiet saves a portal without sending Matrix events.
@@ -183,11 +168,6 @@ func (oc *AIClient) BuildPrompt(ctx context.Context, portal *bridgev2.Portal, me
 	return oc.buildPrompt(ctx, portal, meta, latest, eventID)
 }
 
-// CreateAgentChatWithModel creates a new chat with the given agent and optional model.
-// Returns an error in simple runtime — agentic bridges override via hooks.
-func (oc *AIClient) CreateAgentChatWithModel(ctx context.Context, agent *AgentDefinition, modelID string, applyModelOverride bool) (*bridgev2.CreateChatResponse, error) {
-	return nil, fmt.Errorf("agent chat creation is not available in simple bridge mode")
-}
 
 // InitPortalForChat initializes a portal for a new chat.
 func (oc *AIClient) InitPortalForChat(ctx context.Context, opts PortalInitOpts) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
@@ -315,16 +295,6 @@ func (oc *AIClient) SetRoomName(ctx context.Context, portal *bridgev2.Portal, na
 	return oc.setRoomName(ctx, portal, name)
 }
 
-// EnsureAgentGhostDisplayName ensures the agent ghost has its display name set.
-// No-op in simple runtime. Agentic bridges override.
-func (oc *AIClient) EnsureAgentGhostDisplayName(ctx context.Context, agentID, modelID, agentName string) {
-	// no-op: agents are not a simple-bridge concept
-}
-
-// CreateAgentChat creates a new chat for the given agent. Disabled in simple runtime.
-func (oc *AIClient) CreateAgentChat(ctx context.Context, agent *AgentDefinition) (*bridgev2.CreateChatResponse, error) {
-	return nil, fmt.Errorf("agent chat creation is not available in simple bridge mode")
-}
 
 // ToolExecutor is the exported alias for the builtin tool executor signature.
 type ToolExecutor = toolExecutor

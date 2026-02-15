@@ -1,10 +1,17 @@
 .DS_Store
 .claude/settings.local.json
+
+# Compiled binaries
 /ai
 /ai-simple
 /ai-agentic
 /ai-codex
 /ai-opencode
+/bridge
+/generate-models
+/bridges/*/bridge
+/start
+
 logs/
 *.db*
 *.yaml
@@ -12,9 +19,7 @@ logs/
 !registration.yaml.example
 !**/example-config.yaml
 !.pre-commit-config.yaml
-!.gitlab-ci.yml
 !.github/**/*.yml
-/start
 .env
 .cache
 .gocache

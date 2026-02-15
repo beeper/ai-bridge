@@ -106,12 +106,12 @@ func isBuiltinToolEnabled(meta *PortalMetadata, name string) bool {
 	return true
 }
 
-func executeWebSearch(ctx context.Context, args map[string]any) (string, error) {
+func executeWebSearch(_ context.Context, args map[string]any) (string, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
 		return "", errors.New("web_search requires query")
 	}
-	return executeWebSearchWithProviders(ctx, args)
+	return "", errors.New("web_search provider is not configured in simple bridge")
 }
 
 func normalizeMimeString(value string) string {

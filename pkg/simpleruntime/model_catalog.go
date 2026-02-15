@@ -3,7 +3,6 @@ package connector
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"slices"
 	"strings"
 
@@ -64,34 +63,10 @@ func (oc *AIClient) ensureModelCatalogVFS(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 
-	payload := struct {
-		Models []ModelCatalogEntry `json:"models"`
-	}{
-		Models: merged,
-	}
-	raw, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return false, err
-	}
-	content := string(raw) + "\n"
-
-	backend := oc.bridgeStateBackend()
-	if backend == nil {
-		return false, nil
-	}
-	if existing, found, err := backend.Read(ctx, modelCatalogStoreKey); err == nil && found {
-		if string(existing) == content {
-			return false, nil
-		}
-	}
-
-	if err := backend.Write(ctx, modelCatalogStoreKey, []byte(content)); err != nil {
-		return false, err
-	}
-
+	// In simple bridge, model catalog is in-memory only (no VFS backend).
 	oc.modelCatalogMu.Lock()
-	oc.modelCatalogLoaded = false
-	oc.modelCatalogCache = nil
+	oc.modelCatalogLoaded = true
+	oc.modelCatalogCache = merged
 	oc.modelCatalogMu.Unlock()
 
 	return true, nil
@@ -300,36 +275,14 @@ func (oc *AIClient) loadModelCatalog(ctx context.Context, useCache bool) []Model
 		oc.modelCatalogMu.Unlock()
 	}
 
-	backend := oc.bridgeStateBackend()
-	if backend == nil {
-		return nil
-	}
-	data, found, err := backend.Read(ctx, modelCatalogStoreKey)
-	if err != nil || !found {
-		data, found, err = backend.Read(ctx, modelCatalogStoreKeyAlt)
-	}
-	if err != nil || !found {
-		if useCache {
-			oc.modelCatalogMu.Lock()
-			oc.modelCatalogLoaded = true
-			oc.modelCatalogCache = nil
-			oc.modelCatalogMu.Unlock()
-		}
-		return nil
-	}
-
-	var raw any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil
-	}
-	entries := parseModelCatalog(raw)
+	// Simple bridge: no VFS backend, catalog is only in memory.
 	if useCache {
 		oc.modelCatalogMu.Lock()
 		oc.modelCatalogLoaded = true
-		oc.modelCatalogCache = append([]ModelCatalogEntry(nil), entries...)
+		oc.modelCatalogCache = nil
 		oc.modelCatalogMu.Unlock()
 	}
-	return entries
+	return nil
 }
 
 func parseModelCatalog(raw any) []ModelCatalogEntry {

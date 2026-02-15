@@ -17,11 +17,6 @@ func (oc *AIClient) matrixRoomDisplayName(ctx context.Context, portal *bridgev2.
 		}
 		return ""
 	}
-	if info, err := getMatrixRoomInfo(ctx, &BridgeToolContext{Client: oc, Portal: portal}); err == nil && info != nil {
-		if info.Name != "" {
-			return info.Name
-		}
-	}
 	name := portalRoomName(portal)
 	if name != "" {
 		return name

@@ -220,7 +220,7 @@ func (oc *AIClient) dispatchQueuedPrompt(
 				followup := item
 				followup.backlogAfter = false
 				followup.allowDuplicate = true
-				queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(oc.backgroundContext(ctx), item.pending.Portal, item.pending.Meta, "", aiqueue.QueueInlineOptions{})
+				queueSettings := oc.resolveQueueSettingsForPortal(oc.backgroundContext(ctx), item.pending.Portal, item.pending.Meta, "", aiqueue.QueueInlineOptions{})
 				oc.queuePendingMessage(roomID, followup, queueSettings)
 			}
 			oc.releaseRoom(roomID)

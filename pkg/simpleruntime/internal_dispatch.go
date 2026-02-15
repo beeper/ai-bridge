@@ -96,7 +96,7 @@ func (oc *AIClient) dispatchInternalMessage(
 		summaryLine: trimmed,
 		enqueuedAt:  time.Now().UnixMilli(),
 	}
-	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
+	queueSettings := oc.resolveQueueSettingsForPortal(ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
 
 	if oc.acquireRoom(portal.MXID) {
 		metaSnapshot := clonePortalMetadata(meta)
