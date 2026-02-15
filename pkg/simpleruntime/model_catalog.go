@@ -26,7 +26,7 @@ type ModelCatalogEntry struct {
 	Input           []string `json:"input,omitempty"`
 }
 
-func (oc *AIClient) ensureModelCatalogVFS(ctx context.Context) (bool, error) {
+func (oc *AIClient) ensureModelCatalog(ctx context.Context) (bool, error) {
 	if oc == nil || oc.UserLogin == nil {
 		return false, nil
 	}
@@ -63,7 +63,7 @@ func (oc *AIClient) ensureModelCatalogVFS(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 
-	// In simple bridge, model catalog is in-memory only (no VFS backend).
+	// Model catalog is in-memory only.
 	oc.modelCatalogMu.Lock()
 	oc.modelCatalogLoaded = true
 	oc.modelCatalogCache = merged
@@ -275,7 +275,7 @@ func (oc *AIClient) loadModelCatalog(ctx context.Context, useCache bool) []Model
 		oc.modelCatalogMu.Unlock()
 	}
 
-	// Simple bridge: no VFS backend, catalog is only in memory.
+	// Catalog is in-memory only.
 	if useCache {
 		oc.modelCatalogMu.Lock()
 		oc.modelCatalogLoaded = true

@@ -11,7 +11,6 @@ type ResponsePrefixContext struct {
 	ModelFull     string
 	Provider      string
 	ThinkingLevel string
-	IdentityName  string
 }
 
 var responsePrefixTemplatePattern = regexp.MustCompile(`\{([a-zA-Z][a-zA-Z0-9.]*)\}`)
@@ -43,10 +42,6 @@ func resolveResponsePrefixTemplate(template string, ctx ResponsePrefixContext) s
 		case "thinkinglevel", "think":
 			if ctx.ThinkingLevel != "" {
 				return ctx.ThinkingLevel
-			}
-		case "identity.name", "identityname":
-			if ctx.IdentityName != "" {
-				return ctx.IdentityName
 			}
 		}
 		return match

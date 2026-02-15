@@ -61,13 +61,3 @@ func formatReasoningAck(level string) string {
 	}
 }
 
-func formatElevatedAck(level string) string {
-	switch level {
-	case "off":
-		return formatSystemAck("Elevated mode disabled.")
-	case "full":
-		return formatSystemAck("Elevated mode set to full (auto-approve).")
-	default:
-		return formatSystemAck("Elevated mode set to ask.")
-	}
-}

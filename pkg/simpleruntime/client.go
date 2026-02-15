@@ -300,7 +300,7 @@ type AIClient struct {
 	queueTypingMu sync.Mutex
 	queueTyping   map[id.RoomID]*TypingController
 
-	// Model catalog cache (VFS-backed)
+	// Model catalog cache
 	modelCatalogMu     sync.Mutex
 	modelCatalogLoaded bool
 	modelCatalogCache  []ModelCatalogEntry
@@ -1660,8 +1660,8 @@ func (oc *AIClient) listAvailableModels(ctx context.Context, forceRefresh bool) 
 		}
 	}
 
-	oc.loggerForContext(ctx).Debug().Msg("Loading model catalog from VFS")
-	if _, err := oc.ensureModelCatalogVFS(ctx); err != nil {
+	oc.loggerForContext(ctx).Debug().Msg("Loading model catalog")
+	if _, err := oc.ensureModelCatalog(ctx); err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to seed model catalog")
 	}
 	allModels := oc.loadModelCatalogModels(ctx)

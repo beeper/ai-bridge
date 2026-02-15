@@ -127,7 +127,6 @@ type PortalMetadata struct {
 	EmitToolArgs              bool   `json:"emit_tool_args,omitempty"`
 	ThinkingLevel             string `json:"thinking_level,omitempty"`   // off|minimal|low|medium|high|xhigh
 	VerboseLevel              string `json:"verbose_level,omitempty"`    // off|on|full
-	ElevatedLevel             string `json:"elevated_level,omitempty"`   // off|on|ask|full
 	GroupActivation           string `json:"group_activation,omitempty"` // mention|always
 	GroupActivationNeedsIntro bool   `json:"group_activation_needs_intro,omitempty"`
 	GroupIntroSent            bool   `json:"group_intro_sent,omitempty"`

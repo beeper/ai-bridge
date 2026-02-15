@@ -251,41 +251,6 @@ func fnReasoning(ce *commands.Event) {
 	ce.Reply("%s", formatReasoningAck(level))
 }
 
-// CommandElevated handles the !ai elevated command.
-var CommandElevated = registerAICommand(commandregistry.Definition{
-	Name:           "elevated",
-	Aliases:        []string{"elev"},
-	Description:    "Get or set elevated access (off|on|ask|full)",
-	Args:           "[level]",
-	Section:        HelpSectionAI,
-	RequiresPortal: true,
-	RequiresLogin:  true,
-	Handler:        fnElevated,
-})
-
-func fnElevated(ce *commands.Event) {
-	client, meta, ok := requireClientMeta(ce)
-	if !ok {
-		return
-	}
-	if len(ce.Args) == 0 {
-		current := meta.ElevatedLevel
-		if current == "" {
-			current = "off"
-		}
-		ce.Reply("Elevated access: %s", current)
-		return
-	}
-	level, ok := normalizeElevatedLevel(ce.Args[0])
-	if !ok {
-		ce.Reply("Usage: `!ai elevated off|on|ask|full`")
-		return
-	}
-	meta.ElevatedLevel = level
-	client.savePortalQuiet(ce.Ctx, ce.Portal, "elevated change")
-	ce.Reply("%s", formatElevatedAck(level))
-}
-
 // CommandActivation handles the !ai activation command.
 var CommandActivation = registerAICommand(commandregistry.Definition{
 	Name:           "activation",
