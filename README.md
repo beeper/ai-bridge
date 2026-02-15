@@ -5,9 +5,9 @@ Shared AI bridge foundation plus the simple Matrix bridge binary.
 ## Repository scope
 
 This repo contains:
-- shared modules (`modules/contracts`, `modules/runtime`, `modules/core`, `modules/aiproxy`, `modules/simple`)
-- shared runtime/tool/helper packages (`pkg/*`)
-- simple bridge binary (`bridges/simple`)
+- shared modules (`modules/contracts`, `modules/runtime`, `modules/aiproxy`)
+- shared library packages (`pkg/core/*`, `pkg/matrixai/*`, `pkg/airuntime/*`)
+- simple bridge binary (`bridges/ai`)
 
 Dedicated products live in sibling repos:
 - `../beep` (advanced runtime)
