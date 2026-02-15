@@ -3,7 +3,7 @@ module github.com/beeper/ai-bridge/bridges/ai
 go 1.24.0
 
 require (
-	github.com/beeper/ai-bridge/modules/simple v0.0.0-20260209155641-adfecbb4ed29
+	github.com/beeper/ai-bridge v0.0.0-20260209155641-adfecbb4ed29
 	maunium.net/go/mautrix v0.26.3-0.20260129174719-d2364b382275
 )
 
@@ -11,7 +11,6 @@ require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/PuerkitoBio/goquery v1.11.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
-	github.com/beeper/ai-bridge v0.0.0-20260209155641-adfecbb4ed29 // indirect
 	github.com/beeper/ai-bridge/modules/contracts v0.0.0-20260209155641-adfecbb4ed29 // indirect
 	github.com/beeper/ai-bridge/modules/runtime v0.0.0-20260209155641-adfecbb4ed29 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
@@ -47,8 +46,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	maunium.net/go/mauflag v1.0.0 // indirect
 )
-
-replace github.com/beeper/ai-bridge/modules/simple => ../../modules/simple
 
 replace github.com/beeper/ai-bridge/modules/contracts => ../../modules/contracts
 
