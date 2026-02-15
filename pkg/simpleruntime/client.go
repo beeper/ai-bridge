@@ -300,10 +300,6 @@ type AIClient struct {
 	queueTypingMu sync.Mutex
 	queueTyping   map[id.RoomID]*TypingController
 
-	// Heartbeat runtime
-	heartbeatRunner *HeartbeatRunner
-	heartbeatWake   *HeartbeatWake
-
 	// Model catalog cache (VFS-backed)
 	modelCatalogMu     sync.Mutex
 	modelCatalogLoaded bool
@@ -448,9 +444,6 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		oc.provider = provider
 		oc.api = provider.Client()
 	}
-
-	oc.heartbeatWake = &HeartbeatWake{log: oc.log}
-	oc.heartbeatRunner = NewHeartbeatRunner(oc)
 
 	// Notify downstream hooks about the new client
 	if connector.hooks != nil {
@@ -996,9 +989,6 @@ func (oc *AIClient) Connect(ctx context.Context) {
 		Message:    "Connected",
 	})
 
-	if oc.heartbeatRunner != nil {
-		oc.heartbeatRunner.Start()
-	}
 }
 
 func (oc *AIClient) Disconnect() {
@@ -1014,9 +1004,6 @@ func (oc *AIClient) Disconnect() {
 	}
 	oc.loggedIn.Store(false)
 
-	if oc.heartbeatRunner != nil {
-		oc.heartbeatRunner.Stop()
-	}
 
 	// Clean up per-room maps to prevent unbounded growth
 	oc.activeRoomsMu.Lock()
@@ -1066,10 +1053,7 @@ func (oc *AIClient) Log() *zerolog.Logger {
 }
 
 func (oc *AIClient) LogoutRemote(ctx context.Context) {
-	// Best-effort: remove per-login data not covered by bridgev2's user_login/portal/message cleanup.
-	if oc != nil && oc.UserLogin != nil {
-		purgeLoginDataBestEffort(ctx, oc.UserLogin)
-	}
+	_ = ctx
 
 	oc.Disconnect()
 
@@ -1234,18 +1218,6 @@ func (oc *AIClient) ensureAgentGhostDisplayName(ctx context.Context, agentID, mo
 	// Agent ghosts are not explicitly managed in the simpleruntime build.
 }
 
-func (oc *AIClient) createAgentChatWithModel(
-	ctx context.Context,
-	agent *AgentDefinition,
-	modelID string,
-	applyModelOverride bool,
-) (*bridgev2.CreateChatResponse, error) {
-	_ = ctx
-	_ = agent
-	_ = modelID
-	_ = applyModelOverride
-	return nil, errors.New("agent chats are not supported in simpleruntime")
-}
 
 // effectiveModelForAPI returns the actual model name to send to the API
 // For OpenRouter/Beeper, returns the full model ID (e.g., "openai/gpt-5.2")
@@ -2825,7 +2797,7 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 		enqueuedAt:      time.Now().UnixMilli(),
 		rawEventContent: rawEventContent,
 	}
-	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(statusCtx, last.Portal, last.Meta, "", aiqueue.QueueInlineOptions{})
+	queueSettings := oc.resolveQueueSettingsForPortal(statusCtx, last.Portal, last.Meta, "", aiqueue.QueueInlineOptions{})
 
 	_, _ = oc.dispatchOrQueue(statusCtx, last.Event, last.Portal, last.Meta, nil, queueItem, queueSettings, promptMessages)
 

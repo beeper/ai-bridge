@@ -37,11 +37,7 @@ func (c *brokenLoginClient) Disconnect() {}
 
 func (c *brokenLoginClient) IsLoggedIn() bool { return false }
 
-func (c *brokenLoginClient) LogoutRemote(ctx context.Context) {
-	if c != nil && c.UserLogin != nil {
-		purgeLoginDataBestEffort(ctx, c.UserLogin)
-	}
-}
+func (c *brokenLoginClient) LogoutRemote(_ context.Context) {}
 
 func (c *brokenLoginClient) IsThisUser(ctx context.Context, userID networkid.UserID) bool {
 	return false

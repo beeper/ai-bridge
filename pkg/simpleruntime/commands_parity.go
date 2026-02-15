@@ -38,7 +38,7 @@ func fnStatus(ce *commands.Event) {
 		return
 	}
 	isGroup := client.isGroupChat(ce.Ctx, portal)
-	queueSettings, _, _, _ := client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
+	queueSettings := client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
 	ce.Reply("%s", client.buildStatusText(ce.Ctx, portal, meta, isGroup, queueSettings))
 }
 
@@ -131,71 +131,21 @@ func fnQueue(ce *commands.Event) {
 	if !ok {
 		return
 	}
-	queueSettings, _, storeRef, sessionKey := client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
+	queueSettings := client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
 
 	if len(ce.Args) == 0 || strings.EqualFold(strings.TrimSpace(ce.Args[0]), "status") {
 		ce.Reply("%s", aiqueue.BuildQueueStatusLine(queueSettings))
 		return
 	}
 
-	// Allow `!ai queue reset` as a command-oriented alias for clearing session overrides.
 	if strings.EqualFold(strings.TrimSpace(ce.Args[0]), "reset") || strings.EqualFold(strings.TrimSpace(ce.Args[0]), "default") || strings.EqualFold(strings.TrimSpace(ce.Args[0]), "clear") {
-		if sessionKey != "" {
-			client.updateSessionEntry(ce.Ctx, storeRef, sessionKey, func(entry sessionEntry) sessionEntry {
-				entry.QueueMode = ""
-				entry.QueueDebounceMs = nil
-				entry.QueueCap = nil
-				entry.QueueDrop = ""
-				entry.UpdatedAt = time.Now().UnixMilli()
-				return entry
-			})
-		}
 		client.clearPendingQueue(portal.MXID)
-		queueSettings, _, _, _ = client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
+		queueSettings = client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
 		ce.Reply("%s", aiqueue.BuildQueueStatusLine(queueSettings))
 		return
 	}
 
-	raw := strings.TrimSpace(strings.Join(ce.Args, " "))
-	_, directive := aiqueue.ParseQueueDirectiveArgs(raw)
-	if directive.HasDebounce && directive.DebounceMs == nil {
-		ce.Reply("Invalid debounce \"%s\". Use ms/s/m (e.g. debounce:1500ms, debounce:2s).", directive.RawDebounce)
-		return
-	}
-	if directive.HasCap && directive.Cap == nil {
-		ce.Reply("Invalid cap \"%s\". Use a positive integer (e.g. cap:10).", directive.RawCap)
-		return
-	}
-	if directive.HasDrop && directive.DropPolicy == nil {
-		ce.Reply("Invalid drop policy \"%s\". Use drop:old, drop:new, or drop:summarize.", directive.RawDrop)
-		return
-	}
-	if directive.QueueMode == "" && !directive.HasOptions {
-		ce.Reply("Usage: `!ai queue [status|reset|<mode>] [debounce:<dur>] [cap:<n>] [drop:<old|new|summarize>]`")
-		return
-	}
-
-	if sessionKey != "" {
-		client.updateSessionEntry(ce.Ctx, storeRef, sessionKey, func(entry sessionEntry) sessionEntry {
-			if directive.QueueMode != "" {
-				entry.QueueMode = string(directive.QueueMode)
-			}
-			if directive.DebounceMs != nil {
-				entry.QueueDebounceMs = directive.DebounceMs
-			}
-			if directive.Cap != nil {
-				entry.QueueCap = directive.Cap
-			}
-			if directive.DropPolicy != nil {
-				entry.QueueDrop = string(*directive.DropPolicy)
-			}
-			entry.UpdatedAt = time.Now().UnixMilli()
-			return entry
-		})
-	}
-
-	queueSettings, _, _, _ = client.resolveQueueSettingsForPortal(ce.Ctx, portal, meta, "", aiqueue.QueueInlineOptions{})
-	ce.Reply("%s", aiqueue.BuildQueueStatusLine(queueSettings))
+	ce.Reply("Queue settings are configured in the bridge config. Use `!ai queue status` to view current settings.")
 }
 
 // CommandThink handles the !ai think command.
