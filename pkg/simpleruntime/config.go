@@ -4,8 +4,8 @@ import (
 	_ "embed"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/core/aimedia"
 	"github.com/beeper/ai-bridge/pkg/core/aiutil"
+	"github.com/beeper/ai-bridge/pkg/matrixai/linkpreview"
 	"go.mau.fi/util/configupgrade"
 )
 
@@ -32,7 +32,7 @@ type Config struct {
 	Pruning *PruningConfig `yaml:"pruning"`
 
 	// Link preview configuration
-	LinkPreviews *LinkPreviewConfig `yaml:"link_previews"`
+	LinkPreviews *linkpreview.Config `yaml:"link_previews"`
 
 	// Inbound message processing configuration
 	Inbound *InboundConfig `yaml:"inbound"`
@@ -110,17 +110,77 @@ type ToolProvidersConfig struct {
 	Media  *MediaToolsConfig `yaml:"media"`
 }
 
-// Media understanding config types are aliases from the core library.
-type (
-	MediaUnderstandingScopeMatch        = aimedia.ScopeMatch
-	MediaUnderstandingScopeRule         = aimedia.ScopeRule
-	MediaUnderstandingScopeConfig       = aimedia.ScopeConfig
-	MediaUnderstandingAttachmentsConfig = aimedia.AttachmentsConfig
-	MediaUnderstandingDeepgramConfig    = aimedia.DeepgramConfig
-	MediaUnderstandingModelConfig       = aimedia.ModelConfig
-	MediaUnderstandingConfig            = aimedia.CapabilityConfig
-	MediaToolsConfig                    = aimedia.ToolsConfig
-)
+type MediaUnderstandingScopeMatch struct {
+	Channel   string `yaml:"channel" json:"channel,omitempty"`
+	ChatType  string `yaml:"chatType" json:"chatType,omitempty"`
+	KeyPrefix string `yaml:"keyPrefix" json:"keyPrefix,omitempty"`
+}
+
+type MediaUnderstandingScopeRule struct {
+	Action string                        `yaml:"action" json:"action,omitempty"`
+	Match  *MediaUnderstandingScopeMatch `yaml:"match" json:"match,omitempty"`
+}
+
+type MediaUnderstandingScopeConfig struct {
+	Default string                        `yaml:"default" json:"default,omitempty"`
+	Rules   []MediaUnderstandingScopeRule `yaml:"rules" json:"rules,omitempty"`
+}
+
+type MediaUnderstandingAttachmentsConfig struct {
+	Mode           string `yaml:"mode" json:"mode,omitempty"`
+	MaxAttachments int    `yaml:"maxAttachments" json:"maxAttachments,omitempty"`
+	Prefer         string `yaml:"prefer" json:"prefer,omitempty"`
+}
+
+type MediaUnderstandingDeepgramConfig struct {
+	DetectLanguage *bool `yaml:"detectLanguage" json:"detectLanguage,omitempty"`
+	Punctuate      *bool `yaml:"punctuate" json:"punctuate,omitempty"`
+	SmartFormat    *bool `yaml:"smartFormat" json:"smartFormat,omitempty"`
+}
+
+type MediaUnderstandingModelConfig struct {
+	Provider         string                            `yaml:"provider" json:"provider,omitempty"`
+	Model            string                            `yaml:"model" json:"model,omitempty"`
+	Capabilities     []string                          `yaml:"capabilities" json:"capabilities,omitempty"`
+	Type             string                            `yaml:"type" json:"type,omitempty"`
+	Command          string                            `yaml:"command" json:"command,omitempty"`
+	Args             []string                          `yaml:"args" json:"args,omitempty"`
+	Prompt           string                            `yaml:"prompt" json:"prompt,omitempty"`
+	MaxChars         int                               `yaml:"maxChars" json:"maxChars,omitempty"`
+	MaxBytes         int                               `yaml:"maxBytes" json:"maxBytes,omitempty"`
+	TimeoutSeconds   int                               `yaml:"timeoutSeconds" json:"timeoutSeconds,omitempty"`
+	Language         string                            `yaml:"language" json:"language,omitempty"`
+	ProviderOptions  map[string]map[string]any         `yaml:"providerOptions" json:"providerOptions,omitempty"`
+	Deepgram         *MediaUnderstandingDeepgramConfig `yaml:"deepgram" json:"deepgram,omitempty"`
+	BaseURL          string                            `yaml:"baseUrl" json:"baseUrl,omitempty"`
+	Headers          map[string]string                 `yaml:"headers" json:"headers,omitempty"`
+	Profile          string                            `yaml:"profile" json:"profile,omitempty"`
+	PreferredProfile string                            `yaml:"preferredProfile" json:"preferredProfile,omitempty"`
+}
+
+type MediaUnderstandingConfig struct {
+	Enabled         *bool                                `yaml:"enabled" json:"enabled,omitempty"`
+	Scope           *MediaUnderstandingScopeConfig       `yaml:"scope" json:"scope,omitempty"`
+	MaxBytes        int                                  `yaml:"maxBytes" json:"maxBytes,omitempty"`
+	MaxChars        int                                  `yaml:"maxChars" json:"maxChars,omitempty"`
+	Prompt          string                               `yaml:"prompt" json:"prompt,omitempty"`
+	TimeoutSeconds  int                                  `yaml:"timeoutSeconds" json:"timeoutSeconds,omitempty"`
+	Language        string                               `yaml:"language" json:"language,omitempty"`
+	ProviderOptions map[string]map[string]any            `yaml:"providerOptions" json:"providerOptions,omitempty"`
+	Deepgram        *MediaUnderstandingDeepgramConfig    `yaml:"deepgram" json:"deepgram,omitempty"`
+	BaseURL         string                               `yaml:"baseUrl" json:"baseUrl,omitempty"`
+	Headers         map[string]string                    `yaml:"headers" json:"headers,omitempty"`
+	Attachments     *MediaUnderstandingAttachmentsConfig `yaml:"attachments" json:"attachments,omitempty"`
+	Models          []MediaUnderstandingModelConfig      `yaml:"models" json:"models,omitempty"`
+}
+
+type MediaToolsConfig struct {
+	Models      []MediaUnderstandingModelConfig `yaml:"models" json:"models,omitempty"`
+	Concurrency int                             `yaml:"concurrency" json:"concurrency,omitempty"`
+	Image       *MediaUnderstandingConfig       `yaml:"image" json:"image,omitempty"`
+	Audio       *MediaUnderstandingConfig       `yaml:"audio" json:"audio,omitempty"`
+	Video       *MediaUnderstandingConfig       `yaml:"video" json:"video,omitempty"`
+}
 
 type SearchConfig struct {
 	Provider  string   `yaml:"provider"`

@@ -33,12 +33,16 @@ const (
 	BeeperAIToolResultKey = contractevents.BeeperAIToolResultKey
 )
 
-type StreamEventOpts = contractevents.StreamEventOpts
-
-func BuildStreamEventEnvelope(turnID string, seq int, part map[string]any, opts StreamEventOpts) (map[string]any, error) {
-	return contractevents.BuildStreamEventEnvelope(turnID, seq, part, opts)
-}
-
 func BuildStreamEventTxnID(turnID string, seq int) string {
 	return contractevents.BuildStreamEventTxnID(turnID, seq)
+}
+
+type StreamEventOpts contractevents.StreamEventOpts
+
+func (opts StreamEventOpts) toContract() contractevents.StreamEventOpts {
+	return contractevents.StreamEventOpts(opts)
+}
+
+func BuildStreamEventEnvelope(turnID string, seq int, part map[string]any, opts StreamEventOpts) (map[string]any, error) {
+	return contractevents.BuildStreamEventEnvelope(turnID, seq, part, opts.toContract())
 }

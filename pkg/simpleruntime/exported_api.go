@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
 	"github.com/openai/openai-go/v3"
 	"github.com/rs/zerolog"
 
@@ -236,11 +237,12 @@ func (oc *AIClient) ModelIDForAPI(modelID string) string {
 }
 
 // ResponseFunc is the exported alias for the response handler type.
-type ResponseFunc = responseFunc
+type ResponseFunc func(ctx context.Context, evt *event.Event, portal *bridgev2.Portal, meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (bool, *aierrors.ContextLengthError, error)
 
 // SelectResponseFn selects the appropriate response function and log label.
 func (oc *AIClient) SelectResponseFn(meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (ResponseFunc, string) {
-	return oc.selectResponseFn(meta, prompt)
+	responseFn, label := oc.selectResponseFn(meta, prompt)
+	return ResponseFunc(responseFn), label
 }
 
 // ResponseWithRetryAndReasoningFallback runs response with retry and reasoning fallback.
@@ -253,7 +255,7 @@ func (oc *AIClient) ResponseWithRetryAndReasoningFallback(
 	responseFn ResponseFunc,
 	logLabel string,
 ) (bool, error) {
-	return oc.responseWithRetryAndReasoningFallback(ctx, evt, portal, meta, prompt, responseFn, logLabel)
+	return oc.responseWithRetryAndReasoningFallback(ctx, evt, portal, meta, prompt, responseFunc(responseFn), logLabel)
 }
 
 // StreamingResponseWithRetry runs a streaming response with retry logic.
@@ -293,7 +295,7 @@ func (oc *AIClient) SetRoomName(ctx context.Context, portal *bridgev2.Portal, na
 }
 
 // ToolExecutor is the exported alias for the builtin tool executor signature.
-type ToolExecutor = toolExecutor
+type ToolExecutor func(ctx context.Context, args map[string]any) (string, error)
 
 // BuildPromptWithLinkContext builds a prompt with link preview context.
 func (oc *AIClient) BuildPromptWithLinkContext(

@@ -1352,7 +1352,7 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 		})
 		if len(enabledTools) > 0 {
 			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
-			params.Tools = append(params.Tools, ToOpenAITools(toProviderToolDefs(enabledTools), strictMode, &oc.log)...)
+			params.Tools = append(params.Tools, ToOpenAITools(enabledTools, strictMode, &oc.log)...)
 			log.Debug().Int("count", len(enabledTools)).Msg("Added builtin function tools")
 		}
 
@@ -3014,7 +3014,7 @@ func (oc *AIClient) buildContinuationParams(
 		})
 		if len(enabledTools) > 0 {
 			strictMode := resolveToolStrictMode(oc.isOpenRouterProvider())
-			params.Tools = append(params.Tools, ToOpenAITools(toProviderToolDefs(enabledTools), strictMode, &oc.log)...)
+			params.Tools = append(params.Tools, ToOpenAITools(enabledTools, strictMode, &oc.log)...)
 		}
 	}
 
@@ -3156,7 +3156,7 @@ func (oc *AIClient) streamChatCompletions(
 				return isBuiltinToolEnabled(meta, name)
 			})
 			if len(enabledTools) > 0 {
-				params.Tools = append(params.Tools, ToOpenAIChatTools(toProviderToolDefs(enabledTools), &oc.log)...)
+				params.Tools = append(params.Tools, ToOpenAIChatTools(enabledTools, &oc.log)...)
 			}
 			params.Tools = dedupeChatToolParams(params.Tools)
 		}

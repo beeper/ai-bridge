@@ -2,18 +2,99 @@ package search
 
 import (
 	"context"
+	"slices"
+	"strings"
 
 	basesearch "github.com/beeper/ai-bridge/pkg/matrixai/search"
 )
 
-type Request = basesearch.Request
-type Result = basesearch.Result
-type Response = basesearch.Response
-type Config = basesearch.Config
-type ExaConfig = basesearch.ExaConfig
-type BraveConfig = basesearch.BraveConfig
-type PerplexityConfig = basesearch.PerplexityConfig
-type OpenRouterConfig = basesearch.OpenRouterConfig
+type Request struct {
+	Query      string
+	Count      int
+	Country    string
+	SearchLang string
+	UILang     string
+	Freshness  string
+}
+
+type Result struct {
+	ID          string
+	Title       string
+	URL         string
+	Description string
+	Published   string
+	SiteName    string
+	Author      string
+	Image       string
+	Favicon     string
+}
+
+type Response struct {
+	Query      string
+	Provider   string
+	Count      int
+	TookMs     int64
+	Results    []Result
+	Answer     string
+	Summary    string
+	Definition string
+	Warning    string
+	NoResults  bool
+	Cached     bool
+	Extras     map[string]any
+}
+
+type Config struct {
+	Provider  string
+	Fallbacks []string
+
+	Exa        ExaConfig
+	Brave      BraveConfig
+	Perplexity PerplexityConfig
+	OpenRouter OpenRouterConfig
+}
+
+type ExaConfig struct {
+	Enabled           *bool
+	BaseURL           string
+	APIKey            string
+	Type              string
+	Category          string
+	NumResults        int
+	IncludeText       bool
+	TextMaxCharacters int
+	Highlights        bool
+}
+
+type BraveConfig struct {
+	Enabled          *bool
+	BaseURL          string
+	APIKey           string
+	TimeoutSecs      int
+	CacheTtlSecs     int
+	SearchLang       string
+	UILang           string
+	DefaultCountry   string
+	DefaultFreshness string
+}
+
+type PerplexityConfig struct {
+	Enabled      *bool
+	APIKey       string
+	BaseURL      string
+	Model        string
+	TimeoutSecs  int
+	CacheTtlSecs int
+}
+
+type OpenRouterConfig struct {
+	Enabled      *bool
+	APIKey       string
+	BaseURL      string
+	Model        string
+	TimeoutSecs  int
+	CacheTtlSecs int
+}
 
 const (
 	ProviderExa        = basesearch.ProviderExa
@@ -30,9 +111,235 @@ const (
 var DefaultFallbackOrder = basesearch.DefaultFallbackOrder
 
 func Search(ctx context.Context, req Request, cfg *Config) (*Response, error) {
-	return basesearch.Search(ctx, req, cfg)
+	resp, err := basesearch.Search(ctx, toBaseRequest(req), toBaseConfig(cfg))
+	if err != nil || resp == nil {
+		return nil, err
+	}
+	converted := fromBaseResponse(*resp)
+	return &converted, nil
 }
 
 func ApplyEnvDefaults(cfg *Config) *Config {
-	return basesearch.ApplyEnvDefaults(cfg)
+	return fromBaseConfig(basesearch.ApplyEnvDefaults(toBaseConfig(cfg)))
+}
+
+func (c *Config) WithDefaults() *Config {
+	if c == nil {
+		c = &Config{}
+	}
+	if strings.TrimSpace(c.Provider) == "" {
+		if strings.TrimSpace(c.Exa.APIKey) != "" {
+			c.Provider = ProviderExa
+		} else {
+			c.Provider = ProviderOpenRouter
+		}
+	}
+	if len(c.Fallbacks) == 0 {
+		c.Fallbacks = slices.Clone(DefaultFallbackOrder)
+	}
+	c.Exa = c.Exa.withDefaults()
+	c.Brave = c.Brave.withDefaults()
+	c.Perplexity = c.Perplexity.withDefaults()
+	c.OpenRouter = c.OpenRouter.withDefaults()
+	return c
+}
+
+func (c ExaConfig) withDefaults() ExaConfig {
+	if c.BaseURL == "" {
+		c.BaseURL = "https://api.exa.ai"
+	}
+	if c.Type == "" {
+		c.Type = "auto"
+	}
+	if c.NumResults <= 0 {
+		c.NumResults = DefaultSearchCount
+	}
+	if c.TextMaxCharacters <= 0 {
+		c.TextMaxCharacters = 500
+	}
+	c.Highlights = true
+	return c
+}
+
+func (c BraveConfig) withDefaults() BraveConfig {
+	if c.BaseURL == "" {
+		c.BaseURL = "https://api.search.brave.com/res/v1/web/search"
+	}
+	if c.TimeoutSecs <= 0 {
+		c.TimeoutSecs = DefaultTimeoutSecs
+	}
+	if c.CacheTtlSecs <= 0 {
+		c.CacheTtlSecs = DefaultCacheTtlSecs
+	}
+	return c
+}
+
+func (c PerplexityConfig) withDefaults() PerplexityConfig {
+	if c.Model == "" {
+		c.Model = "perplexity/sonar-pro"
+	}
+	if c.BaseURL == "" {
+		c.BaseURL = "https://openrouter.ai/api/v1"
+	}
+	if c.TimeoutSecs <= 0 {
+		c.TimeoutSecs = DefaultTimeoutSecs
+	}
+	if c.CacheTtlSecs <= 0 {
+		c.CacheTtlSecs = DefaultCacheTtlSecs
+	}
+	return c
+}
+
+func (c OpenRouterConfig) withDefaults() OpenRouterConfig {
+	if c.BaseURL == "" {
+		c.BaseURL = "https://openrouter.ai/api/v1"
+	}
+	if c.Model == "" {
+		c.Model = "openai/gpt-5.2"
+	}
+	if c.TimeoutSecs <= 0 {
+		c.TimeoutSecs = DefaultTimeoutSecs
+	}
+	if c.CacheTtlSecs <= 0 {
+		c.CacheTtlSecs = DefaultCacheTtlSecs
+	}
+	return c
+}
+
+func toBaseRequest(req Request) basesearch.Request {
+	return basesearch.Request{
+		Query:      req.Query,
+		Count:      req.Count,
+		Country:    req.Country,
+		SearchLang: req.SearchLang,
+		UILang:     req.UILang,
+		Freshness:  req.Freshness,
+	}
+}
+
+func toBaseConfig(cfg *Config) *basesearch.Config {
+	if cfg == nil {
+		return nil
+	}
+	return &basesearch.Config{
+		Provider:  cfg.Provider,
+		Fallbacks: cfg.Fallbacks,
+		Exa: basesearch.ExaConfig{
+			Enabled:           cfg.Exa.Enabled,
+			BaseURL:           cfg.Exa.BaseURL,
+			APIKey:            cfg.Exa.APIKey,
+			Type:              cfg.Exa.Type,
+			Category:          cfg.Exa.Category,
+			NumResults:        cfg.Exa.NumResults,
+			IncludeText:       cfg.Exa.IncludeText,
+			TextMaxCharacters: cfg.Exa.TextMaxCharacters,
+			Highlights:        cfg.Exa.Highlights,
+		},
+		Brave: basesearch.BraveConfig{
+			Enabled:          cfg.Brave.Enabled,
+			BaseURL:          cfg.Brave.BaseURL,
+			APIKey:           cfg.Brave.APIKey,
+			TimeoutSecs:      cfg.Brave.TimeoutSecs,
+			CacheTtlSecs:     cfg.Brave.CacheTtlSecs,
+			SearchLang:       cfg.Brave.SearchLang,
+			UILang:           cfg.Brave.UILang,
+			DefaultCountry:   cfg.Brave.DefaultCountry,
+			DefaultFreshness: cfg.Brave.DefaultFreshness,
+		},
+		Perplexity: basesearch.PerplexityConfig{
+			Enabled:      cfg.Perplexity.Enabled,
+			APIKey:       cfg.Perplexity.APIKey,
+			BaseURL:      cfg.Perplexity.BaseURL,
+			Model:        cfg.Perplexity.Model,
+			TimeoutSecs:  cfg.Perplexity.TimeoutSecs,
+			CacheTtlSecs: cfg.Perplexity.CacheTtlSecs,
+		},
+		OpenRouter: basesearch.OpenRouterConfig{
+			Enabled:      cfg.OpenRouter.Enabled,
+			APIKey:       cfg.OpenRouter.APIKey,
+			BaseURL:      cfg.OpenRouter.BaseURL,
+			Model:        cfg.OpenRouter.Model,
+			TimeoutSecs:  cfg.OpenRouter.TimeoutSecs,
+			CacheTtlSecs: cfg.OpenRouter.CacheTtlSecs,
+		},
+	}
+}
+
+func fromBaseConfig(cfg *basesearch.Config) *Config {
+	if cfg == nil {
+		return nil
+	}
+	return &Config{
+		Provider:  cfg.Provider,
+		Fallbacks: cfg.Fallbacks,
+		Exa: ExaConfig{
+			Enabled:           cfg.Exa.Enabled,
+			BaseURL:           cfg.Exa.BaseURL,
+			APIKey:            cfg.Exa.APIKey,
+			Type:              cfg.Exa.Type,
+			Category:          cfg.Exa.Category,
+			NumResults:        cfg.Exa.NumResults,
+			IncludeText:       cfg.Exa.IncludeText,
+			TextMaxCharacters: cfg.Exa.TextMaxCharacters,
+			Highlights:        cfg.Exa.Highlights,
+		},
+		Brave: BraveConfig{
+			Enabled:          cfg.Brave.Enabled,
+			BaseURL:          cfg.Brave.BaseURL,
+			APIKey:           cfg.Brave.APIKey,
+			TimeoutSecs:      cfg.Brave.TimeoutSecs,
+			CacheTtlSecs:     cfg.Brave.CacheTtlSecs,
+			SearchLang:       cfg.Brave.SearchLang,
+			UILang:           cfg.Brave.UILang,
+			DefaultCountry:   cfg.Brave.DefaultCountry,
+			DefaultFreshness: cfg.Brave.DefaultFreshness,
+		},
+		Perplexity: PerplexityConfig{
+			Enabled:      cfg.Perplexity.Enabled,
+			APIKey:       cfg.Perplexity.APIKey,
+			BaseURL:      cfg.Perplexity.BaseURL,
+			Model:        cfg.Perplexity.Model,
+			TimeoutSecs:  cfg.Perplexity.TimeoutSecs,
+			CacheTtlSecs: cfg.Perplexity.CacheTtlSecs,
+		},
+		OpenRouter: OpenRouterConfig{
+			Enabled:      cfg.OpenRouter.Enabled,
+			APIKey:       cfg.OpenRouter.APIKey,
+			BaseURL:      cfg.OpenRouter.BaseURL,
+			Model:        cfg.OpenRouter.Model,
+			TimeoutSecs:  cfg.OpenRouter.TimeoutSecs,
+			CacheTtlSecs: cfg.OpenRouter.CacheTtlSecs,
+		},
+	}
+}
+
+func fromBaseResponse(resp basesearch.Response) Response {
+	results := make([]Result, 0, len(resp.Results))
+	for _, result := range resp.Results {
+		results = append(results, Result{
+			ID:          result.ID,
+			Title:       result.Title,
+			URL:         result.URL,
+			Description: result.Description,
+			Published:   result.Published,
+			SiteName:    result.SiteName,
+			Author:      result.Author,
+			Image:       result.Image,
+			Favicon:     result.Favicon,
+		})
+	}
+	return Response{
+		Query:      resp.Query,
+		Provider:   resp.Provider,
+		Count:      resp.Count,
+		TookMs:     resp.TookMs,
+		Results:    results,
+		Answer:     resp.Answer,
+		Summary:    resp.Summary,
+		Definition: resp.Definition,
+		Warning:    resp.Warning,
+		NoResults:  resp.NoResults,
+		Cached:     resp.Cached,
+		Extras:     resp.Extras,
+	}
 }

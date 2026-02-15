@@ -6,10 +6,33 @@ import (
 	"github.com/beeper/ai-bridge/pkg/core/aityping"
 )
 
-type TypingContext = aityping.TypingContext
+type TypingContext struct {
+	IsGroup      bool
+	WasMentioned bool
+}
 
-var WithTypingContext = aityping.WithTypingContext
+type typingContextKey struct{}
+
+func WithTypingContext(ctx context.Context, typing *TypingContext) context.Context {
+	if ctx == nil || typing == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, typingContextKey{}, typing)
+}
 
 func typingContextFromContext(ctx context.Context) *TypingContext {
-	return aityping.TypingContextFromContext(ctx)
+	if ctx == nil {
+		return nil
+	}
+	if local, ok := ctx.Value(typingContextKey{}).(*TypingContext); ok && local != nil {
+		return local
+	}
+	shared := aityping.TypingContextFromContext(ctx)
+	if shared == nil {
+		return nil
+	}
+	return &TypingContext{
+		IsGroup:      shared.IsGroup,
+		WasMentioned: shared.WasMentioned,
+	}
 }

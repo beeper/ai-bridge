@@ -518,9 +518,7 @@ const (
 )
 
 // ModelInfo describes a single AI model's capabilities.
-// This is a type alias for aimodels.ModelInfo.
-// for external consumers that import connector.ModelInfo.
-type ModelInfo = aimodels.ModelInfo
+type ModelInfo aimodels.ModelInfo
 
 // ImageGenerationMetadata is added to m.image events for AI-generated images
 type ImageGenerationMetadata struct {

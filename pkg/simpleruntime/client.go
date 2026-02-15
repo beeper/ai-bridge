@@ -21,6 +21,7 @@ import (
 	"github.com/beeper/ai-bridge/pkg/core/aimodels"
 	"github.com/beeper/ai-bridge/pkg/core/aiqueue"
 	"github.com/beeper/ai-bridge/pkg/core/aiutil"
+	"github.com/beeper/ai-bridge/pkg/matrixai/linkpreview"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/rs/zerolog"
@@ -1096,9 +1097,9 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 	if modelID := parseModelFromGhostID(ghostID); modelID != "" {
 		info := oc.findModelInfo(modelID)
 		return &bridgev2.UserInfo{
-			Name:         ptr.Ptr(aimodels.ModelContactName(modelID, info)),
+			Name:         ptr.Ptr(aimodels.ModelContactName(modelID, toCoreModelInfo(info))),
 			IsBot:        ptr.Ptr(false),
-			Identifiers:  aimodels.ModelContactIdentifiers(modelID, info),
+			Identifiers:  aimodels.ModelContactIdentifiers(modelID, toCoreModelInfo(info)),
 			ExtraUpdates: updateGhostLastSync,
 		}, nil
 	}
@@ -1277,7 +1278,7 @@ func (oc *AIClient) effectivePrompt(meta *PortalMetadata) string {
 }
 
 // getLinkPreviewConfig returns the link preview configuration, with defaults filled in.
-func getLinkPreviewConfig(connectorConfig *Config) LinkPreviewConfig {
+func getLinkPreviewConfig(connectorConfig *Config) linkpreview.Config {
 	config := DefaultLinkPreviewConfig()
 
 	if connectorConfig.LinkPreviews != nil {
@@ -2527,12 +2528,12 @@ func (oc *AIClient) ensureGhostDisplayNameWithGhost(ctx context.Context, ghost *
 	if ghost == nil {
 		return
 	}
-	displayName := aimodels.ModelContactName(modelID, info)
+	displayName := aimodels.ModelContactName(modelID, toCoreModelInfo(info))
 	if ghost.Name == "" || !ghost.NameSet || ghost.Name != displayName {
 		ghost.UpdateInfo(ctx, &bridgev2.UserInfo{
 			Name:        ptr.Ptr(displayName),
 			IsBot:       ptr.Ptr(false),
-			Identifiers: aimodels.ModelContactIdentifiers(modelID, info),
+			Identifiers: aimodels.ModelContactIdentifiers(modelID, toCoreModelInfo(info)),
 		})
 		oc.loggerForContext(ctx).Debug().Str("model", modelID).Str("name", displayName).Msg("Updated ghost display name")
 	}

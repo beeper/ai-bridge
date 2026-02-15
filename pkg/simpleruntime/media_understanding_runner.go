@@ -1037,8 +1037,13 @@ func resolveOpenAIMediaBaseURL(oc *AIClient) string {
 	return aimedia.DefaultOpenAITranscriptionBaseURL
 }
 
-var resolveMediaBaseURL = aimedia.ResolveBaseURL
-var mergeMediaHeaders = aimedia.MergeHeaders
+func resolveMediaBaseURL(cfg *MediaUnderstandingConfig, entry MediaUnderstandingModelConfig) string {
+	return aimedia.ResolveBaseURL(toCoreMediaConfig(cfg), toCoreMediaModelConfig(entry))
+}
+
+func mergeMediaHeaders(cfg *MediaUnderstandingConfig, entry MediaUnderstandingModelConfig) map[string]string {
+	return aimedia.MergeHeaders(toCoreMediaConfig(cfg), toCoreMediaModelConfig(entry))
+}
 
 func resolveProfiledEnvKey(base string, profile string) string {
 	if base == "" || strings.TrimSpace(profile) == "" {

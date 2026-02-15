@@ -7,7 +7,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/core/aiprovider"
 	"github.com/beeper/ai-bridge/pkg/core/aiutil"
 	"github.com/beeper/ai-bridge/pkg/core/shared/toolspec"
 	"maunium.net/go/mautrix/bridgev2"
@@ -20,19 +19,6 @@ type ToolDefinition struct {
 	Description string
 	Parameters  map[string]any
 	Execute     func(ctx context.Context, args map[string]any) (string, error)
-}
-
-// toProviderToolDefs extracts the provider-facing fields from connector ToolDefinitions.
-func toProviderToolDefs(tools []ToolDefinition) []aiprovider.ToolDefinition {
-	out := make([]aiprovider.ToolDefinition, len(tools))
-	for i, t := range tools {
-		out[i] = aiprovider.ToolDefinition{
-			Name:        t.Name,
-			Description: t.Description,
-			Parameters:  t.Parameters,
-		}
-	}
-	return out
 }
 
 // BridgeToolContext carries runtime data for tool execution.

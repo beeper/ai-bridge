@@ -7,18 +7,24 @@ import (
 	"github.com/beeper/ai-bridge/pkg/core/aityping"
 )
 
-type TypingMode = aityping.TypingMode
+type TypingMode string
 
 const (
-	TypingModeNever    = aityping.TypingModeNever
-	TypingModeInstant  = aityping.TypingModeInstant
-	TypingModeThinking = aityping.TypingModeThinking
-	TypingModeMessage  = aityping.TypingModeMessage
+	TypingModeNever    TypingMode = TypingMode(aityping.TypingModeNever)
+	TypingModeInstant  TypingMode = TypingMode(aityping.TypingModeInstant)
+	TypingModeThinking TypingMode = TypingMode(aityping.TypingModeThinking)
+	TypingModeMessage  TypingMode = TypingMode(aityping.TypingModeMessage)
 )
 
 const defaultTypingInterval = 6 * time.Second
 
-var normalizeTypingMode = aityping.NormalizeTypingMode
+func normalizeTypingMode(raw string) (TypingMode, bool) {
+	mode, ok := aityping.NormalizeTypingMode(raw)
+	if !ok {
+		return "", false
+	}
+	return TypingMode(mode), true
+}
 
 func (oc *AIClient) resolveTypingMode(meta *PortalMetadata, ctx *TypingContext) TypingMode {
 	if meta != nil {

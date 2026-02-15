@@ -366,7 +366,7 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 		// Still send the welcome notice and schedule greeting; duplicates are preferable to missing UX.
 	}
 
-	displayName := aimodels.ModelContactName(meta.Model, oc.findModelInfo(meta.Model))
+	displayName := aimodels.ModelContactName(meta.Model, toCoreModelInfo(oc.findModelInfo(meta.Model)))
 	oc.sendSystemNotice(bgCtx, portal, fmt.Sprintf("You are chatting with %s. AI can make mistakes.", displayName))
 
 	// Ensure initial room state exists for clients (model/settings/capabilities).
