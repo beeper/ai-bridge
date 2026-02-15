@@ -1494,14 +1494,14 @@ func (oc *AIClient) streamingResponse(
 	var typingSignals *TypingSignaler
 	touchTyping := func() {}
 	if !state.suppressSend {
-		mode := oc.resolveTypingMode(meta, typingContextFromContext(ctx), false)
+		mode := oc.resolveTypingMode(meta, typingContextFromContext(ctx))
 		interval := oc.resolveTypingInterval(meta)
 		if interval > 0 && mode != TypingModeNever {
 			typingCtrl = NewTypingController(oc, ctx, portal, TypingControllerOptions{
 				Interval: interval,
 				TTL:      typingTTL,
 			})
-			typingSignals = NewTypingSignaler(typingCtrl, mode, false)
+			typingSignals = NewTypingSignaler(typingCtrl, mode)
 			touchTyping = func() {
 				typingCtrl.RefreshTTL()
 			}
@@ -3103,14 +3103,14 @@ func (oc *AIClient) streamChatCompletions(
 	var typingSignals *TypingSignaler
 	touchTyping := func() {}
 	if !state.suppressSend {
-		mode := oc.resolveTypingMode(meta, typingContextFromContext(ctx), false)
+		mode := oc.resolveTypingMode(meta, typingContextFromContext(ctx))
 		interval := oc.resolveTypingInterval(meta)
 		if interval > 0 && mode != TypingModeNever {
 			typingCtrl = NewTypingController(oc, ctx, portal, TypingControllerOptions{
 				Interval: interval,
 				TTL:      typingTTL,
 			})
-			typingSignals = NewTypingSignaler(typingCtrl, mode, false)
+			typingSignals = NewTypingSignaler(typingCtrl, mode)
 			touchTyping = func() {
 				typingCtrl.RefreshTTL()
 			}

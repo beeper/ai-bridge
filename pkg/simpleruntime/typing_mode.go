@@ -20,10 +20,7 @@ const defaultTypingInterval = 6 * time.Second
 
 var normalizeTypingMode = aityping.NormalizeTypingMode
 
-func (oc *AIClient) resolveTypingMode(meta *PortalMetadata, ctx *TypingContext, isHeartbeat bool) TypingMode {
-	if isHeartbeat {
-		return TypingModeNever
-	}
+func (oc *AIClient) resolveTypingMode(meta *PortalMetadata, ctx *TypingContext) TypingMode {
 	if meta != nil {
 		if mode, ok := normalizeTypingMode(meta.TypingMode); ok {
 			return mode
@@ -67,8 +64,8 @@ type TypingSignaler struct {
 	hasRenderableText    bool
 }
 
-func NewTypingSignaler(typing *TypingController, mode TypingMode, isHeartbeat bool) *TypingSignaler {
-	disabled := isHeartbeat || mode == TypingModeNever || typing == nil
+func NewTypingSignaler(typing *TypingController, mode TypingMode) *TypingSignaler {
+	disabled := mode == TypingModeNever || typing == nil
 	return &TypingSignaler{
 		mode:                 mode,
 		typing:               typing,

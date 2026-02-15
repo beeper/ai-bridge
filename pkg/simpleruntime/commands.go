@@ -411,7 +411,7 @@ func fnTyping(ce *commands.Event) {
 
 	isGroup := client.isGroupChat(ce.Ctx, ce.Portal)
 	if len(ce.Args) == 0 {
-		mode := client.resolveTypingMode(meta, &TypingContext{IsGroup: isGroup, WasMentioned: !isGroup}, false)
+		mode := client.resolveTypingMode(meta, &TypingContext{IsGroup: isGroup, WasMentioned: !isGroup})
 		interval := client.resolveTypingInterval(meta)
 		response := fmt.Sprintf("Typing: mode=%s interval=%s", mode, formatTypingInterval(interval))
 		if meta.TypingMode != "" || meta.TypingIntervalSeconds != nil {
