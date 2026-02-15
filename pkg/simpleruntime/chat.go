@@ -53,7 +53,7 @@ func modelMatchesQuery(model *ModelInfo, query string) bool {
 		strings.Contains(strings.ToLower(model.Provider), q) {
 		return true
 	}
-	for _, ident := range aimodels.ModelContactIdentifiers(model.ID, model) {
+	for _, ident := range aimodels.ModelContactIdentifiers(model.ID, toCoreModelInfo(model)) {
 		if strings.Contains(strings.ToLower(ident), q) {
 			return true
 		}
@@ -89,9 +89,9 @@ func (oc *AIClient) modelContacts(ctx context.Context, query string) ([]*bridgev
 		contacts = append(contacts, &bridgev2.ResolveIdentifierResponse{
 			UserID: userID,
 			UserInfo: &bridgev2.UserInfo{
-				Name:        ptr.Ptr(aimodels.ModelContactName(model.ID, model)),
+				Name:        ptr.Ptr(aimodels.ModelContactName(model.ID, toCoreModelInfo(model))),
 				IsBot:       ptr.Ptr(false),
-				Identifiers: aimodels.ModelContactIdentifiers(model.ID, model),
+				Identifiers: aimodels.ModelContactIdentifiers(model.ID, toCoreModelInfo(model)),
 			},
 			Ghost: ghost,
 		})
@@ -219,9 +219,9 @@ func (oc *AIClient) resolveModelIdentifier(ctx context.Context, modelID string, 
 	return &bridgev2.ResolveIdentifierResponse{
 		UserID: userID,
 		UserInfo: &bridgev2.UserInfo{
-			Name:        ptr.Ptr(aimodels.ModelContactName(modelID, info)),
+			Name:        ptr.Ptr(aimodels.ModelContactName(modelID, toCoreModelInfo(info))),
 			IsBot:       ptr.Ptr(false),
-			Identifiers: aimodels.ModelContactIdentifiers(modelID, info),
+			Identifiers: aimodels.ModelContactIdentifiers(modelID, toCoreModelInfo(info)),
 		},
 		Ghost: ghost,
 		Chat:  chatResp,
@@ -298,7 +298,7 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 
 	title := opts.Title
 	if title == "" {
-		modelName := aimodels.ModelContactName(modelID, oc.findModelInfo(modelID))
+		modelName := aimodels.ModelContactName(modelID, toCoreModelInfo(oc.findModelInfo(modelID)))
 		title = fmt.Sprintf("AI Chat with %s", modelName)
 	}
 
@@ -510,7 +510,7 @@ func (oc *AIClient) createAndOpenModelChat(ctx context.Context, portal *bridgev2
 	roomLink := fmt.Sprintf("https://matrix.to/#/%s", newPortal.MXID)
 	oc.sendSystemNotice(ctx, portal, fmt.Sprintf(
 		"New %s chat created.\nOpen: %s",
-		aimodels.ModelContactName(modelID, oc.findModelInfo(modelID)), roomLink,
+		aimodels.ModelContactName(modelID, toCoreModelInfo(oc.findModelInfo(modelID))), roomLink,
 	))
 }
 
@@ -632,7 +632,7 @@ func (oc *AIClient) chatInfoFromPortal(ctx context.Context, portal *bridgev2.Por
 		if portal.Name != "" {
 			title = portal.Name
 		} else {
-			title = aimodels.ModelContactName(modelID, oc.findModelInfo(modelID))
+			title = aimodels.ModelContactName(modelID, toCoreModelInfo(oc.findModelInfo(modelID)))
 		}
 	}
 	chatInfo := oc.composeChatInfo(title, modelID)
@@ -647,7 +647,7 @@ func (oc *AIClient) composeChatInfo(title, modelID string) *bridgev2.ChatInfo {
 		modelID = oc.effectiveModel(nil)
 	}
 	modelInfo := oc.findModelInfo(modelID)
-	modelName := aimodels.ModelContactName(modelID, modelInfo)
+	modelName := aimodels.ModelContactName(modelID, toCoreModelInfo(modelInfo))
 	if title == "" {
 		title = modelName
 	}
@@ -668,7 +668,7 @@ func (oc *AIClient) composeChatInfo(title, modelID string) *bridgev2.ChatInfo {
 			UserInfo: &bridgev2.UserInfo{
 				Name:        ptr.Ptr(modelName),
 				IsBot:       ptr.Ptr(false),
-				Identifiers: aimodels.ModelContactIdentifiers(modelID, modelInfo),
+				Identifiers: aimodels.ModelContactIdentifiers(modelID, toCoreModelInfo(modelInfo)),
 			},
 			// Set displayname directly in membership event content
 			// This works because MemberEventContent.Displayname has omitempty
@@ -778,8 +778,8 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 
 	oldInfo := oc.findModelInfo(oldModel)
 	newInfo := oc.findModelInfo(newModel)
-	oldModelName := aimodels.ModelContactName(oldModel, oldInfo)
-	newModelName := aimodels.ModelContactName(newModel, newInfo)
+	oldModelName := aimodels.ModelContactName(oldModel, toCoreModelInfo(oldInfo))
+	newModelName := aimodels.ModelContactName(newModel, toCoreModelInfo(newInfo))
 
 	// Pre-update the new model ghost's profile before queueing the event
 	// This ensures the ghost has a display name set in its Matrix profile
@@ -812,7 +812,7 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 				UserInfo: &bridgev2.UserInfo{
 					Name:        ptr.Ptr(newModelName),
 					IsBot:       ptr.Ptr(false),
-					Identifiers: aimodels.ModelContactIdentifiers(newModel, newInfo),
+					Identifiers: aimodels.ModelContactIdentifiers(newModel, toCoreModelInfo(newInfo)),
 				},
 				MemberEventExtra: map[string]any{
 					"displayname":            newModelName,

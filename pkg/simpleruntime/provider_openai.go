@@ -21,7 +21,6 @@ import (
 	"go.mau.fi/util/random"
 
 	"github.com/beeper/ai-bridge/pkg/core/aimodels"
-	"github.com/beeper/ai-bridge/pkg/core/aiprovider"
 	"github.com/beeper/ai-bridge/pkg/core/aiutil"
 	"github.com/beeper/ai-bridge/pkg/core/shared/httputil"
 )
@@ -826,7 +825,7 @@ func MakeToolDedupMiddleware(log zerolog.Logger) option.Middleware {
 }
 
 // ToOpenAITools converts tool definitions to OpenAI Responses API format
-func ToOpenAITools(tools []aiprovider.ToolDefinition, strictMode ToolStrictMode, log *zerolog.Logger) []responses.ToolUnionParam {
+func ToOpenAITools(tools []ToolDefinition, strictMode ToolStrictMode, log *zerolog.Logger) []responses.ToolUnionParam {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -861,7 +860,7 @@ func ToOpenAITools(tools []aiprovider.ToolDefinition, strictMode ToolStrictMode,
 }
 
 // ToOpenAIChatTools converts tool definitions to OpenAI Chat Completions tool format.
-func ToOpenAIChatTools(tools []aiprovider.ToolDefinition, log *zerolog.Logger) []openai.ChatCompletionToolUnionParam {
+func ToOpenAIChatTools(tools []ToolDefinition, log *zerolog.Logger) []openai.ChatCompletionToolUnionParam {
 	if len(tools) == 0 {
 		return nil
 	}

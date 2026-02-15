@@ -9,20 +9,13 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
-// Type aliases that delegate to pkg/linkpreview.
-type (
-	LinkPreviewConfig = linkpreview.Config
-	PreviewWithImage  = linkpreview.PreviewWithImage
-	LinkPreviewer     = linkpreview.Previewer
-)
-
 // DefaultLinkPreviewConfig returns sensible defaults.
-func DefaultLinkPreviewConfig() LinkPreviewConfig {
+func DefaultLinkPreviewConfig() linkpreview.Config {
 	return linkpreview.DefaultConfig()
 }
 
 // NewLinkPreviewer creates a new link previewer with the given config.
-func NewLinkPreviewer(config LinkPreviewConfig) *LinkPreviewer {
+func NewLinkPreviewer(config linkpreview.Config) *linkpreview.Previewer {
 	return linkpreview.NewPreviewer(config)
 }
 
@@ -32,12 +25,12 @@ func ExtractURLs(text string, maxURLs int) []string {
 }
 
 // UploadPreviewImages uploads images from PreviewWithImage to Matrix and returns final BeeperLinkPreviews.
-func UploadPreviewImages(ctx context.Context, previews []*PreviewWithImage, intent bridgev2.MatrixAPI, roomID id.RoomID) []*event.BeeperLinkPreview {
+func UploadPreviewImages(ctx context.Context, previews []*linkpreview.PreviewWithImage, intent bridgev2.MatrixAPI, roomID id.RoomID) []*event.BeeperLinkPreview {
 	return linkpreview.UploadPreviewImages(ctx, previews, intent, roomID)
 }
 
 // ExtractBeeperPreviews extracts just the BeeperLinkPreview from PreviewWithImage slice.
-func ExtractBeeperPreviews(previews []*PreviewWithImage) []*event.BeeperLinkPreview {
+func ExtractBeeperPreviews(previews []*linkpreview.PreviewWithImage) []*event.BeeperLinkPreview {
 	return linkpreview.ExtractBeeperPreviews(previews)
 }
 

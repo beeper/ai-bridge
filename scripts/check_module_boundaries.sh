@@ -53,6 +53,14 @@ if rg -n 'compat|shim|alias wrapper|legacy adapter' pkg modules bridges -g'*.go'
   fail "compatibility/shim markers are not allowed in active runtime paths"
 fi
 
+# Disallow type alias declarations in active runtime paths.
+if rg -n "^[[:space:]]*type[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=" pkg modules bridges -g'*.go' >/dev/null; then
+  fail "type alias declarations are not allowed in active runtime paths"
+fi
+if rg --pcre2 -U -n "(?s)type\\s*\\([^)]*?\\b[A-Za-z_][A-Za-z0-9_]*\\s*=\\s*[^\\n]+\\)" pkg modules bridges -g'*.go' >/dev/null; then
+  fail "type alias declarations are not allowed in active runtime paths"
+fi
+
 # pkg/matrixai/ must not import simpleruntime or bridge-specific code.
 if rg -q 'github.com/beeper/ai-bridge/pkg/simpleruntime' pkg/matrixai/; then
   fail "pkg/matrixai/ must not import simpleruntime"

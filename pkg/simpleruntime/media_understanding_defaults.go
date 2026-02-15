@@ -10,10 +10,26 @@ const (
 	defaultImageUnderstandingLimit = aimedia.DefaultImageUnderstandingLimit
 )
 
-var defaultMaxCharsByCapability = aimedia.DefaultMaxCharsByCapability
-var defaultMaxBytesByCapability = aimedia.DefaultMaxBytesByCapability
-var defaultTimeoutSecondsByCapability = aimedia.DefaultTimeoutSecondsByCapability
-var defaultPromptByCapability = aimedia.DefaultPromptByCapability
+var defaultMaxCharsByCapability = map[MediaUnderstandingCapability]int{
+	MediaCapabilityImage: aimedia.DefaultMaxCharsByCapability[aimedia.MediaCapabilityImage],
+	MediaCapabilityAudio: aimedia.DefaultMaxCharsByCapability[aimedia.MediaCapabilityAudio],
+	MediaCapabilityVideo: aimedia.DefaultMaxCharsByCapability[aimedia.MediaCapabilityVideo],
+}
+var defaultMaxBytesByCapability = map[MediaUnderstandingCapability]int{
+	MediaCapabilityImage: aimedia.DefaultMaxBytesByCapability[aimedia.MediaCapabilityImage],
+	MediaCapabilityAudio: aimedia.DefaultMaxBytesByCapability[aimedia.MediaCapabilityAudio],
+	MediaCapabilityVideo: aimedia.DefaultMaxBytesByCapability[aimedia.MediaCapabilityVideo],
+}
+var defaultTimeoutSecondsByCapability = map[MediaUnderstandingCapability]int{
+	MediaCapabilityImage: aimedia.DefaultTimeoutSecondsByCapability[aimedia.MediaCapabilityImage],
+	MediaCapabilityAudio: aimedia.DefaultTimeoutSecondsByCapability[aimedia.MediaCapabilityAudio],
+	MediaCapabilityVideo: aimedia.DefaultTimeoutSecondsByCapability[aimedia.MediaCapabilityVideo],
+}
+var defaultPromptByCapability = map[MediaUnderstandingCapability]string{
+	MediaCapabilityImage: aimedia.DefaultPromptByCapability[aimedia.MediaCapabilityImage],
+	MediaCapabilityAudio: aimedia.DefaultPromptByCapability[aimedia.MediaCapabilityAudio],
+	MediaCapabilityVideo: aimedia.DefaultPromptByCapability[aimedia.MediaCapabilityVideo],
+}
 var defaultAudioModelsByProvider = aimedia.DefaultAudioModelsByProvider
 
 const defaultOpenRouterGoogleModel = aimedia.DefaultOpenRouterGoogleModel

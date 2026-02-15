@@ -5,40 +5,96 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
-
-	"github.com/beeper/ai-bridge/pkg/core/aiprovider"
 )
 
-// Type aliases that delegate to pkg/aiprovider.
-type (
-	MessageRole     = aiprovider.MessageRole
-	ContentPartType = aiprovider.ContentPartType
-	ContentPart     = aiprovider.ContentPart
-	UnifiedMessage  = aiprovider.UnifiedMessage
-)
+type MessageRole string
+type ContentPartType string
+
+type ContentPart struct {
+	Type        ContentPartType
+	Text        string
+	ImageURL    string
+	ImageB64    string
+	MimeType    string
+	PDFURL      string
+	PDFB64      string
+	AudioB64    string
+	AudioFormat string
+	VideoURL    string
+	VideoB64    string
+}
+
+type UnifiedMessage struct {
+	Role       MessageRole
+	Content    []ContentPart
+	ToolCalls  []ToolCallResult
+	ToolCallID string
+	Name       string
+}
 
 // Re-export role constants.
 const (
-	RoleSystem    = aiprovider.RoleSystem
-	RoleUser      = aiprovider.RoleUser
-	RoleAssistant = aiprovider.RoleAssistant
-	RoleTool      = aiprovider.RoleTool
+	RoleSystem    MessageRole = "system"
+	RoleUser      MessageRole = "user"
+	RoleAssistant MessageRole = "assistant"
+	RoleTool      MessageRole = "tool"
 )
 
 // Re-export content type constants.
 const (
-	ContentTypeText  = aiprovider.ContentTypeText
-	ContentTypeImage = aiprovider.ContentTypeImage
-	ContentTypePDF   = aiprovider.ContentTypePDF
-	ContentTypeAudio = aiprovider.ContentTypeAudio
-	ContentTypeVideo = aiprovider.ContentTypeVideo
+	ContentTypeText  ContentPartType = "text"
+	ContentTypeImage ContentPartType = "image"
+	ContentTypePDF   ContentPartType = "pdf"
+	ContentTypeAudio ContentPartType = "audio"
+	ContentTypeVideo ContentPartType = "video"
 )
 
-// Re-export constructor functions.
-var (
-	NewTextMessage  = aiprovider.NewTextMessage
-	NewImageMessage = aiprovider.NewImageMessage
-)
+func NewTextMessage(role MessageRole, text string) UnifiedMessage {
+	return UnifiedMessage{
+		Role: role,
+		Content: []ContentPart{
+			{Type: ContentTypeText, Text: text},
+		},
+	}
+}
+
+func NewImageMessage(role MessageRole, imageURL, mimeType string) UnifiedMessage {
+	return UnifiedMessage{
+		Role: role,
+		Content: []ContentPart{
+			{Type: ContentTypeImage, ImageURL: imageURL, MimeType: mimeType},
+		},
+	}
+}
+
+func (m *UnifiedMessage) Text() string {
+	var texts []string
+	for _, part := range m.Content {
+		if part.Type == ContentTypeText {
+			texts = append(texts, part.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
+}
+
+func (m *UnifiedMessage) HasImages() bool {
+	for _, part := range m.Content {
+		if part.Type == ContentTypeImage {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *UnifiedMessage) HasMultimodalContent() bool {
+	for _, part := range m.Content {
+		switch part.Type {
+		case ContentTypeImage, ContentTypePDF, ContentTypeAudio, ContentTypeVideo:
+			return true
+		}
+	}
+	return false
+}
 
 // ToOpenAIResponsesInput converts unified messages to OpenAI Responses API format.
 // Supports text + image/PDF inputs for user messages; audio/video are intentionally
@@ -168,5 +224,11 @@ func ToOpenAIResponsesInput(messages []UnifiedMessage) responses.ResponseInputPa
 }
 
 // ExtractSystemPrompt extracts the system prompt from unified messages.
-// Delegates to aiprovider.ExtractSystemPrompt.
-var ExtractSystemPrompt = aiprovider.ExtractSystemPrompt
+func ExtractSystemPrompt(messages []UnifiedMessage) string {
+	for _, msg := range messages {
+		if msg.Role == RoleSystem {
+			return msg.Text()
+		}
+	}
+	return ""
+}

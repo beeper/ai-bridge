@@ -2,26 +2,25 @@ package connector
 
 import "github.com/beeper/ai-bridge/pkg/core/aimodels"
 
-// Type and constant aliases so that in-package code can use short names.
-type ModelAPI = aimodels.ModelAPI
+type ModelAPI string
 
 const (
-	ModelAPIResponses       = aimodels.ModelAPIResponses
-	ModelAPIChatCompletions = aimodels.ModelAPIChatCompletions
+	ModelAPIResponses       ModelAPI = ModelAPI(aimodels.ModelAPIResponses)
+	ModelAPIChatCompletions ModelAPI = ModelAPI(aimodels.ModelAPIChatCompletions)
 )
 
-func (oc *AIClient) resolveModelAPI(meta *PortalMetadata) aimodels.ModelAPI {
+func (oc *AIClient) resolveModelAPI(meta *PortalMetadata) ModelAPI {
 	modelID := oc.effectiveModel(meta)
 	if info := oc.findModelInfo(modelID); info != nil {
 		if api := aimodels.NormalizeModelAPI(info.API); api != "" {
 			if oc.isOpenRouterProvider() && api == aimodels.ModelAPIResponses {
-				return aimodels.ModelAPIChatCompletions
+				return ModelAPIChatCompletions
 			}
-			return api
+			return ModelAPI(api)
 		}
 	}
 	if oc.isOpenRouterProvider() {
-		return aimodels.ModelAPIChatCompletions
+		return ModelAPIChatCompletions
 	}
-	return aimodels.ModelAPIResponses
+	return ModelAPIResponses
 }

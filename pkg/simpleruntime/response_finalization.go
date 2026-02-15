@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/matrixai/linkpreview"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/format"
@@ -643,7 +644,7 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 // generateOutboundLinkPreviews extracts URLs from AI response text, generates link previews, and uploads images to Matrix.
 // When citations are provided (e.g. from Exa search results), matching URLs use the citation's
 // image directly instead of fetching the page's HTML.
-func generateOutboundLinkPreviews(ctx context.Context, text string, intent bridgev2.MatrixAPI, portal *bridgev2.Portal, citations []sourceCitation, config LinkPreviewConfig) []*event.BeeperLinkPreview {
+func generateOutboundLinkPreviews(ctx context.Context, text string, intent bridgev2.MatrixAPI, portal *bridgev2.Portal, citations []sourceCitation, config linkpreview.Config) []*event.BeeperLinkPreview {
 	if !config.Enabled {
 		return nil
 	}
@@ -657,7 +658,7 @@ func generateOutboundLinkPreviews(ctx context.Context, text string, intent bridg
 	fetchCtx, cancel := context.WithTimeout(ctx, config.FetchTimeout*time.Duration(len(urls)))
 	defer cancel()
 
-	var previewsWithImages []*PreviewWithImage
+	var previewsWithImages []*linkpreview.PreviewWithImage
 	if len(citations) > 0 {
 		previewsWithImages = previewer.FetchPreviewsWithCitations(fetchCtx, urls, sourceCitationsToLinkpreviewCitations(citations))
 	} else {
