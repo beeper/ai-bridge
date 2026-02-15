@@ -238,7 +238,7 @@ func (oc *AIClient) createNewChat(ctx context.Context, modelID string) (*bridgev
 		return nil, err
 	}
 
-	// Keep model-only chats consistent with "!ai new <model>": raw/non-agentic.
+	// Keep model-only chats consistent with "!ai new <model>": raw mode.
 	meta := portalMeta(portal)
 	if meta != nil && !meta.IsRawMode {
 		meta.IsRawMode = true
@@ -609,7 +609,7 @@ func (oc *AIClient) createNewChatWithModel(ctx context.Context, modelID string) 
 		return nil, nil, err
 	}
 
-	// Model-only rooms are "raw"/non-agentic rooms. This disables directive processing
+	// Model-only rooms are raw mode rooms. This disables directive processing
 	// and prevents media-understanding unions from making the room appear more capable
 	// than the base model.
 	meta := portalMeta(portal)
@@ -698,13 +698,6 @@ func (oc *AIClient) composeChatInfo(title, modelID string) *bridgev2.ChatInfo {
 	}
 }
 
-func (oc *AIClient) applyAgentChatInfo(chatInfo *bridgev2.ChatInfo, agentID, agentName, modelID string) {
-	_ = chatInfo
-	_ = agentID
-	_ = agentName
-	_ = modelID
-}
-
 // updatePortalConfig applies room settings to portal metadata with optimistic updates.
 // If persistence fails, metadata is rolled back to the previous values.
 func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Portal, config *RoomSettingsEventContent) error {
@@ -776,7 +769,7 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 		return
 	}
 
-	// For non-agent rooms, use model-only ghosts
+	// Use model-only ghosts.
 	oc.loggerForContext(ctx).Info().
 		Str("old_model", oldModel).
 		Str("new_model", newModel).
@@ -864,15 +857,6 @@ func (oc *AIClient) handleModelSwitch(ctx context.Context, portal *bridgev2.Port
 	if err := oc.ensureSingleAIGhost(ctx, portal); err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure single AI ghost after model switch")
 	}
-}
-
-// handleAgentModelSwitch is disabled in the simple runtime.
-func (oc *AIClient) handleAgentModelSwitch(ctx context.Context, portal *bridgev2.Portal, agentID, oldModel, newModel string) {
-	_ = ctx
-	_ = portal
-	_ = agentID
-	_ = oldModel
-	_ = newModel
 }
 
 // ensureSingleAIGhost ensures only one model ghost is in the room at a time.
@@ -1040,7 +1024,6 @@ func (oc *AIClient) broadcastSettings(ctx context.Context, portal *bridgev2.Port
 		MaxCompletionTokens: meta.MaxCompletionTokens,
 		ReasoningEffort:     meta.ReasoningEffort,
 		ConversationMode:    meta.ConversationMode,
-		AgentID:             "",
 	}
 
 	bot := oc.UserLogin.Bridge.Bot

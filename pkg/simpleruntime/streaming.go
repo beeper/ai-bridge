@@ -13,8 +13,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
 	"github.com/beeper/ai-bridge/pkg/core/aitokens"
+	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
@@ -30,7 +30,6 @@ import (
 // streamingState tracks the state of a streaming response
 type streamingState struct {
 	turnID         string
-	agentID        string
 	startedAtMs    int64
 	firstTokenAtMs int64
 	completedAtMs  int64
@@ -106,7 +105,6 @@ type streamingState struct {
 func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID id.EventID, senderID string, roomID id.RoomID) *streamingState {
 	state := &streamingState{
 		turnID:                 NewTurnID(),
-		agentID:                "",
 		startedAtMs:            time.Now().UnixMilli(),
 		firstToken:             true,
 		sourceEventID:          sourceEventID,

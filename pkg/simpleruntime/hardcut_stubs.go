@@ -26,7 +26,7 @@ func shouldUseStrictMode(mode ToolStrictMode, _ map[string]any) bool {
 }
 
 // appendMessageIDHint is a no-op in the simple bridge.
-// Agentic bridges override to embed message ID hints in prompts.
+// Downstream bridges can override to embed message ID hints in prompts.
 func appendMessageIDHint(text string, _ any) string { return text }
 
 // stripMessageIDHintLines is a no-op in the simple bridge.

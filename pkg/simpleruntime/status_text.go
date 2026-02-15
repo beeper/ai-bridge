@@ -102,7 +102,7 @@ func (oc *AIClient) buildStatusText(
 	if sendPolicy == "deny" {
 		sendLabel = "off"
 	}
-	responseMode := string(oc.getAgentResponseMode(meta))
+	responseMode := string(oc.getResponseMode(meta))
 	conversationMode := strings.TrimSpace(meta.ConversationMode)
 	if conversationMode == "" {
 		conversationMode = "default"
@@ -158,42 +158,7 @@ func (oc *AIClient) buildStatusText(
 	}
 	sb.WriteString(typingLine + "\n")
 
-
 	return strings.TrimSpace(sb.String())
-}
-
-func formatHeartbeatSummary(nowMs int64, evt *HeartbeatEventPayload) string {
-	if evt == nil {
-		return "Heartbeat: none"
-	}
-	age := ""
-	if evt.TS > 0 && nowMs > evt.TS {
-		age = formatAge(nowMs - evt.TS)
-	}
-	parts := make([]string, 0, 6)
-	parts = append(parts, fmt.Sprintf("Heartbeat: %s", strings.TrimSpace(evt.Status)))
-	if age != "" {
-		parts = append(parts, fmt.Sprintf("(%s ago)", age))
-	}
-	if ch := strings.TrimSpace(evt.Channel); ch != "" {
-		parts = append(parts, "channel="+ch)
-	}
-	if to := strings.TrimSpace(evt.To); to != "" {
-		parts = append(parts, "to="+to)
-	}
-	if r := strings.TrimSpace(evt.Reason); r != "" {
-		parts = append(parts, "reason="+r)
-	}
-	if p := strings.TrimSpace(evt.Preview); p != "" {
-		p = strings.ReplaceAll(p, "\n", " ")
-		p = strings.ReplaceAll(p, "\r", " ")
-		p = strings.Join(strings.Fields(p), " ")
-		if len(p) > 120 {
-			p = p[:120] + "..."
-		}
-		parts = append(parts, fmt.Sprintf("preview=%q", p))
-	}
-	return strings.Join(parts, " ")
 }
 
 func formatTypingInterval(interval time.Duration) string {

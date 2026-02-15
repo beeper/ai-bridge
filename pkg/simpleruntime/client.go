@@ -310,7 +310,7 @@ type AIClient struct {
 	disconnectCtx    context.Context
 	disconnectCancel context.CancelFunc
 
-	// Extension hooks for downstream bridges (e.g. beep's agentic layer).
+	// Extension hooks for downstream bridges.
 	clientHooks AIClientHooks
 }
 
@@ -895,7 +895,7 @@ func (oc *AIClient) processPendingQueue(ctx context.Context, roomID id.RoomID) {
 			if len(ackIDs) > 0 {
 				item.pending.AckEventIDs = ackIDs
 			}
-			combined := buildCollectPrompt("[Queued messages while agent was busy]", items, summary)
+			combined := buildCollectPrompt("[Queued messages while model was busy]", items, summary)
 			if traceFull && strings.TrimSpace(combined) != "" {
 				logCtx.Debug().Str("body", combined).Msg("Collect prompt body")
 			}
@@ -1003,7 +1003,6 @@ func (oc *AIClient) Disconnect() {
 		oc.inboundDebouncer.FlushAll()
 	}
 	oc.loggedIn.Store(false)
-
 
 	// Clean up per-room maps to prevent unbounded growth
 	oc.activeRoomsMu.Lock()
@@ -1127,8 +1126,7 @@ func updateGhostLastSync(_ context.Context, ghost *bridgev2.Ghost) bool {
 func (oc *AIClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
 	meta := portalMeta(portal)
 
-	// Always recompute effective room capabilities to ensure they're up-to-date
-	// (includes image-understanding union for agent rooms)
+	// Always recompute effective room capabilities to ensure they're up-to-date.
 	modelCaps := oc.getRoomCapabilities(ctx, meta)
 	allowTextFiles := oc.canUseMediaUnderstanding(meta)
 	supportsPDF := modelCaps.SupportsPDF || oc.isOpenRouterProvider()
@@ -1204,20 +1202,6 @@ func (oc *AIClient) effectiveModel(meta *PortalMetadata) string {
 	// Provider default from config
 	return oc.defaultModelForProvider()
 }
-
-func (oc *AIClient) agentModelOverride(agentID string) string {
-	_ = agentID
-	return ""
-}
-
-func (oc *AIClient) ensureAgentGhostDisplayName(ctx context.Context, agentID, modelID, agentName string) {
-	_ = ctx
-	_ = agentID
-	_ = modelID
-	_ = agentName
-	// Agent ghosts are not explicitly managed in the simpleruntime build.
-}
-
 
 // effectiveModelForAPI returns the actual model name to send to the API
 // For OpenRouter/Beeper, returns the full model ID (e.g., "openai/gpt-5.2")
@@ -1326,14 +1310,6 @@ func getLinkPreviewConfig(connectorConfig *Config) LinkPreviewConfig {
 	}
 
 	return config
-}
-
-// effectiveAgentPrompt is disabled in the simple runtime.
-func (oc *AIClient) effectiveAgentPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) string {
-	_ = ctx
-	_ = portal
-	_ = meta
-	return ""
 }
 
 // effectiveTemperature returns the temperature to use.
@@ -1887,15 +1863,11 @@ func (oc *AIClient) buildBasePrompt(
 		prompt = maybePrependSessionGreeting(ctx, portal, meta, prompt, oc.log)
 	}
 
-	// Add system prompt - agent prompt takes priority, then room override, then config default
+	// Add system prompt
 	if isRaw {
 		prompt = append(prompt, openai.SystemMessage(oc.buildRawModeSystemPrompt(meta)))
 	} else {
-		systemPrompt := oc.effectiveAgentPrompt(ctx, portal, meta)
-		if systemPrompt == "" {
-			systemPrompt = oc.effectivePrompt(meta)
-		}
-		if systemPrompt != "" {
+		if systemPrompt := oc.effectivePrompt(meta); systemPrompt != "" {
 			prompt = append(prompt, openai.SystemMessage(systemPrompt))
 		}
 		prompt = append(prompt, oc.buildAdditionalSystemPrompts(ctx, portal, meta)...)
@@ -1996,7 +1968,7 @@ func (oc *AIClient) applyAbortHint(ctx context.Context, portal *bridgev2.Portal,
 	if portal != nil {
 		oc.savePortalQuiet(ctx, portal, "abort hint")
 	}
-	note := "Note: The previous agent run was aborted by the user. Resume carefully or ask for clarification."
+	note := "Note: The previous run was aborted by the user. Resume carefully or ask for clarification."
 	if strings.TrimSpace(body) == "" {
 		return note
 	}
@@ -2267,16 +2239,12 @@ func (oc *AIClient) buildPromptUpToMessage(
 ) ([]openai.ChatCompletionMessageParamUnion, error) {
 	var prompt []openai.ChatCompletionMessageParamUnion
 
-	// Add system prompt - agent prompt takes priority, then room override, then config default
+	// Add system prompt
 	isRaw := meta != nil && meta.IsRawMode
 	if isRaw {
 		prompt = append(prompt, openai.SystemMessage(oc.buildRawModeSystemPrompt(meta)))
 	} else {
-		systemPrompt := oc.effectiveAgentPrompt(ctx, portal, meta)
-		if systemPrompt == "" {
-			systemPrompt = oc.effectivePrompt(meta)
-		}
-		if systemPrompt != "" {
+		if systemPrompt := oc.effectivePrompt(meta); systemPrompt != "" {
 			prompt = append(prompt, openai.SystemMessage(systemPrompt))
 		}
 		prompt = append(prompt, oc.buildAdditionalSystemPrompts(ctx, portal, meta)...)
@@ -2658,17 +2626,6 @@ func getModelCapabilities(modelID string, info *ModelInfo) ModelCapabilities {
 	}
 
 	return caps
-}
-
-// AgentState tracks the state of an active agent turn
-type AgentState struct {
-	AgentID     string
-	TurnID      string
-	Status      string // pending, thinking, generating, tool_use, completed, failed, cancelled
-	StartedAt   time.Time
-	Model       string
-	ToolCalls   []string // Event IDs of tool calls
-	ImageEvents []string // Event IDs of generated images
 }
 
 // buildDedupeKey creates a unique key for inbound message deduplication.

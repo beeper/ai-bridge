@@ -17,7 +17,7 @@ The simple bridge has its own `go.mod`, `cmd/bridge/main.go`, and `config.exampl
 
 Dedicated runtimes were split out into sibling repositories:
 
-- `../beep` (agentic)
+- `../beep` (advanced runtime)
 - `../beeper-codex` (codex)
 - `../beeper-opencode` (opencode)
 

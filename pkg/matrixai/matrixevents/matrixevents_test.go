@@ -19,7 +19,6 @@ func TestBuildStreamEventEnvelope_RequiresSeq(t *testing.T) {
 func TestBuildStreamEventEnvelope_IncludesRelatesTo(t *testing.T) {
 	content, err := BuildStreamEventEnvelope("turn1", 2, map[string]any{"type": "text-delta"}, StreamEventOpts{
 		TargetEventID: "$event",
-		AgentID:       "agent1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -29,9 +28,6 @@ func TestBuildStreamEventEnvelope_IncludesRelatesTo(t *testing.T) {
 	}
 	if content["seq"] != 2 {
 		t.Fatalf("seq mismatch")
-	}
-	if content["agent_id"] != "agent1" {
-		t.Fatalf("agent_id mismatch")
 	}
 	rt, ok := content["m.relates_to"].(map[string]any)
 	if !ok {

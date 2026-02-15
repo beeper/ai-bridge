@@ -42,11 +42,9 @@ func resolveResponsePrefixRaw(oc *AIClient, cfg *Config, meta *PortalMetadata) s
 	return strings.TrimSpace(cfg.Messages.ResponsePrefix)
 }
 
-func resolveIdentityNameForPrefix(_ *AIClient, _ string) string { return "" }
-
-func buildResponsePrefixContext(oc *AIClient, agentID string, meta *PortalMetadata) ResponsePrefixContext {
+func buildResponsePrefixContext(oc *AIClient, meta *PortalMetadata) ResponsePrefixContext {
 	ctx := ResponsePrefixContext{
-		IdentityName: resolveIdentityNameForPrefix(oc, agentID),
+		IdentityName: "",
 	}
 	if oc == nil {
 		return ctx
@@ -77,14 +75,9 @@ func resolveResponsePrefixForReply(oc *AIClient, cfg *Config, meta *PortalMetada
 	if raw == "" {
 		return ""
 	}
-	agentID := resolveAgentID(meta)
 	if strings.EqualFold(raw, "auto") {
-		name := resolveIdentityNameForPrefix(oc, agentID)
-		if name == "" {
-			return ""
-		}
-		return "[" + name + "]"
+		return ""
 	}
-	ctx := buildResponsePrefixContext(oc, agentID, meta)
+	ctx := buildResponsePrefixContext(oc, meta)
 	return resolveResponsePrefixTemplate(raw, ctx)
 }

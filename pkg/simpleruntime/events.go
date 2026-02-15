@@ -15,7 +15,6 @@ func init() {
 	event.TypeMap[RoomCapabilitiesEventType] = reflect.TypeOf(RoomCapabilitiesEventContent{})
 	event.TypeMap[RoomSettingsEventType] = reflect.TypeOf(RoomSettingsEventContent{})
 	event.TypeMap[ModelCapabilitiesEventType] = reflect.TypeOf(ModelCapabilitiesEventContent{})
-	event.TypeMap[AgentsEventType] = reflect.TypeOf(AgentsEventContent{})
 }
 
 // AssistantTurnEventType is the container event for an assistant's response
@@ -32,9 +31,6 @@ var AIErrorEventType = matrixevents.AIErrorEventType
 
 // TurnCancelledEventType represents a cancelled turn
 var TurnCancelledEventType = matrixevents.TurnCancelledEventType
-
-// AgentHandoffEventType represents a handoff between agents
-var AgentHandoffEventType = matrixevents.AgentHandoffEventType
 
 // StepBoundaryEventType represents multi-step boundaries within a turn
 var StepBoundaryEventType = matrixevents.StepBoundaryEventType
@@ -64,9 +60,6 @@ var RoomSettingsEventType = matrixevents.RoomSettingsEventType
 
 // ModelCapabilitiesEventType is the Matrix state event type for broadcasting available models
 var ModelCapabilitiesEventType = matrixevents.ModelCapabilitiesEventType
-
-// AgentsEventType configures active agents in a room
-var AgentsEventType = matrixevents.AgentsEventType
 
 // StreamContentType identifies the type of content in a stream delta
 type StreamContentType string
@@ -151,7 +144,6 @@ type AssistantTurnContent struct {
 // AssistantTurnAI contains the AI-specific metadata for an assistant turn
 type AssistantTurnAI struct {
 	TurnID       string     `json:"turn_id"`
-	AgentID      string     `json:"agent_id,omitempty"`
 	Model        string     `json:"model"`
 	Status       TurnStatus `json:"status"`
 	FinishReason string     `json:"finish_reason,omitempty"`
@@ -231,7 +223,6 @@ type ToolCallContent struct {
 type ToolCallData struct {
 	CallID   string     `json:"call_id"`
 	TurnID   string     `json:"turn_id"`
-	AgentID  string     `json:"agent_id,omitempty"`
 	ToolName string     `json:"tool_name"`
 	ToolType ToolType   `json:"tool_type"`
 	Status   ToolStatus `json:"status"`
@@ -272,7 +263,6 @@ type ToolResultContent struct {
 type ToolResultData struct {
 	CallID   string       `json:"call_id"`
 	TurnID   string       `json:"turn_id"`
-	AgentID  string       `json:"agent_id,omitempty"`
 	ToolName string       `json:"tool_name"`
 	Status   ResultStatus `json:"status"`
 
@@ -315,7 +305,6 @@ type AIErrorContent struct {
 // AIErrorData contains error details
 type AIErrorData struct {
 	TurnID       string `json:"turn_id,omitempty"`
-	AgentID      string `json:"agent_id,omitempty"`
 	ErrorCode    string `json:"error_code"`
 	ErrorMessage string `json:"error_message"`
 	Retryable    bool   `json:"retryable"`
@@ -325,34 +314,15 @@ type AIErrorData struct {
 // TurnCancelledContent represents a cancelled turn event
 type TurnCancelledContent struct {
 	TurnID             string   `json:"turn_id"`
-	AgentID            string   `json:"agent_id,omitempty"`
 	CancelledAt        int64    `json:"cancelled_at"` // Unix ms
 	Reason             string   `json:"reason,omitempty"`
 	PartialContent     string   `json:"partial_content,omitempty"`
 	ToolCallsCancelled []string `json:"tool_calls_cancelled,omitempty"`
 }
 
-// AgentHandoffContent represents an agent handoff event
-type AgentHandoffContent struct {
-	Body    string `json:"body"`
-	MsgType string `json:"msgtype"`
-
-	Handoff *AgentHandoffData `json:"com.beeper.ai.agent_handoff"`
-}
-
-// AgentHandoffData contains handoff details
-type AgentHandoffData struct {
-	FromAgent string         `json:"from_agent"`
-	ToAgent   string         `json:"to_agent"`
-	FromTurn  string         `json:"from_turn,omitempty"`
-	Reason    string         `json:"reason,omitempty"`
-	Context   map[string]any `json:"context,omitempty"`
-}
-
 // StepBoundaryContent represents a step boundary within a turn
 type StepBoundaryContent struct {
 	TurnID            string       `json:"turn_id"`
-	AgentID           string       `json:"agent_id,omitempty"`
 	StepNumber        int          `json:"step_number"`
 	StepType          string       `json:"step_type"` // "tool_response_processed", etc.
 	PreviousToolCalls []string     `json:"previous_tool_calls,omitempty"`
@@ -367,7 +337,6 @@ type StepDisplay struct {
 // StreamDeltaContent represents a streaming delta event
 type StreamDeltaContent struct {
 	TurnID      string            `json:"turn_id"`
-	AgentID     string            `json:"agent_id,omitempty"`
 	TargetEvent string            `json:"target_event,omitempty"` // Event ID being updated
 	ContentType StreamContentType `json:"content_type"`
 	Delta       string            `json:"delta"`
@@ -391,7 +360,6 @@ type StreamCursor struct {
 // GenerationStatusContent represents a generation status update
 type GenerationStatusContent struct {
 	TurnID        string `json:"turn_id"`
-	AgentID       string `json:"agent_id,omitempty"`
 	TargetEvent   string `json:"target_event,omitempty"`
 	Status        string `json:"status"` // "starting", "thinking", "generating", "tool_use", etc.
 	StatusMessage string `json:"status_message,omitempty"`
@@ -399,9 +367,6 @@ type GenerationStatusContent struct {
 	Details  *GenerationDetails  `json:"details,omitempty"`
 	Progress *GenerationProgress `json:"progress,omitempty"`
 	Display  *StatusDisplay      `json:"display,omitempty"`
-
-	// For collaboration
-	Collaboration *CollaborationInfo `json:"collaboration,omitempty"`
 }
 
 // GenerationDetails provides detailed status information
@@ -425,24 +390,10 @@ type StatusDisplay struct {
 	Color     string `json:"color,omitempty"`
 }
 
-// CollaborationInfo contains multi-agent collaboration status
-type CollaborationInfo struct {
-	Orchestrator string                     `json:"orchestrator,omitempty"`
-	Participants []CollaborationParticipant `json:"participants,omitempty"`
-}
-
-// CollaborationParticipant represents an agent in a collaboration
-type CollaborationParticipant struct {
-	AgentID string `json:"agent_id"`
-	Status  string `json:"status"`
-	Task    string `json:"task,omitempty"`
-}
-
 // ToolProgressContent represents tool execution progress
 type ToolProgressContent struct {
 	CallID   string `json:"call_id"`
 	TurnID   string `json:"turn_id"`
-	AgentID  string `json:"agent_id,omitempty"`
 	ToolName string `json:"tool_name"`
 
 	Status   ToolStatus           `json:"status"`
@@ -476,7 +427,6 @@ type ReasoningEffortOption struct {
 type SettingSource string
 
 const (
-	SourceAgentPolicy    SettingSource = "agent_policy"
 	SourceRoomOverride   SettingSource = "room_override"
 	SourceUserDefault    SettingSource = "user_default"
 	SourceProviderConfig SettingSource = "provider_config"
@@ -520,7 +470,6 @@ type RoomSettingsEventContent struct {
 	MaxCompletionTokens int      `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string   `json:"reasoning_effort,omitempty"`
 	ConversationMode    string   `json:"conversation_mode,omitempty"` // "messages" or "responses"
-	AgentID             string   `json:"agent_id,omitempty"`
 	EmitThinking        *bool    `json:"emit_thinking,omitempty"`
 	EmitToolArgs        *bool    `json:"emit_tool_args,omitempty"`
 }
@@ -573,35 +522,9 @@ const (
 // for external consumers that import connector.ModelInfo.
 type ModelInfo = aimodels.ModelInfo
 
-// AgentsEventContent configures active agents in a room
-type AgentsEventContent struct {
-	Agents        []AgentConfig        `json:"agents"`
-	Orchestration *OrchestrationConfig `json:"orchestration,omitempty"`
-}
-
-// AgentConfig describes an AI agent
-type AgentConfig struct {
-	AgentID     string   `json:"agent_id"`
-	Name        string   `json:"name"`
-	Model       string   `json:"model"`
-	UserID      string   `json:"user_id"` // Matrix user ID for this agent
-	Role        string   `json:"role"`    // "primary", "specialist"
-	Description string   `json:"description,omitempty"`
-	AvatarURL   string   `json:"avatar_url,omitempty"` // mxc:// URL
-	Triggers    []string `json:"triggers,omitempty"`   // e.g., ["@researcher", "/research"]
-}
-
-// OrchestrationConfig defines how agents work together
-type OrchestrationConfig struct {
-	Mode          string `json:"mode"` // "user_directed", "auto"
-	AllowParallel bool   `json:"allow_parallel"`
-	MaxConcurrent int    `json:"max_concurrent,omitempty"`
-}
-
 // ImageGenerationMetadata is added to m.image events for AI-generated images
 type ImageGenerationMetadata struct {
 	TurnID        string `json:"turn_id,omitempty"`
-	AgentID       string `json:"agent_id,omitempty"`
 	Prompt        string `json:"prompt,omitempty"`
 	RevisedPrompt string `json:"revised_prompt,omitempty"`
 	Model         string `json:"model,omitempty"`
@@ -619,35 +542,4 @@ type AttachmentMetadata struct {
 	Size     int    `json:"size,omitempty"`
 	Width    int    `json:"width,omitempty"`  // For images
 	Height   int    `json:"height,omitempty"` // For images
-}
-
-// AgentMemberContent is stored in m.room.member events in the Builder room
-// to persist agent definitions as Matrix state events.
-type AgentMemberContent struct {
-	Membership  string                  `json:"membership"`
-	DisplayName string                  `json:"displayname,omitempty"`
-	AvatarURL   string                  `json:"avatar_url,omitempty"`
-	Agent       *AgentDefinitionContent `json:"com.beeper.ai.agent,omitempty"`
-}
-
-// AgentDefinitionContent stores agent configuration in Matrix state events.
-// This is the serialized form of AgentDefinition for Matrix storage.
-type AgentDefinitionContent struct {
-	ID              string         `json:"id"`
-	Name            string         `json:"name"`
-	Description     string         `json:"description,omitempty"`
-	AvatarURL       string         `json:"avatar_url,omitempty"`
-	Model           string         `json:"model,omitempty"`
-	ModelFallback   []string       `json:"model_fallback,omitempty"`
-	SystemPrompt    string         `json:"system_prompt,omitempty"`
-	PromptMode      string         `json:"prompt_mode,omitempty"`
-	Tools           map[string]any `json:"tools,omitempty"`
-	Temperature     float64        `json:"temperature,omitempty"`
-	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
-	IdentityName    string         `json:"identity_name,omitempty"`
-	IdentityPersona string         `json:"identity_persona,omitempty"`
-	IsPreset        bool           `json:"is_preset,omitempty"`
-	HeartbeatPrompt string         `json:"heartbeat_prompt,omitempty"`
-	CreatedAt       int64          `json:"created_at"`
-	UpdatedAt       int64          `json:"updated_at"`
 }

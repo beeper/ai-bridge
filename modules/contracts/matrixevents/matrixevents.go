@@ -17,7 +17,6 @@ var (
 	ToolResultEventType    = event.Type{Type: "com.beeper.ai.tool_result", Class: event.MessageEventType}
 	AIErrorEventType       = event.Type{Type: "com.beeper.ai.error", Class: event.MessageEventType}
 	TurnCancelledEventType = event.Type{Type: "com.beeper.ai.turn_cancelled", Class: event.MessageEventType}
-	AgentHandoffEventType  = event.Type{Type: "com.beeper.ai.agent_handoff", Class: event.MessageEventType}
 	StepBoundaryEventType  = event.Type{Type: "com.beeper.ai.step_boundary", Class: event.MessageEventType}
 
 	StreamDeltaEventType   = event.Type{Type: "com.beeper.ai.stream_delta", Class: event.EphemeralEventType}
@@ -30,7 +29,6 @@ var (
 	RoomCapabilitiesEventType  = event.Type{Type: "com.beeper.ai.room_capabilities", Class: event.StateEventType}
 	RoomSettingsEventType      = event.Type{Type: "com.beeper.ai.room_settings", Class: event.StateEventType}
 	ModelCapabilitiesEventType = event.Type{Type: "com.beeper.ai.model_capabilities", Class: event.StateEventType}
-	AgentsEventType            = event.Type{Type: "com.beeper.ai.agents", Class: event.StateEventType}
 )
 
 // Relation types.
@@ -50,7 +48,6 @@ const (
 
 type StreamEventOpts struct {
 	TargetEventID string
-	AgentID       string
 }
 
 // BuildStreamEventEnvelope builds the stable envelope for com.beeper.ai.stream_event payloads.
@@ -79,10 +76,6 @@ func BuildStreamEventEnvelope(turnID string, seq int, part map[string]any, opts 
 			"event_id": target,
 		}
 	}
-	if agentID := strings.TrimSpace(opts.AgentID); agentID != "" {
-		content["agent_id"] = agentID
-	}
-
 	return content, nil
 }
 

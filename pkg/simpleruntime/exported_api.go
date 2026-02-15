@@ -42,7 +42,6 @@ func (oc *AIClient) SetStreamingHooks(h StreamingHooks) { oc.streamingHooks = h 
 // GetStreamingHooks returns the streaming hooks for this client.
 func (oc *AIClient) GetStreamingHooks() StreamingHooks { return oc.streamingHooks }
 
-
 // ============================================================================
 // AIClient exported methods (used by downstream bridges via struct embedding)
 // ============================================================================
@@ -66,7 +65,6 @@ func (oc *AIClient) BackgroundContext(ctx context.Context) context.Context {
 func (oc *AIClient) EffectiveModel(meta *PortalMetadata) string {
 	return oc.effectiveModel(meta)
 }
-
 
 // ResolveModelID validates and resolves a model ID.
 func (oc *AIClient) ResolveModelID(ctx context.Context, modelID string) (string, bool, error) {
@@ -167,7 +165,6 @@ func (oc *AIClient) ListAllChatPortals(ctx context.Context) ([]*bridgev2.Portal,
 func (oc *AIClient) BuildPrompt(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, latest string, eventID id.EventID) ([]openai.ChatCompletionMessageParamUnion, error) {
 	return oc.buildPrompt(ctx, portal, meta, latest, eventID)
 }
-
 
 // InitPortalForChat initializes a portal for a new chat.
 func (oc *AIClient) InitPortalForChat(ctx context.Context, opts PortalInitOpts) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
@@ -295,7 +292,6 @@ func (oc *AIClient) SetRoomName(ctx context.Context, portal *bridgev2.Portal, na
 	return oc.setRoomName(ctx, portal, name)
 }
 
-
 // ToolExecutor is the exported alias for the builtin tool executor signature.
 type ToolExecutor = toolExecutor
 
@@ -395,9 +391,6 @@ const SessionGreetingPrompt = sessionGreetingPrompt
 
 // MaybePrependSessionGreeting prepends a session greeting if applicable.
 var MaybePrependSessionGreeting = maybePrependSessionGreeting
-
-// FormatHeartbeatSummary formats a heartbeat summary string.
-var FormatHeartbeatSummary = formatHeartbeatSummary
 
 // ============================================================================
 // Exported helper functions

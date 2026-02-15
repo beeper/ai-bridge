@@ -19,7 +19,7 @@ type Config struct {
 	Models    *ModelsConfig       `yaml:"models"`
 	Bridge    BridgeConfig        `yaml:"bridge"`
 	Tools     ToolProvidersConfig `yaml:"tools"`
-	Channels *ChannelsConfig `yaml:"channels"`
+	Channels  *ChannelsConfig     `yaml:"channels"`
 	Messages  *MessagesConfig     `yaml:"messages"`
 	Commands  *CommandsConfig     `yaml:"commands"`
 	Session   *SessionConfig      `yaml:"session"`
@@ -49,21 +49,13 @@ type ChannelsConfig struct {
 }
 
 type ChannelDefaultsConfig struct {
-	Heartbeat      *ChannelHeartbeatVisibilityConfig `yaml:"heartbeat"`
-	ResponsePrefix string                            `yaml:"responsePrefix"`
+	ResponsePrefix string `yaml:"responsePrefix"`
 }
 
 type ChannelConfig struct {
-	Heartbeat      *ChannelHeartbeatVisibilityConfig `yaml:"heartbeat"`
-	ResponsePrefix string                            `yaml:"responsePrefix"`
-	ReplyToMode    string                            `yaml:"replyToMode"`   // off|first|all (Matrix)
-	ThreadReplies  string                            `yaml:"threadReplies"` // off|inbound|always (Matrix)
-}
-
-type ChannelHeartbeatVisibilityConfig struct {
-	ShowOk       *bool `yaml:"showOk"`
-	ShowAlerts   *bool `yaml:"showAlerts"`
-	UseIndicator *bool `yaml:"useIndicator"`
+	ResponsePrefix string `yaml:"responsePrefix"`
+	ReplyToMode    string `yaml:"replyToMode"`   // off|first|all (Matrix)
+	ThreadReplies  string `yaml:"threadReplies"` // off|inbound|always (Matrix)
 }
 
 // MessagesConfig defines message rendering settings (OpenClaw-style).
@@ -438,14 +430,8 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Str, "session", "mainKey")
 	helper.Copy(configupgrade.Str, "session", "store")
 
-	// Channels heartbeat visibility
-	helper.Copy(configupgrade.Bool, "channels", "defaults", "heartbeat", "showOk")
-	helper.Copy(configupgrade.Bool, "channels", "defaults", "heartbeat", "showAlerts")
-	helper.Copy(configupgrade.Bool, "channels", "defaults", "heartbeat", "useIndicator")
+	// Channels
 	helper.Copy(configupgrade.Str, "channels", "defaults", "responsePrefix")
-	helper.Copy(configupgrade.Bool, "channels", "matrix", "heartbeat", "showOk")
-	helper.Copy(configupgrade.Bool, "channels", "matrix", "heartbeat", "showAlerts")
-	helper.Copy(configupgrade.Bool, "channels", "matrix", "heartbeat", "useIndicator")
 	helper.Copy(configupgrade.Str, "channels", "matrix", "responsePrefix")
 	helper.Copy(configupgrade.Str, "channels", "matrix", "replyToMode")
 	helper.Copy(configupgrade.Str, "channels", "matrix", "threadReplies")

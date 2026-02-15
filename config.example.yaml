@@ -1,4 +1,4 @@
-# Example configuration for the ai-bridge OpenAI Matrix bridge.
+# Example configuration for the ai-bridge simple Matrix bridge.
 
 homeserver:
   address: https://matrix-client.example.com
@@ -14,8 +14,7 @@ appservice:
   id: openai-gpt
   bot:
     username: gptbridge
-    displayname: "ChatGPT Bridge"
-    # avatar: mxc://example.com/abcdef
+    displayname: "AI Bridge"
   as_token: "GENERATE-A-TOKEN"
   hs_token: "GENERATE-A-TOKEN"
 
@@ -36,60 +35,60 @@ metrics:
 encryption:
   allow: true
   default: false
-  delete_keys:
-    ratchet_on_decrypt: false
 
-# Connector-specific options (identical to pkg/connector/example-config.yaml)
 network:
-  # Beeper AI credentials for automatic login (optional)
   beeper:
-    base_url: ""  # Optional. If empty, login uses selected Beeper domain.
-    token: ""     # Beeper AI key (requires Beeper Plus)
+    base_url: ""
+    token: ""
 
-  # Per-provider default models
   providers:
     beeper:
       default_model: "anthropic/claude-opus-4.6"
-      # PDF processing engine for OpenRouter's file-parser plugin.
-      # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
       default_pdf_engine: "mistral-ocr"
     openai:
-      # Optional. If set, overrides login-provided key.
       api_key: ""
-      # Optional. Defaults to https://api.openai.com/v1
       base_url: "https://api.openai.com/v1"
       default_model: "openai/gpt-5.2"
     openrouter:
-      # Optional. If set, overrides login-provided key.
       api_key: ""
-      # Optional. Defaults to https://openrouter.ai/api/v1
       base_url: "https://openrouter.ai/api/v1"
       default_model: "anthropic/claude-opus-4.6"
-      # PDF processing engine for OpenRouter's file-parser plugin.
-      # Options: pdf-text (free), mistral-ocr (OCR, paid, default), native
       default_pdf_engine: "mistral-ocr"
 
-# Optional model catalog seeding (OpenClaw-style).
-# models:
-#   mode: "merge" # merge | replace
-#   providers:
-#     openai:
-#       models:
-#         - id: "gpt-5.2"
-#           name: "GPT-5.2"
-#           reasoning: true
-#           input: ["text", "image"]
-#           context_window: 128000
-#           max_tokens: 8192
-
-# Global settings
-default_system_prompt: |
-  You are a helpful, concise assistant.
+  default_system_prompt: |
+    You are a helpful, concise assistant.
     Ask clarifying questions when needed.
     Follow the user's intent and be accurate.
+
   model_cache_duration: 6h
 
-  # External tool providers (search + fetch). Proxy is optional.
+  bridge:
+    log_ephemeral_events: false
+
+  messages:
+    responsePrefix: ""
+    directChat:
+      historyLimit: 20
+    groupChat:
+      historyLimit: 50
+    queue:
+      mode: "collect"
+      debounceMs: 1000
+      cap: 20
+      drop: "summarize"
+
+  commands:
+    ownerAllowFrom: []
+
+  channels:
+    matrix:
+      responsePrefix: ""
+
+  session:
+    scope: "per-sender"
+    mainKey: "main"
+    store: ""
+
   tools:
     search:
       provider: "openrouter"
@@ -125,19 +124,6 @@ default_system_prompt: |
         timeout_seconds: 30
       max_chars: 50000
       max_redirects: 3
-
-    # Nexus tool bridge (optional).
-    # Points to a clay-nexus backend and exposes its contact/group tools in ai-bridge.
-    nexus:
-      enabled: false
-      base_url: "https://nexum.clay.earth"
-      # Optional explicit MCP endpoint override. Defaults to "<base_url>/mcp".
-      mcp_endpoint: ""
-      token: ""
-      auth_type: "bearer" # bearer | apikey
-      timeout_seconds: 30
-
-    # Media understanding/transcription (OpenClaw-style).
     media:
       concurrency: 2
       image:
@@ -146,194 +132,29 @@ default_system_prompt: |
         maxBytes: 10485760
         maxChars: 500
         timeoutSeconds: 60
-        models:
-          - provider: "openrouter"
-            model: "google/gemini-3-flash-preview"
       audio:
         enabled: true
         prompt: "Transcribe the audio."
         language: ""
-        # CLI transcription auto-detection (whisper/whisper.cpp) is not implemented yet.
         maxBytes: 20971520
         timeoutSeconds: 60
-        models:
-          - provider: "openai"
-            model: "gpt-4o-mini-transcribe"
       video:
         enabled: true
         prompt: "Describe the video."
         maxBytes: 52428800
         timeoutSeconds: 120
-        models:
-          - provider: "openrouter"
-            model: "google/gemini-3-flash-preview"
 
-  # Memory search configuration (OpenClaw-style).
-  # Indexes MEMORY.md + memory/*.md stored in the bridge DB.
-  # Per-agent overrides can be set via agent definitions.
-  memory_search:
-    enabled: true
-    sources: ["memory"]
-    extra_paths: []
-    provider: "auto" # auto | openai | gemini | local
-    model: ""        # e.g., text-embedding-3-small or gemini-embedding-001
-    fallback: "none"
-    remote:
-      base_url: ""
-      api_key: ""
-      headers: {}
-      batch:
-        enabled: true
-        wait: true
-        concurrency: 2
-        poll_interval_ms: 2000
-        timeout_minutes: 60
-    local:
-      model_path: ""
-      model_cache_dir: ""
-      base_url: ""
-      api_key: ""
-    store:
-      driver: "sqlite"
-      path: ""
-      vector:
-        enabled: true
-        extension_path: ""
-    chunking:
-      tokens: 400
-      overlap: 80
-    sync:
-      on_session_start: true
-      on_search: true
-      watch: true
-      watch_debounce_ms: 1500
-      interval_minutes: 0
-      sessions:
-        delta_bytes: 100000
-        delta_messages: 50
-    query:
-      max_results: 6
-      min_score: 0.35
-      hybrid:
-        enabled: true
-        vector_weight: 0.7
-        text_weight: 0.3
-        candidate_multiplier: 4
-    cache:
-      enabled: true
-      max_entries: 0
-    experimental:
-      session_memory: false
-
-  # Tool policy (OpenClaw-style). Controls allow/deny lists and profiles.
-  # tool_policy:
-  #   profile: "full"
-  #   # group:openclaw is the strict OpenClaw native tool set.
-  #   # group:ai-bridge includes ai-bridge-only extras (beeper_docs, gravatar_*, tts, image_generate, calculator, etc).
-  #   allow: ["group:openclaw", "group:ai-bridge"]
-  #   deny: []
-  #   subagents:
-  #     tools:
-  #       deny: ["sessions_list", "sessions_history", "sessions_send"]
-
-  # Agent defaults (OpenClaw-style).
-  # agents:
-  #   defaults:
-  #     subagents:
-  #       model: "anthropic/claude-sonnet-4.5"
-  #       allowAgents: ["*"]
-  #     typingMode: "instant" # never|instant|thinking|message (message ignores NO_REPLY)
-  #     typingIntervalSeconds: 6 # refresh cadence, not start time (heartbeats never show typing)
-
-  # Context pruning configuration (OpenClaw-style).
-  # Reduces token usage by intelligently truncating old tool results.
   pruning:
-    # Enable proactive context pruning
+    mode: "cache-ttl"
+    ttl: "1h"
     enabled: true
 
-    # Ratio of context window usage that triggers soft trimming (0.0-1.0)
-    # At 30% usage, large tool results start getting truncated
-    soft_trim_ratio: 0.3
-
-    # Ratio of context window usage that triggers hard clearing (0.0-1.0)
-    # At 50% usage, old tool results are replaced with placeholder
-    hard_clear_ratio: 0.5
-
-    # Number of recent assistant messages to protect from pruning
-    keep_last_assistants: 3
-
-    # Minimum total chars in prunable tool results before hard clear kicks in
-    min_prunable_chars: 50000
-
-    # Tool results larger than this are candidates for soft trimming
-    soft_trim_max_chars: 4000
-
-    # When soft trimming, keep this many chars from the start
-    soft_trim_head_chars: 1500
-
-    # When soft trimming, keep this many chars from the end
-    soft_trim_tail_chars: 1500
-
-    # Enable/disable hard clear phase
-    hard_clear_enabled: true
-
-    # Placeholder text for hard-cleared tool results
-    hard_clear_placeholder: "[Old tool result content cleared]"
-
-    # Tool patterns to allow/deny pruning (supports wildcards: exec*, *_search)
-    # Empty means all tools are prunable unless denied
-    # tools_allow: []
-    # tools_deny: []
-
-    # --- LLM-based summarization (compaction) ---
-    # When enabled, uses an LLM to generate intelligent summaries of compacted
-    # content instead of just using placeholder text. This preserves context better.
-
-    # Enable LLM summarization (default: true when pruning is enabled)
-    summarization_enabled: true
-
-    # Model to use for generating summaries (default: fast model)
-    summarization_model: "openai/gpt-5.2"
-
-    # Maximum tokens for generated summaries
-    max_summary_tokens: 500
-
-    # Maximum ratio of context that history can consume (0.0-1.0)
-    # When exceeded, oldest messages are summarized to fit budget
-    max_history_share: 0.5
-
-    # Token budget reserved for compaction output
-    reserve_tokens: 20000
-
-    # Additional instructions for the summarization model
-    # custom_instructions: "Focus on preserving code decisions and TODOs"
-
-    # Pre-compaction memory flush (OpenClaw-style).
-    # Runs a silent turn that can write to memory/YYYY-MM-DD.md before compaction.
-    memory_flush:
-      enabled: true
-      soft_threshold_tokens: 4000
-      prompt: "Pre-compaction memory flush. Store durable memories now (use memory/YYYY-MM-DD.md; create memory/ if needed). If nothing to store, reply with NO_REPLY."
-      system_prompt: "Pre-compaction memory flush turn. The session is near auto-compaction; capture durable memories to disk. You may reply, but usually NO_REPLY is correct."
-
-  # Link preview configuration.
-  # Automatically fetches metadata for URLs in messages to provide context to the AI
-  # and generate rich previews in outgoing AI responses.
   link_previews:
-    # Enable link preview functionality (default: true)
     enabled: true
-
-    # Maximum number of URLs to fetch from user messages for AI context (default: 3)
     max_urls_inbound: 3
-
-    # Maximum number of URLs to preview in AI responses (default: 5)
     max_urls_outbound: 5
-
-    # Timeout for fetching each URL (default: 10s)
     fetch_timeout: 10s
-
-    # Maximum characters from description to include in context (default: 500)
     max_content_chars: 500
-
-    # Maximum page size to download in bytes (default: 10MB)
     max_page_bytes: 10485760
+    max_image_bytes: 5242880
+    cache_ttl: 1h

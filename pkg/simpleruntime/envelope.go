@@ -105,7 +105,7 @@ func formatElapsedTime(current, previous time.Time) string {
 	return fmt.Sprintf("%dd", days)
 }
 
-func formatAgentEnvelope(params struct {
+func formatMessageEnvelope(params struct {
 	Channel         string
 	From            string
 	Body            string
@@ -149,7 +149,7 @@ func formatAgentEnvelope(params struct {
 	return fmt.Sprintf("%s %s", header, params.Body)
 }
 
-// envelopePrefixRE matches the [Channel ...] envelope prefix added by formatAgentEnvelope.
+// envelopePrefixRE matches the [Channel ...] envelope prefix added by formatMessageEnvelope.
 // This covers known channel names used across platforms.
 var envelopePrefixRE = regexp.MustCompile(
 	`^\[(?:WebChat|WhatsApp|Telegram|Signal|Slack|Discord|iMessage|Matrix|Teams|SMS|Google Chat|Zalo|BlueBubbles|Channel)[\s\S]*?\]\s*`,

@@ -1,6 +1,6 @@
 package toolspec
 
-// Shared tool schema definitions used by both connector and agents.
+// Shared tool schema definitions used by bridge runtimes.
 
 const (
 	CalculatorName        = "calculator"
@@ -20,7 +20,7 @@ const (
 
 	// ImageName matches OpenClaw's image analysis tool (vision).
 	ImageName                  = "image"
-	ImageDescription           = "Analyze an image with the configured image model (agents.defaults.imageModel). Provide a prompt and image path or URL."
+	ImageDescription           = "Analyze an image with the configured image model. Provide a prompt and image path or URL."
 	ImageDescriptionVisionHint = "Analyze an image with a vision model. Only use this tool when the image was NOT already provided in the user's message. Images mentioned in the prompt are automatically visible to you."
 
 	// ImageGenerateName is an AI image generation tool (not in OpenClaw).

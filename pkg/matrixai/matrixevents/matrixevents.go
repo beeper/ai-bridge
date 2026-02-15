@@ -8,7 +8,6 @@ var (
 	ToolResultEventType    = contractevents.ToolResultEventType
 	AIErrorEventType       = contractevents.AIErrorEventType
 	TurnCancelledEventType = contractevents.TurnCancelledEventType
-	AgentHandoffEventType  = contractevents.AgentHandoffEventType
 	StepBoundaryEventType  = contractevents.StepBoundaryEventType
 
 	StreamDeltaEventType   = contractevents.StreamDeltaEventType
@@ -21,7 +20,6 @@ var (
 	RoomCapabilitiesEventType  = contractevents.RoomCapabilitiesEventType
 	RoomSettingsEventType      = contractevents.RoomSettingsEventType
 	ModelCapabilitiesEventType = contractevents.ModelCapabilitiesEventType
-	AgentsEventType            = contractevents.AgentsEventType
 )
 
 const (
