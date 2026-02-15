@@ -1,4 +1,4 @@
-//lint:file-ignore U1000 Hard-cut compatibility: pending full dead-code deletion.
+//lint:file-ignore U1000 Hard-cut cleanup: pending full dead-code deletion.
 package connector
 
 import (
@@ -455,7 +455,7 @@ func (oc *AIClient) getTitleGenerationModel() string {
 }
 
 // generateRoomTitle asks the model to generate a short descriptive title for the conversation
-// Uses Responses API for OpenRouter compatibility (the PDF plugins middleware adds a 'plugins'
+// Uses Responses API for OpenRouter support (the PDF plugins middleware adds a 'plugins'
 // field that is only valid for Responses API, not Chat Completions API)
 func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistantResponse string) (string, error) {
 	model := oc.getTitleGenerationModel()
@@ -483,7 +483,7 @@ func (oc *AIClient) generateRoomTitle(ctx context.Context, userMessage, assistan
 		}
 	}
 
-	// Use Responses API for OpenRouter compatibility (plugins field is only valid here)
+	// Use Responses API for OpenRouter support (plugins field is only valid here)
 	resp, err := oc.api.Responses.New(ctx, params)
 	if err != nil && params.Reasoning.Effort != "" {
 		oc.loggerForContext(ctx).Warn().Err(err).Str("model", model).Msg("Title generation failed with reasoning disabled; retrying without reasoning param")

@@ -10,7 +10,7 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
-// Emitter sends AI SDK compatible streaming events over Matrix.
+// Emitter sends AI SDK streaming events over Matrix.
 //
 // This is transport-agnostic and can be used by the bridge adapter, bot, and
 // future modules that need token/tool streaming semantics.

@@ -9,7 +9,7 @@ import (
 	"github.com/beeper/ai-bridge/pkg/core/aiprovider"
 )
 
-// Backward-compatible type aliases that delegate to pkg/aiprovider.
+// Type aliases that delegate to pkg/aiprovider.
 type (
 	MessageRole     = aiprovider.MessageRole
 	ContentPartType = aiprovider.ContentPartType
@@ -17,7 +17,7 @@ type (
 	UnifiedMessage  = aiprovider.UnifiedMessage
 )
 
-// Re-export role constants for backward compatibility.
+// Re-export role constants.
 const (
 	RoleSystem    = aiprovider.RoleSystem
 	RoleUser      = aiprovider.RoleUser
@@ -25,7 +25,7 @@ const (
 	RoleTool      = aiprovider.RoleTool
 )
 
-// Re-export content type constants for backward compatibility.
+// Re-export content type constants.
 const (
 	ContentTypeText  = aiprovider.ContentTypeText
 	ContentTypeImage = aiprovider.ContentTypeImage
@@ -34,7 +34,7 @@ const (
 	ContentTypeVideo = aiprovider.ContentTypeVideo
 )
 
-// Re-export constructor functions for backward compatibility.
+// Re-export constructor functions.
 var (
 	NewTextMessage  = aiprovider.NewTextMessage
 	NewImageMessage = aiprovider.NewImageMessage

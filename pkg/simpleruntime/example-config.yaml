@@ -88,10 +88,6 @@ tools:
       timeout_seconds: 30
       max_chars: 50000
       max_redirects: 3
-  vfs:
-    apply_patch:
-      enabled: false
-      allow_models: []
   media:
     concurrency: 2
     image:

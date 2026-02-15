@@ -4,18 +4,18 @@ import (
 	"github.com/beeper/ai-bridge/pkg/core/aiprovider"
 )
 
-// Backward-compatible type aliases that delegate to pkg/aiprovider.
+// Type aliases that delegate to pkg/aiprovider.
 type (
-	AIProvider      = aiprovider.AIProvider
-	GenerateParams  = aiprovider.GenerateParams
+	AIProvider       = aiprovider.AIProvider
+	GenerateParams   = aiprovider.GenerateParams
 	GenerateResponse = aiprovider.GenerateResponse
-	StreamEventType = aiprovider.StreamEventType
-	StreamEvent     = aiprovider.StreamEvent
-	ToolCallResult  = aiprovider.ToolCallResult
-	UsageInfo       = aiprovider.UsageInfo
+	StreamEventType  = aiprovider.StreamEventType
+	StreamEvent      = aiprovider.StreamEvent
+	ToolCallResult   = aiprovider.ToolCallResult
+	UsageInfo        = aiprovider.UsageInfo
 )
 
-// Re-export StreamEventType constants for backward compatibility.
+// Re-export StreamEventType constants.
 const (
 	StreamEventDelta     = aiprovider.StreamEventDelta
 	StreamEventReasoning = aiprovider.StreamEventReasoning

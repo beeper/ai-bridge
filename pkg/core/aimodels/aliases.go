@@ -2,7 +2,7 @@ package aimodels
 
 import "strings"
 
-// OpenClawAliases provides OpenClaw-compatible shorthands and model ID aliases.
+// OpenClawAliases provides OpenClaw shorthands and model ID aliases.
 // These resolve to canonical model IDs in the local manifest.
 var OpenClawAliases = map[string]string{
 	// OpenClaw built-in shorthands

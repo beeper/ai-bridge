@@ -1,4 +1,4 @@
-//lint:file-ignore U1000 Hard-cut compatibility: pending full dead-code deletion.
+//lint:file-ignore U1000 Hard-cut cleanup: pending full dead-code deletion.
 package connector
 
 import (
@@ -3512,7 +3512,7 @@ func (oc *AIClient) streamChatCompletions(
 		}
 
 		// Continue if tools were requested.
-		// Some Anthropic-compatible adapters may emit `tool_use` (or omit finish reason)
+		// Some Anthropic adapters may emit `tool_use` (or omit finish reason)
 		// even when tool calls are present.
 		if shouldContinueChatToolLoop(state.finishReason, len(toolCallParams)) {
 			// Ensure the next assistant text delta can't get glued to the previous text.

@@ -3,12 +3,12 @@ package connector
 import "github.com/beeper/ai-bridge/pkg/core/aimedia"
 
 type (
-	MediaUnderstandingCapability       = aimedia.MediaUnderstandingCapability
-	MediaUnderstandingKind             = aimedia.MediaUnderstandingKind
-	MediaUnderstandingOutput           = aimedia.MediaUnderstandingOutput
-	MediaUnderstandingModelDecision    = aimedia.MediaUnderstandingModelDecision
+	MediaUnderstandingCapability         = aimedia.MediaUnderstandingCapability
+	MediaUnderstandingKind               = aimedia.MediaUnderstandingKind
+	MediaUnderstandingOutput             = aimedia.MediaUnderstandingOutput
+	MediaUnderstandingModelDecision      = aimedia.MediaUnderstandingModelDecision
 	MediaUnderstandingAttachmentDecision = aimedia.MediaUnderstandingAttachmentDecision
-	MediaUnderstandingDecision         = aimedia.MediaUnderstandingDecision
+	MediaUnderstandingDecision           = aimedia.MediaUnderstandingDecision
 )
 
 const (

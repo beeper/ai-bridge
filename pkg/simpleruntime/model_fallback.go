@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
 	"github.com/beeper/ai-bridge/pkg/core/aimodels"
+	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"

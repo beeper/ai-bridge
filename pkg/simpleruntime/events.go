@@ -518,7 +518,7 @@ const (
 )
 
 // ModelInfo describes a single AI model's capabilities.
-// This is a type alias for aimodels.ModelInfo to preserve backward compatibility
+// This is a type alias for aimodels.ModelInfo.
 // for external consumers that import connector.ModelInfo.
 type ModelInfo = aimodels.ModelInfo
 

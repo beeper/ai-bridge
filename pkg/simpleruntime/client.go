@@ -1,4 +1,4 @@
-//lint:file-ignore U1000 Hard-cut compatibility: pending full dead-code deletion.
+//lint:file-ignore U1000 Hard-cut cleanup: pending full dead-code deletion.
 package connector
 
 import (
@@ -431,7 +431,7 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		oc.api = provider.Client()
 
 	default:
-		// OpenAI (default) or Custom OpenAI-compatible provider
+		// OpenAI (default) or custom OpenAI-style provider
 		openaiURL := connector.resolveOpenAIBaseURL()
 		log.Info().
 			Str("provider", meta.Provider).
@@ -467,7 +467,7 @@ func openRouterHeaders() map[string]string {
 	}
 }
 
-// initOpenRouterProvider creates an OpenRouter-compatible provider with PDF support.
+// initOpenRouterProvider creates an OpenRouter-style provider with PDF support.
 func initOpenRouterProvider(key, url, userID, pdfEngine, providerName string, log zerolog.Logger) (*OpenAIProvider, error) {
 	log.Info().
 		Str("provider", providerName).
@@ -1328,7 +1328,7 @@ func (oc *AIClient) effectiveTemperature(meta *PortalMetadata) float64 {
 	return defaultTemperature
 }
 
-// defaultThinkLevel resolves the default think level in an OpenClaw-compatible way:
+// defaultThinkLevel resolves the default think level in an OpenClaw-aligned way:
 // low for reasoning-capable models, off otherwise.
 func (oc *AIClient) defaultThinkLevel(meta *PortalMetadata) string {
 	if meta != nil {

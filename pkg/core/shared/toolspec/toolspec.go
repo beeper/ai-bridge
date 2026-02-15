@@ -476,7 +476,7 @@ func TTSSchema() map[string]any {
 			},
 			"voice": map[string]any{
 				"type":        "string",
-				"description": "Optional: preferred voice (OpenAI voices: alloy, ash, coral, echo, fable, onyx, nova, sage, shimmer).",
+				"description": "Optional: preferred voice (OpenAI voices include alloy, ash, coral, echo, fable, onyx, nova, sage).",
 			},
 			"model": map[string]any{
 				"type":        "string",

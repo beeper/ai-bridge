@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/core/aimedia"
 	"github.com/beeper/ai-bridge/pkg/core/aiutil"
 	"go.mau.fi/util/configupgrade"
 )
@@ -102,7 +103,6 @@ type QueueConfig struct {
 	Drop                string            `yaml:"drop"`
 }
 
-
 // ToolProvidersConfig configures external tool providers like search and fetch.
 type ToolProvidersConfig struct {
 	Search *SearchConfig     `yaml:"search"`
@@ -110,85 +110,17 @@ type ToolProvidersConfig struct {
 	Media  *MediaToolsConfig `yaml:"media"`
 }
 
-// MediaUnderstandingScopeMatch defines match criteria for media understanding scope rules.
-type MediaUnderstandingScopeMatch struct {
-	Channel   string `yaml:"channel"`
-	ChatType  string `yaml:"chatType"`
-	KeyPrefix string `yaml:"keyPrefix"`
-}
-
-// MediaUnderstandingScopeRule defines a single allow/deny rule.
-type MediaUnderstandingScopeRule struct {
-	Action string                        `yaml:"action"`
-	Match  *MediaUnderstandingScopeMatch `yaml:"match"`
-}
-
-// MediaUnderstandingScopeConfig controls allow/deny gating for media understanding.
-type MediaUnderstandingScopeConfig struct {
-	Default string                        `yaml:"default"`
-	Rules   []MediaUnderstandingScopeRule `yaml:"rules"`
-}
-
-// MediaUnderstandingAttachmentsConfig controls how media attachments are selected.
-type MediaUnderstandingAttachmentsConfig struct {
-	Mode           string `yaml:"mode"`
-	MaxAttachments int    `yaml:"maxAttachments"`
-	Prefer         string `yaml:"prefer"`
-}
-
-// MediaUnderstandingDeepgramConfig is a deprecated compatibility shim for Deepgram settings.
-type MediaUnderstandingDeepgramConfig struct {
-	DetectLanguage *bool `yaml:"detectLanguage"`
-	Punctuate      *bool `yaml:"punctuate"`
-	SmartFormat    *bool `yaml:"smartFormat"`
-}
-
-// MediaUnderstandingModelConfig defines a single media understanding model entry.
-type MediaUnderstandingModelConfig struct {
-	Provider         string                            `yaml:"provider"`
-	Model            string                            `yaml:"model"`
-	Capabilities     []string                          `yaml:"capabilities"`
-	Type             string                            `yaml:"type"`
-	Command          string                            `yaml:"command"`
-	Args             []string                          `yaml:"args"`
-	Prompt           string                            `yaml:"prompt"`
-	MaxChars         int                               `yaml:"maxChars"`
-	MaxBytes         int                               `yaml:"maxBytes"`
-	TimeoutSeconds   int                               `yaml:"timeoutSeconds"`
-	Language         string                            `yaml:"language"`
-	ProviderOptions  map[string]map[string]any         `yaml:"providerOptions"`
-	Deepgram         *MediaUnderstandingDeepgramConfig `yaml:"deepgram"`
-	BaseURL          string                            `yaml:"baseUrl"`
-	Headers          map[string]string                 `yaml:"headers"`
-	Profile          string                            `yaml:"profile"`
-	PreferredProfile string                            `yaml:"preferredProfile"`
-}
-
-// MediaUnderstandingConfig defines defaults for media understanding of a capability.
-type MediaUnderstandingConfig struct {
-	Enabled         *bool                                `yaml:"enabled"`
-	Scope           *MediaUnderstandingScopeConfig       `yaml:"scope"`
-	MaxBytes        int                                  `yaml:"maxBytes"`
-	MaxChars        int                                  `yaml:"maxChars"`
-	Prompt          string                               `yaml:"prompt"`
-	TimeoutSeconds  int                                  `yaml:"timeoutSeconds"`
-	Language        string                               `yaml:"language"`
-	ProviderOptions map[string]map[string]any            `yaml:"providerOptions"`
-	Deepgram        *MediaUnderstandingDeepgramConfig    `yaml:"deepgram"`
-	BaseURL         string                               `yaml:"baseUrl"`
-	Headers         map[string]string                    `yaml:"headers"`
-	Attachments     *MediaUnderstandingAttachmentsConfig `yaml:"attachments"`
-	Models          []MediaUnderstandingModelConfig      `yaml:"models"`
-}
-
-// MediaToolsConfig configures media understanding/transcription.
-type MediaToolsConfig struct {
-	Models      []MediaUnderstandingModelConfig `yaml:"models"`
-	Concurrency int                             `yaml:"concurrency"`
-	Image       *MediaUnderstandingConfig       `yaml:"image"`
-	Audio       *MediaUnderstandingConfig       `yaml:"audio"`
-	Video       *MediaUnderstandingConfig       `yaml:"video"`
-}
+// Media understanding config types are aliases from the core library.
+type (
+	MediaUnderstandingScopeMatch        = aimedia.ScopeMatch
+	MediaUnderstandingScopeRule         = aimedia.ScopeRule
+	MediaUnderstandingScopeConfig       = aimedia.ScopeConfig
+	MediaUnderstandingAttachmentsConfig = aimedia.AttachmentsConfig
+	MediaUnderstandingDeepgramConfig    = aimedia.DeepgramConfig
+	MediaUnderstandingModelConfig       = aimedia.ModelConfig
+	MediaUnderstandingConfig            = aimedia.CapabilityConfig
+	MediaToolsConfig                    = aimedia.ToolsConfig
+)
 
 type SearchConfig struct {
 	Provider  string   `yaml:"provider"`

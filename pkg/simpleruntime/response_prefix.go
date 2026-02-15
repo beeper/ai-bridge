@@ -1,4 +1,4 @@
-//lint:file-ignore U1000 Hard-cut compatibility: pending full dead-code deletion.
+//lint:file-ignore U1000 Hard-cut cleanup: pending full dead-code deletion.
 package connector
 
 import "strings"

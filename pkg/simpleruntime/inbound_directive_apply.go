@@ -60,4 +60,3 @@ func formatReasoningAck(level string) string {
 		return formatSystemAck("Reasoning visibility enabled.")
 	}
 }
-

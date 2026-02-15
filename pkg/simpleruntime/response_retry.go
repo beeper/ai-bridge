@@ -149,4 +149,3 @@ func (oc *AIClient) truncatePrompt(
 	// Use smart truncation with 50% reduction target
 	return smartTruncatePrompt(prompt, 0.5)
 }
-
