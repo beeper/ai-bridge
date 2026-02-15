@@ -26,7 +26,6 @@ require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/beeper/ai-bridge/modules/contracts v0.0.0-20260209155641-adfecbb4ed29
-	github.com/beeper/ai-bridge/modules/simple v0.0.0-20260209155641-adfecbb4ed29
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/coreos/go-systemd/v22 v22.6.0 // indirect
 	github.com/dlclark/regexp2 v1.10.0 // indirect
@@ -50,12 +49,9 @@ require (
 	golang.org/x/text v0.33.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	maunium.net/go/mauflag v1.0.0 // indirect
 )
 
 replace github.com/beeper/ai-bridge/modules/contracts => ./modules/contracts
-
-replace github.com/beeper/ai-bridge/modules/simple => ./modules/simple
 
 replace github.com/beeper/ai-bridge/modules/runtime => ./modules/runtime
 

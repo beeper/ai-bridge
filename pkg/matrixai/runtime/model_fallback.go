@@ -1,0 +1,111 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"strings"
+
+	"github.com/beeper/ai-bridge/pkg/core/aimodels"
+	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
+	"github.com/openai/openai-go/v3"
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/event"
+)
+
+// shouldFallbackOnError determines if a model fallback should be attempted.
+// Mirrors OpenClaw's fallback triggers (auth, rate limits, timeouts).
+func shouldFallbackOnError(err error) bool {
+	var nf *aierrors.NonFallbackError
+	if errors.As(err, &nf) {
+		return false
+	}
+	return aierrors.IsAuthError(err) ||
+		aierrors.IsRateLimitError(err) ||
+		aierrors.IsTimeoutError(err) ||
+		aierrors.IsOverloadedError(err) ||
+		aierrors.IsBillingError(err) ||
+		aierrors.IsModelNotFound(err) ||
+		aierrors.IsServerError(err)
+}
+
+// modelFallbackChain returns the model chain to try in order.
+// Room-level overrides take priority and disable fallbacks.
+func (oc *AIClient) modelFallbackChain(ctx context.Context, meta *PortalMetadata) []string {
+	// Explicit room-level model overrides should not fall back.
+	if meta != nil && strings.TrimSpace(meta.Model) != "" {
+		return dedupeModels([]string{aimodels.ResolveAlias(meta.Model)})
+	}
+
+	// Simple runtime uses model-only fallback.
+	return dedupeModels([]string{oc.effectiveModel(meta)})
+}
+
+func dedupeModels(models []string) []string {
+	seen := make(map[string]struct{}, len(models))
+	out := make([]string, 0, len(models))
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if _, ok := seen[model]; ok {
+			continue
+		}
+		seen[model] = struct{}{}
+		out = append(out, model)
+	}
+	return out
+}
+
+// overrideModel returns a shallow copy of meta with a different model and refreshed capabilities.
+func (oc *AIClient) overrideModel(meta *PortalMetadata, modelID string) *PortalMetadata {
+	if meta == nil {
+		return nil
+	}
+	metaCopy := *meta
+	metaCopy.Model = modelID
+	metaCopy.Capabilities = getModelCapabilities(modelID, oc.findModelInfo(modelID))
+	return &metaCopy
+}
+
+type responseSelector func(meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (responseFunc, string)
+
+func (oc *AIClient) responseWithModelFallbackDynamic(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	prompt []openai.ChatCompletionMessageParamUnion,
+	selector responseSelector,
+) {
+	modelChain := oc.modelFallbackChain(ctx, meta)
+	if len(modelChain) == 0 {
+		modelChain = []string{oc.effectiveModel(meta)}
+	}
+
+	for idx, modelID := range modelChain {
+		effectiveMeta := meta
+		if meta != nil {
+			effectiveMeta = oc.overrideModel(meta, modelID)
+		}
+		responseFn, logLabel := selector(effectiveMeta, prompt)
+		success, err := oc.responseWithRetryAndReasoningFallback(ctx, evt, portal, effectiveMeta, prompt, responseFn, logLabel)
+		if success {
+			return
+		}
+		if err == nil {
+			// Error already handled (context length or non-retryable path).
+			return
+		}
+		if !shouldFallbackOnError(err) || idx == len(modelChain)-1 {
+			oc.notifyMatrixSendFailure(ctx, portal, evt, err)
+			return
+		}
+		oc.loggerForContext(ctx).Warn().
+			Err(err).
+			Str("failed_model", modelID).
+			Str("next_model", modelChain[idx+1]).
+			Str("failover_reason", string(aierrors.ClassifyFailoverReason(err))).
+			Msg("Model failed; falling back to next model")
+	}
+}
