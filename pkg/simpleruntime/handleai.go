@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
 	"github.com/beeper/ai-bridge/pkg/core/aimodels"
+	"github.com/beeper/ai-bridge/pkg/matrixai/aierrors"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
@@ -236,13 +236,7 @@ func (oc *AIClient) scheduleAutoGreeting(ctx context.Context, portal *bridgev2.P
 	if meta == nil || meta.AutoGreetingSent {
 		return
 	}
-	if meta.IsBuilderRoom {
-		return
-	}
 	if normalizeSendPolicyMode(meta.SendPolicy) == "deny" {
-		return
-	}
-	if resolveAgentID(meta) == "" {
 		return
 	}
 	if oc.hasPortalMessages(ctx, portal) {
@@ -277,16 +271,8 @@ func (oc *AIClient) scheduleAutoGreeting(ctx context.Context, portal *bridgev2.P
 				oc.Log().Debug().Stringer("room_id", roomID).Msg("auto-greeting loop exiting: already sent or no meta")
 				return
 			}
-			if currentMeta.IsBuilderRoom {
-				oc.Log().Debug().Stringer("room_id", roomID).Msg("auto-greeting loop exiting: special room type")
-				return
-			}
 			if normalizeSendPolicyMode(currentMeta.SendPolicy) == "deny" {
 				oc.Log().Debug().Stringer("room_id", roomID).Msg("auto-greeting loop exiting: send policy deny")
-				return
-			}
-			if resolveAgentID(currentMeta) == "" {
-				oc.Log().Debug().Stringer("room_id", roomID).Msg("auto-greeting loop exiting: no agent ID")
 				return
 			}
 			if oc.hasPortalMessages(bgCtx, current) {
@@ -311,7 +297,7 @@ func (oc *AIClient) scheduleAutoGreeting(ctx context.Context, portal *bridgev2.P
 }
 
 // scheduleWelcomeMessage waits for a portal to get a Matrix room ID and then sends the
-// welcome notice (and schedules an auto-greeting for agent rooms).
+// welcome notice (and schedules an auto-greeting if the room stays idle).
 //
 // This is primarily for rooms created via provisioning (ResolveIdentifier/CreateDM),
 // where the room creation happens in bridgev2 internals and we don't have a direct hook
@@ -380,12 +366,8 @@ func (oc *AIClient) sendWelcomeMessage(ctx context.Context, portal *bridgev2.Por
 		// Still send the welcome notice and schedule greeting; duplicates are preferable to missing UX.
 	}
 
-	if meta.AgentID == "" {
-		displayName := aimodels.ModelContactName(meta.Model, oc.findModelInfo(meta.Model))
-		oc.sendSystemNotice(bgCtx, portal, fmt.Sprintf("You are chatting with %s. AI can make mistakes.", displayName))
-	} else {
-		oc.sendSystemNotice(bgCtx, portal, "AI can make mistakes.")
-	}
+	displayName := aimodels.ModelContactName(meta.Model, oc.findModelInfo(meta.Model))
+	oc.sendSystemNotice(bgCtx, portal, fmt.Sprintf("You are chatting with %s. AI can make mistakes.", displayName))
 
 	// Ensure initial room state exists for clients (model/settings/capabilities).
 	// Only broadcast once on first-room initialization.

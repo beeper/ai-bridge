@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -20,20 +19,10 @@ func maybePrependSessionGreeting(
 	prompt []openai.ChatCompletionMessageParamUnion,
 	log zerolog.Logger,
 ) []openai.ChatCompletionMessageParamUnion {
-	if meta == nil {
+	if meta == nil || meta.SessionBootstrappedAt != 0 {
 		return prompt
 	}
-	agentID := strings.TrimSpace(resolveAgentID(meta))
-	if agentID == "" {
-		return prompt
-	}
-	if meta.SessionBootstrapByAgent == nil {
-		meta.SessionBootstrapByAgent = make(map[string]int64)
-	}
-	if meta.SessionBootstrapByAgent[agentID] != 0 {
-		return prompt
-	}
-	meta.SessionBootstrapByAgent[agentID] = time.Now().UnixMilli()
+	meta.SessionBootstrappedAt = time.Now().UnixMilli()
 	if portal != nil {
 		if err := portal.Save(ctx); err != nil {
 			log.Warn().Err(err).Msg("Failed to persist session bootstrap state")

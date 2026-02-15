@@ -1,12 +1,9 @@
 package connector
 
 import (
-	"maps"
-
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/random"
 	"maunium.net/go/mautrix/bridgev2/database"
-	"maunium.net/go/mautrix/bridgev2/networkid"
 )
 
 // ModelCache stores available models (cached in UserLoginMetadata)
@@ -84,20 +81,6 @@ type UserLoginMetadata struct {
 	// Optional per-login tokens for external services
 	ServiceTokens *ServiceTokens `json:"service_tokens,omitempty"`
 
-	// AgentModelOverrides stores per-agent model overrides (agent ID -> model ID).
-	AgentModelOverrides map[string]string `json:"agent_model_overrides,omitempty"`
-
-	// Agent Builder room for managing agents
-	BuilderRoomID networkid.PortalID `json:"builder_room_id,omitempty"`
-	// Custom agents store (source of truth for user-created agents).
-	CustomAgents map[string]*AgentDefinitionContent `json:"custom_agents,omitempty"`
-	// Last active room per agent (used for heartbeat delivery).
-	LastActiveRoomByAgent map[string]string `json:"last_active_room_by_agent,omitempty"`
-	// Heartbeat dedupe state per agent.
-	HeartbeatState map[string]HeartbeatState `json:"heartbeat_state,omitempty"`
-	// LastHeartbeatEvent is the last emitted heartbeat event for this login (command-only debug surface).
-	LastHeartbeatEvent *HeartbeatEventPayload `json:"last_heartbeat_event,omitempty"`
-
 	// Provider health tracking
 	ConsecutiveErrors int   `json:"consecutive_errors,omitempty"`
 	LastErrorAt       int64 `json:"last_error_at,omitempty"` // Unix timestamp
@@ -105,12 +88,6 @@ type UserLoginMetadata struct {
 	// Extra holds bridge-specific login metadata that the core engine
 	// carries opaquely.
 	Extra any `json:"extra,omitempty"`
-}
-
-// HeartbeatState tracks last heartbeat delivery for dedupe.
-type HeartbeatState struct {
-	LastHeartbeatText   string `json:"last_heartbeat_text,omitempty"`
-	LastHeartbeatSentAt int64  `json:"last_heartbeat_sent_at,omitempty"`
 }
 
 // GravatarProfile stores the selected Gravatar profile for a login.
@@ -144,28 +121,23 @@ type PortalMetadata struct {
 	LastRoomStateSync   int64             `json:"last_room_state_sync,omitempty"` // Track when we've synced room state
 	PDFConfig           *PDFConfig        `json:"pdf_config,omitempty"`           // Per-room PDF processing configuration
 
-	ConversationMode          string           `json:"conversation_mode,omitempty"`
-	LastResponseID            string           `json:"last_response_id,omitempty"`
-	EmitThinking              bool             `json:"emit_thinking,omitempty"`
-	EmitToolArgs              bool             `json:"emit_tool_args,omitempty"`
-	ThinkingLevel             string           `json:"thinking_level,omitempty"`   // off|minimal|low|medium|high|xhigh
-	VerboseLevel              string           `json:"verbose_level,omitempty"`    // off|on|full
-	ElevatedLevel             string           `json:"elevated_level,omitempty"`   // off|on|ask|full
-	GroupActivation           string           `json:"group_activation,omitempty"` // mention|always
-	GroupActivationNeedsIntro bool             `json:"group_activation_needs_intro,omitempty"`
-	GroupIntroSent            bool             `json:"group_intro_sent,omitempty"`
-	SendPolicy                string           `json:"send_policy,omitempty"` // allow|deny
-	SessionResetAt            int64            `json:"session_reset_at,omitempty"`
-	AbortedLastRun            bool             `json:"aborted_last_run,omitempty"`
-	CompactionCount           int              `json:"compaction_count,omitempty"`
-	SessionBootstrappedAt     int64            `json:"session_bootstrapped_at,omitempty"`
-	SessionBootstrapByAgent   map[string]int64 `json:"session_bootstrap_by_agent,omitempty"`
+	ConversationMode          string `json:"conversation_mode,omitempty"`
+	LastResponseID            string `json:"last_response_id,omitempty"`
+	EmitThinking              bool   `json:"emit_thinking,omitempty"`
+	EmitToolArgs              bool   `json:"emit_tool_args,omitempty"`
+	ThinkingLevel             string `json:"thinking_level,omitempty"`   // off|minimal|low|medium|high|xhigh
+	VerboseLevel              string `json:"verbose_level,omitempty"`    // off|on|full
+	ElevatedLevel             string `json:"elevated_level,omitempty"`   // off|on|ask|full
+	GroupActivation           string `json:"group_activation,omitempty"` // mention|always
+	GroupActivationNeedsIntro bool   `json:"group_activation_needs_intro,omitempty"`
+	GroupIntroSent            bool   `json:"group_intro_sent,omitempty"`
+	SendPolicy                string `json:"send_policy,omitempty"` // allow|deny
+	SessionResetAt            int64  `json:"session_reset_at,omitempty"`
+	AbortedLastRun            bool   `json:"aborted_last_run,omitempty"`
+	CompactionCount           int    `json:"compaction_count,omitempty"`
+	SessionBootstrappedAt     int64  `json:"session_bootstrapped_at,omitempty"`
 
-	// Agent-related metadata
-	AgentID       string `json:"agent_id,omitempty"`        // Which agent is the ghost for this room
-	AgentPrompt   string `json:"agent_prompt,omitempty"`    // Cached prompt for the assigned agent
-	IsBuilderRoom bool   `json:"is_builder_room,omitempty"` // True if this is the Manage AI Chats room (protected from overrides)
-	IsRawMode     bool   `json:"is_raw_mode,omitempty"`     // True if this is a playground/raw mode room (no directive processing)
+	IsRawMode bool `json:"is_raw_mode,omitempty"` // True if this is a playground/raw mode room (no directive processing)
 
 	// Ack reaction config - similar to OpenClaw's ack reactions
 	AckReactionEmoji       string `json:"ack_reaction_emoji,omitempty"`        // Emoji to react with when message received (e.g., "👀", "🤔"). Empty = disabled.
@@ -201,10 +173,6 @@ func clonePortalMetadata(src *PortalMetadata) *PortalMetadata {
 		clone.PDFConfig = &pdf
 	}
 
-	if src.SessionBootstrapByAgent != nil {
-		clone.SessionBootstrapByAgent = maps.Clone(src.SessionBootstrapByAgent)
-	}
-
 	if len(src.DisabledTools) > 0 {
 		clone.DisabledTools = append([]string(nil), src.DisabledTools...)
 	}
@@ -231,8 +199,7 @@ type MessageMetadata struct {
 	MediaUnderstandingDecisions []MediaUnderstandingDecision `json:"media_understanding_decisions,omitempty"`
 
 	// Turn tracking for the new schema
-	TurnID  string `json:"turn_id,omitempty"`  // Unique identifier for this assistant turn
-	AgentID string `json:"agent_id,omitempty"` // Which agent generated this (for multi-agent rooms)
+	TurnID string `json:"turn_id,omitempty"` // Unique identifier for this assistant turn
 
 	// Tool call tracking
 	ToolCalls []ToolCallMetadata `json:"tool_calls,omitempty"` // List of tool calls in this turn
@@ -325,9 +292,6 @@ func (mm *MessageMetadata) CopyFrom(other any) {
 	// Copy new fields
 	if src.TurnID != "" {
 		mm.TurnID = src.TurnID
-	}
-	if src.AgentID != "" {
-		mm.AgentID = src.AgentID
 	}
 	if len(src.ToolCalls) > 0 {
 		mm.ToolCalls = src.ToolCalls

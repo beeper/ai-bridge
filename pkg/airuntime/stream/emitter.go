@@ -22,7 +22,6 @@ type PartEnvelope struct {
 	TurnID         string
 	Seq            int
 	TargetEventID  id.EventID
-	AgentID        string
 	Part           map[string]any
 	TransactionID  string
 	EphemeralType  event.Type
@@ -38,7 +37,6 @@ func (e *Emitter) Emit(ctx context.Context, roomID id.RoomID, env PartEnvelope) 
 	}
 	contentRaw, err := matrixevents.BuildStreamEventEnvelope(env.TurnID, env.Seq, env.Part, matrixevents.StreamEventOpts{
 		TargetEventID: env.TargetEventID.String(),
-		AgentID:       env.AgentID,
 	})
 	if err != nil {
 		return err

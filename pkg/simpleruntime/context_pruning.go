@@ -10,7 +10,7 @@ import (
 	"github.com/openai/openai-go/v3"
 )
 
-// PruningConfig configures context pruning behavior (matches OpenClaw's AgentContextPruningConfig)
+// PruningConfig configures context pruning behavior.
 type PruningConfig struct {
 	// Mode controls pruning strategy.
 	// "off" disables proactive pruning.

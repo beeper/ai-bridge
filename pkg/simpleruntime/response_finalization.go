@@ -140,7 +140,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	rawContent := state.accumulated.String()
 
 	// Check response mode - raw mode skips directive processing
-	responseMode := oc.getAgentResponseMode(meta)
+	responseMode := oc.getResponseMode(meta)
 	if responseMode == "raw" {
 		// Raw mode: send content directly without directive processing
 		rendered := format.RenderMarkdown(rawContent, true, true)
@@ -319,7 +319,6 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 		oc.sendContinuationMessage(ctx, portal, intent, chunk)
 	}
 }
-
 
 func (oc *AIClient) redactInitialStreamingMessage(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, state *streamingState) {
 	if portal == nil || intent == nil || state == nil {
@@ -669,10 +668,10 @@ func generateOutboundLinkPreviews(ctx context.Context, text string, intent bridg
 	return UploadPreviewImages(ctx, previewsWithImages, intent, portal.MXID)
 }
 
-// getAgentResponseMode returns the response mode for the current agent.
+// getResponseMode returns the response mode for the current room.
 // Defaults to ResponseModeNatural if not set.
 // IsRawMode on the portal overrides all other settings (for playground rooms).
-func (oc *AIClient) getAgentResponseMode(meta *PortalMetadata) string {
+func (oc *AIClient) getResponseMode(meta *PortalMetadata) string {
 	// IsRawMode flag takes priority (set by playground command)
 	if meta.IsRawMode {
 		return "raw"

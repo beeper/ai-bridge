@@ -9,7 +9,7 @@ import (
 	"github.com/beeper/ai-bridge/pkg/core/shared/stringutil"
 )
 
-// SilentReplyToken is the token the agent uses to indicate no response is needed.
+// SilentReplyToken is the token used to indicate no response is needed.
 // Matches clawdbot/OpenClaw's SILENT_REPLY_TOKEN.
 const SilentReplyToken = "NO_REPLY"
 

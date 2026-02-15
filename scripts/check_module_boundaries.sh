@@ -34,7 +34,7 @@ for imports in "$runtime_imports" "$simple_imports" "$aiproxy_imports"; do
 done
 
 ai_bridge_deps="$(go list -deps ./bridges/ai/cmd/bridge)"
-if echo "$ai_bridge_deps" | rg -q 'github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/(agents|cron|memory)'; then
+if echo "$ai_bridge_deps" | rg -q 'github.com/beeper/ai-bridge/pkg/simpleruntime/simpledeps/'; then
   fail "ai bridge must not depend on pkg/simpleruntime/simpledeps/*"
 fi
 

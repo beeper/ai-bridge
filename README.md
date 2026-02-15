@@ -10,13 +10,13 @@ This repo contains:
 - simple bridge binary (`bridges/simple`)
 
 Dedicated products live in sibling repos:
-- `../beep` (agentic)
+- `../beep` (advanced runtime)
 - `../beeper-codex` (codex-only)
 - `../beeper-opencode` (opencode-only)
 
 ## Product matrix
 - `ai-bridge` (this repo): simple chat bridge + shared libraries
-- `beep`: agentic bridge (memory/cron/subagents/tool orchestration)
+- `beep`: advanced runtime bridge
 - `beeper-codex`: codex-only bridge
 - `beeper-opencode`: opencode-only bridge
 

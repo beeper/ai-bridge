@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"maunium.net/go/mautrix/event"
-
 )
 
 const (
@@ -88,7 +87,7 @@ func (oc *AIClient) resolveModelForCapability(
 	return fallbackID, true
 }
 
-// resolveImageUnderstandingModel returns a vision-capable model from the agent's model chain.
+// resolveImageUnderstandingModel returns a vision-capable model from the model chain.
 func (oc *AIClient) resolveImageUnderstandingModel(ctx context.Context, meta *PortalMetadata) string {
 	return oc.resolveUnderstandingModel(
 		ctx,
@@ -110,7 +109,7 @@ func (oc *AIClient) resolveVisionModelForImage(ctx context.Context, meta *Portal
 	)
 }
 
-// resolveAudioUnderstandingModel returns an audio-capable model from the agent's model chain.
+// resolveAudioUnderstandingModel returns an audio-capable model from the model chain.
 func (oc *AIClient) resolveAudioUnderstandingModel(ctx context.Context, meta *PortalMetadata) string {
 	return oc.resolveUnderstandingModel(
 		ctx,

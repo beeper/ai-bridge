@@ -112,7 +112,7 @@ func (oc *AIClient) buildMatrixInboundBody(
 		hasTimestamp = true
 	}
 	prev, hasPrev := oc.lastPortalMessageTime(ctx, portal)
-	enveloped := formatAgentEnvelope(struct {
+	enveloped := formatMessageEnvelope(struct {
 		Channel         string
 		From            string
 		Body            string
