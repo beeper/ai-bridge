@@ -10,11 +10,11 @@ appservice:
   address: http://localhost:29345
   hostname: 0.0.0.0
   port: 29345
-  database: openai-bridge.db
-  id: openai-gpt
+  database: ai-simple.db
+  id: ai-simple
   bot:
-    username: gptbridge
-    displayname: "AI Bridge"
+    username: ai_simple
+    displayname: "AI Simple Bridge"
   as_token: "GENERATE-A-TOKEN"
   hs_token: "GENERATE-A-TOKEN"
 
@@ -24,7 +24,7 @@ logging:
 
 database:
   type: sqlite3-fk-wal
-  uri: file:openai-bridge.db?_txlock=immediate
+  uri: file:ai-simple.db?_txlock=immediate
   max_open_conns: 1
   max_idle_conns: 1
 
