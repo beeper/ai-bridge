@@ -92,13 +92,17 @@ func (oc *AIClient) sessionTextFSStore(agentID string) (*textfs.Store, error) {
 	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.DB == nil {
 		return nil, errors.New("session store not available")
 	}
+	db := oc.bridgeDB()
+	if db == nil {
+		return nil, errors.New("session store not available")
+	}
 	bridgeID := string(oc.UserLogin.Bridge.DB.BridgeID)
 	loginID := string(oc.UserLogin.ID)
 	normalized := normalizeAgentID(agentID)
 	if normalized == "" {
 		normalized = normalizeAgentID(agents.DefaultAgentID)
 	}
-	return textfs.NewStore(oc.UserLogin.Bridge.DB.Database, bridgeID, loginID, normalized), nil
+	return textfs.NewStore(db, bridgeID, loginID, normalized), nil
 }
 
 func (oc *AIClient) loadSessionStore(ctx context.Context, ref sessionStoreRef) (sessionStore, error) {

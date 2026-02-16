@@ -1,4 +1,4 @@
--- v26 -> v27: ai memory tables
+-- v0 -> v1: create ai bridge schema
 CREATE TABLE IF NOT EXISTS ai_memory_files (
   bridge_id TEXT NOT NULL,
   login_id TEXT NOT NULL,
@@ -40,12 +40,15 @@ CREATE TABLE IF NOT EXISTS ai_memory_meta (
   chunk_tokens INTEGER NOT NULL,
   chunk_overlap INTEGER NOT NULL,
   vector_dims INTEGER,
+  index_generation TEXT NOT NULL DEFAULT '',
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (bridge_id, login_id, agent_id)
 );
 
 CREATE TABLE IF NOT EXISTS ai_memory_embedding_cache (
   bridge_id TEXT NOT NULL,
+  login_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
   provider TEXT NOT NULL,
   model TEXT NOT NULL,
   provider_key TEXT NOT NULL,
@@ -53,7 +56,7 @@ CREATE TABLE IF NOT EXISTS ai_memory_embedding_cache (
   embedding TEXT NOT NULL,
   dims INTEGER,
   updated_at INTEGER NOT NULL,
-  PRIMARY KEY (bridge_id, provider, model, provider_key, hash)
+  PRIMARY KEY (bridge_id, login_id, agent_id, provider, model, provider_key, hash)
 );
 
 CREATE INDEX IF NOT EXISTS idx_ai_memory_embedding_cache_updated_at ON ai_memory_embedding_cache(updated_at);
@@ -84,3 +87,12 @@ CREATE TABLE IF NOT EXISTS ai_memory_session_files (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ai_memory_session_files_path ON ai_memory_session_files(path);
+
+CREATE TABLE IF NOT EXISTS ai_bridge_state (
+  bridge_id TEXT NOT NULL,
+  login_id TEXT NOT NULL,
+  store_key TEXT NOT NULL,
+  content TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (bridge_id, login_id, store_key)
+);

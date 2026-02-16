@@ -27,9 +27,13 @@ func (oc *AIClient) injectMemoryContext(
 	if oc == nil || portal == nil || meta == nil || oc.connector == nil || oc.connector.Config.Memory == nil || !oc.connector.Config.Memory.InjectContext {
 		return prompt
 	}
+	db := oc.bridgeDB()
+	if db == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.DB == nil {
+		return prompt
+	}
 
 	store := textfs.NewStore(
-		oc.UserLogin.Bridge.DB.Database,
+		db,
 		string(oc.UserLogin.Bridge.DB.BridgeID),
 		string(oc.UserLogin.ID),
 		resolveAgentID(meta),

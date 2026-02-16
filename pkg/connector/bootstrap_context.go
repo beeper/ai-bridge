@@ -14,11 +14,15 @@ func (oc *AIClient) buildBootstrapContextFiles(ctx context.Context, agentID stri
 	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.DB == nil {
 		return nil
 	}
+	db := oc.bridgeDB()
+	if db == nil {
+		return nil
+	}
 	if strings.TrimSpace(agentID) == "" {
 		agentID = "default"
 	}
 	store := textfs.NewStore(
-		oc.UserLogin.Bridge.DB.Database,
+		db,
 		string(oc.UserLogin.Bridge.DB.BridgeID),
 		string(oc.UserLogin.ID),
 		agentID,

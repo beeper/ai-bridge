@@ -31,11 +31,15 @@ func (oc *AIClient) resolveAgentIdentityName(ctx context.Context, agentID string
 	if agentID == "" || oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.DB == nil {
 		return ""
 	}
+	db := oc.bridgeDB()
+	if db == nil {
+		return ""
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	store := textfs.NewStore(
-		oc.UserLogin.Bridge.DB.Database,
+		db,
 		string(oc.UserLogin.Bridge.DB.BridgeID),
 		string(oc.UserLogin.ID),
 		agentID,

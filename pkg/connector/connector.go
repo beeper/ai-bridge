@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/configupgrade"
+	"go.mau.fi/util/dbutil"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/commands"
@@ -37,6 +39,7 @@ var (
 type OpenAIConnector struct {
 	br     *bridgev2.Bridge
 	Config Config
+	db     *dbutil.Database
 
 	clientsMu sync.Mutex
 	clients   map[networkid.UserLoginID]bridgev2.NetworkAPI
@@ -44,6 +47,13 @@ type OpenAIConnector struct {
 
 func (oc *OpenAIConnector) Init(bridge *bridgev2.Bridge) {
 	oc.br = bridge
+	oc.db = nil
+	if bridge != nil && bridge.DB != nil && bridge.DB.Database != nil {
+		oc.db = makeBridgeChildDB(
+			bridge.DB.Database,
+			dbutil.ZeroLogger(bridge.Log.With().Str("db_section", "ai_bridge").Logger()),
+		)
+	}
 	oc.clientsMu.Lock()
 	if oc.clients == nil {
 		oc.clients = make(map[networkid.UserLoginID]bridgev2.NetworkAPI)
@@ -64,6 +74,14 @@ func (oc *OpenAIConnector) Stop(ctx context.Context) {
 }
 
 func (oc *OpenAIConnector) Start(ctx context.Context) error {
+	db := oc.bridgeDB()
+	if db == nil {
+		return bridgev2.DBUpgradeError{Err: errors.New("ai bridge database not initialized"), Section: "ai_bridge"}
+	}
+	if err := db.Upgrade(ctx); err != nil {
+		return bridgev2.DBUpgradeError{Err: err, Section: "ai_bridge"}
+	}
+
 	oc.applyRuntimeDefaults()
 
 	// Ensure all stored logins are loaded into the in-memory cache early.

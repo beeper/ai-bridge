@@ -135,6 +135,10 @@ func getMemorySearchManager(client *AIClient, agentID string) (*MemorySearchMana
 	if client == nil || client.connector == nil {
 		return nil, "memory search unavailable"
 	}
+	db := client.bridgeDB()
+	if db == nil {
+		return nil, "memory search unavailable"
+	}
 	cfg, err := resolveMemorySearchConfig(client, agentID)
 	if err != nil || cfg == nil {
 		if err != nil {
@@ -164,7 +168,7 @@ func getMemorySearchManager(client *AIClient, agentID string) (*MemorySearchMana
 
 	manager := &MemorySearchManager{
 		client:      client,
-		db:          client.UserLogin.Bridge.DB.Database,
+		db:          db,
 		bridgeID:    bridgeID,
 		loginID:     loginID,
 		agentID:     agentID,
