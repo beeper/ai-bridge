@@ -26,57 +26,100 @@ var modelConfig = struct {
 	Aliases map[string]string
 }{
 	Models: map[string]string{
-		// MiniMax
-		"minimax/minimax-m2.1": "MiniMax M2.1",
-		"minimax/minimax-m2":   "MiniMax M2",
-
-		// GLM (Z.AI) - supports reasoning via parameter
-		"z-ai/glm-4.7":  "GLM 4.7",
-		"z-ai/glm-4.6v": "GLM 4.6V",
-
-		// Kimi (Moonshot)
-		"moonshotai/kimi-k2.5":        "Kimi K2.5",
-		"moonshotai/kimi-k2-0905":     "Kimi K2 (0905)",
-		"moonshotai/kimi-k2-thinking": "Kimi K2 (Thinking)",
-
-		// Qwen
-		"qwen/qwen3-235b-a22b-thinking-2507": "Qwen 3 235B (Thinking)",
-		"qwen/qwen3-235b-a22b":               "Qwen 3 235B",
-
-		// Grok (xAI)
-		"x-ai/grok-4.1-fast": "Grok 4.1 Fast",
+		// Anthropic (Claude) via OpenRouter
+		"anthropic/claude-3.7-sonnet":       "Claude 3.7 Sonnet",
+		"anthropic/claude-3.7-sonnet:thinking": "Claude 3.7 Sonnet (Reasoning)",
+		"anthropic/claude-haiku-4.5":        "Claude Haiku 4.5",
+		"anthropic/claude-opus-4":           "Claude Opus 4",
+		"anthropic/claude-opus-4.1":         "Claude 4.1 Opus",
+		"anthropic/claude-opus-4.5":         "Claude Opus 4.5",
+		"anthropic/claude-opus-4.6":         "Claude Opus 4.6",
+		"anthropic/claude-sonnet-4":         "Claude 4 Sonnet",
+		"anthropic/claude-sonnet-4.5":       "Claude Sonnet 4.5",
 
 		// DeepSeek
-		"deepseek/deepseek-v3.2": "DeepSeek v3.2",
-
-		// Llama (Meta)
-		"meta-llama/llama-4-scout":    "Llama 4 Scout",
-		"meta-llama/llama-4-maverick": "Llama 4 Maverick",
+		"deepseek/deepseek-chat-v3-0324": "DeepSeek v3 (0324)",
+		"deepseek/deepseek-chat-v3.1":    "DeepSeek v3.1",
+		"deepseek/deepseek-v3.1-terminus": "DeepSeek v3.1 Terminus",
+		"deepseek/deepseek-v3.2":         "DeepSeek v3.2",
+		"deepseek/deepseek-r1":           "DeepSeek R1 (Original)",
+		"deepseek/deepseek-r1-0528":      "DeepSeek R1 (0528)",
+		"deepseek/deepseek-r1-distill-qwen-32b": "DeepSeek R1 (Qwen Distilled)",
 
 		// Gemini (Google) via OpenRouter
-		"google/gemini-2.5-flash-image":     "Nano Banana",
-		"google/gemini-3-flash-preview":     "Gemini 3 Flash",
-		"google/gemini-3-pro-image-preview": "Nano Banana Pro",
-		"google/gemini-3-pro-preview":       "Gemini 3 Pro",
+		"google/gemini-2.0-flash-001":         "Gemini 2.0 Flash",
+		"google/gemini-2.0-flash-lite-001":    "Gemini 2.0 Flash Lite",
+		"google/gemini-2.5-flash":             "Gemini 2.5 Flash",
+		"google/gemini-2.5-flash-lite":        "Gemini 2.5 Flash Lite",
+		"google/gemini-2.5-pro":               "Gemini 2.5 Pro",
+		"google/gemini-2.5-flash-image":       "Nano Banana",
+		"google/gemini-3-flash-preview":       "Gemini 3 Flash",
+		"google/gemini-3-pro-preview":         "Gemini 3 Pro",
+		"google/gemini-3-pro-image-preview":   "Nano Banana Pro",
 
-		// Claude (Anthropic) via OpenRouter
-		"anthropic/claude-sonnet-4.5": "Claude Sonnet 4.5",
-		"anthropic/claude-opus-4.5":   "Claude Opus 4.5",
-		"anthropic/claude-opus-4.6":   "Claude Opus 4.6",
-		"anthropic/claude-haiku-4.5":  "Claude Haiku 4.5",
+		// GLM (Z.AI) - supports reasoning via parameter
+		"z-ai/glm-4.5":    "GLM 4.5",
+		"z-ai/glm-4.5v":   "GLM 4.5V",
+		"z-ai/glm-4.5-air": "GLM 4.5 Air",
+		"z-ai/glm-4.6":    "GLM 4.6",
+		"z-ai/glm-4.6v":   "GLM 4.6V",
+		"z-ai/glm-4.7":    "GLM 4.7",
+		"z-ai/glm-5":      "GLM 5",
+
+		// Kimi (Moonshot)
+		"moonshotai/kimi-k2":          "Kimi K2 (0711)",
+		"moonshotai/kimi-k2-0905":     "Kimi K2 (0905)",
+		"moonshotai/kimi-k2-thinking": "Kimi K2 (Thinking)",
+		"moonshotai/kimi-k2.5":        "Kimi K2.5",
+
+		// Llama (Meta)
+		"meta-llama/llama-3.3-70b-instruct": "Llama 3.3 70B",
+		"meta-llama/llama-4-maverick":      "Llama 4 Maverick",
+		"meta-llama/llama-4-scout":         "Llama 4 Scout",
+
+		// MiniMax
+		"minimax/minimax-m2":   "MiniMax M2",
+		"minimax/minimax-m2.1": "MiniMax M2.1",
+		"minimax/minimax-m2.5": "MiniMax M2.5",
 
 		// OpenAI models via OpenRouter
-		"openai/gpt-4.1":           "GPT-4.1",
-		"openai/gpt-5":             "GPT-5",
-		"openai/gpt-5.2":           "GPT-5.2",
-		"openai/gpt-5.2-pro":       "GPT-5.2 Pro",
-		"openai/gpt-5-mini":        "GPT-5 Mini",
-		"openai/gpt-5-nano":        "GPT-5 Nano",
-		"openai/o1":                "O1",
-		"openai/o3-mini":           "O3 Mini",
-		"openai/gpt-4o":            "GPT-4o",
-		"openai/gpt-4o-mini":       "GPT-4o Mini",
-		"openai/chatgpt-4o-latest": "ChatGPT-4o",
+		"openai/gpt-4.1":     "GPT 4.1",
+		"openai/gpt-4.1-mini": "GPT 4.1 Mini",
+		"openai/gpt-4.1-nano": "GPT 4.1 Nano",
+		"openai/gpt-4o-mini":  "GPT 4o Mini",
+		"openai/gpt-5":        "GPT-5",
+		"openai/gpt-5-mini":   "GPT 5 Mini",
+		"openai/gpt-5-nano":   "GPT 5 Nano",
+		"openai/gpt-5.1":      "GPT 5.1",
+		"openai/gpt-5.2":      "GPT 5.2",
+		"openai/gpt-5.2-pro":  "GPT 5.2 Pro",
+		"openai/o3":           "O3",
+		"openai/o3-mini":      "O3 Mini",
+		"openai/o3-pro":       "O3 Pro",
+		"openai/o4-mini":      "O4 Mini",
+
+		"openai/gpt-5-image":      "GPT ImageGen 1.5",
+		"openai/gpt-5-image-mini": "GPT ImageGen",
+
+		// OSS (OpenAI)
+		"openai/gpt-oss-20b":  "OSS 20B",
+		"openai/gpt-oss-120b": "OSS 120B",
+
+		// Qwen (Alibaba)
+		"qwen/qwen-2.5-coder-32b-instruct": "Qwen 2.5 32B",
+		"qwen/qwen3-32b":                  "Qwen 3 32B",
+		"qwen/qwen3-235b-a22b-thinking-2507": "Qwen 3 235B (Thinking)",
+		"qwen/qwen3-235b-a22b":             "Qwen 3 235B",
+		"qwen/qwen3-coder":                  "Qwen 3 Coder",
+
+		// xAI (Grok)
+		"x-ai/grok-3":        "Grok 3",
+		"x-ai/grok-3-mini":   "Grok 3 Mini",
+		"x-ai/grok-4":        "Grok 4",
+		"x-ai/grok-4-fast":   "Grok 4 Fast",
+		"x-ai/grok-4.1-fast": "Grok 4.1 Fast",
+
+		// Preserve existing compatibility models
 	},
 	Aliases: map[string]string{
 		// Default alias

@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3"
@@ -179,4 +180,83 @@ func TestEstimateTotalTokens(t *testing.T) {
 	}
 
 	t.Logf("Estimated tokens: %d", tokens)
+}
+
+func TestCompactorSplitMessages_ProtectsLatestUserWithFewAssistants(t *testing.T) {
+	compactor := NewCompactor(nil, zerolog.Nop(), &CompactionConfig{
+		PruningConfig:   DefaultPruningConfig(),
+		MaxHistoryShare: 0.1,
+	})
+
+	messages := []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage("system"),
+		openai.UserMessage(strings.Repeat("old user content ", 20)),
+		openai.AssistantMessage(strings.Repeat("old assistant content ", 20)),
+		openai.UserMessage("latest user request"),
+	}
+
+	toSummarize, toKeep := compactor.splitMessagesForCompaction(messages, 20)
+	if len(toSummarize) == 0 {
+		t.Fatalf("expected some messages to summarize")
+	}
+	if containsUserMessage(toSummarize, "latest user request") {
+		t.Fatalf("latest user request must not be summarized")
+	}
+	if !containsUserMessage(toKeep, "latest user request") {
+		t.Fatalf("latest user request must be kept verbatim")
+	}
+}
+
+func TestCompactorSplitMessages_ExcludesLatestUserUnderAggressiveCompaction(t *testing.T) {
+	compactor := NewCompactor(nil, zerolog.Nop(), &CompactionConfig{
+		PruningConfig:   DefaultPruningConfig(),
+		MaxHistoryShare: 0.1,
+	})
+
+	messages := []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage("system"),
+		openai.UserMessage(strings.Repeat("turn one ", 30)),
+		openai.UserMessage(strings.Repeat("turn two ", 30)),
+		openai.UserMessage("latest user request"),
+	}
+
+	toSummarize, toKeep := compactor.splitMessagesForCompaction(messages, 20)
+	if containsUserMessage(toSummarize, "latest user request") {
+		t.Fatalf("latest user request must not be summarized")
+	}
+	if !containsUserMessage(toKeep, "latest user request") {
+		t.Fatalf("latest user request must remain in kept context")
+	}
+}
+
+func TestCompactorSplitMessages_NoSummaryWhenOnlyLatestUserIsAvailable(t *testing.T) {
+	compactor := NewCompactor(nil, zerolog.Nop(), &CompactionConfig{
+		PruningConfig:   DefaultPruningConfig(),
+		MaxHistoryShare: 0.1,
+	})
+
+	messages := []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage("system"),
+		openai.UserMessage(strings.Repeat("latest user request ", 50)),
+	}
+
+	toSummarize, toKeep := compactor.splitMessagesForCompaction(messages, 20)
+	if len(toSummarize) != 0 {
+		t.Fatalf("expected no messages to summarize, got %d", len(toSummarize))
+	}
+	if len(toKeep) != len(messages) {
+		t.Fatalf("expected to keep all messages, got keep=%d want=%d", len(toKeep), len(messages))
+	}
+}
+
+func containsUserMessage(messages []openai.ChatCompletionMessageParamUnion, want string) bool {
+	for _, msg := range messages {
+		if msg.OfUser == nil || !msg.OfUser.Content.OfString.Valid() {
+			continue
+		}
+		if msg.OfUser.Content.OfString.Value == want {
+			return true
+		}
+	}
+	return false
 }
