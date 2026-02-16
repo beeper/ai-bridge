@@ -544,7 +544,11 @@ finalFallback:
 }
 
 func (oc *AIClient) shouldRunHeartbeatForFile(agentID string, reason string) bool {
-	store := textfs.NewStore(oc.UserLogin.Bridge.DB.Database, string(oc.UserLogin.Bridge.DB.BridgeID), string(oc.UserLogin.ID), normalizeAgentID(agentID))
+	db := oc.bridgeDB()
+	if db == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.DB == nil {
+		return true
+	}
+	store := textfs.NewStore(db, string(oc.UserLogin.Bridge.DB.BridgeID), string(oc.UserLogin.ID), normalizeAgentID(agentID))
 	entry, found, err := store.Read(context.Background(), agents.DefaultHeartbeatFilename)
 	if err != nil || !found {
 		return true

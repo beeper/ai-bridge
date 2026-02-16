@@ -19,7 +19,7 @@ import (
 //
 // This function is intentionally best-effort: it must not block logout if cleanup fails.
 func purgeLoginDataBestEffort(ctx context.Context, login *bridgev2.UserLogin) {
-	if login == nil || login.Bridge == nil || login.Bridge.DB == nil || login.Bridge.DB.Database == nil {
+	if login == nil || login.Bridge == nil || login.Bridge.DB == nil {
 		return
 	}
 	bridgeID := string(login.Bridge.DB.BridgeID)
@@ -28,7 +28,10 @@ func purgeLoginDataBestEffort(ctx context.Context, login *bridgev2.UserLogin) {
 		return
 	}
 
-	db := login.Bridge.DB.Database
+	db := bridgeDBFromLogin(login)
+	if db == nil {
+		return
+	}
 
 	// Stop background memory workers and (if possible) delete vector rows via existing vector-enabled managers
 	// before we delete the chunk rows.
@@ -161,10 +164,13 @@ func bestEffortExec(ctx context.Context, db *dbutil.Database, query string, args
 }
 
 func purgeVectorRowsBestEffort(ctx context.Context, login *bridgev2.UserLogin, bridgeID, loginID string) {
-	if login == nil || login.Bridge == nil || login.Bridge.DB == nil || login.Bridge.DB.Database == nil {
+	if login == nil || login.Bridge == nil || login.Bridge.DB == nil {
 		return
 	}
-	db := login.Bridge.DB.Database
+	db := bridgeDBFromLogin(login)
+	if db == nil {
+		return
+	}
 	if db.Dialect != dbutil.SQLite {
 		return
 	}

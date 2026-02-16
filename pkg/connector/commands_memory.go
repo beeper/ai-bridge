@@ -314,8 +314,13 @@ func fnMemory(ce *commands.Event) {
 			ce.Reply("Content exceeds %s limit.", textfs.FormatSize(memoryCommandMaxBytes))
 			return
 		}
+		db := client.bridgeDB()
+		if db == nil {
+			ce.Reply("Memory storage unavailable")
+			return
+		}
 		store := textfs.NewStore(
-			client.UserLogin.Bridge.DB.Database,
+			db,
 			string(client.UserLogin.Bridge.DB.BridgeID),
 			string(client.UserLogin.ID),
 			resolveAgentID(meta),

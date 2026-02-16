@@ -1808,7 +1808,10 @@ func textFSStore(ctx context.Context) (*textfs.Store, error) {
 	if agentID == "" {
 		agentID = "default"
 	}
-	db := btc.Client.UserLogin.Bridge.DB.Database
+	db := btc.Client.bridgeDB()
+	if db == nil {
+		return nil, errors.New("file tool database unavailable")
+	}
 	bridgeID := string(btc.Client.UserLogin.Bridge.DB.BridgeID)
 	loginID := string(btc.Client.UserLogin.ID)
 	return textfs.NewStore(db, bridgeID, loginID, agentID), nil

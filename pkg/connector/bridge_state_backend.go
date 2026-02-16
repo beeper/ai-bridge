@@ -79,8 +79,12 @@ func (oc *AIClient) bridgeStateBackend() cron.StoreBackend {
 	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.DB == nil {
 		return nil
 	}
+	db := oc.bridgeDB()
+	if db == nil {
+		return nil
+	}
 	return &bridgeDBBackend{
-		db:       oc.UserLogin.Bridge.DB.Database,
+		db:       db,
 		bridgeID: string(oc.UserLogin.Bridge.DB.BridgeID),
 		loginID:  string(oc.UserLogin.ID),
 	}
