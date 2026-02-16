@@ -49,8 +49,6 @@ type Config struct {
 	Fallbacks []string
 
 	Exa        ExaConfig
-	Brave      BraveConfig
-	Perplexity PerplexityConfig
 	OpenRouter OpenRouterConfig
 }
 
@@ -66,27 +64,6 @@ type ExaConfig struct {
 	Highlights        bool
 }
 
-type BraveConfig struct {
-	Enabled          *bool
-	BaseURL          string
-	APIKey           string
-	TimeoutSecs      int
-	CacheTtlSecs     int
-	SearchLang       string
-	UILang           string
-	DefaultCountry   string
-	DefaultFreshness string
-}
-
-type PerplexityConfig struct {
-	Enabled      *bool
-	APIKey       string
-	BaseURL      string
-	Model        string
-	TimeoutSecs  int
-	CacheTtlSecs int
-}
-
 type OpenRouterConfig struct {
 	Enabled      *bool
 	APIKey       string
@@ -98,8 +75,6 @@ type OpenRouterConfig struct {
 
 const (
 	ProviderExa        = basesearch.ProviderExa
-	ProviderBrave      = basesearch.ProviderBrave
-	ProviderPerplexity = basesearch.ProviderPerplexity
 	ProviderOpenRouter = basesearch.ProviderOpenRouter
 
 	DefaultSearchCount  = basesearch.DefaultSearchCount
@@ -138,8 +113,6 @@ func (c *Config) WithDefaults() *Config {
 		c.Fallbacks = slices.Clone(DefaultFallbackOrder)
 	}
 	c.Exa = c.Exa.withDefaults()
-	c.Brave = c.Brave.withDefaults()
-	c.Perplexity = c.Perplexity.withDefaults()
 	c.OpenRouter = c.OpenRouter.withDefaults()
 	return c
 }
@@ -158,35 +131,6 @@ func (c ExaConfig) withDefaults() ExaConfig {
 		c.TextMaxCharacters = 500
 	}
 	c.Highlights = true
-	return c
-}
-
-func (c BraveConfig) withDefaults() BraveConfig {
-	if c.BaseURL == "" {
-		c.BaseURL = "https://api.search.brave.com/res/v1/web/search"
-	}
-	if c.TimeoutSecs <= 0 {
-		c.TimeoutSecs = DefaultTimeoutSecs
-	}
-	if c.CacheTtlSecs <= 0 {
-		c.CacheTtlSecs = DefaultCacheTtlSecs
-	}
-	return c
-}
-
-func (c PerplexityConfig) withDefaults() PerplexityConfig {
-	if c.Model == "" {
-		c.Model = "perplexity/sonar-pro"
-	}
-	if c.BaseURL == "" {
-		c.BaseURL = "https://openrouter.ai/api/v1"
-	}
-	if c.TimeoutSecs <= 0 {
-		c.TimeoutSecs = DefaultTimeoutSecs
-	}
-	if c.CacheTtlSecs <= 0 {
-		c.CacheTtlSecs = DefaultCacheTtlSecs
-	}
 	return c
 }
 
@@ -235,25 +179,6 @@ func toBaseConfig(cfg *Config) *basesearch.Config {
 			TextMaxCharacters: cfg.Exa.TextMaxCharacters,
 			Highlights:        cfg.Exa.Highlights,
 		},
-		Brave: basesearch.BraveConfig{
-			Enabled:          cfg.Brave.Enabled,
-			BaseURL:          cfg.Brave.BaseURL,
-			APIKey:           cfg.Brave.APIKey,
-			TimeoutSecs:      cfg.Brave.TimeoutSecs,
-			CacheTtlSecs:     cfg.Brave.CacheTtlSecs,
-			SearchLang:       cfg.Brave.SearchLang,
-			UILang:           cfg.Brave.UILang,
-			DefaultCountry:   cfg.Brave.DefaultCountry,
-			DefaultFreshness: cfg.Brave.DefaultFreshness,
-		},
-		Perplexity: basesearch.PerplexityConfig{
-			Enabled:      cfg.Perplexity.Enabled,
-			APIKey:       cfg.Perplexity.APIKey,
-			BaseURL:      cfg.Perplexity.BaseURL,
-			Model:        cfg.Perplexity.Model,
-			TimeoutSecs:  cfg.Perplexity.TimeoutSecs,
-			CacheTtlSecs: cfg.Perplexity.CacheTtlSecs,
-		},
 		OpenRouter: basesearch.OpenRouterConfig{
 			Enabled:      cfg.OpenRouter.Enabled,
 			APIKey:       cfg.OpenRouter.APIKey,
@@ -282,25 +207,6 @@ func fromBaseConfig(cfg *basesearch.Config) *Config {
 			IncludeText:       cfg.Exa.IncludeText,
 			TextMaxCharacters: cfg.Exa.TextMaxCharacters,
 			Highlights:        cfg.Exa.Highlights,
-		},
-		Brave: BraveConfig{
-			Enabled:          cfg.Brave.Enabled,
-			BaseURL:          cfg.Brave.BaseURL,
-			APIKey:           cfg.Brave.APIKey,
-			TimeoutSecs:      cfg.Brave.TimeoutSecs,
-			CacheTtlSecs:     cfg.Brave.CacheTtlSecs,
-			SearchLang:       cfg.Brave.SearchLang,
-			UILang:           cfg.Brave.UILang,
-			DefaultCountry:   cfg.Brave.DefaultCountry,
-			DefaultFreshness: cfg.Brave.DefaultFreshness,
-		},
-		Perplexity: PerplexityConfig{
-			Enabled:      cfg.Perplexity.Enabled,
-			APIKey:       cfg.Perplexity.APIKey,
-			BaseURL:      cfg.Perplexity.BaseURL,
-			Model:        cfg.Perplexity.Model,
-			TimeoutSecs:  cfg.Perplexity.TimeoutSecs,
-			CacheTtlSecs: cfg.Perplexity.CacheTtlSecs,
 		},
 		OpenRouter: OpenRouterConfig{
 			Enabled:      cfg.OpenRouter.Enabled,

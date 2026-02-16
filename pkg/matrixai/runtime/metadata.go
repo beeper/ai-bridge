@@ -52,8 +52,6 @@ type ServiceTokens struct {
 	OpenAI     string `json:"openai,omitempty"`
 	OpenRouter string `json:"openrouter,omitempty"`
 	Exa        string `json:"exa,omitempty"`
-	Brave      string `json:"brave,omitempty"`
-	Perplexity string `json:"perplexity,omitempty"`
 }
 
 // UserLoginMetadata is stored on each login row to keep per-user settings.

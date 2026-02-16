@@ -2,15 +2,8 @@
 .claude/settings.local.json
 
 # Compiled binaries
-/ai
-/ai-simple
-/ai-agentic
-/ai-codex
-/ai-opencode
-/bridge
 /generate-models
 /bridges/*/bridge
-/start
 
 logs/
 *.db*
