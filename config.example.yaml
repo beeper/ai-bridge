@@ -84,15 +84,10 @@ network:
     matrix:
       responsePrefix: ""
 
-  session:
-    scope: "per-sender"
-    mainKey: "main"
-    store: ""
-
   tools:
     search:
       provider: "openrouter"
-      fallbacks: ["exa", "brave", "perplexity"]
+      fallbacks: ["exa"]
       exa:
         api_key: ""
         base_url: "https://api.exa.ai"
@@ -100,13 +95,6 @@ network:
         num_results: 5
         include_text: false
         text_max_chars: 500
-      brave:
-        api_key: ""
-        base_url: "https://api.search.brave.com/res/v1/web/search"
-      perplexity:
-        api_key: ""
-        base_url: "https://openrouter.ai/api/v1"
-        model: "perplexity/sonar-pro"
       openrouter:
         api_key: ""
         base_url: "https://openrouter.ai/api/v1"

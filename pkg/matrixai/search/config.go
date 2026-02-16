@@ -6,10 +6,8 @@ import (
 )
 
 const (
-	ProviderExa         = "exa"
-	ProviderBrave       = "brave"
-	ProviderPerplexity  = "perplexity"
-	ProviderOpenRouter  = "openrouter"
+	ProviderExa        = "exa"
+	ProviderOpenRouter = "openrouter"
 	DefaultSearchCount  = 5
 	MaxSearchCount      = 10
 	DefaultTimeoutSecs  = 30
@@ -19,8 +17,6 @@ const (
 var DefaultFallbackOrder = []string{
 	ProviderOpenRouter,
 	ProviderExa,
-	ProviderBrave,
-	ProviderPerplexity,
 }
 
 // Config controls search provider selection and credentials.
@@ -29,8 +25,6 @@ type Config struct {
 	Fallbacks []string `yaml:"fallbacks"`
 
 	Exa        ExaConfig        `yaml:"exa"`
-	Brave      BraveConfig      `yaml:"brave"`
-	Perplexity PerplexityConfig `yaml:"perplexity"`
 	OpenRouter OpenRouterConfig `yaml:"openrouter"`
 }
 
@@ -44,27 +38,6 @@ type ExaConfig struct {
 	IncludeText       bool   `yaml:"include_text"`
 	TextMaxCharacters int    `yaml:"text_max_chars"`
 	Highlights        bool   `yaml:"highlights"`
-}
-
-type BraveConfig struct {
-	Enabled          *bool  `yaml:"enabled"`
-	BaseURL          string `yaml:"base_url"`
-	APIKey           string `yaml:"api_key"`
-	TimeoutSecs      int    `yaml:"timeout_seconds"`
-	CacheTtlSecs     int    `yaml:"cache_ttl_seconds"`
-	SearchLang       string `yaml:"search_lang"`
-	UILang           string `yaml:"ui_lang"`
-	DefaultCountry   string `yaml:"default_country"`
-	DefaultFreshness string `yaml:"default_freshness"`
-}
-
-type PerplexityConfig struct {
-	Enabled      *bool  `yaml:"enabled"`
-	APIKey       string `yaml:"api_key"`
-	BaseURL      string `yaml:"base_url"`
-	Model        string `yaml:"model"`
-	TimeoutSecs  int    `yaml:"timeout_seconds"`
-	CacheTtlSecs int    `yaml:"cache_ttl_seconds"`
 }
 
 type OpenRouterConfig struct {
@@ -91,8 +64,6 @@ func (c *Config) WithDefaults() *Config {
 		c.Fallbacks = slices.Clone(DefaultFallbackOrder)
 	}
 	c.Exa = c.Exa.withDefaults()
-	c.Brave = c.Brave.withDefaults()
-	c.Perplexity = c.Perplexity.withDefaults()
 	c.OpenRouter = c.OpenRouter.withDefaults()
 	return c
 }
@@ -111,35 +82,6 @@ func (c ExaConfig) withDefaults() ExaConfig {
 		c.TextMaxCharacters = 500
 	}
 	c.Highlights = true
-	return c
-}
-
-func (c BraveConfig) withDefaults() BraveConfig {
-	if c.BaseURL == "" {
-		c.BaseURL = "https://api.search.brave.com/res/v1/web/search"
-	}
-	if c.TimeoutSecs <= 0 {
-		c.TimeoutSecs = DefaultTimeoutSecs
-	}
-	if c.CacheTtlSecs <= 0 {
-		c.CacheTtlSecs = DefaultCacheTtlSecs
-	}
-	return c
-}
-
-func (c PerplexityConfig) withDefaults() PerplexityConfig {
-	if c.Model == "" {
-		c.Model = "perplexity/sonar-pro"
-	}
-	if c.BaseURL == "" {
-		c.BaseURL = "https://openrouter.ai/api/v1"
-	}
-	if c.TimeoutSecs <= 0 {
-		c.TimeoutSecs = DefaultTimeoutSecs
-	}
-	if c.CacheTtlSecs <= 0 {
-		c.CacheTtlSecs = DefaultCacheTtlSecs
-	}
 	return c
 }
 

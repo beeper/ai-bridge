@@ -92,7 +92,7 @@ func WebSearchSchema() map[string]any {
 			},
 			"freshness": map[string]any{
 				"type":        "string",
-				"description": "Filter results by discovery time (Brave only). Values: 'pd' (past 24h), 'pw' (past week), 'pm' (past month), 'py' (past year), or date range 'YYYY-MM-DDtoYYYY-MM-DD'.",
+				"description": "Filter results by discovery time. Values: 'pd' (past 24h), 'pw' (past week), 'pm' (past month), 'py' (past year), or date range 'YYYY-MM-DDtoYYYY-MM-DD'.",
 			},
 		},
 		"required": []string{"query"},
