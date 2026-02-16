@@ -367,6 +367,17 @@ func (c *Compactor) splitMessagesForCompaction(
 	}
 	cutoffIndex := findAssistantCutoffIndex(infos, keepLastAssistants)
 	firstUserIndex := findFirstUserIndex(infos)
+	lastUserIndex := -1
+	for i := len(infos) - 1; i >= 0; i-- {
+		if infos[i].role == "user" {
+			lastUserIndex = i
+			break
+		}
+	}
+	// No user message found: nothing meaningful to summarize.
+	if lastUserIndex < 0 {
+		return nil, messages
+	}
 
 	// Calculate how much we need to drop to fit in history budget
 	charWindow := contextWindowTokens * charsPerTokenEstimate
@@ -390,6 +401,10 @@ func (c *Compactor) splitMessagesForCompaction(
 	for i := firstUserIndex; i < cutoffIndex && removedChars < charsToRemove; i++ {
 		removedChars += infos[i].charCount
 		splitIndex = i + 1
+	}
+	// Never summarize the latest user turn.
+	if splitIndex > lastUserIndex {
+		splitIndex = lastUserIndex
 	}
 
 	// Never summarize the system prompt (index 0 if present)

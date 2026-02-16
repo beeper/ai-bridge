@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
@@ -221,20 +222,41 @@ func (oc *AIClient) truncatePrompt(
 // getCompactor returns the compactor instance, creating it lazily if needed
 func (oc *AIClient) getCompactor() *Compactor {
 	oc.compactorOnce.Do(func() {
+		defaults := DefaultCompactionConfig()
+
 		// Build compaction config from pruning config
 		var compactionConfig *CompactionConfig
 		if oc.connector.Config.Pruning != nil {
+			pruning := oc.connector.Config.Pruning
 			compactionConfig = &CompactionConfig{
-				PruningConfig: oc.connector.Config.Pruning,
+				PruningConfig:        pruning,
+				SummarizationEnabled: pruning.SummarizationEnabled,
+				SummarizationModel:   strings.TrimSpace(pruning.SummarizationModel),
+				MaxSummaryTokens:     pruning.MaxSummaryTokens,
+				MaxHistoryShare:      pruning.MaxHistoryShare,
+				ReserveTokens:        pruning.ReserveTokens,
+				CustomInstructions:   pruning.CustomInstructions,
+			}
+			if compactionConfig.SummarizationEnabled == nil {
+				compactionConfig.SummarizationEnabled = defaults.SummarizationEnabled
+			}
+			if compactionConfig.MaxSummaryTokens <= 0 {
+				compactionConfig.MaxSummaryTokens = defaults.MaxSummaryTokens
+			}
+			if compactionConfig.MaxHistoryShare <= 0 {
+				compactionConfig.MaxHistoryShare = defaults.MaxHistoryShare
+			}
+			if compactionConfig.ReserveTokens <= 0 {
+				compactionConfig.ReserveTokens = defaults.ReserveTokens
 			}
 		} else {
-			compactionConfig = DefaultCompactionConfig()
+			compactionConfig = defaults
 		}
 
 		oc.compactor = NewCompactor(&oc.api, oc.log, compactionConfig)
 
 		// Use a fast model for summarization
-		if oc.isOpenRouterProvider() {
+		if oc.isOpenRouterProvider() && strings.TrimSpace(compactionConfig.SummarizationModel) == "" {
 			oc.compactor.SetSummarizationModel("anthropic/claude-opus-4.6")
 		}
 	})

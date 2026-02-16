@@ -98,6 +98,10 @@ func (oc *AIClient) maybeRunMemoryFlush(
 	meta *PortalMetadata,
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) {
+	// Raw/playground rooms must remain non-agentic and skip memory flush tool loops.
+	if meta != nil && meta.IsRawMode {
+		return
+	}
 	compactor := oc.getCompactor()
 	settings := resolveMemoryFlushSettings(compactor.config)
 	if settings == nil {

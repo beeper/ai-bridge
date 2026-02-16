@@ -563,6 +563,27 @@ type PortalInitOpts struct {
 	PortalKey    *networkid.PortalKey
 }
 
+func cloneForkPortalMetadata(src *PortalMetadata, slug, title string) *PortalMetadata {
+	if src == nil {
+		return nil
+	}
+	return &PortalMetadata{
+		Model:               src.Model,
+		Slug:                slug,
+		Title:               title,
+		SystemPrompt:        src.SystemPrompt,
+		Temperature:         src.Temperature,
+		MaxContextMessages:  src.MaxContextMessages,
+		MaxCompletionTokens: src.MaxCompletionTokens,
+		ReasoningEffort:     src.ReasoningEffort,
+		Capabilities:        src.Capabilities,
+		ConversationMode:    src.ConversationMode,
+		AgentID:             src.AgentID,
+		AgentPrompt:         src.AgentPrompt,
+		IsRawMode:           src.IsRawMode,
+	}
+}
+
 // initPortalForChat handles common portal initialization logic.
 // Returns the configured portal, chat info, and any error.
 func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) (*bridgev2.Portal, *bridgev2.ChatInfo, error) {
@@ -595,20 +616,7 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 	// Initialize or copy metadata
 	var pmeta *PortalMetadata
 	if opts.CopyFrom != nil {
-		pmeta = &PortalMetadata{
-			Model:               opts.CopyFrom.Model,
-			Slug:                slug,
-			Title:               title,
-			SystemPrompt:        opts.CopyFrom.SystemPrompt,
-			Temperature:         opts.CopyFrom.Temperature,
-			MaxContextMessages:  opts.CopyFrom.MaxContextMessages,
-			MaxCompletionTokens: opts.CopyFrom.MaxCompletionTokens,
-			ReasoningEffort:     opts.CopyFrom.ReasoningEffort,
-			Capabilities:        opts.CopyFrom.Capabilities,
-			ConversationMode:    opts.CopyFrom.ConversationMode,
-			AgentID:             opts.CopyFrom.AgentID,
-			AgentPrompt:         opts.CopyFrom.AgentPrompt,
-		}
+		pmeta = cloneForkPortalMetadata(opts.CopyFrom, slug, title)
 		modelID = opts.CopyFrom.Model
 	} else {
 		pmeta = &PortalMetadata{
