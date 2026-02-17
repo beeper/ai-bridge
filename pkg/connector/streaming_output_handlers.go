@@ -52,6 +52,27 @@ func (oc *AIClient) upsertActiveToolFromDescriptor(
 	return tool
 }
 
+func (oc *AIClient) ensureActiveToolForStreamItem(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	activeTools map[string]*activeToolCall,
+	itemID string,
+	item responses.ResponseOutputItemUnion,
+) *activeToolCall {
+	if activeTools == nil || state == nil {
+		return nil
+	}
+	if tool, exists := activeTools[itemID]; exists {
+		return tool
+	}
+	itemDesc := deriveToolDescriptorForOutputItem(item, state)
+	if !itemDesc.ok {
+		return nil
+	}
+	return oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
+}
+
 func (oc *AIClient) handleResponseOutputItemAdded(
 	ctx context.Context,
 	portal *bridgev2.Portal,
