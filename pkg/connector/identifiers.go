@@ -108,7 +108,7 @@ func parseAgentFromGhostID(ghostID string) (agentID string, ok bool) {
 }
 
 func humanUserID(loginID networkid.UserLoginID) networkid.UserID {
-	return networkid.UserID(fmt.Sprintf("openai-user:%s", loginID))
+	return bridgeadapter.HumanUserID("openai-user", loginID)
 }
 
 func portalMeta(portal *bridgev2.Portal) *PortalMetadata {
@@ -167,7 +167,7 @@ func parseChatSlug(slug string) (int, bool) {
 
 // MakeMessageID creates a message ID from a Matrix event ID
 func MakeMessageID(eventID id.EventID) networkid.MessageID {
-	return networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID)))
+	return bridgeadapter.MatrixMessageID(eventID)
 }
 
 // cronPortalKey creates a deterministic portal key for a cron job room.
