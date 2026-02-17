@@ -26,41 +26,6 @@ func TestIsGoogleModel(t *testing.T) {
 	}
 }
 
-func TestValidateGeminiTurns_Valid(t *testing.T) {
-	prompt := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage("system"),
-		openai.UserMessage("hello"),
-		openai.AssistantMessage("hi"),
-		openai.UserMessage("how are you"),
-	}
-	if !ValidateGeminiTurns(prompt) {
-		t.Fatal("expected valid turn sequence")
-	}
-}
-
-func TestValidateGeminiTurns_ConsecutiveUser(t *testing.T) {
-	prompt := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage("system"),
-		openai.UserMessage("hello"),
-		openai.UserMessage("hello again"),
-		openai.AssistantMessage("hi"),
-	}
-	if ValidateGeminiTurns(prompt) {
-		t.Fatal("expected invalid for consecutive user messages")
-	}
-}
-
-func TestValidateGeminiTurns_ConsecutiveAssistant(t *testing.T) {
-	prompt := []openai.ChatCompletionMessageParamUnion{
-		openai.UserMessage("hello"),
-		openai.AssistantMessage("hi"),
-		openai.AssistantMessage("I mean, hello"),
-	}
-	if ValidateGeminiTurns(prompt) {
-		t.Fatal("expected invalid for consecutive assistant messages")
-	}
-}
-
 func TestSanitizeGoogleTurnOrdering_MergesConsecutiveUser(t *testing.T) {
 	prompt := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage("system"),
@@ -69,7 +34,7 @@ func TestSanitizeGoogleTurnOrdering_MergesConsecutiveUser(t *testing.T) {
 		openai.AssistantMessage("hi"),
 	}
 	result := SanitizeGoogleTurnOrdering(prompt)
-	if !ValidateGeminiTurns(result) {
+	if hasConsecutiveUserOrAssistantRoles(result) {
 		t.Fatal("expected sanitized prompt to be valid")
 	}
 	// system + merged-user + assistant = 3
@@ -85,7 +50,7 @@ func TestSanitizeGoogleTurnOrdering_PrependsSyntheticUser(t *testing.T) {
 		openai.UserMessage("ok"),
 	}
 	result := SanitizeGoogleTurnOrdering(prompt)
-	if !ValidateGeminiTurns(result) {
+	if hasConsecutiveUserOrAssistantRoles(result) {
 		t.Fatal("expected sanitized prompt to be valid")
 	}
 	// system + synthetic-user + assistant + user = 4
@@ -130,4 +95,19 @@ func TestChatMessageRole(t *testing.T) {
 			t.Errorf("chatMessageRole() = %q, want %q", got, tt.want)
 		}
 	}
+}
+
+func hasConsecutiveUserOrAssistantRoles(prompt []openai.ChatCompletionMessageParamUnion) bool {
+	lastRole := ""
+	for _, msg := range prompt {
+		role := chatMessageRole(msg)
+		if role == "system" {
+			continue
+		}
+		if role == lastRole && (role == "user" || role == "assistant") {
+			return true
+		}
+		lastRole = role
+	}
+	return false
 }

@@ -9,6 +9,10 @@ import (
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 )
 
+func boolPtr(v bool) *bool {
+	return &v
+}
+
 func TestToolAvailable_WebSearch_RequiresAnyProviderKey(t *testing.T) {
 	oc := &AIClient{
 		connector: &OpenAIConnector{

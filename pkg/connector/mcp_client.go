@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	mcpDefaultPath      = "/mcp"
-	mcpToolCacheTTL     = 60 * time.Second
-	mcpDiscoveryTimeout = 3 * time.Second
+	defaultMCPTimeoutSeconds = 30
+	mcpToolCacheTTL          = 60 * time.Second
+	mcpDiscoveryTimeout      = 3 * time.Second
 )
 
 type mcpAuthRoundTripper struct {
@@ -68,23 +68,6 @@ func mcpAuthorizationHeaderValue(authType, token string) (string, error) {
 	}
 }
 
-func mcpEndpointFromNexusConfig(cfg *NexusToolsConfig) string {
-	if cfg == nil {
-		return ""
-	}
-	if explicit := strings.TrimSpace(cfg.MCPEndpoint); explicit != "" {
-		return strings.TrimRight(explicit, "/")
-	}
-	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
-	if baseURL == "" {
-		return ""
-	}
-	if strings.HasSuffix(strings.ToLower(baseURL), mcpDefaultPath) {
-		return baseURL
-	}
-	return baseURL + mcpDefaultPath
-}
-
 func copyToolDefinitions(defs []ToolDefinition) []ToolDefinition {
 	if len(defs) == 0 {
 		return nil
@@ -102,10 +85,7 @@ func copyStringMap(src map[string]string) map[string]string {
 }
 
 func (oc *AIClient) mcpRequestTimeout() time.Duration {
-	timeoutSeconds := defaultNexusTimeoutSeconds
-	if oc != nil && oc.connector != nil && oc.connector.Config.Tools.Nexus != nil && oc.connector.Config.Tools.Nexus.TimeoutSeconds > 0 {
-		timeoutSeconds = oc.connector.Config.Tools.Nexus.TimeoutSeconds
-	}
+	timeoutSeconds := defaultMCPTimeoutSeconds
 	return time.Duration(timeoutSeconds) * time.Second
 }
 
@@ -386,9 +366,6 @@ func (oc *AIClient) mcpServerForTool(ctx context.Context, toolName string) (name
 }
 
 func (oc *AIClient) isMCPToolName(name string) bool {
-	if isNexusToolName(name) {
-		return true
-	}
 	return oc.hasCachedMCPTool(name)
 }
 
@@ -399,9 +376,6 @@ func (oc *AIClient) shouldUseMCPTool(ctx context.Context, toolName string) bool 
 	}
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	if isNexusToolName(toolName) {
-		return true
 	}
 	if oc.hasCachedMCPTool(toolName) {
 		return true

@@ -6,7 +6,7 @@ Batteries included - one click setup (for [Beeper Plus](https://www.beeper.com/p
 
 Coming soon to Beeper Desktop as an experiment. Join the [Developer Community](beeper://connect) on [Matrix](https://matrix.to/#/#beeper-developers:beeper.com?via=beeper.com) for early access.
 
-Connect all your chats with one click and manage your inbox with agents. Supports image generation, reminders, web search, memory, Clay.earth integration. Create basic AI Chats to talk to models with no tools and customizable system prompt.
+Connect all your chats with one click and manage your inbox with agents. Supports image generation, reminders, web search, and memory. Create basic AI Chats to talk to models with no tools and customizable system prompt.
 
 Made by humans using agentic coding.
 

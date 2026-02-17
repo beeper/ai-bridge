@@ -111,13 +111,6 @@ type CompactionHooks struct {
 // globalCompactionHooks is the global hook registry
 var globalCompactionHooks = &CompactionHooks{}
 
-// RegisterBeforeCompactionHook registers a hook to run before compaction
-func RegisterBeforeCompactionHook(hook CompactionBeforeHook) {
-	globalCompactionHooks.mu.Lock()
-	defer globalCompactionHooks.mu.Unlock()
-	globalCompactionHooks.beforeHooks = append(globalCompactionHooks.beforeHooks, hook)
-}
-
 // runBeforeHooks runs all registered before hooks
 func (h *CompactionHooks) runBeforeHooks(ctx context.Context, hookCtx *CompactionHookContext) (*CompactionHookResult, error) {
 	h.mu.RLock()

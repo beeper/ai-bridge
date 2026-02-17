@@ -114,21 +114,6 @@ func containsAnyPattern(err error, patterns []string) bool {
 	return false
 }
 
-// IsCompactionFailureError checks if a context-length error originated from
-// compaction itself (e.g., the summarisation prompt overflowed). This lets
-// callers avoid re-attempting compaction when compaction was the thing that failed.
-func IsCompactionFailureError(err error) bool {
-	if ParseContextLengthError(err) == nil {
-		return false
-	}
-	return containsAnyPattern(err, []string{
-		"summarization failed",
-		"auto-compaction",
-		"compaction failed",
-		"compaction",
-	})
-}
-
 // IsBillingError checks if the error is a billing/payment error (402)
 func IsBillingError(err error) bool {
 	return containsAnyPattern(err, []string{

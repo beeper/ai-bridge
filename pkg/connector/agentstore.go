@@ -37,7 +37,6 @@ func (s *AgentStoreAdapter) LoadAgents(ctx context.Context) (map[string]*agents.
 	_ = ctx
 	// Start with preset agents
 	result := make(map[string]*agents.AgentDefinition)
-	showBexus := s.client != nil && s.client.hasConnectedClayMCP()
 
 	// Resolve login metadata for provider gating
 	loginMeta := loginMetadata(s.client.UserLogin)
@@ -45,9 +44,6 @@ func (s *AgentStoreAdapter) LoadAgents(ctx context.Context) (map[string]*agents.
 
 	// Add all presets
 	for _, preset := range agents.PresetAgents {
-		if preset != nil && agents.IsNexusAI(preset.ID) && !showBexus {
-			continue
-		}
 		if preset != nil && agents.IsBeeperHelp(preset.ID) && !isBeeperProvider {
 			continue
 		}

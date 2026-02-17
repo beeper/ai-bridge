@@ -19,7 +19,7 @@ var m = mxmain.BridgeMain{
 	Description: "A Matrix↔AI bridge for Beeper built on mautrix-go bridgev2.",
 	URL:         "https://github.com/beeper/ai-bridge",
 	Version:     "0.1.0",
-	Connector:   &connector.OpenAIConnector{},
+	Connector:   connector.NewAIConnector(),
 }
 
 func main() {
