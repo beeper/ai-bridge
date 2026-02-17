@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
 	"github.com/rs/xid"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/id"
@@ -30,7 +31,7 @@ func codexChatPortalKey(loginID networkid.UserLoginID, slug string) networkid.Po
 
 // MakeMessageID creates a message ID from a Matrix event ID.
 func MakeMessageID(eventID id.EventID) networkid.MessageID {
-	return networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID)))
+	return bridgeadapter.MatrixMessageID(eventID)
 }
 
 func generateShortID() string {
@@ -54,4 +55,3 @@ func expandUserPath(value string) string {
 	}
 	return value
 }
-

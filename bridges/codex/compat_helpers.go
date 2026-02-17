@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -14,7 +15,7 @@ import (
 )
 
 func humanUserID(loginID networkid.UserLoginID) networkid.UserID {
-	return networkid.UserID(fmt.Sprintf("codex-user:%s", loginID))
+	return bridgeadapter.HumanUserID("codex-user", loginID)
 }
 
 func ptrIfNotEmpty(value string) *string {
@@ -128,4 +129,3 @@ func normalizeElevatedLevel(raw string) (string, bool) {
 	}
 	return "", false
 }
-

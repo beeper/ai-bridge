@@ -41,5 +41,5 @@ func portalMeta(portal *bridgev2.Portal) *PortalMetadata {
 }
 
 func humanUserID(loginID networkid.UserLoginID) networkid.UserID {
-	return networkid.UserID("opencode-user:" + string(loginID))
+	return bridgeadapter.HumanUserID("opencode-user", loginID)
 }
