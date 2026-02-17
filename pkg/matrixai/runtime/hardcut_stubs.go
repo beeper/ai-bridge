@@ -43,11 +43,6 @@ func parsePositiveInt(value string) (int, error) {
 	return n, nil
 }
 
-func isAllowedValue(value string, allowed map[string]bool) bool {
-	_, ok := allowed[strings.TrimSpace(value)]
-	return ok
-}
-
 func sanitizeToolSchemaWithReport(schema map[string]any) (map[string]any, []string) {
 	return schema, nil
 }

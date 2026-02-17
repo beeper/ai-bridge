@@ -1,4 +1,3 @@
-//lint:file-ignore U1000 Hard-cut cleanup: pending full dead-code deletion.
 package runtime
 
 import (
@@ -1810,36 +1809,6 @@ func (oc *AIClient) downloadGeneratedFileImages(ctx context.Context, files []Gen
 		}
 	}
 	return parts
-}
-
-// updateAssistantGeneratedFiles finds the most recent assistant message with tool calls
-// in the portal and appends the given GeneratedFileRef entries to its metadata.
-// This is used by async image generation to link generated images back to the assistant
-// turn that triggered them, so the model can reference them via [media_url: ...] in history.
-func (oc *AIClient) updateAssistantGeneratedFiles(ctx context.Context, portal *bridgev2.Portal, refs []GeneratedFileRef) {
-	if len(refs) == 0 {
-		return
-	}
-	messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, 10)
-	if err != nil {
-		oc.Log().Warn().Err(err).Msg("Failed to load messages for async GeneratedFiles update")
-		return
-	}
-	for _, msg := range messages {
-		meta, ok := msg.Metadata.(*MessageMetadata)
-		if !ok || meta.Role != "assistant" || !meta.HasToolCalls {
-			continue
-		}
-		// Found the most recent assistant message with tool calls — update its GeneratedFiles.
-		meta.GeneratedFiles = append(meta.GeneratedFiles, refs...)
-		if err := oc.UserLogin.Bridge.DB.Message.Update(ctx, msg); err != nil {
-			oc.Log().Warn().Err(err).Str("msg_id", string(msg.ID)).Msg("Failed to update assistant message with async GeneratedFiles")
-		} else {
-			oc.Log().Debug().Str("msg_id", string(msg.ID)).Int("files", len(refs)).Msg("Updated assistant message with async GeneratedFiles")
-		}
-		return
-	}
-	oc.Log().Warn().Msg("No assistant message found to update with async GeneratedFiles")
 }
 
 // buildBasePrompt builds the system prompt and history portion of a prompt.

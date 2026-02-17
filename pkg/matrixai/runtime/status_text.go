@@ -276,10 +276,6 @@ func (oc *AIClient) estimatePromptTokens(ctx context.Context, portal *bridgev2.P
 	return count
 }
 
-func (oc *AIClient) getSessionEntryMaybe(_ context.Context, _, _ string) any {
-	return nil
-}
-
 func formatCompactTokens(value int64) string {
 	abs := value
 	if abs < 0 {
@@ -300,27 +296,6 @@ func formatPercent(numerator, denominator int) string {
 	}
 	percent := (float64(numerator) / float64(denominator)) * 100
 	return fmt.Sprintf("%.0f%%", percent)
-}
-
-func formatAge(deltaMs int64) string {
-	if deltaMs < 0 {
-		deltaMs = -deltaMs
-	}
-	d := time.Duration(deltaMs) * time.Millisecond
-	if d < time.Minute {
-		secs := int(d.Seconds())
-		if secs <= 0 {
-			secs = 1
-		}
-		return fmt.Sprintf("%ds ago", secs)
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	}
-	if d < 24*time.Hour {
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	}
-	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
 func (oc *AIClient) buildToolsStatusText(meta *PortalMetadata) string {

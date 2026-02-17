@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"github.com/beeper/ai-bridge/pkg/core/aimedia"
@@ -48,28 +47,8 @@ func normalizeMediaProviderID(id string) string {
 	return aimedia.NormalizeProviderID(id)
 }
 
-func normalizeMediaBaseURL(value string, fallback string) string {
-	return aimedia.NormalizeBaseURL(value, fallback)
-}
-
-func readErrorResponse(res *http.Response) string {
-	return aimedia.ReadErrorResponse(res)
-}
-
-func headerExists(headers http.Header, key string) bool {
-	return aimedia.HeaderExists(headers, key)
-}
-
-func applyHeaderMap(headers http.Header, values map[string]string) {
-	aimedia.ApplyHeaderMap(headers, values)
-}
-
 func resolveProviderQuery(providerID string, capCfg *MediaUnderstandingConfig, modelCfg MediaUnderstandingModelConfig) map[string]any {
 	return aimedia.ResolveProviderQuery(providerID, toCoreMediaConfig(capCfg), toCoreMediaModelConfig(modelCfg))
-}
-
-func buildDeepgramQuery(cfg *MediaUnderstandingConfig, entry MediaUnderstandingModelConfig) map[string]any {
-	return aimedia.BuildDeepgramQuery(toCoreMediaConfig(cfg), toCoreMediaModelConfig(entry))
 }
 
 func transcribeOpenAIAudio(ctx context.Context, request mediaAudioRequest) (string, error) {

@@ -35,19 +35,6 @@ func resolveMediaEntries(cfg *MediaToolsConfig, capCfg *MediaUnderstandingConfig
 	return out
 }
 
-func capabilityInList(capability MediaUnderstandingCapability, values []string) bool {
-	return aimedia.CapabilityInList(toCoreMediaCapability(capability), values)
-}
-
-func capabilityInCapabilities(capability MediaUnderstandingCapability, values []MediaUnderstandingCapability) bool {
-	for _, value := range values {
-		if value == capability {
-			return true
-		}
-	}
-	return false
-}
-
 func providerSupportsCapability(providerID string, capability MediaUnderstandingCapability) bool {
 	return aimedia.ProviderSupportsCapability(providerID, toCoreMediaCapability(capability))
 }

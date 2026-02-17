@@ -65,17 +65,12 @@ tools:
       model: "openai/gpt-5.2"
   fetch:
     provider: "exa"
-    fallbacks: ["direct"]
+    fallbacks: []
     exa:
       api_key: ""
       base_url: "https://api.exa.ai"
       include_text: true
       text_max_chars: 5000
-    direct:
-      enabled: true
-      timeout_seconds: 30
-      max_chars: 50000
-      max_redirects: 3
   media:
     concurrency: 2
     image:

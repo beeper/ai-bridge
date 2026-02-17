@@ -107,15 +107,7 @@ func (ol *OpenAILogin) credentialsStep() *bridgev2.LoginStep {
 				Type:        bridgev2.LoginInputFieldTypeToken,
 				ID:          "openrouter_api_key",
 				Name:        "OpenRouter API Key",
-				Description: "Optional if you use OpenAI instead. Generate one at https://openrouter.ai/keys",
-			})
-		}
-		if !ol.configHasOpenAIKey() {
-			fields = append(fields, bridgev2.LoginInputDataField{
-				Type:        bridgev2.LoginInputFieldTypeToken,
-				ID:          "openai_api_key",
-				Name:        "OpenAI API Key",
-				Description: "Optional if you use OpenRouter instead. Generate one at https://platform.openai.com/account/api-keys",
+				Description: "Required. Generate one at https://openrouter.ai/keys",
 			})
 		}
 		if !ol.configHasExaKey() {
@@ -268,45 +260,25 @@ func (ol *OpenAILogin) resolveCustomLogin(input map[string]string) (string, stri
 		input = map[string]string{}
 	}
 	openrouterCfg := strings.TrimSpace(ol.Connector.Config.Providers.OpenRouter.APIKey)
-	openaiCfg := strings.TrimSpace(ol.Connector.Config.Providers.OpenAI.APIKey)
 
 	openrouterInput := ""
-	openaiInput := ""
 	if openrouterCfg == "" {
 		openrouterInput = strings.TrimSpace(input["openrouter_api_key"])
-	}
-	if openaiCfg == "" {
-		openaiInput = strings.TrimSpace(input["openai_api_key"])
 	}
 
 	openrouterToken := openrouterCfg
 	if openrouterToken == "" {
 		openrouterToken = openrouterInput
 	}
-	openaiToken := openaiCfg
-	if openaiToken == "" {
-		openaiToken = openaiInput
+
+	if openrouterToken == "" {
+		return "", "", nil, &aierrors.ErrOpenRouterRequired
 	}
 
-	if openrouterToken == "" && openaiToken == "" {
-		return "", "", nil, &aierrors.ErrOpenAIOrOpenRouterRequired
-	}
-
-	provider := ProviderOpenAI
-	apiKey := openaiToken
-	if openrouterToken != "" {
-		provider = ProviderOpenRouter
-		apiKey = openrouterToken
-	}
+	provider := ProviderOpenRouter
+	apiKey := openrouterToken
 
 	serviceTokens := &ServiceTokens{}
-
-	if provider != ProviderOpenAI && openaiCfg == "" && openaiInput != "" {
-		serviceTokens.OpenAI = openaiInput
-	}
-	if provider != ProviderOpenRouter && openrouterCfg == "" && openrouterInput != "" {
-		serviceTokens.OpenRouter = openrouterInput
-	}
 
 	if !ol.configHasExaKey() {
 		serviceTokens.Exa = strings.TrimSpace(input["exa_api_key"])
@@ -357,10 +329,6 @@ func parseMagicProxyLink(raw string) (string, string, error) {
 
 func (ol *OpenAILogin) configHasOpenRouterKey() bool {
 	return strings.TrimSpace(ol.Connector.Config.Providers.OpenRouter.APIKey) != ""
-}
-
-func (ol *OpenAILogin) configHasOpenAIKey() bool {
-	return strings.TrimSpace(ol.Connector.Config.Providers.OpenAI.APIKey) != ""
 }
 
 func (ol *OpenAILogin) configHasExaKey() bool {

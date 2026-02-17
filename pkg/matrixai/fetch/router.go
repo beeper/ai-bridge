@@ -91,7 +91,4 @@ func registerProviders(registry *Registry, cfg *Config) {
 	if p := newExaProvider(cfg); p != nil {
 		registry.Register(p)
 	}
-	if p := newDirectProvider(cfg); p != nil {
-		registry.Register(p)
-	}
 }

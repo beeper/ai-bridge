@@ -157,23 +157,6 @@ func toCoreMediaCapability(value MediaUnderstandingCapability) aimedia.MediaUnde
 	return aimedia.MediaUnderstandingCapability(value)
 }
 
-func fromCoreMediaOutputs(values []aimedia.MediaUnderstandingOutput) []MediaUnderstandingOutput {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make([]MediaUnderstandingOutput, 0, len(values))
-	for _, value := range values {
-		out = append(out, MediaUnderstandingOutput{
-			Kind:            MediaUnderstandingKind(value.Kind),
-			AttachmentIndex: value.AttachmentIndex,
-			Text:            value.Text,
-			Provider:        value.Provider,
-			Model:           value.Model,
-		})
-	}
-	return out
-}
-
 func toCoreMediaOutputs(values []MediaUnderstandingOutput) []aimedia.MediaUnderstandingOutput {
 	if len(values) == 0 {
 		return nil

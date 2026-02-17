@@ -1,20 +1,10 @@
-//lint:file-ignore U1000 Hard-cut cleanup: pending full dead-code deletion.
 package runtime
 
 import (
-	"context"
 	"encoding/json"
 
 	"github.com/beeper/ai-bridge/pkg/core/shared/toolspec"
 )
-
-type toolExecutor func(ctx context.Context, args map[string]any) (string, error)
-
-func builtinToolExecutors() map[string]toolExecutor {
-	return map[string]toolExecutor{
-		toolspec.WebSearchName: executeWebSearch,
-	}
-}
 
 func buildBuiltinToolDefinitions() []ToolDefinition {
 	// Simple bridge intentionally exposes only web_search as a callable tool.

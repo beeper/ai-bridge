@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -260,16 +258,6 @@ func (oc *AIClient) resolveAutoMediaEntries(
 		return []MediaUnderstandingModelConfig{*active}
 	}
 
-	if capability == MediaCapabilityAudio {
-		if local := resolveLocalAudioEntry(); local != nil {
-			return []MediaUnderstandingModelConfig{*local}
-		}
-	}
-
-	if gemini := resolveGeminiCliEntry(); gemini != nil {
-		return []MediaUnderstandingModelConfig{*gemini}
-	}
-
 	if keyEntry := oc.resolveKeyMediaEntry(capability, cfg); keyEntry != nil {
 		return []MediaUnderstandingModelConfig{*keyEntry}
 	}
@@ -369,123 +357,6 @@ func splitModelProvider(modelID string) (string, string) {
 		return "", trimmed
 	}
 	return strings.ToLower(strings.TrimSpace(parts[0])), strings.TrimSpace(parts[1])
-}
-
-func hasBinary(name string) bool {
-	if strings.TrimSpace(name) == "" {
-		return false
-	}
-	_, err := exec.LookPath(name)
-	return err == nil
-}
-
-func fileExists(path string) bool {
-	if strings.TrimSpace(path) == "" {
-		return false
-	}
-	if _, err := os.Stat(path); err == nil {
-		return true
-	}
-	return false
-}
-
-func resolveLocalWhisperCPPEntry() *MediaUnderstandingModelConfig {
-	if !hasBinary("whisper-cli") {
-		return nil
-	}
-	envModel := strings.TrimSpace(os.Getenv("WHISPER_CPP_MODEL"))
-	defaultModel := "/opt/homebrew/share/whisper-cpp/for-tests-ggml-tiny.bin"
-	modelPath := defaultModel
-	if envModel != "" && fileExists(envModel) {
-		modelPath = envModel
-	}
-	if !fileExists(modelPath) {
-		return nil
-	}
-	return &MediaUnderstandingModelConfig{
-		Type:    "cli",
-		Command: "whisper-cli",
-		Args:    []string{"-m", modelPath, "-otxt", "-of", "{{OutputBase}}", "-np", "-nt", "{{MediaPath}}"},
-	}
-}
-
-func resolveLocalWhisperEntry() *MediaUnderstandingModelConfig {
-	if !hasBinary("whisper") {
-		return nil
-	}
-	return &MediaUnderstandingModelConfig{
-		Type:    "cli",
-		Command: "whisper",
-		Args: []string{
-			"--model",
-			"turbo",
-			"--output_format",
-			"txt",
-			"--output_dir",
-			"{{OutputDir}}",
-			"--verbose",
-			"False",
-			"{{MediaPath}}",
-		},
-	}
-}
-
-func resolveSherpaOnnxEntry() *MediaUnderstandingModelConfig {
-	if !hasBinary("sherpa-onnx-offline") {
-		return nil
-	}
-	modelDir := strings.TrimSpace(os.Getenv("SHERPA_ONNX_MODEL_DIR"))
-	if modelDir == "" {
-		return nil
-	}
-	tokens := filepath.Join(modelDir, "tokens.txt")
-	encoder := filepath.Join(modelDir, "encoder.onnx")
-	decoder := filepath.Join(modelDir, "decoder.onnx")
-	joiner := filepath.Join(modelDir, "joiner.onnx")
-	if !fileExists(tokens) || !fileExists(encoder) || !fileExists(decoder) || !fileExists(joiner) {
-		return nil
-	}
-	return &MediaUnderstandingModelConfig{
-		Type:    "cli",
-		Command: "sherpa-onnx-offline",
-		Args: []string{
-			"--tokens=" + tokens,
-			"--encoder=" + encoder,
-			"--decoder=" + decoder,
-			"--joiner=" + joiner,
-			"{{MediaPath}}",
-		},
-	}
-}
-
-func resolveLocalAudioEntry() *MediaUnderstandingModelConfig {
-	if entry := resolveSherpaOnnxEntry(); entry != nil {
-		return entry
-	}
-	if entry := resolveLocalWhisperCPPEntry(); entry != nil {
-		return entry
-	}
-	return resolveLocalWhisperEntry()
-}
-
-func resolveGeminiCliEntry() *MediaUnderstandingModelConfig {
-	if !hasBinary("gemini") {
-		return nil
-	}
-	return &MediaUnderstandingModelConfig{
-		Type:    "cli",
-		Command: "gemini",
-		Args: []string{
-			"--output-format",
-			"json",
-			"--allowed-tools",
-			"read_many_files",
-			"--include-directories",
-			"{{MediaDir}}",
-			"{{Prompt}}",
-			"Use read_many_files to read {{MediaPath}} and respond with only the text output.",
-		},
-	}
 }
 
 func (oc *AIClient) runMediaUnderstandingEntries(
@@ -624,28 +495,7 @@ func (oc *AIClient) runMediaUnderstandingEntry(
 
 	switch entryType {
 	case "cli":
-		data, actualMime, err := oc.downloadMediaBytes(ctx, attachment.URL, attachment.EncryptedFile, maxBytes, attachment.MimeType)
-		if err != nil {
-			return nil, err
-		}
-		fileName := resolveMediaFileName(attachment.FileName, string(capability), attachment.URL)
-		tempDir, err := os.MkdirTemp("", "ai-bridge-media-*")
-		if err != nil {
-			return nil, err
-		}
-		defer os.RemoveAll(tempDir)
-		mediaPath := filepath.Join(tempDir, fileName)
-		if err := os.WriteFile(mediaPath, data, 0600); err != nil {
-			return nil, err
-		}
-		if actualMime != "" {
-			attachment.MimeType = actualMime
-		}
-		output, err := runMediaCLI(ctx, entry.Command, entry.Args, prompt, maxChars, mediaPath)
-		if err != nil {
-			return nil, err
-		}
-		return buildMediaOutput(capability, output, "cli", entry.Model, attachment.Index), nil
+		return nil, errors.New("media cli execution is disabled")
 
 	default:
 		providerID := normalizeMediaProviderID(entry.Provider)
