@@ -14,7 +14,6 @@ var PresetAgents = []*AgentDefinition{
 	BeeperAIAgent,
 	BeeperSearchAgent,
 	BeeperHelpAgent,
-	NexusAIAgent,
 	PlaygroundAgent,
 }
 

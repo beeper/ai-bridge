@@ -55,20 +55,6 @@ func IsMemoryPath(relPath string) bool {
 	return strings.HasPrefix(normalized, "memory/")
 }
 
-// IsVirtualDir returns true for virtual directories that should exist even when empty.
-func IsVirtualDir(relDir string) bool {
-	normalized, err := NormalizeDir(relDir)
-	if err != nil || normalized == "" {
-		return false
-	}
-	return normalized == "memory" || normalized == "workspace"
-}
-
-// VirtualRootEntries returns the virtual root directories.
-func VirtualRootEntries() []string {
-	return []string{"memory/", "workspace/"}
-}
-
 // ClassifySource returns the default source label for a path.
 func ClassifySource(path string) string {
 	if IsMemoryPath(path) {

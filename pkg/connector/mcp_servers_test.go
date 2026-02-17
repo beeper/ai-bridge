@@ -20,11 +20,8 @@ func TestNormalizeMCPServerKind(t *testing.T) {
 	if got := normalizeMCPServerKind(""); got != mcpServerKindGeneric {
 		t.Fatalf("expected empty kind to default to generic, got %q", got)
 	}
-	if got := normalizeMCPServerKind("clay"); got != mcpServerKindNexus {
-		t.Fatalf("expected clay kind to normalize to nexus, got %q", got)
-	}
-	if got := normalizeMCPServerKind("nexus"); got != mcpServerKindNexus {
-		t.Fatalf("expected nexus kind to remain nexus, got %q", got)
+	if got := normalizeMCPServerKind("custom"); got != "custom" {
+		t.Fatalf("expected custom kind to remain custom, got %q", got)
 	}
 	if got := normalizeMCPServerKind("generic"); got != mcpServerKindGeneric {
 		t.Fatalf("expected generic kind to remain generic, got %q", got)
@@ -81,11 +78,11 @@ func TestNormalizeMCPServerConfigStdioDefaults(t *testing.T) {
 
 func TestActiveMCPServersIncludesAllKinds(t *testing.T) {
 	oc := testAIClientWithMCPServers(map[string]MCPServerConfig{
-		"nexus": {
-			Endpoint:  "https://nexum.clay.earth/mcp",
+		"contacts": {
+			Endpoint:  "https://contacts.example.com/mcp",
 			AuthType:  "none",
 			Connected: true,
-			Kind:      mcpServerKindNexus,
+			Kind:      "contacts",
 		},
 		"docs": {
 			Endpoint:  "https://docs.example.com/mcp",

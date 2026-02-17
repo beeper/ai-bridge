@@ -94,15 +94,21 @@ func TestCompactorFallbackSummary(t *testing.T) {
 }
 
 func TestCompactionHooks(t *testing.T) {
-	// Test hook registration
 	hookCalled := false
-
-	RegisterBeforeCompactionHook(func(ctx context.Context, hookCtx *CompactionHookContext) (*CompactionHookResult, error) {
+	hook := CompactionBeforeHook(func(ctx context.Context, hookCtx *CompactionHookContext) (*CompactionHookResult, error) {
 		hookCalled = true
 		return &CompactionHookResult{Skip: true}, nil
 	})
+	globalCompactionHooks.mu.Lock()
+	prev := globalCompactionHooks.beforeHooks
+	globalCompactionHooks.beforeHooks = append(prev, hook)
+	globalCompactionHooks.mu.Unlock()
+	defer func() {
+		globalCompactionHooks.mu.Lock()
+		globalCompactionHooks.beforeHooks = prev
+		globalCompactionHooks.mu.Unlock()
+	}()
 
-	// Run hooks
 	result, err := globalCompactionHooks.runBeforeHooks(context.Background(), &CompactionHookContext{
 		SessionID:    "test",
 		MessageCount: 10,

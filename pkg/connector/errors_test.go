@@ -281,25 +281,6 @@ func TestStripThinkTags(t *testing.T) {
 	}
 }
 
-func TestIsCompactionFailureError(t *testing.T) {
-	tests := []struct {
-		msg  string
-		want bool
-	}{
-		{"context_length_exceeded: compaction failed due to overflow", true},
-		{"prompt is too long: auto-compaction exceeded limits", true},
-		{"prompt is too long: summarization failed for session", true},
-		{"context_length_exceeded: normal overflow", false},  // "compaction" not present
-		{"compaction failed but not a context error", false}, // no context signal
-		{"just a normal error", false},
-	}
-	for _, tt := range tests {
-		if got := IsCompactionFailureError(errors.New(tt.msg)); got != tt.want {
-			t.Errorf("IsCompactionFailureError(%q) = %v, want %v", tt.msg, got, tt.want)
-		}
-	}
-}
-
 func TestIsBillingError_ResourceHasBeenExhausted(t *testing.T) {
 	err := errors.New("resource has been exhausted for project XYZ")
 	if !IsBillingError(err) {

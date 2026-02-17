@@ -5,18 +5,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 	agenttools "github.com/beeper/ai-bridge/pkg/agents/tools"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 )
-
-func canUseNexusToolsForAgent(meta *PortalMetadata) bool {
-	if meta == nil {
-		return false
-	}
-	return agents.IsNexusAI(normalizeAgentID(resolveAgentID(meta)))
-}
 
 func (oc *AIClient) resolveToolPolicyModelContext(meta *PortalMetadata) (provider string, modelID string) {
 	modelID = oc.effectiveModel(meta)
@@ -104,10 +96,6 @@ func (oc *AIClient) isToolAvailable(meta *PortalMetadata, toolName string) (bool
 		if !oc.isMCPConfigured() {
 			return false, SourceProviderLimit, "MCP tool bridge is not configured"
 		}
-	}
-	// Compact local Nexus wrappers are not MCP tools, but still must be Nexus-agent-only.
-	if isNexusCompactToolName(toolName) && !canUseNexusToolsForAgent(meta) {
-		return false, SourceAgentPolicy, "Nexus tools are restricted to the Nexus agent"
 	}
 	if toolName == ToolNameBeeperDocs || toolName == ToolNameBeeperSendFeedback {
 		loginMeta := loginMetadata(oc.UserLogin)

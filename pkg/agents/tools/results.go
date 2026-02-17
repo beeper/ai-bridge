@@ -47,23 +47,3 @@ func toMap(v any) map[string]any {
 	}
 	return m
 }
-
-// IsSuccess returns true if the result indicates success.
-func (r *Result) IsSuccess() bool {
-	return r.Status == ResultSuccess
-}
-
-// IsError returns true if the result indicates an error.
-func (r *Result) IsError() bool {
-	return r.Status == ResultError
-}
-
-// HasImages returns true if the result contains image blocks.
-func (r *Result) HasImages() bool {
-	for _, block := range r.Content {
-		if block.Type == "image" {
-			return true
-		}
-	}
-	return false
-}

@@ -8,9 +8,8 @@ import (
 )
 
 const (
-	mcpDefaultServerName       = "nexus"
+	mcpDefaultServerName       = "default"
 	mcpServerKindGeneric       = "generic"
-	mcpServerKindNexus         = "nexus"
 	mcpTransportStreamableHTTP = "streamable_http"
 	mcpTransportStdio          = "stdio"
 )
@@ -34,10 +33,7 @@ func normalizeMCPServerKind(kind string) string {
 	if value == "" {
 		return mcpServerKindGeneric
 	}
-	switch value {
-	case "nexus", "clay":
-		return mcpServerKindNexus
-	case "generic":
+	if value == "generic" {
 		return mcpServerKindGeneric
 	}
 	return value
@@ -196,50 +192,15 @@ func (oc *AIClient) loginMCPServers() map[string]MCPServerConfig {
 	return out
 }
 
-func (oc *AIClient) configDefaultMCPServer() (MCPServerConfig, bool) {
-	if oc == nil || oc.connector == nil {
-		return MCPServerConfig{}, false
-	}
-	cfg := oc.connector.Config.Tools.Nexus
-	if !nexusConfigured(cfg) {
-		return MCPServerConfig{}, false
-	}
-	endpoint := mcpEndpointFromNexusConfig(cfg)
-	if endpoint == "" {
-		return MCPServerConfig{}, false
-	}
-	return normalizeMCPServerConfig(MCPServerConfig{
-		Transport: mcpTransportStreamableHTTP,
-		Endpoint:  endpoint,
-		AuthType:  cfg.AuthType,
-		Token:     cfg.Token,
-		Connected: true,
-		Kind:      mcpServerKindNexus,
-	}), true
-}
-
 func sortNamedMCPServers(servers []namedMCPServer) {
-	slices.SortFunc(servers, func(a, b namedMCPServer) int {
-		if a.Name == mcpDefaultServerName && b.Name != mcpDefaultServerName {
-			return -1
-		}
-		if b.Name == mcpDefaultServerName && a.Name != mcpDefaultServerName {
-			return 1
-		}
-		return cmp.Compare(a.Name, b.Name)
-	})
+	slices.SortFunc(servers, func(a, b namedMCPServer) int { return cmp.Compare(a.Name, b.Name) })
 }
 
 func (oc *AIClient) configuredMCPServers() []namedMCPServer {
 	loginServers := oc.loginMCPServers()
-	servers := make([]namedMCPServer, 0, len(loginServers)+1)
+	servers := make([]namedMCPServer, 0, len(loginServers))
 	for name, cfg := range loginServers {
 		servers = append(servers, namedMCPServer{Name: name, Config: cfg, Source: "login"})
-	}
-	if _, hasNexusOverride := loginServers[mcpDefaultServerName]; !hasNexusOverride {
-		if cfg, ok := oc.configDefaultMCPServer(); ok {
-			servers = append(servers, namedMCPServer{Name: mcpDefaultServerName, Config: cfg, Source: "config"})
-		}
 	}
 	sortNamedMCPServers(servers)
 	return servers
@@ -284,28 +245,6 @@ func (oc *AIClient) isMCPConfigured() bool {
 		return false
 	}
 	return len(oc.activeMCPServers()) > 0
-}
-
-func (oc *AIClient) hasConnectedClayMCP() bool {
-	if oc == nil {
-		return false
-	}
-	loginServers := oc.loginMCPServers()
-	cfg, ok := loginServers[mcpDefaultServerName]
-	if !ok {
-		return false
-	}
-	cfg = normalizeMCPServerConfig(cfg)
-	if normalizeMCPServerKind(cfg.Kind) != mcpServerKindNexus {
-		return false
-	}
-	if !cfg.Connected || !mcpServerHasTarget(cfg) {
-		return false
-	}
-	if mcpServerNeedsToken(cfg) && strings.TrimSpace(cfg.Token) == "" {
-		return false
-	}
-	return true
 }
 
 func (oc *AIClient) invalidateMCPToolCache() {
