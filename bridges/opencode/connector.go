@@ -1,0 +1,174 @@
+package opencode
+
+import (
+	"context"
+	"fmt"
+	"maps"
+	"strings"
+	"sync"
+
+	"go.mau.fi/util/configupgrade"
+	"go.mau.fi/util/ptr"
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/event"
+)
+
+var (
+	_ bridgev2.NetworkConnector               = (*OpenCodeConnector)(nil)
+	_ bridgev2.PortalBridgeInfoFillingNetwork = (*OpenCodeConnector)(nil)
+)
+
+type OpenCodeConnector struct {
+	br     *bridgev2.Bridge
+	Config Config
+
+	clientsMu sync.Mutex
+	clients   map[networkid.UserLoginID]bridgev2.NetworkAPI
+}
+
+func (oc *OpenCodeConnector) Init(bridge *bridgev2.Bridge) {
+	oc.br = bridge
+	oc.clientsMu.Lock()
+	if oc.clients == nil {
+		oc.clients = make(map[networkid.UserLoginID]bridgev2.NetworkAPI)
+	}
+	oc.clientsMu.Unlock()
+}
+
+func (oc *OpenCodeConnector) Start(ctx context.Context) error {
+	_ = ctx
+	if oc.Config.Bridge.CommandPrefix == "" {
+		oc.Config.Bridge.CommandPrefix = "!opencode"
+	}
+	if oc.Config.OpenCode.Enabled == nil {
+		oc.Config.OpenCode.Enabled = ptr.Ptr(true)
+	}
+	return nil
+}
+
+func (oc *OpenCodeConnector) Stop(ctx context.Context) {
+	_ = ctx
+	oc.clientsMu.Lock()
+	clients := maps.Clone(oc.clients)
+	oc.clientsMu.Unlock()
+	for _, client := range clients {
+		if dc, ok := client.(interface{ Disconnect() }); ok {
+			dc.Disconnect()
+		}
+	}
+}
+
+func (oc *OpenCodeConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
+	return &bridgev2.NetworkGeneralCapabilities{
+		DisappearingMessages: true,
+		Provisioning: bridgev2.ProvisioningCapabilities{
+			ResolveIdentifier: bridgev2.ResolveIdentifierCapabilities{
+				CreateDM:       true,
+				LookupUsername: true,
+				ContactList:    true,
+				Search:         true,
+			},
+		},
+	}
+}
+
+func (oc *OpenCodeConnector) GetBridgeInfoVersion() (info, capabilities int) {
+	return 1, 3
+}
+
+func (oc *OpenCodeConnector) FillPortalBridgeInfo(portal *bridgev2.Portal, content *event.BridgeEventContent) {
+	meta := portalMeta(portal)
+	if meta.IsOpenCodeRoom {
+		content.BeeperRoomTypeV2 = "opencode"
+	} else {
+		content.BeeperRoomTypeV2 = "chat"
+	}
+}
+
+func (oc *OpenCodeConnector) GetName() bridgev2.BridgeName {
+	return bridgev2.BridgeName{
+		DisplayName:          "OpenCode Bridge",
+		NetworkURL:           "https://opencode.ai",
+		NetworkID:            "opencode",
+		BeeperBridgeType:     "opencode",
+		DefaultPort:          29347,
+		DefaultCommandPrefix: oc.Config.Bridge.CommandPrefix,
+	}
+}
+
+func (oc *OpenCodeConnector) GetConfig() (example string, data any, upgrader configupgrade.Upgrader) {
+	return exampleNetworkConfig, &oc.Config, configupgrade.SimpleUpgrader(upgradeConfig)
+}
+
+func (oc *OpenCodeConnector) GetDBMetaTypes() database.MetaTypes {
+	return database.MetaTypes{
+		Portal: func() any {
+			return &PortalMetadata{}
+		},
+		Message: func() any {
+			return &MessageMetadata{}
+		},
+		UserLogin: func() any {
+			return &UserLoginMetadata{}
+		},
+		Ghost: func() any {
+			return &GhostMetadata{}
+		},
+	}
+}
+
+func (oc *OpenCodeConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
+	_ = ctx
+	meta := loginMetadata(login)
+	if !strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderOpenCode) {
+		login.Client = &brokenLoginClient{UserLogin: login, Reason: "This bridge only supports OpenCode logins."}
+		return nil
+	}
+
+	oc.clientsMu.Lock()
+	if existingAPI := oc.clients[login.ID]; existingAPI != nil {
+		if existing, ok := existingAPI.(*OpenCodeClient); ok {
+			existing.UserLogin = login
+			login.Client = existing
+			oc.clientsMu.Unlock()
+			return nil
+		}
+		delete(oc.clients, login.ID)
+	}
+	oc.clientsMu.Unlock()
+
+	client, err := newOpenCodeClient(login, oc)
+	if err != nil {
+		login.Client = &brokenLoginClient{UserLogin: login, Reason: "Couldn't initialize OpenCode for this login."}
+		return nil
+	}
+	oc.clientsMu.Lock()
+	oc.clients[login.ID] = client
+	oc.clientsMu.Unlock()
+	login.Client = client
+	return nil
+}
+
+func (oc *OpenCodeConnector) GetLoginFlows() []bridgev2.LoginFlow {
+	if oc.Config.OpenCode.Enabled != nil && !*oc.Config.OpenCode.Enabled {
+		return nil
+	}
+	return []bridgev2.LoginFlow{{
+		ID:          ProviderOpenCode,
+		Name:        "OpenCode",
+		Description: "Create a login for an OpenCode server instance.",
+	}}
+}
+
+func (oc *OpenCodeConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
+	_ = ctx
+	if flowID != ProviderOpenCode {
+		return nil, fmt.Errorf("login flow %s is not available", flowID)
+	}
+	if oc.Config.OpenCode.Enabled != nil && !*oc.Config.OpenCode.Enabled {
+		return nil, fmt.Errorf("login flow %s is not available", flowID)
+	}
+	return &OpenCodeLogin{User: user, Connector: oc, FlowID: flowID}, nil
+}

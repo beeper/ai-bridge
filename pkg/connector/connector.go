@@ -128,54 +128,6 @@ func (oc *OpenAIConnector) applyRuntimeDefaults() {
 	if oc.Config.Bridge.CommandPrefix == "" {
 		oc.Config.Bridge.CommandPrefix = "!ai"
 	}
-	if oc.Config.Codex == nil {
-		oc.Config.Codex = &CodexConfig{}
-	}
-	if oc.Config.Codex.Enabled == nil {
-		v := true
-		oc.Config.Codex.Enabled = &v
-	}
-	if strings.TrimSpace(oc.Config.Codex.Command) == "" {
-		oc.Config.Codex.Command = "codex"
-	}
-	if strings.TrimSpace(oc.Config.Codex.DefaultModel) == "" {
-		oc.Config.Codex.DefaultModel = "gpt-5.1-codex"
-	}
-	if oc.Config.Codex.NetworkAccess == nil {
-		v := true
-		oc.Config.Codex.NetworkAccess = &v
-	}
-	if oc.Config.Codex.ClientInfo == nil {
-		oc.Config.Codex.ClientInfo = &CodexClientInfo{}
-	}
-	if strings.TrimSpace(oc.Config.Codex.ClientInfo.Name) == "" {
-		oc.Config.Codex.ClientInfo.Name = "ai_bridge_matrix"
-	}
-	if strings.TrimSpace(oc.Config.Codex.ClientInfo.Title) == "" {
-		oc.Config.Codex.ClientInfo.Title = "AI Bridge (Matrix)"
-	}
-	if strings.TrimSpace(oc.Config.Codex.ClientInfo.Version) == "" {
-		oc.Config.Codex.ClientInfo.Version = "0.1.0"
-	}
-	if oc.Config.OpenCode != nil {
-		if oc.Config.OpenCode.Enabled == nil {
-			v := true
-			oc.Config.OpenCode.Enabled = &v
-		}
-		if oc.Config.OpenCode.AutoStart == nil {
-			v := false
-			oc.Config.OpenCode.AutoStart = &v
-		}
-		if strings.TrimSpace(oc.Config.OpenCode.Command) == "" {
-			oc.Config.OpenCode.Command = "opencode"
-		}
-		if strings.TrimSpace(oc.Config.OpenCode.Hostname) == "" {
-			oc.Config.OpenCode.Hostname = "127.0.0.1"
-		}
-		if strings.TrimSpace(oc.Config.OpenCode.Username) == "" {
-			oc.Config.OpenCode.Username = "opencode"
-		}
-	}
 	if oc.Config.Pruning == nil {
 		oc.Config.Pruning = DefaultPruningConfig()
 	} else {
@@ -467,109 +419,9 @@ func (oc *OpenAIConnector) GetDBMetaTypes() database.MetaTypes {
 }
 
 func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
+	_ = ctx
 	meta := loginMetadata(login)
-	if strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderCodex) {
-		// Codex uses its own auth/tokens stored under CODEX_HOME. No OpenAI API key is required here.
-		if oc.Config.Codex != nil && oc.Config.Codex.Enabled != nil && !*oc.Config.Codex.Enabled {
-			login.Client = &brokenLoginClient{UserLogin: login, Reason: "Codex integration is disabled in the configuration."}
-			return nil
-		}
-
-		oc.clientsMu.Lock()
-		if existingAPI := oc.clients[login.ID]; existingAPI != nil {
-			if existing, ok := existingAPI.(*CodexClient); ok {
-				// Keep using one Codex client instance per login ID.
-				existing.UserLogin = login
-				login.Client = existing
-				oc.clientsMu.Unlock()
-				return nil
-			}
-			// Type mismatch: rebuild.
-			delete(oc.clients, login.ID)
-		}
-		oc.clientsMu.Unlock()
-
-		client, err := newCodexClient(login, oc)
-		if err != nil {
-			login.Client = &brokenLoginClient{UserLogin: login, Reason: "Couldn't initialize Codex for this login. Remove and re-add the account."}
-			return nil
-		}
-		oc.clientsMu.Lock()
-		oc.clients[login.ID] = client
-		oc.clientsMu.Unlock()
-		login.Client = client
-		return nil
-	}
-
-	key := strings.TrimSpace(oc.resolveProviderAPIKey(meta))
-	if key == "" {
-		login.Client = &brokenLoginClient{UserLogin: login, Reason: "No API key available for this login. Sign in again or remove this account."}
-		return nil
-	}
-	oc.clientsMu.Lock()
-	if existingAPI := oc.clients[login.ID]; existingAPI != nil {
-		existing, ok := existingAPI.(*AIClient)
-		if !ok || existing == nil {
-			// Type mismatch: rebuild.
-			delete(oc.clients, login.ID)
-			oc.clientsMu.Unlock()
-			client, err := newAIClient(login, oc, key)
-			if err != nil {
-				login.Client = &brokenLoginClient{UserLogin: login, Reason: "Couldn't initialize this login. Remove and re-add the account."}
-				return nil
-			}
-			oc.clientsMu.Lock()
-			oc.clients[login.ID] = client
-			oc.clientsMu.Unlock()
-			login.Client = client
-			client.scheduleBootstrap()
-			return nil
-		}
-
-		existingMeta := loginMetadata(existing.UserLogin)
-		existingProvider := strings.TrimSpace(existingMeta.Provider)
-		existingBaseURL := strings.TrimRight(strings.TrimSpace(existingMeta.BaseURL), "/")
-		needsRebuild := existing.apiKey != key ||
-			!strings.EqualFold(existingProvider, strings.TrimSpace(meta.Provider)) ||
-			existingBaseURL != strings.TrimRight(strings.TrimSpace(meta.BaseURL), "/")
-		if needsRebuild {
-			oc.clientsMu.Unlock()
-			client, err := newAIClient(login, oc, key)
-			if err != nil {
-				// Keep the existing client if it's already in-memory; allow the login to stay cached/deletable.
-				oc.clientsMu.Lock()
-				existing.UserLogin = login
-				login.Client = existing
-				oc.clientsMu.Unlock()
-				return nil
-			}
-			oc.clientsMu.Lock()
-			oc.clients[login.ID] = client
-			oc.clientsMu.Unlock()
-			login.Client = client
-			client.scheduleBootstrap()
-			return nil
-		}
-		// Keep using one client instance per login ID when provider settings have not changed.
-		existing.UserLogin = login
-		login.Client = existing
-		oc.clientsMu.Unlock()
-		existing.scheduleBootstrap()
-		return nil
-	}
-	oc.clientsMu.Unlock()
-
-	client, err := newAIClient(login, oc, key)
-	if err != nil {
-		login.Client = &brokenLoginClient{UserLogin: login, Reason: "Couldn't initialize this login. Remove and re-add the account."}
-		return nil
-	}
-	oc.clientsMu.Lock()
-	oc.clients[login.ID] = client
-	oc.clientsMu.Unlock()
-	login.Client = client
-	client.scheduleBootstrap()
-	return nil
+	return oc.loadAIUserLogin(login, meta)
 }
 
 // Package-level flow definitions (use Provider* constants as flow IDs)
@@ -579,25 +431,12 @@ func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
 		{ID: ProviderMagicProxy, Name: "Magic Proxy"},
 		{ID: FlowCustom, Name: "Manual"},
 	}
-	if oc.Config.Codex != nil && (oc.Config.Codex.Enabled == nil || *oc.Config.Codex.Enabled) {
-		flows = append(flows, bridgev2.LoginFlow{
-			ID:          ProviderCodex,
-			Name:        "Codex",
-			Description: "Use a local Codex install via codex app-server (stdio).",
-		})
-	}
 	return flows
 }
 
 func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
-	if flowID == ProviderCodex {
-		if oc.Config.Codex != nil && oc.Config.Codex.Enabled != nil && !*oc.Config.Codex.Enabled {
-			return nil, fmt.Errorf("login flow %s is not available", flowID)
-		}
-		return &CodexLogin{User: user, Connector: oc, FlowID: flowID}, nil
-	}
 	// Compatibility aliases: some clients may still request these historic flow IDs even though
-	// we intentionally keep the UI limited to Beeper AI, Magic Proxy, Custom, Codex.
+	// we intentionally keep the UI limited to Beeper AI, Magic Proxy and Custom.
 	if flowID == ProviderOpenAI || flowID == ProviderOpenRouter {
 		flowID = FlowCustom
 	}

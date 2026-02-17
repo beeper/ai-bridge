@@ -35,7 +35,6 @@ const (
 	GroupOpenClaw   = "group:openclaw"
 	GroupAIBridge   = "group:ai-bridge"
 	GroupFS         = "group:fs"
-	GroupNexus      = "group:nexus"
 )
 
 // ToolGroups maps group names to tool names for policy composition.
@@ -77,29 +76,6 @@ var ToolGroups = map[string][]string{
 	// ai-bridge extras (keep separate so group:openclaw stays portable with OpenClaw configs).
 	GroupAIBridge: {"gravatar_fetch", "gravatar_set", "beeper_docs", "beeper_send_feedback", "image_generate", "tts", "calculator"},
 	GroupFS:       {"read", "write", "edit", "apply_patch"},
-	GroupNexus: {
-		"get_user_information",
-		"contacts",
-		"searchContacts",
-		"getContact",
-		"createContact",
-		"updateContact",
-		"archive_contact",
-		"restore_contact",
-		"createNote",
-		"getGroups",
-		"createGroup",
-		"updateGroup",
-		"getNotes",
-		"getEvents",
-		"getUpcomingEvents",
-		"getEmails",
-		"getRecentEmails",
-		"getRecentReminders",
-		"getUpcomingReminders",
-		"find_duplicates",
-		"merge_contacts",
-	},
 }
 
 var ownerOnlyToolNames = map[string]struct{}{

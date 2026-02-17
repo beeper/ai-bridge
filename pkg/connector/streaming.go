@@ -101,13 +101,8 @@ type streamingState struct {
 	// Debounced ephemeral logging: true once the "Streaming started" summary has been logged.
 	loggedStreamStart bool
 
-	// Codex (app-server) specific streaming helpers.
-	// Only used by CodexClient; kept here to reuse the existing AI SDK chunk plumbing.
-	codexToolOutputBuffers    map[string]*strings.Builder // toolCallId -> accumulated output
-	codexLatestDiff           string                      // last turn/diff/updated diff snapshot
-	codexReasoningSummarySeen bool                        // whether summary reasoning deltas have been seen
-	// Used by CodexClient to avoid spamming timeline notices for repeated signals.
-	codexTimelineNotices map[string]bool
+	// Used to avoid spamming repeated timeline notices during a single run.
+	timelineNotices map[string]bool
 }
 
 type mcpApprovalRequest struct {
@@ -143,7 +138,7 @@ func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID 
 		uiToolTypeByToolCallID:  make(map[string]ToolType),
 		uiToolOutputFinalized:   make(map[string]bool),
 		pendingMcpApprovalsSeen: make(map[string]bool),
-		codexTimelineNotices:    make(map[string]bool),
+		timelineNotices:         make(map[string]bool),
 	}
 	if meta != nil && normalizeSendPolicyMode(meta.SendPolicy) == "deny" {
 		state.suppressSend = true
@@ -900,14 +895,14 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 	}
 	// Avoid spamming the timeline for the same approval. The ephemeral event is
 	// still emitted above (so capable clients can render the native UI).
-	if state.codexTimelineNotices == nil {
-		state.codexTimelineNotices = make(map[string]bool)
+	if state.timelineNotices == nil {
+		state.timelineNotices = make(map[string]bool)
 	}
 	noticeKey := "approval:" + approvalID
-	if state.codexTimelineNotices[noticeKey] {
+	if state.timelineNotices[noticeKey] {
 		return
 	}
-	state.codexTimelineNotices[noticeKey] = true
+	state.timelineNotices[noticeKey] = true
 
 	if strings.TrimSpace(toolName) == "" {
 		toolName = "tool"

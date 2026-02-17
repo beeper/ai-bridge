@@ -25,21 +25,6 @@ func TestMCPAuthorizationHeaderValue(t *testing.T) {
 	}
 }
 
-func TestMCPEndpointFromNexusConfig(t *testing.T) {
-	cfg := &NexusToolsConfig{BaseURL: "https://nexum.clay.earth"}
-	if got := mcpEndpointFromNexusConfig(cfg); got != "https://nexum.clay.earth/mcp" {
-		t.Fatalf("unexpected derived MCP endpoint: %q", got)
-	}
-
-	override := &NexusToolsConfig{
-		BaseURL:     "https://unused.example",
-		MCPEndpoint: "https://nexum.clay.earth/custom-mcp",
-	}
-	if got := mcpEndpointFromNexusConfig(override); got != "https://nexum.clay.earth/custom-mcp" {
-		t.Fatalf("unexpected explicit MCP endpoint: %q", got)
-	}
-}
-
 func TestFormatMCPToolResultJSONPassthrough(t *testing.T) {
 	result := &mcp.CallToolResult{
 		Content: []mcp.Content{

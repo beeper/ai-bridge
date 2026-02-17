@@ -92,11 +92,6 @@ func shouldUseStrictMode(mode ToolStrictMode, schema map[string]any) bool {
 	}
 }
 
-func sanitizeToolSchema(schema map[string]any) map[string]any {
-	cleaned, _ := sanitizeToolSchemaWithReport(schema)
-	return cleaned
-}
-
 func sanitizeToolSchemaWithReport(schema map[string]any) (map[string]any, []string) {
 	if schema == nil {
 		return nil, nil

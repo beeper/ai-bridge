@@ -24,7 +24,6 @@ const (
 	GroupStatus    = toolpolicy.GroupStatus
 	GroupOpenClaw  = toolpolicy.GroupOpenClaw
 	GroupFS        = toolpolicy.GroupFS
-	GroupNexus     = toolpolicy.GroupNexus
 )
 
 // BuiltinTools returns all locally-executable builtin tools.
@@ -49,7 +48,6 @@ func BuiltinTools() []*Tool {
 		WriteTool,
 		EditTool,
 	}
-	tools = append(tools, NexusTools()...)
 	return tools
 }
 

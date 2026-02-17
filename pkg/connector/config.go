@@ -18,8 +18,6 @@ var exampleNetworkConfig string
 // the `network:` block in the main bridge config.
 type Config struct {
 	Beeper        BeeperConfig                       `yaml:"beeper"`
-	Codex         *CodexConfig                       `yaml:"codex"`
-	OpenCode      *OpenCodeConfig                    `yaml:"opencode"`
 	Providers     ProvidersConfig                    `yaml:"providers"`
 	Models        *ModelsConfig                      `yaml:"models"`
 	Bridge        BridgeConfig                       `yaml:"bridge"`
@@ -90,35 +88,6 @@ func (c *ToolApprovalsRuntimeConfig) WithDefaults() *ToolApprovalsRuntimeConfig 
 		}
 	}
 	return c
-}
-
-// CodexConfig configures the optional Codex app-server integration.
-type CodexConfig struct {
-	Enabled       *bool            `yaml:"enabled"`
-	Command       string           `yaml:"command"`
-	HomeBaseDir   string           `yaml:"home_base_dir"`
-	DefaultModel  string           `yaml:"default_model"`
-	NetworkAccess *bool            `yaml:"network_access"`
-	ClientInfo    *CodexClientInfo `yaml:"client_info"`
-}
-
-type CodexClientInfo struct {
-	Name    string `yaml:"name"`
-	Title   string `yaml:"title"`
-	Version string `yaml:"version"`
-}
-
-// OpenCodeConfig configures optional OpenCode local server autostart/restore.
-type OpenCodeConfig struct {
-	Enabled     *bool  `yaml:"enabled"`
-	AutoStart   *bool  `yaml:"auto_start"`
-	Command     string `yaml:"command"`
-	Hostname    string `yaml:"hostname"`
-	Port        int    `yaml:"port"`
-	Username    string `yaml:"username"`
-	Password    string `yaml:"password"`
-	IsolateXDG  *bool  `yaml:"isolate_xdg"`
-	HomeBaseDir string `yaml:"home_base_dir"`
 }
 
 // AgentsConfig configures agent defaults (OpenClaw-style).
@@ -350,19 +319,8 @@ type ToolProvidersConfig struct {
 	Search *SearchConfig     `yaml:"search"`
 	Fetch  *FetchConfig      `yaml:"fetch"`
 	Media  *MediaToolsConfig `yaml:"media"`
-	Nexus  *NexusToolsConfig `yaml:"nexus"`
 	MCP    *MCPToolsConfig   `yaml:"mcp"`
 	VFS    *VFSToolsConfig   `yaml:"vfs"`
-}
-
-// NexusToolsConfig configures Nexus tool bridging to a clay-nexus backend.
-type NexusToolsConfig struct {
-	Enabled        *bool  `yaml:"enabled"`
-	BaseURL        string `yaml:"base_url"`
-	MCPEndpoint    string `yaml:"mcp_endpoint"`
-	Token          string `yaml:"token"`
-	AuthType       string `yaml:"auth_type"` // bearer | apikey
-	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
 // MCPToolsConfig configures generic MCP behavior.
@@ -771,12 +729,6 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "max_chars")
 	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "max_redirects")
 	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "cache_ttl_seconds")
-	helper.Copy(configupgrade.Bool, "tools", "nexus", "enabled")
-	helper.Copy(configupgrade.Str, "tools", "nexus", "base_url")
-	helper.Copy(configupgrade.Str, "tools", "nexus", "mcp_endpoint")
-	helper.Copy(configupgrade.Str, "tools", "nexus", "token")
-	helper.Copy(configupgrade.Str, "tools", "nexus", "auth_type")
-	helper.Copy(configupgrade.Int, "tools", "nexus", "timeout_seconds")
 	helper.Copy(configupgrade.Bool, "tools", "mcp", "enable_stdio")
 
 	// Memory search configuration

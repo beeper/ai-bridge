@@ -80,14 +80,3 @@ type ToolInfo struct {
 	Group       string   `json:"group,omitempty"`
 	Enabled     bool     `json:"enabled"`
 }
-
-// Clone creates a copy of the tool.
-func (t *Tool) Clone() *Tool {
-	return &Tool{
-		Tool:     t.Tool,
-		Type:     t.Type,
-		Group:    t.Group,
-		PluginID: t.PluginID,
-		Execute:  t.Execute,
-	}
-}

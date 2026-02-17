@@ -14,7 +14,7 @@ func TestSanitizeToolSchema_StripsUnsupportedKeywords(t *testing.T) {
 		},
 	}
 
-	cleaned := sanitizeToolSchema(schema)
+	cleaned, _ := sanitizeToolSchemaWithReport(schema)
 	if _, ok := cleaned["minProperties"]; ok {
 		t.Fatalf("expected minProperties to be stripped")
 	}
@@ -35,7 +35,7 @@ func TestSanitizeToolSchema_ConvertsConstToEnum(t *testing.T) {
 	schema := map[string]any{
 		"const": "send",
 	}
-	cleaned := sanitizeToolSchema(schema)
+	cleaned, _ := sanitizeToolSchemaWithReport(schema)
 	if _, ok := cleaned["const"]; ok {
 		t.Fatalf("expected const to be removed")
 	}
@@ -64,7 +64,7 @@ func TestSanitizeToolSchema_MergesUnionProperties(t *testing.T) {
 		},
 	}
 
-	cleaned := sanitizeToolSchema(schema)
+	cleaned, _ := sanitizeToolSchemaWithReport(schema)
 	if _, ok := cleaned["anyOf"]; ok {
 		t.Fatalf("expected anyOf to be merged away")
 	}

@@ -15,23 +15,6 @@ func IsGoogleModel(modelID string) bool {
 		strings.Contains(lower, "/gemini")
 }
 
-// ValidateGeminiTurns checks whether the prompt satisfies Google's strict
-// user→assistant alternation requirement. Returns true if the prompt is valid.
-func ValidateGeminiTurns(prompt []openai.ChatCompletionMessageParamUnion) bool {
-	lastRole := ""
-	for _, msg := range prompt {
-		role := chatMessageRole(msg)
-		if role == "system" {
-			continue
-		}
-		if role == lastRole && (role == "user" || role == "assistant") {
-			return false
-		}
-		lastRole = role
-	}
-	return true
-}
-
 // SanitizeGoogleTurnOrdering fixes prompt ordering for Google models:
 //   - Merges consecutive user messages
 //   - Merges consecutive assistant messages

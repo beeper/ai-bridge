@@ -3,6 +3,7 @@ package connector
 import (
 	"strings"
 
+	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2/commands"
 
 	"github.com/beeper/ai-bridge/pkg/connector/commandregistry"
@@ -16,6 +17,10 @@ func registerAICommand(def commandregistry.Definition) *commands.FullHandler {
 
 // registerCommands registers all AI commands with the command processor.
 func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
+	registerCommandsWithOwnerGuard(proc, &oc.Config, &oc.br.Log, HelpSectionAI)
+}
+
+func registerCommandsWithOwnerGuard(proc *commands.Processor, cfg *Config, log *zerolog.Logger, section commands.HelpSection) {
 	handlers := aiCommandRegistry.All()
 	if len(handlers) > 0 {
 		commandHandlers := make([]commands.CommandHandler, 0, len(handlers))
@@ -29,7 +34,7 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 				if ce != nil && ce.User != nil {
 					senderID = ce.User.MXID.String()
 				}
-				if !isOwnerAllowed(&oc.Config, senderID) {
+				if !isOwnerAllowed(cfg, senderID) {
 					if ce != nil {
 						ce.Reply("Only configured owners can use that command.")
 					}
@@ -43,9 +48,9 @@ func (oc *OpenAIConnector) registerCommands(proc *commands.Processor) {
 	}
 
 	names := aiCommandRegistry.Names()
-	oc.br.Log.Info().
-		Str("section", HelpSectionAI.Name).
-		Int("section_order", HelpSectionAI.Order).
+	log.Info().
+		Str("section", section.Name).
+		Int("section_order", section.Order).
 		Strs("commands", names).
 		Msg("Registered AI commands: " + strings.Join(names, ", "))
 }
