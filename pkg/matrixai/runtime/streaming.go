@@ -1,4 +1,3 @@
-//lint:file-ignore U1000 Hard-cut cleanup: pending full dead-code deletion.
 package runtime
 
 import (
@@ -92,11 +91,6 @@ type streamingState struct {
 	// Debounced ephemeral logging: true once the "Streaming started" summary has been logged.
 	loggedStreamStart bool
 
-	// Dedicated-runtime streaming helpers.
-	// Kept here to reuse existing stream chunk plumbing.
-	toolOutputBuffers    map[string]*strings.Builder // toolCallId -> accumulated output
-	latestDiffSnapshot   string                      // last turn/diff/updated diff snapshot
-	reasoningSummarySeen bool                        // whether summary reasoning deltas have been seen
 	// Used to avoid spamming timeline notices for repeated signals.
 	timelineNotices map[string]bool
 }
@@ -426,39 +420,6 @@ func deriveToolDescriptorForOutputItem(item responses.ResponseOutputItemUnion, s
 		desc.providerExecuted = true
 		desc.input = map[string]any{}
 		desc.ok = true
-	case "local_shell_call":
-		desc.callID = strings.TrimSpace(item.CallID)
-		if desc.callID == "" {
-			desc.callID = item.ID
-		}
-		desc.toolName = "local_shell"
-		desc.toolType = ToolTypeProvider
-		desc.providerExecuted = true
-		desc.dynamic = true
-		desc.input = responseOutputItemToMap(item)
-		desc.ok = true
-	case "shell_call":
-		desc.callID = strings.TrimSpace(item.CallID)
-		if desc.callID == "" {
-			desc.callID = item.ID
-		}
-		desc.toolName = "shell"
-		desc.toolType = ToolTypeProvider
-		desc.providerExecuted = true
-		desc.dynamic = true
-		desc.input = responseOutputItemToMap(item)
-		desc.ok = true
-	case "apply_patch_call":
-		desc.callID = strings.TrimSpace(item.CallID)
-		if desc.callID == "" {
-			desc.callID = item.ID
-		}
-		desc.toolName = "apply_patch"
-		desc.toolType = ToolTypeProvider
-		desc.providerExecuted = true
-		desc.dynamic = true
-		desc.input = responseOutputItemToMap(item)
-		desc.ok = true
 	case "custom_tool_call":
 		desc.callID = strings.TrimSpace(item.CallID)
 		if desc.callID == "" {
@@ -518,14 +479,6 @@ func responseOutputItemResultPayload(item responses.ResponseOutputItemUnion) any
 			"status": item.Status,
 			"result": item.Result,
 		}
-	case "shell_call_output":
-		if output := item.Output.OfResponseFunctionShellToolCallOutputOutputArray; len(output) > 0 {
-			return map[string]any{"output": output}
-		}
-		if output := strings.TrimSpace(item.Output.OfString); output != "" {
-			return parseJSONOrRaw(output)
-		}
-		return responseOutputItemToMap(item)
 	default:
 		if mapped := responseOutputItemToMap(item); len(mapped) > 0 {
 			return mapped
@@ -1046,10 +999,10 @@ func (oc *AIClient) handleResponseOutputItemDone(
 
 	resultJSON, _ := json.Marshal(result)
 	resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, string(resultJSON), resultStatus)
-	outputMap := map[string]any{}
+	var outputMap map[string]any
 	if converted := toJSONObject(result); len(converted) > 0 {
 		outputMap = converted
-	} else if result != nil {
+	} else {
 		outputMap = map[string]any{"result": result}
 	}
 

@@ -194,8 +194,7 @@ type FetchConfig struct {
 	Provider  string   `yaml:"provider"`
 	Fallbacks []string `yaml:"fallbacks"`
 
-	Exa    ProviderExaConfig    `yaml:"exa"`
-	Direct ProviderDirectConfig `yaml:"direct"`
+	Exa ProviderExaConfig `yaml:"exa"`
 }
 
 type ProviderExaConfig struct {
@@ -216,16 +215,6 @@ type ProviderOpenRouterConfig struct {
 	BaseURL      string `yaml:"base_url"`
 	Model        string `yaml:"model"`
 	TimeoutSecs  int    `yaml:"timeout_seconds"`
-	CacheTtlSecs int    `yaml:"cache_ttl_seconds"`
-}
-
-type ProviderDirectConfig struct {
-	Enabled      *bool  `yaml:"enabled"`
-	TimeoutSecs  int    `yaml:"timeout_seconds"`
-	UserAgent    string `yaml:"user_agent"`
-	Readability  bool   `yaml:"readability"`
-	MaxChars     int    `yaml:"max_chars"`
-	MaxRedirects int    `yaml:"max_redirects"`
 	CacheTtlSecs int    `yaml:"cache_ttl_seconds"`
 }
 
@@ -406,12 +395,5 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Str, "tools", "fetch", "exa", "api_key")
 	helper.Copy(configupgrade.Bool, "tools", "fetch", "exa", "include_text")
 	helper.Copy(configupgrade.Int, "tools", "fetch", "exa", "text_max_chars")
-	helper.Copy(configupgrade.Bool, "tools", "fetch", "direct", "enabled")
-	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "timeout_seconds")
-	helper.Copy(configupgrade.Str, "tools", "fetch", "direct", "user_agent")
-	helper.Copy(configupgrade.Bool, "tools", "fetch", "direct", "readability")
-	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "max_chars")
-	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "max_redirects")
-	helper.Copy(configupgrade.Int, "tools", "fetch", "direct", "cache_ttl_seconds")
 	// Tool policy (OpenClaw-style)
 }

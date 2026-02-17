@@ -1,9 +1,7 @@
-//lint:file-ignore U1000 Hard-cut cleanup: pending full dead-code deletion.
 package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 
@@ -109,27 +107,4 @@ func normalizeMimeString(value string) string {
 		value = value[:semi]
 	}
 	return strings.TrimSpace(value)
-}
-
-func readStringArg(args map[string]any, keys ...string) (string, bool) {
-	for _, key := range keys {
-		if raw, ok := args[key]; ok {
-			if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
-				return s, true
-			}
-		}
-	}
-	return "", false
-}
-
-func jsonActionResult(action string, payload map[string]any) (string, error) {
-	if payload == nil {
-		payload = map[string]any{}
-	}
-	payload["action"] = action
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-	return string(encoded), nil
 }

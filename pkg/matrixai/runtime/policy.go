@@ -1,4 +1,3 @@
-//lint:file-ignore U1000 Hard-cut cleanup: pending full dead-code deletion.
 package runtime
 
 import (
@@ -75,15 +74,4 @@ func (oc *OpenAIConnector) bridgePolicy() BridgePolicy {
 
 func (oc *OpenAIConnector) shouldBootstrapChats() bool {
 	return oc.bridgePolicy().ResolveIdentifier.CreateDM
-}
-
-func providerToFlowID(provider string) string {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case ProviderBeeper:
-		return ProviderMagicProxy
-	case ProviderMagicProxy:
-		return ProviderMagicProxy
-	default:
-		return FlowCustom
-	}
 }

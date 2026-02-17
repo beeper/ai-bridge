@@ -31,10 +31,3 @@ func requirePortal(ce *commands.Event) (*bridgev2.Portal, bool) {
 	}
 	return ce.Portal, true
 }
-
-func rejectBossOverrides(ce *commands.Event, meta *PortalMetadata, message string) bool {
-	_ = ce
-	_ = meta
-	_ = message
-	return false
-}

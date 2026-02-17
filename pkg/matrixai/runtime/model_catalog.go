@@ -9,11 +9,6 @@ import (
 	"github.com/beeper/ai-bridge/pkg/core/aimodels"
 )
 
-const (
-	modelCatalogStoreKey    = "models/catalog.json"
-	modelCatalogStoreKeyAlt = "models.json"
-)
-
 const defaultModelCatalogMode = "merge"
 
 type ModelCatalogEntry struct {
@@ -283,100 +278,6 @@ func (oc *AIClient) loadModelCatalog(ctx context.Context, useCache bool) []Model
 		oc.modelCatalogMu.Unlock()
 	}
 	return nil
-}
-
-func parseModelCatalog(raw any) []ModelCatalogEntry {
-	if raw == nil {
-		return nil
-	}
-	switch value := raw.(type) {
-	case []any:
-		return coerceModelEntries(value)
-	case map[string]any:
-		if models, ok := value["models"].([]any); ok {
-			return coerceModelEntries(models)
-		}
-	}
-	return nil
-}
-
-func coerceModelEntries(items []any) []ModelCatalogEntry {
-	out := make([]ModelCatalogEntry, 0, len(items))
-	for _, item := range items {
-		entryMap, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		id := strings.TrimSpace(asString(entryMap["id"]))
-		provider := strings.TrimSpace(asString(entryMap["provider"]))
-		if id == "" || provider == "" {
-			continue
-		}
-		name := strings.TrimSpace(asString(entryMap["name"]))
-		if name == "" {
-			name = id
-		}
-		out = append(out, ModelCatalogEntry{
-			ID:              id,
-			Name:            name,
-			Provider:        provider,
-			ContextWindow:   asInt(entryMap["contextWindow"]),
-			MaxOutputTokens: asInt(valueOr(entryMap, "maxTokens", "max_output_tokens")),
-			Reasoning:       asBool(entryMap["reasoning"]),
-			Input:           asStringSlice(entryMap["input"]),
-		})
-	}
-	return out
-}
-
-func valueOr(m map[string]any, keys ...string) any {
-	for _, key := range keys {
-		if value, ok := m[key]; ok {
-			return value
-		}
-	}
-	return nil
-}
-
-func asString(value any) string {
-	if s, ok := value.(string); ok {
-		return s
-	}
-	return ""
-}
-
-func asInt(value any) int {
-	switch v := value.(type) {
-	case float64:
-		return int(v)
-	case int:
-		return v
-	case int64:
-		return int(v)
-	default:
-		return 0
-	}
-}
-
-func asBool(value any) bool {
-	if v, ok := value.(bool); ok {
-		return v
-	}
-	return false
-}
-
-func asStringSlice(value any) []string {
-	list, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(list))
-	for _, item := range list {
-		if str, ok := item.(string); ok {
-			out = append(out, str)
-		}
-	}
-	return out
 }
 
 func catalogInputIncludes(entry *ModelCatalogEntry, label string) bool {

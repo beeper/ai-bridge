@@ -321,27 +321,6 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	}
 }
 
-func (oc *AIClient) redactInitialStreamingMessage(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, state *streamingState) {
-	if portal == nil || intent == nil || state == nil {
-		return
-	}
-	if state.initialEventID == "" {
-		return
-	}
-	_, err := intent.SendMessage(ctx, portal.MXID, event.EventRedaction, &event.Content{
-		Parsed: &event.RedactionEventContent{
-			Redacts: state.initialEventID,
-		},
-	}, nil)
-	if err != nil {
-		oc.loggerForContext(ctx).Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact initial streaming message")
-	}
-}
-
-func (oc *AIClient) sendPlainAssistantMessage(ctx context.Context, portal *bridgev2.Portal, text string) {
-	_ = oc.sendPlainAssistantMessageWithResult(ctx, portal, text)
-}
-
 // sendPlainAssistantMessageWithResult is used by background delivery paths where failures should be
 // observable by the caller.
 func (oc *AIClient) sendPlainAssistantMessageWithResult(ctx context.Context, portal *bridgev2.Portal, text string) error {
