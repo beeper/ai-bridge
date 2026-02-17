@@ -168,26 +168,14 @@ func (oc *AIClient) streamingResponse(
 			oc.handleResponseOutputItemDone(ctx, portal, state, activeTools, streamEvent.Item)
 
 		case "response.custom_tool_call_input.delta":
-			tool, exists := activeTools[streamEvent.ItemID]
-			if !exists {
-				itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-				if itemDesc.ok {
-					tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-				}
-			}
+			tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 			if tool != nil {
 				tool.input.WriteString(streamEvent.Delta)
 				oc.emitUIToolInputDelta(ctx, portal, state, tool.callID, tool.toolName, streamEvent.Delta, tool.toolType == ToolTypeProvider)
 			}
 
 		case "response.custom_tool_call_input.done":
-			tool, exists := activeTools[streamEvent.ItemID]
-			if !exists {
-				itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-				if itemDesc.ok {
-					tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-				}
-			}
+			tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 			if tool != nil {
 				if tool.input.Len() == 0 && strings.TrimSpace(streamEvent.Input) != "" {
 					tool.input.WriteString(streamEvent.Input)
@@ -196,26 +184,14 @@ func (oc *AIClient) streamingResponse(
 			}
 
 		case "response.code_interpreter_call_code.delta":
-			tool, exists := activeTools[streamEvent.ItemID]
-			if !exists {
-				itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-				if itemDesc.ok {
-					tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-				}
-			}
+			tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 			if tool != nil {
 				tool.input.WriteString(streamEvent.Delta)
 				oc.emitUIToolInputDelta(ctx, portal, state, tool.callID, tool.toolName, streamEvent.Delta, true)
 			}
 
 		case "response.code_interpreter_call_code.done":
-			tool, exists := activeTools[streamEvent.ItemID]
-			if !exists {
-				itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-				if itemDesc.ok {
-					tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-				}
-			}
+			tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 			if tool != nil {
 				if tool.input.Len() == 0 && strings.TrimSpace(streamEvent.Code) != "" {
 					tool.input.WriteString(streamEvent.Code)
@@ -224,26 +200,14 @@ func (oc *AIClient) streamingResponse(
 			}
 
 		case "response.mcp_call_arguments.delta":
-			tool, exists := activeTools[streamEvent.ItemID]
-			if !exists {
-				itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-				if itemDesc.ok {
-					tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-				}
-			}
+			tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 			if tool != nil {
 				tool.input.WriteString(streamEvent.Delta)
 				oc.emitUIToolInputDelta(ctx, portal, state, tool.callID, tool.toolName, streamEvent.Delta, true)
 			}
 
 		case "response.mcp_call_arguments.done":
-			tool, exists := activeTools[streamEvent.ItemID]
-			if !exists {
-				itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-				if itemDesc.ok {
-					tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-				}
-			}
+			tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 			if tool != nil {
 				if tool.input.Len() == 0 && strings.TrimSpace(streamEvent.Arguments) != "" {
 					tool.input.WriteString(streamEvent.Arguments)
@@ -252,13 +216,7 @@ func (oc *AIClient) streamingResponse(
 			}
 
 		case "response.mcp_call.failed":
-			tool, exists := activeTools[streamEvent.ItemID]
-			if !exists {
-				itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-				if itemDesc.ok {
-					tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-				}
-			}
+			tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 			if tool != nil {
 				if state != nil && state.uiToolOutputFinalized[tool.callID] {
 					break
@@ -1399,26 +1357,14 @@ func (oc *AIClient) streamingResponse(
 				oc.handleResponseOutputItemDone(ctx, portal, state, activeTools, streamEvent.Item)
 
 			case "response.custom_tool_call_input.delta":
-				tool, exists := activeTools[streamEvent.ItemID]
-				if !exists {
-					itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-					if itemDesc.ok {
-						tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-					}
-				}
+				tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 				if tool != nil {
 					tool.input.WriteString(streamEvent.Delta)
 					oc.emitUIToolInputDelta(ctx, portal, state, tool.callID, tool.toolName, streamEvent.Delta, tool.toolType == ToolTypeProvider)
 				}
 
 			case "response.custom_tool_call_input.done":
-				tool, exists := activeTools[streamEvent.ItemID]
-				if !exists {
-					itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-					if itemDesc.ok {
-						tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-					}
-				}
+				tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 				if tool != nil {
 					if tool.input.Len() == 0 && strings.TrimSpace(streamEvent.Input) != "" {
 						tool.input.WriteString(streamEvent.Input)
@@ -1427,26 +1373,14 @@ func (oc *AIClient) streamingResponse(
 				}
 
 			case "response.code_interpreter_call_code.delta":
-				tool, exists := activeTools[streamEvent.ItemID]
-				if !exists {
-					itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-					if itemDesc.ok {
-						tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-					}
-				}
+				tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 				if tool != nil {
 					tool.input.WriteString(streamEvent.Delta)
 					oc.emitUIToolInputDelta(ctx, portal, state, tool.callID, tool.toolName, streamEvent.Delta, true)
 				}
 
 			case "response.code_interpreter_call_code.done":
-				tool, exists := activeTools[streamEvent.ItemID]
-				if !exists {
-					itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-					if itemDesc.ok {
-						tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-					}
-				}
+				tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 				if tool != nil {
 					if tool.input.Len() == 0 && strings.TrimSpace(streamEvent.Code) != "" {
 						tool.input.WriteString(streamEvent.Code)
@@ -1455,26 +1389,14 @@ func (oc *AIClient) streamingResponse(
 				}
 
 			case "response.mcp_call_arguments.delta":
-				tool, exists := activeTools[streamEvent.ItemID]
-				if !exists {
-					itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-					if itemDesc.ok {
-						tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-					}
-				}
+				tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 				if tool != nil {
 					tool.input.WriteString(streamEvent.Delta)
 					oc.emitUIToolInputDelta(ctx, portal, state, tool.callID, tool.toolName, streamEvent.Delta, true)
 				}
 
 			case "response.mcp_call_arguments.done":
-				tool, exists := activeTools[streamEvent.ItemID]
-				if !exists {
-					itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-					if itemDesc.ok {
-						tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-					}
-				}
+				tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 				if tool != nil {
 					if tool.input.Len() == 0 && strings.TrimSpace(streamEvent.Arguments) != "" {
 						tool.input.WriteString(streamEvent.Arguments)
@@ -1483,13 +1405,7 @@ func (oc *AIClient) streamingResponse(
 				}
 
 			case "response.mcp_call.failed":
-				tool, exists := activeTools[streamEvent.ItemID]
-				if !exists {
-					itemDesc := deriveToolDescriptorForOutputItem(streamEvent.Item, state)
-					if itemDesc.ok {
-						tool = oc.upsertActiveToolFromDescriptor(ctx, portal, state, activeTools, itemDesc)
-					}
-				}
+				tool := oc.ensureActiveToolForStreamItem(ctx, portal, state, activeTools, streamEvent.ItemID, streamEvent.Item)
 				if tool != nil {
 					if state != nil && state.uiToolOutputFinalized[tool.callID] {
 						break
