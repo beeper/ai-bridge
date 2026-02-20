@@ -564,8 +564,8 @@ func (oc *AIClient) sendPlainAssistantMessage(ctx context.Context, portal *bridg
 	_ = oc.sendPlainAssistantMessageWithResult(ctx, portal, text)
 }
 
-// sendPlainAssistantMessageWithResult is used by cron/heartbeat delivery paths where failures should be
-// observable by the caller (e.g. so the cron scheduler doesn't get stuck on a blocked send forever).
+// sendPlainAssistantMessageWithResult is used by automated delivery paths where failures should be
+// observable by the caller (e.g. so the scheduler doesn't get stuck on a blocked send forever).
 func (oc *AIClient) sendPlainAssistantMessageWithResult(ctx context.Context, portal *bridgev2.Portal, text string) error {
 	if portal == nil || portal.MXID == "" {
 		return nil
@@ -575,7 +575,7 @@ func (oc *AIClient) sendPlainAssistantMessageWithResult(ctx context.Context, por
 		return fmt.Errorf("missing intent")
 	}
 
-	// Best-effort: cron/heartbeat delivery may target rooms where the ghost isn't currently joined.
+	// Best-effort: automated delivery may target rooms where the ghost isn't currently joined.
 	// EnsureJoined is typically a no-op when already in the room.
 	if err := intent.EnsureJoined(ctx, portal.MXID); err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Stringer("room_id", portal.MXID).Msg("Failed to ensure assistant ghost is joined")
