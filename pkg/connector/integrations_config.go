@@ -11,7 +11,7 @@ import (
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 )
 
-//go:embed example-config.yaml
+//go:embed integrations_example-config.yaml
 var exampleNetworkConfig string
 
 // Config represents the connector-specific configuration that is nested under
@@ -45,6 +45,16 @@ type Config struct {
 
 	// Inbound message processing configuration
 	Inbound *InboundConfig `yaml:"inbound"`
+
+	// Integration registration toggles.
+	Integrations *IntegrationsConfig `yaml:"integrations"`
+}
+
+// IntegrationsConfig controls compile-time-available integration registration.
+// When a field is nil, it defaults to enabled.
+type IntegrationsConfig struct {
+	Scheduler *bool `yaml:"scheduler"`
+	Recall    *bool `yaml:"recall"`
 }
 
 // ToolApprovalsRuntimeConfig controls runtime behaviour for tool approvals.
