@@ -20,7 +20,8 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 		return "", errors.New("cron tool requires bridge context")
 	}
 	client := btc.Client
-	if client.schedulerIntegration == nil {
+	scheduler := client.schedulerModule()
+	if scheduler == nil {
 		return "", errors.New("cron service not available")
 	}
 
@@ -34,7 +35,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 
 	switch action {
 	case "status":
-		enabled, storePath, jobCount, nextWake, err := client.schedulerIntegration.Status()
+		enabled, storePath, jobCount, nextWake, err := scheduler.Status()
 		if err != nil {
 			return agenttools.JSONResult(map[string]any{
 				"status": "error",
@@ -54,7 +55,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 		return agenttools.JSONResult(out).Text(), nil
 	case "list":
 		includeDisabled := agenttools.ReadBool(args, "includeDisabled", false)
-		jobs, err := client.schedulerIntegration.List(includeDisabled)
+		jobs, err := scheduler.List(includeDisabled)
 		if err != nil {
 			return agenttools.JSONResult(map[string]any{
 				"status": "error",
@@ -110,7 +111,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 		if contextMessages > 0 {
 			injectCronReminderContext(&jobInput, btc, contextMessages)
 		}
-		job, err := client.schedulerIntegration.Add(jobInput)
+		job, err := scheduler.Add(jobInput)
 		if err != nil {
 			return agenttools.JSONResult(map[string]any{
 				"status": "error",
@@ -162,7 +163,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 				}).Text(), nil
 			}
 		}
-		job, err := client.schedulerIntegration.Update(jobID, patch)
+		job, err := scheduler.Update(jobID, patch)
 		if err != nil {
 			return agenttools.JSONResult(map[string]any{
 				"status": "error",
@@ -178,7 +179,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 				"error":  "jobId required",
 			}).Text(), nil
 		}
-		removed, err := client.schedulerIntegration.Remove(jobID)
+		removed, err := scheduler.Remove(jobID)
 		if err != nil {
 			return agenttools.JSONResult(map[string]any{
 				"status": "error",
@@ -197,7 +198,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 				"error":  "jobId required",
 			}).Text(), nil
 		}
-		ran, reason, err := client.schedulerIntegration.Run(jobID, "")
+		ran, reason, err := scheduler.Run(jobID, "")
 		if err != nil {
 			return agenttools.JSONResult(map[string]any{
 				"status": "error",
@@ -221,7 +222,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 			}).Text(), nil
 		}
 		limit := agenttools.ReadIntDefault(args, "limit", 200)
-		runs, err := client.schedulerIntegration.Runs(jobID, limit)
+		runs, err := scheduler.Runs(jobID, limit)
 		if err != nil {
 			return agenttools.JSONResult(map[string]any{
 				"status": "error",
@@ -244,7 +245,7 @@ func executeCron(ctx context.Context, args map[string]any) (string, error) {
 		if mode != "now" && mode != "next-heartbeat" {
 			mode = "next-heartbeat"
 		}
-		_, err := client.schedulerIntegration.Wake(mode, text)
+		_, err := scheduler.Wake(mode, text)
 		if err != nil {
 			return agenttools.JSONResult(map[string]any{
 				"status": "error",
@@ -465,13 +466,13 @@ func truncateContextText(input string, maxLen int) string {
 }
 
 func (oc *AIClient) readCronRuns(jobID string, limit int) ([]cron.CronRunLogEntry, error) {
-	if oc == nil || oc.schedulerIntegration == nil {
+	if oc == nil || oc.schedulerModule() == nil {
 		return nil, errors.New("cron service not available")
 	}
 	if limit <= 0 {
 		limit = 200
 	}
-	_, storePath, _, _, err := oc.schedulerIntegration.Status()
+	_, storePath, _, _, err := oc.schedulerModule().Status()
 	if err != nil {
 		return nil, err
 	}

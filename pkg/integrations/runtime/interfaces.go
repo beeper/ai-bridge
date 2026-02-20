@@ -63,3 +63,14 @@ type PromptIntegration interface {
 	AdditionalSystemMessages(ctx context.Context, scope PromptScope) []openai.ChatCompletionMessageParamUnion
 	AugmentPrompt(ctx context.Context, scope PromptScope, prompt []openai.ChatCompletionMessageParamUnion) []openai.ChatCompletionMessageParamUnion
 }
+
+// LifecycleIntegration is an optional capability for integrations that need runtime start/stop hooks.
+type LifecycleIntegration interface {
+	Start(ctx context.Context) error
+	Stop()
+}
+
+// LoginLifecycleIntegration is an optional capability for integrations that need per-login shutdown hooks.
+type LoginLifecycleIntegration interface {
+	StopForLogin(bridgeID, loginID string)
+}
