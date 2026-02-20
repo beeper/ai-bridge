@@ -25,7 +25,8 @@ func fnCron(ce *commands.Event) {
 	if !ok {
 		return
 	}
-	if client.schedulerIntegration == nil {
+	scheduler := client.schedulerModule()
+	if scheduler == nil {
 		ce.Reply("Cron service not available.")
 		return
 	}
@@ -36,7 +37,7 @@ func fnCron(ce *commands.Event) {
 	}
 	switch action {
 	case "status":
-		enabled, storePath, jobCount, nextWake, err := client.schedulerIntegration.Status()
+		enabled, storePath, jobCount, nextWake, err := scheduler.Status()
 		if err != nil {
 			ce.Reply("Cron status failed: %s", err.Error())
 			return
@@ -47,7 +48,7 @@ func fnCron(ce *commands.Event) {
 		if len(ce.Args) > 1 && (strings.EqualFold(ce.Args[1], "all") || strings.EqualFold(ce.Args[1], "--all")) {
 			includeDisabled = true
 		}
-		jobs, err := client.schedulerIntegration.List(includeDisabled)
+		jobs, err := scheduler.List(includeDisabled)
 		if err != nil {
 			ce.Reply("Cron list failed: %s", err.Error())
 			return
@@ -65,7 +66,7 @@ func fnCron(ce *commands.Event) {
 				limit = n
 			}
 		}
-		entries, err := client.schedulerIntegration.Runs(jobID, limit)
+		entries, err := scheduler.Runs(jobID, limit)
 		if err != nil {
 			ce.Reply("Cron runs failed: %s", err.Error())
 			return
@@ -77,7 +78,7 @@ func fnCron(ce *commands.Event) {
 			return
 		}
 		jobID := strings.TrimSpace(ce.Args[1])
-		removed, err := client.schedulerIntegration.Remove(jobID)
+		removed, err := scheduler.Remove(jobID)
 		if err != nil {
 			ce.Reply("Cron remove failed: %s", err.Error())
 			return
@@ -97,7 +98,7 @@ func fnCron(ce *commands.Event) {
 		if len(ce.Args) > 2 && strings.EqualFold(strings.TrimSpace(ce.Args[2]), "force") {
 			mode = "force"
 		}
-		ran, reason, err := client.schedulerIntegration.Run(jobID, mode)
+		ran, reason, err := scheduler.Run(jobID, mode)
 		if err != nil {
 			ce.Reply("Cron run failed: %s", err.Error())
 			return
