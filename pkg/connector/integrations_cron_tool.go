@@ -12,6 +12,7 @@ import (
 	"github.com/beeper/ai-bridge/pkg/agents"
 	agenttools "github.com/beeper/ai-bridge/pkg/agents/tools"
 	"github.com/beeper/ai-bridge/pkg/cron"
+	integrationcron "github.com/beeper/ai-bridge/pkg/integrations/cron"
 )
 
 func executeCron(ctx context.Context, args map[string]any) (string, error) {
@@ -484,7 +485,7 @@ func (oc *AIClient) readCronRuns(jobID string, limit int) ([]cron.CronRunLogEntr
 	trimmed := strings.TrimSpace(jobID)
 	if trimmed != "" {
 		path := cron.ResolveCronRunLogPath(storePath, trimmed)
-		return cron.ReadCronRunLogEntries(context.Background(), cronBackend, path, limit, trimmed)
+		return cron.ReadCronRunLogEntries(context.Background(), integrationcron.NewStoreBackendAdapter(cronBackend), path, limit, trimmed)
 	}
 	entries := make([]cron.CronRunLogEntry, 0)
 	runDir := cron.ResolveCronRunLogDir(storePath)

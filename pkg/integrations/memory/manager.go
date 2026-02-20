@@ -1,4 +1,4 @@
-package connector
+package memory
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/dbutil"
 
-	"github.com/beeper/ai-bridge/pkg/memory"
+	memorycore "github.com/beeper/ai-bridge/pkg/memory"
 	"github.com/beeper/ai-bridge/pkg/textfs"
 )
 
@@ -32,14 +32,14 @@ const memorySearchTimeout = 10 * time.Second
 const memoryManagerInitTimeout = 10 * time.Second
 
 type MemorySearchManager struct {
-	client       *AIClient
+	runtime      Runtime
 	db           *dbutil.Database
 	bridgeID     string
 	loginID      string
 	agentID      string
-	cfg          *memory.ResolvedConfig
-	provider     memory.EmbeddingProvider
-	status       memory.ProviderStatus
+	cfg          *memorycore.ResolvedConfig
+	provider     memorycore.EmbeddingProvider
+	status       memorycore.ProviderStatus
 	providerKey  string
 	vectorDims   int
 	indexGen     string
@@ -81,7 +81,7 @@ type MemorySearchStatus struct {
 	SourceCounts      []MemorySearchSourceCount
 	Cache             *MemorySearchCacheStatus
 	FTS               *MemorySearchFTSStatus
-	Fallback          *memory.FallbackStatus
+	Fallback          *memorycore.FallbackStatus
 	Vector            *MemorySearchVectorStatus
 	Batch             *MemorySearchBatchStatus
 }
@@ -131,19 +131,15 @@ var memoryManagerCache = struct {
 	managers: make(map[string]*MemorySearchManager),
 }
 
-func (oc *AIClient) getRecallManager(agentID string) (*MemorySearchManager, string) {
-	return getRecallSearchManager(oc, agentID)
-}
-
-func getRecallSearchManager(client *AIClient, agentID string) (*MemorySearchManager, string) {
-	if client == nil || client.connector == nil {
+func GetRecallSearchManager(runtime Runtime, agentID string) (*MemorySearchManager, string) {
+	if runtime == nil {
 		return nil, "memory search unavailable"
 	}
-	db := client.bridgeDB()
+	db := runtime.BridgeDB()
 	if db == nil {
 		return nil, "memory search unavailable"
 	}
-	cfg, err := resolveRecallSearchConfig(client, agentID)
+	cfg, err := runtime.ResolveConfig(agentID)
 	if err != nil || cfg == nil {
 		if err != nil {
 			return nil, err.Error()
@@ -151,8 +147,8 @@ func getRecallSearchManager(client *AIClient, agentID string) (*MemorySearchMana
 		return nil, "memory search disabled"
 	}
 
-	bridgeID := string(client.UserLogin.Bridge.DB.BridgeID)
-	loginID := string(client.UserLogin.ID)
+	bridgeID := runtime.BridgeID()
+	loginID := runtime.LoginID()
 	if agentID == "" {
 		agentID = "default"
 	}
@@ -165,13 +161,13 @@ func getRecallSearchManager(client *AIClient, agentID string) (*MemorySearchMana
 		return existing, ""
 	}
 
-	providerResult, err := buildMemoryProvider(client, cfg)
+	providerResult, err := buildMemoryProvider(runtime, cfg)
 	if err != nil {
 		return nil, err.Error()
 	}
 
 	manager := &MemorySearchManager{
-		client:      client,
+		runtime:     runtime,
 		db:          db,
 		bridgeID:    bridgeID,
 		loginID:     loginID,
@@ -180,7 +176,7 @@ func getRecallSearchManager(client *AIClient, agentID string) (*MemorySearchMana
 		provider:    providerResult.Provider,
 		status:      providerResult.Status,
 		providerKey: providerResult.ProviderKey,
-		log:         client.log.With().Str("component", "memory").Logger(),
+		log:         runtime.Logger().With().Str("component", "memory").Logger(),
 	}
 	if hasSource(cfg.Sources, "memory") || hasSource(cfg.Sources, "workspace") {
 		manager.dirty = true
@@ -196,7 +192,7 @@ func getRecallSearchManager(client *AIClient, agentID string) (*MemorySearchMana
 	return manager, ""
 }
 
-func (m *MemorySearchManager) Status() memory.ProviderStatus {
+func (m *MemorySearchManager) Status() memorycore.ProviderStatus {
 	return m.status
 }
 
@@ -257,7 +253,10 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 	vectorError := m.vectorError
 	m.vectorMu.Unlock()
 
-	workspaceDir := resolvePromptWorkspaceDir()
+	workspaceDir := ""
+	if m.runtime != nil {
+		workspaceDir = m.runtime.ResolvePromptWorkspaceDir()
+	}
 	status := &MemorySearchStatus{
 		Dirty:             dirty,
 		WorkspaceDir:      workspaceDir,
@@ -408,7 +407,7 @@ func buildSourceCounts(ctx context.Context, m *MemorySearchManager, indexGen str
 	return out
 }
 
-func (m *MemorySearchManager) Search(ctx context.Context, query string, opts memory.SearchOptions) ([]memory.SearchResult, error) {
+func (m *MemorySearchManager) Search(ctx context.Context, query string, opts memorycore.SearchOptions) ([]memorycore.SearchResult, error) {
 	if m == nil {
 		return nil, errors.New("memory search unavailable")
 	}
@@ -442,7 +441,7 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 
 	cleaned := strings.TrimSpace(query)
 	if mode != "list" && cleaned == "" {
-		return []memory.SearchResult{}, nil
+		return []memorycore.SearchResult{}, nil
 	}
 
 	maxResults := m.cfg.Query.MaxResults
@@ -450,7 +449,7 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 		maxResults = opts.MaxResults
 	}
 	if maxResults <= 0 {
-		maxResults = memory.DefaultMaxResults
+		maxResults = memorycore.DefaultMaxResults
 	}
 
 	minScore := m.cfg.Query.MinScore
@@ -483,8 +482,8 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 	wantKeyword := mode == "auto" || mode == "keyword" || mode == "hybrid"
 	wantVector := mode == "auto" || mode == "semantic" || mode == "hybrid"
 
-	keywordResults := []memory.HybridKeywordResult{} // mergeable (chunk-level)
-	keywordDirect := []memory.SearchResult{}         // non-mergeable (file-level)
+	keywordResults := []memorycore.HybridKeywordResult{} // mergeable (chunk-level)
+	keywordDirect := []memorycore.SearchResult{}         // non-mergeable (file-level)
 	keywordOK := false
 	if wantKeyword {
 		if m.ftsAvailable {
@@ -523,7 +522,7 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 		}
 	}
 
-	vectorResults := []memory.HybridVectorResult{}
+	vectorResults := []memorycore.HybridVectorResult{}
 	vectorOK := false
 	// In auto mode, only pay for embeddings if keyword search couldn't find anything.
 	if wantVector && m.cfg.Store.Vector.Enabled && !(mode == "auto" && keywordOK) {
@@ -567,7 +566,7 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 	// auto/hybrid: merge when hybrid is enabled and we have both sides; otherwise
 	// degrade to whichever side succeeded.
 	if m.cfg.Query.Hybrid.Enabled && vectorOK && keywordOK {
-		merged := memory.MergeHybridResults(vectorResults, keywordResults, m.cfg.Query.Hybrid.VectorWeight, m.cfg.Query.Hybrid.TextWeight)
+		merged := memorycore.MergeHybridResults(vectorResults, keywordResults, m.cfg.Query.Hybrid.VectorWeight, m.cfg.Query.Hybrid.TextWeight)
 		return clampInjectedChars(filterAndLimit(merged, minScore, maxResults), m.cfg.Query.MaxInjectedChars), nil
 	}
 	if vectorOK {
@@ -579,7 +578,7 @@ func (m *MemorySearchManager) Search(ctx context.Context, query string, opts mem
 		}
 		return clampInjectedChars(filterAndLimit(keywordResultsToSearch(keywordResults), minScore, maxResults), m.cfg.Query.MaxInjectedChars), nil
 	}
-	return []memory.SearchResult{}, nil
+	return []memorycore.SearchResult{}, nil
 }
 
 func normalizeSearchSources(requested []string, fallback []string) []string {
@@ -617,12 +616,12 @@ func normalizeSearchPathPrefix(raw string) string {
 	return normalized
 }
 
-func (m *MemorySearchManager) listRecentFiles(ctx context.Context, sources []string, pathPrefix string, limit int) ([]memory.SearchResult, error) {
+func (m *MemorySearchManager) listRecentFiles(ctx context.Context, sources []string, pathPrefix string, limit int) ([]memorycore.SearchResult, error) {
 	if m == nil || m.db == nil {
 		return nil, errors.New("memory search unavailable")
 	}
 	if limit <= 0 {
-		limit = memory.DefaultMaxResults
+		limit = memorycore.DefaultMaxResults
 	}
 	if limit > 200 {
 		limit = 200
@@ -657,7 +656,7 @@ func (m *MemorySearchManager) listRecentFiles(ctx context.Context, sources []str
 	}
 	defer rows.Close()
 
-	results := make([]memory.SearchResult, 0, limit)
+	results := make([]memorycore.SearchResult, 0, limit)
 	for rows.Next() {
 		var path, source, content string
 		var length int
@@ -670,7 +669,7 @@ func (m *MemorySearchManager) listRecentFiles(ctx context.Context, sources []str
 		if length > textfs.NoteMaxBytesDefault() {
 			continue
 		}
-		results = append(results, memory.SearchResult{
+		results = append(results, memorycore.SearchResult{
 			Path:      path,
 			StartLine: 1,
 			EndLine:   1,
@@ -688,7 +687,7 @@ func (m *MemorySearchManager) listRecentFiles(ctx context.Context, sources []str
 	return results, nil
 }
 
-func (m *MemorySearchManager) searchKeywordScan(ctx context.Context, query string, limit int, sources []string, pathPrefix string, indexGen string) ([]memory.HybridKeywordResult, error) {
+func (m *MemorySearchManager) searchKeywordScan(ctx context.Context, query string, limit int, sources []string, pathPrefix string, indexGen string) ([]memorycore.HybridKeywordResult, error) {
 	if m == nil || m.db == nil || limit <= 0 {
 		return nil, nil
 	}
@@ -739,7 +738,7 @@ func (m *MemorySearchManager) searchKeywordScan(ctx context.Context, query strin
 	defer rows.Close()
 
 	type scored struct {
-		r     memory.HybridKeywordResult
+		r     memorycore.HybridKeywordResult
 		score float64
 	}
 	scoredResults := make([]scored, 0, scanLimit)
@@ -761,7 +760,7 @@ func (m *MemorySearchManager) searchKeywordScan(ctx context.Context, query strin
 		}
 		score := float64(hits) / float64(len(tokens))
 		scoredResults = append(scoredResults, scored{
-			r: memory.HybridKeywordResult{
+			r: memorycore.HybridKeywordResult{
 				ID:        id,
 				Path:      path,
 				StartLine: startLine,
@@ -788,14 +787,14 @@ func (m *MemorySearchManager) searchKeywordScan(ctx context.Context, query strin
 	if len(scoredResults) > limit {
 		scoredResults = scoredResults[:limit]
 	}
-	out := make([]memory.HybridKeywordResult, 0, len(scoredResults))
+	out := make([]memorycore.HybridKeywordResult, 0, len(scoredResults))
 	for _, entry := range scoredResults {
 		out = append(out, entry.r)
 	}
 	return out, nil
 }
 
-func (m *MemorySearchManager) searchKeywordFiles(ctx context.Context, query string, limit int, sources []string, pathPrefix string) ([]memory.SearchResult, error) {
+func (m *MemorySearchManager) searchKeywordFiles(ctx context.Context, query string, limit int, sources []string, pathPrefix string) ([]memorycore.SearchResult, error) {
 	if m == nil || m.db == nil || limit <= 0 {
 		return nil, nil
 	}
@@ -842,7 +841,7 @@ func (m *MemorySearchManager) searchKeywordFiles(ctx context.Context, query stri
 	}
 	defer rows.Close()
 
-	results := make([]memory.SearchResult, 0, limit)
+	results := make([]memorycore.SearchResult, 0, limit)
 	for rows.Next() {
 		var path, source, content string
 		var length int
@@ -866,7 +865,7 @@ func (m *MemorySearchManager) searchKeywordFiles(ctx context.Context, query stri
 			continue
 		}
 		score := float64(hits) / float64(len(tokens))
-		results = append(results, memory.SearchResult{
+		results = append(results, memorycore.SearchResult{
 			Path:      path,
 			StartLine: 1,
 			EndLine:   1,
@@ -952,7 +951,7 @@ func (m *MemorySearchManager) ReadFile(ctx context.Context, relPath string, from
 	return map[string]any{"path": entry.Path, "text": strings.Join(slice, "\n")}, nil
 }
 
-func filterAndLimit(results []memory.SearchResult, minScore float64, maxResults int) []memory.SearchResult {
+func filterAndLimit(results []memorycore.SearchResult, minScore float64, maxResults int) []memorycore.SearchResult {
 	filtered := results[:0]
 	for _, result := range results {
 		if result.Score >= minScore {
@@ -968,7 +967,7 @@ func filterAndLimit(results []memory.SearchResult, minScore float64, maxResults 
 // clampInjectedChars enforces a total character budget across all search result snippets.
 // If maxChars <= 0, no clamping is applied. The last result that would exceed the budget
 // is truncated; subsequent results are dropped.
-func clampInjectedChars(results []memory.SearchResult, maxChars int) []memory.SearchResult {
+func clampInjectedChars(results []memorycore.SearchResult, maxChars int) []memorycore.SearchResult {
 	if maxChars <= 0 || len(results) == 0 {
 		return results
 	}
@@ -988,10 +987,10 @@ func clampInjectedChars(results []memory.SearchResult, maxChars int) []memory.Se
 	return results
 }
 
-func vectorResultsToSearch(results []memory.HybridVectorResult) []memory.SearchResult {
-	out := make([]memory.SearchResult, 0, len(results))
+func vectorResultsToSearch(results []memorycore.HybridVectorResult) []memorycore.SearchResult {
+	out := make([]memorycore.SearchResult, 0, len(results))
 	for _, entry := range results {
-		out = append(out, memory.SearchResult{
+		out = append(out, memorycore.SearchResult{
 			Path:      entry.Path,
 			StartLine: entry.StartLine,
 			EndLine:   entry.EndLine,
@@ -1003,10 +1002,10 @@ func vectorResultsToSearch(results []memory.HybridVectorResult) []memory.SearchR
 	return out
 }
 
-func keywordResultsToSearch(results []memory.HybridKeywordResult) []memory.SearchResult {
-	out := make([]memory.SearchResult, 0, len(results))
+func keywordResultsToSearch(results []memorycore.HybridKeywordResult) []memorycore.SearchResult {
+	out := make([]memorycore.SearchResult, 0, len(results))
 	for _, entry := range results {
-		out = append(out, memory.SearchResult{
+		out = append(out, memorycore.SearchResult{
 			Path:      entry.Path,
 			StartLine: entry.StartLine,
 			EndLine:   entry.EndLine,
@@ -1018,7 +1017,7 @@ func keywordResultsToSearch(results []memory.HybridKeywordResult) []memory.Searc
 	return out
 }
 
-func memoryManagerCacheKey(bridgeID, loginID, agentID string, cfg *memory.ResolvedConfig) string {
+func memoryManagerCacheKey(bridgeID, loginID, agentID string, cfg *memorycore.ResolvedConfig) string {
 	if cfg == nil {
 		return fmt.Sprintf("%s:%s:%s", bridgeID, loginID, agentID)
 	}
@@ -1203,6 +1202,6 @@ func resolveStatusExtraPaths(paths []string, workspaceDir string) []string {
 	return out
 }
 
-func resolveMemoryDBPath(_ *memory.ResolvedConfig, _ string) string {
+func resolveMemoryDBPath(_ *memorycore.ResolvedConfig, _ string) string {
 	return "bridge.sqlite (vfs)"
 }

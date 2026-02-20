@@ -3,17 +3,14 @@ package connector
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 
-	"github.com/google/uuid"
-
-	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/cron"
+	integrationcron "github.com/beeper/ai-bridge/pkg/integrations/cron"
 )
 
 const (
@@ -24,137 +21,105 @@ func (oc *AIClient) runCronIsolatedAgentJob(ctx context.Context, job cron.CronJo
 	if oc == nil || oc.UserLogin == nil {
 		return "error", "", "", errors.New("missing client")
 	}
-	runCtx, cancel := oc.mergeCronContext(ctx)
-	defer cancel()
-	agentID := resolveCronAgentID(job.AgentID, &oc.connector.Config)
-	portal, err := oc.getOrCreateCronRoom(runCtx, agentID, job.ID, job.Name)
-	if err != nil {
-		return "error", "", "", err
-	}
+	return integrationcron.RunCronIsolatedAgentJob(ctx, job, message, integrationcron.IsolatedRunnerDeps{
+		DeliveryTimeout: cronDeliveryTimeout,
+		MergeContext:    oc.mergeCronContext,
+		ResolveAgentID: func(raw string) string {
+			return resolveCronAgentID(raw, &oc.connector.Config)
+		},
+		GetOrCreateRoom: func(ctx context.Context, agentID, jobID, jobName string) (any, error) {
+			return oc.getOrCreateCronRoom(ctx, agentID, jobID, jobName)
+		},
+		BuildDispatchMetadata: func(room any, patch integrationcron.MetadataPatch) any {
+			portal, _ := room.(*bridgev2.Portal)
+			return oc.buildCronDispatchMetadata(portal, patch)
+		},
+		NormalizeThinkingLevel: normalizeThinkingLevel,
+		SessionKey:             cronSessionKey,
+		UpdateSessionEntry: func(ctx context.Context, sessionKey string, updater func(entry integrationcron.SessionEntry) integrationcron.SessionEntry) {
+			oc.updateCronSessionEntry(ctx, sessionKey, updater)
+		},
+		ResolveUserTimezone: func() string {
+			tz, _ := oc.resolveUserTimezone()
+			return tz
+		},
+		LastAssistantMessage: func(ctx context.Context, room any) (string, int64) {
+			portal, _ := room.(*bridgev2.Portal)
+			return oc.lastAssistantMessageInfo(ctx, portal)
+		},
+		DispatchInternalMessage: func(ctx context.Context, room any, metadata any, message string) error {
+			portal, _ := room.(*bridgev2.Portal)
+			if portal == nil {
+				return errors.New("missing portal")
+			}
+			metaSnapshot, _ := metadata.(*PortalMetadata)
+			if metaSnapshot == nil {
+				metaSnapshot = &PortalMetadata{}
+			}
+			_, _, dispatchErr := oc.dispatchInternalMessage(ctx, portal, metaSnapshot, message, "cron", false)
+			return dispatchErr
+		},
+		WaitForAssistantMessage: func(ctx context.Context, room any, lastID string, lastTimestamp int64) (integrationcron.AssistantMessage, bool) {
+			portal, _ := room.(*bridgev2.Portal)
+			msg, found := oc.waitForNewAssistantMessage(ctx, portal, lastID, lastTimestamp)
+			if !found || msg == nil {
+				return integrationcron.AssistantMessage{}, false
+			}
+			body := ""
+			model := ""
+			var promptTokens, completionTokens int64
+			if meta := messageMeta(msg); meta != nil {
+				body = strings.TrimSpace(meta.Body)
+				model = strings.TrimSpace(meta.Model)
+				promptTokens = meta.PromptTokens
+				completionTokens = meta.CompletionTokens
+			}
+			return integrationcron.AssistantMessage{
+				Body:             body,
+				Model:            model,
+				PromptTokens:     promptTokens,
+				CompletionTokens: completionTokens,
+			}, true
+		},
+		ResolveAckMaxChars: func(agentID string) int {
+			return resolveHeartbeatAckMaxChars(&oc.connector.Config, resolveHeartbeatConfig(&oc.connector.Config, agentID))
+		},
+		ResolveDeliveryTarget: func(agentID string, delivery *cron.CronDelivery) integrationcron.DeliveryTarget {
+			target := oc.resolveCronDeliveryTarget(agentID, delivery)
+			return integrationcron.DeliveryTarget{
+				Portal:  target.Portal,
+				RoomID:  target.RoomID.String(),
+				Channel: target.Channel,
+				Reason:  target.Reason,
+			}
+		},
+		SendDeliveryMessage: func(ctx context.Context, portal any, body string) error {
+			targetPortal, _ := portal.(*bridgev2.Portal)
+			if targetPortal == nil {
+				return errors.New("missing delivery portal")
+			}
+			return oc.sendPlainAssistantMessageWithResult(ctx, targetPortal, body)
+		},
+	})
+}
+
+func (oc *AIClient) buildCronDispatchMetadata(portal *bridgev2.Portal, patch integrationcron.MetadataPatch) *PortalMetadata {
 	meta := portalMeta(portal)
 	metaSnapshot := clonePortalMetadata(meta)
 	if metaSnapshot == nil {
 		metaSnapshot = &PortalMetadata{}
 	}
-	metaSnapshot.AgentID = agentID
-
-	// Apply model override for this run if provided.
-	if strings.TrimSpace(job.Payload.Model) != "" {
-		metaSnapshot.Model = strings.TrimSpace(job.Payload.Model)
+	metaSnapshot.AgentID = patch.AgentID
+	if patch.Model != nil {
+		metaSnapshot.Model = strings.TrimSpace(*patch.Model)
 	}
-	if strings.TrimSpace(job.Payload.Thinking) != "" {
-		if level, ok := normalizeThinkingLevel(job.Payload.Thinking); ok {
-			if level == "off" {
-				metaSnapshot.ReasoningEffort = ""
-			} else {
-				metaSnapshot.ReasoningEffort = level
-			}
-		}
+	if patch.ReasoningEffort != nil {
+		metaSnapshot.ReasoningEffort = strings.TrimSpace(*patch.ReasoningEffort)
 	}
-
-	sessionKey := cronSessionKey(agentID, job.ID)
-	runID := uuid.NewString()
-	oc.updateCronSessionEntry(runCtx, sessionKey, func(entry cronSessionEntry) cronSessionEntry {
-		entry.SessionID = runID
-		entry.UpdatedAt = time.Now().UnixMilli()
-		return entry
-	})
-
-	userTimezone, _ := oc.resolveUserTimezone()
-	cronMessage := buildCronMessage(job.ID, job.Name, message, userTimezone)
-
-	if job.Payload.AllowUnsafeExternal == nil || !*job.Payload.AllowUnsafeExternal {
-		cronMessage = wrapSafeExternalPrompt(cronMessage)
-	}
-
-	// Resolve delivery mode early so we can disable the message tool when
-	// delivery is planned (the cron runner handles delivery itself).
-	delivery := job.Delivery
-	deliveryMode := cron.CronDeliveryAnnounce
-	if delivery != nil && strings.TrimSpace(string(delivery.Mode)) != "" {
-		deliveryMode = delivery.Mode
-	}
-	if delivery == nil {
-		delivery = &cron.CronDelivery{Mode: deliveryMode}
-	}
-	if deliveryMode == cron.CronDeliveryAnnounce {
+	if patch.DisableMessageTool {
 		metaSnapshot.DisabledTools = []string{ToolNameMessage}
 	}
-
-	// Capture last assistant message before dispatch.
-	lastID, lastTimestamp := oc.lastAssistantMessageInfo(runCtx, portal)
-
-	_, _, dispatchErr := oc.dispatchInternalMessage(runCtx, portal, metaSnapshot, cronMessage, "cron", false)
-	if dispatchErr != nil {
-		return "error", "", "", dispatchErr
-	}
-
-	for {
-		if err := runCtx.Err(); err != nil {
-			return "error", "", "", errors.New("cron job timed out")
-		}
-		msg, found := oc.waitForNewAssistantMessage(runCtx, portal, lastID, lastTimestamp)
-		if found {
-			body := ""
-			if msg != nil {
-				if meta := messageMeta(msg); meta != nil {
-					body = strings.TrimSpace(meta.Body)
-					oc.updateCronSessionEntry(runCtx, sessionKey, func(entry cronSessionEntry) cronSessionEntry {
-						entry.Model = strings.TrimSpace(meta.Model)
-						entry.PromptTokens = meta.PromptTokens
-						entry.CompletionTokens = meta.CompletionTokens
-						total := meta.PromptTokens + meta.CompletionTokens
-						if total > 0 {
-							entry.TotalTokens = total
-						}
-						entry.UpdatedAt = time.Now().UnixMilli()
-						return entry
-					})
-				}
-			}
-			outputText = body
-			summary = truncateTextForCronSummary(body)
-			break
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	if outputText == "" {
-		return "error", "", "", errors.New("cron job timed out")
-	}
-
-	deliveryRequested := deliveryMode == cron.CronDeliveryAnnounce
-	bestEffort := delivery != nil && delivery.BestEffort != nil && *delivery.BestEffort
-
-	ackMax := resolveHeartbeatAckMaxChars(&oc.connector.Config, resolveHeartbeatConfig(&oc.connector.Config, agentID))
-	skipHeartbeatDelivery := deliveryRequested && isHeartbeatOnlyText(outputText, ackMax)
-
-	if deliveryRequested && !skipHeartbeatDelivery {
-		target := oc.resolveCronDeliveryTarget(agentID, delivery)
-		if target.Portal == nil || target.RoomID == "" {
-			reason := strings.TrimSpace(target.Reason)
-			if reason == "" {
-				reason = "no-target"
-			}
-			if bestEffort {
-				return "skipped", fmt.Sprintf("Delivery skipped (%s).", reason), outputText, nil
-			}
-			return "error", summary, outputText, fmt.Errorf("cron delivery failed: %s", reason)
-		}
-		if strings.TrimSpace(outputText) != "" {
-			// Bound delivery time. A blocked Matrix send can otherwise wedge the cron scheduler
-			// (which runs jobs inline on the timer goroutine).
-			deliveryCtx, cancel := context.WithTimeout(runCtx, cronDeliveryTimeout)
-			defer cancel()
-			if sendErr := oc.sendPlainAssistantMessageWithResult(deliveryCtx, target.Portal, outputText); sendErr != nil {
-				if bestEffort {
-					return "skipped", fmt.Sprintf("Delivery skipped (%s).", sendErr.Error()), outputText, nil
-				}
-				return "error", summary, outputText, fmt.Errorf("cron delivery failed: %w", sendErr)
-			}
-		}
-	}
-
-	return "ok", summary, outputText, nil
+	return metaSnapshot
 }
 
 // mergeCronContext ensures cron runs are cancelled on disconnect while preserving deadlines.
@@ -186,8 +151,6 @@ func (oc *AIClient) lastAssistantMessageInfo(ctx context.Context, portal *bridge
 	if portal == nil {
 		return "", 0
 	}
-	// Don't assume DB ordering (some implementations return newest-first).
-	// Scan for the newest assistant message by timestamp.
 	messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, 20)
 	if err != nil {
 		return "", 0
@@ -215,9 +178,6 @@ func (oc *AIClient) waitForNewAssistantMessage(ctx context.Context, portal *brid
 	if portal == nil {
 		return nil, false
 	}
-	// Don't assume DB ordering (some implementations return newest-first).
-	// Pick the newest assistant message that is strictly newer than the last
-	// snapshot, or has a different event ID at the same timestamp.
 	messages, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, 20)
 	if err != nil {
 		return nil, false
@@ -240,7 +200,6 @@ func (oc *AIClient) waitForNewAssistantMessage(ctx context.Context, portal *brid
 		if ts == lastTimestamp && idStr == lastID {
 			continue
 		}
-		// Prefer the newest matching assistant message.
 		if candidate == nil || ts > candidateTS {
 			candidate = msg
 			candidateTS = ts
@@ -250,28 +209,4 @@ func (oc *AIClient) waitForNewAssistantMessage(ctx context.Context, portal *brid
 		return nil, false
 	}
 	return candidate, true
-}
-
-func truncateTextForCronSummary(text string) string {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return ""
-	}
-	const max = 2000
-	if len(trimmed) <= max {
-		return trimmed
-	}
-	return strings.TrimSpace(trimmed[:max]) + "…"
-}
-
-func isHeartbeatOnlyText(text string, ackMax int) bool {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return true
-	}
-	shouldSkip, stripped, _ := agents.StripHeartbeatTokenWithMode(trimmed, agents.StripHeartbeatModeHeartbeat, ackMax)
-	if shouldSkip && strings.TrimSpace(stripped) == "" {
-		return true
-	}
-	return false
 }

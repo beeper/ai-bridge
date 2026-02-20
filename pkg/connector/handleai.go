@@ -233,17 +233,18 @@ func isInternalControlRoom(meta *PortalMetadata) bool {
 }
 
 func autoGreetingBlockReason(meta *PortalMetadata) string {
-	if meta.AutoGreetingSent {
-		return "already-sent"
+	if meta == nil {
+		return "missing-meta"
 	}
-	if isInternalControlRoom(meta) {
+	switch {
+	case isInternalControlRoom(meta):
 		return "internal-control-room"
-	}
-	if normalizeSendPolicyMode(meta.SendPolicy) == "deny" {
+	case normalizeSendPolicyMode(meta.SendPolicy) == "deny":
 		return "send-policy-deny"
-	}
-	if resolveAgentID(meta) == "" {
+	case resolveAgentID(meta) == "":
 		return "no-agent"
+	case meta.AutoGreetingSent:
+		return "already-sent"
 	}
 	return ""
 }
