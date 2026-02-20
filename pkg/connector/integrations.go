@@ -465,6 +465,40 @@ func integrationToolByName(name string) (ToolDefinition, bool) {
 	return ToolDefinition{}, false
 }
 
+func integrationPortalRoomType(meta *PortalMetadata) string {
+	if meta != nil && meta.IsSchedulerRoom {
+		return "scheduler"
+	}
+	return "ai"
+}
+
+func isIntegrationSessionKindAllowed(kind string) bool {
+	switch kind {
+	case "main", "group", "scheduler", "hook", "node", "other":
+		return true
+	default:
+		return false
+	}
+}
+
+func integrationSessionKind(currentRoomID string, portalRoomID string, meta *PortalMetadata) string {
+	if currentRoomID != "" && portalRoomID != "" && portalRoomID == currentRoomID {
+		return "main"
+	}
+	if meta != nil {
+		if meta.IsSchedulerRoom {
+			return "scheduler"
+		}
+		if strings.TrimSpace(meta.SubagentParentRoomID) != "" {
+			return "other"
+		}
+		if meta.IsBuilderRoom {
+			return "other"
+		}
+	}
+	return "group"
+}
+
 type coreToolIntegration struct {
 	client *AIClient
 }
@@ -720,15 +754,15 @@ func (a *memoryConnectorHostAdapter) GetManager(scope integrationruntime.ToolSco
 }
 
 func (a *memoryConnectorHostAdapter) StopForLogin(bridgeID, loginID string) {
-	stopMemoryManagersForLogin(bridgeID, loginID)
+	integrationmemory.StopManagersForLogin(bridgeID, loginID)
 }
 
 func (a *memoryConnectorHostAdapter) PurgeForLogin(ctx context.Context, bridgeID, loginID string, chunkIDsByAgent map[string][]string) {
-	purgeMemoryManagersForLogin(ctx, bridgeID, loginID, chunkIDsByAgent)
+	integrationmemory.PurgeManagersForLogin(ctx, bridgeID, loginID, chunkIDsByAgent)
 }
 
 type memoryManagerAdapter struct {
-	manager *MemorySearchManager
+	manager *integrationmemory.MemorySearchManager
 }
 
 func (m *memoryManagerAdapter) Status() integrationmemory.ProviderStatus {
@@ -891,5 +925,5 @@ func (m *memoryManagerAdapter) SyncWithProgress(ctx context.Context, onProgress 
 	if m == nil || m.manager == nil {
 		return errors.New("memory search unavailable")
 	}
-	return m.manager.syncWithProgress(ctx, "", true, onProgress)
+	return m.manager.SyncWithProgress(ctx, onProgress)
 }

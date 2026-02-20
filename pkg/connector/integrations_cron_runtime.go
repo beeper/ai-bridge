@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/beeper/ai-bridge/pkg/cron"
+	integrationcron "github.com/beeper/ai-bridge/pkg/integrations/cron"
 )
 
 type cronStoreBackendAdapter struct {
@@ -27,7 +28,7 @@ func (a *cronStoreBackendAdapter) Write(ctx context.Context, key string, data []
 	return a.backend.Write(ctx, key, data)
 }
 
-func (a *cronStoreBackendAdapter) List(ctx context.Context, prefix string) ([]cron.StoreEntry, error) {
+func (a *cronStoreBackendAdapter) List(ctx context.Context, prefix string) ([]integrationcron.StoreEntry, error) {
 	if a == nil || a.backend == nil {
 		return nil, errors.New("bridge state store not available")
 	}
@@ -35,18 +36,18 @@ func (a *cronStoreBackendAdapter) List(ctx context.Context, prefix string) ([]cr
 	if err != nil {
 		return nil, err
 	}
-	out := make([]cron.StoreEntry, 0, len(entries))
+	out := make([]integrationcron.StoreEntry, 0, len(entries))
 	for _, entry := range entries {
-		out = append(out, cron.StoreEntry{Key: entry.Key, Data: entry.Data})
+		out = append(out, integrationcron.StoreEntry{Key: entry.Key, Data: entry.Data})
 	}
 	return out, nil
 }
 
 func resolveCronEnabled(cfg *Config) bool {
-	if cfg == nil || cfg.Cron == nil || cfg.Cron.Enabled == nil {
-		return true
+	if cfg == nil || cfg.Cron == nil {
+		return integrationcron.ResolveCronEnabled(nil)
 	}
-	return *cfg.Cron.Enabled
+	return integrationcron.ResolveCronEnabled(cfg.Cron.Enabled)
 }
 
 func resolveCronStorePath(cfg *Config) string {
@@ -54,17 +55,14 @@ func resolveCronStorePath(cfg *Config) string {
 	if cfg != nil && cfg.Cron != nil {
 		raw = cfg.Cron.Store
 	}
-	return cron.ResolveCronStorePath(raw)
+	return integrationcron.ResolveCronStorePath(raw)
 }
 
 func resolveCronMaxConcurrentRuns(cfg *Config) int {
 	if cfg == nil || cfg.Cron == nil {
-		return 1
+		return integrationcron.ResolveCronMaxConcurrentRuns(0)
 	}
-	if cfg.Cron.MaxConcurrentRuns > 0 {
-		return cfg.Cron.MaxConcurrentRuns
-	}
-	return 1
+	return integrationcron.ResolveCronMaxConcurrentRuns(cfg.Cron.MaxConcurrentRuns)
 }
 
 func (oc *AIClient) buildCronService() *cron.CronService {
@@ -72,17 +70,17 @@ func (oc *AIClient) buildCronService() *cron.CronService {
 		return nil
 	}
 	storePath := resolveCronStorePath(&oc.connector.Config)
-	// Use a lazy wrapper so that each store operation gets a fresh backend
-	// with the current loginID (survives reconnection without stale state).
 	storeBackend := &cronStoreBackendAdapter{backend: &lazyStoreBackend{client: oc}}
-	deps := cron.CronServiceDeps{
-		NowMs:               func() int64 { return time.Now().UnixMilli() },
-		Log:                 cronLogger{log: oc.log},
-		StorePath:           storePath,
-		Store:               storeBackend,
-		MaxConcurrentRuns:   resolveCronMaxConcurrentRuns(&oc.connector.Config),
-		CronEnabled:         resolveCronEnabled(&oc.connector.Config),
-		ResolveJobTimeoutMs: func(job cron.CronJob) int64 { return oc.resolveCronJobTimeoutMs(job) },
+	return integrationcron.BuildCronService(integrationcron.ServiceBuildDeps{
+		NowMs:             func() int64 { return time.Now().UnixMilli() },
+		Log:               oc.log,
+		StorePath:         storePath,
+		Store:             storeBackend,
+		MaxConcurrentRuns: resolveCronMaxConcurrentRuns(&oc.connector.Config),
+		CronEnabled:       resolveCronEnabled(&oc.connector.Config),
+		ResolveJobTimeoutMs: func(job cron.CronJob) int64 {
+			return oc.resolveCronJobTimeoutMs(job)
+		},
 		EnqueueSystemEvent: func(ctx context.Context, text string, agentID string) error {
 			return oc.enqueueCronSystemEvent(ctx, text, agentID)
 		},
@@ -97,38 +95,18 @@ func (oc *AIClient) buildCronService() *cron.CronService {
 			return oc.runCronIsolatedAgentJob(ctx, job, message)
 		},
 		OnEvent: oc.onCronEvent,
-	}
-	return cron.NewCronService(deps)
+	})
 }
 
 func (oc *AIClient) resolveCronJobTimeoutMs(job cron.CronJob) int64 {
-	// Default to agent defaults for isolated jobs; main jobs use a short fixed default.
 	if oc == nil {
 		return 0
 	}
-	if job.SessionTarget != cron.CronSessionIsolated {
-		return int64((10 * time.Minute) / time.Millisecond)
-	}
-
-	// Base default from config agents.defaults.timeoutSeconds (fallback 600s).
 	defaultSeconds := 600
 	if cfg := &oc.connector.Config; cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.TimeoutSeconds > 0 {
 		defaultSeconds = cfg.Agents.Defaults.TimeoutSeconds
 	}
-	timeoutSeconds := defaultSeconds
-	if job.Payload.TimeoutSeconds != nil {
-		override := *job.Payload.TimeoutSeconds
-		switch {
-		case override == 0:
-			return int64((30 * 24 * time.Hour) / time.Millisecond)
-		case override > 0:
-			timeoutSeconds = override
-		}
-	}
-	if timeoutSeconds < 1 {
-		timeoutSeconds = 1
-	}
-	return int64(timeoutSeconds) * 1000
+	return integrationcron.ResolveCronJobTimeoutMs(job, defaultSeconds)
 }
 
 func (oc *AIClient) enqueueCronSystemEvent(ctx context.Context, text string, agentID string) error {
@@ -142,7 +120,6 @@ func (oc *AIClient) enqueueCronSystemEvent(ctx context.Context, text string, age
 		if err != nil {
 			oc.loggerForContext(context.Background()).Warn().Err(err).Str("agent_id", agentID).Msg("cron: unable to resolve heartbeat session for system event")
 		}
-		// Fallback to logical session key so the event isn't lost if room resolution is temporarily unavailable.
 		sessionKey = strings.TrimSpace(oc.resolveHeartbeatSession(agentID, hb).SessionKey)
 		if sessionKey == "" {
 			return nil
@@ -165,31 +142,22 @@ func (oc *AIClient) runHeartbeatImmediate(ctx context.Context, reason string) he
 	if oc == nil || oc.heartbeatRunner == nil {
 		return heartbeatRunResult{Status: "skipped", Reason: "disabled"}
 	}
-	_ = ctx // currently no ctx plumbing in HeartbeatRunner
+	_ = ctx
 	return oc.heartbeatRunner.run(reason)
 }
 
 func (oc *AIClient) onCronEvent(evt cron.CronEvent) {
-	if oc == nil || strings.TrimSpace(evt.JobID) == "" {
-		return
-	}
-	oc.log.Debug().Str("job_id", evt.JobID).Str("action", evt.Action).Str("status", evt.Status).Int64("duration_ms", evt.DurationMs).Msg("Cron event received")
-	if evt.Action != "finished" {
+	if oc == nil {
 		return
 	}
 	storePath := resolveCronStorePath(&oc.connector.Config)
-	path := cron.ResolveCronRunLogPath(storePath, evt.JobID)
-	entry := cronRunLogEntryFromEvent(evt)
-	backend := oc.bridgeStateBackend()
-	if backend == nil {
-		return
-	}
-	_ = cron.AppendCronRunLog(
-		context.Background(),
-		&cronStoreBackendAdapter{backend: &lazyStoreBackend{client: oc}},
-		path,
-		entry,
-		0,
-		0,
-	)
+	backend := &cronStoreBackendAdapter{backend: &lazyStoreBackend{client: oc}}
+	integrationcron.HandleCronEvent(evt, integrationcron.EventLogDeps{
+		StorePath: storePath,
+		Log:       newCronLogger(oc.log),
+		NowMs:     func() int64 { return time.Now().UnixMilli() },
+		AppendRunLog: func(ctx context.Context, path string, entry cron.CronRunLogEntry) error {
+			return cron.AppendCronRunLog(ctx, integrationcron.NewStoreBackendAdapter(backend), path, entry, 0, 0)
+		},
+	})
 }

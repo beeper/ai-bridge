@@ -4,20 +4,24 @@ import (
 	"strings"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
+	integrationcron "github.com/beeper/ai-bridge/pkg/integrations/cron"
 )
 
 func resolveCronAgentID(raw string, cfg *Config) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" || strings.EqualFold(trimmed, "main") {
-		return agents.DefaultAgentID
-	}
-	normalized := normalizeAgentID(trimmed)
-	if cfg != nil && cfg.Agents != nil {
-		for _, entry := range cfg.Agents.List {
-			if normalizeAgentID(entry.ID) == normalized {
-				return normalized
+	return integrationcron.ResolveCronAgentID(
+		raw,
+		agents.DefaultAgentID,
+		normalizeAgentID,
+		func(normalized string) bool {
+			if cfg == nil || cfg.Agents == nil {
+				return false
 			}
-		}
-	}
-	return agents.DefaultAgentID
+			for _, entry := range cfg.Agents.List {
+				if normalizeAgentID(entry.ID) == strings.TrimSpace(normalized) {
+					return true
+				}
+			}
+			return false
+		},
+	)
 }

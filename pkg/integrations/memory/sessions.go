@@ -1,4 +1,4 @@
-package connector
+package memory
 
 import (
 	"context"
@@ -24,64 +24,32 @@ type sessionPortal struct {
 	portalKey networkid.PortalKey
 }
 
-func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sessionKey, generation string) error {
-	if m == nil || m.client == nil {
-		return errors.New("memory search unavailable")
+func (m *MemorySearchManager) activeSessionPortals(ctx context.Context) (map[string]sessionPortal, error) {
+	if m == nil || m.runtime == nil {
+		return nil, errors.New("memory search unavailable")
 	}
-	// For shared portals (portal.Receiver == ""), only index sessions for portals that this login is
-	// actually in. Otherwise a login could accidentally index unrelated shared portals.
-	allowedShared := map[string]struct{}{}
-	if m.client.UserLogin != nil && m.client.UserLogin.Bridge != nil && m.client.UserLogin.Bridge.DB != nil {
-		if ups, err := m.client.UserLogin.Bridge.DB.UserPortal.GetAllForLogin(ctx, m.client.UserLogin.UserLogin); err == nil {
-			for _, up := range ups {
-				if up == nil {
-					continue
-				}
-				if up.Portal.Receiver != "" {
-					// Private portal keys are already scoped by receiver.
-					continue
-				}
-				allowedShared[up.Portal.String()] = struct{}{}
-			}
-		}
-	}
-
-	portals, err := m.client.UserLogin.Bridge.DB.Portal.GetAll(ctx)
+	items, err := m.runtime.ListSessionPortals(ctx, m.loginID, m.agentID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	active := make(map[string]sessionPortal)
-	for _, portal := range portals {
-		if portal == nil {
-			continue
-		}
-		if portal.MXID == "" {
-			continue
-		}
-		if portal.Receiver != "" && string(portal.Receiver) != m.loginID {
-			continue
-		}
-		if portal.Receiver == "" && len(allowedShared) > 0 {
-			if _, ok := allowedShared[portal.PortalKey.String()]; !ok {
-				continue
-			}
-		}
-		meta, ok := portal.Metadata.(*PortalMetadata)
-		if !ok || meta == nil {
-			continue
-		}
-		if meta.IsSchedulerRoom {
-			continue
-		}
-		if resolveAgentID(meta) != m.agentID {
-			continue
-		}
-		key := portal.PortalKey.String()
+	active := make(map[string]sessionPortal, len(items))
+	for _, item := range items {
+		key := strings.TrimSpace(item.Key)
 		if key == "" {
 			continue
 		}
-		active[key] = sessionPortal{key: key, portalKey: portal.PortalKey}
+		active[key] = sessionPortal{key: key, portalKey: item.PortalKey}
+	}
+	return active, nil
+}
+
+func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sessionKey, generation string) error {
+	if m == nil || m.runtime == nil {
+		return errors.New("memory search unavailable")
+	}
+	active, err := m.activeSessionPortals(ctx)
+	if err != nil {
+		return err
 	}
 
 	indexAll := force
@@ -192,51 +160,12 @@ func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sess
 // prepareSessions reads session data and computes embeddings without DB writes.
 // Returns prepared content for all sessions that need indexing.
 func (m *MemorySearchManager) prepareSessions(ctx context.Context, force bool, sessionKey, generation string) ([]*preparedContent, error) {
-	if m == nil || m.client == nil {
+	if m == nil || m.runtime == nil {
 		return nil, errors.New("memory search unavailable")
 	}
-	allowedShared := map[string]struct{}{}
-	if m.client.UserLogin != nil && m.client.UserLogin.Bridge != nil && m.client.UserLogin.Bridge.DB != nil {
-		if ups, err := m.client.UserLogin.Bridge.DB.UserPortal.GetAllForLogin(ctx, m.client.UserLogin.UserLogin); err == nil {
-			for _, up := range ups {
-				if up == nil || up.Portal.Receiver != "" {
-					continue
-				}
-				allowedShared[up.Portal.String()] = struct{}{}
-			}
-		}
-	}
-
-	portals, err := m.client.UserLogin.Bridge.DB.Portal.GetAll(ctx)
+	active, err := m.activeSessionPortals(ctx)
 	if err != nil {
 		return nil, err
-	}
-
-	active := make(map[string]sessionPortal)
-	for _, portal := range portals {
-		if portal == nil || portal.MXID == "" {
-			continue
-		}
-		if portal.Receiver != "" && string(portal.Receiver) != m.loginID {
-			continue
-		}
-		if portal.Receiver == "" && len(allowedShared) > 0 {
-			if _, ok := allowedShared[portal.PortalKey.String()]; !ok {
-				continue
-			}
-		}
-		meta, ok := portal.Metadata.(*PortalMetadata)
-		if !ok || meta == nil || meta.IsSchedulerRoom {
-			continue
-		}
-		if resolveAgentID(meta) != m.agentID {
-			continue
-		}
-		key := portal.PortalKey.String()
-		if key == "" {
-			continue
-		}
-		active[key] = sessionPortal{key: key, portalKey: portal.PortalKey}
 	}
 
 	indexAll := force
@@ -322,7 +251,7 @@ func (m *MemorySearchManager) prepareSessions(ctx context.Context, force bool, s
 
 // writeSessions writes pre-computed session content and performs session bookkeeping inside a transaction.
 func (m *MemorySearchManager) writeSessions(ctx context.Context, force bool, sessionKey string, prepared []*preparedContent, ops *pendingVectorOps) error {
-	if m == nil || m.client == nil {
+	if m == nil || m.runtime == nil {
 		return errors.New("memory search unavailable")
 	}
 	// Build a map of path -> preparedContent for quick lookup.
@@ -334,48 +263,9 @@ func (m *MemorySearchManager) writeSessions(ctx context.Context, force bool, ses
 	}
 
 	// Re-resolve active sessions for bookkeeping (state saves, stale cleanup, pruning).
-	allowedShared := map[string]struct{}{}
-	if m.client.UserLogin != nil && m.client.UserLogin.Bridge != nil && m.client.UserLogin.Bridge.DB != nil {
-		if ups, err := m.client.UserLogin.Bridge.DB.UserPortal.GetAllForLogin(ctx, m.client.UserLogin.UserLogin); err == nil {
-			for _, up := range ups {
-				if up == nil || up.Portal.Receiver != "" {
-					continue
-				}
-				allowedShared[up.Portal.String()] = struct{}{}
-			}
-		}
-	}
-
-	portals, err := m.client.UserLogin.Bridge.DB.Portal.GetAll(ctx)
+	active, err := m.activeSessionPortals(ctx)
 	if err != nil {
 		return err
-	}
-
-	active := make(map[string]sessionPortal)
-	for _, portal := range portals {
-		if portal == nil || portal.MXID == "" {
-			continue
-		}
-		if portal.Receiver != "" && string(portal.Receiver) != m.loginID {
-			continue
-		}
-		if portal.Receiver == "" && len(allowedShared) > 0 {
-			if _, ok := allowedShared[portal.PortalKey.String()]; !ok {
-				continue
-			}
-		}
-		meta, ok := portal.Metadata.(*PortalMetadata)
-		if !ok || meta == nil || meta.IsSchedulerRoom {
-			continue
-		}
-		if resolveAgentID(meta) != m.agentID {
-			continue
-		}
-		key := portal.PortalKey.String()
-		if key == "" {
-			continue
-		}
-		active[key] = sessionPortal{key: key, portalKey: portal.PortalKey}
 	}
 
 	indexAll := force
@@ -538,7 +428,7 @@ func (m *MemorySearchManager) computeSessionDelta(ctx context.Context, portalKey
 			maxRowID.Int64 = rowid
 		}
 		meta := parseSessionMetadata(rawMeta)
-		if meta == nil || !shouldIncludeInHistory(meta) {
+		if meta == nil || !shouldIncludeSessionInHistory(meta) {
 			continue
 		}
 		role := strings.ToLower(strings.TrimSpace(meta.Role))
@@ -591,7 +481,7 @@ func (m *MemorySearchManager) buildSessionContent(ctx context.Context, portalKey
 			maxRowID = rowid
 		}
 		meta := parseSessionMetadata(rawMeta)
-		if meta == nil || !shouldIncludeInHistory(meta) {
+		if meta == nil || !shouldIncludeSessionInHistory(meta) {
 			continue
 		}
 		role := strings.ToLower(strings.TrimSpace(meta.Role))
@@ -719,15 +609,35 @@ func (m *MemorySearchManager) removeStaleSessions(ctx context.Context, active ma
 	return rows.Err()
 }
 
-func parseSessionMetadata(raw []byte) *MessageMetadata {
+type sessionMessageMetadata struct {
+	Body               string `json:"body,omitempty"`
+	Role               string `json:"role,omitempty"`
+	AgentID            string `json:"agent_id,omitempty"`
+	ExcludeFromHistory bool   `json:"exclude_from_history,omitempty"`
+}
+
+func parseSessionMetadata(raw []byte) *sessionMessageMetadata {
 	if len(raw) == 0 {
 		return nil
 	}
-	var meta MessageMetadata
+	var meta sessionMessageMetadata
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return nil
 	}
 	return &meta
+}
+
+func shouldIncludeSessionInHistory(meta *sessionMessageMetadata) bool {
+	if meta == nil || meta.Body == "" {
+		return false
+	}
+	if meta.ExcludeFromHistory {
+		return false
+	}
+	if meta.Role != "user" && meta.Role != "assistant" {
+		return false
+	}
+	return true
 }
 
 func normalizeSessionText(text string) string {

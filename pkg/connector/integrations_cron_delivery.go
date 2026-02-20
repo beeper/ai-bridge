@@ -4,71 +4,56 @@ import (
 	"context"
 	"strings"
 
+	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/ai-bridge/pkg/cron"
+	integrationcron "github.com/beeper/ai-bridge/pkg/integrations/cron"
 )
 
 func (oc *AIClient) resolveCronDeliveryTarget(agentID string, delivery *cron.CronDelivery) deliveryTarget {
-	if delivery == nil {
-		return deliveryTarget{Reason: "no-delivery"}
-	}
-
-	channel := strings.TrimSpace(delivery.Channel)
-	if channel == "" {
-		channel = "last"
-	}
-	lowered := strings.ToLower(channel)
-	if lowered != "last" && lowered != "matrix" {
-		return deliveryTarget{Channel: lowered, Reason: "unsupported-channel"}
-	}
-
-	target := strings.TrimSpace(delivery.To)
-	if target == "" && lowered == "last" {
-		storeRef, mainKey := oc.resolveHeartbeatMainSessionRef(agentID)
-		if entry, ok := oc.getSessionEntry(context.Background(), storeRef, mainKey); ok {
-			lastChannel := strings.TrimSpace(entry.LastChannel)
-			if lastChannel == "" || strings.EqualFold(lastChannel, "matrix") {
-				candidate := strings.TrimSpace(entry.LastTo)
-				// Stale agent routing guard: skip if the resolved portal is now
-				// assigned to a different agent (matches resolveHeartbeatDeliveryTarget
-				// and resolveHeartbeatSessionPortal).
-				if candidate != "" && strings.HasPrefix(candidate, "!") {
-					if p := oc.portalByRoomID(context.Background(), id.RoomID(candidate)); p != nil {
-						if meta := portalMeta(p); meta != nil && normalizeAgentID(meta.AgentID) != normalizeAgentID(agentID) {
-							// Stale — fall through to lastActivePortal / defaultChatPortal.
-						} else {
-							target = candidate
-						}
-					} else {
-						target = candidate
-					}
+	resolved := integrationcron.ResolveCronDeliveryTarget(agentID, delivery, integrationcron.DeliveryResolverDeps{
+		ResolveLastTarget: func(agentID string) (string, string, bool) {
+			storeRef, mainKey := oc.resolveHeartbeatMainSessionRef(agentID)
+			entry, ok := oc.getSessionEntry(context.Background(), storeRef, mainKey)
+			if !ok {
+				return "", "", false
+			}
+			return entry.LastChannel, entry.LastTo, true
+		},
+		IsStaleTarget: func(roomID, agentID string) bool {
+			candidate := strings.TrimSpace(roomID)
+			if candidate == "" || !strings.HasPrefix(candidate, "!") {
+				return false
+			}
+			if p := oc.portalByRoomID(context.Background(), id.RoomID(candidate)); p != nil {
+				if meta := portalMeta(p); meta != nil && normalizeAgentID(meta.AgentID) != normalizeAgentID(agentID) {
+					return true
 				}
 			}
-		}
-		if target == "" {
+			return false
+		},
+		LastActiveRoomID: func(agentID string) string {
 			if portal := oc.lastActivePortal(agentID); portal != nil && portal.MXID != "" {
-				target = portal.MXID.String()
+				return portal.MXID.String()
 			}
-		}
-		if target == "" {
+			return ""
+		},
+		DefaultChatRoomID: func() string {
 			if portal := oc.defaultChatPortal(); portal != nil && portal.MXID != "" {
-				target = portal.MXID.String()
+				return portal.MXID.String()
 			}
-		}
+			return ""
+		},
+		ResolvePortalByRoom: func(roomID string) any {
+			return oc.portalByRoomID(context.Background(), id.RoomID(roomID))
+		},
+		IsLoggedIn: oc.IsLoggedIn,
+	})
+	out := deliveryTarget{Channel: resolved.Channel, Reason: resolved.Reason}
+	if portal, ok := resolved.Portal.(*bridgev2.Portal); ok && portal != nil {
+		out.Portal = portal
+		out.RoomID = portal.MXID
 	}
-	if target == "" {
-		return deliveryTarget{Channel: "matrix", Reason: "no-target"}
-	}
-	if !strings.HasPrefix(target, "!") {
-		return deliveryTarget{Channel: "matrix", Reason: "invalid-target"}
-	}
-	portal := oc.portalByRoomID(context.Background(), id.RoomID(target))
-	if portal == nil {
-		return deliveryTarget{Channel: "matrix", Reason: "no-target"}
-	}
-	if !oc.IsLoggedIn() {
-		return deliveryTarget{Channel: "matrix", Reason: "channel-not-ready"}
-	}
-	return deliveryTarget{Portal: portal, RoomID: portal.MXID, Channel: "matrix"}
+	return out
 }

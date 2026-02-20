@@ -1,4 +1,4 @@
-package connector
+package memory
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/memory"
+	memorycore "github.com/beeper/ai-bridge/pkg/memory"
 )
 
 const (
@@ -34,9 +34,9 @@ func (m *MemorySearchManager) estimateEmbeddingTokens(text string) int {
 	return int(math.Ceil(float64(len(text)) / float64(embeddingApproxCharsPerToken)))
 }
 
-func (m *MemorySearchManager) buildEmbeddingBatches(chunks []memory.Chunk) [][]memory.Chunk {
-	batches := make([][]memory.Chunk, 0)
-	current := make([]memory.Chunk, 0)
+func (m *MemorySearchManager) buildEmbeddingBatches(chunks []memorycore.Chunk) [][]memorycore.Chunk {
+	batches := make([][]memorycore.Chunk, 0)
+	current := make([]memorycore.Chunk, 0)
 	currentTokens := 0
 
 	for _, chunk := range chunks {
@@ -48,7 +48,7 @@ func (m *MemorySearchManager) buildEmbeddingBatches(chunks []memory.Chunk) [][]m
 			currentTokens = 0
 		}
 		if len(current) == 0 && estimate > embeddingBatchMaxTokens {
-			batches = append(batches, []memory.Chunk{chunk})
+			batches = append(batches, []memorycore.Chunk{chunk})
 			continue
 		}
 		current = append(current, chunk)
@@ -61,7 +61,7 @@ func (m *MemorySearchManager) buildEmbeddingBatches(chunks []memory.Chunk) [][]m
 	return batches
 }
 
-func (m *MemorySearchManager) embedChunksInBatches(ctx context.Context, chunks []memory.Chunk) ([][]float64, error) {
+func (m *MemorySearchManager) embedChunksInBatches(ctx context.Context, chunks []memorycore.Chunk) ([][]float64, error) {
 	if len(chunks) == 0 {
 		return nil, nil
 	}
@@ -86,7 +86,7 @@ func (m *MemorySearchManager) embedChunksInBatches(ctx context.Context, chunks [
 		return embeddings, nil
 	}
 
-	missingChunks := make([]memory.Chunk, len(missing))
+	missingChunks := make([]memorycore.Chunk, len(missing))
 	for i, item := range missing {
 		missingChunks[i] = item.chunk
 	}
@@ -110,7 +110,7 @@ func (m *MemorySearchManager) embedChunksInBatches(ctx context.Context, chunks [
 				embedding = batchEmbeddings[i]
 			}
 			embeddings[item.index] = embedding
-			toCache = append(toCache, missingChunk{index: item.index, chunk: memory.Chunk{
+			toCache = append(toCache, missingChunk{index: item.index, chunk: memorycore.Chunk{
 				StartLine: chunk.StartLine,
 				EndLine:   chunk.EndLine,
 				Text:      chunk.Text,
@@ -198,7 +198,7 @@ func withTimeout[T any](ctx context.Context, timeout time.Duration, message stri
 	return zero, err
 }
 
-func (m *MemorySearchManager) loadEmbeddingCache(ctx context.Context, chunks []memory.Chunk) map[string][]float64 {
+func (m *MemorySearchManager) loadEmbeddingCache(ctx context.Context, chunks []memorycore.Chunk) map[string][]float64 {
 	if m == nil || !m.cfg.Cache.Enabled || len(chunks) == 0 {
 		return nil
 	}

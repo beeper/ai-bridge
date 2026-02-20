@@ -169,12 +169,3 @@ func parseChatSlug(slug string) (int, bool) {
 func MakeMessageID(eventID id.EventID) networkid.MessageID {
 	return bridgeadapter.MatrixMessageID(eventID)
 }
-
-// schedulerPortalKey creates a deterministic portal key for a scheduler job room.
-// Format: "openai:{loginID}:scheduler:{agentID}:{jobID}"
-func schedulerPortalKey(loginID networkid.UserLoginID, agentID, jobID string) networkid.PortalKey {
-	return networkid.PortalKey{
-		ID:       networkid.PortalID(fmt.Sprintf("openai:%s:scheduler:%s:%s", loginID, url.PathEscape(agentID), url.PathEscape(jobID))),
-		Receiver: loginID,
-	}
-}

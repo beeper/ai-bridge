@@ -1,4 +1,4 @@
-package connector
+package memory
 
 import (
 	"context"
@@ -36,7 +36,7 @@ func (m *MemorySearchManager) Close() {
 	m.mu.Unlock()
 }
 
-func purgeMemoryManagersForLogin(ctx context.Context, bridgeID, loginID string, chunkIDsByAgent map[string][]string) {
+func PurgeManagersForLogin(ctx context.Context, bridgeID, loginID string, chunkIDsByAgent map[string][]string) {
 	if strings.TrimSpace(bridgeID) == "" || strings.TrimSpace(loginID) == "" {
 		return
 	}
@@ -69,7 +69,7 @@ func purgeMemoryManagersForLogin(ctx context.Context, bridgeID, loginID string, 
 
 // stopMemoryManagersForLogin stops all memory managers for a login without deleting vector rows.
 // Used during disconnect to release goroutines and timers.
-func stopMemoryManagersForLogin(bridgeID, loginID string) {
+func StopManagersForLogin(bridgeID, loginID string) {
 	if strings.TrimSpace(bridgeID) == "" || strings.TrimSpace(loginID) == "" {
 		return
 	}

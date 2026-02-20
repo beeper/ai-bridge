@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	integrationmemory "github.com/beeper/ai-bridge/pkg/integrations/memory"
 	"go.mau.fi/util/dbutil"
 	"maunium.net/go/mautrix/bridgev2"
 )
@@ -25,7 +26,7 @@ func purgeRecallLoginDataBestEffort(
 	if client, ok := login.Client.(*AIClient); ok && client != nil && client.recallModule() != nil {
 		client.recallModule().PurgeForLogin(ctx, bridgeID, loginID, chunkIDsByAgent)
 	} else {
-		purgeMemoryManagersForLogin(ctx, bridgeID, loginID, chunkIDsByAgent)
+		integrationmemory.PurgeManagersForLogin(ctx, bridgeID, loginID, chunkIDsByAgent)
 	}
 
 	// Best-effort: delete vector rows using a dedicated SQLite connection with the extension loaded.
@@ -185,4 +186,8 @@ func purgeVectorRowsBestEffort(ctx context.Context, login *bridgev2.UserLogin, b
          )`,
 		bridgeID, loginID,
 	)
+}
+
+type loadExtensionEnabler interface {
+	EnableLoadExtension(bool) error
 }
