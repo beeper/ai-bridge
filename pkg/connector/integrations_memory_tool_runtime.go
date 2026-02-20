@@ -40,6 +40,10 @@ func executeRecallSearch(ctx context.Context, args map[string]any) (string, erro
 	if btc == nil {
 		return "", errors.New("memory_search requires bridge context")
 	}
+	var recall *integrationmemory.Integration
+	if btc.Client != nil {
+		recall = btc.Client.recallModule()
+	}
 
 	mode := ""
 	if raw, ok := args["mode"].(string); ok {
@@ -68,7 +72,7 @@ func executeRecallSearch(ctx context.Context, args map[string]any) (string, erro
 	}
 
 	meta := portalMeta(btc.Portal)
-	if btc.Client == nil || btc.Client.recallIntegration == nil {
+	if btc.Client == nil || recall == nil {
 		payload := recallSearchOutput{
 			Results:  []recallSearchResult{},
 			Disabled: true,
@@ -77,7 +81,7 @@ func executeRecallSearch(ctx context.Context, args map[string]any) (string, erro
 		output, _ := json.MarshalIndent(payload, "", "  ")
 		return string(output), nil
 	}
-	manager, errMsg := btc.Client.recallIntegration.GetManager(btc.Client.toolScope(btc.Portal, meta))
+	manager, errMsg := recall.GetManager(btc.Client.toolScope(btc.Portal, meta))
 	if manager == nil {
 		payload := recallSearchOutput{
 			Results:  []recallSearchResult{},
@@ -165,6 +169,10 @@ func executeRecallGet(ctx context.Context, args map[string]any) (string, error) 
 	if btc == nil {
 		return "", errors.New("memory_get requires bridge context")
 	}
+	var recall *integrationmemory.Integration
+	if btc.Client != nil {
+		recall = btc.Client.recallModule()
+	}
 
 	pathRaw, ok := args["path"].(string)
 	path := strings.TrimSpace(pathRaw)
@@ -173,7 +181,7 @@ func executeRecallGet(ctx context.Context, args map[string]any) (string, error) 
 	}
 
 	meta := portalMeta(btc.Portal)
-	if btc.Client == nil || btc.Client.recallIntegration == nil {
+	if btc.Client == nil || recall == nil {
 		payload := recallGetOutput{
 			Path:     path,
 			Text:     "",
@@ -183,7 +191,7 @@ func executeRecallGet(ctx context.Context, args map[string]any) (string, error) 
 		output, _ := json.MarshalIndent(payload, "", "  ")
 		return string(output), nil
 	}
-	manager, errMsg := btc.Client.recallIntegration.GetManager(btc.Client.toolScope(btc.Portal, meta))
+	manager, errMsg := recall.GetManager(btc.Client.toolScope(btc.Portal, meta))
 	if manager == nil {
 		payload := recallGetOutput{
 			Path:     path,
