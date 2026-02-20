@@ -1,4 +1,4 @@
-package connector
+package memory
 
 import (
 	"cmp"
@@ -15,7 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/beeper/ai-bridge/pkg/memory"
+	memorycore "github.com/beeper/ai-bridge/pkg/memory"
 	"github.com/beeper/ai-bridge/pkg/memory/embedding"
 	"github.com/beeper/ai-bridge/pkg/textfs"
 )
@@ -515,7 +515,7 @@ type preparedContent struct {
 	Path       string
 	Source     string
 	Generation string
-	Chunks     []memory.Chunk
+	Chunks     []memorycore.Chunk
 	Embeddings [][]float64
 }
 
@@ -523,7 +523,7 @@ type preparedContent struct {
 // No DB writes happen here — safe to call outside a transaction.
 func (m *MemorySearchManager) prepareContent(ctx context.Context, path, source, content, generation string) (*preparedContent, error) {
 	cleanContent := normalizeNewlines(content)
-	chunks := memory.ChunkMarkdown(cleanContent, m.cfg.Chunking.Tokens, m.cfg.Chunking.Overlap)
+	chunks := memorycore.ChunkMarkdown(cleanContent, m.cfg.Chunking.Tokens, m.cfg.Chunking.Overlap)
 	filtered := chunks[:0]
 	for _, chunk := range chunks {
 		if strings.TrimSpace(chunk.Text) == "" {
@@ -864,10 +864,10 @@ func (m *MemorySearchManager) deleteOldGenerations(ctx context.Context, generati
 
 type missingChunk struct {
 	index int
-	chunk memory.Chunk
+	chunk memorycore.Chunk
 }
 
-func (m *MemorySearchManager) embedChunks(ctx context.Context, chunks []memory.Chunk, relPath, source string) ([][]float64, error) {
+func (m *MemorySearchManager) embedChunks(ctx context.Context, chunks []memorycore.Chunk, relPath, source string) ([][]float64, error) {
 	embeddings := make([][]float64, len(chunks))
 	var missing []missingChunk
 	for i, chunk := range chunks {
@@ -947,7 +947,7 @@ func (m *MemorySearchManager) embedChunks(ctx context.Context, chunks []memory.C
 		}
 	}
 
-	missingChunks := make([]memory.Chunk, len(missing))
+	missingChunks := make([]memorycore.Chunk, len(missing))
 	for i, item := range missing {
 		missingChunks[i] = item.chunk
 	}
@@ -969,10 +969,10 @@ func (m *MemorySearchManager) embedChunksWithOpenAIBatch(
 	relPath string,
 	source string,
 ) (map[string][]float64, error) {
-	if m == nil || m.client == nil {
+	if m == nil || m.runtime == nil {
 		return nil, errors.New("memory search unavailable")
 	}
-	apiKey, baseURL, headers := resolveDirectOpenAIEmbeddingConfig(m.client, m.cfg)
+	apiKey, baseURL, headers := m.runtime.ResolveDirectOpenAIEmbeddingConfig(m.cfg)
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, errors.New("openai embeddings require api_key")
 	}
@@ -1007,10 +1007,10 @@ func (m *MemorySearchManager) embedChunksWithGeminiBatch(
 	relPath string,
 	source string,
 ) (map[string][]float64, error) {
-	if m == nil {
+	if m == nil || m.runtime == nil {
 		return nil, errors.New("memory search unavailable")
 	}
-	apiKey, baseURL, headers := resolveGeminiEmbeddingConfig(m.client, m.cfg)
+	apiKey, baseURL, headers := m.runtime.ResolveGeminiEmbeddingConfig(m.cfg)
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, errors.New("gemini embeddings require api_key")
 	}
@@ -1107,7 +1107,7 @@ func maybePruneEmbeddingCache(ctx context.Context, m *MemorySearchManager) {
 	)
 }
 
-func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float64, limit int, sources []string, pathPrefix string, indexGen string) ([]memory.HybridVectorResult, error) {
+func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float64, limit int, sources []string, pathPrefix string, indexGen string) ([]memorycore.HybridVectorResult, error) {
 	if !m.cfg.Store.Vector.Enabled {
 		return nil, nil
 	}
@@ -1123,7 +1123,7 @@ func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float
 		args = append(args, pathArgs...)
 		args = append(args, genArgs...)
 		args = append(args, limit)
-		var vecResults []memory.HybridVectorResult
+		var vecResults []memorycore.HybridVectorResult
 		err := m.queryVectorCollect(ctx,
 			fmt.Sprintf(`SELECT c.id, c.path, c.start_line, c.end_line, c.text, c.source,
                vec_distance_cosine(v.embedding, ?) AS dist
@@ -1133,7 +1133,7 @@ func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float
              ORDER BY dist ASC
              LIMIT ?`, memoryVectorTable, filterSQL, pathSQL, genSQL),
 			func(rows *sql.Rows) error {
-				vecResults = make([]memory.HybridVectorResult, 0, limit)
+				vecResults = make([]memorycore.HybridVectorResult, 0, limit)
 				for rows.Next() {
 					var id, path, text, source string
 					var startLine, endLine int
@@ -1141,7 +1141,7 @@ func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float
 					if err := rows.Scan(&id, &path, &startLine, &endLine, &text, &source, &dist); err != nil {
 						return err
 					}
-					vecResults = append(vecResults, memory.HybridVectorResult{
+					vecResults = append(vecResults, memorycore.HybridVectorResult{
 						ID:          id,
 						Path:        path,
 						StartLine:   startLine,
@@ -1182,7 +1182,7 @@ func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float
 	defer rows.Close()
 
 	type scored struct {
-		result memory.HybridVectorResult
+		result memorycore.HybridVectorResult
 		score  float64
 	}
 	var scoredResults []scored
@@ -1195,7 +1195,7 @@ func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float
 		embedding := parseEmbedding(embeddingRaw)
 		score := cosineSimilarity(queryVec, embedding)
 		scoredResults = append(scoredResults, scored{
-			result: memory.HybridVectorResult{
+			result: memorycore.HybridVectorResult{
 				ID:          id,
 				Path:        path,
 				StartLine:   startLine,
@@ -1216,18 +1216,18 @@ func (m *MemorySearchManager) searchVector(ctx context.Context, queryVec []float
 	if len(scoredResults) > limit {
 		scoredResults = scoredResults[:limit]
 	}
-	results := make([]memory.HybridVectorResult, 0, len(scoredResults))
+	results := make([]memorycore.HybridVectorResult, 0, len(scoredResults))
 	for _, entry := range scoredResults {
 		results = append(results, entry.result)
 	}
 	return results, nil
 }
 
-func (m *MemorySearchManager) searchKeyword(ctx context.Context, query string, limit int, sources []string, pathPrefix string, indexGen string) ([]memory.HybridKeywordResult, error) {
+func (m *MemorySearchManager) searchKeyword(ctx context.Context, query string, limit int, sources []string, pathPrefix string, indexGen string) ([]memorycore.HybridKeywordResult, error) {
 	if !m.ftsAvailable || limit <= 0 {
 		return nil, nil
 	}
-	ftsQuery := memory.BuildFtsQuery(query)
+	ftsQuery := memorycore.BuildFtsQuery(query)
 	if ftsQuery == "" {
 		return nil, nil
 	}
@@ -1252,7 +1252,7 @@ func (m *MemorySearchManager) searchKeyword(ctx context.Context, query string, l
 	}
 	defer rows.Close()
 
-	var results []memory.HybridKeywordResult
+	var results []memorycore.HybridKeywordResult
 	for rows.Next() {
 		var id, path, source, text string
 		var startLine, endLine int
@@ -1260,8 +1260,8 @@ func (m *MemorySearchManager) searchKeyword(ctx context.Context, query string, l
 		if err := rows.Scan(&id, &path, &source, &startLine, &endLine, &text, &rank); err != nil {
 			return nil, err
 		}
-		score := memory.BM25RankToScore(rank)
-		results = append(results, memory.HybridKeywordResult{
+		score := memorycore.BM25RankToScore(rank)
+		results = append(results, memorycore.HybridKeywordResult{
 			ID:        id,
 			Path:      path,
 			StartLine: startLine,

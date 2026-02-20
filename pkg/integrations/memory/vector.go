@@ -1,4 +1,4 @@
-package connector
+package memory
 
 import (
 	"context"

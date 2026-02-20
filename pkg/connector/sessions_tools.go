@@ -37,7 +37,7 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 	allowedKinds := make(map[string]struct{})
 	for _, kind := range kindsRaw {
 		key := strings.ToLower(strings.TrimSpace(kind))
-		if key == "main" || key == "group" || key == "scheduler" || key == "hook" || key == "node" || key == "other" {
+		if isIntegrationSessionKindAllowed(key) {
 			allowedKinds[key] = struct{}{}
 		}
 	}
@@ -563,21 +563,11 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 }
 
 func resolveSessionKind(current id.RoomID, portal *bridgev2.Portal, meta *PortalMetadata) string {
-	if current != "" && portal != nil && portal.MXID == current {
-		return "main"
+	portalRoomID := ""
+	if portal != nil && portal.MXID != "" {
+		portalRoomID = portal.MXID.String()
 	}
-	if meta != nil {
-		if meta.IsSchedulerRoom {
-			return "scheduler"
-		}
-		if strings.TrimSpace(meta.SubagentParentRoomID) != "" {
-			return "other"
-		}
-		if meta.IsBuilderRoom {
-			return "other"
-		}
-	}
-	return "group"
+	return integrationSessionKind(string(current), portalRoomID, meta)
 }
 
 func isForbiddenSessionSendError(errText string) bool {
