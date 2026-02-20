@@ -32,7 +32,6 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
-	"github.com/beeper/ai-bridge/pkg/cron"
 )
 
 var (
@@ -306,9 +305,13 @@ type AIClient struct {
 	queueTyping   map[id.RoomID]*TypingController
 
 	// Cron + heartbeat
-	cronService     *cron.CronService
-	heartbeatRunner *HeartbeatRunner
-	heartbeatWake   *HeartbeatWake
+	schedulerIntegration *schedulerIntegrationType
+	recallIntegration    *recallIntegrationType
+	heartbeatRunner      *HeartbeatRunner
+	heartbeatWake        *HeartbeatWake
+
+	toolRegistry   *toolIntegrationRegistry
+	promptRegistry *promptIntegrationRegistry
 
 	// Model catalog cache (VFS-backed)
 	modelCatalogMu     sync.Mutex
@@ -461,7 +464,7 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 
 	oc.heartbeatWake = &HeartbeatWake{log: oc.log}
 	oc.heartbeatRunner = NewHeartbeatRunner(oc)
-	oc.cronService = oc.buildCronService()
+	oc.initIntegrations()
 
 	// Seed last-heartbeat snapshot from persisted login metadata (command-only surface).
 	if meta != nil && meta.LastHeartbeatEvent != nil {
@@ -1013,15 +1016,15 @@ func (oc *AIClient) Connect(ctx context.Context) {
 	if oc.heartbeatRunner != nil {
 		oc.heartbeatRunner.Start()
 	}
-	if oc.cronService != nil {
-		if err := oc.cronService.Start(); err != nil {
-			oc.loggerForContext(ctx).Warn().Err(err).Msg("cron: failed to start scheduler, scheduling retry")
-			go oc.retryCronStart(oc.disconnectCtx)
+	if oc.schedulerIntegration != nil {
+		if err := oc.schedulerIntegration.Start(ctx); err != nil {
+			oc.loggerForContext(ctx).Warn().Err(err).Msg("scheduler: failed to start, scheduling retry")
+			go oc.retrySchedulerStart(oc.disconnectCtx)
 		}
 	}
 }
 
-func (oc *AIClient) retryCronStart(ctx context.Context) {
+func (oc *AIClient) retrySchedulerStart(ctx context.Context) {
 	delays := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second, 60 * time.Second}
 	for _, d := range delays {
 		select {
@@ -1029,14 +1032,17 @@ func (oc *AIClient) retryCronStart(ctx context.Context) {
 			return
 		case <-time.After(d):
 		}
-		if err := oc.cronService.Start(); err != nil {
-			oc.loggerForContext(ctx).Warn().Err(err).Dur("retryDelay", d).Msg("cron: start retry failed")
+		if oc.schedulerIntegration == nil {
+			return
+		}
+		if err := oc.schedulerIntegration.Start(ctx); err != nil {
+			oc.loggerForContext(ctx).Warn().Err(err).Dur("retryDelay", d).Msg("scheduler: start retry failed")
 			continue
 		}
-		oc.loggerForContext(ctx).Info().Msg("cron: start retry succeeded")
+		oc.loggerForContext(ctx).Info().Msg("scheduler: start retry succeeded")
 		return
 	}
-	oc.loggerForContext(ctx).Error().Msg("cron: all start retries exhausted")
+	oc.loggerForContext(ctx).Error().Msg("scheduler: all start retries exhausted")
 }
 
 func (oc *AIClient) Disconnect() {
@@ -1052,18 +1058,20 @@ func (oc *AIClient) Disconnect() {
 	}
 	oc.loggedIn.Store(false)
 
-	if oc.cronService != nil {
-		oc.cronService.Stop()
+	if oc.schedulerIntegration != nil {
+		oc.schedulerIntegration.Stop()
 	}
 	if oc.heartbeatRunner != nil {
 		oc.heartbeatRunner.Stop()
 	}
 
-	// Stop all memory search managers for this login (releases goroutines/timers).
+	// Stop all recall managers for this login (releases goroutines/timers).
 	if oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.DB != nil {
 		bridgeID := string(oc.UserLogin.Bridge.DB.BridgeID)
 		loginID := string(oc.UserLogin.ID)
-		stopMemoryManagersForLogin(bridgeID, loginID)
+		if oc.recallIntegration != nil {
+			oc.recallIntegration.StopForLogin(bridgeID, loginID)
+		}
 	}
 
 	// Clean up per-room maps to prevent unbounded growth
@@ -2248,9 +2256,7 @@ func (oc *AIClient) buildPromptWithLinkContext(
 	if err != nil {
 		return nil, err
 	}
-	if meta == nil || !meta.IsRawMode {
-		prompt = oc.injectMemoryContext(ctx, portal, meta, prompt)
-	}
+	prompt = oc.augmentPromptWithIntegrations(ctx, portal, meta, prompt)
 
 	// Build final message with link context
 	isRaw := meta != nil && meta.IsRawMode
@@ -2360,9 +2366,7 @@ func (oc *AIClient) buildPromptWithMedia(
 		return nil, err
 	}
 	isRaw := meta != nil && meta.IsRawMode
-	if !isRaw {
-		prompt = oc.injectMemoryContext(ctx, portal, meta, prompt)
-	}
+	prompt = oc.augmentPromptWithIntegrations(ctx, portal, meta, prompt)
 
 	captionWithID := strings.TrimSpace(caption)
 	if !isRaw {
