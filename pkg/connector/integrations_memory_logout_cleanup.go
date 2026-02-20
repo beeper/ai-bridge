@@ -22,8 +22,8 @@ func purgeRecallLoginDataBestEffort(
 	// Stop background recall workers and (if possible) delete vector rows via existing vector-enabled managers
 	// before deleting chunk rows.
 	chunkIDsByAgent := loadMemoryChunkIDsByAgentBestEffort(ctx, db, bridgeID, loginID)
-	if client, ok := login.Client.(*AIClient); ok && client != nil && client.recallIntegration != nil {
-		client.recallIntegration.PurgeForLogin(ctx, bridgeID, loginID, chunkIDsByAgent)
+	if client, ok := login.Client.(*AIClient); ok && client != nil && client.recallModule() != nil {
+		client.recallModule().PurgeForLogin(ctx, bridgeID, loginID, chunkIDsByAgent)
 	} else {
 		purgeMemoryManagersForLogin(ctx, bridgeID, loginID, chunkIDsByAgent)
 	}

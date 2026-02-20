@@ -128,7 +128,7 @@ func (oc *AIClient) isTTSConfigured() (bool, string) {
 }
 
 func (oc *AIClient) isSchedulerConfigured() (bool, string) {
-	if oc == nil || oc.schedulerIntegration == nil {
+	if oc == nil || oc.schedulerModule() == nil {
 		return false, "Scheduler service not available"
 	}
 	return true, ""

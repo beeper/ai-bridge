@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
@@ -16,15 +17,15 @@ import (
 	memorycore "github.com/beeper/ai-bridge/pkg/memory"
 )
 
-type schedulerIntegrationType = integrationcron.Integration
-type recallIntegrationType = integrationmemory.Integration
-
 const (
 	integrationToolSchedulerName    = "cron"
 	integrationToolRecallSearchName = "memory_search"
 	integrationToolRecallGetName    = "memory_get"
 	legacyRecallRootPath            = "memory/"
 	legacyRecallFilePath            = "memory.md"
+
+	integrationModuleScheduler = "cron"
+	integrationModuleRecall    = "memory"
 )
 
 type toolIntegrationRegistry struct {
@@ -193,6 +194,8 @@ func (oc *AIClient) initIntegrations() {
 	}
 	oc.toolRegistry = &toolIntegrationRegistry{}
 	oc.promptRegistry = &promptIntegrationRegistry{}
+	oc.integrationModules = make(map[string]any)
+	oc.integrationOrder = nil
 
 	oc.toolRegistry.register(&coreToolIntegration{client: oc})
 	oc.promptRegistry.register(&corePromptIntegration{client: oc})
@@ -200,15 +203,143 @@ func (oc *AIClient) initIntegrations() {
 	if oc.schedulerModuleEnabled() {
 		cronAdapter := &cronConnectorHostAdapter{client: oc}
 		cronAdapter.service = oc.buildCronService()
-		oc.schedulerIntegration = integrationcron.NewIntegration(cronAdapter)
-		oc.toolRegistry.register(oc.schedulerIntegration)
+		module := integrationcron.NewIntegration(cronAdapter)
+		oc.registerIntegrationModule(module.Name(), module)
+		oc.toolRegistry.register(module)
 	}
 
 	if oc.recallModuleEnabled() {
-		oc.recallIntegration = integrationmemory.NewIntegration(&memoryConnectorHostAdapter{client: oc})
-		oc.toolRegistry.register(oc.recallIntegration)
-		oc.promptRegistry.register(oc.recallIntegration)
+		module := integrationmemory.NewIntegration(&memoryConnectorHostAdapter{client: oc})
+		oc.registerIntegrationModule(module.Name(), module)
+		oc.toolRegistry.register(module)
+		oc.promptRegistry.register(module)
 	}
+}
+
+func (oc *AIClient) registerIntegrationModule(name string, module any) {
+	if oc == nil || module == nil {
+		return
+	}
+	key := strings.ToLower(strings.TrimSpace(name))
+	if key == "" {
+		return
+	}
+	if oc.integrationModules == nil {
+		oc.integrationModules = make(map[string]any)
+	}
+	if _, exists := oc.integrationModules[key]; exists {
+		return
+	}
+	oc.integrationModules[key] = module
+	oc.integrationOrder = append(oc.integrationOrder, key)
+}
+
+func (oc *AIClient) integrationModule(name string) any {
+	if oc == nil || oc.integrationModules == nil {
+		return nil
+	}
+	return oc.integrationModules[strings.ToLower(strings.TrimSpace(name))]
+}
+
+func (oc *AIClient) schedulerModule() *integrationcron.Integration {
+	if module, ok := oc.integrationModule(integrationModuleScheduler).(*integrationcron.Integration); ok {
+		return module
+	}
+	return nil
+}
+
+func (oc *AIClient) recallModule() *integrationmemory.Integration {
+	if module, ok := oc.integrationModule(integrationModuleRecall).(*integrationmemory.Integration); ok {
+		return module
+	}
+	return nil
+}
+
+func (oc *AIClient) eachIntegrationModule(fn func(name string, module any)) {
+	if oc == nil || fn == nil || len(oc.integrationOrder) == 0 {
+		return
+	}
+	for _, name := range oc.integrationOrder {
+		module := oc.integrationModule(name)
+		if module == nil {
+			continue
+		}
+		fn(name, module)
+	}
+}
+
+func (oc *AIClient) startLifecycleIntegrations(ctx context.Context) {
+	if oc == nil {
+		return
+	}
+	oc.eachIntegrationModule(func(name string, module any) {
+		lifecycle, ok := module.(integrationruntime.LifecycleIntegration)
+		if !ok {
+			return
+		}
+		if err := lifecycle.Start(ctx); err != nil {
+			oc.loggerForContext(ctx).Warn().Err(err).Str("integration", name).Msg("integration start failed, scheduling retry")
+			go oc.retryIntegrationStart(oc.disconnectCtx, name, lifecycle)
+		}
+	})
+}
+
+func (oc *AIClient) retryIntegrationStart(ctx context.Context, name string, lifecycle integrationruntime.LifecycleIntegration) {
+	if oc == nil || lifecycle == nil {
+		return
+	}
+	delays := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second, 60 * time.Second}
+	for _, d := range delays {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(d):
+		}
+		current := oc.integrationModule(name)
+		if current == nil {
+			return
+		}
+		currentLifecycle, ok := current.(integrationruntime.LifecycleIntegration)
+		if !ok {
+			return
+		}
+		if err := currentLifecycle.Start(ctx); err != nil {
+			oc.loggerForContext(ctx).Warn().Err(err).Str("integration", name).Dur("retryDelay", d).Msg("integration start retry failed")
+			continue
+		}
+		oc.loggerForContext(ctx).Info().Str("integration", name).Msg("integration start retry succeeded")
+		return
+	}
+	oc.loggerForContext(ctx).Error().Str("integration", name).Msg("integration start retries exhausted")
+}
+
+func (oc *AIClient) stopLifecycleIntegrations() {
+	if oc == nil || len(oc.integrationOrder) == 0 {
+		return
+	}
+	// Stop in reverse registration order.
+	for i := len(oc.integrationOrder) - 1; i >= 0; i-- {
+		name := oc.integrationOrder[i]
+		module := oc.integrationModule(name)
+		lifecycle, ok := module.(integrationruntime.LifecycleIntegration)
+		if !ok {
+			continue
+		}
+		lifecycle.Stop()
+	}
+}
+
+func (oc *AIClient) stopLoginLifecycleIntegrations(bridgeID, loginID string) {
+	if oc == nil || strings.TrimSpace(bridgeID) == "" || strings.TrimSpace(loginID) == "" {
+		return
+	}
+	oc.eachIntegrationModule(func(_ string, module any) {
+		loginLifecycle, ok := module.(integrationruntime.LoginLifecycleIntegration)
+		if !ok {
+			return
+		}
+		loginLifecycle.StopForLogin(bridgeID, loginID)
+	})
 }
 
 func (oc *AIClient) schedulerModuleEnabled() bool {

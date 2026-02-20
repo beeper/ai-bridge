@@ -304,11 +304,11 @@ type AIClient struct {
 	queueTypingMu sync.Mutex
 	queueTyping   map[id.RoomID]*TypingController
 
-	// Cron + heartbeat
-	schedulerIntegration *schedulerIntegrationType
-	recallIntegration    *recallIntegrationType
-	heartbeatRunner      *HeartbeatRunner
-	heartbeatWake        *HeartbeatWake
+	// Heartbeat + integrations
+	heartbeatRunner    *HeartbeatRunner
+	heartbeatWake      *HeartbeatWake
+	integrationModules map[string]any
+	integrationOrder   []string
 
 	toolRegistry   *toolIntegrationRegistry
 	promptRegistry *promptIntegrationRegistry
@@ -1016,33 +1016,7 @@ func (oc *AIClient) Connect(ctx context.Context) {
 	if oc.heartbeatRunner != nil {
 		oc.heartbeatRunner.Start()
 	}
-	if oc.schedulerIntegration != nil {
-		if err := oc.schedulerIntegration.Start(ctx); err != nil {
-			oc.loggerForContext(ctx).Warn().Err(err).Msg("scheduler: failed to start, scheduling retry")
-			go oc.retrySchedulerStart(oc.disconnectCtx)
-		}
-	}
-}
-
-func (oc *AIClient) retrySchedulerStart(ctx context.Context) {
-	delays := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second, 60 * time.Second}
-	for _, d := range delays {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(d):
-		}
-		if oc.schedulerIntegration == nil {
-			return
-		}
-		if err := oc.schedulerIntegration.Start(ctx); err != nil {
-			oc.loggerForContext(ctx).Warn().Err(err).Dur("retryDelay", d).Msg("scheduler: start retry failed")
-			continue
-		}
-		oc.loggerForContext(ctx).Info().Msg("scheduler: start retry succeeded")
-		return
-	}
-	oc.loggerForContext(ctx).Error().Msg("scheduler: all start retries exhausted")
+	oc.startLifecycleIntegrations(ctx)
 }
 
 func (oc *AIClient) Disconnect() {
@@ -1058,9 +1032,7 @@ func (oc *AIClient) Disconnect() {
 	}
 	oc.loggedIn.Store(false)
 
-	if oc.schedulerIntegration != nil {
-		oc.schedulerIntegration.Stop()
-	}
+	oc.stopLifecycleIntegrations()
 	if oc.heartbeatRunner != nil {
 		oc.heartbeatRunner.Stop()
 	}
@@ -1069,9 +1041,7 @@ func (oc *AIClient) Disconnect() {
 	if oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.DB != nil {
 		bridgeID := string(oc.UserLogin.Bridge.DB.BridgeID)
 		loginID := string(oc.UserLogin.ID)
-		if oc.recallIntegration != nil {
-			oc.recallIntegration.StopForLogin(bridgeID, loginID)
-		}
+		oc.stopLoginLifecycleIntegrations(bridgeID, loginID)
 	}
 
 	// Clean up per-room maps to prevent unbounded growth
