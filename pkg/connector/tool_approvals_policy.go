@@ -38,16 +38,16 @@ func (oc *AIClient) builtinToolApprovalRequirement(toolName string, args map[str
 		normalizeApprovalToken(ToolNameEdit),
 		normalizeApprovalToken(ToolNameApplyPatch):
 		path := strings.ToLower(readStringArgAny(args, "path"))
-		// Memory writes/edits are lower-risk (bridge-local notes/state), so allow without approval.
-		if path == "memory.md" || strings.HasPrefix(path, "memory/") {
-			return false, "memory"
+		// Recall writes/edits are lower-risk (bridge-local notes/state), so allow without approval.
+		if path == legacyRecallFilePath || strings.HasPrefix(path, legacyRecallRootPath) {
+			return false, "recall"
 		}
 		// If we don't know the path (e.g. apply_patch), default to requiring approval.
 		if path == "" {
 			return true, "workspace"
 		}
 		return true, "workspace"
-	case normalizeApprovalToken(ToolNameCron):
+	case normalizeApprovalToken(ToolNameScheduler):
 		action = normalizeApprovalToken(readStringArgAny(args, "action"))
 		switch action {
 		case "status", "list", "runs":
