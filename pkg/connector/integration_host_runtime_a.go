@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/agents"
 	integrationcron "github.com/beeper/ai-bridge/pkg/integrations/cron"
 )
 
@@ -153,10 +154,51 @@ func (oc *AIClient) onCronEvent(evt integrationcron.Event) {
 	backend := &cronStoreBackendAdapter{backend: &lazyStoreBackend{client: oc}}
 	integrationcron.HandleCronEvent(evt, integrationcron.EventLogDeps{
 		StorePath: storePath,
-		Log:       newCronLogger(oc.log),
+		Log:       integrationcron.NewZeroLogger(oc.log),
 		NowMs:     func() int64 { return time.Now().UnixMilli() },
 		AppendRunLog: func(ctx context.Context, path string, entry integrationcron.RunLogEntry) error {
 			return integrationcron.AppendRunLog(ctx, integrationcron.NewStoreBackendAdapter(backend), path, entry, 0, 0)
 		},
 	})
+}
+
+func resolveCronAgentID(raw string, cfg *Config) string {
+	return integrationcron.ResolveCronAgentID(
+		raw,
+		agents.DefaultAgentID,
+		normalizeAgentID,
+		func(normalized string) bool {
+			if cfg == nil || cfg.Agents == nil {
+				return false
+			}
+			for _, entry := range cfg.Agents.List {
+				if normalizeAgentID(entry.ID) == strings.TrimSpace(normalized) {
+					return true
+				}
+			}
+			return false
+		},
+	)
+}
+
+func cronSessionKey(agentID, jobID string) string {
+	return integrationcron.CronSessionKey(agentID, jobID, normalizeAgentID)
+}
+
+func (oc *AIClient) updateCronSessionEntry(ctx context.Context, sessionKey string, updater func(entry integrationcron.SessionEntry) integrationcron.SessionEntry) {
+	if oc == nil {
+		return
+	}
+	integrationcron.UpdateSessionEntry(
+		ctx,
+		oc.bridgeStateBackend(),
+		integrationcron.NewZeroLogger(oc.log),
+		sessionKey,
+		func(entry integrationcron.SessionEntry) integrationcron.SessionEntry {
+			if updater == nil {
+				return entry
+			}
+			return updater(entry)
+		},
+	)
 }
