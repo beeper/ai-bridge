@@ -39,3 +39,17 @@ func LoadOrCreateClient(
 	mu.Unlock()
 	return client, nil
 }
+
+// RemoveClientFromCache removes a client from the cache by login ID.
+func RemoveClientFromCache(
+	mu *sync.Mutex,
+	clients map[networkid.UserLoginID]bridgev2.NetworkAPI,
+	loginID networkid.UserLoginID,
+) {
+	if mu == nil {
+		return
+	}
+	mu.Lock()
+	delete(clients, loginID)
+	mu.Unlock()
+}

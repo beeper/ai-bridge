@@ -5,7 +5,6 @@ import (
 
 	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
 	"github.com/rs/zerolog"
-	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
 )
 
@@ -28,12 +27,5 @@ func messageSendStatusError(err error, message string, reason event.MessageStatu
 	return bridgeadapter.MessageSendStatusError(err, message, reason, messageStatusForError, messageStatusReasonForError)
 }
 
-type brokenLoginClient = bridgeadapter.BrokenLoginClient
-
-func newBrokenLoginClient(login *bridgev2.UserLogin, reason string) *brokenLoginClient {
-	return &brokenLoginClient{
-		UserLogin: login,
-		Reason:    reason,
-	}
-}
+var newBrokenLoginClient = bridgeadapter.NewBrokenLoginClient
 
