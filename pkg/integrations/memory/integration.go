@@ -205,7 +205,7 @@ func (i *Integration) PurgeForLogin(ctx context.Context, scope iruntime.LoginSco
 func (i *Integration) buildToolExecDeps() ToolExecDeps {
 	return ToolExecDeps{
 		GetManager: func(scope iruntime.ToolScope) (Manager, string) {
-			agentID := i.resolveAgentIDFromScope(scope)
+			agentID := i.agentIDFromEventMeta(scope.Meta)
 			return i.getManager(agentID)
 		},
 		ResolveSessionKey: func(scope iruntime.ToolScope) string {
@@ -227,7 +227,7 @@ func (i *Integration) buildToolExecDeps() ToolExecDeps {
 func (i *Integration) buildCommandExecDeps() CommandExecDeps {
 	return CommandExecDeps{
 		GetManager: func(scope iruntime.ToolScope) (Manager, string) {
-			agentID := i.resolveAgentIDFromScope(scope)
+			agentID := i.agentIDFromEventMeta(scope.Meta)
 			return i.getManager(agentID)
 		},
 		ResolveSessionKey: func(scope iruntime.ToolScope) string {
@@ -555,7 +555,7 @@ func (i *Integration) runFlushToolLoop(
 			return result.AssistantMessage, calls, len(calls) == 0, nil
 		},
 		ExecuteTool: func(ctx context.Context, name string, argsJSON string) (string, error) {
-			if tph.IsToolEnabled(meta, name) == false {
+			if !tph.IsToolEnabled(meta, name) {
 				return "", fmt.Errorf("tool %s is disabled", name)
 			}
 			return tph.ExecuteToolInContext(ctx, portal, meta, name, argsJSON)
@@ -598,17 +598,18 @@ func (i *Integration) resolveMemoryCitationsMode() string {
 	if cfg == nil {
 		return "auto"
 	}
-	mode, _ := cfg["citations"].(string)
-	switch strings.ToLower(strings.TrimSpace(mode)) {
+	raw, _ := cfg["citations"].(string)
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	switch mode {
 	case "on", "off", "auto":
-		return strings.ToLower(strings.TrimSpace(mode))
+		return mode
 	default:
 		return "auto"
 	}
 }
 
 func (i *Integration) shouldIncludeMemoryCitations(ctx context.Context, scope iruntime.ToolScope, mode string) bool {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
+	switch mode {
 	case "on":
 		return true
 	case "off":
@@ -648,10 +649,6 @@ func (i *Integration) writeMemoryCommandFile(
 }
 
 // ---- private: helpers ----
-
-func (i *Integration) resolveAgentIDFromScope(scope iruntime.ToolScope) string {
-	return i.agentIDFromEventMeta(scope.Meta)
-}
 
 func (i *Integration) agentIDFromEventMeta(meta any) string {
 	ma, ok := i.host.(iruntime.MetadataAccess)
@@ -725,24 +722,22 @@ func (a *hostRuntimeAdapter) ResolveConfig(agentID string) (*ResolvedConfig, err
 	return resolveMemorySearchConfigFromMaps(cfg, agentCfg)
 }
 
+func embeddingParamsFromConfig(cfg *ResolvedConfig) (apiKey, baseURL string, headers map[string]string) {
+	if cfg == nil {
+		return
+	}
+	apiKey = cfg.Remote.APIKey
+	baseURL = cfg.Remote.BaseURL
+	headers = cfg.Remote.Headers
+	return
+}
+
 func (a *hostRuntimeAdapter) ResolveOpenAIEmbeddingConfig(cfg *ResolvedConfig) (string, string, map[string]string) {
 	eh, ok := a.host.(iruntime.EmbeddingHelper)
 	if !ok {
 		return "", "", nil
 	}
-	apiKey := ""
-	baseURL := ""
-	var headers map[string]string
-	if cfg != nil && cfg.Remote.APIKey != "" {
-		apiKey = cfg.Remote.APIKey
-	}
-	if cfg != nil && cfg.Remote.BaseURL != "" {
-		baseURL = cfg.Remote.BaseURL
-	}
-	if cfg != nil {
-		headers = cfg.Remote.Headers
-	}
-	return eh.ResolveOpenAIEmbeddingConfig(apiKey, baseURL, headers)
+	return eh.ResolveOpenAIEmbeddingConfig(embeddingParamsFromConfig(cfg))
 }
 
 func (a *hostRuntimeAdapter) ResolveDirectOpenAIEmbeddingConfig(cfg *ResolvedConfig) (string, string, map[string]string) {
@@ -750,19 +745,7 @@ func (a *hostRuntimeAdapter) ResolveDirectOpenAIEmbeddingConfig(cfg *ResolvedCon
 	if !ok {
 		return "", "", nil
 	}
-	apiKey := ""
-	baseURL := ""
-	var headers map[string]string
-	if cfg != nil && cfg.Remote.APIKey != "" {
-		apiKey = cfg.Remote.APIKey
-	}
-	if cfg != nil && cfg.Remote.BaseURL != "" {
-		baseURL = cfg.Remote.BaseURL
-	}
-	if cfg != nil {
-		headers = cfg.Remote.Headers
-	}
-	return eh.ResolveDirectOpenAIEmbeddingConfig(apiKey, baseURL, headers)
+	return eh.ResolveDirectOpenAIEmbeddingConfig(embeddingParamsFromConfig(cfg))
 }
 
 func (a *hostRuntimeAdapter) ResolveGeminiEmbeddingConfig(cfg *ResolvedConfig) (string, string, map[string]string) {
@@ -770,19 +753,7 @@ func (a *hostRuntimeAdapter) ResolveGeminiEmbeddingConfig(cfg *ResolvedConfig) (
 	if !ok {
 		return "", "", nil
 	}
-	apiKey := ""
-	baseURL := ""
-	var headers map[string]string
-	if cfg != nil && cfg.Remote.APIKey != "" {
-		apiKey = cfg.Remote.APIKey
-	}
-	if cfg != nil && cfg.Remote.BaseURL != "" {
-		baseURL = cfg.Remote.BaseURL
-	}
-	if cfg != nil {
-		headers = cfg.Remote.Headers
-	}
-	return eh.ResolveGeminiEmbeddingConfig(apiKey, baseURL, headers)
+	return eh.ResolveGeminiEmbeddingConfig(embeddingParamsFromConfig(cfg))
 }
 
 func (a *hostRuntimeAdapter) ResolvePromptWorkspaceDir() string {
@@ -831,15 +802,7 @@ func (a *hostRuntimeAdapter) LoginID() string {
 }
 
 func (a *hostRuntimeAdapter) Logger() zerolog.Logger {
-	rl, ok := a.host.(iruntime.RawLoggerAccess)
-	if !ok {
-		return zerolog.Nop()
-	}
-	zl, ok := rl.RawLogger().(zerolog.Logger)
-	if !ok {
-		return zerolog.Nop()
-	}
-	return zl
+	return iruntime.ZerologFromHost(a.host)
 }
 
 // ---- private: config resolution ----

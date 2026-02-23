@@ -258,10 +258,7 @@ func (m ModelConfig) Clone() ModelConfig {
 	clone := ModelConfig{
 		Primary: m.Primary,
 	}
-	if m.Fallbacks != nil {
-		clone.Fallbacks = make([]string, len(m.Fallbacks))
-		copy(clone.Fallbacks, m.Fallbacks)
-	}
+	clone.Fallbacks = slices.Clone(m.Fallbacks)
 	return clone
 }
 

@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -153,7 +154,7 @@ func (r *commandIntegrationRegistry) definitions() []integrationruntime.CommandD
 	for name := range r.byName {
 		names = append(names, name)
 	}
-	slicesSortStrings(names)
+	slices.Sort(names)
 	out := make([]integrationruntime.CommandDefinition, 0, len(names))
 	for _, name := range names {
 		out = append(out, r.byName[name].definition)
@@ -274,45 +275,7 @@ func (r *toolApprovalIntegrationRegistry) requirement(toolName string, args map[
 }
 
 func settingSourceFromIntegration(source integrationruntime.SettingSource) SettingSource {
-	switch source {
-	case integrationruntime.SourceAgentPolicy:
-		return SourceAgentPolicy
-	case integrationruntime.SourceRoomOverride:
-		return SourceRoomOverride
-	case integrationruntime.SourceUserDefault:
-		return SourceUserDefault
-	case integrationruntime.SourceProviderConfig:
-		return SourceProviderConfig
-	case integrationruntime.SourceGlobalDefault:
-		return SourceGlobalDefault
-	case integrationruntime.SourceModelLimit:
-		return SourceModelLimit
-	case integrationruntime.SourceProviderLimit:
-		return SourceProviderLimit
-	default:
-		return SourceGlobalDefault
-	}
-}
-
-func settingSourceToIntegration(source SettingSource) integrationruntime.SettingSource {
-	switch source {
-	case SourceAgentPolicy:
-		return integrationruntime.SourceAgentPolicy
-	case SourceRoomOverride:
-		return integrationruntime.SourceRoomOverride
-	case SourceUserDefault:
-		return integrationruntime.SourceUserDefault
-	case SourceProviderConfig:
-		return integrationruntime.SourceProviderConfig
-	case SourceGlobalDefault:
-		return integrationruntime.SourceGlobalDefault
-	case SourceModelLimit:
-		return integrationruntime.SourceModelLimit
-	case SourceProviderLimit:
-		return integrationruntime.SourceProviderLimit
-	default:
-		return integrationruntime.SourceGlobalDefault
-	}
+	return SettingSource(source)
 }
 
 func (oc *AIClient) toolScope(portal *bridgev2.Portal, meta *PortalMetadata) integrationruntime.ToolScope {
@@ -786,17 +749,4 @@ func (c *corePromptIntegration) AugmentPrompt(
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) []openai.ChatCompletionMessageParamUnion {
 	return prompt
-}
-
-func slicesSortStrings(in []string) {
-	if len(in) <= 1 {
-		return
-	}
-	for i := 0; i < len(in)-1; i++ {
-		for j := i + 1; j < len(in); j++ {
-			if in[j] < in[i] {
-				in[i], in[j] = in[j], in[i]
-			}
-		}
-	}
 }

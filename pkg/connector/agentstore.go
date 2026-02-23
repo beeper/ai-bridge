@@ -242,9 +242,7 @@ func ToAgentDefinitionContent(agent *agents.AgentDefinition) *AgentDefinitionCon
 		content.IdentityPersona = agent.Identity.Persona
 	}
 
-	if agent.MemorySearch != nil {
-		content.MemorySearch = agent.MemorySearch
-	}
+	content.MemorySearch = agent.MemorySearch
 
 	return content
 }
@@ -279,9 +277,7 @@ func FromAgentDefinitionContent(content *AgentDefinitionContent) *agents.AgentDe
 		}
 	}
 
-	if content.MemorySearch != nil {
-		def.MemorySearch = content.MemorySearch
-	}
+	def.MemorySearch = content.MemorySearch
 
 	return def
 }

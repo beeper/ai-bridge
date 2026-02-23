@@ -493,8 +493,7 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 	cc.emitUIStart(ctx, portal, state, model)
 	cc.emitUIStepStart(ctx, portal, state)
 
-	// Codex app-server v2 AskForApproval: untrusted|on-failure|on-request|never
-	approvalPolicy := "untrusted"
+	approvalPolicy := "unlessTrusted"
 	if lvl, _ := normalizeElevatedLevel(meta.ElevatedLevel); lvl == "full" {
 		approvalPolicy = "never"
 	}
@@ -515,11 +514,7 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 		},
 		"cwd":            cwd,
 		"approvalPolicy": approvalPolicy,
-		"sandboxPolicy": map[string]any{
-			"type":          "workspaceWrite",
-			"writableRoots": []string{cwd},
-			"networkAccess": cc.codexNetworkAccess(),
-		},
+		"sandboxPolicy":  cc.buildSandboxPolicy(cwd),
 	}, &turnStart)
 	if err != nil {
 		cc.emitUIError(ctx, portal, state, err.Error())
@@ -620,6 +615,29 @@ func (cc *CodexClient) appendCodexToolOutput(state *streamingState, toolCallID, 
 	return b.String()
 }
 
+func (cc *CodexClient) handleSimpleOutputDelta(
+	ctx context.Context, portal *bridgev2.Portal, state *streamingState,
+	params json.RawMessage, threadID, turnID, defaultToolName string,
+) {
+	var p struct {
+		Delta  string `json:"delta"`
+		ItemID string `json:"itemId"`
+		Thread string `json:"threadId"`
+		Turn   string `json:"turnId"`
+	}
+	_ = json.Unmarshal(params, &p)
+	if p.Thread != threadID || p.Turn != turnID {
+		return
+	}
+	toolCallID := strings.TrimSpace(p.ItemID)
+	if toolCallID == "" {
+		toolCallID = defaultToolName
+	}
+	cc.ensureUIToolInputStart(ctx, portal, state, toolCallID, defaultToolName, true, map[string]any{})
+	buf := cc.appendCodexToolOutput(state, toolCallID, p.Delta)
+	cc.emitUIToolOutputAvailable(ctx, portal, state, toolCallID, buf, true, true)
+}
+
 func (cc *CodexClient) handleNotif(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, state *streamingState, model, threadID, turnID string, evt codexNotif) {
 	switch evt.Method {
 	case "error":
@@ -708,42 +726,10 @@ func (cc *CodexClient) handleNotif(ctx context.Context, portal *bridgev2.Portal,
 		cc.emitUIReasoningDelta(ctx, portal, state, p.Delta)
 
 	case "item/commandExecution/outputDelta":
-		var p struct {
-			Delta  string `json:"delta"`
-			ItemID string `json:"itemId"`
-			Thread string `json:"threadId"`
-			Turn   string `json:"turnId"`
-		}
-		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
-			return
-		}
-		toolCallID := strings.TrimSpace(p.ItemID)
-		if toolCallID == "" {
-			toolCallID = "commandExecution"
-		}
-		cc.ensureUIToolInputStart(ctx, portal, state, toolCallID, "commandExecution", true, map[string]any{})
-		buf := cc.appendCodexToolOutput(state, toolCallID, p.Delta)
-		cc.emitUIToolOutputAvailable(ctx, portal, state, toolCallID, buf, true, true)
+		cc.handleSimpleOutputDelta(ctx, portal, state, evt.Params, threadID, turnID, "commandExecution")
 
 	case "item/fileChange/outputDelta":
-		var p struct {
-			Delta  string `json:"delta"`
-			ItemID string `json:"itemId"`
-			Thread string `json:"threadId"`
-			Turn   string `json:"turnId"`
-		}
-		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
-			return
-		}
-		toolCallID := strings.TrimSpace(p.ItemID)
-		if toolCallID == "" {
-			toolCallID = "fileChange"
-		}
-		cc.ensureUIToolInputStart(ctx, portal, state, toolCallID, "fileChange", true, map[string]any{})
-		buf := cc.appendCodexToolOutput(state, toolCallID, p.Delta)
-		cc.emitUIToolOutputAvailable(ctx, portal, state, toolCallID, buf, true, true)
+		cc.handleSimpleOutputDelta(ctx, portal, state, evt.Params, threadID, turnID, "fileChange")
 
 	case "item/mcpToolCall/outputDelta":
 		var p struct {
@@ -770,23 +756,7 @@ func (cc *CodexClient) handleNotif(ctx context.Context, portal *bridgev2.Portal,
 		cc.emitUIToolOutputAvailable(ctx, portal, state, toolCallID, buf, true, true)
 
 	case "item/collabToolCall/outputDelta":
-		var p struct {
-			Delta  string `json:"delta"`
-			ItemID string `json:"itemId"`
-			Thread string `json:"threadId"`
-			Turn   string `json:"turnId"`
-		}
-		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
-			return
-		}
-		toolCallID := strings.TrimSpace(p.ItemID)
-		if toolCallID == "" {
-			toolCallID = "collabToolCall"
-		}
-		cc.ensureUIToolInputStart(ctx, portal, state, toolCallID, "collabToolCall", true, map[string]any{})
-		buf := cc.appendCodexToolOutput(state, toolCallID, p.Delta)
-		cc.emitUIToolOutputAvailable(ctx, portal, state, toolCallID, buf, true, true)
+		cc.handleSimpleOutputDelta(ctx, portal, state, evt.Params, threadID, turnID, "collabToolCall")
 
 	case "turn/diff/updated":
 		var p struct {
@@ -804,23 +774,7 @@ func (cc *CodexClient) handleNotif(ctx context.Context, portal *bridgev2.Portal,
 		cc.emitUIToolOutputAvailable(ctx, portal, state, diffToolID, p.Diff, true, true)
 
 	case "item/plan/delta":
-		var p struct {
-			Delta  string `json:"delta"`
-			ItemID string `json:"itemId"`
-			Thread string `json:"threadId"`
-			Turn   string `json:"turnId"`
-		}
-		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
-			return
-		}
-		toolCallID := strings.TrimSpace(p.ItemID)
-		if toolCallID == "" {
-			toolCallID = "plan"
-		}
-		cc.ensureUIToolInputStart(ctx, portal, state, toolCallID, "plan", true, map[string]any{})
-		buf := cc.appendCodexToolOutput(state, toolCallID, p.Delta)
-		cc.emitUIToolOutputAvailable(ctx, portal, state, toolCallID, buf, true, true)
+		cc.handleSimpleOutputDelta(ctx, portal, state, evt.Params, threadID, turnID, "plan")
 
 	case "turn/plan/updated":
 		var p struct {
@@ -999,6 +953,20 @@ func (cc *CodexClient) handleItemStarted(ctx context.Context, portal *bridgev2.P
 	}
 }
 
+func newProviderToolCall(id, name string, output map[string]any) ToolCallMetadata {
+	now := time.Now().UnixMilli()
+	return ToolCallMetadata{
+		CallID:        id,
+		ToolName:      name,
+		ToolType:      string(ToolTypeProvider),
+		Output:        output,
+		Status:        string(ToolStatusCompleted),
+		ResultStatus:  string(ResultStatusSuccess),
+		StartedAtMs:   now,
+		CompletedAtMs: now,
+	}
+}
+
 func (cc *CodexClient) handleItemCompleted(ctx context.Context, portal *bridgev2.Portal, state *streamingState, raw json.RawMessage) {
 	var probe struct {
 		Type string `json:"type"`
@@ -1074,17 +1042,7 @@ func (cc *CodexClient) handleItemCompleted(ctx context.Context, portal *bridgev2
 			cc.emitUIToolOutputAvailable(ctx, portal, state, itemID, it, true, false)
 		}
 
-		tc := ToolCallMetadata{
-			CallID:        itemID,
-			ToolName:      fmt.Sprintf("%v", it["type"]),
-			ToolType:      string(ToolTypeProvider),
-			Input:         nil,
-			Output:        it,
-			Status:        string(ToolStatusCompleted),
-			ResultStatus:  string(ResultStatusSuccess),
-			StartedAtMs:   time.Now().UnixMilli(),
-			CompletedAtMs: time.Now().UnixMilli(),
-		}
+		tc := newProviderToolCall(itemID, fmt.Sprintf("%v", it["type"]), it)
 		switch statusVal {
 		case "declined":
 			tc.ResultStatus = string(ResultStatusDenied)
@@ -1104,30 +1062,12 @@ func (cc *CodexClient) handleItemCompleted(ctx context.Context, portal *bridgev2
 		var it map[string]any
 		_ = json.Unmarshal(raw, &it)
 		cc.emitUIToolOutputAvailable(ctx, portal, state, itemID, it, true, false)
-		state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-			CallID:        itemID,
-			ToolName:      "collabToolCall",
-			ToolType:      string(ToolTypeProvider),
-			Output:        it,
-			Status:        string(ToolStatusCompleted),
-			ResultStatus:  string(ResultStatusSuccess),
-			StartedAtMs:   time.Now().UnixMilli(),
-			CompletedAtMs: time.Now().UnixMilli(),
-		})
+		state.toolCalls = append(state.toolCalls, newProviderToolCall(itemID, "collabToolCall", it))
 	case "webSearch":
 		var it map[string]any
 		_ = json.Unmarshal(raw, &it)
 		cc.emitUIToolOutputAvailable(ctx, portal, state, itemID, it, true, false)
-		state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-			CallID:        itemID,
-			ToolName:      "webSearch",
-			ToolType:      string(ToolTypeProvider),
-			Output:        it,
-			Status:        string(ToolStatusCompleted),
-			ResultStatus:  string(ResultStatusSuccess),
-			StartedAtMs:   time.Now().UnixMilli(),
-			CompletedAtMs: time.Now().UnixMilli(),
-		})
+		state.toolCalls = append(state.toolCalls, newProviderToolCall(itemID, "webSearch", it))
 		// Extract web search citations and emit source-url stream events.
 		if outputJSON, err := json.Marshal(it); err == nil {
 			collectToolOutputCitations(state, "webSearch", string(outputJSON))
@@ -1139,16 +1079,7 @@ func (cc *CodexClient) handleItemCompleted(ctx context.Context, portal *bridgev2
 		var it map[string]any
 		_ = json.Unmarshal(raw, &it)
 		cc.emitUIToolOutputAvailable(ctx, portal, state, itemID, it, true, false)
-		state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-			CallID:        itemID,
-			ToolName:      "imageView",
-			ToolType:      string(ToolTypeProvider),
-			Output:        it,
-			Status:        string(ToolStatusCompleted),
-			ResultStatus:  string(ResultStatusSuccess),
-			StartedAtMs:   time.Now().UnixMilli(),
-			CompletedAtMs: time.Now().UnixMilli(),
-		})
+		state.toolCalls = append(state.toolCalls, newProviderToolCall(itemID, "imageView", it))
 	case "plan":
 		var it struct {
 			Text string `json:"text"`
@@ -1159,30 +1090,12 @@ func (cc *CodexClient) handleItemCompleted(ctx context.Context, portal *bridgev2
 			return
 		}
 		cc.emitUIToolOutputAvailable(ctx, portal, state, itemID, text, true, false)
-		state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-			CallID:        itemID,
-			ToolName:      "plan",
-			ToolType:      string(ToolTypeProvider),
-			Output:        map[string]any{"text": text},
-			Status:        string(ToolStatusCompleted),
-			ResultStatus:  string(ResultStatusSuccess),
-			StartedAtMs:   time.Now().UnixMilli(),
-			CompletedAtMs: time.Now().UnixMilli(),
-		})
+		state.toolCalls = append(state.toolCalls, newProviderToolCall(itemID, "plan", map[string]any{"text": text}))
 	case "enteredReviewMode":
 		var it map[string]any
 		_ = json.Unmarshal(raw, &it)
 		cc.emitUIToolOutputAvailable(ctx, portal, state, itemID, it, true, false)
-		state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-			CallID:        itemID,
-			ToolName:      "review",
-			ToolType:      string(ToolTypeProvider),
-			Output:        it,
-			Status:        string(ToolStatusCompleted),
-			ResultStatus:  string(ResultStatusSuccess),
-			StartedAtMs:   time.Now().UnixMilli(),
-			CompletedAtMs: time.Now().UnixMilli(),
-		})
+		state.toolCalls = append(state.toolCalls, newProviderToolCall(itemID, "review", it))
 	case "exitedReviewMode":
 		var it struct {
 			Review string `json:"review"`
@@ -1193,30 +1106,12 @@ func (cc *CodexClient) handleItemCompleted(ctx context.Context, portal *bridgev2
 			return
 		}
 		cc.emitUIToolOutputAvailable(ctx, portal, state, itemID, text, true, false)
-		state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-			CallID:        itemID,
-			ToolName:      "review",
-			ToolType:      string(ToolTypeProvider),
-			Output:        map[string]any{"review": text},
-			Status:        string(ToolStatusCompleted),
-			ResultStatus:  string(ResultStatusSuccess),
-			StartedAtMs:   time.Now().UnixMilli(),
-			CompletedAtMs: time.Now().UnixMilli(),
-		})
+		state.toolCalls = append(state.toolCalls, newProviderToolCall(itemID, "review", map[string]any{"review": text}))
 	case "contextCompaction":
 		var it map[string]any
 		_ = json.Unmarshal(raw, &it)
 		cc.emitUIToolOutputAvailable(ctx, portal, state, itemID, it, true, false)
-		state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-			CallID:        itemID,
-			ToolName:      "contextCompaction",
-			ToolType:      string(ToolTypeProvider),
-			Output:        it,
-			Status:        string(ToolStatusCompleted),
-			ResultStatus:  string(ResultStatusSuccess),
-			StartedAtMs:   time.Now().UnixMilli(),
-			CompletedAtMs: time.Now().UnixMilli(),
-		})
+		state.toolCalls = append(state.toolCalls, newProviderToolCall(itemID, "contextCompaction", it))
 		cc.sendSystemNoticeOnce(ctx, portal, state, "compaction:completed:"+itemID, "Codex finished compacting context.")
 	}
 }
@@ -1245,10 +1140,15 @@ func (cc *CodexClient) ensureRPC(ctx context.Context) error {
 	if err := os.MkdirAll(codexHome, 0o700); err != nil {
 		return err
 	}
+	launch, err := cc.connector.resolveAppServerLaunch()
+	if err != nil {
+		return err
+	}
 	rpc, err := codexrpc.StartProcess(ctx, codexrpc.ProcessConfig{
-		Command: cmd,
-		Args:    []string{"app-server"},
-		Env:     []string{"CODEX_HOME=" + codexHome},
+		Command:      cmd,
+		Args:         launch.Args,
+		Env:          []string{"CODEX_HOME=" + codexHome},
+		WebSocketURL: launch.WebSocketURL,
 	})
 	if err != nil {
 		return err
@@ -1502,6 +1402,14 @@ func (cc *CodexClient) composeCodexChatInfo(title string) *bridgev2.ChatInfo {
 	}
 }
 
+func (cc *CodexClient) buildSandboxPolicy(cwd string) map[string]any {
+	return map[string]any{
+		"type":          "workspaceWrite",
+		"writableRoots": []string{cwd},
+		"networkAccess": cc.codexNetworkAccess(),
+	}
+}
+
 func (cc *CodexClient) ensureCodexThread(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) error {
 	if meta == nil || portal == nil {
 		return errors.New("missing portal/meta")
@@ -1541,8 +1449,8 @@ func (cc *CodexClient) ensureCodexThread(ctx context.Context, portal *bridgev2.P
 	err := cc.rpc.Call(callCtx, "thread/start", map[string]any{
 		"model":          model,
 		"cwd":            meta.CodexCwd,
-		"approvalPolicy": "untrusted",
-		"sandbox":        "workspace-write",
+		"approvalPolicy": "unlessTrusted",
+		"sandboxPolicy":  cc.buildSandboxPolicy(meta.CodexCwd),
 	}, &resp)
 	if err != nil {
 		return err
@@ -1588,8 +1496,8 @@ func (cc *CodexClient) ensureCodexThreadLoaded(ctx context.Context, portal *brid
 		"threadId":       threadID,
 		"model":          cc.connector.Config.Codex.DefaultModel,
 		"cwd":            meta.CodexCwd,
-		"approvalPolicy": "untrusted",
-		"sandbox":        "workspace-write",
+		"approvalPolicy": "unlessTrusted",
+		"sandboxPolicy":  cc.buildSandboxPolicy(meta.CodexCwd),
 	}, &resp)
 	if err != nil {
 		// If the stored thread can't be resumed (missing/corrupt), fall back to a fresh thread.
@@ -2436,15 +2344,15 @@ func (cc *CodexClient) waitToolApproval(ctx context.Context, approvalID string) 
 	}
 }
 
-func (cc *CodexClient) handleCommandApprovalRequest(ctx context.Context, req codexrpc.Request) (any, *codexrpc.RPCError) {
+func (cc *CodexClient) handleApprovalRequest(
+	ctx context.Context, req codexrpc.Request,
+	defaultToolName string, extractInput func(json.RawMessage) map[string]any,
+) (any, *codexrpc.RPCError) {
 	approvalID := strings.Trim(string(req.ID), "\"")
 	var params struct {
-		ThreadID string  `json:"threadId"`
-		TurnID   string  `json:"turnId"`
-		ItemID   string  `json:"itemId"`
-		Reason   *string `json:"reason"`
-		Command  *string `json:"command"`
-		Cwd      *string `json:"cwd"`
+		ThreadID string `json:"threadId"`
+		TurnID   string `json:"turnId"`
+		ItemID   string `json:"itemId"`
 	}
 	_ = json.Unmarshal(req.Params, &params)
 
@@ -2457,25 +2365,21 @@ func (cc *CodexClient) handleCommandApprovalRequest(ctx context.Context, req cod
 
 	toolCallID := strings.TrimSpace(params.ItemID)
 	if toolCallID == "" {
-		toolCallID = "commandExecution"
+		toolCallID = defaultToolName
 	}
-	toolName := "commandExecution"
+	toolName := defaultToolName
 	ttlSeconds := 600
 
 	cc.setApprovalStateTracking(active.state, approvalID, toolCallID, toolName)
 
-	cc.ensureUIToolInputStart(ctx, active.portal, active.state, toolCallID, toolName, true, map[string]any{
-		"command": params.Command,
-		"cwd":     params.Cwd,
-		"reason":  params.Reason,
-	})
+	inputMap := extractInput(req.Params)
+	cc.ensureUIToolInputStart(ctx, active.portal, active.state, toolCallID, toolName, true, inputMap)
 	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID, toolName, ttlSeconds)
 	cc.sendToolCallApprovalEvent(ctx, active.portal, active.state, toolCallID, toolName, approvalID,
 		time.Now().Add(time.Duration(ttlSeconds)*time.Second).UnixMilli())
 	cc.sendSystemNoticeOnce(ctx, active.portal, active.state, "codex-approval:"+approvalID, fmt.Sprintf("Approval required (%s): !ai approve %s <allow|deny> [reason]", toolName, approvalID))
 	cc.registerToolApproval(approvalID, toolCallID, toolName, time.Duration(ttlSeconds)*time.Second)
 
-	// Auto-approve in elevated=full.
 	if active.meta != nil {
 		if lvl, _ := normalizeElevatedLevel(active.meta.ElevatedLevel); lvl == "full" {
 			return map[string]any{"decision": "accept"}, nil
@@ -2492,57 +2396,27 @@ func (cc *CodexClient) handleCommandApprovalRequest(ctx context.Context, req cod
 	return map[string]any{"decision": "decline"}, nil
 }
 
-func (cc *CodexClient) handleFileChangeApprovalRequest(ctx context.Context, req codexrpc.Request) (any, *codexrpc.RPCError) {
-	approvalID := strings.Trim(string(req.ID), "\"")
-	var params struct {
-		ThreadID  string  `json:"threadId"`
-		TurnID    string  `json:"turnId"`
-		ItemID    string  `json:"itemId"`
-		Reason    *string `json:"reason"`
-		GrantRoot *string `json:"grantRoot"`
-	}
-	_ = json.Unmarshal(req.Params, &params)
-
-	cc.activeMu.Lock()
-	active := cc.activeTurns[codexTurnKey(params.ThreadID, params.TurnID)]
-	cc.activeMu.Unlock()
-	if active == nil || params.ThreadID != active.threadID || params.TurnID != active.turnID {
-		return map[string]any{"decision": "decline"}, nil
-	}
-
-	toolCallID := strings.TrimSpace(params.ItemID)
-	if toolCallID == "" {
-		toolCallID = "fileChange"
-	}
-	toolName := "fileChange"
-	ttlSeconds := 600
-
-	cc.setApprovalStateTracking(active.state, approvalID, toolCallID, toolName)
-
-	cc.ensureUIToolInputStart(ctx, active.portal, active.state, toolCallID, toolName, true, map[string]any{
-		"reason":    params.Reason,
-		"grantRoot": params.GrantRoot,
-	})
-	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID, toolName, ttlSeconds)
-	cc.sendToolCallApprovalEvent(ctx, active.portal, active.state, toolCallID, toolName, approvalID,
-		time.Now().Add(time.Duration(ttlSeconds)*time.Second).UnixMilli())
-	cc.sendSystemNoticeOnce(ctx, active.portal, active.state, "codex-approval:"+approvalID, fmt.Sprintf("Approval required (%s): !ai approve %s <allow|deny> [reason]", toolName, approvalID))
-	cc.registerToolApproval(approvalID, toolCallID, toolName, time.Duration(ttlSeconds)*time.Second)
-
-	if active.meta != nil {
-		if lvl, _ := normalizeElevatedLevel(active.meta.ElevatedLevel); lvl == "full" {
-			return map[string]any{"decision": "accept"}, nil
+func (cc *CodexClient) handleCommandApprovalRequest(ctx context.Context, req codexrpc.Request) (any, *codexrpc.RPCError) {
+	return cc.handleApprovalRequest(ctx, req, "commandExecution", func(raw json.RawMessage) map[string]any {
+		var p struct {
+			Command *string `json:"command"`
+			Cwd     *string `json:"cwd"`
+			Reason  *string `json:"reason"`
 		}
-	}
+		_ = json.Unmarshal(raw, &p)
+		return map[string]any{"command": p.Command, "cwd": p.Cwd, "reason": p.Reason}
+	})
+}
 
-	decision, ok := cc.waitToolApproval(ctx, approvalID)
-	if !ok {
-		return map[string]any{"decision": "decline"}, nil
-	}
-	if decision.Approve {
-		return map[string]any{"decision": "accept"}, nil
-	}
-	return map[string]any{"decision": "decline"}, nil
+func (cc *CodexClient) handleFileChangeApprovalRequest(ctx context.Context, req codexrpc.Request) (any, *codexrpc.RPCError) {
+	return cc.handleApprovalRequest(ctx, req, "fileChange", func(raw json.RawMessage) map[string]any {
+		var p struct {
+			Reason    *string `json:"reason"`
+			GrantRoot *string `json:"grantRoot"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		return map[string]any{"reason": p.Reason, "grantRoot": p.GrantRoot}
+	})
 }
 
 func (cc *CodexClient) sendSystemNoticeOnce(ctx context.Context, portal *bridgev2.Portal, state *streamingState, key string, message string) {
