@@ -27,16 +27,21 @@ const (
 type OpenCodeLogin struct {
 	User      *bridgev2.User
 	Connector *OpenCodeConnector
-	FlowID    string
 }
 
-func (ol *OpenCodeLogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
-	_ = ctx
+func (ol *OpenCodeLogin) validate() error {
 	if ol.User == nil {
-		return nil, errors.New("missing user context for login")
+		return errors.New("missing user context for login")
 	}
 	if ol.Connector == nil || ol.Connector.br == nil {
-		return nil, errors.New("connector is not initialized")
+		return errors.New("connector is not initialized")
+	}
+	return nil
+}
+
+func (ol *OpenCodeLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
+	if err := ol.validate(); err != nil {
+		return nil, err
 	}
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeUserInput,
@@ -70,11 +75,8 @@ func (ol *OpenCodeLogin) Start(ctx context.Context) (*bridgev2.LoginStep, error)
 }
 
 func (ol *OpenCodeLogin) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
-	if ol.User == nil {
-		return nil, errors.New("missing user context for login")
-	}
-	if ol.Connector == nil || ol.Connector.br == nil {
-		return nil, errors.New("connector is not initialized")
+	if err := ol.validate(); err != nil {
+		return nil, err
 	}
 
 	normalizedURL, err := openCodeAPI.NormalizeBaseURL(input["url"])
@@ -146,13 +148,13 @@ func openCodeCompleteStep(login *bridgev2.UserLogin) *bridgev2.LoginStep {
 
 func openCodeRemoteName(baseURL, username string) string {
 	parsed, err := url.Parse(baseURL)
-	if err != nil || strings.TrimSpace(parsed.Host) == "" {
+	if err != nil || parsed.Host == "" {
 		return "OpenCode"
 	}
-	if strings.EqualFold(strings.TrimSpace(username), defaultOpenCodeUsername) || strings.TrimSpace(username) == "" {
+	if strings.EqualFold(username, defaultOpenCodeUsername) || username == "" {
 		return "OpenCode (" + parsed.Host + ")"
 	}
-	return fmt.Sprintf("OpenCode (%s@%s)", strings.TrimSpace(username), parsed.Host)
+	return fmt.Sprintf("OpenCode (%s@%s)", username, parsed.Host)
 }
 
 func (ol *OpenCodeLogin) Cancel() {}

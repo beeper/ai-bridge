@@ -19,63 +19,43 @@ import (
 var _ opencodebridge.Host = (*OpenCodeClient)(nil)
 
 func (oc *OpenCodeClient) Log() *zerolog.Logger {
-	if oc == nil {
-		logger := zerolog.Nop()
-		return &logger
-	}
 	l := oc.UserLogin.Log.With().Str("component", "opencode").Logger()
 	return &l
 }
 
 func (oc *OpenCodeClient) Login() *bridgev2.UserLogin {
-	if oc == nil {
-		return nil
-	}
 	return oc.UserLogin
 }
 
 func (oc *OpenCodeClient) BackgroundContext(ctx context.Context) context.Context {
-	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.BackgroundCtx == nil {
+	if ctx != nil {
 		return ctx
 	}
-	if ctx == nil {
-		return oc.UserLogin.Bridge.BackgroundCtx
+	if bg := oc.UserLogin.Bridge.BackgroundCtx; bg != nil {
+		return bg
 	}
-	return ctx
+	return context.Background()
 }
 
 func (oc *OpenCodeClient) SendSystemNotice(ctx context.Context, portal *bridgev2.Portal, msg string) {
-	if oc == nil || portal == nil || portal.MXID == "" || oc.UserLogin == nil || oc.UserLogin.Bridge == nil {
+	if portal == nil || portal.MXID == "" {
 		return
 	}
 	content := &event.MessageEventContent{MsgType: event.MsgNotice, Body: msg, Mentions: &event.Mentions{}}
 	_, _ = oc.UserLogin.Bridge.Bot.SendMessage(ctx, portal.MXID, event.EventMessage, &event.Content{Parsed: content}, nil)
 }
 
-func (oc *OpenCodeClient) SendPendingStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, msg string) {
-	_ = ctx
-	_ = portal
-	_ = evt
-	_ = msg
+func (oc *OpenCodeClient) SendPendingStatus(_ context.Context, _ *bridgev2.Portal, _ *event.Event, _ string) {
 }
 
-func (oc *OpenCodeClient) SendSuccessStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event) {
-	_ = ctx
-	_ = portal
-	_ = evt
+func (oc *OpenCodeClient) SendSuccessStatus(_ context.Context, _ *bridgev2.Portal, _ *event.Event) {
 }
 
-func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *bridgev2.Portal, turnID, agentID, targetEventID string, part map[string]any) {
-	_ = ctx
-	_ = portal
-	_ = turnID
-	_ = agentID
-	_ = targetEventID
-	_ = part
+func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(_ context.Context, _ *bridgev2.Portal, _, _, _ string, _ map[string]any) {
 }
 
 func (oc *OpenCodeClient) FinishOpenCodeStream(turnID string) {
-	if oc == nil || turnID == "" {
+	if turnID == "" {
 		return
 	}
 	oc.streamSeqMu.Lock()
@@ -83,12 +63,11 @@ func (oc *OpenCodeClient) FinishOpenCodeStream(turnID string) {
 	oc.streamSeqMu.Unlock()
 }
 
-func (oc *OpenCodeClient) DownloadAndEncodeMedia(ctx context.Context, mediaURL string, file *event.EncryptedFileInfo, maxMB int) (string, string, error) {
-	_ = maxMB
+func (oc *OpenCodeClient) DownloadAndEncodeMedia(ctx context.Context, mediaURL string, file *event.EncryptedFileInfo, _ int) (string, string, error) {
 	if strings.TrimSpace(mediaURL) == "" {
 		return "", "", errors.New("missing media URL")
 	}
-	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.Bot == nil {
+	if oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.Bot == nil {
 		return "", "", errors.New("bridge is unavailable")
 	}
 	data, err := oc.UserLogin.Bridge.Bot.DownloadMedia(ctx, id.ContentURIString(mediaURL), file)
@@ -98,17 +77,11 @@ func (oc *OpenCodeClient) DownloadAndEncodeMedia(ctx context.Context, mediaURL s
 	return base64.StdEncoding.EncodeToString(data), "application/octet-stream", nil
 }
 
-func (oc *OpenCodeClient) SetRoomName(ctx context.Context, portal *bridgev2.Portal, name string) error {
-	_ = ctx
-	_ = portal
-	_ = name
+func (oc *OpenCodeClient) SetRoomName(_ context.Context, _ *bridgev2.Portal, _ string) error {
 	return nil
 }
 
 func (oc *OpenCodeClient) SenderForOpenCode(instanceID string, fromMe bool) bridgev2.EventSender {
-	if oc == nil || oc.UserLogin == nil {
-		return bridgev2.EventSender{}
-	}
 	if fromMe {
 		return bridgev2.EventSender{Sender: humanUserID(oc.UserLogin.ID), SenderLogin: oc.UserLogin.ID, IsFromMe: true}
 	}
@@ -121,7 +94,7 @@ func (oc *OpenCodeClient) SenderForOpenCode(instanceID string, fromMe bool) brid
 }
 
 func (oc *OpenCodeClient) CleanupPortal(ctx context.Context, portal *bridgev2.Portal, reason string) {
-	if oc == nil || portal == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil {
+	if portal == nil {
 		return
 	}
 	if portal.MXID != "" {
@@ -153,14 +126,10 @@ func (oc *OpenCodeClient) PortalMeta(portal *bridgev2.Portal) *opencodebridge.Po
 }
 
 func (oc *OpenCodeClient) SetPortalMeta(portal *bridgev2.Portal, meta *opencodebridge.PortalMeta) {
-	if portal == nil {
+	if portal == nil || meta == nil {
 		return
 	}
 	existing := portalMeta(portal)
-	if meta == nil {
-		portal.Metadata = existing
-		return
-	}
 	existing.IsOpenCodeRoom = meta.IsOpenCodeRoom
 	existing.OpenCodeInstanceID = meta.InstanceID
 	existing.OpenCodeSessionID = meta.SessionID
@@ -185,16 +154,10 @@ func (oc *OpenCodeClient) DefaultAgentID() string {
 }
 
 func (oc *OpenCodeClient) OpenCodeInstances() map[string]*opencodebridge.OpenCodeInstance {
-	if oc == nil || oc.UserLogin == nil {
-		return nil
-	}
 	return loginMetadata(oc.UserLogin).OpenCodeInstances
 }
 
 func (oc *OpenCodeClient) SaveOpenCodeInstances(ctx context.Context, instances map[string]*opencodebridge.OpenCodeInstance) error {
-	if oc == nil || oc.UserLogin == nil {
-		return nil
-	}
 	meta := loginMetadata(oc.UserLogin)
 	meta.OpenCodeInstances = instances
 	return oc.UserLogin.Save(ctx)

@@ -1,11 +1,14 @@
 package matrixevents
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
+	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 )
 
 // Event types shared across bridge/bot/modules.
@@ -47,6 +50,44 @@ const (
 	BeeperAIToolCallKey   = "com.beeper.ai.tool_call"
 	BeeperAIToolResultKey = "com.beeper.ai.tool_result"
 )
+
+// ToolStatus represents the state of a tool call.
+type ToolStatus string
+
+const (
+	ToolStatusPending          ToolStatus = "pending"
+	ToolStatusRunning          ToolStatus = "running"
+	ToolStatusCompleted        ToolStatus = "completed"
+	ToolStatusFailed           ToolStatus = "failed"
+	ToolStatusTimeout          ToolStatus = "timeout"
+	ToolStatusCancelled        ToolStatus = "cancelled"
+	ToolStatusApprovalRequired ToolStatus = "approval_required"
+)
+
+// ResultStatus represents the status of a tool result.
+type ResultStatus string
+
+const (
+	ResultStatusSuccess ResultStatus = "success"
+	ResultStatusError   ResultStatus = "error"
+	ResultStatusPartial ResultStatus = "partial"
+	ResultStatusDenied  ResultStatus = "denied"
+)
+
+// ToolType identifies the category of tool.
+type ToolType string
+
+const (
+	ToolTypeBuiltin  ToolType = "builtin"
+	ToolTypeProvider ToolType = "provider"
+	ToolTypeFunction ToolType = "function"
+	ToolTypeMCP      ToolType = "mcp"
+)
+
+// MatrixEphemeralSender is the subset of a Matrix client/intent needed to send ephemeral events.
+type MatrixEphemeralSender interface {
+	SendEphemeralEvent(ctx context.Context, roomID id.RoomID, eventType event.Type, content *event.Content, txnID string) (*mautrix.RespSendEvent, error)
+}
 
 type StreamEventOpts struct {
 	TargetEventID string
