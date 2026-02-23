@@ -2,6 +2,7 @@ package codexrpc
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -185,7 +186,7 @@ func TestCodexRPC_HelperProcess(t *testing.T) {
 		if err != nil {
 			return
 		}
-		line = bytesTrimSpace(line)
+		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue
 		}
@@ -240,7 +241,7 @@ func TestCodexRPC_HelperProcess(t *testing.T) {
 				if err != nil {
 					return
 				}
-				l2 = bytesTrimSpace(l2)
+				l2 = bytes.TrimSpace(l2)
 				if len(l2) == 0 {
 					continue
 				}

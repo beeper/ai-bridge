@@ -98,16 +98,10 @@ func toolDisplayTitle(toolName string) string {
 	return toolName
 }
 
-func messageStatusForError(err error) event.MessageStatus {
-	if err == nil {
-		return event.MessageStatusFail
-	}
+func messageStatusForError(_ error) event.MessageStatus {
 	return event.MessageStatusRetriable
 }
 
-func messageStatusReasonForError(err error) event.MessageStatusReason {
-	if err == nil {
-		return event.MessageStatusGenericError
-	}
+func messageStatusReasonForError(_ error) event.MessageStatusReason {
 	return event.MessageStatusGenericError
 }

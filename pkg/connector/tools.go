@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"mime"
 	"net/http"
 	"net/url"
@@ -1998,28 +1997,6 @@ func executeEditFile(ctx context.Context, args map[string]any) (string, error) {
 		}(entry.Path)
 	}
 	return fmt.Sprintf("Replaced text in %s.", path), nil
-}
-
-func readNumberArg(raw any) (float64, bool) {
-	switch v := raw.(type) {
-	case float64:
-		if math.IsNaN(v) || math.IsInf(v, 0) {
-			return 0, false
-		}
-		return v, true
-	case string:
-		trimmed := strings.TrimSpace(v)
-		if trimmed == "" {
-			return 0, false
-		}
-		parsed, err := strconv.ParseFloat(trimmed, 64)
-		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
-			return 0, false
-		}
-		return parsed, true
-	default:
-		return 0, false
-	}
 }
 
 func executeGravatarFetch(ctx context.Context, args map[string]any) (string, error) {

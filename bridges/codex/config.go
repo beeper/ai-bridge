@@ -31,6 +31,7 @@ type PreviewConfig struct {
 type CodexConfig struct {
 	Enabled       *bool            `yaml:"enabled"`
 	Command       string           `yaml:"command"`
+	Listen        string           `yaml:"listen"`
 	HomeBaseDir   string           `yaml:"home_base_dir"`
 	DefaultModel  string           `yaml:"default_model"`
 	NetworkAccess *bool            `yaml:"network_access"`
@@ -49,6 +50,7 @@ bridge:
 codex:
   enabled: true
   command: "codex"
+  listen: "stdio://"
   default_model: "gpt-5.1-codex"
   network_access: true
   client_info:
@@ -60,4 +62,3 @@ codex:
 func upgradeConfig(helper configupgrade.Helper) {
 	_ = helper
 }
-
