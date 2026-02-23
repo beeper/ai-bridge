@@ -4,31 +4,29 @@ import (
 	"strings"
 
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/matrixevents"
 )
 
-// ToolStatus represents the state of a tool call.
-type ToolStatus string
+type ToolStatus = matrixevents.ToolStatus
 
 const (
-	ToolStatusPending   ToolStatus = "pending"
-	ToolStatusRunning   ToolStatus = "running"
-	ToolStatusCompleted ToolStatus = "completed"
-	ToolStatusFailed    ToolStatus = "failed"
+	ToolStatusPending   = matrixevents.ToolStatusPending
+	ToolStatusRunning   = matrixevents.ToolStatusRunning
+	ToolStatusCompleted = matrixevents.ToolStatusCompleted
+	ToolStatusFailed    = matrixevents.ToolStatusFailed
 )
 
-// ResultStatus represents the status of a tool result.
-type ResultStatus string
+type ResultStatus = matrixevents.ResultStatus
 
 const (
-	ResultStatusSuccess ResultStatus = "success"
-	ResultStatusError   ResultStatus = "error"
+	ResultStatusSuccess = matrixevents.ResultStatusSuccess
+	ResultStatusError   = matrixevents.ResultStatusError
 )
 
-// ToolType identifies the category of tool.
-type ToolType string
+type ToolType = matrixevents.ToolType
 
 const (
-	ToolTypeBuiltin ToolType = "builtin"
+	ToolTypeBuiltin = matrixevents.ToolTypeBuiltin
 )
 
 // TimingInfo contains timing information for events.

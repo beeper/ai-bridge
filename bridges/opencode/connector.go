@@ -33,8 +33,7 @@ func (oc *OpenCodeConnector) Init(bridge *bridgev2.Bridge) {
 	bridgeadapter.EnsureClientMap(&oc.clientsMu, &oc.clients)
 }
 
-func (oc *OpenCodeConnector) Start(ctx context.Context) error {
-	_ = ctx
+func (oc *OpenCodeConnector) Start(_ context.Context) error {
 	if oc.Config.Bridge.CommandPrefix == "" {
 		oc.Config.Bridge.CommandPrefix = "!opencode"
 	}
@@ -44,8 +43,7 @@ func (oc *OpenCodeConnector) Start(ctx context.Context) error {
 	return nil
 }
 
-func (oc *OpenCodeConnector) Stop(ctx context.Context) {
-	_ = ctx
+func (oc *OpenCodeConnector) Stop(_ context.Context) {
 	bridgeadapter.StopClients(&oc.clientsMu, &oc.clients)
 }
 
@@ -90,11 +88,10 @@ func (oc *OpenCodeConnector) GetDBMetaTypes() database.MetaTypes {
 	)
 }
 
-func (oc *OpenCodeConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
-	_ = ctx
+func (oc *OpenCodeConnector) LoadUserLogin(_ context.Context, login *bridgev2.UserLogin) error {
 	meta := loginMetadata(login)
 	if !strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderOpenCode) {
-		login.Client = newBrokenLoginClient(login, "This bridge only supports OpenCode logins.")
+		login.Client = &bridgeadapter.BrokenLoginClient{UserLogin: login, Reason: "This bridge only supports OpenCode logins."}
 		return nil
 	}
 
@@ -116,7 +113,7 @@ func (oc *OpenCodeConnector) LoadUserLogin(ctx context.Context, login *bridgev2.
 		},
 	)
 	if err != nil {
-		login.Client = newBrokenLoginClient(login, "Couldn't initialize OpenCode for this login.")
+		login.Client = &bridgeadapter.BrokenLoginClient{UserLogin: login, Reason: "Couldn't initialize OpenCode for this login."}
 		return nil
 	}
 	login.Client = client
@@ -131,12 +128,11 @@ func (oc *OpenCodeConnector) GetLoginFlows() []bridgev2.LoginFlow {
 	})
 }
 
-func (oc *OpenCodeConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
-	_ = ctx
+func (oc *OpenCodeConnector) CreateLogin(_ context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
 	if err := bridgeadapter.ValidateSingleLoginFlow(flowID, ProviderOpenCode, oc.openCodeEnabled()); err != nil {
 		return nil, err
 	}
-	return &OpenCodeLogin{User: user, Connector: oc, FlowID: flowID}, nil
+	return &OpenCodeLogin{User: user, Connector: oc}, nil
 }
 
 func (oc *OpenCodeConnector) openCodeEnabled() bool {

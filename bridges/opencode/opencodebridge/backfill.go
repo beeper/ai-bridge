@@ -145,8 +145,7 @@ func findAnchorIndex(entries []backfillMessageEntry, anchor *database.Message) (
 	if anchor == nil {
 		return 0, false
 	}
-	id := string(anchor.ID)
-	if id == "" {
+	if anchor.ID == "" {
 		return 0, false
 	}
 	partID, isPart := parseOpenCodePartID(anchor.ID)

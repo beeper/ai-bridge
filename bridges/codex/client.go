@@ -25,6 +25,7 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/ai-bridge/bridges/codex/codexrpc"
+	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
 )
 
 var _ bridgev2.NetworkAPI = (*CodexClient)(nil)
@@ -223,9 +224,7 @@ func (cc *CodexClient) LogoutRemote(ctx context.Context) {
 	cc.Disconnect()
 
 	if cc.connector != nil {
-		cc.connector.clientsMu.Lock()
-		delete(cc.connector.clients, cc.UserLogin.ID)
-		cc.connector.clientsMu.Unlock()
+		bridgeadapter.RemoveClientFromCache(&cc.connector.clientsMu, cc.connector.clients, cc.UserLogin.ID)
 	}
 
 	cc.UserLogin.BridgeState.Send(status.BridgeState{
