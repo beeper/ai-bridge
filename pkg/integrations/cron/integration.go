@@ -687,12 +687,7 @@ func (i *Integration) resolveCronConfig() cronConfig {
 }
 
 func (i *Integration) resolveZerologLogger() zerolog.Logger {
-	if rl, ok := i.host.(iruntime.RawLoggerAccess); ok {
-		if zl, ok := rl.RawLogger().(zerolog.Logger); ok {
-			return zl
-		}
-	}
-	return zerolog.Nop()
+	return iruntime.ZerologFromHost(i.host)
 }
 
 func (i *Integration) resolveCoreLogger() croncore.Logger {

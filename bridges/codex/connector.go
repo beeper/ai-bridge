@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,12 @@ type CodexConnector struct {
 	clientsMu sync.Mutex
 	clients   map[networkid.UserLoginID]bridgev2.NetworkAPI
 }
+
+const (
+	FlowCodexAPIKey                = "codex_api_key"
+	FlowCodexChatGPT               = "codex_chatgpt"
+	FlowCodexChatGPTExternalTokens = "codex_chatgpt_external_tokens"
+)
 
 func (cc *CodexConnector) Init(bridge *bridgev2.Bridge) {
 	cc.br = bridge
@@ -83,6 +90,9 @@ func (cc *CodexConnector) applyRuntimeDefaults() {
 	}
 	if strings.TrimSpace(cc.Config.Codex.Command) == "" {
 		cc.Config.Codex.Command = "codex"
+	}
+	if strings.TrimSpace(cc.Config.Codex.Listen) == "" {
+		cc.Config.Codex.Listen = "stdio://"
 	}
 	if strings.TrimSpace(cc.Config.Codex.DefaultModel) == "" {
 		cc.Config.Codex.DefaultModel = "gpt-5.1-codex"
@@ -188,16 +198,46 @@ func (cc *CodexConnector) loadCodexUserLogin(login *bridgev2.UserLogin) error {
 }
 
 func (cc *CodexConnector) GetLoginFlows() []bridgev2.LoginFlow {
-	return bridgeadapter.SingleLoginFlow(cc.codexEnabled(), bridgev2.LoginFlow{
-		ID:          ProviderCodex,
-		Name:        "Codex",
-		Description: "Use a local Codex install via codex app-server (stdio).",
-	})
+	if !cc.codexEnabled() {
+		return nil
+	}
+	return []bridgev2.LoginFlow{
+		{
+			ID:          FlowCodexAPIKey,
+			Name:        "API Key",
+			Description: "Sign in with an OpenAI API key using codex app-server.",
+		},
+		{
+			ID:          FlowCodexChatGPT,
+			Name:        "ChatGPT",
+			Description: "Open browser login and authenticate with your ChatGPT account.",
+		},
+		{
+			ID:          FlowCodexChatGPTExternalTokens,
+			Name:        "ChatGPT external tokens",
+			Description: "Provide externally managed ChatGPT id/access tokens.",
+		},
+	}
 }
 
 func (cc *CodexConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
-	if err := bridgeadapter.ValidateSingleLoginFlow(flowID, ProviderCodex, cc.codexEnabled()); err != nil {
-		return nil, err
+	_ = ctx
+	if !cc.codexEnabled() {
+		return nil, fmt.Errorf("login flow %s is not available", flowID)
+	}
+	// Compatibility alias for older clients.
+	if flowID == ProviderCodex {
+		flowID = FlowCodexChatGPT
+	}
+	valid := false
+	for _, flow := range cc.GetLoginFlows() {
+		if flow.ID == flowID {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return nil, fmt.Errorf("login flow %s is not available", flowID)
 	}
 	return &CodexLogin{User: user, Connector: cc, FlowID: flowID}, nil
 }

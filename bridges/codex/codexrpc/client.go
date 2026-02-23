@@ -2,12 +2,14 @@ package codexrpc
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"os"
 	"os/exec"
 	"slices"
@@ -15,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 type ClientInfo struct {
@@ -36,6 +40,9 @@ type ProcessConfig struct {
 	Command string
 	Args    []string
 	Env     []string
+	// WebSocketURL enables websocket transport. When set, one JSON-RPC message
+	// is sent per text frame, and stdio is ignored for RPC payloads.
+	WebSocketURL string
 	// OnStderr is called for each line of stderr output from the process.
 	// If nil, stderr is silently discarded.
 	OnStderr func(line string)
@@ -48,6 +55,9 @@ type Client struct {
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 	stderr io.ReadCloser
+	wsConn *websocket.Conn
+	wsCtx  context.Context
+	wsStop context.CancelFunc
 
 	writeCh chan writeReq
 
@@ -63,9 +73,8 @@ type Client struct {
 	onStderr      func(line string)
 	onProcessExit func(err error)
 
-	closed    atomic.Bool
-	failOnce  sync.Once
-	closeOnce sync.Once
+	closed   atomic.Bool
+	failOnce sync.Once
 
 	waitOnce sync.Once
 	waitErr  error
@@ -100,12 +109,32 @@ func StartProcess(ctx context.Context, cfg ProcessConfig) (*Client, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	wsURL := strings.TrimSpace(cfg.WebSocketURL)
+	var wsConn *websocket.Conn
+	var wsCtx context.Context
+	var wsStop context.CancelFunc
+	if wsURL != "" {
+		dialCtx := ctx
+		if dialCtx == nil {
+			dialCtx = context.Background()
+		}
+		wsConn, err = dialWebSocketWithRetry(dialCtx, wsURL, 20*time.Second)
+		if err != nil {
+			_ = cmd.Process.Kill()
+			return nil, err
+		}
+		wsConn.SetReadLimit(32 * 1024 * 1024)
+		wsCtx, wsStop = context.WithCancel(context.Background())
+	}
 
 	c := &Client{
 		cmd:           cmd,
 		stdin:         stdin,
 		stdout:        stdout,
 		stderr:        stderr,
+		wsConn:        wsConn,
+		wsCtx:         wsCtx,
+		wsStop:        wsStop,
 		writeCh:       make(chan writeReq, 256),
 		requestRoutes: make(map[string]func(ctx context.Context, req Request) (any, *RPCError)),
 		onStderr:      cfg.OnStderr,
@@ -115,6 +144,9 @@ func StartProcess(ctx context.Context, cfg ProcessConfig) (*Client, error) {
 	c.nextID.Store(1)
 	go c.writeLoop()
 	go c.readLoop()
+	if c.wsConn != nil && c.stdout != nil {
+		go c.drainStdout()
+	}
 	if c.stderr != nil {
 		go c.drainStderr()
 	}
@@ -143,18 +175,19 @@ func (c *Client) waitForProcess() error {
 }
 
 func (c *Client) Close() error {
-	if c == nil {
-		return nil
-	}
 	if c.closed.Swap(true) {
 		return nil
 	}
 	c.failAllPending()
-	c.closeOnce.Do(func() {
-		if c.writeCh != nil {
-			close(c.writeCh)
-		}
-	})
+	if c.writeCh != nil {
+		close(c.writeCh)
+	}
+	if c.wsStop != nil {
+		c.wsStop()
+	}
+	if c.wsConn != nil {
+		_ = c.wsConn.Close(websocket.StatusNormalClosure, "closing")
+	}
 	_ = c.stdin.Close()
 	if c.cmd != nil && c.cmd.Process != nil {
 		_ = c.cmd.Process.Kill()
@@ -165,9 +198,6 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) failAllPending() {
-	if c == nil {
-		return
-	}
 	c.failOnce.Do(func() {
 		rpcErr := &RPCError{Code: -32000, Message: "rpc process closed"}
 		c.pending.Range(func(key, value any) bool {
@@ -176,10 +206,8 @@ func (c *Client) failAllPending() {
 				c.pending.Delete(key)
 				return true
 			}
-			keyStr, _ := key.(string)
-			idRaw := json.RawMessage(keyStr)
 			select {
-			case ch <- Response{ID: idRaw, Error: rpcErr}:
+			case ch <- Response{Error: rpcErr}:
 			default:
 			}
 			c.pending.Delete(key)
@@ -189,7 +217,7 @@ func (c *Client) failAllPending() {
 }
 
 func (c *Client) OnNotification(fn func(method string, params json.RawMessage)) {
-	if c == nil || fn == nil {
+	if fn == nil {
 		return
 	}
 	c.notifMu.Lock()
@@ -198,10 +226,10 @@ func (c *Client) OnNotification(fn func(method string, params json.RawMessage)) 
 }
 
 func (c *Client) HandleRequest(method string, fn func(ctx context.Context, req Request) (any, *RPCError)) {
-	if c == nil || strings.TrimSpace(method) == "" || fn == nil {
+	method = strings.TrimSpace(method)
+	if method == "" || fn == nil {
 		return
 	}
-	method = strings.TrimSpace(method)
 	c.reqMu.Lock()
 	c.requestRoutes[method] = fn
 	c.reqMu.Unlock()
@@ -228,9 +256,6 @@ func (c *Client) Initialize(ctx context.Context, info ClientInfo, experimental b
 }
 
 func (c *Client) Notify(ctx context.Context, method string, params any) error {
-	if c == nil {
-		return errors.New("client is nil")
-	}
 	msg := map[string]any{
 		"method": method,
 	}
@@ -241,42 +266,50 @@ func (c *Client) Notify(ctx context.Context, method string, params any) error {
 }
 
 func (c *Client) Call(ctx context.Context, method string, params any, out any) error {
-	if c == nil {
-		return errors.New("client is nil")
-	}
-	idNum := c.nextID.Add(1)
-	idRaw, _ := json.Marshal(idNum)
-	ch := make(chan Response, 1)
-	c.pending.Store(idKey(idRaw), ch)
-	defer c.pending.Delete(idKey(idRaw))
+	const maxRetries = 5
+	for attempt := 0; ; attempt++ {
+		idNum := c.nextID.Add(1)
+		idRaw, _ := json.Marshal(idNum)
+		ch := make(chan Response, 1)
+		c.pending.Store(idKey(idRaw), ch)
 
-	req := map[string]any{
-		"id":     idNum,
-		"method": method,
-	}
-	if params != nil {
-		req["params"] = params
-	}
-	if err := c.writeJSONL(ctx, req); err != nil {
-		return err
-	}
+		req := map[string]any{
+			"id":     idNum,
+			"method": method,
+		}
+		if params != nil {
+			req["params"] = params
+		}
+		if err := c.writeJSONL(ctx, req); err != nil {
+			c.pending.Delete(idKey(idRaw))
+			return err
+		}
 
-	var resp Response
-	select {
-	case resp = <-ch:
-	case <-ctx.Done():
-		return ctx.Err()
+		var resp Response
+		select {
+		case resp = <-ch:
+		case <-ctx.Done():
+			c.pending.Delete(idKey(idRaw))
+			return ctx.Err()
+		}
+		c.pending.Delete(idKey(idRaw))
+		if resp.Error != nil {
+			if c.wsConn != nil && shouldRetryServerOverloaded(resp.Error) && attempt < maxRetries {
+				if err := waitRetryBackoff(ctx, attempt); err != nil {
+					return err
+				}
+				continue
+			}
+			return fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
+		}
+		if out == nil {
+			return nil
+		}
+		if len(resp.Result) == 0 {
+			return errors.New("missing rpc result")
+		}
+		return json.Unmarshal(resp.Result, out)
 	}
-	if resp.Error != nil {
-		return fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
-	}
-	if out == nil {
-		return nil
-	}
-	if len(resp.Result) == 0 {
-		return errors.New("missing rpc result")
-	}
-	return json.Unmarshal(resp.Result, out)
 }
 
 func (c *Client) writeJSONL(ctx context.Context, v any) error {
@@ -288,9 +321,6 @@ func (c *Client) writeJSONL(ctx context.Context, v any) error {
 		return err
 	}
 	data = append(data, '\n')
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	req := writeReq{
 		ctx:  ctx,
 		data: data,
@@ -332,13 +362,18 @@ func (c *Client) writeLoop() {
 					}
 				}
 			}()
+			if c.wsConn != nil {
+				payload := bytes.TrimSpace(b)
+				writeDone <- c.wsConn.Write(req.ctx, websocket.MessageText, payload)
+				return
+			}
 			_, err := c.stdin.Write(b)
 			writeDone <- err
 		}(req.data)
 
 		// If caller provided no deadline, enforce a conservative max write time.
 		maxWrite := 30 * time.Second
-		timer := (*time.Timer)(nil)
+		var timer *time.Timer
 		if _, ok := req.ctx.Deadline(); !ok {
 			timer = time.NewTimer(maxWrite)
 		}
@@ -371,59 +406,72 @@ func timerC(t *time.Timer) <-chan time.Time {
 }
 
 func (c *Client) readLoop() {
+	if c.wsConn != nil {
+		for {
+			_, payload, err := c.wsConn.Read(c.wsCtx)
+			if err != nil {
+				break
+			}
+			c.handleInboundJSON(payload)
+		}
+		c.failAllPending()
+		_ = c.Close()
+		return
+	}
+
 	sc := bufio.NewScanner(c.stdout)
 	// Default token limit is 64K; Codex items/diffs can be bigger.
 	buf := make([]byte, 0, 1024*1024)
 	sc.Buffer(buf, 32*1024*1024)
 	for sc.Scan() {
-		line := sc.Bytes()
-		line = bytesTrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-
-		// Probe JSON shape.
-		var probe map[string]json.RawMessage
-		if err := json.Unmarshal(line, &probe); err != nil {
-			slog.Warn("codexrpc: failed to parse JSON line from process", "error", err)
-			continue
-		}
-		if _, hasMethod := probe["method"]; hasMethod {
-			// Notification or server-initiated request.
-			if _, hasID := probe["id"]; hasID {
-				var req Request
-				if err := json.Unmarshal(line, &req); err != nil {
-					continue
-				}
-				go c.handleServerRequest(req)
-				continue
-			}
-			var n Notification
-			if err := json.Unmarshal(line, &n); err != nil {
-				continue
-			}
-			c.dispatchNotification(n.Method, n.Params)
-			continue
-		}
-		if _, hasID := probe["id"]; hasID {
-			var resp Response
-			if err := json.Unmarshal(line, &resp); err != nil {
-				slog.Warn("codexrpc: failed to parse response JSON", "error", err)
-				continue
-			}
-			if chAny, ok := c.pending.Load(idKey(resp.ID)); ok {
-				ch := chAny.(chan Response)
-				select {
-				case ch <- resp:
-				default:
-					slog.Warn("codexrpc: dropped response (channel full)", "id", string(resp.ID))
-				}
-			}
-			continue
-		}
+		c.handleInboundJSON(sc.Bytes())
 	}
 	c.failAllPending()
 	_ = c.Close()
+}
+
+func (c *Client) handleInboundJSON(line []byte) {
+	line = bytes.TrimSpace(line)
+	if len(line) == 0 {
+		return
+	}
+
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(line, &probe); err != nil {
+		slog.Warn("codexrpc: failed to parse JSON payload from process", "error", err)
+		return
+	}
+	if _, hasMethod := probe["method"]; hasMethod {
+		if _, hasID := probe["id"]; hasID {
+			var req Request
+			if err := json.Unmarshal(line, &req); err != nil {
+				return
+			}
+			go c.handleServerRequest(req)
+			return
+		}
+		var n Notification
+		if err := json.Unmarshal(line, &n); err != nil {
+			return
+		}
+		c.dispatchNotification(n.Method, n.Params)
+		return
+	}
+	if _, hasID := probe["id"]; hasID {
+		var resp Response
+		if err := json.Unmarshal(line, &resp); err != nil {
+			slog.Warn("codexrpc: failed to parse response JSON", "error", err)
+			return
+		}
+		if chAny, ok := c.pending.Load(idKey(resp.ID)); ok {
+			ch := chAny.(chan Response)
+			select {
+			case ch <- resp:
+			default:
+				slog.Warn("codexrpc: dropped response (channel full)", "id", string(resp.ID))
+			}
+		}
+	}
 }
 
 func (c *Client) handleServerRequest(req Request) {
@@ -436,10 +484,10 @@ func (c *Client) handleServerRequest(req Request) {
 	c.reqMu.RUnlock()
 
 	if handler == nil {
-		// Best-effort: respond with decline for approval-style requests,
-		// otherwise return a generic error.
-		result := map[string]any{"decision": "decline"}
-		_ = c.writeResponse(context.Background(), req.ID, result, nil)
+		_ = c.writeResponse(context.Background(), req.ID, nil, &RPCError{
+			Code:    -32601,
+			Message: "Method not found",
+		})
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
@@ -453,7 +501,7 @@ func (c *Client) writeResponse(ctx context.Context, id json.RawMessage, result a
 		return nil
 	}
 	msg := map[string]any{
-		"id": json.RawMessage(id),
+		"id": id,
 	}
 	if rpcErr != nil {
 		msg["error"] = rpcErr
@@ -465,7 +513,7 @@ func (c *Client) writeResponse(ctx context.Context, id json.RawMessage, result a
 
 func (c *Client) dispatchNotification(method string, params json.RawMessage) {
 	c.notifMu.RLock()
-	subs := append([]func(string, json.RawMessage){}, c.notifSubs...)
+	subs := slices.Clone(c.notifSubs)
 	c.notifMu.RUnlock()
 	for _, fn := range subs {
 		fn(method, params)
@@ -486,17 +534,81 @@ func (c *Client) drainStderr() {
 	}
 }
 
-func bytesTrimSpace(b []byte) []byte {
-	for len(b) > 0 && (b[0] == ' ' || b[0] == '\n' || b[0] == '\r' || b[0] == '\t') {
-		b = b[1:]
+func (c *Client) drainStdout() {
+	if c.stdout == nil {
+		return
 	}
-	for len(b) > 0 {
-		last := b[len(b)-1]
-		if last == ' ' || last == '\n' || last == '\r' || last == '\t' {
-			b = b[:len(b)-1]
-			continue
+	_, _ = io.Copy(io.Discard, c.stdout)
+}
+
+func shouldRetryServerOverloaded(rpcErr *RPCError) bool {
+	if rpcErr == nil {
+		return false
+	}
+	if rpcErr.Code != -32001 {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(rpcErr.Message))
+	return strings.Contains(msg, "overloaded") || strings.Contains(msg, "retry later")
+}
+
+func waitRetryBackoff(ctx context.Context, attempt int) error {
+	base := 100 * time.Millisecond
+	max := 3 * time.Second
+	backoff := base << attempt
+	if backoff > max {
+		backoff = max
+	}
+	jitter := time.Duration(rand.Int63n(int64(250 * time.Millisecond)))
+	timer := time.NewTimer(backoff + jitter)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func dialWebSocketWithRetry(ctx context.Context, wsURL string, maxWait time.Duration) (*websocket.Conn, error) {
+	if strings.TrimSpace(wsURL) == "" {
+		return nil, errors.New("missing websocket url")
+	}
+	dialCtx := ctx
+	cancel := func() {}
+	if _, ok := ctx.Deadline(); !ok {
+		dialCtx, cancel = context.WithTimeout(ctx, maxWait)
+	}
+	defer cancel()
+
+	backoff := 50 * time.Millisecond
+	var lastErr error
+	for {
+		conn, _, err := websocket.Dial(dialCtx, wsURL, nil)
+		if err == nil {
+			return conn, nil
 		}
-		break
+		lastErr = err
+		timer := time.NewTimer(backoff + time.Duration(rand.Int63n(int64(100*time.Millisecond))))
+		select {
+		case <-timer.C:
+		case <-dialCtx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("websocket dial failed: %w", firstErr(dialCtx.Err(), lastErr))
+		}
+		timer.Stop()
+		if backoff < 1*time.Second {
+			backoff *= 2
+			if backoff > 1*time.Second {
+				backoff = 1 * time.Second
+			}
+		}
 	}
-	return b
+}
+
+func firstErr(primary, fallback error) error {
+	if primary != nil {
+		return primary
+	}
+	return fallback
 }
