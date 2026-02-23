@@ -93,37 +93,34 @@ const (
 	TurnStatusCancelled  TurnStatus = "cancelled"
 )
 
-// ToolStatus represents the state of a tool call
-type ToolStatus string
+type ToolStatus = matrixevents.ToolStatus
 
 const (
-	ToolStatusPending          ToolStatus = "pending"
-	ToolStatusRunning          ToolStatus = "running"
-	ToolStatusCompleted        ToolStatus = "completed"
-	ToolStatusFailed           ToolStatus = "failed"
-	ToolStatusTimeout          ToolStatus = "timeout"
-	ToolStatusCancelled        ToolStatus = "cancelled"
-	ToolStatusApprovalRequired ToolStatus = "approval_required"
+	ToolStatusPending          = matrixevents.ToolStatusPending
+	ToolStatusRunning          = matrixevents.ToolStatusRunning
+	ToolStatusCompleted        = matrixevents.ToolStatusCompleted
+	ToolStatusFailed           = matrixevents.ToolStatusFailed
+	ToolStatusTimeout          = matrixevents.ToolStatusTimeout
+	ToolStatusCancelled        = matrixevents.ToolStatusCancelled
+	ToolStatusApprovalRequired = matrixevents.ToolStatusApprovalRequired
 )
 
-// ResultStatus represents the status of a tool result
-type ResultStatus string
+type ResultStatus = matrixevents.ResultStatus
 
 const (
-	ResultStatusSuccess ResultStatus = "success"
-	ResultStatusError   ResultStatus = "error"
-	ResultStatusPartial ResultStatus = "partial"
-	ResultStatusDenied  ResultStatus = "denied"
+	ResultStatusSuccess = matrixevents.ResultStatusSuccess
+	ResultStatusError   = matrixevents.ResultStatusError
+	ResultStatusPartial = matrixevents.ResultStatusPartial
+	ResultStatusDenied  = matrixevents.ResultStatusDenied
 )
 
-// ToolType identifies the category of tool
-type ToolType string
+type ToolType = matrixevents.ToolType
 
 const (
-	ToolTypeBuiltin  ToolType = "builtin"
-	ToolTypeProvider ToolType = "provider"
-	ToolTypeFunction ToolType = "function"
-	ToolTypeMCP      ToolType = "mcp"
+	ToolTypeBuiltin  = matrixevents.ToolTypeBuiltin
+	ToolTypeProvider = matrixevents.ToolTypeProvider
+	ToolTypeFunction = matrixevents.ToolTypeFunction
+	ToolTypeMCP      = matrixevents.ToolTypeMCP
 )
 
 const (

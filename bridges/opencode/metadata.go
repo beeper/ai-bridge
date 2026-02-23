@@ -2,7 +2,6 @@ package opencode
 
 import (
 	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
-	"go.mau.fi/util/jsontime"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
@@ -28,9 +27,7 @@ type PortalMetadata struct {
 
 type MessageMetadata struct{}
 
-type GhostMetadata struct {
-	LastSync jsontime.Unix `json:"last_sync,omitempty"`
-}
+type GhostMetadata struct{}
 
 func loginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
 	return bridgeadapter.EnsureLoginMetadata[UserLoginMetadata](login)

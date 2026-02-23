@@ -53,25 +53,9 @@ type MessageMetadata struct {
 	GeneratedFiles     []GeneratedFileRef `json:"generated_files,omitempty"`
 }
 
-type ToolCallMetadata struct {
-	CallID        string         `json:"call_id"`
-	ToolName      string         `json:"tool_name"`
-	ToolType      string         `json:"tool_type"`
-	Input         map[string]any `json:"input,omitempty"`
-	Output        map[string]any `json:"output,omitempty"`
-	Status        string         `json:"status"`
-	ResultStatus  string         `json:"result_status,omitempty"`
-	ErrorMessage  string         `json:"error_message,omitempty"`
-	StartedAtMs   int64          `json:"started_at_ms,omitempty"`
-	CompletedAtMs int64          `json:"completed_at_ms,omitempty"`
-	CallEventID   string         `json:"call_event_id,omitempty"`
-	ResultEventID string         `json:"result_event_id,omitempty"`
-}
+type ToolCallMetadata = bridgeadapter.ToolCallMetadata
 
-type GeneratedFileRef struct {
-	URL      string `json:"url"`
-	MimeType string `json:"mime_type"`
-}
+type GeneratedFileRef = bridgeadapter.GeneratedFileRef
 
 type GhostMetadata struct {
 	LastSync jsontime.Unix `json:"last_sync,omitempty"`

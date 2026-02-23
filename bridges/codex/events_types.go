@@ -26,28 +26,28 @@ const (
 var ToolCallEventType = matrixevents.ToolCallEventType
 var ToolResultEventType = matrixevents.ToolResultEventType
 
-type ToolStatus string
+type ToolStatus = matrixevents.ToolStatus
 
 const (
-	ToolStatusPending          ToolStatus = "pending"
-	ToolStatusRunning          ToolStatus = "running"
-	ToolStatusCompleted        ToolStatus = "completed"
-	ToolStatusFailed           ToolStatus = "failed"
-	ToolStatusApprovalRequired ToolStatus = "approval_required"
+	ToolStatusPending          = matrixevents.ToolStatusPending
+	ToolStatusRunning          = matrixevents.ToolStatusRunning
+	ToolStatusCompleted        = matrixevents.ToolStatusCompleted
+	ToolStatusFailed           = matrixevents.ToolStatusFailed
+	ToolStatusApprovalRequired = matrixevents.ToolStatusApprovalRequired
 )
 
-type ToolType string
+type ToolType = matrixevents.ToolType
 
 const (
-	ToolTypeProvider ToolType = "provider"
+	ToolTypeProvider = matrixevents.ToolTypeProvider
 )
 
-type ResultStatus string
+type ResultStatus = matrixevents.ResultStatus
 
 const (
-	ResultStatusSuccess ResultStatus = "success"
-	ResultStatusError   ResultStatus = "error"
-	ResultStatusDenied  ResultStatus = "denied"
+	ResultStatusSuccess = matrixevents.ResultStatusSuccess
+	ResultStatusError   = matrixevents.ResultStatusError
+	ResultStatusDenied  = matrixevents.ResultStatusDenied
 )
 
 const (

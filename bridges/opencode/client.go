@@ -15,6 +15,7 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	"github.com/beeper/ai-bridge/bridges/opencode/opencodebridge"
+	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
 )
 
 var _ bridgev2.NetworkAPI = (*OpenCodeClient)(nil)
@@ -48,9 +49,6 @@ func newOpenCodeClient(login *bridgev2.UserLogin, connector *OpenCodeConnector) 
 }
 
 func (oc *OpenCodeClient) Connect(ctx context.Context) {
-	if oc == nil || oc.UserLogin == nil {
-		return
-	}
 	oc.loggedIn.Store(true)
 	oc.UserLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected, Message: "Connected"})
 	if oc.bridge != nil {
@@ -61,9 +59,6 @@ func (oc *OpenCodeClient) Connect(ctx context.Context) {
 }
 
 func (oc *OpenCodeClient) Disconnect() {
-	if oc == nil {
-		return
-	}
 	oc.loggedIn.Store(false)
 	if oc.bridge != nil {
 		oc.bridge.DisconnectAll()
@@ -74,14 +69,11 @@ func (oc *OpenCodeClient) Disconnect() {
 }
 
 func (oc *OpenCodeClient) IsLoggedIn() bool {
-	if oc == nil {
-		return false
-	}
 	return oc.loggedIn.Load()
 }
 
 func (oc *OpenCodeClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (*bridgev2.MatrixMessageResponse, error) {
-	if oc == nil || msg == nil || msg.Portal == nil {
+	if msg == nil || msg.Portal == nil {
 		return nil, errors.New("missing portal context")
 	}
 	if oc.bridge == nil {
@@ -95,14 +87,14 @@ func (oc *OpenCodeClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2
 }
 
 func (oc *OpenCodeClient) HandleMatrixDeleteChat(ctx context.Context, msg *bridgev2.MatrixDeleteChat) error {
-	if oc == nil || oc.bridge == nil {
+	if oc.bridge == nil {
 		return nil
 	}
 	return oc.bridge.HandleMatrixDeleteChat(ctx, msg)
 }
 
 func (oc *OpenCodeClient) FetchMessages(ctx context.Context, params bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
-	if oc == nil || oc.bridge == nil {
+	if oc.bridge == nil {
 		return nil, nil
 	}
 	if params.Portal == nil {
@@ -115,30 +107,26 @@ func (oc *OpenCodeClient) FetchMessages(ctx context.Context, params bridgev2.Fet
 	return oc.bridge.FetchMessages(ctx, params)
 }
 
-func openCodeFileFeatures() *event.FileFeatures {
-	return &event.FileFeatures{
-		MimeTypes: map[string]event.CapabilitySupportLevel{
-			"*/*": event.CapLevelFullySupported,
-		},
-		Caption:          event.CapLevelFullySupported,
-		MaxCaptionLength: 100000,
-		MaxSize:          50 * 1024 * 1024,
-	}
+var openCodeFileFeatures = &event.FileFeatures{
+	MimeTypes: map[string]event.CapabilitySupportLevel{
+		"*/*": event.CapLevelFullySupported,
+	},
+	Caption:          event.CapLevelFullySupported,
+	MaxCaptionLength: 100000,
+	MaxSize:          50 * 1024 * 1024,
 }
 
-func (oc *OpenCodeClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
-	_ = ctx
-	_ = portal
+func (oc *OpenCodeClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) *event.RoomFeatures {
 	return &event.RoomFeatures{
 		ID: "com.beeper.ai.capabilities.2026_02_17+opencode",
 		File: event.FileFeatureMap{
-			event.MsgImage:      openCodeFileFeatures(),
-			event.MsgVideo:      openCodeFileFeatures(),
-			event.MsgAudio:      openCodeFileFeatures(),
-			event.MsgFile:       openCodeFileFeatures(),
-			event.CapMsgVoice:   openCodeFileFeatures(),
-			event.CapMsgGIF:     openCodeFileFeatures(),
-			event.CapMsgSticker: openCodeFileFeatures(),
+			event.MsgImage:      openCodeFileFeatures,
+			event.MsgVideo:      openCodeFileFeatures,
+			event.MsgAudio:      openCodeFileFeatures,
+			event.MsgFile:       openCodeFileFeatures,
+			event.CapMsgVoice:   openCodeFileFeatures,
+			event.CapMsgGIF:     openCodeFileFeatures,
+			event.CapMsgSticker: openCodeFileFeatures,
 		},
 		MaxTextLength:       100000,
 		Reply:               event.CapLevelFullySupported,
@@ -152,14 +140,17 @@ func (oc *OpenCodeClient) GetCapabilities(ctx context.Context, portal *bridgev2.
 	}
 }
 
-func (oc *OpenCodeClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
-	_ = ctx
+func defaultOpenCodeUserInfo() *bridgev2.UserInfo {
+	return &bridgev2.UserInfo{Name: ptr.Ptr("OpenCode"), IsBot: ptr.Ptr(true)}
+}
+
+func (oc *OpenCodeClient) GetUserInfo(_ context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	if ghost == nil {
-		return &bridgev2.UserInfo{Name: ptr.Ptr("OpenCode"), IsBot: ptr.Ptr(true)}, nil
+		return defaultOpenCodeUserInfo(), nil
 	}
 	instanceID, ok := opencodebridge.ParseOpenCodeGhostID(string(ghost.ID))
 	if !ok {
-		return &bridgev2.UserInfo{Name: ptr.Ptr("OpenCode"), IsBot: ptr.Ptr(true)}, nil
+		return defaultOpenCodeUserInfo(), nil
 	}
 	display := "OpenCode"
 	if oc.bridge != nil {
@@ -175,7 +166,7 @@ func (oc *OpenCodeClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost
 }
 
 func (oc *OpenCodeClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	if oc == nil || oc.UserLogin == nil || oc.bridge == nil {
+	if oc.bridge == nil {
 		return nil, errors.New("login unavailable")
 	}
 	instanceID, ok := opencodebridge.ParseOpenCodeIdentifier(identifier)
@@ -218,9 +209,6 @@ func (oc *OpenCodeClient) ResolveIdentifier(ctx context.Context, identifier stri
 }
 
 func (oc *OpenCodeClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
-	if oc == nil || oc.UserLogin == nil {
-		return nil, nil
-	}
 	meta := loginMetadata(oc.UserLogin)
 	if meta == nil || len(meta.OpenCodeInstances) == 0 {
 		return nil, nil
@@ -235,29 +223,18 @@ func (oc *OpenCodeClient) GetContactList(ctx context.Context) ([]*bridgev2.Resol
 	return out, nil
 }
 
-func (oc *OpenCodeClient) LogoutRemote(ctx context.Context) {
-	_ = ctx
-	if oc == nil {
-		return
-	}
+func (oc *OpenCodeClient) LogoutRemote(_ context.Context) {
 	oc.Disconnect()
 	if oc.connector != nil && oc.UserLogin != nil {
-		oc.connector.clientsMu.Lock()
-		delete(oc.connector.clients, oc.UserLogin.ID)
-		oc.connector.clientsMu.Unlock()
+		bridgeadapter.RemoveClientFromCache(&oc.connector.clientsMu, oc.connector.clients, oc.UserLogin.ID)
 	}
 }
 
-func (oc *OpenCodeClient) IsThisUser(ctx context.Context, userID networkid.UserID) bool {
-	_ = ctx
-	if oc == nil || oc.UserLogin == nil {
-		return false
-	}
+func (oc *OpenCodeClient) IsThisUser(_ context.Context, userID networkid.UserID) bool {
 	return userID == humanUserID(oc.UserLogin.ID)
 }
 
-func (oc *OpenCodeClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
-	_ = ctx
+func (oc *OpenCodeClient) GetChatInfo(_ context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 	if portal == nil {
 		return nil, nil
 	}
