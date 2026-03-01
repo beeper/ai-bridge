@@ -64,12 +64,6 @@ var StepBoundaryEventType = event.Type{
 	Class: event.MessageEventType,
 }
 
-// StreamDeltaEventType is the custom event type for streaming token updates (ephemeral).
-var StreamDeltaEventType = event.Type{
-	Type:  "com.beeper.ai.stream_delta",
-	Class: event.EphemeralEventType,
-}
-
 // StreamEventMessageType is the unified event type for AI streaming updates (ephemeral).
 var StreamEventMessageType = event.Type{
 	Type:  "com.beeper.ai.stream_event",
