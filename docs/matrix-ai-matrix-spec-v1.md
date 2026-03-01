@@ -1,504 +1,371 @@
-# Real-time AI with Matrix?
+# MSCXXXX: AI Extensions for Matrix Bridge Transport (Beeper profile)
 
-## Matrix AI Transport Spec v1
+This MSC defines a set of Matrix extensions for AI assistant conversations in bridged rooms.
+It standardizes how assistant turns, live streaming deltas, tool execution, approvals, and room
+AI settings are represented.
 
-> [!WARNING]
-> Status: *Draft* (unreleased), proposed v1.
-> This is a highly experimental profile.
-> It requires homeserver and client support (custom event types + ephemeral events + rendering/consumption).
-> This repo contains one experimental implementation, but the transport profile is not bridge-specific: any Matrix bot/client/bridge can emit and consume these events.
+The proposal is based on production behavior in `ai-bridge` and intentionally prefers
+interoperability with existing clients over idealized redesign.
 
-## Contents
-- [Scope](#scope)
-- [Compatibility](#compatibility)
-- [Terminology](#terminology)
-- [Inventory](#inventory)
-- [Canonical Assistant Message](#canonical)
-- [Streaming](#streaming)
-- [Timeline Projections](#projections)
-- [State Events](#state)
-- [Tool Approvals](#approvals)
-- [Other Matrix Keys](#other-keys)
-- [Defined Schemas (May Not Be Emitted)](#defined-schemas)
-- [Implementation Notes](#impl-notes)
-- [Forward Compatibility](#forward-compat)
+## Background
 
-<a id="scope"></a>
-## Scope
-This document specifies a Matrix transport profile for real-time AI:
-- Canonical assistant content in `m.room.message` (`com.beeper.ai` as AI SDK-compatible `UIMessage`).
-- Streaming deltas as ephemeral events (`com.beeper.ai.stream_event` with AI SDK `UIMessageChunk`).
-- `com.beeper.ai.*` timeline projection events (tool call/result, compaction status, etc).
-- `com.beeper.ai.*` state events (room settings/capabilities).
-- Tool approvals (MCP approvals + selected builtin tools).
-- Auxiliary `com.beeper.ai*` keys used for routing/metadata.
+Matrix currently has no single common shape for:
 
-This spec is intended to be usable by any Matrix bot/client/bridge. Where this document references "the bridge", it refers to the producing implementation (for this repo, `ai-bridge`).
+- Streaming assistant tokens and reasoning updates.
+- Timeline-visible tool call/result projections.
+- Human approval gates for privileged tool execution.
+- Room-level AI settings and capability state.
 
-Upstream reference (AI SDK):
-- Vercel AI SDK inspected at commit `ff7dd528f3933f67bf4568126db0a81cd4a47a96` (2026-02-06 UTC).
-- Core types:
-  - `packages/ai/src/ui/ui-messages.ts`
-  - `packages/ai/src/ui-message-stream/ui-message-chunks.ts`
-  - `packages/ai/src/ui-message-stream/json-to-sse-transform-stream.ts`
+In practice, bridge and client implementations have already converged on a de-facto profile in the
+`com.beeper.ai.*` namespace. This MSC formalizes that profile so independent implementations can
+interoperate.
 
-Reference implementation in this repo (ai-bridge):
-- Event type identifiers: `pkg/matrixevents/matrixevents.go`
-- Event payload structs (where defined): `pkg/connector/events.go`
-- Streaming envelope and emission: `pkg/matrixevents/matrixevents.go`, `pkg/connector/stream_events.go`
-- Tool call/result projections: `pkg/connector/tool_execution.go`
-- Compaction status emission: `pkg/connector/response_retry.go`
-- State broadcast: `pkg/connector/chat.go`
-- Approvals: `pkg/connector/tool_approvals*.go`, `pkg/connector/handlematrix.go`, `pkg/connector/inbound_command_handlers.go`, `pkg/connector/streaming.go`
+## Goals
 
-<a id="compatibility"></a>
-## Compatibility
-- Homeserver support for custom event types and ephemeral events is required.
-- Clients must explicitly implement rendering/consumption of these custom types.
-- Non-supporting clients should fall back to `m.room.message.body` where available.
+- Define a canonical assistant message carrier in `m.room.message`.
+- Define an ephemeral stream event envelope with deterministic sequencing.
+- Define timeline projection events for tools and compaction status.
+- Define room state events for AI capabilities and settings.
+- Define a portable approval flow for tools requiring human confirmation.
+- Preserve fallback readability in non-supporting Matrix clients.
 
-<a id="terminology"></a>
-## Terminology
-- `turn_id`: Unique ID for a single assistant response "turn".
-- `seq`: Per-turn monotonic sequence number for stream events.
-- `target_event`: Matrix event ID that a stream relates to (typically the placeholder timeline event).
-- `call_id` / `toolCallId`: Tool invocation identifier.
-- `timeline`: persisted Matrix events.
-- `ephemeral`: non-persisted events (dropped by servers/clients that don't support them).
-- `m.reference`: relation used to link events to a target event ID.
-- `m.replace`: relation used to edit/replace an earlier timeline message.
+## Non-goals
 
-<a id="inventory"></a>
-## Inventory
-Authoritative identifiers are defined in `pkg/matrixevents/matrixevents.go`.
+- Defining provider-side LLM APIs.
+- Defining room version changes.
+- Defining a stable Matrix `m.*` namespace for AI transport (this remains unstable/vendor-prefixed).
 
-### Event Types
-| Event type | Class | Persistence | Primary purpose | Spec section |
-| --- | --- | --- | --- | --- |
-| `m.room.message` | message | timeline | Canonical assistant message carrier (`com.beeper.ai`) | [Canonical](#canonical) |
-| `com.beeper.ai.stream_event` | ephemeral | ephemeral | Streaming `UIMessageChunk` deltas | [Streaming](#streaming) |
-| `com.beeper.ai.tool_call` | message | timeline | Tool invocation projection | [Projections](#projection-tool-call) |
-| `com.beeper.ai.tool_result` | message | timeline | Tool result projection | [Projections](#projection-tool-result) |
-| `com.beeper.ai.compaction_status` | message | timeline | Context compaction lifecycle/status | [Projections](#projection-compaction) |
-| `com.beeper.ai.room_capabilities` | state | state | Producer-controlled capabilities and effective settings | [State](#state-room-capabilities) |
-| `com.beeper.ai.room_settings` | state | state | User-editable room settings | [State](#state-room-settings) |
-| `com.beeper.ai.model_capabilities` | state | state | Available models + capabilities (defined; may be unused) | [State](#state-model-capabilities) |
-| `com.beeper.ai.agents` | state | state | Agents + orchestration (defined; may be unused) | [State](#state-agents) |
-| `com.beeper.ai.stream_delta` | ephemeral | ephemeral | Legacy/compat streaming deltas (defined; may be unused) | [Defined schemas](#defined-schemas) |
-| `com.beeper.ai.assistant_turn` | message | timeline | Rich turn container (defined; may be unused) | [Defined schemas](#defined-schemas) |
-| `com.beeper.ai.error` | message | timeline | AI error event (defined; may be unused) | [Defined schemas](#defined-schemas) |
-| `com.beeper.ai.turn_cancelled` | message | timeline | Turn cancelled event (defined; may be unused) | [Defined schemas](#defined-schemas) |
-| `com.beeper.ai.agent_handoff` | message | timeline | Agent handoff event (defined; may be unused) | [Defined schemas](#defined-schemas) |
-| `com.beeper.ai.step_boundary` | message | timeline | Step boundary event (defined; may be unused) | [Defined schemas](#defined-schemas) |
-| `com.beeper.ai.generation_status` | message | timeline | Generation status event (defined; may be unused) | [Defined schemas](#defined-schemas) |
-| `com.beeper.ai.tool_progress` | message | timeline | Tool progress event (defined; may be unused) | [Defined schemas](#defined-schemas) |
+## Proposal
 
-### Content Keys (Inside Standard Events)
-| Key | Where it appears | Purpose | Spec section |
-| --- | --- | --- | --- |
-| `com.beeper.ai` | `m.room.message` | Canonical assistant `UIMessage` | [Canonical](#canonical) |
-| `com.beeper.ai.tool_call` | `com.beeper.ai.tool_call` event content | Tool call payload | [Projections](#projection-tool-call) |
-| `com.beeper.ai.tool_result` | `com.beeper.ai.tool_result` event content | Tool result payload | [Projections](#projection-tool-result) |
-| `com.beeper.ai.approval_decision` | inbound `m.room.message` raw content | Approve/deny payload | [Approvals](#approvals-decision) |
-| `com.beeper.ai.model_id` | `m.room.message` | Routing/display hint | [Other keys](#other-keys-routing) |
-| `com.beeper.ai.agent` | `m.room.message`, `m.room.member` | Routing hint or agent definition | [Other keys](#other-keys-agent) |
-| `com.beeper.ai.image_generation` | `m.room.message` (image) | Generated-image tag/metadata | [Other keys](#other-keys-media) |
-| `com.beeper.ai.tts` | `m.room.message` (audio) | Generated-audio tag/metadata | [Other keys](#other-keys-media) |
+### Event and key registry
 
-<a id="canonical"></a>
-## Canonical Assistant Message
-Canonical assistant content is carried in a standard `m.room.message` event.
+The following event types are defined:
 
-Requirements:
-- MUST include standard Matrix fallback fields (`msgtype`, `body`) for non-AI clients.
-- MUST include `com.beeper.ai` and it MUST be an AI SDK-compatible `UIMessage`.
+- `com.beeper.ai.stream_event` (ephemeral): UI chunk streaming envelope.
+- `com.beeper.ai.tool_call` (message): timeline tool invocation projection.
+- `com.beeper.ai.tool_result` (message): timeline tool output projection.
+- `com.beeper.ai.compaction_status` (message): context compaction lifecycle events.
+- `com.beeper.ai.room_capabilities` (state): bridge-controlled capabilities and effective settings.
+- `com.beeper.ai.room_settings` (state): user-editable room AI settings.
 
-### UIMessage Shape
-`com.beeper.ai`:
+The following event types are part of the declared surface area but MAY be unused by a given
+implementation version:
+
+- `com.beeper.ai.assistant_turn`
+- `com.beeper.ai.error`
+- `com.beeper.ai.turn_cancelled`
+- `com.beeper.ai.agent_handoff`
+- `com.beeper.ai.step_boundary`
+- `com.beeper.ai.generation_status`
+- `com.beeper.ai.tool_progress`
+- `com.beeper.ai.stream_delta` (legacy)
+- `com.beeper.ai.model_capabilities`
+- `com.beeper.ai.agents`
+
+The following content keys are defined:
+
+- `com.beeper.ai` inside `m.room.message` (canonical assistant `UIMessage` payload).
+- `com.beeper.ai.tool_call` inside `com.beeper.ai.tool_call` events.
+- `com.beeper.ai.tool_result` inside `com.beeper.ai.tool_result` events.
+- `com.beeper.ai.approval_decision` in inbound `m.room.message` payloads.
+- `com.beeper.ai.model_id` and `com.beeper.ai.agent` as routing/display hints.
+- `com.beeper.ai.image_generation` and `com.beeper.ai.tts` for generated media tags.
+
+### Canonical assistant message
+
+Assistant turns MUST be represented in a standard `m.room.message` event carrying:
+
+- Matrix fallback fields (`msgtype`, `body`).
+- `com.beeper.ai` containing an AI SDK-compatible `UIMessage` object.
+
+#### `com.beeper.ai` shape
+
+`com.beeper.ai` MUST contain:
+
 - `id: string`
 - `role: "assistant"`
-- `metadata?: object`
 - `parts: UIMessagePart[]`
 
-Recommended `metadata` keys:
-- `turn_id`, `agent_id`, `model`, `finish_reason`
-- `usage` (`prompt_tokens`, `completion_tokens`, `reasoning_tokens`, `total_tokens?`)
-- `timing` (`started_at`, `first_token_at`, `completed_at`, unix ms)
+`metadata` SHOULD include:
+
+- `turn_id`
+- `agent_id`
+- `model`
+- `finish_reason`
+- `usage` with token counters
+- `timing` with unix-ms timestamps
 
 Example:
+
 ```json
 {
-  "msgtype": "m.text",
-  "body": "Thinking...",
-  "com.beeper.ai": {
-    "id": "turn_123",
-    "role": "assistant",
-    "metadata": { "turn_id": "turn_123" },
-    "parts": []
+  "type": "m.room.message",
+  "content": {
+    "msgtype": "m.text",
+    "body": "Thinking...",
+    "com.beeper.ai": {
+      "id": "turn_abc",
+      "role": "assistant",
+      "metadata": {"turn_id": "turn_abc"},
+      "parts": []
+    }
   }
 }
 ```
 
-<a id="streaming"></a>
-## Streaming
-Streaming uses ephemeral `com.beeper.ai.stream_event` events.
+#### Streaming placeholder and final replacement
 
-### Envelope
-Event type: `com.beeper.ai.stream_event` (ephemeral)
+For streaming turns, senders SHOULD:
 
-Content:
-- `turn_id: string` (REQUIRED)
-- `seq: integer` (REQUIRED, starts at 1, strictly increasing per `turn_id`)
-- `part: UIMessageChunk` (REQUIRED)
-- `target_event?: string` (RECOMMENDED)
-- `agent_id?: string` (OPTIONAL)
-- `m.relates_to?: { rel_type: "m.reference", event_id: string }` (RECOMMENDED when `target_event` is present)
+1. Send an initial placeholder `m.room.message` with `com.beeper.ai` seed metadata.
+2. Emit ephemeral stream chunks (defined below).
+3. Finalize with an `m.replace` edit including `m.new_content` and full final `com.beeper.ai` payload.
 
-### SSE Mapping
-AI SDK UI streams emit SSE frames:
-- `data: <JSON UIMessageChunk>`
-- terminal sentinel `data: [DONE]`
+When using `m.replace`, senders SHOULD include an outer short fallback body and put full textual
+assistant output in `m.new_content`.
 
-Mapping:
-1. For each SSE JSON chunk, send one `com.beeper.ai.stream_event` with `part = <chunk>`.
-2. `data: [DONE]` is transport-level termination and does not require a Matrix event.
+### Ephemeral streaming event
 
-Implications:
-- Producers MUST NOT remap chunk payload schemas.
-- Consumers MUST process `part` as AI SDK `UIMessageChunk`.
+Streaming uses `com.beeper.ai.stream_event` (ephemeral).
 
-### Chunk Compatibility
-Producers MAY emit any valid AI SDK `UIMessageChunk` type:
-- `start`
-- `start-step`
-- `finish-step`
-- `message-metadata`
-- `text-start`
-- `text-delta`
-- `text-end`
-- `reasoning-start`
-- `reasoning-delta`
-- `reasoning-end`
-- `tool-input-start`
-- `tool-input-delta`
-- `tool-input-available`
-- `tool-input-error`
-- `tool-approval-request`
-- `tool-output-available`
-- `tool-output-error`
-- `tool-output-denied`
-- `source-url`
-- `source-document`
-- `file`
-- `data-*`
-- `finish`
-- `abort`
-- `error`
+Each event MUST contain:
 
-Consumer requirements:
-- MUST accept and safely handle all valid AI SDK chunk types.
-- MUST ignore unknown future chunk types.
-- MUST NOT persist `data-*` chunks with `transient: true`.
+- `turn_id: string`
+- `seq: integer` (strictly increasing per turn, first value 1)
+- `part: object` (AI SDK-compatible `UIMessageChunk`)
 
-### Bridge-specific `data-*` chunks
-This bridge emits some `data-*` chunks in `part` for UI coordination. Clients that do not recognize them SHOULD ignore them.
+Each event SHOULD contain:
 
-| Chunk type | Transient | Payload |
-| --- | --- | --- |
-| `data-tool-progress` | yes | `data.call_id`, `data.tool_name`, `data.status`, `data.progress` |
-| `data-tool-call-event` | no | `id = "tool-call-event:<toolCallId>"`, `data.toolCallId`, `data.callEventId` |
-| `data-image_generation_partial` | yes | `data.item_id`, `data.index`, `data.image_b64` |
-| `data-annotation` | yes | `data.annotation`, `data.index` |
+- `target_event: string` (event ID of placeholder message)
+- `m.relates_to: {"rel_type":"m.reference","event_id":"..."}` when `target_event` is present
 
-### Ordering and Lifecycle
-Per turn:
-- `seq` MUST be strictly increasing.
-- Duplicate/stale events (`seq <= last_applied_seq`) MUST be ignored.
-- Out-of-order events SHOULD be buffered briefly and applied in `seq` order.
+Each event MAY contain:
 
-Recommended lifecycle:
-1. Send initial placeholder `m.room.message` with seed `com.beeper.ai`.
-2. Emit `com.beeper.ai.stream_event` chunks (monotonic `seq`).
-3. Emit final timeline edit (`m.replace`) containing final fallback text + full final `com.beeper.ai`.
+- `agent_id: string`
 
-Terminal chunks:
-- The stream SHOULD end with one of: `finish`, `abort`, `error`.
+Envelope example:
 
-Mermaid (conceptual):
-```mermaid
-sequenceDiagram
-  participant C as Client
-  participant H as Homeserver
-  participant B as Bridge
-
-  B->>H: m.room.message (placeholder + com.beeper.ai seed)
-  H->>C: timeline placeholder
-  loop stream chunks
-    B->>H: com.beeper.ai.stream_event (turn_id, seq, part)
-    H->>C: ephemeral stream_event
-  end
-  B->>H: m.room.message (m.replace final + com.beeper.ai final)
-  H->>C: timeline edit
-```
-
-### Streaming Example
 ```json
 {
-  "turn_id": "turn_123",
+  "turn_id": "turn_abc",
   "seq": 7,
-  "target_event": "$initial_event",
-  "m.relates_to": { "rel_type": "m.reference", "event_id": "$initial_event" },
-  "part": { "type": "text-delta", "id": "text-turn_123", "delta": "hello" }
+  "target_event": "$placeholder",
+  "m.relates_to": {"rel_type": "m.reference", "event_id": "$placeholder"},
+  "part": {"type": "text-delta", "id": "text-turn_abc", "delta": "hello"}
 }
 ```
 
-<a id="projections"></a>
-## Timeline Projections
-These are separate timeline events to support richer UI and/or non-streaming clients.
+#### Sequencing and ordering
 
-<a id="projection-tool-call"></a>
-### `com.beeper.ai.tool_call`
-A timeline-visible projection of a tool invocation.
+Producers MUST emit monotonically increasing `seq` values per `turn_id`.
 
-Schema (event content):
-- `body: string` (fallback)
-- `msgtype: "m.notice"` (fallback)
-- `com.beeper.ai.tool_call: object`
-  - `call_id: string`
-  - `turn_id: string`
-  - `agent_id?: string`
-  - `tool_name: string`
-  - `tool_type: "builtin"|"provider"|"function"|"mcp"`
-  - `status: "pending"|"running"|"completed"|"failed"|"timeout"|"cancelled"`
-  - `input?: object`
-  - `display?: { title?: string, icon?: string, collapsed?: boolean }`
-  - `timing?: { started_at?: number, first_token_at?: number, completed_at?: number }` (unix ms)
-  - `result_event?: string` (Matrix event ID, optional)
-  - `mcp_server?: string` (optional)
-  - `requires_approval?: boolean`
-  - `approval?: { reason?: string, actions?: string[] }`
+Consumers:
 
-Relations:
-- SHOULD include `m.relates_to = { rel_type: "m.reference", event_id: <turn placeholder> }` when applicable.
+- MUST ignore stale/duplicate chunks where `seq <= last_applied_seq`.
+- SHOULD reorder brief out-of-order arrivals using `seq`.
+- MUST ignore unknown future chunk types.
+
+#### Chunk compatibility
+
+`part` MUST be valid AI SDK `UIMessageChunk` JSON.
+
+A producer MAY emit any chunk type defined by the AI SDK stream protocol, including:
+`start`, `start-step`, `finish-step`, `message-metadata`, `text-*`, `reasoning-*`,
+`tool-input-*`, `tool-output-*`, `tool-approval-request`, `source-url`, `source-document`,
+`file`, `finish`, `abort`, `error`, and `data-*` chunks.
+
+#### Bridge-specific `data-*` chunks
+
+The profile additionally defines these `data-*` chunks used for UI coordination:
+
+- `data-tool-call-event` (non-transient)
+  - `id = "tool-call-event:<toolCallId>"`
+  - `data.toolCallId`, `data.callEventId`
+- `data-image_generation_partial` (transient)
+  - `data.item_id`, `data.index`, `data.image_b64`
+- `data-annotation` (transient)
+  - `data.annotation`, `data.index`
+- `data-tool-progress` (transient, optional)
+  - `data.call_id`, `data.tool_name`, `data.status`, `data.progress`
+
+Clients that do not understand these MUST ignore them.
+
+### Tool call timeline projection
+
+`com.beeper.ai.tool_call` is a timeline event for tool invocation visibility.
+
+Event content MUST include Matrix fallback:
+
+- `msgtype: "m.notice"`
+- `body: string`
+
+And MUST include `com.beeper.ai.tool_call`:
+
+- `call_id: string`
+- `turn_id: string`
+- `tool_name: string`
+- `tool_type: "builtin" | "provider" | "function" | "mcp"`
+- `status: "pending" | "running" | "completed" | "failed" | "timeout" | "cancelled" | "approval_required"`
+
+Optional fields:
+
+- `agent_id`
+- `input`
+- `display` (`title`, `icon`, `collapsed`)
+- `timing` (`started_at`, `first_token_at`, `completed_at`)
+- `result_event`
+- `mcp_server`
+- `requires_approval`
+- `approval` (`reason`, `actions`)
+- `approval_id`
+- `approval_expires_at_ms`
+
+When a target assistant placeholder exists, senders SHOULD set
+`m.relates_to = {"rel_type":"m.reference","event_id":<placeholder>}`.
 
 Example:
+
 ```json
 {
-  "body": "Calling Web Search...",
-  "msgtype": "m.notice",
-  "m.relates_to": { "rel_type": "m.reference", "event_id": "$turn_placeholder" },
-  "com.beeper.ai.tool_call": {
-    "call_id": "call_123",
-    "turn_id": "turn_123",
-    "tool_name": "web_search",
-    "tool_type": "provider",
-    "status": "running",
-    "input": { "query": "matrix event types" },
-    "timing": { "started_at": 1738970000000 }
+  "type": "com.beeper.ai.tool_call",
+  "content": {
+    "msgtype": "m.notice",
+    "body": "Calling Web Search...",
+    "com.beeper.ai.tool_call": {
+      "call_id": "call_1",
+      "turn_id": "turn_abc",
+      "tool_name": "web_search",
+      "tool_type": "provider",
+      "status": "running",
+      "timing": {"started_at": 1738970000000}
+    }
   }
 }
 ```
 
-<a id="projection-tool-result"></a>
-### `com.beeper.ai.tool_result`
-A timeline-visible projection of the tool result.
+### Tool result timeline projection
 
-Schema (event content):
-- `body: string` (fallback)
-- `msgtype: "m.notice"` (fallback)
-- `format?: "org.matrix.custom.html"` (optional)
-- `formatted_body?: string` (optional)
-- `com.beeper.ai.tool_result: object`
-  - `call_id: string`
-  - `turn_id: string`
-  - `agent_id?: string`
-  - `tool_name: string`
-  - `status: "success"|"error"|"partial"`
-  - `output?: object`
-  - `artifacts?: { type: "file"|"image", mxc_uri?: string, filename?: string, mimetype?: string, size?: number }[]`
-  - `display?: { format?: string, expandable?: boolean, default_expanded?: boolean, show_stdout?: boolean, show_artifacts?: boolean }`
+`com.beeper.ai.tool_result` is a timeline event for tool outputs.
 
-Relations:
-- SHOULD reference the tool call event via `m.relates_to = { rel_type: "m.reference", event_id: <tool_call_event_id> }`.
+Event content MUST include Matrix fallback:
 
-Example:
-```json
-{
-  "body": "Search completed",
-  "msgtype": "m.notice",
-  "m.relates_to": { "rel_type": "m.reference", "event_id": "$tool_call_event" },
-  "com.beeper.ai.tool_result": {
-    "call_id": "call_123",
-    "turn_id": "turn_123",
-    "tool_name": "web_search",
-    "status": "success",
-    "output": { "status": "completed", "results": [] }
-  }
-}
-```
+- `msgtype: "m.notice"`
+- `body: string`
 
-<a id="projection-compaction"></a>
-### `com.beeper.ai.compaction_status`
-Status events emitted during context compaction/retry.
+And MUST include `com.beeper.ai.tool_result`:
 
-Schema (event content):
-- `type: "compaction_start"|"compaction_end"` (required)
-- `session_id?: string`
-- `messages_before?: number`
-- `messages_after?: number`
-- `tokens_before?: number`
-- `tokens_after?: number`
-- `summary?: string`
-- `will_retry?: boolean`
-- `error?: string`
-- `duration_ms?: number`
+- `call_id: string`
+- `turn_id: string`
+- `tool_name: string`
+- `status: "success" | "error" | "partial" | "denied"`
+
+Optional fields:
+
+- `agent_id`
+- `output`
+- `artifacts[]` (`type`, `mxc_uri`, `filename`, `mimetype`, `size`)
+- `display` (`format`, `expandable`, `default_expanded`, `show_stdout`, `show_artifacts`)
+
+Tool result events SHOULD reference their corresponding tool call event via
+`m.relates_to` with `m.reference`.
+
+### Compaction status timeline event
+
+`com.beeper.ai.compaction_status` tracks context compaction/retry lifecycle.
+
+Fields:
+
+- `type: "compaction_start" | "compaction_end"` (required)
+- `session_id` (optional)
+- `messages_before`, `messages_after` (optional)
+- `tokens_before`, `tokens_after` (optional)
+- `summary` (optional)
+- `will_retry` (optional)
+- `error` (optional)
+- `duration_ms` (optional)
 
 Example:
+
 ```json
 {
   "type": "compaction_end",
-  "session_id": "main",
+  "session_id": "!room:example.org",
   "messages_before": 50,
   "messages_after": 20,
   "tokens_before": 80000,
   "tokens_after": 30000,
-  "summary": "...",
-  "will_retry": true,
-  "duration_ms": 742
+  "will_retry": true
 }
 ```
 
-<a id="state"></a>
-## State Events
-State events broadcast room configuration and capabilities.
+### Room state events
 
-<a id="state-room-capabilities"></a>
-### `com.beeper.ai.room_capabilities`
-Producer-controlled capabilities and effective settings.
+#### `com.beeper.ai.room_capabilities`
 
-Fields (see `RoomCapabilitiesEventContent` in `pkg/connector/events.go`):
-- `capabilities?: ModelCapabilities`
-- `available_tools?: ToolInfo[]`
-- `reasoning_effort_options?: { value: string, label: string }[]`
-- `provider?: string`
-- `effective_settings?: object`
+Bridge-controlled state. Typical power level requirement is bridge/bot only.
 
-Example:
-```json
-{
-  "capabilities": {
-    "supports_reasoning": true,
-    "supports_tool_calling": true
-  },
-  "available_tools": [
-    {"name": "web_search", "display_name": "Web Search", "type": "provider", "enabled": true, "available": true}
-  ],
-  "provider": "beeper"
-}
-```
-
-<a id="state-room-settings"></a>
-### `com.beeper.ai.room_settings`
-User-editable room settings.
-
-Fields (see `RoomSettingsEventContent` in `pkg/connector/events.go`):
-- `model?: string`
-- `system_prompt?: string`
-- `temperature?: number`
-- `max_context_messages?: number`
-- `max_completion_tokens?: number`
-- `reasoning_effort?: string`
-- `conversation_mode?: string` (`"messages"` or `"responses"`)
-- `agent_id?: string`
-- `emit_thinking?: boolean`
-- `emit_tool_args?: boolean`
-
-Example:
-```json
-{
-  "model": "openai/gpt-5",
-  "temperature": 0.7,
-  "conversation_mode": "responses",
-  "agent_id": "boss"
-}
-```
-
-<a id="state-model-capabilities"></a>
-### `com.beeper.ai.model_capabilities` (defined; may be unused)
 Fields:
-- `available_models: ModelInfo[]`
 
-Example:
-```json
-{
-  "available_models": [
-    {
-      "id": "openai/gpt-5",
-      "name": "GPT-5",
-      "provider": "openai",
-      "supports_vision": true,
-      "supports_tool_calling": true,
-      "supports_reasoning": true,
-      "supports_web_search": false
-    }
-  ]
-}
-```
+- `capabilities`
+- `available_tools`
+- `reasoning_effort_options`
+- `provider`
+- `effective_settings`
 
-<a id="state-agents"></a>
-### `com.beeper.ai.agents` (defined; may be unused)
+`effective_settings` SHOULD include values and source attribution (`room_override`, `user_default`,
+`provider_config`, etc.) to explain resolved behavior.
+
+#### `com.beeper.ai.room_settings`
+
+User-editable state. Typical power level requirement allows normal room users.
+
 Fields:
-- `agents: AgentConfig[]`
-- `orchestration?: OrchestrationConfig`
 
-Example:
-```json
-{
-  "agents": [
-    {
-      "agent_id": "boss",
-      "name": "Boss",
-      "model": "openai/gpt-5",
-      "user_id": "@ai-boss:example.org",
-      "role": "primary",
-      "triggers": ["@boss"]
-    }
-  ],
-  "orchestration": { "mode": "user_directed", "allow_parallel": false, "max_concurrent": 1 }
-}
-```
+- `model`
+- `system_prompt`
+- `temperature`
+- `max_context_messages`
+- `max_completion_tokens`
+- `reasoning_effort`
+- `conversation_mode` (`messages` or `responses`)
+- `agent_id`
+- `emit_thinking`
+- `emit_tool_args`
 
-<a id="approvals"></a>
-## Tool Approvals
-Approvals are an owner-only gate for:
-- MCP approvals (OpenAI Responses `mcp_approval_request` items).
-- Selected builtin tool actions, configured via `network.tool_approvals.requireForTools`.
+Profile behavior for partial updates:
 
-Config (see `pkg/connector/example-config.yaml`):
-- `network.tool_approvals.enabled` (default true)
-- `network.tool_approvals.ttlSeconds` (default 600)
-- `network.tool_approvals.requireForMcp` (default true)
-- `network.tool_approvals.requireForTools` (default list in code)
+- Producers MAY treat absent/empty fields as "no change".
+- This MSC does not define explicit clearing/unset semantics.
 
-### Approval Request Emission
-When approval is needed, the bridge emits:
-1. An ephemeral stream chunk (`com.beeper.ai.stream_event`) where `part.type = "tool-approval-request"` containing:
-   - `approvalId: string`
-   - `toolCallId: string`
-2. A timeline-visible fallback notice (for clients that drop/ignore ephemeral events) instructing the user to run `!ai approve ...`.
-   - The notice is an `m.room.message` with `msgtype = "m.notice"` and includes a `com.beeper.ai` `UIMessage` whose `parts` contains a `dynamic-tool` part with:
-     - `state = "approval-requested"`
-     - `toolCallId: string`
-     - `toolName: string`
-     - `approval: { id: string }`
+In encrypted-room deployments using wrapper events, implementations MAY transport this payload via
+`com.beeper.send_state` wrappers and apply equivalent validation.
 
-<a id="approvals-decision"></a>
-### Approving / Denying
-Approvals can be resolved via:
-- Command: `!ai approve <approvalId> <allow|always|deny> [reason]` (owner-only).
-- Message payload: an `m.room.message` whose raw content includes `com.beeper.ai.approval_decision`.
+#### `com.beeper.ai.model_capabilities` and `com.beeper.ai.agents`
 
-Approval decision payload:
+These state event schemas are defined for interoperability and MAY be emitted:
+
+- `com.beeper.ai.model_capabilities`: `available_models[]`
+- `com.beeper.ai.agents`: `agents[]`, optional orchestration config
+
+### Tool approvals
+
+Tool approvals gate selected privileged operations (notably MCP tools and configurable builtin tools).
+
+#### Approval request emission
+
+When approval is required, producers SHOULD emit all of:
+
+1. Ephemeral stream chunk:
+   - `part.type = "tool-approval-request"`
+   - `approvalId`, `toolCallId`
+2. Timeline `com.beeper.ai.tool_call` event with `status = "approval_required"` and approval metadata.
+3. Timeline `m.room.message` fallback notice with a `com.beeper.ai` part indicating
+   `dynamic-tool` state `approval-requested`.
+
+#### Approval decision payload
+
+Users (or clients on their behalf) can resolve approvals by sending an `m.room.message` containing:
+
 ```json
 {
   "com.beeper.ai.approval_decision": {
@@ -509,202 +376,122 @@ Approval decision payload:
 }
 ```
 
-Always-allow:
-- `always` persists an allow rule in login metadata.
+Command-equivalent flows (for clients without custom UI) MAY also be supported, for example:
 
-TTL:
-- Pending approvals expire after `ttlSeconds`.
+- `!ai approve <approvalId> <allow|always|deny> [reason]`
 
-<a id="other-keys"></a>
-## Other Matrix Keys
+Semantics:
 
-<a id="other-keys-routing"></a>
-### Routing/Display Hints on `m.room.message`
-The bridge may set:
-- `com.beeper.ai.model_id: string`
-- `com.beeper.ai.agent: string`
+- `allow`: approve once.
+- `always`: approve and persist allow-rule for matching tool identity.
+- `deny`: reject.
 
-<a id="other-keys-agent"></a>
-### Agent Definitions in `m.room.member` (Builder room)
-Agent definitions can be stored in member state (see `AgentMemberContent` in `pkg/connector/events.go`):
-- `com.beeper.ai.agent: AgentDefinitionContent`
+#### Authorization and timeout
 
-Example:
-```json
-{
-  "membership": "join",
-  "displayname": "Researcher",
-  "avatar_url": "mxc://example.org/abc",
-  "com.beeper.ai.agent": {
-    "id": "researcher",
-    "name": "Researcher",
-    "model": "openai/gpt-5",
-    "created_at": 1738970000000,
-    "updated_at": 1738970000000
-  }
-}
-```
+- Only the room owner/login owner MUST be permitted to resolve approvals for that login.
+- Approvals MUST be room-scoped (approval IDs cannot be resolved across rooms).
+- Pending approvals MUST expire after configured TTL.
+- On timeout/expiry/cancel, producers SHOULD emit terminal tool output state (`tool-output-denied`
+  or equivalent timeline snapshot update) so UI does not remain actionable.
 
-<a id="other-keys-media"></a>
-### AI-Generated Media Tags
-Generated media messages may include minimal metadata:
-- `com.beeper.ai.image_generation: { "turn_id": "..." }`
-- `com.beeper.ai.tts: { "turn_id": "..." }`
+### Auxiliary keys and metadata
 
-### Unstable HTTP Namespace
-For the Beeper provider, base URLs may be formed with:
-- `/_matrix/client/unstable/com.beeper.ai`
+#### Routing and display hints on messages/member events
 
-Examples:
-- `https://<homeserver>/_matrix/client/unstable/com.beeper.ai/openrouter/v1`
-- `https://<homeserver>/_matrix/client/unstable/com.beeper.ai/openai/v1`
-- `https://<homeserver>/_matrix/client/unstable/com.beeper.ai/exa`
+The following keys MAY appear where relevant:
 
-<a id="defined-schemas"></a>
-## Defined Schemas (May Not Be Emitted)
-To keep the main spec terse, the schemas below are collapsed. They are defined in `pkg/connector/events.go` and are part of the v1 surface area.
+- `com.beeper.ai.model_id`
+- `com.beeper.ai.agent`
 
-<details>
-<summary><strong>com.beeper.ai.assistant_turn</strong> (AssistantTurnContent / AssistantTurnAI)</summary>
+These are hints and MUST NOT be treated as sole authorization or identity source of truth.
 
-```json
-{
-  "body": "hello world",
-  "msgtype": "m.text",
-  "com.beeper.ai": {
-    "turn_id": "turn_123",
-    "agent_id": "boss",
-    "model": "openai/gpt-5",
-    "status": "completed",
-    "finish_reason": "stop",
-    "usage": { "prompt_tokens": 10, "completion_tokens": 20 },
-    "timing": { "started_at": 1738970000000, "completed_at": 1738970000500 }
-  }
-}
-```
+#### Generated media metadata
 
-</details>
+AI-generated media messages MAY include:
 
-<details>
-<summary><strong>com.beeper.ai.error</strong> (AIErrorContent / AIErrorData)</summary>
+- `com.beeper.ai.image_generation`: at least `turn_id`
+- `com.beeper.ai.tts`: at least `turn_id`
 
-```json
-{
-  "body": "Generation failed: context too long",
-  "msgtype": "m.notice",
-  "com.beeper.ai.error": {
-    "turn_id": "turn_123",
-    "agent_id": "boss",
-    "error_code": "context_too_long",
-    "error_message": "prompt is too long",
-    "retryable": true
-  }
-}
-```
+Implementations MAY extend these objects with additional fields (e.g. model, revised prompt, style,
+quality) while preserving compatibility.
 
-</details>
+#### Unstable HTTP namespace
 
-<details>
-<summary><strong>com.beeper.ai.turn_cancelled</strong> (TurnCancelledContent)</summary>
+Implementations MAY expose AI-related helper APIs under:
 
-```json
-{
-  "turn_id": "turn_123",
-  "agent_id": "boss",
-  "cancelled_at": 1738970000123,
-  "reason": "user_cancelled"
-}
-```
+- `/_matrix/client/unstable/com.beeper.ai/...`
 
-</details>
+This MSC does not define endpoint semantics beyond namespace reservation.
 
-<details>
-<summary><strong>com.beeper.ai.agent_handoff</strong> (AgentHandoffContent / AgentHandoffData)</summary>
+## Backwards compatibility
 
-```json
-{
-  "body": "Handing off to Researcher",
-  "msgtype": "m.notice",
-  "com.beeper.ai.agent_handoff": {
-    "from_agent": "boss",
-    "to_agent": "researcher",
-    "from_turn": "turn_123",
-    "reason": "needs_sources"
-  }
-}
-```
+- Clients that do not understand `com.beeper.ai.*` events should still render fallback `body` values
+  from `m.room.message`/`m.notice` where present.
+- Because `com.beeper.ai.stream_event` is ephemeral, non-supporting homeservers/clients may drop it;
+  timeline fallback messages are therefore required for critical actions like approvals.
+- Unknown fields and unknown `data-*` chunk types MUST be ignored.
 
-</details>
+## Potential issues
 
-<details>
-<summary><strong>com.beeper.ai.step_boundary</strong> (StepBoundaryContent)</summary>
+- Ephemeral drops can cause incomplete live rendering until final `m.replace` arrives.
+- Out-of-order stream chunks require buffering/reordering logic in clients.
+- Partial-update room settings without explicit clear semantics can be ambiguous for UX.
+- Approval UX can diverge if a client renders only timeline or only ephemeral updates.
 
-```json
-{
-  "turn_id": "turn_123",
-  "agent_id": "boss",
-  "step_number": 2,
-  "step_type": "tool_response_processed",
-  "display": { "label": "Processed tool results" }
-}
-```
+## Security considerations
 
-</details>
+- Approval resolution must enforce owner-only authorization and room scoping.
+- Persisted "always allow" rules should be stored per login and be auditable.
+- Clients should treat all tool outputs as untrusted data and render safely.
+- If `formatted_body` or rich text is used, standard Matrix sanitization rules apply.
+- Routing hint keys (`com.beeper.ai.model_id`, `com.beeper.ai.agent`) are metadata only and not
+  proof of privilege.
 
-<details>
-<summary><strong>com.beeper.ai.generation_status</strong> (GenerationStatusContent)</summary>
+## Alternatives considered
 
-```json
-{
-  "turn_id": "turn_123",
-  "agent_id": "boss",
-  "target_event": "$turn_placeholder",
-  "status": "thinking",
-  "status_message": "Planning..."
-}
-```
+### Reusing only `m.room.message` without custom stream events
 
-</details>
+Rejected: this loses low-latency streaming fidelity and tool lifecycle granularity.
 
-<details>
-<summary><strong>com.beeper.ai.tool_progress</strong> (ToolProgressContent)</summary>
+### Stable `m.ai.*` namespace immediately
 
-```json
-{
-  "call_id": "call_123",
-  "turn_id": "turn_123",
-  "agent_id": "boss",
-  "tool_name": "web_search",
-  "status": "running",
-  "progress": { "stage": "executing", "percent": 50, "message": "Searching..." }
-}
-```
+Deferred: current ecosystem usage is implementation-specific; vendor prefix allows iteration before
+cross-vendor convergence.
 
-</details>
+### Server-calculated tool aggregation only
 
-<details>
-<summary><strong>com.beeper.ai.stream_delta</strong> (StreamDeltaContent, legacy/compat)</summary>
+Rejected for this profile: sender-projected timeline events are simpler to deploy and mirror current
+implementation behavior.
 
-```json
-{
-  "turn_id": "turn_123",
-  "agent_id": "boss",
-  "target_event": "$turn_placeholder",
-  "content_type": "text",
-  "delta": "hello",
-  "seq": 1
-}
-```
+## Unstable prefixes
 
-</details>
+This proposal uses unstable/vendor-prefixed identifiers:
 
-<a id="impl-notes"></a>
-## Implementation Notes
-- Desktop consumes `com.beeper.ai.stream_event.part` as an AI SDK `UIMessageChunk` and reconstructs a live `UIMessage`.
-- Matrix envelope concerns (`turn_id`, `seq`, `target_event`) remain bridge/client responsibilities.
-- Consumers should prefer AI SDK-compatible chunk semantics (metadata merge, tool partial JSON handling, step boundaries).
+- Event types: `com.beeper.ai.*`
+- Content keys: `com.beeper.ai*`
+- Unstable API namespace: `/_matrix/client/unstable/com.beeper.ai`
 
-<a id="forward-compat"></a>
-## Forward Compatibility
-- Clients MUST ignore unknown `com.beeper.ai.*` event types and unknown fields.
-- Clients MUST ignore unknown future streaming chunk types.
+A future MSC may define stable `m.ai.*` equivalents and migration rules.
+
+## Dependencies
+
+This proposal depends conceptually on:
+
+- Matrix event relations and `m.replace` edit semantics.
+- Matrix custom event type extensibility.
+- AI SDK UI message/chunk compatibility for payload semantics.
+
+## Implementation notes (reference profile)
+
+Reference implementation:
+
+- Event identifiers: `pkg/matrixevents/matrixevents.go`
+- Event/state schemas: `pkg/connector/events.go`
+- Stream envelope + sequencing: `pkg/connector/stream_events.go`
+- Streaming UI chunk emission: `pkg/connector/streaming_ui_*.go`
+- Final `m.replace` assistant turn: `pkg/connector/response_finalization.go`
+- Tool projections: `pkg/connector/tool_execution.go`
+- Compaction status events: `pkg/connector/response_retry.go`
+- Room state broadcast/apply: `pkg/connector/chat.go`, `pkg/connector/connector.go`
+- Approval lifecycle: `pkg/connector/tool_approvals*.go`, `pkg/connector/handlematrix.go`,
+  `pkg/connector/commands_parity.go`

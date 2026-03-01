@@ -130,8 +130,6 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 		"type":       "tool-approval-request",
 		"approvalId": approvalID,
 		"toolCallId": toolCallID,
-		"toolName":   toolName,
-		"ttlSeconds": ttlSeconds,
 	})
 
 	// Send a second tool_call timeline event with approval data so the desktop
