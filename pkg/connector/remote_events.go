@@ -144,7 +144,15 @@ func (e *AIRemoteEdit) GetStreamOrder() int64 {
 	return e.GetTimestamp().UnixMilli()
 }
 
-func (e *AIRemoteEdit) ConvertEdit(_ context.Context, _ *bridgev2.Portal, _ bridgev2.MatrixAPI, _ []*database.Message) (*bridgev2.ConvertedEdit, error) {
+func (e *AIRemoteEdit) ConvertEdit(_ context.Context, _ *bridgev2.Portal, _ bridgev2.MatrixAPI, existing []*database.Message) (*bridgev2.ConvertedEdit, error) {
+	// Bind existing DB parts to modified parts when Part was left nil at build time.
+	if e.preBuilt != nil && len(existing) > 0 {
+		for i, part := range e.preBuilt.ModifiedParts {
+			if part.Part == nil && i < len(existing) {
+				part.Part = existing[i]
+			}
+		}
+	}
 	return e.preBuilt, nil
 }
 

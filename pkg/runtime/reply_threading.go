@@ -53,3 +53,76 @@ func ApplyReplyToMode(payloads []ReplyPayload, policy ReplyThreadPolicy) []Reply
 	}
 	return out
 }
+
+type ThreadReplyMode string
+
+const (
+	ThreadReplyModeOff     ThreadReplyMode = "off"
+	ThreadReplyModeInbound ThreadReplyMode = "inbound"
+	ThreadReplyModeAlways  ThreadReplyMode = "always"
+)
+
+func NormalizeThreadReplyMode(raw string) ThreadReplyMode {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case string(ThreadReplyModeOff):
+		return ThreadReplyModeOff
+	case string(ThreadReplyModeAlways):
+		return ThreadReplyModeAlways
+	default:
+		return ThreadReplyModeInbound
+	}
+}
+
+func ResolveInboundReplyTarget(mode ThreadReplyMode, replyToID, threadRootID, eventID string) ReplyTargetDecision {
+	replyToID = strings.TrimSpace(replyToID)
+	threadRootID = strings.TrimSpace(threadRootID)
+	eventID = strings.TrimSpace(eventID)
+
+	switch mode {
+	case ThreadReplyModeOff:
+		return ReplyTargetDecision{
+			ReplyToID:  replyToID,
+			ThreadRoot: "",
+			Reason:     "threading_off",
+		}
+	case ThreadReplyModeAlways:
+		root := threadRootID
+		if root == "" {
+			root = eventID
+		}
+		return ReplyTargetDecision{
+			ReplyToID:  root,
+			ThreadRoot: root,
+			Reason:     "threading_always",
+		}
+	default:
+		if threadRootID != "" {
+			return ReplyTargetDecision{
+				ReplyToID:  threadRootID,
+				ThreadRoot: threadRootID,
+				Reason:     "threading_inbound_thread",
+			}
+		}
+		return ReplyTargetDecision{
+			ReplyToID:  replyToID,
+			ThreadRoot: "",
+			Reason:     "threading_inbound_reply",
+		}
+	}
+}
+
+func ResolveQueueThreadKey(mode ThreadReplyMode, threadRootID, eventID string) string {
+	threadRootID = strings.TrimSpace(threadRootID)
+	eventID = strings.TrimSpace(eventID)
+	switch mode {
+	case ThreadReplyModeAlways:
+		if threadRootID != "" {
+			return threadRootID
+		}
+		return eventID
+	case ThreadReplyModeInbound:
+		return threadRootID
+	default:
+		return ""
+	}
+}

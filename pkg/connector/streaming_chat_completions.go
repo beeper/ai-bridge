@@ -145,7 +145,7 @@ func (oc *AIClient) streamChatCompletions(
 								state.firstTokenAtMs = time.Now().UnixMilli()
 								if !state.suppressSend && !isHeartbeat {
 									oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
-									state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state.visibleAccumulated.String(), state.turnID, state.replyTarget)
+									state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state, state.visibleAccumulated.String(), state.turnID, state.replyTarget)
 									if state.initialEventID == "" {
 										errText := "failed to send initial streaming message"
 										log.Error().Msg("Failed to send initial streaming message")
@@ -386,9 +386,6 @@ func (oc *AIClient) streamChatCompletions(
 					prompt := strings.TrimSpace(item.prompt)
 					if prompt == "" {
 						prompt = item.pending.MessageBody
-						if item.pending.Event != nil {
-							prompt = appendMessageIDHint(prompt, item.pending.Event.ID)
-						}
 					}
 					prompt = strings.TrimSpace(prompt)
 					if prompt == "" {

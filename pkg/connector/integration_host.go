@@ -781,11 +781,7 @@ func (h *runtimeIntegrationHost) CompactorReserveTokens() int {
 	if h == nil || h.client == nil {
 		return 2000
 	}
-	compactor := h.client.getCompactor()
-	if compactor == nil || compactor.config == nil || compactor.config.ReserveTokens <= 0 {
-		return 2000
-	}
-	return compactor.config.ReserveTokens
+	return h.client.pruningReserveTokens()
 }
 
 func (h *runtimeIntegrationHost) SilentReplyToken() string {
@@ -796,11 +792,7 @@ func (h *runtimeIntegrationHost) OverflowFlushConfig() (enabled *bool, softThres
 	if h == nil || h.client == nil {
 		return nil, 0, "", ""
 	}
-	compactor := h.client.getCompactor()
-	if compactor == nil || compactor.config == nil || compactor.config.PruningConfig == nil {
-		return nil, 0, "", ""
-	}
-	cfg := compactor.config.PruningConfig.OverflowFlush
+	cfg := h.client.pruningOverflowFlushConfig()
 	if cfg == nil {
 		return nil, 0, "", ""
 	}

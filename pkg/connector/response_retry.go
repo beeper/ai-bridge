@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	airuntime "github.com/beeper/ai-bridge/pkg/runtime"
 	"github.com/openai/openai-go/v3"
@@ -19,8 +18,8 @@ const (
 // responseFunc is the signature for response handlers that can be retried on context length errors
 type responseFunc func(ctx context.Context, evt *event.Event, portal *bridgev2.Portal, meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (bool, *ContextLengthError, error)
 
-// responseWithRetry wraps a response function with context length retry logic
-// It first tries auto-compaction (LLM summarization) before falling back to reactive truncation
+// responseWithRetry wraps a response function with context length retry logic.
+// It performs one runtime compaction attempt before falling back to reactive truncation.
 func (oc *AIClient) responseWithRetry(
 	ctx context.Context,
 	evt *event.Event,
@@ -94,38 +93,41 @@ func (oc *AIClient) responseWithRetry(
 					MessagesBefore: len(currentPrompt),
 				})
 
-				// Attempt auto-compaction with LLM summarization
-				compactor := oc.getCompactor()
-				result, compacted, compactionSuccess := compactor.CompactOnOverflow(
-					ctx,
-					sessionID,
-					currentPrompt,
-					contextWindow,
-					cle.RequestedTokens,
-				)
+				compacted, decision, compactionSuccess := oc.runtimeCompactOnOverflow(currentPrompt, contextWindow, cle.RequestedTokens)
 
 				if compactionSuccess && len(compacted) > 2 {
+					modelID := ""
+					if meta != nil {
+						modelID = oc.effectiveModel(meta)
+					}
+					tokensBefore := estimatePromptTokensForModel(currentPrompt, modelID)
+					tokensAfter := estimatePromptTokensForModel(compacted, modelID)
 					if meta != nil {
 						meta.CompactionCount++
 						oc.savePortalQuiet(ctx, portal, "compaction count")
+					}
+					summary := ""
+					if decision.DroppedCount > 0 {
+						summary = fmt.Sprintf("Dropped %d older context entries.", decision.DroppedCount)
 					}
 					// Emit compaction end event
 					oc.emitCompactionStatus(ctx, portal, &CompactionEvent{
 						Type:           CompactionEventEnd,
 						SessionID:      sessionID,
-						MessagesBefore: result.MessagesBefore,
-						MessagesAfter:  result.MessagesAfter,
-						TokensBefore:   result.TokensBefore,
-						TokensAfter:    result.TokensAfter,
-						Summary:        result.Summary,
+						MessagesBefore: len(currentPrompt),
+						MessagesAfter:  len(compacted),
+						TokensBefore:   tokensBefore,
+						TokensAfter:    tokensAfter,
+						Summary:        summary,
 						WillRetry:      true,
 					})
 
 					oc.loggerForContext(ctx).Info().
-						Int("messages_before", result.MessagesBefore).
-						Int("messages_after", result.MessagesAfter).
-						Int("tokens_before", result.TokensBefore).
-						Int("tokens_after", result.TokensAfter).
+						Int("messages_before", len(currentPrompt)).
+						Int("messages_after", len(compacted)).
+						Int("tokens_before", tokensBefore).
+						Int("tokens_after", tokensAfter).
+						Int("dropped", decision.DroppedCount).
 						Msg("Auto-compaction succeeded, retrying with compacted context")
 
 					currentPrompt = compacted
@@ -230,26 +232,7 @@ func (oc *AIClient) notifyContextLengthExceeded(
 func (oc *AIClient) truncatePrompt(
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) []openai.ChatCompletionMessageParamUnion {
-	charInputs := make([]string, 0, len(prompt))
-	totalChars := 0
-	for _, msg := range prompt {
-		text := ""
-		switch {
-		case msg.OfSystem != nil:
-			text = extractSystemContent(msg.OfSystem.Content)
-		case msg.OfAssistant != nil:
-			text = extractAssistantContent(msg.OfAssistant.Content)
-		case msg.OfUser != nil:
-			text = extractUserContent(msg.OfUser.Content)
-		case msg.OfTool != nil:
-			text = extractToolContent(msg.OfTool.Content)
-		}
-		if strings.TrimSpace(text) == "" {
-			continue
-		}
-		charInputs = append(charInputs, text)
-		totalChars += len(text)
-	}
+	charInputs, totalChars := promptTextPayloads(prompt)
 	if totalChars > 0 {
 		decision := airuntime.ApplyCompaction(airuntime.CompactionInput{
 			Messages:      charInputs,
@@ -268,53 +251,72 @@ func (oc *AIClient) truncatePrompt(
 	return smartTruncatePrompt(prompt, 0.5)
 }
 
-// getCompactor returns the compactor instance, creating it lazily if needed
-func (oc *AIClient) getCompactor() *Compactor {
-	oc.compactorOnce.Do(func() {
-		defaults := DefaultCompactionConfig()
-
-		// Build compaction config from pruning config
-		var compactionConfig *CompactionConfig
-		if oc.connector.Config.Pruning != nil {
-			pruning := oc.connector.Config.Pruning
-			compactionConfig = &CompactionConfig{
-				PruningConfig:          pruning,
-				SummarizationEnabled:   pruning.SummarizationEnabled,
-				SummarizationModel:     strings.TrimSpace(pruning.SummarizationModel),
-				MaxSummaryTokens:       pruning.MaxSummaryTokens,
-				MaxHistoryShare:        pruning.MaxHistoryShare,
-				ReserveTokens:          pruning.ReserveTokens,
-				CustomInstructions:     pruning.CustomInstructions,
-				IdentifierPolicy:       pruning.IdentifierPolicy,
-				IdentifierInstructions: pruning.IdentifierInstructions,
-			}
-			if compactionConfig.SummarizationEnabled == nil {
-				compactionConfig.SummarizationEnabled = defaults.SummarizationEnabled
-			}
-			if compactionConfig.MaxSummaryTokens <= 0 {
-				compactionConfig.MaxSummaryTokens = defaults.MaxSummaryTokens
-			}
-			if compactionConfig.MaxHistoryShare <= 0 {
-				compactionConfig.MaxHistoryShare = defaults.MaxHistoryShare
-			}
-			if compactionConfig.ReserveTokens <= 0 {
-				compactionConfig.ReserveTokens = defaults.ReserveTokens
-			}
-			if strings.TrimSpace(compactionConfig.IdentifierPolicy) == "" {
-				compactionConfig.IdentifierPolicy = defaults.IdentifierPolicy
-			}
-		} else {
-			compactionConfig = defaults
+func (oc *AIClient) runtimeCompactOnOverflow(
+	prompt []openai.ChatCompletionMessageParamUnion,
+	contextWindowTokens int,
+	requestedTokens int,
+) ([]openai.ChatCompletionMessageParamUnion, airuntime.CompactionDecision, bool) {
+	charInputs, totalChars := promptTextPayloads(prompt)
+	if len(prompt) <= 2 || totalChars <= 0 {
+		decision := airuntime.CompactionDecision{
+			Applied:       false,
+			DroppedCount:  0,
+			OriginalChars: totalChars,
+			FinalChars:    totalChars,
+			Reason:        "insufficient_prompt",
 		}
+		return prompt, decision, false
+	}
 
-		oc.compactor = NewCompactor(&oc.api, oc.log, compactionConfig)
-
-		// Use a fast model for summarization
-		if oc.isOpenRouterProvider() && strings.TrimSpace(compactionConfig.SummarizationModel) == "" {
-			oc.compactor.SetSummarizationModel("anthropic/claude-opus-4.6")
+	maxChars := totalChars / 2
+	if contextWindowTokens > 0 {
+		budget := (contextWindowTokens - oc.pruningReserveTokens()) * charsPerTokenEstimate
+		if budget > 0 && budget < maxChars {
+			maxChars = budget
 		}
+	}
+	if requestedTokens > contextWindowTokens && contextWindowTokens > 0 {
+		targetKeep := float64(contextWindowTokens) / float64(requestedTokens)
+		targetChars := int(float64(totalChars) * targetKeep)
+		if targetChars > 0 && targetChars < maxChars {
+			maxChars = targetChars
+		}
+	}
+	if maxChars <= 0 {
+		maxChars = totalChars / 2
+	}
+	if maxChars <= 0 {
+		maxChars = 1
+	}
+
+	compaction := airuntime.ApplyCompaction(airuntime.CompactionInput{
+		Messages:      charInputs,
+		MaxChars:      maxChars,
+		ProtectedTail: 3,
 	})
-	return oc.compactor
+	decision := compaction.Decision
+	if !decision.Applied {
+		return prompt, decision, false
+	}
+
+	ratio := 0.5
+	if decision.OriginalChars > 0 && decision.FinalChars > 0 {
+		keep := float64(decision.FinalChars) / float64(decision.OriginalChars)
+		ratio = 1 - keep
+	}
+	if ratio < 0.1 {
+		ratio = 0.1
+	}
+	if ratio > 0.85 {
+		ratio = 0.85
+	}
+
+	compacted := smartTruncatePrompt(prompt, ratio)
+	if len(compacted) >= len(prompt) {
+		compacted = smartTruncatePrompt(prompt, 0.5)
+	}
+	success := len(compacted) > 2 && len(compacted) < len(prompt)
+	return compacted, decision, success
 }
 
 // emitCompactionStatus sends a compaction status event to the room
@@ -352,9 +354,6 @@ func (oc *AIClient) emitCompactionStatus(ctx context.Context, portal *bridgev2.P
 	}
 	if evt.Error != "" {
 		content["error"] = evt.Error
-	}
-	if evt.Duration > 0 {
-		content["duration_ms"] = evt.Duration.Milliseconds()
 	}
 
 	eventContent := &event.Content{Raw: content}

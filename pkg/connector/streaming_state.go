@@ -8,6 +8,7 @@ import (
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
@@ -42,6 +43,7 @@ type streamingState struct {
 	sourceDocuments        []citations.SourceDocument
 	generatedFiles         []citations.GeneratedFilePart
 	initialEventID         id.EventID
+	networkMessageID       networkid.MessageID // Network message ID for bridgev2 DB lookup
 	finishReason           string
 	responseID             string
 	sequenceNum            int

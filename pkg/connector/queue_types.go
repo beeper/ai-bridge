@@ -1,15 +1,19 @@
 package connector
 
-import "strings"
+import (
+	"strings"
 
-type QueueMode string
+	airuntime "github.com/beeper/ai-bridge/pkg/runtime"
+)
+
+type QueueMode = airuntime.QueueMode
 
 const (
-	QueueModeSteer        QueueMode = "steer"
-	QueueModeFollowup     QueueMode = "followup"
-	QueueModeCollect      QueueMode = "collect"
-	QueueModeSteerBacklog QueueMode = "steer-backlog"
-	QueueModeInterrupt    QueueMode = "interrupt"
+	QueueModeSteer        QueueMode = airuntime.QueueModeSteer
+	QueueModeFollowup     QueueMode = airuntime.QueueModeFollowup
+	QueueModeCollect      QueueMode = airuntime.QueueModeCollect
+	QueueModeSteerBacklog QueueMode = airuntime.QueueModeSteerBacklog
+	QueueModeInterrupt    QueueMode = airuntime.QueueModeInterrupt
 )
 
 type QueueDropPolicy string
