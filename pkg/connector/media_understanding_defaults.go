@@ -45,6 +45,13 @@ var defaultImageModelsByProvider = map[string]string{
 	"openrouter": defaultOpenRouterGoogleModel,
 }
 
+func truncateText(s string, maxChars int) string {
+	if maxChars > 0 && len(s) > maxChars {
+		return s[:maxChars]
+	}
+	return s
+}
+
 func resolveVideoMaxBase64Bytes(maxBytes int) int {
 	if maxBytes <= 0 {
 		return defaultVideoMaxBase64Bytes

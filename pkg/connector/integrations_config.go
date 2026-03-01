@@ -2,6 +2,7 @@ package connector
 
 import (
 	_ "embed"
+	"strings"
 	"time"
 
 	"go.mau.fi/util/configupgrade"
@@ -299,6 +300,17 @@ type MediaUnderstandingModelConfig struct {
 	PreferredProfile string                    `yaml:"preferredProfile"`
 }
 
+func (c MediaUnderstandingModelConfig) ResolvedType() string {
+	t := strings.TrimSpace(c.Type)
+	if t != "" {
+		return t
+	}
+	if strings.TrimSpace(c.Command) != "" {
+		return "cli"
+	}
+	return "provider"
+}
+
 // MediaUnderstandingConfig defines defaults for media understanding of a capability.
 type MediaUnderstandingConfig struct {
 	Enabled         *bool                                `yaml:"enabled"`
@@ -322,6 +334,22 @@ type MediaToolsConfig struct {
 	Image       *MediaUnderstandingConfig       `yaml:"image"`
 	Audio       *MediaUnderstandingConfig       `yaml:"audio"`
 	Video       *MediaUnderstandingConfig       `yaml:"video"`
+}
+
+func (cfg *MediaToolsConfig) ConfigForCapability(capability MediaUnderstandingCapability) *MediaUnderstandingConfig {
+	if cfg == nil {
+		return nil
+	}
+	switch capability {
+	case MediaCapabilityImage:
+		return cfg.Image
+	case MediaCapabilityAudio:
+		return cfg.Audio
+	case MediaCapabilityVideo:
+		return cfg.Video
+	default:
+		return nil
+	}
 }
 
 type SearchConfig struct {
