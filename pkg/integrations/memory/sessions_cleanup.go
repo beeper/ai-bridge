@@ -5,8 +5,7 @@ import (
 	"time"
 )
 
-func (m *MemorySearchManager) purgeSessionPath(ctx context.Context, path string, ops *pendingVectorOps) {
-	_ = ops
+func (m *MemorySearchManager) purgeSessionPath(ctx context.Context, path string) {
 	if path == "" {
 		return
 	}
@@ -26,7 +25,7 @@ func (m *MemorySearchManager) purgeSessionPath(ctx context.Context, path string,
 
 // pruneExpiredSessions removes session files and their index entries that are older
 // than the configured retention window. No-op if retention_days is 0 (unlimited).
-func (m *MemorySearchManager) pruneExpiredSessions(ctx context.Context, ops *pendingVectorOps) {
+func (m *MemorySearchManager) pruneExpiredSessions(ctx context.Context) {
 	if m == nil || m.cfg == nil {
 		return
 	}
@@ -51,7 +50,7 @@ func (m *MemorySearchManager) pruneExpiredSessions(ctx context.Context, ops *pen
 		if err := rows.Scan(&sessionKey, &path); err != nil {
 			return
 		}
-		m.purgeSessionPath(ctx, path, ops)
+		m.purgeSessionPath(ctx, path)
 		_, _ = m.db.Exec(ctx,
 			`DELETE FROM ai_memory_session_files
              WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND session_key=$4`,

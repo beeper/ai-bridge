@@ -233,7 +233,7 @@ func BuildFinalEditContent(p FinalEditContentParams) *event.Content {
 			"formatted_body": p.Rendered.FormattedBody,
 			"m.mentions":     map[string]any{},
 		},
-		"m.relates_to": p.RelatesTo,
+		"m.relates_to":           p.RelatesTo,
 		matrixevents.BeeperAIKey: p.UIMessage,
 		"m.mentions":             map[string]any{},
 	}
@@ -385,8 +385,8 @@ func BuildToolCallEventContent(p ToolCallEventParams) *event.Content {
 	}
 
 	raw := map[string]any{
-		"body":    fmt.Sprintf("Calling %s...", p.DisplayTitle),
-		"msgtype": event.MsgNotice,
+		"body":                           fmt.Sprintf("Calling %s...", p.DisplayTitle),
+		"msgtype":                        event.MsgNotice,
 		matrixevents.BeeperAIToolCallKey: toolCallData,
 	}
 	if p.ReferenceEvent != "" {
@@ -431,8 +431,8 @@ func BuildToolResultEventContent(p ToolResultEventParams) *event.Content {
 	}
 
 	raw := map[string]any{
-		"body":    p.BodyText,
-		"msgtype": event.MsgNotice,
+		"body":                             p.BodyText,
+		"msgtype":                          event.MsgNotice,
 		matrixevents.BeeperAIToolResultKey: toolResultData,
 	}
 	if p.ReferenceEvent != "" {
