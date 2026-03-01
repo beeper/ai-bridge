@@ -1425,7 +1425,7 @@ func (oc *AIClient) buildPromptForRegenerate(
 				}
 				prompt = append(prompt, openai.AssistantMessage(body))
 			default:
-				if isRaw {
+				if isSimple {
 					body = StripEnvelope(body)
 					body = stripMessageIDHintLines(body)
 				}
@@ -1443,7 +1443,7 @@ func (oc *AIClient) buildPromptForRegenerate(
 
 		// Reverse to get chronological order (skip system message at index 0 if present)
 		startIdx := 0
-		if systemPrompt != "" && len(prompt) > 0 {
+		if len(prompt) > 0 && prompt[0].OfSystem != nil {
 			startIdx = 1
 		}
 		for i, j := len(prompt)-1, startIdx; i > j; i, j = i-1, j+1 {
@@ -1452,7 +1452,7 @@ func (oc *AIClient) buildPromptForRegenerate(
 	}
 
 	latest := strings.TrimSpace(latestUserBody)
-	if !isRaw {
+	if !isSimple {
 		latest = appendMessageIDHint(latestUserBody, latestUserID)
 	} else {
 		latest = StripEnvelope(latest)
