@@ -29,6 +29,7 @@ import (
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
+	airuntime "github.com/beeper/ai-bridge/pkg/runtime"
 	"github.com/beeper/ai-bridge/pkg/shared/stringutil"
 )
 
@@ -2117,6 +2118,7 @@ func (oc *AIClient) buildBasePrompt(
 				// Strip thinking traces from historical assistant messages to avoid
 				// confusing models or wasting tokens on replayed reasoning.
 				body = stripThinkTags(body)
+				body = airuntime.SanitizeChatMessageForDisplay(body, false)
 				if body == "" {
 					continue
 				}
@@ -2130,11 +2132,8 @@ func (oc *AIClient) buildBasePrompt(
 					}
 				}
 			default:
-				// Strip envelope prefixes from historical user messages to reduce noise
-				body = StripEnvelope(body)
-				if isSimple {
-					body = stripMessageIDHintLines(body)
-				}
+				// Strip injected metadata and transport envelope from user display/history paths.
+				body = airuntime.SanitizeChatMessageForDisplay(body, true)
 				// Re-inject user-sent images as multimodal content so the model can reference them.
 				if injectImages && msgMeta.MediaURL != "" && isImageMimeType(msgMeta.MimeType) {
 					if imgPart := oc.downloadHistoryImage(ctx, msgMeta.MediaURL, msgMeta.MimeType); imgPart != nil {
@@ -2193,12 +2192,22 @@ func (oc *AIClient) buildPromptWithLinkContext(
 		return nil, err
 	}
 	prompt = oc.augmentPromptWithIntegrations(ctx, portal, meta, prompt)
+	inboundCtx := oc.resolvePromptInboundContext(ctx, portal, latest, eventID)
 
 	// Build final message with link context
 	isSimple := isSimpleMode(meta)
-	finalMessage := strings.TrimSpace(latest)
 	if !isSimple {
-		finalMessage = oc.applyAbortHint(ctx, portal, meta, latest)
+		if trustedMeta := strings.TrimSpace(airuntime.BuildInboundMetaSystemPrompt(inboundCtx)); trustedMeta != "" {
+			prompt = append(prompt, openai.SystemMessage(trustedMeta))
+		}
+	}
+
+	finalMessage := strings.TrimSpace(latest)
+	if body := strings.TrimSpace(inboundCtx.BodyForAgent); body != "" {
+		finalMessage = body
+	}
+	if !isSimple {
+		finalMessage = oc.applyAbortHint(ctx, portal, meta, finalMessage)
 		linkContext := oc.buildLinkContext(ctx, latest, rawEventContent)
 		if linkContext != "" {
 			finalMessage = finalMessage + linkContext
@@ -2219,6 +2228,9 @@ func (oc *AIClient) buildPromptWithLinkContext(
 	}
 
 	if !isSimple {
+		if untrustedPrefix := strings.TrimSpace(airuntime.BuildInboundUserContextPrefix(inboundCtx)); untrustedPrefix != "" {
+			finalMessage = untrustedPrefix + "\n\n" + finalMessage
+		}
 		finalMessage = appendMessageIDHint(finalMessage, eventID)
 	}
 	prompt = append(prompt, openai.UserMessage(finalMessage))
@@ -2303,11 +2315,23 @@ func (oc *AIClient) buildPromptWithMedia(
 	}
 	isSimple := isSimpleMode(meta)
 	prompt = oc.augmentPromptWithIntegrations(ctx, portal, meta, prompt)
+	inboundCtx := oc.resolvePromptInboundContext(ctx, portal, caption, eventID)
+	if !isSimple {
+		if trustedMeta := strings.TrimSpace(airuntime.BuildInboundMetaSystemPrompt(inboundCtx)); trustedMeta != "" {
+			prompt = append(prompt, openai.SystemMessage(trustedMeta))
+		}
+	}
 
 	captionWithID := strings.TrimSpace(caption)
+	if body := strings.TrimSpace(inboundCtx.BodyForAgent); body != "" {
+		captionWithID = body
+	}
 	if !isSimple {
-		caption = oc.applyAbortHint(ctx, portal, meta, caption)
-		captionWithID = appendMessageIDHint(caption, eventID)
+		captionWithID = oc.applyAbortHint(ctx, portal, meta, captionWithID)
+		if untrustedPrefix := strings.TrimSpace(airuntime.BuildInboundUserContextPrefix(inboundCtx)); untrustedPrefix != "" {
+			captionWithID = untrustedPrefix + "\n\n" + captionWithID
+		}
+		captionWithID = appendMessageIDHint(captionWithID, eventID)
 	}
 	textContent := openai.ChatCompletionContentPartUnionParam{
 		OfText: &openai.ChatCompletionContentPartTextParam{
@@ -2395,9 +2419,9 @@ func (oc *AIClient) buildPromptWithMedia(
 			prompt = append(prompt, userMsg)
 			return prompt, nil
 		}
-		videoPrompt := fmt.Sprintf("%s\n\nVideo data URL: %s", caption, dataURL)
+		videoPrompt := fmt.Sprintf("%s\n\nVideo data URL: %s", captionWithID, dataURL)
 		if !isSimple {
-			videoPrompt = appendMessageIDHint(videoPrompt, eventID)
+			// captionWithID already carries the message-id hint in non-simple mode.
 		}
 		userMsg := openai.ChatCompletionMessageParamUnion{
 			OfUser: &openai.ChatCompletionUserMessageParam{

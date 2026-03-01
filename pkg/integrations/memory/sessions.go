@@ -77,7 +77,7 @@ func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sess
 		Int("files", len(active)).
 		Bool("needsFullReindex", force).
 		Int("dirtyFiles", dirtyFiles).
-		Int("concurrency", m.indexConcurrency()).
+		Int("concurrency", 1).
 		Msg("memory sync: indexing session files")
 
 	for key, session := range active {
@@ -126,13 +126,13 @@ func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sess
 			if err != nil {
 				m.log.Warn().Err(err).Str("session", key).Msg("memory session read failed")
 			} else if content == "" {
-				_ = m.deleteSessionFile(ctx, key, nil)
+				_ = m.deleteSessionFile(ctx, key)
 			} else {
 				path := sessionPathForKey(key)
 				hash := hashSessionContent(content)
 				existingHash, _ := m.getSessionFileHash(ctx, key)
 				if needsFullReindex || indexAll || existingHash == "" || existingHash != hash {
-					if err := m.upsertSessionFile(ctx, key, path, content, hash, nil); err != nil {
+					if err := m.upsertSessionFile(ctx, key, path, content, hash); err != nil {
 						m.log.Warn().Err(err).Str("session", key).Msg("memory session write failed")
 					} else if err := m.indexContent(ctx, path, "sessions", content, generation); err != nil {
 						m.log.Warn().Err(err).Str("session", key).Msg("memory session index failed")
@@ -149,10 +149,10 @@ func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sess
 		_ = m.saveSessionState(ctx, key, state)
 	}
 
-	if err := m.removeStaleSessions(ctx, active, nil); err != nil {
+	if err := m.removeStaleSessions(ctx, active); err != nil {
 		return err
 	}
-	m.pruneExpiredSessions(ctx, nil)
+	m.pruneExpiredSessions(ctx)
 	return nil
 }
 
@@ -249,7 +249,7 @@ func (m *MemorySearchManager) prepareSessions(ctx context.Context, force bool, s
 }
 
 // writeSessions writes pre-computed session content and performs session bookkeeping inside a transaction.
-func (m *MemorySearchManager) writeSessions(ctx context.Context, force bool, sessionKey string, prepared []*preparedContent, ops *pendingVectorOps) error {
+func (m *MemorySearchManager) writeSessions(ctx context.Context, force bool, sessionKey string, prepared []*preparedContent) error {
 	if m == nil || m.runtime == nil {
 		return errors.New("memory search unavailable")
 	}
@@ -324,16 +324,16 @@ func (m *MemorySearchManager) writeSessions(ctx context.Context, force bool, ses
 			if err != nil {
 				m.log.Warn().Err(err).Str("session", key).Msg("memory session read failed")
 			} else if content == "" {
-				_ = m.deleteSessionFile(ctx, key, ops)
+				_ = m.deleteSessionFile(ctx, key)
 			} else {
 				path := sessionPathForKey(key)
 				hash := hashSessionContent(content)
 				existingHash, _ := m.getSessionFileHash(ctx, key)
 				if needsFullReindex || indexAll || existingHash == "" || existingHash != hash {
-					if err := m.upsertSessionFile(ctx, key, path, content, hash, ops); err != nil {
+					if err := m.upsertSessionFile(ctx, key, path, content, hash); err != nil {
 						m.log.Warn().Err(err).Str("session", key).Msg("memory session write failed")
 					} else if pc := preparedByPath[path]; pc != nil {
-						if err := m.writeContent(ctx, pc, ops); err != nil {
+						if err := m.writeContent(ctx, pc); err != nil {
 							m.log.Warn().Err(err).Str("session", key).Msg("memory session index failed")
 						}
 					}
@@ -349,10 +349,10 @@ func (m *MemorySearchManager) writeSessions(ctx context.Context, force bool, ses
 		_ = m.saveSessionState(ctx, key, state)
 	}
 
-	if err := m.removeStaleSessions(ctx, active, ops); err != nil {
+	if err := m.removeStaleSessions(ctx, active); err != nil {
 		return err
 	}
-	m.pruneExpiredSessions(ctx, ops)
+	m.pruneExpiredSessions(ctx)
 	return nil
 }
 
@@ -526,7 +526,7 @@ func (m *MemorySearchManager) getSessionFileHash(ctx context.Context, sessionKey
 	}
 }
 
-func (m *MemorySearchManager) upsertSessionFile(ctx context.Context, sessionKey, path, content, hash string, ops *pendingVectorOps) error {
+func (m *MemorySearchManager) upsertSessionFile(ctx context.Context, sessionKey, path, content, hash string) error {
 	var existingPath string
 	row := m.db.QueryRow(ctx,
 		`SELECT path FROM ai_memory_session_files
@@ -536,7 +536,7 @@ func (m *MemorySearchManager) upsertSessionFile(ctx context.Context, sessionKey,
 	switch err := row.Scan(&existingPath); err {
 	case nil:
 		if existingPath != "" && existingPath != path {
-			m.purgeSessionPath(ctx, existingPath, ops)
+			m.purgeSessionPath(ctx, existingPath)
 		}
 	case sql.ErrNoRows:
 	default:
@@ -555,7 +555,7 @@ func (m *MemorySearchManager) upsertSessionFile(ctx context.Context, sessionKey,
 	return err
 }
 
-func (m *MemorySearchManager) deleteSessionFile(ctx context.Context, sessionKey string, ops *pendingVectorOps) error {
+func (m *MemorySearchManager) deleteSessionFile(ctx context.Context, sessionKey string) error {
 	var path string
 	row := m.db.QueryRow(ctx,
 		`SELECT path FROM ai_memory_session_files
@@ -565,7 +565,7 @@ func (m *MemorySearchManager) deleteSessionFile(ctx context.Context, sessionKey 
 	if err := row.Scan(&path); err != nil && err != sql.ErrNoRows {
 		return err
 	}
-	m.purgeSessionPath(ctx, path, ops)
+	m.purgeSessionPath(ctx, path)
 	_, _ = m.db.Exec(ctx,
 		`DELETE FROM ai_memory_session_files
          WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND session_key=$4`,
@@ -574,7 +574,7 @@ func (m *MemorySearchManager) deleteSessionFile(ctx context.Context, sessionKey 
 	return nil
 }
 
-func (m *MemorySearchManager) removeStaleSessions(ctx context.Context, active map[string]sessionPortal, ops *pendingVectorOps) error {
+func (m *MemorySearchManager) removeStaleSessions(ctx context.Context, active map[string]sessionPortal) error {
 	rows, err := m.db.Query(ctx,
 		`SELECT session_key, path FROM ai_memory_session_files
          WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
@@ -593,7 +593,7 @@ func (m *MemorySearchManager) removeStaleSessions(ctx context.Context, active ma
 		if _, ok := active[sessionKey]; ok {
 			continue
 		}
-		m.purgeSessionPath(ctx, path, ops)
+		m.purgeSessionPath(ctx, path)
 		_, _ = m.db.Exec(ctx,
 			`DELETE FROM ai_memory_session_files
              WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND session_key=$4`,

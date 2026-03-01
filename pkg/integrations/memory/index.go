@@ -203,7 +203,7 @@ func (m *MemorySearchManager) indexMemoryFiles(ctx context.Context, force bool, 
 	}
 
 	for _, pc := range prepared {
-		if err := m.writeContent(ctx, pc, nil); err != nil {
+		if err := m.writeContent(ctx, pc); err != nil {
 			return err
 		}
 	}
@@ -213,7 +213,7 @@ func (m *MemorySearchManager) indexMemoryFiles(ctx context.Context, force bool, 
 		if active == nil {
 			continue
 		}
-		if err := m.removeStaleChunksForSource(ctx, active, generation, source, nil); err != nil {
+		if err := m.removeStaleChunksForSource(ctx, active, generation, source); err != nil {
 			return err
 		}
 	}
@@ -312,10 +312,6 @@ func (m *MemorySearchManager) prepareMemoryFiles(ctx context.Context, force bool
 	return prepared, activeBySource, nil
 }
 
-func (m *MemorySearchManager) indexConcurrency() int {
-	return 1
-}
-
 func (m *MemorySearchManager) needsFileIndex(ctx context.Context, entry textfs.FileEntry, source, generation string) (bool, error) {
 	var updatedAt sql.NullInt64
 	genSQL, genArgs := generationFilterSQL(7, generation)
@@ -367,12 +363,7 @@ func (m *MemorySearchManager) prepareContent(_ context.Context, path, source, co
 	}, nil
 }
 
-// pendingVectorOps remains for session bookkeeping signatures; lexical mode does not use it.
-type pendingVectorOps struct {
-	deletes []string
-}
-
-func (m *MemorySearchManager) writeContent(ctx context.Context, pc *preparedContent, _ *pendingVectorOps) error {
+func (m *MemorySearchManager) writeContent(ctx context.Context, pc *preparedContent) error {
 	if pc == nil || len(pc.Chunks) == 0 {
 		return nil
 	}
@@ -401,7 +392,7 @@ func (m *MemorySearchManager) writeContent(ctx context.Context, pc *preparedCont
 			)
 		}
 	}
-	return m.deletePathChunks(ctx, pc.Path, pc.Source, pc.Generation, newIDs, nil)
+	return m.deletePathChunks(ctx, pc.Path, pc.Source, pc.Generation, newIDs)
 }
 
 func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, content, generation string) error {
@@ -409,7 +400,7 @@ func (m *MemorySearchManager) indexContent(ctx context.Context, path, source, co
 	if err != nil {
 		return err
 	}
-	return m.writeContent(ctx, pc, nil)
+	return m.writeContent(ctx, pc)
 }
 
 func buildChunkID(generation string) string {
@@ -420,7 +411,7 @@ func buildChunkID(generation string) string {
 	return generation + ":" + uuid.NewString()
 }
 
-func (m *MemorySearchManager) deletePathChunks(ctx context.Context, path, source, generation string, keepIDs []string, _ *pendingVectorOps) error {
+func (m *MemorySearchManager) deletePathChunks(ctx context.Context, path, source, generation string, keepIDs []string) error {
 	if m == nil {
 		return nil
 	}
@@ -485,7 +476,7 @@ func (m *MemorySearchManager) deletePathChunks(ctx context.Context, path, source
 	return err
 }
 
-func (m *MemorySearchManager) removeStaleChunksForSource(ctx context.Context, active map[string]textfs.FileEntry, generation string, source string, _ *pendingVectorOps) error {
+func (m *MemorySearchManager) removeStaleChunksForSource(ctx context.Context, active map[string]textfs.FileEntry, generation string, source string) error {
 	source = strings.TrimSpace(source)
 	if source == "" {
 		return nil
@@ -665,33 +656,6 @@ func generationFilterSQL(startIndex int, generation string) (string, []any) {
 		return "", nil
 	}
 	return fmt.Sprintf(" AND id LIKE $%d", startIndex), []any{generation + ":%"}
-}
-
-func (m *MemorySearchManager) collectChunkIDs(ctx context.Context, path, source, model, generation string) []string {
-	if m == nil {
-		return nil
-	}
-	genSQL, genArgs := generationFilterSQL(7, generation)
-	args := []any{m.bridgeID, m.loginID, m.agentID, path, source, model}
-	args = append(args, genArgs...)
-	rows, err := m.db.Query(ctx,
-		`SELECT id FROM ai_memory_chunks
-         WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5 AND model=$6`+genSQL,
-		args...,
-	)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return ids
-		}
-		ids = append(ids, id)
-	}
-	return ids
 }
 
 func hasSource(sources []string, target string) bool {

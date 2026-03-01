@@ -76,38 +76,16 @@ func (oc *AIClient) buildMatrixInboundBody(
 	roomName string,
 	isGroup bool,
 ) string {
+	normalized := oc.buildMatrixInboundContext(portal, evt, rawBody, senderName, roomName, isGroup)
+
 	// Simple mode must not inject any envelope/sender/event-id context.
 	if isSimpleMode(meta) {
-		ctx := runtimeparse.FinalizeInboundContext(runtimeparse.InboundContext{
-			Provider:     "matrix",
-			Surface:      "matrix",
-			ChatType:     map[bool]string{true: "group", false: "direct"}[isGroup],
-			ChatID:       roomName,
-			SenderLabel:  senderName,
-			SenderID:     senderName,
-			Body:         rawBody,
-			BodyForAgent: rawBody,
-		})
-		return strings.TrimSpace(ctx.BodyForAgent)
+		return strings.TrimSpace(normalized.BodyForAgent)
 	}
 
-	normalized := runtimeparse.FinalizeInboundContext(runtimeparse.InboundContext{
-		Provider:          "matrix",
-		Surface:           "matrix",
-		ChatType:          map[bool]string{true: "group", false: "direct"}[isGroup],
-		ChatID:            roomName,
-		ConversationLabel: roomName,
-		SenderLabel:       senderName,
-		SenderID:          senderName,
-		Body:              rawBody,
-		BodyForAgent:      rawBody,
-	})
 	body := strings.TrimSpace(normalized.BodyForAgent)
 	if body == "" {
 		return ""
-	}
-	if isGroup && senderName != "" && !hasSenderPrefix(body, senderName) {
-		body = senderName + ": " + body
 	}
 	if evt != nil && evt.ID != "" {
 		body = appendMessageIDHint(body, evt.ID)
@@ -159,4 +137,52 @@ func (oc *AIClient) buildMatrixInboundBody(
 		Envelope:        opts,
 	})
 	return formatInboundBodyWithSenderMeta(enveloped, senderName, isGroup)
+}
+
+func (oc *AIClient) buildMatrixInboundContext(
+	portal *bridgev2.Portal,
+	evt *event.Event,
+	rawBody string,
+	senderName string,
+	roomName string,
+	isGroup bool,
+) runtimeparse.InboundContext {
+	replyCtx := extractInboundReplyContext(evt)
+	messageID := ""
+	if evt != nil && evt.ID != "" {
+		messageID = evt.ID.String()
+	}
+	senderID := strings.TrimSpace(senderName)
+	if evt != nil && evt.Sender != "" {
+		senderID = evt.Sender.String()
+	}
+
+	bodyForAgent := rawBody
+	if isGroup && senderName != "" && !hasSenderPrefix(strings.TrimSpace(bodyForAgent), senderName) {
+		bodyForAgent = senderName + ": " + strings.TrimSpace(bodyForAgent)
+	}
+
+	chatID := strings.TrimSpace(roomName)
+	if chatID == "" && portal != nil && portal.MXID != "" {
+		chatID = portal.MXID.String()
+	}
+
+	inbound := runtimeparse.InboundContext{
+		Provider:          "matrix",
+		Surface:           "beeper-matrix",
+		ChatType:          map[bool]string{true: "group", false: "direct"}[isGroup],
+		ChatID:            chatID,
+		ConversationLabel: strings.TrimSpace(roomName),
+		SenderLabel:       strings.TrimSpace(senderName),
+		SenderID:          senderID,
+		MessageID:         messageID,
+		MessageIDFull:     messageID,
+		ReplyToID:         replyCtx.ReplyTo.String(),
+		ThreadID:          replyCtx.ThreadRoot.String(),
+		Body:              rawBody,
+		RawBody:           rawBody,
+		BodyForAgent:      bodyForAgent,
+		BodyForCommands:   rawBody,
+	}
+	return runtimeparse.FinalizeInboundContext(inbound)
 }

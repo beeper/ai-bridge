@@ -1744,26 +1744,20 @@ func (cc *CodexClient) sendInitialStreamMessage(ctx context.Context, portal *bri
 }
 
 func (cc *CodexClient) buildUIMessageMetadata(state *streamingState, model string, includeUsage bool, finishReason string) map[string]any {
-	metadata := map[string]any{
-		"model":    strings.TrimSpace(model),
-		"turn_id":  state.turnID,
-		"agent_id": state.agentID,
-	}
-	if includeUsage {
-		metadata["usage"] = map[string]any{
-			"prompt_tokens":     state.promptTokens,
-			"completion_tokens": state.completionTokens,
-			"reasoning_tokens":  state.reasoningTokens,
-			"total_tokens":      state.totalTokens,
-		}
-		metadata["timing"] = map[string]any{
-			"started_at":     state.startedAtMs,
-			"first_token_at": state.firstTokenAtMs,
-			"completed_at":   state.completedAtMs,
-		}
-		metadata["finish_reason"] = finishReason
-	}
-	return metadata
+	return msgconv.BuildUIMessageMetadata(msgconv.UIMessageMetadataParams{
+		TurnID:           state.turnID,
+		AgentID:          state.agentID,
+		Model:            strings.TrimSpace(model),
+		FinishReason:     finishReason,
+		PromptTokens:     state.promptTokens,
+		CompletionTokens: state.completionTokens,
+		ReasoningTokens:  state.reasoningTokens,
+		TotalTokens:      state.totalTokens,
+		StartedAtMs:      state.startedAtMs,
+		FirstTokenAtMs:   state.firstTokenAtMs,
+		CompletedAtMs:    state.completedAtMs,
+		IncludeUsage:     includeUsage,
+	})
 }
 
 func (cc *CodexClient) emitUIStart(ctx context.Context, portal *bridgev2.Portal, state *streamingState, model string) {
