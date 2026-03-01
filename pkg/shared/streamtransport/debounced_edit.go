@@ -48,6 +48,10 @@ func SendDebouncedEdit(ctx context.Context, p DebouncedEditParams) bool {
 	now := time.Now()
 	shouldEmit := p.Force
 	if !shouldEmit {
+		if p.Gate == nil {
+			gate := NewEditDebounceGate()
+			p.Gate = &gate
+		}
 		if *p.Gate == nil {
 			*p.Gate = NewEditDebounceGate()
 		}
@@ -66,7 +70,10 @@ func SendDebouncedEdit(ctx context.Context, p DebouncedEditParams) bool {
 		return false
 	}
 	if _, err := p.Intent.SendMessage(ctx, p.Portal.MXID, event.EventMessage, &event.Content{Raw: raw}, nil); err != nil {
-		p.Log.Warn().Err(err).Stringer("event_id", p.InitialEventID).Msg("Failed to send debounced stream edit")
+		if p.Log != nil {
+			p.Log.Warn().Err(err).Stringer("event_id", p.InitialEventID).Msg("Failed to send debounced stream edit")
+		}
+		return false
 	}
 	return true
 }

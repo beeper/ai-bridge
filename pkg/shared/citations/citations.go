@@ -35,7 +35,7 @@ type GeneratedFilePart struct {
 
 // ProviderMetadata builds the providerMetadata map for a source-url part from
 // a SourceCitation. The keys match what the desktop client reads (e.g.
-// "siteName" in camelCase).
+// "siteName" in camelCase). Emit both siteName and site_name during transition.
 func ProviderMetadata(c SourceCitation) map[string]any {
 	meta := map[string]any{}
 	if v := strings.TrimSpace(c.Description); v != "" {
@@ -45,6 +45,7 @@ func ProviderMetadata(c SourceCitation) map[string]any {
 		meta["published"] = v
 	}
 	if v := strings.TrimSpace(c.SiteName); v != "" {
+		meta["siteName"] = v
 		meta["site_name"] = v
 	}
 	if v := strings.TrimSpace(c.Author); v != "" {
