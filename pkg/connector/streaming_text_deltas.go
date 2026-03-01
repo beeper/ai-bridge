@@ -7,6 +7,8 @@ import (
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
+
+	"github.com/beeper/ai-bridge/pkg/shared/citations"
 )
 
 func (oc *AIClient) ensureInitialStreamMessage(
@@ -182,7 +184,7 @@ func (oc *AIClient) handleResponseOutputAnnotationAdded(
 	annotationIndex any,
 ) {
 	if citation, ok := extractURLCitation(annotation); ok {
-		state.sourceCitations = mergeSourceCitations(state.sourceCitations, []sourceCitation{citation})
+		state.sourceCitations = citations.MergeSourceCitations(state.sourceCitations, []citations.SourceCitation{citation})
 		oc.emitUISourceURL(ctx, portal, state, citation)
 	}
 	if document, ok := extractDocumentCitation(annotation); ok {
