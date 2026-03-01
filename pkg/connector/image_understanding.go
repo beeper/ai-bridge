@@ -335,60 +335,42 @@ func mediaSourceLabel(mediaURL string, encryptedFile *event.EncryptedFileInfo) s
 	return source
 }
 
-func buildImageUnderstandingPrompt(caption string, hasUserCaption bool) string {
+func buildMediaPromptFromCaption(caption string, hasUserCaption bool, defaultPrompt string) string {
 	if hasUserCaption {
 		caption = strings.TrimSpace(caption)
 		if caption != "" {
 			return caption
 		}
 	}
-	return defaultPromptByCapability[MediaCapabilityImage]
+	return defaultPrompt
+}
+
+func buildImageUnderstandingPrompt(caption string, hasUserCaption bool) string {
+	return buildMediaPromptFromCaption(caption, hasUserCaption, defaultPromptByCapability[MediaCapabilityImage])
 }
 
 func buildAudioUnderstandingPrompt(caption string, hasUserCaption bool) string {
-	if hasUserCaption {
-		caption = strings.TrimSpace(caption)
-		if caption != "" {
-			return caption
-		}
-	}
-	return defaultPromptByCapability[MediaCapabilityAudio]
+	return buildMediaPromptFromCaption(caption, hasUserCaption, defaultPromptByCapability[MediaCapabilityAudio])
 }
 
 func buildImageUnderstandingMessage(caption string, hasUserCaption bool, description string) string {
-	description = strings.TrimSpace(description)
-	if description == "" {
+	if strings.TrimSpace(description) == "" {
 		return ""
 	}
-
-	if !hasUserCaption {
-		caption = ""
+	userText := ""
+	if hasUserCaption {
+		userText = strings.TrimSpace(caption)
 	}
-	caption = strings.TrimSpace(caption)
-
-	lines := []string{"[Image]"}
-	if caption != "" {
-		lines = append(lines, "User text:\n"+caption)
-	}
-	lines = append(lines, "Description:\n"+description)
-	return strings.Join(lines, "\n")
+	return formatMediaSection("Image", "Description", strings.TrimSpace(description), userText)
 }
 
 func buildAudioUnderstandingMessage(caption string, hasUserCaption bool, transcript string) string {
-	transcript = strings.TrimSpace(transcript)
-	if transcript == "" {
+	if strings.TrimSpace(transcript) == "" {
 		return ""
 	}
-
-	if !hasUserCaption {
-		caption = ""
+	userText := ""
+	if hasUserCaption {
+		userText = strings.TrimSpace(caption)
 	}
-	caption = strings.TrimSpace(caption)
-
-	lines := []string{"[Audio]"}
-	if caption != "" {
-		lines = append(lines, "User text:\n"+caption)
-	}
-	lines = append(lines, "Transcript:\n"+transcript)
-	return strings.Join(lines, "\n")
+	return formatMediaSection("Audio", "Transcript", strings.TrimSpace(transcript), userText)
 }

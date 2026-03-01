@@ -24,7 +24,7 @@ func analyzeAudio(data []byte, mimeType string) (int, []int) {
 		return 0, nil
 	}
 
-	normalized := strings.ToLower(normalizeMimeString(mimeType))
+	normalized := normalizeMimeType(mimeType)
 	switch normalized {
 	case "audio/wav", "audio/x-wav", "audio/wave":
 		if samples, sampleRate, err := parseWavPCM(data); err == nil {
