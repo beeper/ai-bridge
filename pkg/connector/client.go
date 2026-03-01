@@ -2532,8 +2532,8 @@ func (oc *AIClient) buildPromptUpToMessage(
 					}
 				}
 			default:
+				body = StripEnvelope(body)
 				if isSimple {
-					body = StripEnvelope(body)
 					body = stripMessageIDHintLines(body)
 				}
 				if injectImages && msgMeta.MediaURL != "" && isImageMimeType(msgMeta.MimeType) {
@@ -2549,10 +2549,9 @@ func (oc *AIClient) buildPromptUpToMessage(
 		}
 	} else {
 		// No history, just add the new message
-		body := newBody
+		body := strings.TrimSpace(newBody)
+		body = StripEnvelope(body)
 		if isSimple {
-			body = strings.TrimSpace(body)
-			body = StripEnvelope(body)
 			body = stripMessageIDHintLines(body)
 		}
 		prompt = append(prompt, openai.UserMessage(body))

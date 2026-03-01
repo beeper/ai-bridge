@@ -80,7 +80,7 @@ func BuiltinTools() []ToolDefinition {
 	builtinToolsOnce.Do(func() {
 		builtinToolsCached = buildBuiltinToolDefinitions()
 	})
-	return builtinToolsCached
+	return slices.Clone(builtinToolsCached)
 }
 
 // ToolNameMessage is the name of the message tool.
