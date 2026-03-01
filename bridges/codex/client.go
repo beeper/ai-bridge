@@ -1927,12 +1927,12 @@ func (cc *CodexClient) emitUIToolApprovalRequest(
 	ctx context.Context, portal *bridgev2.Portal, state *streamingState,
 	approvalID, toolCallID, toolName string, ttlSeconds int,
 ) {
+	_ = toolName
+	_ = ttlSeconds
 	cc.emitStreamEvent(ctx, portal, state, map[string]any{
 		"type":       "tool-approval-request",
 		"approvalId": approvalID,
 		"toolCallId": toolCallID,
-		"toolName":   toolName,
-		"ttlSeconds": ttlSeconds,
 	})
 }
 
