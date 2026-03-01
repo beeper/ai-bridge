@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"strings"
-	"time"
 
 	runtimeparse "github.com/beeper/ai-bridge/pkg/runtime"
 	"maunium.net/go/mautrix/bridgev2"
@@ -28,17 +27,6 @@ func (oc *AIClient) matrixRoomDisplayName(ctx context.Context, portal *bridgev2.
 		return name
 	}
 	return portal.MXID.String()
-}
-
-func (oc *AIClient) lastPortalMessageTime(ctx context.Context, portal *bridgev2.Portal) (time.Time, bool) {
-	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || portal == nil {
-		return time.Time{}, false
-	}
-	history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, 1)
-	if err != nil || len(history) == 0 {
-		return time.Time{}, false
-	}
-	return history[0].Timestamp, true
 }
 
 func (oc *AIClient) resolveBotMXID(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) id.UserID {
@@ -76,6 +64,8 @@ func (oc *AIClient) buildMatrixInboundBody(
 	roomName string,
 	isGroup bool,
 ) string {
+	_ = ctx
+	_ = portal
 	// Simple mode must not inject any envelope/sender/event-id context.
 	if isSimpleMode(meta) {
 		simpleCtx := runtimeparse.FinalizeInboundContext(runtimeparse.InboundContext{
@@ -91,61 +81,7 @@ func (oc *AIClient) buildMatrixInboundBody(
 		return strings.TrimSpace(simpleCtx.BodyForAgent)
 	}
 	normalized := oc.buildMatrixInboundContext(portal, evt, rawBody, senderName, roomName, isGroup)
-
-	body := strings.TrimSpace(normalized.BodyForAgent)
-	if body == "" {
-		return ""
-	}
-	if evt != nil && evt.ID != "" {
-		body = appendMessageIDHint(body, evt.ID)
-	}
-	from := strings.TrimSpace(senderName)
-	if isGroup {
-		label := strings.TrimSpace(roomName)
-		if label == "" && portal != nil {
-			label = portal.MXID.String()
-		}
-		if label == "" {
-			label = "Group"
-		}
-		if portal != nil && portal.MXID != "" {
-			from = label + " id:" + portal.MXID.String()
-		} else {
-			from = label
-		}
-	} else if evt != nil && evt.Sender != "" && from != "" && from != evt.Sender.String() {
-		from = from + " id:" + evt.Sender.String()
-	} else if from == "" && evt != nil {
-		from = evt.Sender.String()
-	}
-	opts := oc.resolveEnvelopeFormatOptions()
-	timestamp := time.Time{}
-	hasTimestamp := false
-	if evt != nil && evt.Timestamp > 0 {
-		timestamp = time.UnixMilli(evt.Timestamp)
-		hasTimestamp = true
-	}
-	prev, hasPrev := oc.lastPortalMessageTime(ctx, portal)
-	enveloped := formatAgentEnvelope(struct {
-		Channel         string
-		From            string
-		Body            string
-		Timestamp       time.Time
-		HasTimestamp    bool
-		PreviousTime    time.Time
-		HasPreviousTime bool
-		Envelope        EnvelopeFormatOptions
-	}{
-		Channel:         "Matrix",
-		From:            from,
-		Body:            body,
-		Timestamp:       timestamp,
-		HasTimestamp:    hasTimestamp,
-		PreviousTime:    prev,
-		HasPreviousTime: hasPrev,
-		Envelope:        opts,
-	})
-	return formatInboundBodyWithSenderMeta(enveloped, senderName, isGroup)
+	return strings.TrimSpace(normalized.BodyForAgent)
 }
 
 func (oc *AIClient) buildMatrixInboundContext(

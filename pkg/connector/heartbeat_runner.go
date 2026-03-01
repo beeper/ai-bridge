@@ -474,8 +474,7 @@ func (oc *AIClient) buildPromptWithHeartbeat(ctx context.Context, portal *bridge
 		return nil, err
 	}
 	base = oc.augmentPromptWithIntegrations(ctx, portal, meta, base)
-	message := appendMessageIDHint(prompt, "")
-	return append(base, openai.UserMessage(message)), nil
+	return append(base, openai.UserMessage(prompt)), nil
 }
 
 func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, string, error) {

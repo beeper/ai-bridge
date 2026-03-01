@@ -1469,7 +1469,7 @@ func (oc *AIClient) buildPromptForRegenerate(
 
 	latest := strings.TrimSpace(latestUserBody)
 	if !isSimple {
-		latest = appendMessageIDHint(latestUserBody, latestUserID)
+		latest = latestUserBody
 	} else {
 		latest = airuntime.SanitizeChatMessageForDisplay(latest, true)
 	}

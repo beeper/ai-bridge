@@ -55,13 +55,9 @@ func (oc *AIClient) sendContinuationMessage(ctx context.Context, portal *bridgev
 	oc.loggerForContext(ctx).Debug().Int("body_len", len(body)).Msg("Queued continuation message for oversized response")
 }
 
-// sendInitialStreamMessage sends the first message in a streaming session and returns its event ID
-func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string, turnID string, replyTarget ReplyTarget) id.EventID {
-	intent := oc.getModelIntent(ctx, portal)
-	if intent == nil {
-		return ""
-	}
-
+// sendInitialStreamMessage sends the first message in a streaming session via bridgev2's pipeline.
+// Returns the event ID and stores the network message ID in state for later edits.
+func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, state *streamingState, content string, turnID string, replyTarget ReplyTarget) id.EventID {
 	var relatesTo map[string]any
 	if replyTarget.ThreadRoot != "" {
 		replyTo := replyTarget.EffectiveReplyTo()
@@ -90,22 +86,35 @@ func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridge
 		"parts": []any{},
 	}
 
-	eventContent := &event.Content{
-		Raw: map[string]any{
-			"msgtype":      event.MsgText,
-			"body":         content,
-			"m.relates_to": relatesTo,
-			BeeperAIKey:    uiMessage,
-			"m.mentions":   map[string]any{},
-		},
+	eventRaw := map[string]any{
+		"msgtype":      event.MsgText,
+		"body":         content,
+		"m.relates_to": relatesTo,
+		BeeperAIKey:    uiMessage,
+		"m.mentions":   map[string]any{},
 	}
-	resp, err := intent.SendMessage(ctx, portal.MXID, event.EventMessage, eventContent, nil)
+
+	msgID := newMessageID()
+	converted := &bridgev2.ConvertedMessage{
+		Parts: []*bridgev2.ConvertedMessagePart{{
+			ID:         networkid.PartID("0"),
+			Type:       event.EventMessage,
+			Content:    &event.MessageEventContent{MsgType: event.MsgText, Body: content},
+			Extra:      eventRaw,
+			DBMetadata: &MessageMetadata{Role: "assistant", TurnID: turnID},
+		}},
+	}
+
+	eventID, _, err := oc.sendViaPortal(ctx, portal, converted, msgID)
 	if err != nil {
 		oc.loggerForContext(ctx).Error().Err(err).Msg("Failed to send initial streaming message")
 		return ""
 	}
-	oc.loggerForContext(ctx).Info().Stringer("event_id", resp.EventID).Str("turn_id", turnID).Msg("Initial streaming message sent")
-	return resp.EventID
+	if state != nil {
+		state.networkMessageID = msgID
+	}
+	oc.loggerForContext(ctx).Info().Stringer("event_id", eventID).Str("turn_id", turnID).Msg("Initial streaming message sent")
+	return eventID
 }
 
 // flushPartialStreamingMessage saves the partially accumulated assistant message on context cancellation.
@@ -189,7 +198,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	}
 
 	// Use cleaned content (directives stripped)
-	cleanedContent := airuntime.SanitizeChatMessageForDisplay(stripMessageIDHintLines(directives.Text), false)
+	cleanedContent := airuntime.SanitizeChatMessageForDisplay(airuntime.StripMessageIDHintLines(directives.Text), false)
 
 	finalReplyTarget := oc.resolveFinalReplyTarget(meta, state, &directives)
 	responsePrefix := resolveResponsePrefixForReply(oc, &oc.connector.Config, meta)

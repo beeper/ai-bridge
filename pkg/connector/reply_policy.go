@@ -47,18 +47,6 @@ func extractInboundReplyContext(evt *event.Event) inboundReplyContext {
 	return ctx
 }
 
-func normalizeThreadReplies(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "off":
-		return "off"
-	case "always":
-		return "always"
-	case "inbound":
-		return "inbound"
-	}
-	return ""
-}
-
 func (oc *AIClient) resolveMatrixReplyToMode() string {
 	if oc != nil && oc.connector != nil && oc.connector.Config.Channels != nil && oc.connector.Config.Channels.Matrix != nil {
 		if mode := runtimeparse.NormalizeReplyToMode(oc.connector.Config.Channels.Matrix.ReplyToMode); mode != "" {
@@ -68,13 +56,11 @@ func (oc *AIClient) resolveMatrixReplyToMode() string {
 	return "off"
 }
 
-func (oc *AIClient) resolveMatrixThreadReplies() string {
+func (oc *AIClient) resolveMatrixThreadReplies() runtimeparse.ThreadReplyMode {
 	if oc != nil && oc.connector != nil && oc.connector.Config.Channels != nil && oc.connector.Config.Channels.Matrix != nil {
-		if normalized := normalizeThreadReplies(oc.connector.Config.Channels.Matrix.ThreadReplies); normalized != "" {
-			return normalized
-		}
+		return runtimeparse.NormalizeThreadReplyMode(oc.connector.Config.Channels.Matrix.ThreadReplies)
 	}
-	return "inbound"
+	return runtimeparse.ThreadReplyModeInbound
 }
 
 func (oc *AIClient) resolveInitialReplyTarget(evt *event.Event) ReplyTarget {
@@ -83,52 +69,24 @@ func (oc *AIClient) resolveInitialReplyTarget(evt *event.Event) ReplyTarget {
 		return ReplyTarget{}
 	}
 	ctx := extractInboundReplyContext(evt)
-	switch mode {
-	case "off":
-		if ctx.ReplyTo != "" {
-			return ReplyTarget{ReplyTo: ctx.ReplyTo}
-		}
-		return ReplyTarget{}
-	case "inbound":
-		if ctx.ThreadRoot != "" {
-			return ReplyTarget{ReplyTo: ctx.ThreadRoot, ThreadRoot: ctx.ThreadRoot}
-		}
-		if ctx.ReplyTo != "" {
-			return ReplyTarget{ReplyTo: ctx.ReplyTo}
-		}
-	case "always":
-		root := ctx.ThreadRoot
-		if root == "" {
-			root = evt.ID
-		}
-		if root != "" {
-			return ReplyTarget{ReplyTo: root, ThreadRoot: root}
-		}
+	decision := runtimeparse.ResolveInboundReplyTarget(mode, ctx.ReplyTo.String(), ctx.ThreadRoot.String(), evt.ID.String())
+	target := ReplyTarget{}
+	if strings.TrimSpace(decision.ReplyToID) != "" {
+		target.ReplyTo = id.EventID(strings.TrimSpace(decision.ReplyToID))
 	}
-	return ReplyTarget{}
+	if strings.TrimSpace(decision.ThreadRoot) != "" {
+		target.ThreadRoot = id.EventID(strings.TrimSpace(decision.ThreadRoot))
+	}
+	return target
 }
 
 func (oc *AIClient) queueThreadKey(evt *event.Event) string {
 	mode := oc.resolveMatrixThreadReplies()
-	if mode == "off" || evt == nil {
+	if mode == runtimeparse.ThreadReplyModeOff || evt == nil {
 		return ""
 	}
 	ctx := extractInboundReplyContext(evt)
-	switch mode {
-	case "inbound":
-		if ctx.ThreadRoot != "" {
-			return ctx.ThreadRoot.String()
-		}
-		return ""
-	case "always":
-		if ctx.ThreadRoot != "" {
-			return ctx.ThreadRoot.String()
-		}
-		if evt.ID != "" {
-			return evt.ID.String()
-		}
-	}
-	return ""
+	return runtimeparse.ResolveQueueThreadKey(mode, ctx.ThreadRoot.String(), evt.ID.String())
 }
 
 func (oc *AIClient) resolveFinalReplyTarget(meta *PortalMetadata, state *streamingState, directives *runtimeparse.ReplyDirectiveResult) ReplyTarget {
