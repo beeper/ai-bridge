@@ -12,17 +12,7 @@ func (oc *AIClient) canRunMediaUnderstanding(ctx context.Context, meta *PortalMe
 		return false
 	}
 	toolsCfg := oc.connector.Config.Tools.Media
-	var capCfg *MediaUnderstandingConfig
-	if toolsCfg != nil {
-		switch capability {
-		case MediaCapabilityImage:
-			capCfg = toolsCfg.Image
-		case MediaCapabilityAudio:
-			capCfg = toolsCfg.Audio
-		case MediaCapabilityVideo:
-			capCfg = toolsCfg.Video
-		}
-	}
+	capCfg := toolsCfg.ConfigForCapability(capability)
 	if capCfg != nil && capCfg.Enabled != nil && !*capCfg.Enabled {
 		return false
 	}
