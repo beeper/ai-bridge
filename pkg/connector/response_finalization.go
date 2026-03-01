@@ -165,7 +165,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	}
 
 	// Natural mode: process directives (OpenClaw-style)
-	directives := ParseResponseDirectives(rawContent, state.sourceEventID)
+	directives := airuntime.ParseReplyDirectives(rawContent, state.sourceEventID.String())
 
 	// Handle silent replies - redact the streaming message
 	if directives.IsSilent {
@@ -191,7 +191,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	// Use cleaned content (directives stripped)
 	cleanedContent := airuntime.SanitizeChatMessageForDisplay(stripMessageIDHintLines(directives.Text), false)
 
-	finalReplyTarget := oc.resolveFinalReplyTarget(meta, state, directives)
+	finalReplyTarget := oc.resolveFinalReplyTarget(meta, state, &directives)
 	responsePrefix := resolveResponsePrefixForReply(oc, &oc.connector.Config, meta)
 	if responsePrefix != "" && strings.TrimSpace(cleanedContent) != "" {
 		if !strings.HasPrefix(cleanedContent, responsePrefix) {
@@ -252,7 +252,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 			Str("turn_id", state.turnID).
 			Bool("has_thinking", state.reasoning.Len() > 0).
 			Int("tool_calls", len(state.toolCalls)).
-			Bool("has_reply", directives.ReplyToEventID != "").
+			Bool("has_reply", directives.ReplyToID != "").
 			Int("link_previews", len(linkPreviews)).
 			Msg("Sent final assistant turn with metadata")
 	}

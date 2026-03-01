@@ -13,6 +13,7 @@ import (
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/shared/constant"
 	"github.com/rs/zerolog"
+	runtimeparse "github.com/beeper/ai-bridge/pkg/runtime"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
 
@@ -127,7 +128,7 @@ func (oc *AIClient) streamChatCompletions(
 					state.accumulated.WriteString(delta)
 					roundContent.WriteString(delta)
 
-					parsed := (*streamingDirectiveResult)(nil)
+					parsed := (*runtimeparse.StreamingDirectiveResult)(nil)
 					if state.replyAccumulator != nil {
 						parsed = state.replyAccumulator.Consume(delta, false)
 					}

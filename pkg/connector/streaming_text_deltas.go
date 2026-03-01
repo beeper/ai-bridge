@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	runtimeparse "github.com/beeper/ai-bridge/pkg/runtime"
 	"maunium.net/go/mautrix/bridgev2"
 
 	"github.com/beeper/ai-bridge/pkg/shared/citations"
@@ -57,7 +58,7 @@ func (oc *AIClient) handleResponseOutputTextDelta(
 	delta = maybePrependTextSeparator(state, delta)
 	state.accumulated.WriteString(delta)
 
-	var parsed *streamingDirectiveResult
+	var parsed *runtimeparse.StreamingDirectiveResult
 	if state.replyAccumulator != nil {
 		parsed = state.replyAccumulator.Consume(delta, false)
 	}
