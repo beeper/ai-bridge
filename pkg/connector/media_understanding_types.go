@@ -18,6 +18,26 @@ const (
 	MediaKindVideoDescription   MediaUnderstandingKind = "video.description"
 )
 
+// MediaUnderstandingOutcome represents a decision outcome.
+type MediaUnderstandingOutcome string
+
+const (
+	MediaOutcomeSuccess      MediaUnderstandingOutcome = "success"
+	MediaOutcomeSkipped      MediaUnderstandingOutcome = "skipped"
+	MediaOutcomeFailed       MediaUnderstandingOutcome = "failed"
+	MediaOutcomeDisabled     MediaUnderstandingOutcome = "disabled"
+	MediaOutcomeScopeDeny    MediaUnderstandingOutcome = "scope-deny"
+	MediaOutcomeNoAttachment MediaUnderstandingOutcome = "no-attachment"
+)
+
+// MediaUnderstandingEntryType identifies how a model entry is executed.
+type MediaUnderstandingEntryType string
+
+const (
+	MediaEntryTypeProvider MediaUnderstandingEntryType = "provider"
+	MediaEntryTypeCLI      MediaUnderstandingEntryType = "cli"
+)
+
 // MediaUnderstandingOutput represents a single media understanding result.
 type MediaUnderstandingOutput struct {
 	Kind            MediaUnderstandingKind `json:"kind"`
@@ -29,11 +49,11 @@ type MediaUnderstandingOutput struct {
 
 // MediaUnderstandingModelDecision records a single model attempt.
 type MediaUnderstandingModelDecision struct {
-	Type     string `json:"type,omitempty"` // provider | cli
-	Provider string `json:"provider,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Outcome  string `json:"outcome,omitempty"` // success | skipped | failed
-	Reason   string `json:"reason,omitempty"`
+	Type     MediaUnderstandingEntryType `json:"type,omitempty"`
+	Provider string                     `json:"provider,omitempty"`
+	Model    string                     `json:"model,omitempty"`
+	Outcome  MediaUnderstandingOutcome  `json:"outcome,omitempty"`
+	Reason   string                     `json:"reason,omitempty"`
 }
 
 // MediaUnderstandingAttachmentDecision records attempts for one attachment.
@@ -46,6 +66,6 @@ type MediaUnderstandingAttachmentDecision struct {
 // MediaUnderstandingDecision summarizes the overall outcome for a capability.
 type MediaUnderstandingDecision struct {
 	Capability  MediaUnderstandingCapability           `json:"capability"`
-	Outcome     string                                 `json:"outcome,omitempty"` // success | skipped | disabled | scope-deny | no-attachment
+	Outcome     MediaUnderstandingOutcome              `json:"outcome,omitempty"`
 	Attachments []MediaUnderstandingAttachmentDecision `json:"attachments,omitempty"`
 }
