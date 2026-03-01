@@ -53,7 +53,7 @@ type streamingState struct {
 	sourceEventID    id.EventID // The triggering user message event ID (for [[reply_to_current]])
 	senderID         string     // The triggering sender ID (for owner-only tool gating)
 	replyTarget      ReplyTarget
-	replyAccumulator *streamingDirectiveAccumulator
+	replyAccumulator *runtimeparse.StreamingDirectiveAccumulator
 	// If true, prepend a separator before the next non-whitespace text delta.
 	// Used when a tool continuation resumes a previously-started assistant message.
 	needsTextSeparator bool
@@ -105,7 +105,7 @@ func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID 
 		senderID:                senderID,
 		roomID:                  roomID,
 		statusSentIDs:           make(map[id.EventID]bool),
-		replyAccumulator:        newStreamingDirectiveAccumulator(),
+		replyAccumulator:        runtimeparse.NewStreamingDirectiveAccumulator(),
 		ui:                      ui,
 		pendingMcpApprovalsSeen: make(map[string]bool),
 	}
@@ -157,7 +157,7 @@ func (oc *AIClient) uiEmitter(state *streamingState) *streamui.Emitter {
 	}
 }
 
-func (oc *AIClient) applyStreamingReplyTarget(state *streamingState, parsed *streamingDirectiveResult) {
+func (oc *AIClient) applyStreamingReplyTarget(state *streamingState, parsed *runtimeparse.StreamingDirectiveResult) {
 	if oc == nil || state == nil || parsed == nil || !parsed.HasReplyTag {
 		return
 	}
