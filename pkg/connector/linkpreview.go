@@ -425,9 +425,9 @@ func (lp *LinkPreviewer) FetchPreviews(ctx context.Context, urls []string) []*Pr
 	return previews
 }
 
-// PreviewFromCitation builds a PreviewWithImage from a sourceCitation without fetching HTML.
+// PreviewFromCitation builds a PreviewWithImage from a SourceCitation without fetching HTML.
 // It downloads the image directly from the citation's Image URL.
-func (lp *LinkPreviewer) PreviewFromCitation(ctx context.Context, urlStr string, c sourceCitation) *PreviewWithImage {
+func (lp *LinkPreviewer) PreviewFromCitation(ctx context.Context, urlStr string, c citations.SourceCitation) *PreviewWithImage {
 	// Check cache first — a previous HTML-based fetch may have cached this URL.
 	if cached := globalPreviewCache.get(urlStr); cached != nil {
 		return cached
@@ -476,9 +476,9 @@ func (lp *LinkPreviewer) PreviewFromCitation(ctx context.Context, urlStr string,
 	return result
 }
 
-// FetchPreviewsWithCitations fetches previews for multiple URLs, using sourceCitation
+// FetchPreviewsWithCitations fetches previews for multiple URLs, using SourceCitation
 // metadata when available to skip HTML fetching.
-func (lp *LinkPreviewer) FetchPreviewsWithCitations(ctx context.Context, urls []string, citations []sourceCitation) []*PreviewWithImage {
+func (lp *LinkPreviewer) FetchPreviewsWithCitations(ctx context.Context, urls []string, cits []citations.SourceCitation) []*PreviewWithImage {
 	if len(urls) == 0 {
 		return nil
 	}
