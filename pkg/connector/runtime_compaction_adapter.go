@@ -1,0 +1,88 @@
+package connector
+
+import "github.com/openai/openai-go/v3"
+
+// CompactionEventType represents a compaction lifecycle event type.
+type CompactionEventType string
+
+const (
+	CompactionEventStart CompactionEventType = "compaction_start"
+	CompactionEventEnd   CompactionEventType = "compaction_end"
+)
+
+// CompactionEvent is emitted to clients for overflow compaction visibility.
+type CompactionEvent struct {
+	Type           CompactionEventType `json:"type"`
+	SessionID      string              `json:"session_id,omitempty"`
+	MessagesBefore int                 `json:"messages_before,omitempty"`
+	MessagesAfter  int                 `json:"messages_after,omitempty"`
+	TokensBefore   int                 `json:"tokens_before,omitempty"`
+	TokensAfter    int                 `json:"tokens_after,omitempty"`
+	Summary        string              `json:"summary,omitempty"`
+	WillRetry      bool                `json:"will_retry,omitempty"`
+	Error          string              `json:"error,omitempty"`
+}
+
+func (oc *AIClient) pruningConfigOrDefault() *PruningConfig {
+	if oc != nil && oc.connector != nil && oc.connector.Config.Pruning != nil {
+		return oc.connector.Config.Pruning
+	}
+	return DefaultPruningConfig()
+}
+
+func (oc *AIClient) pruningReserveTokens() int {
+	cfg := oc.pruningConfigOrDefault()
+	if cfg == nil || cfg.ReserveTokens <= 0 {
+		return 2000
+	}
+	return cfg.ReserveTokens
+}
+
+func (oc *AIClient) pruningOverflowFlushConfig() *OverflowFlushConfig {
+	cfg := oc.pruningConfigOrDefault()
+	if cfg == nil {
+		return nil
+	}
+	return cfg.OverflowFlush
+}
+
+func estimatePromptTokensForModel(prompt []openai.ChatCompletionMessageParamUnion, model string) int {
+	if len(prompt) == 0 {
+		return 0
+	}
+	if count, err := EstimateTokens(prompt, model); err == nil && count > 0 {
+		return count
+	}
+	total := 0
+	for _, msg := range prompt {
+		total += estimateMessageChars(msg) / charsPerTokenEstimate
+	}
+	if total <= 0 {
+		return len(prompt) * 3
+	}
+	return total
+}
+
+func promptTextPayloads(prompt []openai.ChatCompletionMessageParamUnion) ([]string, int) {
+	texts := make([]string, 0, len(prompt))
+	totalChars := 0
+	for _, msg := range prompt {
+		text := ""
+		switch {
+		case msg.OfSystem != nil:
+			text = extractSystemContent(msg.OfSystem.Content)
+		case msg.OfAssistant != nil:
+			text = extractAssistantContent(msg.OfAssistant.Content)
+		case msg.OfUser != nil:
+			text = extractUserContent(msg.OfUser.Content)
+		case msg.OfTool != nil:
+			text = extractToolContent(msg.OfTool.Content)
+		}
+		if text == "" {
+			continue
+		}
+		texts = append(texts, text)
+		totalChars += len(text)
+	}
+	return texts, totalChars
+}

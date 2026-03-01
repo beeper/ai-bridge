@@ -133,9 +133,6 @@ func (oc *AIClient) buildSteerInputItems(items []pendingQueueItem, meta *PortalM
 		prompt := strings.TrimSpace(item.prompt)
 		if prompt == "" {
 			prompt = item.pending.MessageBody
-			if item.pending.Event != nil {
-				prompt = appendMessageIDHint(prompt, item.pending.Event.ID)
-			}
 		}
 		prompt = strings.TrimSpace(prompt)
 		if prompt == "" {

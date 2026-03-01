@@ -61,12 +61,11 @@ func formatCurrentTimeForPrompt(timezone string) string {
 	return now.Format("Monday, January 2, 2006 - 3:04 PM (MST)")
 }
 
-// cleanHistoryBody strips or appends message ID hints based on mode.
+// cleanHistoryBody normalizes history body text for the current mode.
 func cleanHistoryBody(body string, simple bool, mxid id.EventID) string {
 	if simple {
 		body = airuntime.SanitizeChatMessageForDisplay(body, true)
-	} else if mxid != "" {
-		body = appendMessageIDHint(body, mxid)
 	}
+	_ = mxid
 	return body
 }

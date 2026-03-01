@@ -246,9 +246,8 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 	return contacts, nil
 }
 
-// ResolveIdentifier resolves an agent ID to a ghost and optionally creates a chat
+// ResolveIdentifier resolves an agent ID to a ghost and optionally creates a chat.
 func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	// Identifier can be an agent ID (e.g., "beeper", "boss") or model ID for backwards compatibility
 	id := strings.TrimSpace(identifier)
 	if id == "" {
 		return nil, errors.New("identifier is required")
@@ -271,7 +270,7 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 		return oc.resolveAgentIdentifier(ctx, agent, createChat)
 	}
 
-	// Fallback: try as model ID for backwards compatibility
+	// Allow explicit model aliases that resolve through configured catalog/aliases.
 	resolved, valid, err := oc.resolveModelID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -279,7 +278,7 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 	if valid && resolved != "" {
 		return oc.resolveModelIdentifier(ctx, resolved, createChat)
 	}
-	return oc.resolveModelIdentifier(ctx, id, createChat)
+	return nil, fmt.Errorf("agent '%s' not found", id)
 }
 
 // resolveAgentIdentifier resolves an agent to a ghost and optionally creates a chat
@@ -323,7 +322,7 @@ func (oc *AIClient) resolveAgentIdentifierWithModel(ctx context.Context, agent *
 	}, nil
 }
 
-// resolveModelIdentifier resolves a model ID to a ghost (backwards compatibility)
+// resolveModelIdentifier resolves an explicit model alias/ID to a ghost.
 func (oc *AIClient) resolveModelIdentifier(ctx context.Context, modelID string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
 	// Get or create ghost
 	userID := modelUserID(modelID)

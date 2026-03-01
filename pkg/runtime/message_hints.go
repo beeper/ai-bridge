@@ -7,10 +7,48 @@ import (
 
 var messageIDLineRE = regexp.MustCompile(`(?i)^\s*\[message_id:\s*([^\]\r\n]+)\]\s*$`)
 var matrixEventIDLineRE = regexp.MustCompile(`(?i)^\s*\[matrix event id:\s*([^\]\s]+)(?:\s+room:\s*[^\]]+)?\]\s*$`)
+var messageIDInlineRE = regexp.MustCompile(`(?i)\[message_id:\s*([^\]\r\n]+)\]`)
 
 func ContainsMessageIDHint(value string) bool {
 	lower := strings.ToLower(value)
 	return strings.Contains(lower, "[message_id:") || strings.Contains(lower, "[matrix event id:")
+}
+
+func NormalizeHintMessageID(value string) string {
+	candidate := strings.TrimSpace(value)
+	if candidate == "" {
+		return ""
+	}
+	candidate = strings.Trim(candidate, "`\"'<>")
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return ""
+	}
+	// Accept a single token only.
+	if strings.ContainsAny(candidate, "[] \t\r\n") {
+		return ""
+	}
+	return candidate
+}
+
+func NormalizeMessageID(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if match := messageIDLineRE.FindStringSubmatch(trimmed); len(match) > 1 {
+		return NormalizeHintMessageID(match[1])
+	}
+	if match := matrixEventIDLineRE.FindStringSubmatch(trimmed); len(match) > 1 {
+		return NormalizeHintMessageID(match[1])
+	}
+	if match := messageIDInlineRE.FindStringSubmatch(trimmed); len(match) > 1 {
+		return NormalizeHintMessageID(match[1])
+	}
+	if ContainsMessageIDHint(trimmed) {
+		return ""
+	}
+	return trimmed
 }
 
 func StripMessageIDHintLines(text string) string {

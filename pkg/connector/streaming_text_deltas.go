@@ -31,7 +31,7 @@ func (oc *AIClient) ensureInitialStreamMessage(
 
 	if !state.suppressSend && !isHeartbeat {
 		oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
-		state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, initialText, state.turnID, state.replyTarget)
+		state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state, initialText, state.turnID, state.replyTarget)
 		if state.initialEventID == "" {
 			log.Error().Msg(logMessage)
 			state.finishReason = "error"
