@@ -54,7 +54,7 @@ func (oc *AIClient) applyMediaUnderstandingForAttachments(
 	if capCfg != nil && capCfg.Enabled != nil && !*capCfg.Enabled {
 		result.Decisions = []MediaUnderstandingDecision{{
 			Capability: capability,
-			Outcome:    "disabled",
+			Outcome:    MediaOutcomeDisabled,
 		}}
 		return result, nil
 	}
@@ -63,7 +63,7 @@ func (oc *AIClient) applyMediaUnderstandingForAttachments(
 	if len(selected) == 0 {
 		result.Decisions = []MediaUnderstandingDecision{{
 			Capability: capability,
-			Outcome:    "no-attachment",
+			Outcome:    MediaOutcomeNoAttachment,
 		}}
 		return result, nil
 	}
@@ -79,7 +79,7 @@ func (oc *AIClient) applyMediaUnderstandingForAttachments(
 			}
 			result.Decisions = []MediaUnderstandingDecision{{
 				Capability:  capability,
-				Outcome:     "scope-deny",
+				Outcome:     MediaOutcomeScopeDeny,
 				Attachments: attachmentDecisions,
 			}}
 			return result, nil
@@ -852,30 +852,33 @@ func (oc *AIClient) describeVideoWithEntry(
 	if providerID == "" {
 		return nil, errors.New("missing video provider")
 	}
+
+	// Download and check base64 size limit (shared by all video providers).
+	data, actualMime, err := oc.downloadMediaBytes(ctx, mediaURL, encryptedFile, maxBytes, mimeType)
+	if err != nil {
+		return nil, err
+	}
+	if actualMime == "" {
+		actualMime = mimeType
+	}
+	if actualMime == "" {
+		actualMime = "video/mp4"
+	}
+	base64Size := estimateBase64Size(len(data))
+	maxBase64 := resolveVideoMaxBase64Bytes(maxBytes)
+	if base64Size > maxBase64 {
+		oc.loggerForContext(ctx).Warn().
+			Int("base64_bytes", base64Size).
+			Int("limit_bytes", maxBase64).
+			Str("provider", providerID).
+			Msg("Video payload exceeds base64 limit")
+		return nil, errors.New("video payload exceeds base64 limit")
+	}
+
 	if providerID == "openrouter" {
 		modelID := strings.TrimSpace(entry.Model)
 		if modelID == "" {
 			return nil, errors.New("video understanding requires model id")
-		}
-
-		data, actualMime, err := oc.downloadMediaBytes(ctx, mediaURL, encryptedFile, maxBytes, mimeType)
-		if err != nil {
-			return nil, err
-		}
-		if actualMime == "" {
-			actualMime = mimeType
-		}
-		if actualMime == "" {
-			actualMime = "video/mp4"
-		}
-		base64Size := estimateBase64Size(len(data))
-		maxBase64 := resolveVideoMaxBase64Bytes(maxBytes)
-		if base64Size > maxBase64 {
-			oc.loggerForContext(ctx).Warn().
-				Int("base64_bytes", base64Size).
-				Int("limit_bytes", maxBase64).
-				Msg("OpenRouter video payload exceeds base64 limit")
-			return nil, errors.New("video payload exceeds base64 limit")
 		}
 		videoB64 := base64.StdEncoding.EncodeToString(data)
 
@@ -911,30 +914,11 @@ func (oc *AIClient) describeVideoWithEntry(
 			return nil, err
 		}
 		text := strings.TrimSpace(resp.Content)
-		if maxChars > 0 && len(text) > maxChars {
-			text = text[:maxChars]
-		}
+		text = truncateText(text, maxChars)
 		return buildMediaOutput(MediaCapabilityVideo, text, entry.Provider, modelID, attachmentIndex), nil
 	}
 	if providerID != "google" {
 		return nil, fmt.Errorf("unsupported video provider: %s", providerID)
-	}
-
-	data, actualMime, err := oc.downloadMediaBytes(ctx, mediaURL, encryptedFile, maxBytes, mimeType)
-	if err != nil {
-		return nil, err
-	}
-	if actualMime == "" {
-		actualMime = mimeType
-	}
-	base64Size := estimateBase64Size(len(data))
-	maxBase64 := resolveVideoMaxBase64Bytes(maxBytes)
-	if base64Size > maxBase64 {
-		oc.loggerForContext(ctx).Warn().
-			Int("base64_bytes", base64Size).
-			Int("limit_bytes", maxBase64).
-			Msg("Google video payload exceeds base64 limit")
-		return nil, errors.New("video payload exceeds base64 limit")
 	}
 
 	headers := mergeMediaHeaders(capCfg, entry)
