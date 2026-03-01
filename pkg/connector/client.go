@@ -290,10 +290,6 @@ type AIClient struct {
 	subagentRuns   map[string]*subagentRun
 	subagentRunsMu sync.Mutex
 
-	// Compactor handles intelligent context compaction with LLM summarization
-	compactor     *Compactor
-	compactorOnce sync.Once
-
 	// Message deduplication cache
 	inboundDedupeCache *DedupeCache
 
@@ -699,9 +695,6 @@ func (oc *AIClient) dispatchOrQueueCore(
 	messageSaved := false
 	if shouldSteer && queueItem.pending.Type == pendingTypeText {
 		queueItem.prompt = queueItem.pending.MessageBody
-		if queueItem.pending.Event != nil {
-			queueItem.prompt = appendMessageIDHint(queueItem.prompt, queueItem.pending.Event.ID)
-		}
 		steered := oc.enqueueSteerQueue(roomID, queueItem)
 		if steered {
 			if trace {
@@ -873,7 +866,6 @@ func (oc *AIClient) processPendingQueue(ctx context.Context, roomID id.RoomID) {
 			for idx := range items {
 				prompt := items[idx].pending.MessageBody
 				if items[idx].pending.Event != nil {
-					prompt = appendMessageIDHint(prompt, items[idx].pending.Event.ID)
 					if len(items[idx].pending.AckEventIDs) > 0 {
 						ackIDs = append(ackIDs, items[idx].pending.AckEventIDs...)
 					} else {
@@ -2129,8 +2121,7 @@ func (oc *AIClient) buildBasePrompt(
 			if resetAt > 0 && history[i].Timestamp.UnixMilli() < resetAt {
 				continue
 			}
-			// Include message ID so the AI can reference specific messages for reactions/replies.
-			// Format: message body + "\n[message_id: $eventId]" (matches clawdbot pattern).
+			// Normalize historical body content for replay.
 			body := sanitizeHistoryImages(msgMeta.Body)
 			body = cleanHistoryBody(body, isSimple, history[i].MXID)
 
@@ -2255,7 +2246,6 @@ func (oc *AIClient) buildPromptWithLinkContext(
 		if untrustedPrefix := strings.TrimSpace(airuntime.BuildInboundUserContextPrefix(inboundCtx)); untrustedPrefix != "" {
 			finalMessage = untrustedPrefix + "\n\n" + finalMessage
 		}
-		finalMessage = appendMessageIDHint(finalMessage, eventID)
 	}
 	prompt = append(prompt, openai.UserMessage(finalMessage))
 	return prompt, nil
@@ -2355,7 +2345,6 @@ func (oc *AIClient) buildPromptWithMedia(
 		if untrustedPrefix := strings.TrimSpace(airuntime.BuildInboundUserContextPrefix(inboundCtx)); untrustedPrefix != "" {
 			captionWithID = untrustedPrefix + "\n\n" + captionWithID
 		}
-		captionWithID = appendMessageIDHint(captionWithID, eventID)
 	}
 	textContent := openai.ChatCompletionContentPartUnionParam{
 		OfText: &openai.ChatCompletionContentPartTextParam{
@@ -2445,7 +2434,7 @@ func (oc *AIClient) buildPromptWithMedia(
 		}
 		videoPrompt := fmt.Sprintf("%s\n\nVideo data URL: %s", captionWithID, dataURL)
 		if !isSimple {
-			// captionWithID already carries the message-id hint in non-simple mode.
+			// captionWithID already carries normalized inbound context for non-simple mode.
 		}
 		userMsg := openai.ChatCompletionMessageParamUnion{
 			OfUser: &openai.ChatCompletionUserMessageParam{

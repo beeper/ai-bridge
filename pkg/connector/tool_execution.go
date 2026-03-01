@@ -123,16 +123,12 @@ func summarizeMessageAction(obj map[string]any) string {
 	}
 }
 
-// sendToolCallEvent sends a tool call as a timeline event
+// sendToolCallEvent sends a tool call as a timeline event via bridgev2's pipeline.
 func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall) id.EventID {
 	if portal == nil || portal.MXID == "" {
 		return ""
 	}
 	if state != nil && state.suppressSend {
-		return ""
-	}
-	intent := oc.getModelIntent(ctx, portal)
-	if intent == nil {
 		return ""
 	}
 
@@ -150,31 +146,39 @@ func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Port
 		ReferenceEvent: state.initialEventID,
 	})
 
-	resp, err := intent.SendMessage(ctx, portal.MXID, ToolCallEventType, eventContent, nil)
+	converted := &bridgev2.ConvertedMessage{
+		Parts: []*bridgev2.ConvertedMessagePart{{
+			ID:    networkid.PartID("0"),
+			Type:  ToolCallEventType,
+			Extra: eventContent.Raw,
+		}},
+	}
+
+	eventID, _, err := oc.sendViaPortal(ctx, portal, converted, "")
 	if err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Str("tool", tool.toolName).Msg("Failed to send tool call event")
 		return ""
 	}
 
 	oc.loggerForContext(ctx).Debug().
-		Stringer("event_id", resp.EventID).
+		Stringer("event_id", eventID).
 		Str("call_id", tool.callID).
 		Str("tool", tool.toolName).
 		Msg("Sent tool call timeline event")
 
 	// Expose the Matrix event ID to the streaming UI so Desktop can react to the tool call event.
-	if state != nil && tool != nil && strings.TrimSpace(tool.callID) != "" && resp.EventID != "" {
+	if state != nil && tool != nil && strings.TrimSpace(tool.callID) != "" && eventID != "" {
 		oc.emitStreamEvent(ctx, portal, state, map[string]any{
 			"type": "data-tool-call-event",
 			"id":   fmt.Sprintf("tool-call-event:%s", tool.callID),
 			"data": map[string]any{
 				"toolCallId":  tool.callID,
-				"callEventId": resp.EventID.String(),
+				"callEventId": eventID.String(),
 			},
 		})
 	}
 
-	return resp.EventID
+	return eventID
 }
 
 // sendToolCallApprovalEvent sends a second tool_call event with status "approval_required"
@@ -192,10 +196,6 @@ func (oc *AIClient) sendToolCallApprovalEvent(
 		return ""
 	}
 	if state != nil && state.suppressSend {
-		return ""
-	}
-	intent := oc.getModelIntent(ctx, portal)
-	if intent == nil {
 		return ""
 	}
 
@@ -237,9 +237,15 @@ func (oc *AIClient) sendToolCallApprovalEvent(
 		}
 	}
 
-	eventContent := &event.Content{Raw: eventRaw}
+	converted := &bridgev2.ConvertedMessage{
+		Parts: []*bridgev2.ConvertedMessagePart{{
+			ID:    networkid.PartID("0"),
+			Type:  ToolCallEventType,
+			Extra: eventRaw,
+		}},
+	}
 
-	resp, err := intent.SendMessage(ctx, portal.MXID, ToolCallEventType, eventContent, nil)
+	eventID, _, err := oc.sendViaPortal(ctx, portal, converted, "")
 	if err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).
 			Str("tool", toolName).
@@ -249,13 +255,13 @@ func (oc *AIClient) sendToolCallApprovalEvent(
 	}
 
 	oc.loggerForContext(ctx).Debug().
-		Stringer("event_id", resp.EventID).
+		Stringer("event_id", eventID).
 		Str("call_id", toolCallID).
 		Str("tool", toolName).
 		Str("approval_id", approvalID).
 		Msg("Sent tool call approval_required timeline event")
 
-	return resp.EventID
+	return eventID
 }
 
 // sendToolResultEvent sends a tool result as a timeline event

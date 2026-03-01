@@ -19,16 +19,7 @@ func shouldFallbackOnError(err error) bool {
 		return false
 	}
 	class := airuntime.ClassifyFallbackError(err)
-	if airuntime.ShouldTriggerFallback(class) {
-		return true
-	}
-	return IsAuthError(err) ||
-		IsRateLimitError(err) ||
-		IsTimeoutError(err) ||
-		IsOverloadedError(err) ||
-		IsBillingError(err) ||
-		IsModelNotFound(err) ||
-		IsServerError(err)
+	return airuntime.ShouldTriggerFallback(class)
 }
 
 // NonFallbackError marks an error as ineligible for model fallback.

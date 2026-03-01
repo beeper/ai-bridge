@@ -124,9 +124,6 @@ func (oc *AIClient) dispatchInternalMessage(
 	}
 	if shouldSteer && pending.Type == pendingTypeText {
 		queueItem.prompt = pending.MessageBody
-		if pending.Event != nil {
-			queueItem.prompt = appendMessageIDHint(queueItem.prompt, pending.Event.ID)
-		}
 		if oc.enqueueSteerQueue(portal.MXID, queueItem) {
 			if !behavior.BacklogAfter {
 				if trace {
