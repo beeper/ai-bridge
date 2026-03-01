@@ -49,17 +49,7 @@ func (oc *AIClient) applyMediaUnderstandingForAttachments(
 ) (*mediaUnderstandingResult, error) {
 	result := &mediaUnderstandingResult{}
 	toolsCfg := oc.connector.Config.Tools.Media
-	var capCfg *MediaUnderstandingConfig
-	if toolsCfg != nil {
-		switch capability {
-		case MediaCapabilityImage:
-			capCfg = toolsCfg.Image
-		case MediaCapabilityAudio:
-			capCfg = toolsCfg.Audio
-		case MediaCapabilityVideo:
-			capCfg = toolsCfg.Video
-		}
-	}
+	capCfg := toolsCfg.ConfigForCapability(capability)
 
 	if capCfg != nil && capCfg.Enabled != nil && !*capCfg.Enabled {
 		result.Decisions = []MediaUnderstandingDecision{{
@@ -517,14 +507,7 @@ func (oc *AIClient) runMediaUnderstandingEntries(
 	attempts := make([]MediaUnderstandingModelDecision, 0, len(entries))
 	var lastErr error
 	for _, entry := range entries {
-		entryType := strings.TrimSpace(entry.Type)
-		if entryType == "" {
-			if strings.TrimSpace(entry.Command) != "" {
-				entryType = "cli"
-			} else {
-				entryType = "provider"
-			}
-		}
+		entryType := entry.ResolvedType()
 		provider := strings.TrimSpace(entry.Provider)
 		model := strings.TrimSpace(entry.Model)
 		if entryType == "cli" {
@@ -627,14 +610,7 @@ func (oc *AIClient) runMediaUnderstandingEntry(
 	entry MediaUnderstandingModelConfig,
 	capCfg *MediaUnderstandingConfig,
 ) (*MediaUnderstandingOutput, error) {
-	entryType := strings.TrimSpace(entry.Type)
-	if entryType == "" {
-		if strings.TrimSpace(entry.Command) != "" {
-			entryType = "cli"
-		} else {
-			entryType = "provider"
-		}
-	}
+	entryType := entry.ResolvedType()
 
 	maxChars := resolveMediaMaxChars(capability, entry, capCfg)
 	maxBytes := resolveMediaMaxBytes(capability, entry, capCfg)
@@ -735,9 +711,7 @@ func (oc *AIClient) describeImageWithEntry(
 		if err != nil {
 			return nil, err
 		}
-		if maxChars > 0 && len(text) > maxChars {
-			text = text[:maxChars]
-		}
+			text = truncateText(text, maxChars)
 		return buildMediaOutput(MediaCapabilityImage, text, "google", entry.Model, attachmentIndex), nil
 	}
 
@@ -785,9 +759,7 @@ func (oc *AIClient) describeImageWithEntry(
 		return nil, err
 	}
 	text := strings.TrimSpace(resp.Content)
-	if maxChars > 0 && len(text) > maxChars {
-		text = text[:maxChars]
-	}
+	text = truncateText(text, maxChars)
 	return buildMediaOutput(MediaCapabilityImage, text, entry.Provider, modelID, attachmentIndex), nil
 }
 
@@ -859,9 +831,7 @@ func (oc *AIClient) transcribeAudioWithEntry(
 		return nil, err
 	}
 	text = strings.TrimSpace(text)
-	if maxChars > 0 && len(text) > maxChars {
-		text = text[:maxChars]
-	}
+	text = truncateText(text, maxChars)
 	return buildMediaOutput(MediaCapabilityAudio, text, providerID, entry.Model, attachmentIndex), nil
 }
 
@@ -988,9 +958,7 @@ func (oc *AIClient) describeVideoWithEntry(
 		return nil, err
 	}
 	text = strings.TrimSpace(text)
-	if maxChars > 0 && len(text) > maxChars {
-		text = text[:maxChars]
-	}
+	text = truncateText(text, maxChars)
 	return buildMediaOutput(MediaCapabilityVideo, text, providerID, entry.Model, attachmentIndex), nil
 }
 
