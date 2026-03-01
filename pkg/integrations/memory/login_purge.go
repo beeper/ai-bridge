@@ -8,44 +8,6 @@ import (
 	"go.mau.fi/util/dbutil"
 )
 
-func LoadChunkIDsByAgentBestEffort(ctx context.Context, db *dbutil.Database, bridgeID, loginID string) map[string][]string {
-	out := make(map[string][]string)
-	if db == nil {
-		return out
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	rows, err := db.Query(ctx,
-		`SELECT id, agent_id FROM ai_memory_chunks WHERE bridge_id=$1 AND login_id=$2`,
-		bridgeID, loginID,
-	)
-	if err != nil {
-		msg := strings.ToLower(err.Error())
-		if strings.Contains(msg, "no such table") || strings.Contains(msg, "does not exist") || strings.Contains(msg, "undefined table") {
-			return out
-		}
-		return out
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id, agentID string
-		if err := rows.Scan(&id, &agentID); err != nil {
-			continue
-		}
-		id = strings.TrimSpace(id)
-		agentID = strings.TrimSpace(agentID)
-		if id == "" {
-			continue
-		}
-		if agentID == "" {
-			agentID = "default"
-		}
-		out[agentID] = append(out[agentID], id)
-	}
-	return out
-}
-
 func PurgeTablesBestEffort(ctx context.Context, db *dbutil.Database, bridgeID, loginID string) {
 	if db == nil {
 		return

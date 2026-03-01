@@ -181,8 +181,7 @@ func (i *Integration) PurgeForLogin(ctx context.Context, scope iruntime.LoginSco
 	if db == nil {
 		return nil
 	}
-	chunkIDsByAgent := LoadChunkIDsByAgentBestEffort(ctx, db, scope.BridgeID, scope.LoginID)
-	PurgeManagersForLogin(ctx, scope.BridgeID, scope.LoginID, chunkIDsByAgent)
+	StopManagersForLogin(scope.BridgeID, scope.LoginID)
 	// Resolve vector extension path from config for vector row purge.
 	cfg := i.resolveMemorySearchConfig("")
 	if cfg != nil && cfg.Store.Vector.Enabled {
