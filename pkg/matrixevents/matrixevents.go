@@ -23,7 +23,6 @@ var (
 	AgentHandoffEventType  = event.Type{Type: "com.beeper.ai.agent_handoff", Class: event.MessageEventType}
 	StepBoundaryEventType  = event.Type{Type: "com.beeper.ai.step_boundary", Class: event.MessageEventType}
 
-	StreamDeltaEventType   = event.Type{Type: "com.beeper.ai.stream_delta", Class: event.EphemeralEventType}
 	StreamEventMessageType = event.Type{Type: "com.beeper.ai.stream_event", Class: event.EphemeralEventType}
 
 	GenerationStatusEventType = event.Type{Type: "com.beeper.ai.generation_status", Class: event.MessageEventType}

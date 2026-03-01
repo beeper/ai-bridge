@@ -39,9 +39,6 @@ var AgentHandoffEventType = matrixevents.AgentHandoffEventType
 // StepBoundaryEventType represents multi-step boundaries within a turn
 var StepBoundaryEventType = matrixevents.StepBoundaryEventType
 
-// StreamDeltaEventType is the custom event type for streaming token updates (ephemeral).
-var StreamDeltaEventType = matrixevents.StreamDeltaEventType
-
 // StreamEventMessageType is the unified event type for AI streaming updates (ephemeral).
 var StreamEventMessageType = matrixevents.StreamEventMessageType
 
