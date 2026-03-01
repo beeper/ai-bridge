@@ -19,11 +19,6 @@ var PresetAgents = []*AgentDefinition{
 
 // GetPresetByID returns a preset agent by ID.
 func GetPresetByID(id string) *AgentDefinition {
-	switch id {
-	case "playground":
-		id = SimpleAgent.ID
-	}
-
 	for _, preset := range PresetAgents {
 		if preset.ID == id {
 			return preset.Clone()
