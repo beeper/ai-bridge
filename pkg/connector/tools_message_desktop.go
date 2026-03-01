@@ -124,7 +124,7 @@ func maybeExecuteMessageSendDesktop(ctx context.Context, args map[string]any, bt
 		if mediaErr != nil {
 			return true, "", mediaErr
 		}
-		mimeType := normalizeMimeString(firstNonEmptyString(args["mimeType"], detectedMime))
+		mimeType := normalizeMimeType(firstNonEmptyString(args["mimeType"], detectedMime))
 		fileName := resolveMessageFilename(args, mediaInput, mimeType)
 		uploadResp, uploadErr := btc.Client.uploadDesktopAssetBase64(ctx, instance, data, fileName, mimeType)
 		if uploadErr != nil {
@@ -530,7 +530,7 @@ func executeMessageDesktopUploadAsset(ctx context.Context, args map[string]any, 
 	if err != nil {
 		return "", err
 	}
-	mimeType := normalizeMimeString(firstNonEmptyString(args["mimeType"], detectedMime))
+	mimeType := normalizeMimeType(firstNonEmptyString(args["mimeType"], detectedMime))
 	fileName := resolveMessageFilename(args, mediaInput, mimeType)
 	upload, err := btc.Client.uploadDesktopAssetBase64(ctx, instance, data, fileName, mimeType)
 	if err != nil {

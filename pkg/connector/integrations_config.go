@@ -300,15 +300,15 @@ type MediaUnderstandingModelConfig struct {
 	PreferredProfile string                    `yaml:"preferredProfile"`
 }
 
-func (c MediaUnderstandingModelConfig) ResolvedType() string {
+func (c MediaUnderstandingModelConfig) ResolvedType() MediaUnderstandingEntryType {
 	t := strings.TrimSpace(c.Type)
 	if t != "" {
-		return t
+		return MediaUnderstandingEntryType(t)
 	}
 	if strings.TrimSpace(c.Command) != "" {
-		return "cli"
+		return MediaEntryTypeCLI
 	}
-	return "provider"
+	return MediaEntryTypeProvider
 }
 
 // MediaUnderstandingConfig defines defaults for media understanding of a capability.
