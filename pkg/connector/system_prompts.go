@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/openai/openai-go/v3"
+	runtimeparse "github.com/beeper/ai-bridge/pkg/runtime"
 	"maunium.net/go/mautrix/bridgev2"
 )
 
@@ -20,7 +21,7 @@ func buildGroupIntro(roomName string, activation string) string {
 	lines := []string{subjectLine, activationLine}
 	if activation == "always" {
 		lines = append(lines,
-			"If no response is needed, reply with exactly \""+SilentReplyToken+"\" (and nothing else) so the bridge stays silent.",
+			"If no response is needed, reply with exactly \""+runtimeparse.SilentReplyToken+"\" (and nothing else) so the bridge stays silent.",
 			"Be extremely selective: reply only when directly addressed or clearly helpful. Otherwise stay silent.",
 		)
 	}

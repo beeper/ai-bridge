@@ -3,6 +3,8 @@ package connector
 import (
 	"strings"
 	"time"
+
+	runtimeparse "github.com/beeper/ai-bridge/pkg/runtime"
 )
 
 type TypingMode string
@@ -141,7 +143,7 @@ func (ts *TypingSignaler) SignalTextDelta(text string) {
 	if trimmed == "" {
 		return
 	}
-	renderable := !isSilentReplyText(trimmed)
+	renderable := !runtimeparse.IsSilentReplyText(trimmed, runtimeparse.SilentReplyToken)
 	if renderable {
 		ts.hasRenderableText = true
 	} else {
