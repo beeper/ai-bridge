@@ -2166,7 +2166,7 @@ func (oc *AIClient) buildBasePrompt(
 			default:
 				// Strip envelope prefixes from historical user messages to reduce noise
 				body = StripEnvelope(body)
-				if isRaw {
+				if isSimple {
 					body = stripMessageIDHintLines(body)
 				}
 				// Re-inject user-sent images as multimodal content so the model can reference them.
@@ -2430,7 +2430,7 @@ func (oc *AIClient) buildPromptWithMedia(
 			return prompt, nil
 		}
 		videoPrompt := fmt.Sprintf("%s\n\nVideo data URL: %s", caption, dataURL)
-		if !isRaw {
+		if !isSimple {
 			videoPrompt = appendMessageIDHint(videoPrompt, eventID)
 		}
 		userMsg := openai.ChatCompletionMessageParamUnion{
@@ -2532,7 +2532,7 @@ func (oc *AIClient) buildPromptUpToMessage(
 					}
 				}
 			default:
-				if isRaw {
+				if isSimple {
 					body = StripEnvelope(body)
 					body = stripMessageIDHintLines(body)
 				}
@@ -2550,7 +2550,7 @@ func (oc *AIClient) buildPromptUpToMessage(
 	} else {
 		// No history, just add the new message
 		body := newBody
-		if isRaw {
+		if isSimple {
 			body = strings.TrimSpace(body)
 			body = StripEnvelope(body)
 			body = stripMessageIDHintLines(body)
