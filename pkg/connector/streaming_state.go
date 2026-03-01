@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/shared/citations"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"maunium.net/go/mautrix/bridgev2"
@@ -33,9 +34,9 @@ type streamingState struct {
 	toolCalls              []ToolCallMetadata
 	pendingImages          []generatedImage
 	pendingFunctionOutputs []functionCallOutput // Function outputs to send back to API for continuation
-	sourceCitations        []sourceCitation
-	sourceDocuments        []sourceDocument
-	generatedFiles         []generatedFilePart
+	sourceCitations        []citations.SourceCitation
+	sourceDocuments        []citations.SourceDocument
+	generatedFiles         []citations.GeneratedFilePart
 	initialEventID         id.EventID
 	finishReason           string
 	responseID             string
@@ -193,11 +194,6 @@ type generatedImage struct {
 	turnID   string
 }
 
-type generatedFilePart struct {
-	url       string
-	mediaType string
-}
-
 // functionCallOutput tracks a completed function call output for API continuation
 type functionCallOutput struct {
 	callID    string // The ItemID from the stream event (used as call_id in continuation)
@@ -228,12 +224,12 @@ func recordGeneratedFile(state *streamingState, url, mediaType string) {
 		return
 	}
 	for _, file := range state.generatedFiles {
-		if file.url == url {
+		if file.URL == url {
 			return
 		}
 	}
-	state.generatedFiles = append(state.generatedFiles, generatedFilePart{
-		url:       url,
-		mediaType: strings.TrimSpace(mediaType),
+	state.generatedFiles = append(state.generatedFiles, citations.GeneratedFilePart{
+		URL:       url,
+		MediaType: strings.TrimSpace(mediaType),
 	})
 }

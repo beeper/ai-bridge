@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
+
+	"github.com/beeper/ai-bridge/pkg/shared/citations"
 )
 
-func (oc *AIClient) emitUISourceURL(ctx context.Context, portal *bridgev2.Portal, state *streamingState, citation sourceCitation) {
+func (oc *AIClient) emitUISourceURL(ctx context.Context, portal *bridgev2.Portal, state *streamingState, citation citations.SourceCitation) {
 	if state == nil {
 		return
 	}
@@ -28,13 +30,13 @@ func (oc *AIClient) emitUISourceURL(ctx context.Context, portal *bridgev2.Portal
 	if title := strings.TrimSpace(citation.Title); title != "" {
 		part["title"] = title
 	}
-	if providerMeta := citationProviderMetadata(citation); len(providerMeta) > 0 {
+	if providerMeta := citations.ProviderMetadata(citation); len(providerMeta) > 0 {
 		part["providerMetadata"] = providerMeta
 	}
 	oc.emitStreamEvent(ctx, portal, state, part)
 }
 
-func (oc *AIClient) emitUISourceDocument(ctx context.Context, portal *bridgev2.Portal, state *streamingState, doc sourceDocument) {
+func (oc *AIClient) emitUISourceDocument(ctx context.Context, portal *bridgev2.Portal, state *streamingState, doc citations.SourceDocument) {
 	if state == nil {
 		return
 	}
@@ -96,9 +98,9 @@ func collectToolOutputCitations(state *streamingState, toolName, output string) 
 	if state == nil {
 		return
 	}
-	citations := extractWebSearchCitationsFromToolOutput(toolName, output)
-	if len(citations) == 0 {
+	extracted := extractWebSearchCitationsFromToolOutput(toolName, output)
+	if len(extracted) == 0 {
 		return
 	}
-	state.sourceCitations = mergeSourceCitations(state.sourceCitations, citations)
+	state.sourceCitations = citations.MergeSourceCitations(state.sourceCitations, extracted)
 }

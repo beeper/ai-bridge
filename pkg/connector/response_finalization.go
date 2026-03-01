@@ -12,6 +12,7 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/ai-bridge/pkg/agents"
+	"github.com/beeper/ai-bridge/pkg/shared/citations"
 	"github.com/beeper/ai-bridge/pkg/shared/streamtransport"
 )
 
@@ -577,8 +578,8 @@ func (oc *AIClient) sendPlainAssistantMessageWithResult(ctx context.Context, por
 	return nil
 }
 
-func buildSourceParts(citations []sourceCitation, documents []sourceDocument, previews []*event.BeeperLinkPreview) []map[string]any {
-	if len(citations) == 0 && len(documents) == 0 && len(previews) == 0 {
+func buildSourceParts(cits []citations.SourceCitation, documents []citations.SourceDocument, previews []*event.BeeperLinkPreview) []map[string]any {
+	if len(cits) == 0 && len(documents) == 0 && len(previews) == 0 {
 		return nil
 	}
 
@@ -599,8 +600,8 @@ func buildSourceParts(citations []sourceCitation, documents []sourceDocument, pr
 		}
 	}
 
-	parts := make([]map[string]any, 0, len(citations)+len(documents)+len(previews))
-	seen := make(map[string]struct{}, len(citations)+len(documents)+len(previews))
+	parts := make([]map[string]any, 0, len(cits)+len(documents)+len(previews))
+	seen := make(map[string]struct{}, len(cits)+len(documents)+len(previews))
 
 	appendURL := func(url, title string, providerMetadata map[string]any) {
 		url = strings.TrimSpace(url)
@@ -626,8 +627,8 @@ func buildSourceParts(citations []sourceCitation, documents []sourceDocument, pr
 		parts = append(parts, part)
 	}
 
-	for _, citation := range citations {
-		meta := citationProviderMetadata(citation)
+	for _, citation := range cits {
+		meta := citations.ProviderMetadata(citation)
 
 		// Enrich with uploaded image URI and dimensions from the matching link preview.
 		if p := previewByURL[strings.TrimSpace(citation.URL)]; p != nil {
@@ -706,24 +707,8 @@ func buildSourceParts(citations []sourceCitation, documents []sourceDocument, pr
 	return parts
 }
 
-func generatedFilesToParts(files []generatedFilePart) []map[string]any {
-	if len(files) == 0 {
-		return nil
-	}
-	parts := make([]map[string]any, 0, len(files))
-	for _, file := range files {
-		if strings.TrimSpace(file.url) == "" {
-			continue
-		}
-		part := map[string]any{
-			"type":      "file",
-			"url":       file.url,
-			"mediaType": strings.TrimSpace(file.mediaType),
-		}
-		parts = append(parts, part)
-	}
-	return parts
-}
+// generatedFilesToParts delegates to the shared citations package.
+var generatedFilesToParts = citations.GeneratedFilesToParts
 
 // sendFinalAssistantTurnContent is a helper for raw mode that sends content without directive processing.
 func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata, intent bridgev2.MatrixAPI, rendered event.MessageEventContent, replyToEventID *id.EventID) {
@@ -848,7 +833,7 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 // generateOutboundLinkPreviews extracts URLs from AI response text, generates link previews, and uploads images to Matrix.
 // When citations are provided (e.g. from Exa search results), matching URLs use the citation's
 // image directly instead of fetching the page's HTML.
-func generateOutboundLinkPreviews(ctx context.Context, text string, intent bridgev2.MatrixAPI, portal *bridgev2.Portal, citations []sourceCitation, config LinkPreviewConfig) []*event.BeeperLinkPreview {
+func generateOutboundLinkPreviews(ctx context.Context, text string, intent bridgev2.MatrixAPI, portal *bridgev2.Portal, cits []citations.SourceCitation, config LinkPreviewConfig) []*event.BeeperLinkPreview {
 	if !config.Enabled {
 		return nil
 	}
@@ -863,8 +848,8 @@ func generateOutboundLinkPreviews(ctx context.Context, text string, intent bridg
 	defer cancel()
 
 	var previewsWithImages []*PreviewWithImage
-	if len(citations) > 0 {
-		previewsWithImages = previewer.FetchPreviewsWithCitations(fetchCtx, urls, citations)
+	if len(cits) > 0 {
+		previewsWithImages = previewer.FetchPreviewsWithCitations(fetchCtx, urls, cits)
 	} else {
 		previewsWithImages = previewer.FetchPreviews(fetchCtx, urls)
 	}
