@@ -2,6 +2,8 @@ package connector
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,6 +12,12 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"maunium.net/go/mautrix/bridgev2"
 )
+
+func stableMCPApprovalID(toolCallID string, desc responseToolDescriptor) string {
+	input := stringifyJSONValue(desc.input)
+	sum := sha256.Sum256([]byte(strings.TrimSpace(toolCallID) + "\n" + desc.toolName + "\n" + input))
+	return "mcp_approval_" + hex.EncodeToString(sum[:8])
+}
 
 func (oc *AIClient) upsertActiveToolFromDescriptor(
 	ctx context.Context,
@@ -206,18 +214,21 @@ func (oc *AIClient) gateMcpToolApproval(
 	desc responseToolDescriptor,
 	item responses.ResponseOutputItemUnion,
 ) {
+	if state == nil || tool == nil {
+		return
+	}
 	approvalID := strings.TrimSpace(item.ID)
 	if approvalID == "" {
-		approvalID = NewCallID()
+		approvalID = stableMCPApprovalID(tool.callID, desc)
 	}
-	state.ui.UIToolCallIDByApproval[approvalID] = tool.callID
-	if tool.input.Len() == 0 {
-		tool.input.WriteString(stringifyJSONValue(desc.input))
-	}
-	oc.uiEmitter(state).EmitUIToolInputAvailable(ctx, portal, tool.callID, tool.toolName, desc.input, true)
 	if state.pendingMcpApprovalsSeen[approvalID] {
 		return
 	}
+	if tool.input.Len() == 0 {
+		tool.input.WriteString(stringifyJSONValue(desc.input))
+	}
+	state.ui.UIToolCallIDByApproval[approvalID] = tool.callID
+	oc.uiEmitter(state).EmitUIToolInputAvailable(ctx, portal, tool.callID, tool.toolName, desc.input, true)
 	state.pendingMcpApprovalsSeen[approvalID] = true
 	parsed := item.AsMcpApprovalRequest()
 	serverLabel := strings.TrimSpace(parsed.ServerLabel)
@@ -253,11 +264,13 @@ func (oc *AIClient) gateMcpToolApproval(
 			oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, tool.toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
 		}
 	} else {
-		_ = oc.resolveToolApproval(state.roomID, approvalID, ToolApprovalDecision{
+		if err := oc.resolveToolApproval(state.roomID, approvalID, ToolApprovalDecision{
 			Approve:   true,
 			DecidedAt: time.Now(),
 			DecidedBy: oc.UserLogin.UserMXID,
-		})
+		}); err != nil {
+			oc.loggerForContext(ctx).Warn().Err(err).Str("approval_id", approvalID).Msg("Failed to auto-approve MCP tool call")
+		}
 	}
 }
 

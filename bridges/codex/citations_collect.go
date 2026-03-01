@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	neturl "net/url"
 	"strings"
 
 	"github.com/beeper/ai-bridge/pkg/shared/citations"
@@ -43,6 +44,10 @@ func extractWebSearchCitationsFromToolOutput(toolName, output string) []citation
 		url, _ := m["url"].(string)
 		url = strings.TrimSpace(url)
 		if url == "" {
+			continue
+		}
+		parsedURL, err := neturl.Parse(url)
+		if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
 			continue
 		}
 		title, _ := m["title"].(string)

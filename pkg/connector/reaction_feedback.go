@@ -37,28 +37,7 @@ var (
 
 const maxReactionFeedback = 10 // Keep last N reactions per room
 
-// getReactionQueue returns or creates a reaction queue for a room.
-func getReactionQueue(roomID id.RoomID) *ReactionQueue {
-	reactionQueuesMu.Lock()
-	defer reactionQueuesMu.Unlock()
-
-	q, ok := reactionQueues[roomID]
-	if !ok {
-		q = &ReactionQueue{
-			feedback: make([]ReactionFeedback, 0, maxReactionFeedback),
-			maxSize:  maxReactionFeedback,
-		}
-		reactionQueues[roomID] = q
-	}
-	return q
-}
-
-// AddReaction adds a reaction feedback to the queue.
-// Skips consecutive duplicates like OpenClaw does.
-func (q *ReactionQueue) AddReaction(feedback ReactionFeedback) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
+func (q *ReactionQueue) addReactionLocked(feedback ReactionFeedback) {
 	// Build text key for deduplication
 	textKey := fmt.Sprintf("%s:%s:%s:%s", feedback.Action, feedback.Emoji, feedback.Sender, feedback.MessageID)
 	if q.lastText == textKey {
@@ -70,6 +49,14 @@ func (q *ReactionQueue) AddReaction(feedback ReactionFeedback) {
 	if len(q.feedback) > q.maxSize {
 		q.feedback = q.feedback[1:] // Remove oldest
 	}
+}
+
+// AddReaction adds a reaction feedback to the queue.
+// Skips consecutive duplicates like OpenClaw does.
+func (q *ReactionQueue) AddReaction(feedback ReactionFeedback) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.addReactionLocked(feedback)
 }
 
 // DrainFeedback returns all queued feedback and clears the queue.
@@ -90,8 +77,19 @@ func (q *ReactionQueue) DrainFeedback() []ReactionFeedback {
 
 // EnqueueReactionFeedback adds reaction feedback for a room.
 func EnqueueReactionFeedback(roomID id.RoomID, feedback ReactionFeedback) {
-	q := getReactionQueue(roomID)
-	q.AddReaction(feedback)
+	reactionQueuesMu.Lock()
+	q, ok := reactionQueues[roomID]
+	if !ok {
+		q = &ReactionQueue{
+			feedback: make([]ReactionFeedback, 0, maxReactionFeedback),
+			maxSize:  maxReactionFeedback,
+		}
+		reactionQueues[roomID] = q
+	}
+	q.mu.Lock()
+	q.addReactionLocked(feedback)
+	q.mu.Unlock()
+	reactionQueuesMu.Unlock()
 }
 
 // DrainReactionFeedback returns and clears all reaction feedback for a room.

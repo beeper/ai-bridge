@@ -8,8 +8,8 @@ const (
 	ModelZAIGLM47     = "z-ai/glm-4.7"
 )
 
-// PresetAgents contains the default agent definitions.
-// Includes Beep (default), Simple (direct model access), and Boss (meta).
+// PresetAgents contains the default agent definitions:
+// Beeper AI (default), Beeper Search, Beeper Help, and Simple.
 var PresetAgents = []*AgentDefinition{
 	BeeperAIAgent,
 	BeeperSearchAgent,
@@ -19,6 +19,11 @@ var PresetAgents = []*AgentDefinition{
 
 // GetPresetByID returns a preset agent by ID.
 func GetPresetByID(id string) *AgentDefinition {
+	switch id {
+	case "playground":
+		id = SimpleAgent.ID
+	}
+
 	for _, preset := range PresetAgents {
 		if preset.ID == id {
 			return preset.Clone()

@@ -503,9 +503,27 @@ func (lp *LinkPreviewer) FetchPreviewsWithCitations(ctx context.Context, urls []
 			defer wg.Done()
 			var preview *PreviewWithImage
 
-			// Prefer citation-based preview if available with an image.
-			if c, ok := citationByURL[urlStr]; ok && strings.TrimSpace(c.Image) != "" {
+			// Prefer citation-based preview when available.
+			if c, ok := citationByURL[urlStr]; ok {
 				preview = lp.PreviewFromCitation(ctx, urlStr, c)
+				// If citation metadata has no image, try filling only the image via normal fetch.
+				if preview != nil && strings.TrimSpace(c.Image) == "" {
+					if fetched, err := lp.FetchPreview(ctx, urlStr); err == nil && fetched != nil {
+						if len(fetched.ImageData) > 0 {
+							preview.ImageData = fetched.ImageData
+							preview.ImageURL = fetched.ImageURL
+						}
+						if preview.Preview != nil && fetched.Preview != nil {
+							preview.Preview.ImageType = fetched.Preview.ImageType
+							preview.Preview.ImageSize = fetched.Preview.ImageSize
+							preview.Preview.ImageWidth = fetched.Preview.ImageWidth
+							preview.Preview.ImageHeight = fetched.Preview.ImageHeight
+							if preview.Preview.ImageURL == "" && fetched.Preview.ImageURL != "" {
+								preview.Preview.ImageURL = fetched.Preview.ImageURL
+							}
+						}
+					}
+				}
 			}
 
 			// Fall back to HTML-based fetch.

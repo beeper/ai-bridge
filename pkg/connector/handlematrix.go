@@ -82,7 +82,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 			Approve:   approve,
 			Always:    always,
 			Reason:    decision.Reason,
-			DecidedAt: time.Now(),
+			DecidedAt: bridgeadapter.MatrixEventTimestamp(msg.Event),
 			DecidedBy: msg.Event.Sender,
 		})
 		if err != nil {

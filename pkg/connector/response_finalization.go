@@ -608,10 +608,11 @@ func buildSourceParts(cits []citations.SourceCitation, documents []citations.Sou
 		if url == "" {
 			return
 		}
-		if _, ok := seen[url]; ok {
+		seenKey := "url:" + url
+		if _, ok := seen[seenKey]; ok {
 			return
 		}
-		seen[url] = struct{}{}
+		seen[seenKey] = struct{}{}
 
 		part := map[string]any{
 			"type":     "source-url",
@@ -660,10 +661,11 @@ func buildSourceParts(cits []citations.SourceCitation, documents []citations.Sou
 		if key == "" {
 			continue
 		}
-		if _, ok := seen[key]; ok {
+		seenKey := "doc:" + key
+		if _, ok := seen[seenKey]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[seenKey] = struct{}{}
 		part := map[string]any{
 			"type":      "source-document",
 			"sourceId":  fmt.Sprintf("source-%d", len(parts)+1),
@@ -869,8 +871,8 @@ func (oc *AIClient) getAgentResponseMode(meta *PortalMetadata) agents.ResponseMo
 	if agentID != "" {
 		store := NewAgentStoreAdapter(oc)
 		if agent, err := store.GetAgentByID(context.Background(), agentID); err == nil && agent != nil {
-			if agent.ResponseMode != "" {
-				return agent.ResponseMode
+			if mode := agent.ResponseMode.Normalize(); mode != "" {
+				return mode
 			}
 		}
 	}

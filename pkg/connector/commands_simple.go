@@ -78,7 +78,7 @@ func fnSimple(ce *commands.Event) {
 			}
 			sb.WriteString("\n")
 		}
-		sb.WriteString("Use `!ai simple new <model>` to create a chat")
+		sb.WriteString("Use `!ai simple new [model]` to create a chat")
 		ce.Reply(sb.String())
 
 	default:

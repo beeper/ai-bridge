@@ -16,7 +16,11 @@ func (e *Emitter) EnsureUIToolInputStart(
 	title string,
 	providerMetadata map[string]any,
 ) {
+	toolCallID = strings.TrimSpace(toolCallID)
 	if toolCallID == "" {
+		return
+	}
+	if e.State == nil {
 		return
 	}
 	if !e.State.UIToolStarted[toolCallID] {
@@ -48,6 +52,7 @@ func (e *Emitter) EnsureUIToolInputStart(
 
 // EmitUIToolInputDelta sends a "tool-input-delta" event.
 func (e *Emitter) EmitUIToolInputDelta(ctx context.Context, portal *bridgev2.Portal, toolCallID, toolName, delta string, providerExecuted bool) {
+	toolCallID = strings.TrimSpace(toolCallID)
 	if toolCallID == "" {
 		return
 	}
@@ -63,6 +68,7 @@ func (e *Emitter) EmitUIToolInputDelta(ctx context.Context, portal *bridgev2.Por
 
 // EmitUIToolInputAvailable sends a "tool-input-available" event.
 func (e *Emitter) EmitUIToolInputAvailable(ctx context.Context, portal *bridgev2.Portal, toolCallID, toolName string, input any, providerExecuted bool) {
+	toolCallID = strings.TrimSpace(toolCallID)
 	if toolCallID == "" {
 		return
 	}
@@ -85,6 +91,7 @@ func (e *Emitter) EmitUIToolInputError(
 	errorText string,
 	providerExecuted, dynamic bool,
 ) {
+	toolCallID = strings.TrimSpace(toolCallID)
 	if toolCallID == "" {
 		return
 	}
@@ -128,6 +135,7 @@ func (e *Emitter) EmitUIToolApprovalRequest(
 
 // EmitUIToolOutputAvailable sends a "tool-output-available" event.
 func (e *Emitter) EmitUIToolOutputAvailable(ctx context.Context, portal *bridgev2.Portal, toolCallID string, output any, providerExecuted, preliminary bool) {
+	toolCallID = strings.TrimSpace(toolCallID)
 	if toolCallID == "" {
 		return
 	}
@@ -168,6 +176,7 @@ func (e *Emitter) EmitUIToolOutputDenied(ctx context.Context, portal *bridgev2.P
 
 // EmitUIToolOutputError sends a "tool-output-error" event.
 func (e *Emitter) EmitUIToolOutputError(ctx context.Context, portal *bridgev2.Portal, toolCallID, errorText string, providerExecuted bool) {
+	toolCallID = strings.TrimSpace(toolCallID)
 	if toolCallID == "" {
 		return
 	}
