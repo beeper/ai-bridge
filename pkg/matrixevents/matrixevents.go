@@ -15,19 +15,11 @@ import (
 //
 // Keep these values stable: clients may rely on them for rendering and behavior.
 var (
-	AssistantTurnEventType = event.Type{Type: "com.beeper.ai.assistant_turn", Class: event.MessageEventType}
 	ToolCallEventType      = event.Type{Type: "com.beeper.ai.tool_call", Class: event.MessageEventType}
 	ToolResultEventType    = event.Type{Type: "com.beeper.ai.tool_result", Class: event.MessageEventType}
-	AIErrorEventType       = event.Type{Type: "com.beeper.ai.error", Class: event.MessageEventType}
-	TurnCancelledEventType = event.Type{Type: "com.beeper.ai.turn_cancelled", Class: event.MessageEventType}
-	AgentHandoffEventType  = event.Type{Type: "com.beeper.ai.agent_handoff", Class: event.MessageEventType}
-	StepBoundaryEventType  = event.Type{Type: "com.beeper.ai.step_boundary", Class: event.MessageEventType}
 
-	StreamDeltaEventType   = event.Type{Type: "com.beeper.ai.stream_delta", Class: event.EphemeralEventType}
 	StreamEventMessageType = event.Type{Type: "com.beeper.ai.stream_event", Class: event.EphemeralEventType}
 
-	GenerationStatusEventType = event.Type{Type: "com.beeper.ai.generation_status", Class: event.MessageEventType}
-	ToolProgressEventType     = event.Type{Type: "com.beeper.ai.tool_progress", Class: event.MessageEventType}
 	CompactionStatusEventType = event.Type{Type: "com.beeper.ai.compaction_status", Class: event.MessageEventType}
 
 	RoomCapabilitiesEventType  = event.Type{Type: "com.beeper.ai.room_capabilities", Class: event.StateEventType}
@@ -41,7 +33,6 @@ const (
 	RelReplace   = "m.replace"
 	RelReference = "m.reference"
 	RelThread    = "m.thread"
-	RelInReplyTo = "m.in_reply_to"
 )
 
 // Content field keys.
