@@ -40,13 +40,14 @@ type OpenCodeClient struct {
 }
 
 type openCodeStreamState struct {
-	turnID         string
-	agentID        string
-	targetEventID  string
-	initialEventID id.EventID
-	sequenceNum    int
-	accumulated    strings.Builder
-	visible        strings.Builder
+	turnID           string
+	agentID          string
+	targetEventID    string
+	initialEventID   id.EventID
+	networkMessageID networkid.MessageID
+	sequenceNum      int
+	accumulated      strings.Builder
+	visible          strings.Builder
 }
 
 func newOpenCodeClient(login *bridgev2.UserLogin, connector *OpenCodeConnector) (*OpenCodeClient, error) {

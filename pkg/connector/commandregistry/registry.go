@@ -13,7 +13,6 @@ type Definition struct {
 	Name        string
 	Description string
 	Args        string
-	Aliases     []string
 	Section     commands.HelpSection
 
 	RequiresPortal bool
@@ -24,9 +23,8 @@ type Definition struct {
 // FullHandler returns the maunium command handler for this definition.
 func (d Definition) FullHandler() *commands.FullHandler {
 	return &commands.FullHandler{
-		Func:    d.Handler,
-		Name:    d.Name,
-		Aliases: d.Aliases,
+		Func: d.Handler,
+		Name: d.Name,
 		Help: commands.HelpMeta{
 			Section:     d.Section,
 			Description: d.Description,
@@ -41,14 +39,12 @@ func (d Definition) FullHandler() *commands.FullHandler {
 type Registry struct {
 	mu       sync.RWMutex
 	handlers map[string]*commands.FullHandler
-	aliases  map[string]string
 }
 
 // NewRegistry creates an empty registry.
 func NewRegistry() *Registry {
 	return &Registry{
 		handlers: make(map[string]*commands.FullHandler),
-		aliases:  make(map[string]string),
 	}
 }
 
@@ -68,19 +64,12 @@ func (r *Registry) RegisterHandler(handler *commands.FullHandler) {
 	defer r.mu.Unlock()
 
 	r.handlers[handler.Name] = handler
-	for _, alias := range handler.Aliases {
-		r.aliases[alias] = handler.Name
-	}
 }
 
-// Get retrieves a handler by name or alias.
+// Get retrieves a handler by canonical name.
 func (r *Registry) Get(name string) *commands.FullHandler {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-
-	if canonical, ok := r.aliases[name]; ok {
-		name = canonical
-	}
 	return r.handlers[name]
 }
 

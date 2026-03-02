@@ -32,8 +32,8 @@ func TestNormalizeMCPServerTransport(t *testing.T) {
 	if got := normalizeMCPServerTransport(""); got != "" {
 		t.Fatalf("expected empty transport to remain empty before defaulting, got %q", got)
 	}
-	if got := normalizeMCPServerTransport("streamable-http"); got != mcpTransportStreamableHTTP {
-		t.Fatalf("expected streamable-http alias to normalize to %q, got %q", mcpTransportStreamableHTTP, got)
+	if got := normalizeMCPServerTransport("streamable-http"); got != "streamable-http" {
+		t.Fatalf("expected non-canonical transport to remain unchanged, got %q", got)
 	}
 	if got := normalizeMCPServerTransport("stdio"); got != mcpTransportStdio {
 		t.Fatalf("expected stdio transport to remain %q, got %q", mcpTransportStdio, got)

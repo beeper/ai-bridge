@@ -12,13 +12,11 @@ import (
 	"github.com/beeper/ai-bridge/pkg/connector/commandregistry"
 )
 
-const mcpImplicitServerName = "default"
-
 func mcpAddUsage(allowStdio bool) string {
 	if allowStdio {
-		return "`!ai mcp add <name> <endpoint> [token] [authType] [authURL]` | `!ai mcp add <name> streamable_http <endpoint> [token] [authType] [authURL]` | `!ai mcp add <name> stdio <command> [args...]` | `!ai mcp add <endpoint> [token] [authType] [authURL]`"
+		return "`!ai mcp add <name> <endpoint> [token] [authType] [authURL]` | `!ai mcp add <name> streamable_http <endpoint> [token] [authType] [authURL]` | `!ai mcp add <name> stdio <command> [args...]`"
 	}
-	return "`!ai mcp add <name> <endpoint> [token] [authType] [authURL]` | `!ai mcp add <name> streamable_http <endpoint> [token] [authType] [authURL]` | `!ai mcp add <endpoint> [token] [authType] [authURL]`"
+	return "`!ai mcp add <name> <endpoint> [token] [authType] [authURL]` | `!ai mcp add <name> streamable_http <endpoint> [token] [authType] [authURL]`"
 }
 
 func mcpManageUsage(allowStdio bool) string {
@@ -49,7 +47,7 @@ func fnMCPCommand(ce *commands.Event) {
 
 	sub := strings.ToLower(strings.TrimSpace(ce.Args[0]))
 	switch sub {
-	case "list", "ls":
+	case "list":
 		fnMCPList(ce, client)
 		return
 	case "add":
@@ -61,7 +59,7 @@ func fnMCPCommand(ce *commands.Event) {
 	case "disconnect":
 		fnMCPDisconnect(ce, client)
 		return
-	case "remove", "rm", "delete":
+	case "remove":
 		fnMCPRemove(ce, client)
 		return
 	default:
@@ -154,16 +152,11 @@ func parseMCPAddArgs(args []string, allowStdio bool) (name string, cfg MCPServer
 		return "", MCPServerConfig{}, errors.New("missing args")
 	}
 
-	name = mcpImplicitServerName
-	targetIndex := 0
-	firstToken := strings.TrimSpace(trimmed[0])
-	if !isLikelyHTTPURL(firstToken) && !isMCPTransportToken(firstToken) {
-		if len(trimmed) < 2 {
-			return "", MCPServerConfig{}, errors.New("missing target")
-		}
-		name = normalizeMCPServerName(firstToken)
-		targetIndex = 1
+	if len(trimmed) < 2 {
+		return "", MCPServerConfig{}, errors.New("missing target")
 	}
+	name = normalizeMCPServerName(trimmed[0])
+	targetIndex := 1
 
 	if targetIndex >= len(trimmed) {
 		return "", MCPServerConfig{}, errors.New("missing target")
@@ -278,10 +271,6 @@ func resolveMCPServerArg(client *AIClient, args []string) (namedMCPServer, strin
 			}
 			return server, token, nil
 		}
-	}
-	if len(args) == 1 && len(servers) == 1 {
-		// Allow `!ai mcp connect <token>` when only one server exists.
-		return servers[0], strings.TrimSpace(args[0]), nil
 	}
 	return namedMCPServer{}, "", errors.New("not found")
 }

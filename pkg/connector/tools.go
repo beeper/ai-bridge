@@ -787,11 +787,7 @@ func executeMessageThreadReply(ctx context.Context, args map[string]any, btc *Br
 	// thread_id is the root message of the thread
 	threadID, ok := args["thread_id"].(string)
 	if !ok || threadID == "" {
-		// Fall back to message_id for thread root
-		threadID, ok = args["message_id"].(string)
-		if !ok || threadID == "" {
-			return "", errors.New("action=thread-reply requires 'thread_id' or 'message_id' parameter")
-		}
+		return "", errors.New("action=thread-reply requires 'thread_id' parameter")
 	}
 	message, ok := args["message"].(string)
 	if !ok || message == "" {

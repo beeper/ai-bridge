@@ -455,8 +455,8 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		oc.provider = provider
 		oc.api = provider.Client()
 
-	default:
-		// OpenAI (default) or Custom OpenAI-compatible provider
+	case ProviderOpenAI:
+		// OpenAI provider
 		openaiURL := connector.resolveOpenAIBaseURL()
 		log.Info().
 			Str("provider", meta.Provider).
@@ -468,6 +468,8 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		}
 		oc.provider = provider
 		oc.api = provider.Client()
+	default:
+		return nil, fmt.Errorf("unsupported provider: %s", meta.Provider)
 	}
 
 	oc.heartbeatWake = &HeartbeatWake{log: oc.log}
@@ -1711,97 +1713,18 @@ func (oc *AIClient) validateModel(ctx context.Context, modelID string) (bool, er
 	return false, nil
 }
 
-// resolveModelID tries to normalize a user-provided model to a known model ID.
-// It accepts exact IDs, aliases, display names, and suffix-only IDs (e.g. "gpt-4o-mini").
+// resolveModelID validates canonical model IDs only (hard-cut mode).
 func (oc *AIClient) resolveModelID(ctx context.Context, modelID string) (string, bool, error) {
 	normalized := strings.TrimSpace(modelID)
 	if normalized == "" {
 		return "", true, nil
 	}
 
-	normalized = ResolveAlias(normalized)
-
 	models, err := oc.listAvailableModels(ctx, false)
 	if err == nil && len(models) > 0 {
-		// Fast path: exact ID match
 		for _, model := range models {
 			if model.ID == normalized {
 				return model.ID, true, nil
-			}
-		}
-
-		// Pre-compute lowercase values once for remaining lookups
-		lower := strings.ToLower(normalized)
-		type modelIndex struct {
-			id        string
-			lowerID   string
-			lowerName string
-			provider  string
-		}
-		indexed := make([]modelIndex, len(models))
-		for i, model := range models {
-			indexed[i] = modelIndex{
-				id:        model.ID,
-				lowerID:   strings.ToLower(model.ID),
-				lowerName: strings.ToLower(model.Name),
-				provider:  model.Provider,
-			}
-		}
-
-		// Case-insensitive ID match
-		for _, m := range indexed {
-			if m.lowerID == lower {
-				return m.id, true, nil
-			}
-		}
-
-		// Case-insensitive name match
-		for _, m := range indexed {
-			if m.lowerName == lower {
-				return m.id, true, nil
-			}
-		}
-
-		// Provider/model matching for "provider/model" format
-		if strings.Contains(normalized, "/") {
-			parts := strings.SplitN(normalized, "/", 2)
-			providerPart, rest := parts[0], parts[1]
-			if providerPart != "" && rest != "" {
-				lowerProvider := strings.ToLower(providerPart)
-				lowerRest := strings.ToLower(rest)
-				for _, m := range indexed {
-					provider := m.provider
-					if provider == "" {
-						if backend, _ := ParseModelPrefix(m.id); backend != "" {
-							provider = string(backend)
-						}
-					}
-					if provider == "" || strings.ToLower(provider) != lowerProvider {
-						continue
-					}
-					if m.lowerID == lowerRest ||
-						m.lowerName == lowerRest ||
-						strings.HasSuffix(m.lowerID, "/"+lowerRest) {
-						return m.id, true, nil
-					}
-				}
-			}
-		}
-
-		// Suffix matching for bare model names
-		if !strings.Contains(normalized, "/") {
-			suffix := "/" + normalized
-			var match string
-			for _, model := range models {
-				if strings.HasSuffix(model.ID, suffix) {
-					if match != "" && match != model.ID {
-						return "", false, nil
-					}
-					match = model.ID
-				}
-			}
-			if match != "" {
-				return match, true, nil
 			}
 		}
 	}
@@ -1819,60 +1742,9 @@ func resolveModelIDFromManifest(modelID string) string {
 		return ""
 	}
 
-	normalized = ResolveAlias(normalized)
 	if _, ok := ModelManifest.Models[normalized]; ok {
 		return normalized
 	}
-
-	lower := strings.ToLower(normalized)
-	for id, info := range ModelManifest.Models {
-		if strings.ToLower(id) == lower {
-			return id
-		}
-		if strings.EqualFold(info.Name, normalized) {
-			return id
-		}
-	}
-
-	if strings.Contains(normalized, "/") {
-		parts := strings.SplitN(normalized, "/", 2)
-		providerPart := strings.TrimSpace(parts[0])
-		rest := strings.TrimSpace(parts[1])
-		if providerPart != "" && rest != "" {
-			if strings.EqualFold(providerPart, ProviderOpenRouter) ||
-				strings.EqualFold(providerPart, ProviderBeeper) ||
-				strings.EqualFold(providerPart, ProviderMagicProxy) {
-				if _, ok := ModelManifest.Models[rest]; ok {
-					return rest
-				}
-				restLower := strings.ToLower(rest)
-				for id, info := range ModelManifest.Models {
-					if strings.EqualFold(id, rest) ||
-						strings.EqualFold(info.Name, rest) ||
-						strings.HasSuffix(strings.ToLower(id), "/"+restLower) {
-						return id
-					}
-				}
-			}
-		}
-	}
-
-	if !strings.Contains(normalized, "/") {
-		var match string
-		needle := strings.ToLower(normalized)
-		for id := range ModelManifest.Models {
-			if strings.HasSuffix(strings.ToLower(id), "/"+needle) {
-				if match != "" && match != id {
-					return ""
-				}
-				match = id
-			}
-		}
-		if match != "" {
-			return match
-		}
-	}
-
 	return ""
 }
 
