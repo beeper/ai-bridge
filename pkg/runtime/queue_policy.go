@@ -5,20 +5,16 @@ import "strings"
 func NormalizeQueueMode(raw string) (QueueMode, bool) {
 	cleaned := strings.TrimSpace(strings.ToLower(raw))
 	switch cleaned {
-	case "queue", "queued":
-		return QueueModeSteer, true
-	case "interrupt", "interrupts", "abort":
+	case "interrupt":
 		return QueueModeInterrupt, true
-	case "steer", "steering":
+	case "steer":
 		return QueueModeSteer, true
-	case "followup", "follow-ups", "followups":
+	case "followup":
 		return QueueModeFollowup, true
-	case "collect", "coalesce":
+	case "collect":
 		return QueueModeCollect, true
-	case "steer+backlog", "steer-backlog", "steer_backlog":
+	case "steer+backlog":
 		return QueueModeSteerBacklog, true
-	case "backlog":
-		return QueueModeBacklog, true
 	default:
 		return "", false
 	}
@@ -27,11 +23,11 @@ func NormalizeQueueMode(raw string) (QueueMode, bool) {
 func NormalizeQueueDropPolicy(raw string) (QueueDropPolicy, bool) {
 	cleaned := strings.TrimSpace(strings.ToLower(raw))
 	switch cleaned {
-	case "old", "oldest":
+	case "old":
 		return QueueDropOld, true
-	case "new", "newest":
+	case "new":
 		return QueueDropNew, true
-	case "summarize", "summary":
+	case "summarize":
 		return QueueDropSummarize, true
 	default:
 		return "", false

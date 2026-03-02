@@ -46,7 +46,6 @@ func registerModuleCommands(defs []integrationruntime.CommandDefinition) {
 			Name:           commandName,
 			Description:    description,
 			Args:           def.Args,
-			Aliases:        def.Aliases,
 			Section:        HelpSectionAI,
 			RequiresPortal: def.RequiresPortal,
 			RequiresLogin:  def.RequiresLogin,

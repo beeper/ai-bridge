@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"strings"
+	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
@@ -15,30 +16,41 @@ func (cc *CodexClient) sendDebouncedStreamEdit(ctx context.Context, portal *brid
 	if cc == nil || state == nil || portal == nil {
 		return nil
 	}
-	intent, _ := cc.getCodexIntentForPortal(ctx, portal, bridgev2.RemoteEventMessage)
-	streamtransport.SendDebouncedEdit(ctx, streamtransport.DebouncedEditParams{
-		Portal:         portal,
+	content := streamtransport.BuildDebouncedEditContent(streamtransport.DebouncedEditParams{
+		PortalMXID:     portal.MXID,
 		Force:          force,
 		SuppressSend:   state.suppressSend,
 		VisibleBody:    state.visibleAccumulated.String(),
 		FallbackBody:   state.accumulated.String(),
 		InitialEventID: state.initialEventID,
-		TurnID:         state.turnID,
-		SendFunc:       codexIntentSendFunc(intent),
-		Log:            cc.loggerForContext(ctx),
 	})
-	return nil
-}
-
-// codexIntentSendFunc wraps a MatrixAPI intent into a streamtransport.SendFunc.
-func codexIntentSendFunc(intent bridgev2.MatrixAPI) streamtransport.SendFunc {
-	if intent == nil {
+	if content == nil || state.networkMessageID == "" {
 		return nil
 	}
-	return func(ctx context.Context, roomID id.RoomID, content *event.Content) error {
-		_, err := intent.SendMessage(ctx, roomID, event.EventMessage, content, nil)
-		return err
-	}
+	sender := cc.senderForPortal()
+	cc.UserLogin.QueueRemoteEvent(&CodexRemoteEdit{
+		portal:        portal.PortalKey,
+		sender:        sender,
+		targetMessage: state.networkMessageID,
+		timestamp:     time.Now(),
+		preBuilt: &bridgev2.ConvertedEdit{
+			ModifiedParts: []*bridgev2.ConvertedEditPart{{
+				Type: event.EventMessage,
+				Content: &event.MessageEventContent{
+					MsgType:       event.MsgText,
+					Body:          content.Body,
+					Format:        content.Format,
+					FormattedBody: content.FormattedBody,
+				},
+				Extra: map[string]any{"m.mentions": map[string]any{}},
+				TopLevelExtra: map[string]any{
+					"com.beeper.dont_render_edited": true,
+					"m.mentions":                    map[string]any{},
+				},
+			}},
+		},
+	})
+	return nil
 }
 
 func (cc *CodexClient) ensureStreamSession(ctx context.Context, portal *bridgev2.Portal, state *streamingState) *streamtransport.StreamSession {

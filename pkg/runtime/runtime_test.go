@@ -90,8 +90,8 @@ func TestQueueFallbackToolCompactionDecisions(t *testing.T) {
 	if mode, ok := NormalizeQueueMode("steer+backlog"); !ok || mode != QueueModeSteerBacklog {
 		t.Fatalf("expected normalized steer+backlog mode, got mode=%q ok=%v", mode, ok)
 	}
-	if drop, ok := NormalizeQueueDropPolicy("summary"); !ok || drop != QueueDropSummarize {
-		t.Fatalf("expected normalized summary drop policy, got drop=%q ok=%v", drop, ok)
+	if drop, ok := NormalizeQueueDropPolicy("summarize"); !ok || drop != QueueDropSummarize {
+		t.Fatalf("expected normalized summarize drop policy, got drop=%q ok=%v", drop, ok)
 	}
 	overflow := ResolveQueueOverflow(2, 2, QueueDropSummarize)
 	if !overflow.KeepNew || overflow.ItemsToDrop != 1 || !overflow.ShouldSummarize {

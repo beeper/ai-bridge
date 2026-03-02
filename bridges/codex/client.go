@@ -1206,18 +1206,12 @@ func codexExtractThreadTurn(params json.RawMessage) (threadID, turnID string, ok
 	var p struct {
 		ThreadID string `json:"threadId"`
 		TurnID   string `json:"turnId"`
-		Turn     struct {
-			ID string `json:"id"`
-		} `json:"turn"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return "", "", false
 	}
 	threadID = strings.TrimSpace(p.ThreadID)
 	turnID = strings.TrimSpace(p.TurnID)
-	if turnID == "" {
-		turnID = strings.TrimSpace(p.Turn.ID)
-	}
 	return threadID, turnID, threadID != "" && turnID != ""
 }
 

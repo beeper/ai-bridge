@@ -73,33 +73,6 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 	}
 
-	if decision := bridgeadapter.ParseApprovalDecision(msg.Event.Content.Raw); decision != nil {
-		approve, always, ok := bridgeadapter.ApprovalDecisionFromString(decision.Decision)
-		if !ok {
-			logCtx.Warn().Str("decision", decision.Decision).Msg("Unknown approval decision")
-			return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-		}
-		state := airuntime.ToolApprovalDenied
-		if approve {
-			state = airuntime.ToolApprovalApproved
-		}
-		err := oc.resolveToolApproval(
-			portal.MXID,
-			decision.ApprovalID,
-			airuntime.ToolApprovalDecision{
-				State:  state,
-				Reason: decision.Reason,
-			},
-			always,
-			msg.Event.Sender,
-		)
-		if err != nil {
-			logCtx.Warn().Err(err).Str("approval_id", decision.ApprovalID).Msg("Failed to resolve approval decision")
-			oc.sendApprovalRejectionEvent(ctx, portal, decision.ApprovalID, err)
-		}
-		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
-	}
-
 	// Normalize sticker events to image handling
 	msgType := msg.Content.MsgType
 	if msg.Event != nil && msg.Event.Type == event.EventSticker {
