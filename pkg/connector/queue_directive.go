@@ -92,15 +92,12 @@ func parseQueueDirectiveArgs(raw string) (consumed int, result QueueDirective) {
 			break
 		}
 		lowered := strings.ToLower(strings.TrimSpace(token))
-		if lowered == "default" || lowered == "reset" || lowered == "clear" {
+		if lowered == "reset" {
 			result.QueueReset = true
 			break
 		}
-		if strings.HasPrefix(lowered, "debounce:") || strings.HasPrefix(lowered, "debounce=") {
+		if strings.HasPrefix(lowered, "debounce:") {
 			parts := strings.SplitN(token, ":", 2)
-			if len(parts) == 1 {
-				parts = strings.SplitN(token, "=", 2)
-			}
 			if len(parts) > 1 {
 				result.RawDebounce = parts[1]
 				result.DebounceMs = parseQueueDebounce(parts[1])
@@ -109,11 +106,8 @@ func parseQueueDirectiveArgs(raw string) (consumed int, result QueueDirective) {
 			}
 			continue
 		}
-		if strings.HasPrefix(lowered, "cap:") || strings.HasPrefix(lowered, "cap=") {
+		if strings.HasPrefix(lowered, "cap:") {
 			parts := strings.SplitN(token, ":", 2)
-			if len(parts) == 1 {
-				parts = strings.SplitN(token, "=", 2)
-			}
 			if len(parts) > 1 {
 				result.RawCap = parts[1]
 				result.Cap = parseQueueCap(parts[1])
@@ -122,11 +116,8 @@ func parseQueueDirectiveArgs(raw string) (consumed int, result QueueDirective) {
 			}
 			continue
 		}
-		if strings.HasPrefix(lowered, "drop:") || strings.HasPrefix(lowered, "drop=") {
+		if strings.HasPrefix(lowered, "drop:") {
 			parts := strings.SplitN(token, ":", 2)
-			if len(parts) == 1 {
-				parts = strings.SplitN(token, "=", 2)
-			}
 			if len(parts) > 1 {
 				result.RawDrop = parts[1]
 				if policy, ok := airuntime.NormalizeQueueDropPolicy(parts[1]); ok {

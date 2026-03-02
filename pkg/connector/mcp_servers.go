@@ -57,9 +57,9 @@ func normalizeMCPServerTransport(transport string) string {
 	switch value {
 	case "":
 		return ""
-	case mcpTransportStreamableHTTP, "streamable-http", "streamablehttp", "streamable", "http":
+	case mcpTransportStreamableHTTP:
 		return mcpTransportStreamableHTTP
-	case mcpTransportStdio, "command", "cmd":
+	case mcpTransportStdio:
 		return mcpTransportStdio
 	default:
 		return value

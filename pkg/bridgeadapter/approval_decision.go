@@ -1,50 +1,68 @@
 package bridgeadapter
 
 import (
+	"encoding/json"
 	"strings"
 
-	"github.com/beeper/ai-bridge/pkg/shared/maputil"
+	"maunium.net/go/mautrix/event"
 )
 
-// ApprovalDecisionPayload holds the parsed content of a
-// "com.beeper.ai.approval_decision" event payload.
-type ApprovalDecisionPayload struct {
+// ActionResponsePayload holds the parsed content of a com.beeper.action_response event.
+type ActionResponsePayload struct {
+	ActionID   string
 	ApprovalID string
-	Decision   string
-	Reason     string
+	ToolCallID string
+	HintKey    int
+	EventID    string // event_id of the message containing action hints
 }
 
-// ParseApprovalDecision extracts an ApprovalDecisionPayload from the raw
-// event content map, returning nil when the payload is absent or incomplete.
-func ParseApprovalDecision(raw map[string]any) *ApprovalDecisionPayload {
-	if raw == nil {
+// ParseActionResponse extracts an ActionResponsePayload from a BeeperActionResponseEventContent,
+// returning nil when the payload is incomplete.
+func ParseActionResponse(content *event.BeeperActionResponseEventContent) *ActionResponsePayload {
+	if content == nil {
 		return nil
 	}
-	payloadRaw, ok := raw["com.beeper.ai.approval_decision"]
-	if !ok || payloadRaw == nil {
+	actionID := strings.TrimSpace(content.ActionID)
+	if actionID == "" {
 		return nil
 	}
-	payloadMap, ok := payloadRaw.(map[string]any)
-	if !ok {
-		return nil
+
+	payload := &ActionResponsePayload{
+		ActionID: actionID,
 	}
-	approvalID := maputil.StringArg(payloadMap, "approvalId")
-	decision := maputil.StringArg(payloadMap, "decision")
-	reason := maputil.StringArg(payloadMap, "reason")
-	if approvalID == "" || decision == "" {
-		return nil
+
+	// Parse context for approval_id and tool_call_id
+	if len(content.Context) > 0 {
+		var ctx map[string]any
+		if err := json.Unmarshal(content.Context, &ctx); err == nil {
+			if aid, ok := ctx["approval_id"].(string); ok {
+				payload.ApprovalID = strings.TrimSpace(aid)
+			}
+			if tcid, ok := ctx["tool_call_id"].(string); ok {
+				payload.ToolCallID = strings.TrimSpace(tcid)
+			}
+		}
 	}
-	return &ApprovalDecisionPayload{
-		ApprovalID: approvalID,
-		Decision:   decision,
-		Reason:     reason,
+
+	// Parse m.from_action_hint relation
+	if content.RelatesTo != nil && content.RelatesTo.Custom != nil {
+		if fromHint, ok := content.RelatesTo.Custom["m.from_action_hint"].(map[string]any); ok {
+			if eid, ok := fromHint["event_id"].(string); ok {
+				payload.EventID = strings.TrimSpace(eid)
+			}
+			if hk, ok := fromHint["hint_key"].(float64); ok {
+				payload.HintKey = int(hk)
+			}
+		}
 	}
+
+	return payload
 }
 
-// ApprovalDecisionFromString converts a free-text decision string into
-// structured booleans (approve, always, ok).
-func ApprovalDecisionFromString(decision string) (approve bool, always bool, ok bool) {
-	switch strings.ToLower(strings.TrimSpace(decision)) {
+// ActionDecisionFromString converts an action_id string from a com.beeper.action_response
+// into structured booleans (approve, always, ok).
+func ActionDecisionFromString(actionID string) (approve bool, always bool, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(actionID)) {
 	case "allow", "approve", "yes", "y", "true", "1", "once":
 		return true, false, true
 	case "always", "always-allow", "allow-always":

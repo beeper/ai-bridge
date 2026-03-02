@@ -116,14 +116,12 @@ func fnApprove(ce *commands.Event) {
 	approve := false
 	always := false
 	switch actionToken {
-	case "allow", "approve", "yes", "y", "true", "1":
+	case "allow":
 		approve = true
-	case "allow-once", "once":
-		approve = true
-	case "allow-always", "always":
+	case "always":
 		approve = true
 		always = true
-	case "deny", "reject", "no", "n", "false", "0":
+	case "deny":
 		approve = false
 	default:
 		ce.Reply("Usage: `!ai approve <approvalId> <allow|always|deny> [reason]`")
@@ -204,7 +202,6 @@ func fnReset(ce *commands.Event) {
 // CommandStop handles the !ai stop command.
 var CommandStop = registerAICommand(commandregistry.Definition{
 	Name:           "stop",
-	Aliases:        []string{"abort", "interrupt"},
 	Description:    "Abort the current run and clear the pending queue",
 	Section:        HelpSectionAI,
 	RequiresPortal: true,
@@ -258,8 +255,7 @@ func fnQueue(ce *commands.Event) {
 		return
 	}
 
-	// Allow `!ai queue reset` as a command-oriented alias for clearing session overrides.
-	if strings.EqualFold(strings.TrimSpace(ce.Args[0]), "reset") || strings.EqualFold(strings.TrimSpace(ce.Args[0]), "default") || strings.EqualFold(strings.TrimSpace(ce.Args[0]), "clear") {
+	if strings.EqualFold(strings.TrimSpace(ce.Args[0]), "reset") {
 		if sessionKey != "" {
 			client.updateSessionEntry(ce.Ctx, storeRef, sessionKey, func(entry sessionEntry) sessionEntry {
 				entry.QueueMode = ""
@@ -351,7 +347,6 @@ func fnThink(ce *commands.Event) {
 // CommandVerbose handles the !ai verbose command.
 var CommandVerbose = registerAICommand(commandregistry.Definition{
 	Name:           "verbose",
-	Aliases:        []string{"v"},
 	Description:    "Get or set verbosity (off|on|full)",
 	Args:           "[level]",
 	Section:        HelpSectionAI,
@@ -424,7 +419,6 @@ func fnReasoning(ce *commands.Event) {
 // CommandElevated handles the !ai elevated command.
 var CommandElevated = registerAICommand(commandregistry.Definition{
 	Name:           "elevated",
-	Aliases:        []string{"elev"},
 	Description:    "Get or set elevated access (off|on|ask|full)",
 	Args:           "[level]",
 	Section:        HelpSectionAI,
@@ -536,7 +530,6 @@ func fnSend(ce *commands.Event) {
 // CommandWhoami handles the !ai whoami command.
 var CommandWhoami = registerAICommand(commandregistry.Definition{
 	Name:           "whoami",
-	Aliases:        []string{"id"},
 	Description:    "Show your Matrix user ID",
 	Section:        HelpSectionAI,
 	RequiresPortal: false,

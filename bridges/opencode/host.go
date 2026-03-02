@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
@@ -101,19 +102,36 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 	oc.streamMu.Unlock()
 
 	if needPlaceholder {
-		content := &event.Content{Raw: map[string]any{
-			"msgtype": event.MsgText,
-			"body":    "...",
-		}}
-		resp, err := oc.UserLogin.Bridge.Bot.SendMessage(ctx, portal.MXID, event.EventMessage, content, nil)
-		if err == nil && resp != nil && resp.EventID != "" {
-			oc.streamMu.Lock()
-			st := oc.streamStates[turnID]
-			if st != nil && st.initialEventID == "" {
-				st.initialEventID = resp.EventID
-				st.targetEventID = resp.EventID.String()
+		pmeta := oc.PortalMeta(portal)
+		instanceID := ""
+		if pmeta != nil {
+			instanceID = pmeta.InstanceID
+		}
+		sender := oc.SenderForOpenCode(instanceID, false)
+		pi := portal.Internal()
+		intent, _, err := pi.GetIntentAndUserMXIDFor(ctx, sender, oc.UserLogin, nil, bridgev2.RemoteEventMessage)
+		if err == nil && intent != nil {
+			msgID := newOpenCodeMessageID()
+			converted := &bridgev2.ConvertedMessage{
+				Parts: []*bridgev2.ConvertedMessagePart{{
+					ID:      networkid.PartID("0"),
+					Type:    event.EventMessage,
+					Content: &event.MessageEventContent{MsgType: event.MsgText, Body: "..."},
+					Extra:   map[string]any{"msgtype": event.MsgText, "body": "...", "m.mentions": map[string]any{}},
+				}},
 			}
-			oc.streamMu.Unlock()
+			now := time.Now()
+			dbMsgs, result := pi.SendConvertedMessage(ctx, msgID, intent, sender.Sender, converted, now, now.UnixMilli(), nil)
+			if result.Success && len(dbMsgs) > 0 {
+				oc.streamMu.Lock()
+				st := oc.streamStates[turnID]
+				if st != nil && st.initialEventID == "" {
+					st.initialEventID = dbMsgs[0].MXID
+					st.networkMessageID = msgID
+					st.targetEventID = dbMsgs[0].MXID.String()
+				}
+				oc.streamMu.Unlock()
+			}
 		}
 	}
 
@@ -165,25 +183,52 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 				st := oc.streamStates[turnID]
 				var visibleBody, fallbackBody string
 				var initialEventID id.EventID
+				var netMsgID networkid.MessageID
 				if st != nil {
 					visibleBody = st.visible.String()
 					fallbackBody = st.accumulated.String()
 					initialEventID = st.initialEventID
+					netMsgID = st.networkMessageID
 				}
 				oc.streamMu.Unlock()
-				streamtransport.SendDebouncedEdit(callCtx, streamtransport.DebouncedEditParams{
-					Portal:         portal,
+				content := streamtransport.BuildDebouncedEditContent(streamtransport.DebouncedEditParams{
+					PortalMXID:     portal.MXID,
 					Force:          force,
 					SuppressSend:   false,
 					VisibleBody:    visibleBody,
 					FallbackBody:   fallbackBody,
 					InitialEventID: initialEventID,
-					TurnID:         turnID,
-					SendFunc: func(ctx context.Context, roomID id.RoomID, content *event.Content) error {
-						_, err := oc.UserLogin.Bridge.Bot.SendMessage(ctx, roomID, event.EventMessage, content, nil)
-						return err
+				})
+				if content == nil || netMsgID == "" {
+					return nil
+				}
+				pmeta := oc.PortalMeta(portal)
+				instanceID := ""
+				if pmeta != nil {
+					instanceID = pmeta.InstanceID
+				}
+				sender := oc.SenderForOpenCode(instanceID, false)
+				oc.UserLogin.QueueRemoteEvent(&OpenCodeRemoteEdit{
+					portal:        portal.PortalKey,
+					sender:        sender,
+					targetMessage: netMsgID,
+					timestamp:     time.Now(),
+					preBuilt: &bridgev2.ConvertedEdit{
+						ModifiedParts: []*bridgev2.ConvertedEditPart{{
+							Type: event.EventMessage,
+							Content: &event.MessageEventContent{
+								MsgType:       event.MsgText,
+								Body:          content.Body,
+								Format:        content.Format,
+								FormattedBody: content.FormattedBody,
+							},
+							Extra: map[string]any{"m.mentions": map[string]any{}},
+							TopLevelExtra: map[string]any{
+								"com.beeper.dont_render_edited": true,
+								"m.mentions":                    map[string]any{},
+							},
+						}},
 					},
-					Log: oc.Log(),
 				})
 				return nil
 			},

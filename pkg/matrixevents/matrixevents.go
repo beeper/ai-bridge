@@ -37,7 +37,16 @@ const (
 	BeeperAIKey           = "com.beeper.ai"
 	BeeperAIToolCallKey   = "com.beeper.ai.tool_call"
 	BeeperAIToolResultKey = "com.beeper.ai.tool_result"
+	BeeperActionHintsKey  = "com.beeper.action_hints"
 )
+
+// ActionResponseEventType is the event type for com.beeper.action_response (MSC1485 action hints).
+// Re-exported from mautrix-go event.BeeperActionResponse.
+var ActionResponseEventType = event.BeeperActionResponse
+
+// BotCommandDescriptionEventType is the state event type for MSC4391 command descriptions.
+// Re-exported from mautrix-go event.StateMSC4391BotCommand.
+var BotCommandDescriptionEventType = event.StateMSC4391BotCommand
 
 // ToolStatus represents the state of a tool call.
 type ToolStatus string

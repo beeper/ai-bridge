@@ -168,7 +168,14 @@ const (
 	BeeperAIKey           = matrixevents.BeeperAIKey
 	BeeperAIToolCallKey   = matrixevents.BeeperAIToolCallKey
 	BeeperAIToolResultKey = matrixevents.BeeperAIToolResultKey
+	BeeperActionHintsKey  = matrixevents.BeeperActionHintsKey
 )
+
+// ActionResponseEventType is the event type for com.beeper.action_response (MSC1485).
+var ActionResponseEventType = matrixevents.ActionResponseEventType
+
+// BotCommandDescriptionEventType is the state event type for MSC4391 command descriptions.
+var BotCommandDescriptionEventType = matrixevents.BotCommandDescriptionEventType
 
 // ModelInfo describes a single AI model's capabilities
 type ModelInfo struct {

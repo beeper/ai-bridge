@@ -195,7 +195,6 @@ func fnModel(ce *commands.Event) {
 // CommandTemp handles the !ai temp command
 var CommandTemp = registerAICommand(commandregistry.Definition{
 	Name:           "temp",
-	Aliases:        []string{"temperature"},
 	Description:    "Get or set the temperature (0-2)",
 	Args:           "[_value_]",
 	Section:        HelpSectionAI,
@@ -241,7 +240,6 @@ func fnTemp(ce *commands.Event) {
 // CommandSystemPrompt handles the !ai system-prompt command
 var CommandSystemPrompt = registerAICommand(commandregistry.Definition{
 	Name:           "system-prompt",
-	Aliases:        []string{"prompt", "system"},
 	Description:    "Get or set the system prompt (shows full constructed prompt)",
 	Args:           "[_text_]",
 	Section:        HelpSectionAI,
@@ -319,7 +317,6 @@ func fnContext(ce *commands.Event) {
 // CommandTokens handles the !ai tokens command
 var CommandTokens = registerAICommand(commandregistry.Definition{
 	Name:           "tokens",
-	Aliases:        []string{"maxtokens"},
 	Description:    "Get or set max completion tokens (1-16384)",
 	Args:           "[_count_]",
 	Section:        HelpSectionAI,
@@ -375,7 +372,6 @@ const desktopAPIManageUsage = "`!ai desktop-api list` | `!ai desktop-api add <to
 
 var CommandCommands = registerAICommand(commandregistry.Definition{
 	Name:           "commands",
-	Aliases:        []string{"cmds"},
 	Description:    "Show AI command groups and recommended command forms",
 	Section:        HelpSectionAI,
 	RequiresPortal: false,
@@ -503,22 +499,6 @@ func fnSetDesktopAPIToken(ce *commands.Event) {
 		ce.Reply("Usage: `!ai desktop-api add <token> [baseURL]`.")
 		return
 	}
-	if strings.EqualFold(token, "clear") || strings.EqualFold(token, "none") || strings.EqualFold(token, "unset") {
-		if meta.ServiceTokens == nil {
-			meta.ServiceTokens = &ServiceTokens{}
-		}
-		meta.ServiceTokens.DesktopAPI = ""
-		if meta.ServiceTokens.DesktopAPIInstances != nil {
-			delete(meta.ServiceTokens.DesktopAPIInstances, desktopDefaultInstance)
-		}
-		if err := login.Save(ce.Ctx); err != nil {
-			ce.Reply("Couldn't clear the Desktop API token: %s", err)
-			return
-		}
-		ce.Reply("Desktop API token cleared")
-		return
-	}
-
 	if meta.ServiceTokens == nil {
 		meta.ServiceTokens = &ServiceTokens{}
 	}
@@ -694,14 +674,14 @@ func fnDesktopAPI(ce *commands.Event) {
 
 	sub := strings.ToLower(strings.TrimSpace(ce.Args[0]))
 	switch sub {
-	case "list", "ls":
+	case "list":
 		ce.Args = ce.Args[1:]
 		fnListDesktopAPIInstances(ce)
 		return
-	case "add", "set":
+	case "add":
 		parsedName, parsedToken, parsedBaseURL, parsedErr := parseDesktopAPIAddArgs(ce.Args[1:])
 		if parsedErr != nil {
-			ce.Reply("Usage: `!ai desktop-api add <token> [baseURL]` or `!ai desktop-api add <name> <token> [baseURL]`.")
+			ce.Reply("Usage: `!ai desktop-api add <name> <token> [baseURL]`.")
 			return
 		}
 		if parsedName == "" || parsedName == desktopDefaultInstance {
@@ -720,7 +700,7 @@ func fnDesktopAPI(ce *commands.Event) {
 		ce.Args = nextArgs
 		fnAddDesktopAPIInstance(ce)
 		return
-	case "remove", "rm", "delete":
+	case "remove":
 		ce.Args = ce.Args[1:]
 		fnRemoveDesktopAPIInstance(ce)
 		return
@@ -745,23 +725,16 @@ func parseDesktopAPIAddArgs(args []string) (name, token, baseURL string, err err
 		return "", "", "", errors.New("missing args")
 	}
 
-	switch len(trimmed) {
-	case 1:
-		return desktopDefaultInstance, trimmed[0], "", nil
-	case 2:
-		if isLikelyHTTPURL(trimmed[1]) {
-			return desktopDefaultInstance, trimmed[0], trimmed[1], nil
-		}
-		return normalizeDesktopInstanceName(trimmed[0]), trimmed[1], "", nil
-	default:
-		name = normalizeDesktopInstanceName(trimmed[0])
-		token = trimmed[1]
-		baseURL = strings.TrimSpace(strings.Join(trimmed[2:], " "))
-		if token == "" {
-			return "", "", "", errors.New("missing token")
-		}
-		return name, token, baseURL, nil
+	if len(trimmed) < 2 {
+		return "", "", "", errors.New("missing args")
 	}
+	name = normalizeDesktopInstanceName(trimmed[0])
+	token = trimmed[1]
+	baseURL = strings.TrimSpace(strings.Join(trimmed[2:], " "))
+	if token == "" {
+		return "", "", "", errors.New("missing token")
+	}
+	return name, token, baseURL, nil
 }
 
 func isLikelyHTTPURL(raw string) bool {
@@ -1035,7 +1008,6 @@ func fnRegenerate(ce *commands.Event) {
 // CommandTitle handles the !ai title command
 var CommandTitle = registerAICommand(commandregistry.Definition{
 	Name:           "title",
-	Aliases:        []string{"retitle"},
 	Description:    "Regenerate the chat room title",
 	Section:        HelpSectionAI,
 	RequiresPortal: true,
@@ -1122,7 +1094,6 @@ func fnModels(ce *commands.Event) {
 // CommandTimezone handles the !ai timezone command
 var CommandTimezone = registerAICommand(commandregistry.Definition{
 	Name:           "timezone",
-	Aliases:        []string{"tz"},
 	Description:    "Get or set your timezone for all chats (IANA name)",
 	Args:           "[_timezone_|reset]",
 	Section:        HelpSectionAI,
