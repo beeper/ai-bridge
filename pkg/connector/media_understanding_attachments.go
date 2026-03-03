@@ -35,14 +35,12 @@ func selectMediaAttachments(attachments []mediaAttachment, policy *MediaUndersta
 		mode = "first"
 	}
 
-	ordered := make([]mediaAttachment, 0, len(attachments))
-	ordered = append(ordered, attachments...)
+	ordered := make([]mediaAttachment, len(attachments))
+	copy(ordered, attachments)
 
 	switch prefer {
 	case "last":
-		for i, j := 0, len(ordered)-1; i < j; i, j = i+1, j-1 {
-			ordered[i], ordered[j] = ordered[j], ordered[i]
-		}
+		slices.Reverse(ordered)
 	case "path":
 		slices.SortStableFunc(ordered, func(a, b mediaAttachment) int {
 			left := strings.ToLower(strings.TrimSpace(a.FileName))
@@ -77,10 +75,6 @@ func selectMediaAttachments(attachments []mediaAttachment, policy *MediaUndersta
 			return ordered[:max]
 		}
 		return ordered
-	}
-
-	if len(ordered) == 0 {
-		return nil
 	}
 	return ordered[:1]
 }
