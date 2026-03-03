@@ -94,57 +94,49 @@ func addOpenAIErrorFields(event *zerolog.Event, err error) {
 		return
 	}
 	var apiErr *openai.Error
-	if errors.As(err, &apiErr) {
-		if apiErr.StatusCode != 0 {
-			event.Int("status_code", apiErr.StatusCode)
-		}
-		if apiErr.Code != "" {
-			event.Str("error_code", apiErr.Code)
-		}
-		if apiErr.Type != "" {
-			event.Str("error_type", apiErr.Type)
-		}
-		if apiErr.Param != "" {
-			event.Str("error_param", apiErr.Param)
-		}
-		if apiErr.Message != "" {
-			event.Str("error_message", apiErr.Message)
-		}
-		if apiErr.Response != nil {
-			if requestID := apiErr.Response.Header.Get("x-request-id"); requestID != "" {
-				event.Str("request_id", requestID)
-			}
-			if requestID := apiErr.Response.Header.Get("x-openai-request-id"); requestID != "" {
-				event.Str("openai_request_id", requestID)
-			}
-			if provider := apiErr.Response.Header.Get("x-ai-proxy-provider"); provider != "" {
-				event.Str("proxy_provider", provider)
-			}
-			if upstreamRay := apiErr.Response.Header.Get("x-ai-proxy-upstream-ray"); upstreamRay != "" {
-				event.Str("proxy_upstream_ray", upstreamRay)
-			}
-			if cfRay := apiErr.Response.Header.Get("cf-ray"); cfRay != "" {
-				event.Str("cf_ray", cfRay)
-			}
-			if server := apiErr.Response.Header.Get("server"); server != "" {
-				event.Str("response_server", server)
-			}
-			if contentType := apiErr.Response.Header.Get("Content-Type"); contentType != "" {
-				event.Str("response_content_type", contentType)
+	if !errors.As(err, &apiErr) {
+		return
+	}
+	if apiErr.StatusCode != 0 {
+		event.Int("status_code", apiErr.StatusCode)
+	}
+	if apiErr.Code != "" {
+		event.Str("error_code", apiErr.Code)
+	}
+	if apiErr.Type != "" {
+		event.Str("error_type", apiErr.Type)
+	}
+	if apiErr.Param != "" {
+		event.Str("error_param", apiErr.Param)
+	}
+	if apiErr.Message != "" {
+		event.Str("error_message", apiErr.Message)
+	}
+	if resp := apiErr.Response; resp != nil {
+		addOptionalHeader := func(header, logKey string) {
+			if v := resp.Header.Get(header); v != "" {
+				event.Str(logKey, v)
 			}
 		}
-		if apiErr.Request != nil && apiErr.Request.URL != nil {
-			event.
-				Str("request_method", apiErr.Request.Method).
-				Str("request_url", apiErr.Request.URL.String()).
-				Str("request_host", apiErr.Request.URL.Host)
-			if requestID := apiErr.Request.Header.Get("x-request-id"); requestID != "" {
-				event.Str("client_request_id", requestID)
-			}
+		addOptionalHeader("x-request-id", "request_id")
+		addOptionalHeader("x-openai-request-id", "openai_request_id")
+		addOptionalHeader("x-ai-proxy-provider", "proxy_provider")
+		addOptionalHeader("x-ai-proxy-upstream-ray", "proxy_upstream_ray")
+		addOptionalHeader("cf-ray", "cf_ray")
+		addOptionalHeader("server", "response_server")
+		addOptionalHeader("Content-Type", "response_content_type")
+	}
+	if req := apiErr.Request; req != nil && req.URL != nil {
+		event.
+			Str("request_method", req.Method).
+			Str("request_url", req.URL.String()).
+			Str("request_host", req.URL.Host)
+		if v := req.Header.Get("x-request-id"); v != "" {
+			event.Str("client_request_id", v)
 		}
-		if raw := apiErr.RawJSON(); raw != "" {
-			event.Str("error_raw", raw)
-		}
+	}
+	if raw := apiErr.RawJSON(); raw != "" {
+		event.Str("error_raw", raw)
 	}
 }
 

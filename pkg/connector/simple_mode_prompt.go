@@ -7,7 +7,6 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/id"
 
 	airuntime "github.com/beeper/ai-bridge/pkg/runtime"
 )
@@ -63,10 +62,9 @@ func formatCurrentTimeForPrompt(timezone string) string {
 }
 
 // cleanHistoryBody normalizes history body text for the current mode.
-func cleanHistoryBody(body string, simple bool, mxid id.EventID) string {
+func cleanHistoryBody(body string, simple bool) string {
 	if simple {
 		body = airuntime.SanitizeChatMessageForDisplay(body, true)
 	}
-	_ = mxid
 	return body
 }

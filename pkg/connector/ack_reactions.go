@@ -59,16 +59,8 @@ func shouldAckReaction(params AckReactionGateParams) bool {
 	case AckScopeGroupAll:
 		return params.IsGroup
 	case AckScopeGroupMention:
-		if !params.IsMentionableGroup {
-			return false
-		}
-		if !params.RequireMention {
-			return false
-		}
-		if !params.CanDetectMention {
-			return false
-		}
-		return params.EffectiveMention || params.ShouldBypass
+		return params.IsMentionableGroup && params.RequireMention && params.CanDetectMention &&
+			(params.EffectiveMention || params.ShouldBypass)
 	default:
 		return false
 	}
