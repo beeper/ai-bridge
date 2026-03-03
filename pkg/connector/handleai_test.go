@@ -50,7 +50,7 @@ func TestDecodeBase64Image(t *testing.T) {
 			name:        "invalid data URL - no comma",
 			input:       "data:image/png;base64" + pngBase64,
 			wantErr:     true,
-			errContains: "no comma found",
+			errContains: "no comma separator",
 		},
 		{
 			name:    "invalid base64",

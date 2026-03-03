@@ -57,14 +57,14 @@ func httpErrStatus(err *mautrix.HTTPError) int {
 }
 
 func isFallbackRespErrorCode(code string) bool {
-	code = strings.ToUpper(strings.TrimSpace(code))
-	if code == "" {
+	upper := strings.ToUpper(strings.TrimSpace(code))
+	if upper == "" {
 		return false
 	}
-	return strings.Contains(code, "UNKNOWN") ||
-		strings.Contains(code, "UNRECOGNIZED") ||
-		strings.Contains(code, "UNSUPPORTED") ||
-		strings.Contains(code, "NOT_IMPLEMENTED")
+	return strings.Contains(upper, "UNKNOWN") ||
+		strings.Contains(upper, "UNRECOGNIZED") ||
+		strings.Contains(upper, "UNSUPPORTED") ||
+		strings.Contains(upper, "NOT_IMPLEMENTED")
 }
 
 func looksLikeUnknownUnsupported(s string) bool {
