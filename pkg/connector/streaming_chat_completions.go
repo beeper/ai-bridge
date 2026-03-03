@@ -74,23 +74,12 @@ func (oc *AIClient) streamChatCompletions(
 		}
 		if meta.Capabilities.SupportsToolCalling && chatHasAgent {
 			if !oc.isBuilderRoom(portal) {
-				var enabledSessions []*tools.Tool
-				for _, tool := range tools.SessionTools() {
-					if oc.isToolEnabled(meta, tool.Name) {
-						enabledSessions = append(enabledSessions, tool)
-					}
-				}
-				if len(enabledSessions) > 0 {
+				if enabledSessions := oc.filterEnabledTools(meta, tools.SessionTools()); len(enabledSessions) > 0 {
 					params.Tools = append(params.Tools, bossToolsToChatTools(enabledSessions, &oc.log)...)
 				}
 			}
 			if hasBossAgent(meta) || oc.isBuilderRoom(portal) {
-				var enabledBoss []*tools.Tool
-				for _, tool := range tools.BossTools() {
-					if oc.isToolEnabled(meta, tool.Name) {
-						enabledBoss = append(enabledBoss, tool)
-					}
-				}
+				enabledBoss := oc.filterEnabledTools(meta, tools.BossTools())
 				params.Tools = append(params.Tools, bossToolsToChatTools(enabledBoss, &oc.log)...)
 			}
 			params.Tools = dedupeChatToolParams(params.Tools)
@@ -427,7 +416,3 @@ func (oc *AIClient) streamChatCompletions(
 	oc.recordProviderSuccess(ctx)
 	return true, nil, nil
 }
-
-// convertToResponsesInput converts Chat Completion messages to Responses API input items
-// Supports native multimodal content: images (ResponseInputImageParam), files/PDFs (ResponseInputFileParam)
-// Note: Audio is handled via Chat Completions API fallback (SDK v3.16.0 lacks Responses API audio union support)

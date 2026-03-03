@@ -277,6 +277,24 @@ func (oc *AIClient) resolveOutputItemTool(
 	return tool, desc, true
 }
 
+// applyDescriptorInput writes the descriptor's input into the tool buffer (if empty)
+// and emits a UI input-available event.
+func (oc *AIClient) applyDescriptorInput(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	tool *activeToolCall,
+	desc responseToolDescriptor,
+) {
+	if desc.input == nil {
+		return
+	}
+	if tool.input.Len() == 0 {
+		tool.input.WriteString(stringifyJSONValue(desc.input))
+	}
+	oc.uiEmitter(state).EmitUIToolInputAvailable(ctx, portal, tool.callID, tool.toolName, desc.input, desc.providerExecuted)
+}
+
 func (oc *AIClient) handleResponseOutputItemAdded(
 	ctx context.Context,
 	portal *bridgev2.Portal,
@@ -288,13 +306,7 @@ func (oc *AIClient) handleResponseOutputItemAdded(
 	if !ok {
 		return
 	}
-
-	if desc.input != nil {
-		if tool.input.Len() == 0 {
-			tool.input.WriteString(stringifyJSONValue(desc.input))
-		}
-		oc.uiEmitter(state).EmitUIToolInputAvailable(ctx, portal, tool.callID, tool.toolName, desc.input, desc.providerExecuted)
-	}
+	oc.applyDescriptorInput(ctx, portal, state, tool, desc)
 }
 
 func (oc *AIClient) handleResponseOutputItemDone(
@@ -308,13 +320,7 @@ func (oc *AIClient) handleResponseOutputItemDone(
 	if !ok {
 		return
 	}
-
-	if desc.input != nil {
-		if tool.input.Len() == 0 {
-			tool.input.WriteString(stringifyJSONValue(desc.input))
-		}
-		oc.uiEmitter(state).EmitUIToolInputAvailable(ctx, portal, tool.callID, tool.toolName, desc.input, desc.providerExecuted)
-	}
+	oc.applyDescriptorInput(ctx, portal, state, tool, desc)
 
 	if files := codeInterpreterFileParts(item); len(files) > 0 {
 		for _, file := range files {
@@ -365,6 +371,3 @@ func (oc *AIClient) handleResponseOutputItemDone(
 		ResultEventID: string(resultEventID),
 	})
 }
-
-// streamingResponseWithToolSchemaFallback retries via Chat Completions when the provider
-// rejects tool schemas in the Responses API.

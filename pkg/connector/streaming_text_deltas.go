@@ -130,20 +130,9 @@ func (oc *AIClient) handleResponseReasoningTextDelta(
 	return nil
 }
 
-func (oc *AIClient) handleResponseReasoningSummaryDelta(
-	ctx context.Context,
-	portal *bridgev2.Portal,
-	state *streamingState,
-	delta string,
-) {
-	if delta == "" {
-		return
-	}
-	state.reasoning.WriteString(delta)
-	oc.uiEmitter(state).EmitUIReasoningDelta(ctx, portal, delta)
-}
-
-func (oc *AIClient) handleResponseReasoningDone(
+// appendReasoningDelta appends text to the reasoning buffer and emits a UI delta.
+// Used by reasoning summary deltas and reasoning done events alike.
+func (oc *AIClient) appendReasoningDelta(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	state *streamingState,
@@ -154,31 +143,6 @@ func (oc *AIClient) handleResponseReasoningDone(
 	}
 	state.reasoning.WriteString(text)
 	oc.uiEmitter(state).EmitUIReasoningDelta(ctx, portal, text)
-}
-
-func (oc *AIClient) handleResponseRefusalDelta(
-	ctx context.Context,
-	portal *bridgev2.Portal,
-	state *streamingState,
-	typingSignals *TypingSignaler,
-	delta string,
-) {
-	if typingSignals != nil {
-		typingSignals.SignalTextDelta(delta)
-	}
-	oc.uiEmitter(state).EmitUITextDelta(ctx, portal, delta)
-}
-
-func (oc *AIClient) handleResponseRefusalDone(
-	ctx context.Context,
-	portal *bridgev2.Portal,
-	state *streamingState,
-	refusal string,
-) {
-	if refusal == "" {
-		return
-	}
-	oc.uiEmitter(state).EmitUITextDelta(ctx, portal, refusal)
 }
 
 func (oc *AIClient) handleResponseOutputAnnotationAdded(

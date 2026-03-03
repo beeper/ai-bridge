@@ -75,6 +75,14 @@ type responseToolDescriptor struct {
 	ok               bool
 }
 
+// callIDOrFallback returns item.CallID if non-empty, otherwise item.ID.
+func callIDOrFallback(item responses.ResponseOutputItemUnion) string {
+	if id := strings.TrimSpace(item.CallID); id != "" {
+		return id
+	}
+	return item.ID
+}
+
 func deriveToolDescriptorForOutputItem(item responses.ResponseOutputItemUnion, state *streamingState) responseToolDescriptor {
 	desc := responseToolDescriptor{
 		itemID: item.ID,
@@ -82,93 +90,47 @@ func deriveToolDescriptorForOutputItem(item responses.ResponseOutputItemUnion, s
 	}
 	switch item.Type {
 	case "function_call":
-		desc.callID = strings.TrimSpace(item.CallID)
-		if desc.callID == "" {
-			desc.callID = item.ID
-		}
+		desc.callID = callIDOrFallback(item)
 		desc.toolName = strings.TrimSpace(item.Name)
 		desc.toolType = ToolTypeFunction
-		desc.providerExecuted = false
-		desc.dynamic = false
 		desc.input = parseJSONOrRaw(item.Arguments)
 		desc.ok = desc.toolName != ""
+
 	case "web_search_call":
-		desc.toolName = ToolNameWebSearch
-		desc.toolType = ToolTypeProvider
-		desc.providerExecuted = true
-		desc.input = map[string]any{}
-		desc.ok = true
+		desc = providerToolDescriptor(item, ToolNameWebSearch, nil)
+
 	case "file_search_call":
-		desc.toolName = "file_search"
-		desc.toolType = ToolTypeProvider
-		desc.providerExecuted = true
-		desc.input = map[string]any{}
-		desc.ok = true
+		desc = providerToolDescriptor(item, "file_search", nil)
+
 	case "image_generation_call":
-		desc.toolName = "image_generation"
-		desc.toolType = ToolTypeProvider
-		desc.providerExecuted = true
-		desc.input = map[string]any{}
-		desc.ok = true
+		desc = providerToolDescriptor(item, "image_generation", nil)
+
 	case "code_interpreter_call":
-		desc.toolName = "code_interpreter"
-		desc.toolType = ToolTypeProvider
-		desc.providerExecuted = true
-		desc.input = map[string]any{
+		desc = providerToolDescriptor(item, "code_interpreter", map[string]any{
 			"containerId": item.ContainerID,
 			"code":        item.Code,
-		}
-		desc.ok = true
+		})
+
 	case "computer_call":
-		desc.toolName = "computer_use"
-		desc.toolType = ToolTypeProvider
-		desc.providerExecuted = true
-		desc.input = map[string]any{}
-		desc.ok = true
+		desc = providerToolDescriptor(item, "computer_use", nil)
+
 	case "local_shell_call":
-		desc.callID = strings.TrimSpace(item.CallID)
-		if desc.callID == "" {
-			desc.callID = item.ID
-		}
-		desc.toolName = "local_shell"
-		desc.toolType = ToolTypeProvider
-		desc.providerExecuted = true
-		desc.dynamic = true
-		desc.input = responseOutputItemToMap(item)
-		desc.ok = true
+		desc = dynamicProviderToolDescriptor(item, "local_shell")
+
 	case "shell_call":
-		desc.callID = strings.TrimSpace(item.CallID)
-		if desc.callID == "" {
-			desc.callID = item.ID
-		}
-		desc.toolName = "shell"
-		desc.toolType = ToolTypeProvider
-		desc.providerExecuted = true
-		desc.dynamic = true
-		desc.input = responseOutputItemToMap(item)
-		desc.ok = true
+		desc = dynamicProviderToolDescriptor(item, "shell")
+
 	case "apply_patch_call":
-		desc.callID = strings.TrimSpace(item.CallID)
-		if desc.callID == "" {
-			desc.callID = item.ID
-		}
-		desc.toolName = "apply_patch"
-		desc.toolType = ToolTypeProvider
-		desc.providerExecuted = true
-		desc.dynamic = true
-		desc.input = responseOutputItemToMap(item)
-		desc.ok = true
+		desc = dynamicProviderToolDescriptor(item, "apply_patch")
+
 	case "custom_tool_call":
-		desc.callID = strings.TrimSpace(item.CallID)
-		if desc.callID == "" {
-			desc.callID = item.ID
-		}
+		desc.callID = callIDOrFallback(item)
 		desc.toolName = strings.TrimSpace(item.Name)
 		desc.toolType = ToolTypeFunction
-		desc.providerExecuted = false
 		desc.dynamic = true
 		desc.input = parseJSONOrRaw(item.Input)
 		desc.ok = desc.toolName != ""
+
 	case "mcp_call":
 		desc.toolName = "mcp." + strings.TrimSpace(item.Name)
 		desc.toolType = ToolTypeMCP
@@ -181,6 +143,7 @@ func deriveToolDescriptorForOutputItem(item responses.ResponseOutputItemUnion, s
 		}
 		desc.input = parseJSONOrRaw(item.Arguments)
 		desc.ok = strings.TrimSpace(item.Name) != ""
+
 	case "mcp_list_tools":
 		desc.toolName = "mcp.list_tools"
 		desc.toolType = ToolTypeMCP
@@ -188,6 +151,7 @@ func deriveToolDescriptorForOutputItem(item responses.ResponseOutputItemUnion, s
 		desc.dynamic = true
 		desc.input = map[string]any{}
 		desc.ok = true
+
 	case "mcp_approval_request":
 		desc.toolName = "mcp." + strings.TrimSpace(item.Name)
 		desc.toolType = ToolTypeMCP
@@ -196,6 +160,7 @@ func deriveToolDescriptorForOutputItem(item responses.ResponseOutputItemUnion, s
 		desc.callID = NewCallID()
 		desc.input = parseJSONOrRaw(item.Arguments)
 		desc.ok = strings.TrimSpace(item.Name) != ""
+
 	default:
 		desc.ok = false
 	}
@@ -206,6 +171,37 @@ func deriveToolDescriptorForOutputItem(item responses.ResponseOutputItemUnion, s
 		desc.itemID = desc.callID
 	}
 	return desc
+}
+
+// providerToolDescriptor builds a descriptor for a provider-executed tool with static input.
+func providerToolDescriptor(item responses.ResponseOutputItemUnion, name string, input map[string]any) responseToolDescriptor {
+	if input == nil {
+		input = map[string]any{}
+	}
+	return responseToolDescriptor{
+		itemID:           item.ID,
+		callID:           item.ID,
+		toolName:         name,
+		toolType:         ToolTypeProvider,
+		providerExecuted: true,
+		input:            input,
+		ok:               true,
+	}
+}
+
+// dynamicProviderToolDescriptor builds a descriptor for a dynamic provider tool
+// (shell, apply_patch, etc.) that uses callIDOrFallback and the full output item as input.
+func dynamicProviderToolDescriptor(item responses.ResponseOutputItemUnion, name string) responseToolDescriptor {
+	return responseToolDescriptor{
+		itemID:           item.ID,
+		callID:           callIDOrFallback(item),
+		toolName:         name,
+		toolType:         ToolTypeProvider,
+		providerExecuted: true,
+		dynamic:          true,
+		input:            responseOutputItemToMap(item),
+		ok:               true,
+	}
 }
 
 func outputItemLooksDenied(item responses.ResponseOutputItemUnion) bool {

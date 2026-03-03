@@ -1,9 +1,12 @@
 package connector
 
 import (
+	"context"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"maunium.net/go/mautrix/bridgev2"
 
 	"github.com/beeper/ai-bridge/pkg/connector/msgconv"
 )
@@ -69,4 +72,24 @@ func maybePrependTextSeparator(state *streamingState, rawDelta string) string {
 	}
 	// Newline is rendered as whitespace in Markdown/HTML, preventing word run-ons.
 	return "\n" + rawDelta
+}
+
+// emitUIRuntimeMetadata merges extra metadata fields into the base message
+// metadata and emits a metadata update.
+func (oc *AIClient) emitUIRuntimeMetadata(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	meta *PortalMetadata,
+	extra map[string]any,
+) {
+	base := oc.buildUIMessageMetadata(state, meta, false)
+	if len(extra) > 0 {
+		base = mergeMaps(base, extra)
+	}
+	oc.uiEmitter(state).EmitUIMessageMetadata(ctx, portal, base)
+}
+
+func (oc *AIClient) emitUIStart(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata) {
+	oc.uiEmitter(state).EmitUIStart(ctx, portal, oc.buildUIMessageMetadata(state, meta, false))
 }
