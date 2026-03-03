@@ -72,6 +72,54 @@ func NewBossToolExecutor(store AgentStoreInterface) *BossToolExecutor {
 	return &BossToolExecutor{store: store}
 }
 
+// toolPolicyInputSchema is the shared tool policy schema for create_agent and edit_agent.
+var toolPolicyInputSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"profile": map[string]any{
+			"type":        "string",
+			"enum":        []string{"minimal", "coding", "messaging", "full", "boss"},
+			"description": "Tool access profile (OpenClaw-style)",
+		},
+		"allow": map[string]any{
+			"type":        "array",
+			"items":       map[string]any{"type": "string"},
+			"description": "Explicit tool allowlist (supports wildcards like 'web_*' or group:... shorthands)",
+		},
+		"alsoAllow": map[string]any{
+			"type":        "array",
+			"items":       map[string]any{"type": "string"},
+			"description": "Additional allowlist entries merged into allow",
+		},
+		"deny": map[string]any{
+			"type":        "array",
+			"items":       map[string]any{"type": "string"},
+			"description": "Explicit tool denylist (deny wins)",
+		},
+		"byProvider": map[string]any{
+			"type":                 "object",
+			"additionalProperties": map[string]any{"type": "object"},
+			"description":          "Optional provider- or model-specific overrides keyed by provider or provider/model",
+		},
+	},
+}
+
+// subagentInputSchema is the shared subagent config schema for create_agent and edit_agent.
+var subagentInputSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"model": map[string]any{
+			"type":        "string",
+			"description": "Default model override for subagents spawned by this agent",
+		},
+		"allowAgents": map[string]any{
+			"type":        "array",
+			"items":       map[string]any{"type": "string"},
+			"description": "Agent ids allowed for sessions_spawn (use \"*\" for any)",
+		},
+	},
+}
+
 // CreateAgent tool definition.
 var CreateAgentTool = &Tool{
 	Tool: mcp.Tool{
@@ -97,50 +145,8 @@ var CreateAgentTool = &Tool{
 					"type":        "string",
 					"description": "Custom system prompt for the agent",
 				},
-				"tools": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"profile": map[string]any{
-							"type":        "string",
-							"enum":        []string{"minimal", "coding", "messaging", "full", "boss"},
-							"description": "Tool access profile (OpenClaw-style)",
-						},
-						"allow": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Explicit tool allowlist (supports wildcards like 'web_*' or group:... shorthands)",
-						},
-						"alsoAllow": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Additional allowlist entries merged into allow",
-						},
-						"deny": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Explicit tool denylist (deny wins)",
-						},
-						"byProvider": map[string]any{
-							"type":                 "object",
-							"additionalProperties": map[string]any{"type": "object"},
-							"description":          "Optional provider- or model-specific overrides keyed by provider or provider/model",
-						},
-					},
-				},
-				"subagents": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"model": map[string]any{
-							"type":        "string",
-							"description": "Default model override for subagents spawned by this agent",
-						},
-						"allowAgents": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Agent ids allowed for sessions_spawn (use \"*\" for any)",
-						},
-					},
-				},
+				"tools": toolPolicyInputSchema,
+				"subagents": subagentInputSchema,
 			},
 			"required": []string{"name"},
 		},
@@ -203,50 +209,8 @@ var EditAgentTool = &Tool{
 					"type":        "string",
 					"description": "New system prompt",
 				},
-				"tools": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"profile": map[string]any{
-							"type":        "string",
-							"enum":        []string{"minimal", "coding", "messaging", "full", "boss"},
-							"description": "Tool access profile (OpenClaw-style)",
-						},
-						"allow": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Explicit tool allowlist (supports wildcards like 'web_*' or group:... shorthands)",
-						},
-						"alsoAllow": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Additional allowlist entries merged into allow",
-						},
-						"deny": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Explicit tool denylist (deny wins)",
-						},
-						"byProvider": map[string]any{
-							"type":                 "object",
-							"additionalProperties": map[string]any{"type": "object"},
-							"description":          "Optional provider- or model-specific overrides keyed by provider or provider/model",
-						},
-					},
-				},
-				"subagents": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"model": map[string]any{
-							"type":        "string",
-							"description": "Default model override for subagents spawned by this agent",
-						},
-						"allowAgents": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Agent ids allowed for sessions_spawn (use \"*\" for any)",
-						},
-					},
-				},
+				"tools": toolPolicyInputSchema,
+				"subagents": subagentInputSchema,
 			},
 			"required": []string{"agent_id"},
 		},
