@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ func (cc *CodexClient) bootstrap(ctx context.Context) {
 	}
 	if err := cc.ensureDefaultCodexChat(cc.backgroundContext(ctx)); err != nil {
 		cc.log.Warn().Err(err).Msg("Failed to ensure default Codex chat during bootstrap")
+		return
 	}
 	meta.ChatsSynced = true
 	_ = cc.UserLogin.Save(ctx)
@@ -232,12 +234,17 @@ func (cc *CodexClient) ensureCodexThreadLoaded(ctx context.Context, portal *brid
 		"sandboxPolicy":  cc.buildSandboxPolicy(meta.CodexCwd),
 	}, &resp)
 	if err != nil {
-		// If the stored thread can't be resumed, fall back to a fresh thread.
-		meta.CodexThreadID = ""
-		if err2 := portal.Save(ctx); err2 != nil {
-			return fmt.Errorf("saving cleared thread: %w", err2)
+		// Only clear the stored thread and retry on explicit "not found" failures;
+		// transient errors (e.g. network outages) should not discard a valid thread ID.
+		errMsg := strings.ToLower(err.Error())
+		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "not_found") || strings.Contains(errMsg, "unknown thread") {
+			meta.CodexThreadID = ""
+			if err2 := portal.Save(ctx); err2 != nil {
+				return fmt.Errorf("saving cleared thread: %w", err2)
+			}
+			return cc.ensureCodexThread(ctx, portal, meta)
 		}
-		return cc.ensureCodexThread(ctx, portal, meta)
+		return fmt.Errorf("thread/resume: %w", err)
 	}
 	cc.loadedMu.Lock()
 	cc.loadedThreads[threadID] = true
@@ -254,43 +261,70 @@ func (cc *CodexClient) HandleMatrixDeleteChat(ctx context.Context, msg *bridgev2
 	if meta == nil || !meta.IsCodexRoom {
 		return nil
 	}
-	if err := cc.ensureRPC(ctx); err != nil {
-		return nil
-	}
 
-	// If a turn is in-flight for this thread, try to interrupt it.
 	tid := strings.TrimSpace(meta.CodexThreadID)
-	cc.activeMu.Lock()
-	var active *codexActiveTurn
-	for _, at := range cc.activeTurns {
-		if at != nil && strings.TrimSpace(at.threadID) == tid {
-			active = at
-			break
+
+	// Best-effort RPC cleanup: interrupt active turns and archive thread.
+	// If RPC is unavailable we still proceed with local cleanup below.
+	if err := cc.ensureRPC(ctx); err == nil {
+		// If a turn is in-flight for this thread, try to interrupt it.
+		cc.activeMu.Lock()
+		var active *codexActiveTurn
+		for _, at := range cc.activeTurns {
+			if at != nil && strings.TrimSpace(at.threadID) == tid {
+				active = at
+				break
+			}
+		}
+		cc.activeMu.Unlock()
+		if active != nil && strings.TrimSpace(active.threadID) == tid {
+			callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			_ = cc.rpc.Call(callCtx, "turn/interrupt", map[string]any{
+				"threadId": active.threadID,
+				"turnId":   active.turnID,
+			}, &struct{}{})
+			cancel()
+		}
+
+		if tid != "" {
+			callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			_ = cc.rpc.Call(callCtx, "thread/archive", map[string]any{"threadId": tid}, &struct{}{})
+			cancel()
 		}
 	}
-	cc.activeMu.Unlock()
-	if active != nil && strings.TrimSpace(active.threadID) == tid {
-		callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		_ = cc.rpc.Call(callCtx, "turn/interrupt", map[string]any{
-			"threadId": active.threadID,
-			"turnId":   active.turnID,
-		}, &struct{}{})
-		cancel()
-	}
 
+	// Local cleanup always runs, even when RPC is unavailable.
 	if tid != "" {
-		callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		_ = cc.rpc.Call(callCtx, "thread/archive", map[string]any{"threadId": tid}, &struct{}{})
-		cancel()
 		cc.loadedMu.Lock()
 		delete(cc.loadedThreads, tid)
 		cc.loadedMu.Unlock()
 	}
 	if cwd := strings.TrimSpace(meta.CodexCwd); cwd != "" {
-		_ = os.RemoveAll(cwd)
+		cc.removeCodexCwdIfManaged(cwd)
 	}
 	meta.CodexThreadID = ""
 	meta.CodexCwd = ""
 	_ = msg.Portal.Save(ctx)
 	return nil
+}
+
+// removeCodexCwdIfManaged removes the working directory only if it looks like a
+// bridge-managed temp directory (has the "ai-bridge-codex-" prefix and lives
+// under the system temp root). User-provided directories are never deleted.
+func (cc *CodexClient) removeCodexCwdIfManaged(cwd string) {
+	clean := filepath.Clean(cwd)
+	if clean == "." || clean == string(os.PathSeparator) {
+		return
+	}
+	tmp := filepath.Clean(os.TempDir())
+	if tmp == "" || tmp == "." || tmp == string(os.PathSeparator) {
+		return
+	}
+	if !strings.HasPrefix(filepath.Base(clean), "ai-bridge-codex-") {
+		return
+	}
+	if !strings.HasPrefix(clean, tmp+string(os.PathSeparator)) {
+		return
+	}
+	_ = os.RemoveAll(clean)
 }

@@ -26,7 +26,7 @@ import (
 )
 
 var (
-	_ bridgev2.NetworkAPI                  = (*CodexClient)(nil)
+	_ bridgev2.NetworkAPI                   = (*CodexClient)(nil)
 	_ bridgev2.DeleteChatHandlingNetworkAPI = (*CodexClient)(nil)
 )
 
@@ -425,6 +425,10 @@ func (cc *CodexClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Ma
 
 func (cc *CodexClient) handleCwdSetup(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, msg *bridgev2.MatrixMessage, body string) (*bridgev2.MatrixMessageResponse, error) {
 	path := strings.TrimSpace(msg.Content.Body)
+	if !filepath.IsAbs(path) {
+		cc.sendSystemNotice(ctx, portal, "Please send an absolute path (e.g. /home/user/project).")
+		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
+	}
 	info, err := os.Stat(path)
 	if err != nil || !info.IsDir() {
 		cc.sendSystemNotice(ctx, portal, "That path doesn't exist or isn't a directory. Send a valid absolute path.")
