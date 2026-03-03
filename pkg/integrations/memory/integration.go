@@ -223,19 +223,23 @@ func (i *Integration) PurgeForLogin(ctx context.Context, scope iruntime.LoginSco
 
 // ---- private: tool deps wiring ----
 
+func (i *Integration) managerForScope(scope iruntime.ToolScope) (Manager, string) {
+	agentID := i.agentIDFromEventMeta(scope.Meta)
+	return i.getManager(agentID)
+}
+
+func (i *Integration) sessionKeyForScope(scope iruntime.ToolScope) string {
+	pm, ok := i.host.(iruntime.PortalManager)
+	if !ok || scope.Portal == nil {
+		return ""
+	}
+	return pm.PortalKeyString(scope.Portal)
+}
+
 func (i *Integration) buildToolExecDeps() ToolExecDeps {
 	return ToolExecDeps{
-		GetManager: func(scope iruntime.ToolScope) (Manager, string) {
-			agentID := i.agentIDFromEventMeta(scope.Meta)
-			return i.getManager(agentID)
-		},
-		ResolveSessionKey: func(scope iruntime.ToolScope) string {
-			pm, ok := i.host.(iruntime.PortalManager)
-			if !ok || scope.Portal == nil {
-				return ""
-			}
-			return pm.PortalKeyString(scope.Portal)
-		},
+		GetManager:        i.managerForScope,
+		ResolveSessionKey: i.sessionKeyForScope,
 		ResolveCitationsMode: func(_ iruntime.ToolScope) string {
 			return i.resolveMemoryCitationsMode()
 		},
@@ -247,21 +251,32 @@ func (i *Integration) buildToolExecDeps() ToolExecDeps {
 
 func (i *Integration) buildCommandExecDeps() CommandExecDeps {
 	return CommandExecDeps{
-		GetManager: func(scope iruntime.ToolScope) (Manager, string) {
-			agentID := i.agentIDFromEventMeta(scope.Meta)
-			return i.getManager(agentID)
-		},
-		ResolveSessionKey: func(scope iruntime.ToolScope) string {
-			pm, ok := i.host.(iruntime.PortalManager)
-			if !ok || scope.Portal == nil {
-				return ""
-			}
-			return pm.PortalKeyString(scope.Portal)
-		},
-		SplitQuotedArgs: splitQuotedArgs,
+		GetManager:        i.managerForScope,
+		ResolveSessionKey: i.sessionKeyForScope,
+		SplitQuotedArgs:   splitQuotedArgs,
 		WriteFile: func(ctx context.Context, scope iruntime.CommandScope, mode string, path string, content string, maxBytes int) (string, error) {
 			return i.writeMemoryCommandFile(ctx, scope, mode, path, content, maxBytes)
 		},
+	}
+}
+
+// asOverflowCall safely extracts an overflow call from the generic call argument.
+func asOverflowCall(call any) (iruntime.ContextOverflowCall, bool) {
+	oc, ok := call.(iruntime.ContextOverflowCall)
+	return oc, ok
+}
+
+// toInt64 extracts an int64 from a value that may be int, int64, or float64.
+func toInt64(v any) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	case int:
+		return int64(n)
+	default:
+		return 0
 	}
 }
 
@@ -272,11 +287,11 @@ func (i *Integration) buildOverflowDeps() OverflowDeps {
 			if !ok {
 				return false
 			}
-			overflowCall, ok := call.(iruntime.ContextOverflowCall)
+			oc, ok := asOverflowCall(call)
 			if !ok {
 				return false
 			}
-			return ma.IsSimpleMode(overflowCall.Meta)
+			return ma.IsSimpleMode(oc.Meta)
 		},
 		ResolveSettings: i.resolveOverflowFlushSettings,
 		TrimPrompt: func(prompt []openai.ChatCompletionMessageParamUnion) []openai.ChatCompletionMessageParamUnion {
@@ -291,11 +306,11 @@ func (i *Integration) buildOverflowDeps() OverflowDeps {
 			if !ok {
 				return 128000
 			}
-			overflowCall, ok := call.(iruntime.ContextOverflowCall)
+			oc, ok := asOverflowCall(call)
 			if !ok {
 				return 128000
 			}
-			return mh.ContextWindow(overflowCall.Meta)
+			return mh.ContextWindow(oc.Meta)
 		},
 		ReserveTokens: func() int {
 			oh, ok := i.host.(iruntime.OverflowHelper)
@@ -309,11 +324,11 @@ func (i *Integration) buildOverflowDeps() OverflowDeps {
 			if !ok {
 				return ""
 			}
-			overflowCall, ok := call.(iruntime.ContextOverflowCall)
+			oc, ok := asOverflowCall(call)
 			if !ok {
 				return ""
 			}
-			return mh.EffectiveModel(overflowCall.Meta)
+			return mh.EffectiveModel(oc.Meta)
 		},
 		EstimateTokens: func(prompt []openai.ChatCompletionMessageParamUnion, model string) int {
 			oh, ok := i.host.(iruntime.OverflowHelper)
@@ -327,57 +342,34 @@ func (i *Integration) buildOverflowDeps() OverflowDeps {
 			if !ok {
 				return false
 			}
-			overflowCall, ok := call.(iruntime.ContextOverflowCall)
+			oc, ok := asOverflowCall(call)
 			if !ok {
 				return false
 			}
-			meta := overflowCall.Meta
-			flushAt := ma.GetModuleMeta(meta, "overflow_flush_at")
-			flushCompactionCount := ma.GetModuleMeta(meta, "overflow_flush_compaction_count")
-			if flushAt == nil {
-				return false
-			}
-			flushAtMs, _ := flushAt.(int64)
-			if flushAtMs == 0 {
-				if f, ok := flushAt.(float64); ok {
-					flushAtMs = int64(f)
-				}
-			}
+			flushAtMs := toInt64(ma.GetModuleMeta(oc.Meta, "overflow_flush_at"))
 			if flushAtMs == 0 {
 				return false
 			}
-			compactionCount := ma.CompactionCount(meta)
-			flushCC := 0
-			if flushCompactionCount != nil {
-				switch v := flushCompactionCount.(type) {
-				case int:
-					flushCC = v
-				case int64:
-					flushCC = int(v)
-				case float64:
-					flushCC = int(v)
-				}
-			}
-			return flushCC == compactionCount
+			flushCC := toInt64(ma.GetModuleMeta(oc.Meta, "overflow_flush_compaction_count"))
+			return int(flushCC) == ma.CompactionCount(oc.Meta)
 		},
 		MarkFlushed: func(ctx context.Context, call any) {
-			overflowCall, _ := call.(iruntime.ContextOverflowCall)
+			oc, _ := asOverflowCall(call)
 			ma, ok := i.host.(iruntime.MetadataAccess)
-			if !ok || overflowCall.Portal == nil || overflowCall.Meta == nil {
+			if !ok || oc.Portal == nil || oc.Meta == nil {
 				return
 			}
-			compactionCount := ma.CompactionCount(overflowCall.Meta)
-			ma.SetModuleMeta(overflowCall.Meta, "overflow_flush_at", time.Now().UnixMilli())
-			ma.SetModuleMeta(overflowCall.Meta, "overflow_flush_compaction_count", compactionCount)
+			ma.SetModuleMeta(oc.Meta, "overflow_flush_at", time.Now().UnixMilli())
+			ma.SetModuleMeta(oc.Meta, "overflow_flush_compaction_count", ma.CompactionCount(oc.Meta))
 			pm, ok := i.host.(iruntime.PortalManager)
 			if !ok {
 				return
 			}
-			_ = pm.SavePortal(ctx, overflowCall.Portal, "overflow flush")
+			_ = pm.SavePortal(ctx, oc.Portal, "overflow flush")
 		},
 		RunFlushToolLoop: func(ctx context.Context, call any, model string, prompt []openai.ChatCompletionMessageParamUnion) (bool, error) {
-			overflowCall, _ := call.(iruntime.ContextOverflowCall)
-			return i.runFlushToolLoop(ctx, overflowCall.Portal, overflowCall.Meta, model, prompt)
+			oc, _ := asOverflowCall(call)
+			return i.runFlushToolLoop(ctx, oc.Portal, oc.Meta, model, prompt)
 		},
 		OnError: func(_ context.Context, err error) {
 			i.host.Logger().Warn("overflow flush failed", map[string]any{"error": err.Error()})
@@ -416,15 +408,7 @@ func (i *Integration) shouldBootstrapMemoryPromptContext(scope iruntime.PromptSc
 	if raw == nil {
 		return true
 	}
-	switch v := raw.(type) {
-	case int64:
-		return v == 0
-	case float64:
-		return v == 0
-	case int:
-		return v == 0
-	}
-	return false
+	return toInt64(raw) == 0
 }
 
 func (i *Integration) resolveMemoryBootstrapPaths(_ iruntime.PromptScope) []string {
@@ -670,11 +654,7 @@ func (i *Integration) writeMemoryCommandFile(
 	if ma, ok := i.host.(iruntime.MetadataAccess); ok && scope.Meta != nil {
 		agentID = ma.AgentIDFromMeta(scope.Meta)
 	}
-	updatedPath, err := tfh.WriteTextFile(ctx, scope.Portal, scope.Meta, agentID, mode, path, content, maxBytes)
-	if err != nil {
-		return "", err
-	}
-	return updatedPath, nil
+	return tfh.WriteTextFile(ctx, scope.Portal, scope.Meta, agentID, mode, path, content, maxBytes)
 }
 
 // ---- private: helpers ----
@@ -693,16 +673,11 @@ func (i *Integration) agentIDFromEventMeta(meta any) string {
 }
 
 func (i *Integration) resolveBridgeDB() *dbutil.Database {
-	dba := i.host.DBAccess()
-	if dba == nil {
-		return nil
+	if dba := i.host.DBAccess(); dba != nil {
+		db, _ := dba.BridgeDB().(*dbutil.Database)
+		return db
 	}
-	raw := dba.BridgeDB()
-	if raw == nil {
-		return nil
-	}
-	db, _ := raw.(*dbutil.Database)
-	return db
+	return nil
 }
 
 // splitQuotedArgs parses a raw argument string into tokens, respecting quoted segments.
@@ -756,14 +731,11 @@ func (a *hostRuntimeAdapter) ResolveConfig(agentID string) (*ResolvedConfig, err
 	return resolveMemorySearchConfigFromMaps(cfg, agentCfg)
 }
 
-func embeddingParamsFromConfig(cfg *ResolvedConfig) (apiKey, baseURL string, headers map[string]string) {
+func embeddingParamsFromConfig(cfg *ResolvedConfig) (string, string, map[string]string) {
 	if cfg == nil {
-		return
+		return "", "", nil
 	}
-	apiKey = cfg.Remote.APIKey
-	baseURL = cfg.Remote.BaseURL
-	headers = cfg.Remote.Headers
-	return
+	return cfg.Remote.APIKey, cfg.Remote.BaseURL, cfg.Remote.Headers
 }
 
 func (a *hostRuntimeAdapter) ResolveOpenAIEmbeddingConfig(cfg *ResolvedConfig) (string, string, map[string]string) {

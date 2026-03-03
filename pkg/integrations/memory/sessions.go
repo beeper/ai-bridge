@@ -9,6 +9,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode"
 
 	"maunium.net/go/mautrix/bridgev2/networkid"
 )
@@ -445,7 +446,7 @@ func normalizeSessionText(text string) string {
 	var b strings.Builder
 	prevSpace := false
 	for _, r := range text {
-		if r == '\n' || r == '\t' || r == ' ' || r == '\v' || r == '\f' || r == '\u00a0' || r == '\u2000' || r == '\u2001' || r == '\u2002' || r == '\u2003' || r == '\u2004' || r == '\u2005' || r == '\u2006' || r == '\u2007' || r == '\u2008' || r == '\u2009' || r == '\u200a' || r == '\u202f' || r == '\u205f' || r == '\u3000' {
+		if unicode.IsSpace(r) {
 			if !prevSpace {
 				b.WriteByte(' ')
 				prevSpace = true

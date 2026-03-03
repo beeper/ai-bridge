@@ -224,7 +224,7 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 	status := &MemorySearchStatus{
 		Dirty:             dirty,
 		WorkspaceDir:      workspaceDir,
-		DBPath:            resolveMemoryDBPath(m.cfg, m.agentID),
+		DBPath:            memoryDBPath,
 		Provider:          m.status.Provider,
 		Model:             m.status.Model,
 		RequestedProvider: m.cfg.Provider,
@@ -245,29 +245,12 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 	)
 	_ = row.Scan(&status.Chunks)
 
+	status.SourceCounts = buildSourceCounts(statusCtx, m, indexGen)
 	files := 0
-	for _, source := range []string{"memory", "workspace"} {
-		if !hasSource(m.cfg.Sources, source) {
-			continue
-		}
-		var count int
-		_ = m.db.QueryRow(statusCtx,
-			`SELECT COUNT(*) FROM ai_memory_files WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND source=$4`,
-			m.bridgeID, m.loginID, m.agentID, source,
-		).Scan(&count)
-		files += count
-	}
-	if hasSource(m.cfg.Sources, "sessions") {
-		var count int
-		_ = m.db.QueryRow(statusCtx,
-			`SELECT COUNT(*) FROM ai_memory_session_files WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
-			m.bridgeID, m.loginID, m.agentID,
-		).Scan(&count)
-		files += count
+	for _, sc := range status.SourceCounts {
+		files += sc.Files
 	}
 	status.Files = files
-
-	status.SourceCounts = buildSourceCounts(statusCtx, m, indexGen)
 
 	cacheStatus := &MemorySearchCacheStatus{Enabled: m.cfg.Cache.Enabled, MaxEntries: m.cfg.Cache.MaxEntries}
 	if m.cfg.Cache.Enabled {
@@ -438,14 +421,12 @@ func normalizeSearchSources(requested []string, fallback []string) []string {
 		key := strings.ToLower(strings.TrimSpace(raw))
 		switch key {
 		case "memory", "workspace", "sessions":
-		default:
-			continue
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, key)
 		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, key)
 	}
 	if len(out) == 0 {
 		return slices.Clone(fallback)
@@ -920,6 +901,8 @@ func normalizeNewlines(text string) string {
 	return text
 }
 
+// truncateSnippet truncates text to memorySnippetMaxChars, counting supplementary
+// plane characters (> U+FFFF) as 2 units to match UTF-16 encoding width.
 func truncateSnippet(text string) string {
 	if text == "" {
 		return ""
@@ -1014,6 +997,4 @@ func resolveStatusExtraPaths(paths []string, workspaceDir string) []string {
 	return out
 }
 
-func resolveMemoryDBPath(_ *memorycore.ResolvedConfig, _ string) string {
-	return "bridge.sqlite (vfs)"
-}
+const memoryDBPath = "bridge.sqlite (vfs)"
