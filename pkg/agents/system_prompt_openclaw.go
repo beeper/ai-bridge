@@ -20,22 +20,18 @@ Original OpenClaw prompt snippets (reference copy, do not edit):
 - "When diagnosing issues, run `openclaw status` yourself when possible; only ask the user if you lack access (e.g., sandboxed)."
 */
 
-func buildSkillsSection(params struct {
-	skillsPrompt string
-	isMinimal    bool
-	readToolName string
-}) []string {
-	if params.isMinimal {
+func buildSkillsSection(skillsPrompt string, isMinimal bool, readToolName string) []string {
+	if isMinimal {
 		return nil
 	}
-	trimmed := strings.TrimSpace(params.skillsPrompt)
+	trimmed := strings.TrimSpace(skillsPrompt)
 	if trimmed == "" {
 		return nil
 	}
 	return []string{
 		"## Skills (mandatory)",
 		"Before replying: scan <available_skills> <description> entries.",
-		fmt.Sprintf("- If exactly one skill clearly applies: read its SKILL.md at <location> with `%s`, then follow it.", params.readToolName),
+		fmt.Sprintf("- If exactly one skill clearly applies: read its SKILL.md at <location> with `%s`, then follow it.", readToolName),
 		"- If multiple could apply: choose the most specific one, then read/follow it.",
 		"- If none clearly apply: do not read any SKILL.md.",
 		"Constraints: never read more than one skill up front; only read after selecting.",
@@ -44,22 +40,18 @@ func buildSkillsSection(params struct {
 	}
 }
 
-func buildMemorySection(params struct {
-	isMinimal     bool
-	availableTool map[string]bool
-	citationsMode string
-}) []string {
-	if params.isMinimal {
+func buildMemorySection(isMinimal bool, availableTool map[string]bool, citationsMode string) []string {
+	if isMinimal {
 		return nil
 	}
-	if !params.availableTool["memory_search"] && !params.availableTool["memory_get"] {
+	if !availableTool["memory_search"] && !availableTool["memory_get"] {
 		return nil
 	}
 	lines := []string{
 		"## Memory Recall",
 		"Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md + workspace/*.md; then use memory_get to pull only the needed lines. If low confidence after search, say you checked.",
 	}
-	if strings.EqualFold(strings.TrimSpace(params.citationsMode), "off") {
+	if strings.EqualFold(strings.TrimSpace(citationsMode), "off") {
 		lines = append(lines, "Citations are disabled: do not mention file paths or line numbers in replies unless the user explicitly asks.")
 	} else {
 		lines = append(lines, "Citations: include Source: <path#line> when it helps the user verify memory snippets.")
@@ -124,33 +116,33 @@ func buildReplyTagsSection(isMinimal bool) []string {
 	}
 }
 
-func buildMessagingSection(params struct {
-	isMinimal          bool
-	availableTool      map[string]bool
-	messageChannelOpts string
-	inlineButtons      bool
-	runtimeChannel     string
-	messageToolHints   []string
-}) []string {
-	if params.isMinimal {
+func buildMessagingSection(
+	isMinimal bool,
+	availableTool map[string]bool,
+	messageChannelOpts string,
+	inlineButtons bool,
+	runtimeChannel string,
+	messageToolHints []string,
+) []string {
+	if isMinimal {
 		return nil
 	}
 	messageToolBlock := ""
-	if params.availableTool["message"] {
+	if availableTool["message"] {
 		lines := []string{
 			"",
 			"### message tool",
 			"- Use `message` for proactive sends + channel actions (polls, reactions, etc.).",
 			"- For `action=send`, include `to` and `message`.",
-			fmt.Sprintf("- If multiple channels are configured, pass `channel` (%s).", params.messageChannelOpts),
+			fmt.Sprintf("- If multiple channels are configured, pass `channel` (%s).", messageChannelOpts),
 			fmt.Sprintf("- If you use `message` (`action=send`) to deliver your user-visible reply, respond with ONLY: %s (avoid duplicate replies).", SilentReplyToken),
 		}
-		if params.inlineButtons {
+		if inlineButtons {
 			lines = append(lines, "- Inline buttons supported. Use `action=send` with `buttons=[[{text,callback_data}]]` (callback_data routes back as a user message).")
-		} else if params.runtimeChannel != "" {
-			lines = append(lines, fmt.Sprintf("- Inline buttons not enabled for %s. If you need them, ask to set %s.capabilities.inlineButtons (\"dm\"|\"group\"|\"all\"|\"allowlist\").", params.runtimeChannel, params.runtimeChannel))
+		} else if runtimeChannel != "" {
+			lines = append(lines, fmt.Sprintf("- Inline buttons not enabled for %s. If you need them, ask to set %s.capabilities.inlineButtons (\"dm\"|\"group\"|\"all\"|\"allowlist\").", runtimeChannel, runtimeChannel))
 		}
-		for _, hint := range params.messageToolHints {
+		for _, hint := range messageToolHints {
 			if strings.TrimSpace(hint) == "" {
 				continue
 			}
@@ -159,7 +151,7 @@ func buildMessagingSection(params struct {
 		messageToolBlock = strings.Join(lines, "\n")
 	}
 
-	section := []string{
+	return []string{
 		"## Messaging",
 		"- Reply in current session → automatically routes to the source channel (Signal, Telegram, etc.)",
 		"- Cross-session messaging → use sessions_send(sessionKey, message)",
@@ -167,28 +159,21 @@ func buildMessagingSection(params struct {
 		messageToolBlock,
 		"",
 	}
-	return section
 }
 
-func buildVoiceSection(params struct {
-	isMinimal bool
-	ttsHint   string
-}) []string {
-	if params.isMinimal {
+func buildVoiceSection(isMinimal bool, ttsHint string) []string {
+	if isMinimal {
 		return nil
 	}
-	hint := strings.TrimSpace(params.ttsHint)
+	hint := strings.TrimSpace(ttsHint)
 	if hint == "" {
 		return nil
 	}
 	return []string{"## Voice (TTS)", hint, ""}
 }
 
-func buildDocsSection(params struct {
-	isMinimal     bool
-	hasBeeperDocs bool
-}) []string {
-	if params.isMinimal || !params.hasBeeperDocs {
+func buildDocsSection(isMinimal bool, hasBeeperDocs bool) []string {
+	if isMinimal || !hasBeeperDocs {
 		return nil
 	}
 	return []string{
@@ -305,36 +290,25 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"image",
 	}
 
-	rawToolNames := make([]string, 0, len(params.ToolNames))
-	for _, tool := range params.ToolNames {
-		rawToolNames = append(rawToolNames, strings.TrimSpace(tool))
-	}
-	canonicalToolNames := make([]string, 0, len(rawToolNames))
-	for _, name := range rawToolNames {
-		if name != "" {
-			canonicalToolNames = append(canonicalToolNames, name)
+	// Build normalized tool index: lowercase -> original case-sensitive name.
+	canonicalByNormalized := make(map[string]string, len(params.ToolNames))
+	availableTools := make(map[string]bool, len(params.ToolNames))
+	for _, raw := range params.ToolNames {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
 		}
-	}
-	canonicalByNormalized := make(map[string]string)
-	for _, name := range canonicalToolNames {
 		normalized := strings.ToLower(name)
 		if _, ok := canonicalByNormalized[normalized]; !ok {
 			canonicalByNormalized[normalized] = name
 		}
+		availableTools[normalized] = true
 	}
 	resolveToolName := func(normalized string) string {
 		if name, ok := canonicalByNormalized[normalized]; ok {
 			return name
 		}
 		return normalized
-	}
-
-	normalizedTools := make([]string, 0, len(canonicalToolNames))
-	availableTools := make(map[string]bool)
-	for _, name := range canonicalToolNames {
-		normalized := strings.ToLower(name)
-		normalizedTools = append(normalizedTools, normalized)
-		availableTools[normalized] = true
 	}
 
 	externalToolSummaries := make(map[string]string)
@@ -350,52 +324,42 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		externalToolSummaries[normalized] = trimmed
 	}
 
-	toolOrderSet := make(map[string]bool)
+	toolOrderSet := make(map[string]bool, len(toolOrder))
 	for _, tool := range toolOrder {
 		toolOrderSet[tool] = true
 	}
-	extraToolSet := make(map[string]bool)
-	for _, tool := range normalizedTools {
+	var extraTools []string
+	for tool := range availableTools {
 		if !toolOrderSet[tool] {
-			extraToolSet[tool] = true
+			extraTools = append(extraTools, tool)
 		}
 	}
-	extraTools := make([]string, 0, len(extraToolSet))
-	for tool := range extraToolSet {
-		extraTools = append(extraTools, tool)
-	}
+	slices.Sort(extraTools)
 	enabledTools := make([]string, 0, len(toolOrder))
 	for _, tool := range toolOrder {
 		if availableTools[tool] {
 			enabledTools = append(enabledTools, tool)
 		}
 	}
-	slices.Sort(extraTools)
+
+	formatToolLine := func(tool string) string {
+		summary := coreToolSummaries[tool]
+		if summary == "" {
+			summary = externalToolSummaries[tool]
+		}
+		name := resolveToolName(tool)
+		if summary != "" {
+			return fmt.Sprintf("- %s: %s", name, summary)
+		}
+		return fmt.Sprintf("- %s", name)
+	}
 
 	toolLines := make([]string, 0, len(enabledTools)+len(extraTools))
 	for _, tool := range enabledTools {
-		summary := coreToolSummaries[tool]
-		if summary == "" {
-			summary = externalToolSummaries[tool]
-		}
-		name := resolveToolName(tool)
-		if summary != "" {
-			toolLines = append(toolLines, fmt.Sprintf("- %s: %s", name, summary))
-		} else {
-			toolLines = append(toolLines, fmt.Sprintf("- %s", name))
-		}
+		toolLines = append(toolLines, formatToolLine(tool))
 	}
 	for _, tool := range extraTools {
-		summary := coreToolSummaries[tool]
-		if summary == "" {
-			summary = externalToolSummaries[tool]
-		}
-		name := resolveToolName(tool)
-		if summary != "" {
-			toolLines = append(toolLines, fmt.Sprintf("- %s: %s", name, summary))
-		} else {
-			toolLines = append(toolLines, fmt.Sprintf("- %s", name))
-		}
+		toolLines = append(toolLines, formatToolLine(tool))
 	}
 
 	hasGateway := availableTools["gateway"]
@@ -465,22 +429,9 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	}
 	isMinimal := promptMode == PromptModeMinimal || promptMode == PromptModeNone
 
-	skillsSection := buildSkillsSection(struct {
-		skillsPrompt string
-		isMinimal    bool
-		readToolName string
-	}{skillsPrompt: skillsPrompt, isMinimal: isMinimal, readToolName: readToolName})
-
-	memorySection := buildMemorySection(struct {
-		isMinimal     bool
-		availableTool map[string]bool
-		citationsMode string
-	}{isMinimal: isMinimal, availableTool: availableTools, citationsMode: params.MemoryCitations})
-
-	docsSection := buildDocsSection(struct {
-		isMinimal     bool
-		hasBeeperDocs bool
-	}{isMinimal: isMinimal, hasBeeperDocs: availableTools["beeper_docs"]})
+	skillsSection := buildSkillsSection(skillsPrompt, isMinimal, readToolName)
+	memorySection := buildMemorySection(isMinimal, availableTools, params.MemoryCitations)
+	docsSection := buildDocsSection(isMinimal, availableTools["beeper_docs"])
 
 	workspaceNotes := make([]string, 0, len(params.WorkspaceNotes))
 	for _, note := range params.WorkspaceNotes {
@@ -627,25 +578,11 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 		"",
 	)
 	lines = append(lines, buildReplyTagsSection(isMinimal)...)
-	lines = append(lines, buildMessagingSection(struct {
-		isMinimal          bool
-		availableTool      map[string]bool
-		messageChannelOpts string
-		inlineButtons      bool
-		runtimeChannel     string
-		messageToolHints   []string
-	}{
-		isMinimal:          isMinimal,
-		availableTool:      availableTools,
-		messageChannelOpts: messageChannelOptions,
-		inlineButtons:      inlineButtonsEnabled,
-		runtimeChannel:     runtimeChannel,
-		messageToolHints:   params.MessageToolHints,
-	})...)
-	lines = append(lines, buildVoiceSection(struct {
-		isMinimal bool
-		ttsHint   string
-	}{isMinimal: isMinimal, ttsHint: params.TTSHint})...)
+	lines = append(lines, buildMessagingSection(
+		isMinimal, availableTools, messageChannelOptions,
+		inlineButtonsEnabled, runtimeChannel, params.MessageToolHints,
+	)...)
+	lines = append(lines, buildVoiceSection(isMinimal, params.TTSHint)...)
 
 	if extraSystemPrompt != "" {
 		contextHeader := "## Group Chat Context"

@@ -130,49 +130,29 @@ type ToolPolicy struct {
 	Deny  []string `json:"deny,omitempty"`
 }
 
+// clonePolicyLists returns shallow copies of the Allow/AlsoAllow/Deny slices.
+func clonePolicyLists(src ToolPolicyConfig) ToolPolicyConfig {
+	out := ToolPolicyConfig{Profile: src.Profile}
+	out.Allow = slices.Clone(src.Allow)
+	out.AlsoAllow = slices.Clone(src.AlsoAllow)
+	out.Deny = slices.Clone(src.Deny)
+	return out
+}
+
 // Clone creates a deep copy of ToolPolicyConfig.
 func (c *ToolPolicyConfig) Clone() *ToolPolicyConfig {
 	if c == nil {
 		return nil
 	}
-	out := &ToolPolicyConfig{
-		Profile: c.Profile,
-	}
-	if len(c.Allow) > 0 {
-		out.Allow = slices.Clone(c.Allow)
-	}
-	if len(c.AlsoAllow) > 0 {
-		out.AlsoAllow = slices.Clone(c.AlsoAllow)
-	}
-	if len(c.Deny) > 0 {
-		out.Deny = slices.Clone(c.Deny)
-	}
+	out := clonePolicyLists(*c)
 	if len(c.ByProvider) > 0 {
 		out.ByProvider = make(map[string]ToolPolicyConfig, len(c.ByProvider))
 		for key, value := range c.ByProvider {
-			clone := value
-			if len(value.Allow) > 0 {
-				clone.Allow = slices.Clone(value.Allow)
-			}
-			if len(value.AlsoAllow) > 0 {
-				clone.AlsoAllow = slices.Clone(value.AlsoAllow)
-			}
-			if len(value.Deny) > 0 {
-				clone.Deny = slices.Clone(value.Deny)
-			}
+			clone := clonePolicyLists(value)
 			if len(value.ByProvider) > 0 {
 				clone.ByProvider = make(map[string]ToolPolicyConfig, len(value.ByProvider))
 				for subKey, subVal := range value.ByProvider {
-					subClone := subVal
-					if len(subVal.Allow) > 0 {
-						subClone.Allow = slices.Clone(subVal.Allow)
-					}
-					if len(subVal.AlsoAllow) > 0 {
-						subClone.AlsoAllow = slices.Clone(subVal.AlsoAllow)
-					}
-					if len(subVal.Deny) > 0 {
-						subClone.Deny = slices.Clone(subVal.Deny)
-					}
+					subClone := clonePolicyLists(subVal)
 					subClone.ByProvider = nil
 					clone.ByProvider[subKey] = subClone
 				}
@@ -180,7 +160,7 @@ func (c *ToolPolicyConfig) Clone() *ToolPolicyConfig {
 			out.ByProvider[key] = clone
 		}
 	}
-	return out
+	return &out
 }
 
 var toolNameAliases = map[string]string{
@@ -503,13 +483,7 @@ func makeToolPolicyMatcher(policy *ToolPolicy) func(string) bool {
 		if matchesAny(normalized, deny) {
 			return false
 		}
-		if len(allow) == 0 {
-			return true
-		}
-		if matchesAny(normalized, allow) {
-			return true
-		}
-		return false
+		return len(allow) == 0 || matchesAny(normalized, allow)
 	}
 }
 
@@ -554,13 +528,9 @@ var defaultSubagentDeny = []string{
 // ResolveSubagentToolPolicy returns the default subagent policy (deny wins).
 func ResolveSubagentToolPolicy(global *GlobalToolPolicyConfig) *ToolPolicy {
 	deny := slices.Clone(defaultSubagentDeny)
-	if global != nil && global.Subagents != nil && global.Subagents.Tools != nil {
-		if len(global.Subagents.Tools.Deny) > 0 {
-			deny = append(deny, global.Subagents.Tools.Deny...)
-		}
-	}
 	var allow []string
 	if global != nil && global.Subagents != nil && global.Subagents.Tools != nil {
+		deny = append(deny, global.Subagents.Tools.Deny...)
 		allow = global.Subagents.Tools.Allow
 	}
 	return &ToolPolicy{
