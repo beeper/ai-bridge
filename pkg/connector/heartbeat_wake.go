@@ -42,11 +42,10 @@ func (w *HeartbeatWake) SetHandler(handler HeartbeatWakeHandler) {
 
 func (w *HeartbeatWake) Request(reason string, coalesce time.Duration) {
 	w.mu.Lock()
-	if strings.TrimSpace(reason) == "" {
-		if w.pendingReason == "" {
-			w.pendingReason = "requested"
-		}
-	} else {
+	reason = strings.TrimSpace(reason)
+	if reason == "" && w.pendingReason == "" {
+		w.pendingReason = "requested"
+	} else if reason != "" {
 		w.pendingReason = reason
 	}
 	w.mu.Unlock()

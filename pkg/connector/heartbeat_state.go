@@ -9,31 +9,17 @@ import (
 const heartbeatDedupeWindowMs = 24 * 60 * 60 * 1000
 
 func (oc *AIClient) isDuplicateHeartbeat(ref sessionStoreRef, sessionKey string, text string, nowMs int64) bool {
-	if oc == nil {
-		return false
-	}
 	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return false
-	}
 	sessionKey = strings.TrimSpace(sessionKey)
-	if sessionKey == "" {
+	if oc == nil || trimmed == "" || sessionKey == "" {
 		return false
 	}
 	entry, ok := oc.getSessionEntry(context.Background(), ref, sessionKey)
-	if !ok {
+	if !ok || entry.LastHeartbeatSentAt <= 0 {
 		return false
 	}
-	if strings.TrimSpace(entry.LastHeartbeatText) != trimmed {
-		return false
-	}
-	if entry.LastHeartbeatSentAt <= 0 {
-		return false
-	}
-	if nowMs-entry.LastHeartbeatSentAt < heartbeatDedupeWindowMs {
-		return true
-	}
-	return false
+	return strings.TrimSpace(entry.LastHeartbeatText) == trimmed &&
+		nowMs-entry.LastHeartbeatSentAt < heartbeatDedupeWindowMs
 }
 
 func (oc *AIClient) recordHeartbeatText(ref sessionStoreRef, sessionKey string, text string, sentAt int64) {

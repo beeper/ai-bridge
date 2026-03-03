@@ -64,19 +64,14 @@ func (p *heartbeatEventPersister) offer(evt *HeartbeatEventPayload) {
 		return
 	}
 	evtCopy := *evt
+	// Drain any existing value (latest-wins) then send.
+	select {
+	case <-p.ch:
+	default:
+	}
 	select {
 	case p.ch <- &evtCopy:
-		return
 	default:
-		// channel is full, replace existing value (latest-wins)
-		select {
-		case <-p.ch:
-		default:
-		}
-		select {
-		case p.ch <- &evtCopy:
-		default:
-		}
 	}
 }
 
@@ -179,21 +174,21 @@ func getLastHeartbeatEventForLogin(login *bridgev2.UserLogin) *HeartbeatEventPay
 		return nil
 	}
 	heartbeatEvents.mu.Lock()
-	last := (*HeartbeatEventPayload)(nil)
+	var last *HeartbeatEventPayload
 	if heartbeatEvents.lastByLogin != nil {
 		last = heartbeatEvents.lastByLogin[login.ID]
 	}
 	heartbeatEvents.mu.Unlock()
 
-	if last == nil {
-		meta := loginMetadata(login)
-		if meta != nil && meta.LastHeartbeatEvent != nil {
-			seedLastHeartbeatEvent(login.ID, meta.LastHeartbeatEvent)
-			c := *meta.LastHeartbeatEvent
-			return &c
-		}
-		return nil
+	if last != nil {
+		eventsCopy := *last
+		return &eventsCopy
 	}
-	eventsCopy := *last
-	return &eventsCopy
+	// Fall back to persisted metadata.
+	if meta := loginMetadata(login); meta != nil && meta.LastHeartbeatEvent != nil {
+		seedLastHeartbeatEvent(login.ID, meta.LastHeartbeatEvent)
+		c := *meta.LastHeartbeatEvent
+		return &c
+	}
+	return nil
 }

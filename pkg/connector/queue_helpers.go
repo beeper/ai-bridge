@@ -43,19 +43,15 @@ func applyQueueDropPolicy[T any](params struct {
 	if overflow.ShouldSummarize {
 		for _, item := range dropped {
 			params.Queue.DroppedCount++
-			summary := strings.TrimSpace(params.Summarize(item))
-			if summary != "" {
+			if summary := strings.TrimSpace(params.Summarize(item)); summary != "" {
 				params.Queue.SummaryLines = append(params.Queue.SummaryLines, airuntime.BuildQueueSummaryLine(summary, 160))
 			}
 		}
-		limit := params.SummaryLimit
-		if limit <= 0 {
-			limit = params.Queue.Cap
+		limit := max(params.SummaryLimit, 0)
+		if limit == 0 {
+			limit = max(params.Queue.Cap, 0)
 		}
-		if limit < 0 {
-			limit = 0
-		}
-		if len(params.Queue.SummaryLines) > limit {
+		if limit > 0 && len(params.Queue.SummaryLines) > limit {
 			params.Queue.SummaryLines = params.Queue.SummaryLines[len(params.Queue.SummaryLines)-limit:]
 		}
 	}
@@ -66,7 +62,7 @@ func buildQueueSummaryPrompt(state *pendingQueue, noun string) string {
 	if state == nil || state.dropPolicy != airuntime.QueueDropSummarize || state.droppedCount <= 0 {
 		return ""
 	}
-	title := "[Queue overflow] Dropped " + itoa(state.droppedCount) + " " + noun
+	title := "[Queue overflow] Dropped " + strconv.Itoa(state.droppedCount) + " " + noun
 	if state.droppedCount != 1 {
 		title += "s"
 	}
@@ -89,11 +85,7 @@ func buildCollectPrompt(title string, items []pendingQueueItem, summary string) 
 		blocks = append(blocks, summary)
 	}
 	for idx, item := range items {
-		blocks = append(blocks, strings.TrimSpace("---\nQueued #"+itoa(idx+1)+"\n"+item.prompt))
+		blocks = append(blocks, strings.TrimSpace("---\nQueued #"+strconv.Itoa(idx+1)+"\n"+item.prompt))
 	}
 	return strings.Join(blocks, "\n\n")
-}
-
-func itoa(value int) string {
-	return strconv.Itoa(value)
 }
