@@ -167,7 +167,9 @@ func (s *StreamSession) EmitPart(ctx context.Context, part map[string]any) {
 		AgentID:       strings.TrimSpace(s.params.AgentID),
 	})
 	if err != nil {
-		s.logWarn("build_stream_event_envelope_failed", err)
+		if s.params.Logger != nil {
+			s.params.Logger.Warn().Err(err).Msg("Failed to build stream event envelope")
+		}
 		return
 	}
 	txnID := matrixevents.BuildStreamEventTxnID(turnID, seq)
