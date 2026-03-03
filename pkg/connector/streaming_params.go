@@ -58,49 +58,28 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 		}
 	}
 
-	// OpenRouter's Responses API only supports function-type tools.
 	isOpenRouter := oc.isOpenRouterProvider()
-	log.Debug().
-		Bool("is_openrouter", isOpenRouter).
-		Str("detected_provider", loginMetadata(oc.UserLogin).Provider).
-		Msg("Provider detection for tool filtering")
+	hasAgent := resolveAgentID(meta) != ""
+	strictMode := resolveToolStrictMode(isOpenRouter)
 
 	// Add builtin function tools for this turn.
 	// In simple mode this is intentionally restricted to web_search.
-	hasAgent := resolveAgentID(meta) != ""
-	strictMode := resolveToolStrictMode(isOpenRouter)
 	enabledTools := oc.selectedBuiltinToolsForTurn(ctx, meta)
 	if len(enabledTools) > 0 {
 		params.Tools = append(params.Tools, ToOpenAITools(enabledTools, strictMode, &oc.log)...)
-		log.Debug().Int("count", len(enabledTools)).Msg("Added builtin function tools")
 	}
 
 	if meta.Capabilities.SupportsToolCalling && hasAgent {
-		// Add session tools for non-boss rooms
 		if !hasBossAgent(meta) && !oc.isBuilderRoom(portal) {
-			var enabledSessions []*tools.Tool
-			for _, tool := range tools.SessionTools() {
-				if oc.isToolEnabled(meta, tool.Name) {
-					enabledSessions = append(enabledSessions, tool)
-				}
-			}
-			if len(enabledSessions) > 0 {
+			if enabledSessions := oc.filterEnabledTools(meta, tools.SessionTools()); len(enabledSessions) > 0 {
 				params.Tools = append(params.Tools, bossToolsToOpenAI(enabledSessions, strictMode, &oc.log)...)
-				log.Debug().Int("count", len(enabledSessions)).Msg("Added session tools")
 			}
 		}
 	}
 
-	// Add boss tools if this is a Boss room
 	if hasBossAgent(meta) || oc.isBuilderRoom(portal) {
-		var enabledBoss []*tools.Tool
-		for _, tool := range tools.BossTools() {
-			if oc.isToolEnabled(meta, tool.Name) {
-				enabledBoss = append(enabledBoss, tool)
-			}
-		}
+		enabledBoss := oc.filterEnabledTools(meta, tools.BossTools())
 		params.Tools = append(params.Tools, bossToolsToOpenAI(enabledBoss, strictMode, &oc.log)...)
-		log.Debug().Int("count", len(enabledBoss)).Msg("Added boss agent tools")
 	}
 
 	if isOpenRouter {
@@ -114,39 +93,55 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 	return params
 }
 
+// filterEnabledTools returns the subset of tools that are enabled for this room/metadata.
+func (oc *AIClient) filterEnabledTools(meta *PortalMetadata, all []*tools.Tool) []*tools.Tool {
+	var enabled []*tools.Tool
+	for _, tool := range all {
+		if oc.isToolEnabled(meta, tool.Name) {
+			enabled = append(enabled, tool)
+		}
+	}
+	return enabled
+}
+
+// sanitizeToolSchema converts a tool's InputSchema to a sanitized map[string]any.
+func sanitizeToolSchema(inputSchema any, log *zerolog.Logger, toolName string) map[string]any {
+	var schema map[string]any
+	switch v := inputSchema.(type) {
+	case nil:
+		return nil
+	case map[string]any:
+		schema = v
+	default:
+		encoded, err := json.Marshal(v)
+		if err == nil {
+			if err := json.Unmarshal(encoded, &schema); err != nil {
+				return nil
+			}
+		}
+	}
+	if schema != nil {
+		var stripped []string
+		schema, stripped = sanitizeToolSchemaWithReport(schema)
+		logSchemaSanitization(log, toolName, stripped)
+	}
+	return schema
+}
+
 // bossToolsToOpenAI converts boss tools to OpenAI Responses API format.
 func bossToolsToOpenAI(bossTools []*tools.Tool, strictMode ToolStrictMode, log *zerolog.Logger) []responses.ToolUnionParam {
 	var result []responses.ToolUnionParam
 	for _, t := range bossTools {
-		var schema map[string]any
-		switch v := t.InputSchema.(type) {
-		case nil:
-			schema = nil
-		case map[string]any:
-			schema = v
-		default:
-			encoded, err := json.Marshal(v)
-			if err == nil {
-				if err := json.Unmarshal(encoded, &schema); err != nil {
-					schema = nil
-				}
-			}
-		}
-		if schema != nil {
-			var stripped []string
-			schema, stripped = sanitizeToolSchemaWithReport(schema)
-			logSchemaSanitization(log, t.Name, stripped)
-		}
-		strict := shouldUseStrictMode(strictMode, schema)
+		schema := sanitizeToolSchema(t.InputSchema, log, t.Name)
 		toolParam := responses.ToolUnionParam{
 			OfFunction: &responses.FunctionToolParam{
 				Name:       t.Name,
 				Parameters: schema,
-				Strict:     param.NewOpt(strict),
+				Strict:     param.NewOpt(shouldUseStrictMode(strictMode, schema)),
 				Type:       constant.ValueOf[constant.Function](),
 			},
 		}
-		if t.Description != "" && toolParam.OfFunction != nil {
+		if t.Description != "" {
 			toolParam.OfFunction.Description = openai.String(t.Description)
 		}
 		result = append(result, toolParam)
@@ -158,25 +153,7 @@ func bossToolsToOpenAI(bossTools []*tools.Tool, strictMode ToolStrictMode, log *
 func bossToolsToChatTools(bossTools []*tools.Tool, log *zerolog.Logger) []openai.ChatCompletionToolUnionParam {
 	var result []openai.ChatCompletionToolUnionParam
 	for _, t := range bossTools {
-		var schema map[string]any
-		switch v := t.InputSchema.(type) {
-		case nil:
-			schema = nil
-		case map[string]any:
-			schema = v
-		default:
-			encoded, err := json.Marshal(v)
-			if err == nil {
-				if err := json.Unmarshal(encoded, &schema); err != nil {
-					schema = nil
-				}
-			}
-		}
-		if schema != nil {
-			var stripped []string
-			schema, stripped = sanitizeToolSchemaWithReport(schema)
-			logSchemaSanitization(log, t.Name, stripped)
-		}
+		schema := sanitizeToolSchema(t.InputSchema, log, t.Name)
 		function := openai.FunctionDefinitionParam{
 			Name:       t.Name,
 			Parameters: schema,

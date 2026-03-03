@@ -86,24 +86,13 @@ func (oc *AIClient) buildContinuationParams(
 
 	// Add boss tools for Boss agent rooms (needed for multi-turn tool use)
 	if hasBossAgent(meta) || agents.IsBossAgent(agentID) {
-		var enabledBoss []*tools.Tool
-		for _, tool := range tools.BossTools() {
-			if oc.isToolEnabled(meta, tool.Name) {
-				enabledBoss = append(enabledBoss, tool)
-			}
-		}
+		enabledBoss := oc.filterEnabledTools(meta, tools.BossTools())
 		params.Tools = append(params.Tools, bossToolsToOpenAI(enabledBoss, strictMode, &oc.log)...)
 	}
 
 	// Add session tools for non-boss agent rooms (needed for multi-turn tool use)
 	if meta.Capabilities.SupportsToolCalling && agentID != "" && !(hasBossAgent(meta) || agents.IsBossAgent(agentID)) {
-		var enabledSessions []*tools.Tool
-		for _, tool := range tools.SessionTools() {
-			if oc.isToolEnabled(meta, tool.Name) {
-				enabledSessions = append(enabledSessions, tool)
-			}
-		}
-		if len(enabledSessions) > 0 {
+		if enabledSessions := oc.filterEnabledTools(meta, tools.SessionTools()); len(enabledSessions) > 0 {
 			params.Tools = append(params.Tools, bossToolsToOpenAI(enabledSessions, strictMode, &oc.log)...)
 		}
 	}
