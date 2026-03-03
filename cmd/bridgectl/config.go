@@ -18,6 +18,9 @@ func patchConfigWithRegistration(configPath string, reg any, homeserverURL, brid
 	if err = yaml.Unmarshal(data, &doc); err != nil {
 		return err
 	}
+	if doc == nil {
+		doc = map[string]any{}
+	}
 	regMap := toMap(reg)
 
 	// Homeserver -- hungryserv websocket mode
@@ -126,6 +129,9 @@ func applyConfigOverrides(configPath string, overrides map[string]any) error {
 	var doc map[string]any
 	if err = yaml.Unmarshal(data, &doc); err != nil {
 		return err
+	}
+	if doc == nil {
+		doc = map[string]any{}
 	}
 	for k, v := range overrides {
 		setPath(doc, strings.Split(k, "."), v)

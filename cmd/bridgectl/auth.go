@@ -22,6 +22,7 @@ type authConfig struct {
 	Domain   string `json:"domain"`
 	Username string `json:"username"`
 	Token    string `json:"token"`
+	fromEnv  bool   `json:"-"` // true when credentials came from environment variables
 }
 
 func cmdLogin(args []string) error {
@@ -185,9 +186,9 @@ func cmdAuthShow() error {
 	if err != nil {
 		return err
 	}
-	masked := cfg.Token
-	if len(masked) > 8 {
-		masked = masked[:4] + "..." + masked[len(masked)-4:]
+	masked := "***"
+	if len(cfg.Token) > 8 {
+		masked = cfg.Token[:4] + "..." + cfg.Token[len(cfg.Token)-4:]
 	}
 	fmt.Printf("env=%s domain=%s username=%s token=%s\n", cfg.Env, cfg.Domain, cfg.Username, masked)
 	return nil
@@ -208,7 +209,13 @@ func cmdAuthWhoami() error {
 }
 
 // syncAuthUsername updates the persisted auth config if the username changed.
+// It skips writing when credentials were sourced from environment variables
+// to avoid persisting env-only tokens to disk.
 func syncAuthUsername(cfg *authConfig, username string) {
+	if cfg.fromEnv {
+		cfg.Username = username
+		return
+	}
 	if cfg.Username == "" || cfg.Username != username {
 		cfg.Username = username
 		_ = saveAuthConfig(*cfg)
@@ -225,7 +232,9 @@ func getAuthOrEnv() (authConfig, error) {
 		if !ok {
 			return authConfig{}, fmt.Errorf("invalid BEEPER_ENV %q", env)
 		}
-		return authConfig{Env: env, Domain: domain, Username: os.Getenv("BEEPER_USERNAME"), Token: tok}, nil
+		cfg := authConfig{Env: env, Domain: domain, Username: os.Getenv("BEEPER_USERNAME"), Token: tok}
+		cfg.fromEnv = true
+		return cfg, nil
 	}
 	return loadAuthConfig()
 }

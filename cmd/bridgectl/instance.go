@@ -517,12 +517,6 @@ func ensureInitialized(instance string, cfg instanceConfig, sp *statePaths) (*me
 }
 
 func readOrSynthesizeMetadata(instance string, cfg instanceConfig, sp *statePaths) (*metadata, error) {
-	if data, err := os.ReadFile(sp.MetaPath); err == nil {
-		var m metadata
-		if err = json.Unmarshal(data, &m); err == nil {
-			return &m, nil
-		}
-	}
 	repo, err := expandPath(cfg.RepoPath)
 	if err != nil {
 		return nil, err
@@ -533,6 +527,18 @@ func readOrSynthesizeMetadata(instance string, cfg instanceConfig, sp *statePath
 	}
 	if !filepath.IsAbs(binPath) {
 		binPath = filepath.Join(repo, binPath)
+	}
+
+	if data, err := os.ReadFile(sp.MetaPath); err == nil {
+		var m metadata
+		if err = json.Unmarshal(data, &m); err == nil {
+			// Refresh fields that may have changed in the manifest.
+			m.BridgeType = cfg.BridgeType
+			m.RepoPath = repo
+			m.BinaryPath = binPath
+			m.BeeperBridgeName = cfg.BeeperBridgeName
+			return &m, nil
+		}
 	}
 	return &metadata{
 		Instance:         instance,

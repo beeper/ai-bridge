@@ -343,8 +343,12 @@ func resolveAllModels(apiModels map[string]OpenRouterModel) []resolvedModel {
 	for _, id := range modelIDs {
 		displayName := modelConfig.Models[id]
 		apiModel, hasAPIData := apiModels[id]
-		if displayName == "" && hasAPIData {
-			displayName = apiModel.Name
+		if displayName == "" {
+			if hasAPIData {
+				displayName = apiModel.Name
+			} else {
+				displayName = id
+			}
 		}
 		out = append(out, resolvedModel{
 			ID:          id,
