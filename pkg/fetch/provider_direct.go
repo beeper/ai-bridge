@@ -79,11 +79,7 @@ func (p *directProvider) Fetch(ctx context.Context, req Request) (*Response, err
 	extractor := "basic"
 	if strings.Contains(contentType, "text/html") {
 		text = extractTextFromHTML(text)
-		if strings.EqualFold(req.ExtractMode, "text") {
-			extractor = "basic-text"
-		} else {
-			extractor = "basic-markdown"
-		}
+		extractor = "basic-text"
 	} else if strings.Contains(contentType, "application/json") {
 		var decoded any
 		if err := json.Unmarshal(body, &decoded); err == nil {

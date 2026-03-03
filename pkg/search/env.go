@@ -30,6 +30,12 @@ func ApplyEnvDefaults(cfg *Config) *Config {
 	}
 	providerExplicit := strings.TrimSpace(cfg.Provider) != ""
 	envCfg := ConfigFromEnv()
+	if strings.TrimSpace(cfg.Provider) == "" {
+		cfg.Provider = envCfg.Provider
+	}
+	if len(cfg.Fallbacks) == 0 {
+		cfg.Fallbacks = envCfg.Fallbacks
+	}
 	if cfg.Exa.APIKey == "" {
 		cfg.Exa.APIKey = envCfg.Exa.APIKey
 	}

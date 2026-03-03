@@ -204,7 +204,7 @@ func checkPatchBoundariesLenient(lines []string) ([]string, error) {
 	if len(lines) >= 4 {
 		first := strings.TrimSpace(lines[0])
 		last := strings.TrimSpace(lines[len(lines)-1])
-		if (first == "<<EOF" || first == "<<'EOF'" || first == "<<\"EOF\"") && strings.HasSuffix(last, "EOF") {
+		if (first == "<<EOF" || first == "<<'EOF'" || first == "<<\"EOF\"") && last == "EOF" {
 			inner := lines[1 : len(lines)-1]
 			if err := checkPatchBoundariesStrict(inner); err == nil {
 				return inner, nil
