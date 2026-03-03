@@ -63,7 +63,12 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 	}
 	turnID := strings.TrimSpace(turnStart.Turn.ID)
 	if turnID == "" {
-		turnID = "turn_unknown"
+		errMsg := "Codex returned an empty turn ID"
+		cc.uiEmitter(state).EmitUIError(ctx, portal, errMsg)
+		cc.emitUIFinish(ctx, portal, state, model, "failed")
+		cc.sendFinalAssistantTurn(ctx, portal, state, model, "failed")
+		cc.saveAssistantMessage(ctx, portal, state, model, "failed")
+		return
 	}
 
 	turnCh := cc.subscribeTurn(threadID, turnID)
@@ -91,7 +96,11 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 	defer maxWait.Stop()
 	for {
 		select {
-		case evt := <-turnCh:
+		case evt, ok := <-turnCh:
+			if !ok {
+				finishStatus = "interrupted"
+				goto done
+			}
 			cc.handleNotif(ctx, portal, meta, state, model, threadID, turnID, evt)
 			if st, errText, ok := codexTurnCompletedStatus(evt, threadID, turnID); ok {
 				finishStatus = st
