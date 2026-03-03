@@ -360,9 +360,10 @@ func ExecuteCommand(ctx context.Context, call iruntime.CommandCall, deps Command
 }
 
 func normalizeCitationsMode(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	switch mode {
 	case "on", "off", "auto":
-		return strings.ToLower(strings.TrimSpace(raw))
+		return mode
 	default:
 		return "auto"
 	}

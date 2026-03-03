@@ -231,8 +231,5 @@ func isHeartbeatOnlyText(text string, ackMax int) bool {
 		return true
 	}
 	shouldSkip, stripped, _ := agents.StripHeartbeatTokenWithMode(trimmed, agents.StripHeartbeatModeHeartbeat, ackMax)
-	if shouldSkip && strings.TrimSpace(stripped) == "" {
-		return true
-	}
-	return false
+	return shouldSkip && strings.TrimSpace(stripped) == ""
 }
