@@ -206,13 +206,6 @@ func (oc *AIClient) applyMediaUnderstandingForAttachments(
 }
 
 func (oc *AIClient) resolveAutoAudioEntry(cfg *MediaUnderstandingConfig) *MediaUnderstandingModelConfig {
-	headers := map[string]string{}
-	if cfg != nil && cfg.Headers != nil {
-		for key, value := range cfg.Headers {
-			headers[key] = value
-		}
-	}
-
 	candidates := []struct {
 		provider string
 		model    string
@@ -223,7 +216,7 @@ func (oc *AIClient) resolveAutoAudioEntry(cfg *MediaUnderstandingConfig) *MediaU
 		{"google", defaultGoogleAudioModel},
 	}
 	for _, c := range candidates {
-		if oc.resolveMediaProviderAPIKey(c.provider, "", "") != "" || hasProviderAuthHeader(c.provider, headers) {
+		if oc.hasMediaProviderAuth(c.provider, cfg) {
 			return &MediaUnderstandingModelConfig{
 				Provider: c.provider,
 				Model:    c.model,
@@ -328,30 +321,14 @@ func (oc *AIClient) resolveKeyMediaEntry(
 }
 
 func (oc *AIClient) hasMediaProviderAuth(providerID string, cfg *MediaUnderstandingConfig) bool {
-	headers := map[string]string{}
-	if cfg != nil && cfg.Headers != nil {
-		for key, value := range cfg.Headers {
-			headers[key] = value
-		}
-	}
-	if hasProviderAuthHeader(providerID, headers) {
+	if cfg != nil && hasProviderAuthHeader(providerID, cfg.Headers) {
 		return true
 	}
-	key := oc.resolveMediaProviderAPIKey(providerID, "", "")
-	return strings.TrimSpace(key) != ""
+	return strings.TrimSpace(oc.resolveMediaProviderAPIKey(providerID, "", "")) != ""
 }
 
 func providerSupportsCapability(providerID string, capability MediaUnderstandingCapability) bool {
-	caps, ok := mediaProviderCapabilities[providerID]
-	if !ok {
-		return false
-	}
-	for _, cap := range caps {
-		if cap == capability {
-			return true
-		}
-	}
-	return false
+	return capabilityInCapabilities(capability, mediaProviderCapabilities[providerID])
 }
 
 func splitModelProvider(modelID string) (string, string) {
@@ -382,13 +359,11 @@ func hasBinary(name string) bool {
 }
 
 func fileExists(path string) bool {
-	if strings.TrimSpace(path) == "" {
+	if path == "" {
 		return false
 	}
-	if _, err := os.Stat(path); err == nil {
-		return true
-	}
-	return false
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func resolveLocalWhisperCPPEntry() *MediaUnderstandingModelConfig {
@@ -690,7 +665,7 @@ func (oc *AIClient) describeImageWithEntry(
 		if apiKey == "" && !hasProviderAuthHeader("google", headers) {
 			return nil, errors.New("missing API key for google image understanding")
 		}
-		request := mediaImageRequest{
+		request := mediaRequestBase{
 			APIKey:   apiKey,
 			BaseURL:  resolveMediaBaseURL(capCfg, entry),
 			Headers:  headers,
@@ -920,7 +895,7 @@ func (oc *AIClient) describeVideoWithEntry(
 		return nil, fmt.Errorf("missing API key for %s video description", providerID)
 	}
 
-	request := mediaVideoRequest{
+	request := mediaRequestBase{
 		APIKey:   apiKey,
 		BaseURL:  resolveMediaBaseURL(capCfg, entry),
 		Headers:  headers,

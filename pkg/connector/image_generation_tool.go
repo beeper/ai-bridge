@@ -332,37 +332,23 @@ func supportsGeminiImageGen(btc *BridgeToolContext) bool {
 	return false
 }
 
-func normalizeOpenAIModel(model string) string {
-	if strings.TrimSpace(model) == "" {
-		return DefaultOpenAIImageModel
+// normalizeImageGenModel strips the provider prefix from the model name and
+// falls back to defaultModel when the input is empty.
+func normalizeImageGenModel(model, providerPrefix, defaultModel string) string {
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" {
+		return defaultModel
 	}
-	_, actual := ParseModelPrefix(model)
+	if providerPrefix == "" {
+		return trimmed
+	}
+	_, actual := ParseModelPrefix(trimmed)
 	actual = strings.TrimSpace(actual)
-	actual = strings.TrimPrefix(actual, "openai/")
+	actual = strings.TrimPrefix(actual, providerPrefix)
 	if actual == "" {
-		return strings.TrimSpace(model)
+		return trimmed
 	}
 	return actual
-}
-
-func normalizeGeminiModel(model string) string {
-	if strings.TrimSpace(model) == "" {
-		return DefaultGeminiImageModel
-	}
-	_, actual := ParseModelPrefix(model)
-	actual = strings.TrimSpace(actual)
-	actual = strings.TrimPrefix(actual, "google/")
-	if actual == "" {
-		return strings.TrimSpace(model)
-	}
-	return actual
-}
-
-func normalizeOpenRouterModel(model string) string {
-	if strings.TrimSpace(model) == "" {
-		return DefaultImageModel
-	}
-	return strings.TrimSpace(model)
 }
 
 func openAIImageFamily(model string) string {
@@ -380,14 +366,11 @@ func openAIImageFamily(model string) string {
 }
 
 func normalizeOpenAIImageParams(req imageGenRequest) (openAIImageParams, error) {
-	model := normalizeOpenAIModel(req.Model)
+	model := normalizeImageGenModel(req.Model, "openai/", DefaultOpenAIImageModel)
 	family := openAIImageFamily(model)
 	count := req.Count
-	if count == 0 {
+	if count <= 0 {
 		count = 1
-	}
-	if count < 1 {
-		return openAIImageParams{}, errors.New("count must be >= 1")
 	}
 	if count > 10 {
 		return openAIImageParams{}, errors.New("count exceeds maximum (10)")
@@ -569,7 +552,7 @@ func generateImagesForRequest(ctx context.Context, btc *BridgeToolContext, req i
 		if req.Count > 1 {
 			return nil, errors.New("gemini image generation currently supports count=1")
 		}
-		model := normalizeGeminiModel(req.Model)
+		model := normalizeImageGenModel(req.Model, "google/", DefaultGeminiImageModel)
 		baseURL, err := buildGeminiBaseURL(btc)
 		if err != nil {
 			return nil, err
@@ -583,7 +566,7 @@ func generateImagesForRequest(ctx context.Context, btc *BridgeToolContext, req i
 		req.Style = ""
 		req.Background = ""
 		req.OutputFormat = ""
-		model := normalizeOpenRouterModel(req.Model)
+		model := normalizeImageGenModel(req.Model, "", DefaultImageModel)
 		// If the request looks like it's targeting an OpenAI image model, force the OpenRouter
 		// default (Gemini) instead.
 		if inferProviderFromModel(model) == imageGenProviderOpenAI {
@@ -643,13 +626,11 @@ func resolveOpenRouterImageGenEndpoint(btc *BridgeToolContext) (baseURL string, 
 	meta := loginMetadata(btc.Client.UserLogin)
 	conn := btc.Client.connector
 
-	trim := func(s string) string { return strings.TrimSpace(s) }
-
 	// Provider-specific per-login endpoints.
 	switch meta.Provider {
 	case ProviderMagicProxy:
 		base := normalizeMagicProxyBaseURL(meta.BaseURL)
-		key := trim(meta.APIKey)
+		key := strings.TrimSpace(meta.APIKey)
 		if base == "" || key == "" {
 			return "", "", false
 		}
@@ -658,8 +639,8 @@ func resolveOpenRouterImageGenEndpoint(btc *BridgeToolContext) (baseURL string, 
 		if conn == nil {
 			return "", "", false
 		}
-		base := strings.TrimSuffix(trim(btc.Client.connector.resolveBeeperBaseURL(meta)), "/")
-		key := trim(btc.Client.connector.resolveBeeperToken(meta))
+		base := strings.TrimSuffix(strings.TrimSpace(conn.resolveBeeperBaseURL(meta)), "/")
+		key := strings.TrimSpace(conn.resolveBeeperToken(meta))
 		if base == "" || key == "" {
 			return "", "", false
 		}
@@ -668,8 +649,8 @@ func resolveOpenRouterImageGenEndpoint(btc *BridgeToolContext) (baseURL string, 
 		if conn == nil {
 			return "", "", false
 		}
-		base := trim(conn.resolveOpenRouterBaseURL())
-		key := trim(conn.resolveOpenRouterAPIKey(meta))
+		base := strings.TrimSpace(conn.resolveOpenRouterBaseURL())
+		key := strings.TrimSpace(conn.resolveOpenRouterAPIKey(meta))
 		if base == "" || key == "" {
 			return "", "", false
 		}
@@ -680,8 +661,8 @@ func resolveOpenRouterImageGenEndpoint(btc *BridgeToolContext) (baseURL string, 
 	if conn == nil {
 		return "", "", false
 	}
-	base := trim(conn.resolveOpenRouterBaseURL())
-	key := trim(conn.resolveOpenRouterAPIKey(meta))
+	base := strings.TrimSpace(conn.resolveOpenRouterBaseURL())
+	key := strings.TrimSpace(conn.resolveOpenRouterAPIKey(meta))
 	if base == "" || key == "" {
 		return "", "", false
 	}
@@ -693,7 +674,7 @@ func openRouterImageURLForRef(ctx context.Context, btc *BridgeToolContext, ref s
 	if ref == "" {
 		return "", errors.New("empty image reference")
 	}
-
+	// Pass through data-URIs and validated HTTP(S) URLs directly.
 	if strings.HasPrefix(ref, "data:") {
 		return ref, nil
 	}
@@ -703,26 +684,12 @@ func openRouterImageURLForRef(ctx context.Context, btc *BridgeToolContext, ref s
 		}
 		return ref, nil
 	}
-	if strings.HasPrefix(ref, "mxc://") {
-		b64Data, mimeType, err := btc.Client.downloadAndEncodeMedia(ctx, ref, nil, imageInputMaxSizeMB)
-		if err != nil {
-			return "", err
-		}
-		return "data:" + mimeType + ";base64," + b64Data, nil
+	// Everything else (mxc://, local files) needs to be downloaded and encoded.
+	b64Data, mimeType, err := loadInputImageBase64(ctx, btc, ref)
+	if err != nil {
+		return "", err
 	}
-	if isLocalImageRef(ref) {
-		resolved, err := resolveLocalImagePath(ref)
-		if err != nil {
-			return "", err
-		}
-		b64Data, mimeType, err := btc.Client.downloadAndEncodeMedia(ctx, resolved, nil, imageInputMaxSizeMB)
-		if err != nil {
-			return "", err
-		}
-		return "data:" + mimeType + ";base64," + b64Data, nil
-	}
-
-	return "", fmt.Errorf("unsupported image reference: %s", ref)
+	return "data:" + mimeType + ";base64," + b64Data, nil
 }
 
 func callOpenRouterImageGenWithControls(ctx context.Context, btc *BridgeToolContext, apiKey, baseURL string, req imageGenRequest, model string) ([]string, error) {

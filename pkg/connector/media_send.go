@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -113,4 +114,11 @@ func extensionForMIME(mimeType, defaultExt string, overrides map[string]string) 
 		return ext
 	}
 	return defaultExt
+}
+
+func buildMediaMetadataBody(caption, suffix string, understanding *mediaUnderstandingResult) string {
+	if understanding != nil && strings.TrimSpace(understanding.Body) != "" {
+		return understanding.Body
+	}
+	return caption + suffix
 }
