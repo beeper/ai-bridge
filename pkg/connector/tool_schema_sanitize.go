@@ -117,19 +117,19 @@ func sanitizeToolSchemaWithReport(schema map[string]any) (map[string]any, []stri
 
 func normalizeToolSchema(schema map[string]any) map[string]any {
 	if schema == nil {
-		return schema
-	}
-	if hasObjectProperties(schema) && !hasUnion(schema) {
-		if _, hasType := schema["type"]; hasType {
-			return schema
-		}
-		next := cloneSchemaMap(schema)
-		next["type"] = "object"
-		return next
+		return nil
 	}
 	if hasUnion(schema) {
 		if merged := mergeObjectUnionSchema(schema); merged != nil {
 			return merged
+		}
+		return schema
+	}
+	if hasObjectProperties(schema) {
+		if _, hasType := schema["type"]; !hasType {
+			next := maps.Clone(schema)
+			next["type"] = "object"
+			return next
 		}
 	}
 	return schema
@@ -161,9 +161,6 @@ func hasObjectProperties(schema map[string]any) bool {
 	return false
 }
 
-func cloneSchemaMap(schema map[string]any) map[string]any {
-	return maps.Clone(schema)
-}
 
 func mergeObjectUnionSchema(schema map[string]any) map[string]any {
 	var variants []any
@@ -371,24 +368,17 @@ func jsonTypeOf(value any) string {
 		return "array"
 	case map[string]any:
 		return "object"
+	default:
+		if reflect.TypeOf(value).Kind() == reflect.Slice {
+			return "array"
+		}
+		return ""
 	}
-	if reflect.TypeOf(value) != nil && reflect.TypeOf(value).Kind() == reflect.Slice {
-		return "array"
-	}
-	return ""
 }
 
 func isStrictSchemaCompatible(schema map[string]any) bool {
-	if schema == nil {
-		return false
-	}
-	if typ, ok := schema["type"].(string); !ok || typ != "object" {
-		return false
-	}
-	if hasUnsupportedKeywords(schema) {
-		return false
-	}
-	return true
+	typ, ok := schema["type"].(string)
+	return ok && typ == "object" && !hasUnsupportedKeywords(schema)
 }
 
 func hasUnsupportedKeywords(schema any) bool {
@@ -625,30 +615,23 @@ func cleanSchemaWithDefs(schema map[string]any, defs schemaDefs, refStack map[st
 		hasOneOf = true
 	}
 
-	var cleanedAnyOf []any
-	var cleanedOneOf []any
-	if hasAnyOf {
-		raw := schema["anyOf"].([]any)
-		cleanedAnyOf = make([]any, 0, len(raw))
+	cleanUnionVariants := func(raw []any) []any {
+		cleaned := make([]any, 0, len(raw))
 		for _, variant := range raw {
-			cleanedAnyOf = append(cleanedAnyOf, cleanSchemaForProviderWithDefs(variant, nextDefs, refStack, report))
+			cleaned = append(cleaned, cleanSchemaForProviderWithDefs(variant, nextDefs, refStack, report))
 		}
-	}
-	if hasOneOf {
-		raw := schema["oneOf"].([]any)
-		cleanedOneOf = make([]any, 0, len(raw))
-		for _, variant := range raw {
-			cleanedOneOf = append(cleanedOneOf, cleanSchemaForProviderWithDefs(variant, nextDefs, refStack, report))
-		}
+		return cleaned
 	}
 
+	var cleanedAnyOf, cleanedOneOf []any
 	if hasAnyOf {
+		cleanedAnyOf = cleanUnionVariants(schema["anyOf"].([]any))
 		if collapsed, ok := tryCollapseUnionVariants(schema, cleanedAnyOf); ok {
 			return collapsed
 		}
 	}
-
 	if hasOneOf {
+		cleanedOneOf = cleanUnionVariants(schema["oneOf"].([]any))
 		if collapsed, ok := tryCollapseUnionVariants(schema, cleanedOneOf); ok {
 			return collapsed
 		}
@@ -718,36 +701,16 @@ func cleanSchemaWithDefs(schema map[string]any, defs schemaDefs, refStack map[st
 				cleaned[key] = value
 			}
 		case "anyOf":
-			if arr, ok := value.([]any); ok {
-				if cleanedAnyOf != nil {
-					cleaned[key] = cleanedAnyOf
-				} else {
-					nextItems := make([]any, 0, len(arr))
-					for _, entry := range arr {
-						nextItems = append(nextItems, cleanSchemaForProviderWithDefs(entry, nextDefs, refStack, report))
-					}
-					cleaned[key] = nextItems
-				}
+			if cleanedAnyOf != nil {
+				cleaned[key] = cleanedAnyOf
 			}
 		case "oneOf":
-			if arr, ok := value.([]any); ok {
-				if cleanedOneOf != nil {
-					cleaned[key] = cleanedOneOf
-				} else {
-					nextItems := make([]any, 0, len(arr))
-					for _, entry := range arr {
-						nextItems = append(nextItems, cleanSchemaForProviderWithDefs(entry, nextDefs, refStack, report))
-					}
-					cleaned[key] = nextItems
-				}
+			if cleanedOneOf != nil {
+				cleaned[key] = cleanedOneOf
 			}
 		case "allOf":
 			if arr, ok := value.([]any); ok {
-				nextItems := make([]any, 0, len(arr))
-				for _, entry := range arr {
-					nextItems = append(nextItems, cleanSchemaForProviderWithDefs(entry, nextDefs, refStack, report))
-				}
-				cleaned[key] = nextItems
+				cleaned[key] = cleanUnionVariants(arr)
 			}
 		default:
 			cleaned[key] = value

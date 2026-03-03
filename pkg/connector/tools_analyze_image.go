@@ -13,22 +13,12 @@ import (
 
 // executeAnalyzeImage analyzes an image with a custom prompt using vision capabilities.
 func executeAnalyzeImage(ctx context.Context, args map[string]any) (string, error) {
-	imageURL := ""
-	if v, ok := args["image"].(string); ok && strings.TrimSpace(v) != "" {
-		imageURL = strings.TrimSpace(v)
-	} else if v, ok := args["image_url"].(string); ok && strings.TrimSpace(v) != "" {
-		imageURL = strings.TrimSpace(v)
-	} else if v, ok := args["imageUrl"].(string); ok && strings.TrimSpace(v) != "" {
-		imageURL = strings.TrimSpace(v)
-	}
+	imageURL := firstNonEmptyString(args["image"], args["image_url"], args["imageUrl"])
 	if imageURL == "" {
 		return "", errors.New("missing or invalid 'image' argument")
 	}
 
-	prompt := ""
-	if v, ok := args["prompt"].(string); ok && strings.TrimSpace(v) != "" {
-		prompt = strings.TrimSpace(v)
-	}
+	prompt := firstNonEmptyString(args["prompt"])
 	if prompt == "" {
 		prompt = "Describe the image."
 	}

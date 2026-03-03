@@ -711,61 +711,48 @@ func executeMessageReply(ctx context.Context, args map[string]any, btc *BridgeTo
 }
 
 func executeMessagePin(ctx context.Context, args map[string]any, btc *BridgeToolContext, pin bool) (string, error) {
+	action := "pin"
+	if !pin {
+		action = "unpin"
+	}
+
 	messageID, ok := args["message_id"].(string)
 	if !ok || messageID == "" {
-		action := "pin"
-		if !pin {
-			action = "unpin"
-		}
 		return "", fmt.Errorf("action=%s requires 'message_id' parameter", action)
 	}
 
 	targetEventID := id.EventID(messageID)
 	bot := btc.Client.UserLogin.Bridge.Bot
-
 	pinnedEvents := getPinnedEventIDs(ctx, btc)
 
-	// Modify pinned events
 	if pin {
-		// Add to pinned if not already there
 		if !slices.Contains(pinnedEvents, targetEventID.String()) {
 			pinnedEvents = append(pinnedEvents, targetEventID.String())
 		}
 	} else {
-		// Remove from pinned
-		var newPinned []string
+		filtered := pinnedEvents[:0]
 		for _, evtID := range pinnedEvents {
 			if evtID != targetEventID.String() {
-				newPinned = append(newPinned, evtID)
+				filtered = append(filtered, evtID)
 			}
 		}
-		pinnedEvents = newPinned
+		pinnedEvents = filtered
 	}
 
-	// Convert to id.EventID slice
 	pinnedIDs := make([]id.EventID, len(pinnedEvents))
 	for i, evtID := range pinnedEvents {
 		pinnedIDs[i] = id.EventID(evtID)
 	}
 
-	// Update pinned events state
 	_, err := bot.SendState(ctx, btc.Portal.MXID, event.StatePinnedEvents, "", &event.Content{
 		Parsed: &event.PinnedEventsEventContent{
 			Pinned: pinnedIDs,
 		},
 	}, time.Time{})
 	if err != nil {
-		action := "pin"
-		if !pin {
-			action = "unpin"
-		}
 		return "", fmt.Errorf("couldn't %s the message: %w", action, err)
 	}
 
-	action := "pin"
-	if !pin {
-		action = "unpin"
-	}
 	return jsonActionResult(action, map[string]any{
 		"message_id":   targetEventID,
 		"status":       "ok",
@@ -870,10 +857,6 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
-}
-
-func executeWebFetch(ctx context.Context, args map[string]any) (string, error) {
-	return executeWebFetchWithProviders(ctx, args)
 }
 
 func executeImageGeneration(ctx context.Context, args map[string]any) (string, error) {
@@ -1557,11 +1540,6 @@ func executeCalculator(ctx context.Context, args map[string]any) (string, error)
 	}
 
 	return fmt.Sprintf("%.6g", result), nil
-}
-
-// executeWebSearch performs a web search (placeholder implementation)
-func executeWebSearch(ctx context.Context, args map[string]any) (string, error) {
-	return executeWebSearchWithProviders(ctx, args)
 }
 
 // Similar to OpenClaw's session_status tool.
