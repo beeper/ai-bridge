@@ -103,8 +103,9 @@ func (c *CronService) executeJob(jobID string, forced bool) (bool, string, error
 	}
 
 	// Phase 2: execute outside store lock under a hard timeout.
+	// Derive from the service context so Stop() cancellation interrupts active jobs.
 	timeout := c.resolveJobTimeout(snapshot)
-	jobCtx, jobCancel := context.WithTimeout(context.Background(), timeout)
+	jobCtx, jobCancel := context.WithTimeout(c.ctx, timeout)
 	defer jobCancel()
 
 	statusVal, errVal, summaryVal, _ := c.runJob(jobCtx, snapshot)
@@ -153,7 +154,11 @@ func (c *CronService) finalizeJob(jobID string, startedAt int64, statusVal, errV
 		job.UpdatedAtMs = endedAt
 
 		shouldDelete := job.Schedule.Kind == "at" && statusVal == "ok" && job.DeleteAfterRun
-		if !shouldDelete {
+		if shouldDelete {
+			// Job will be removed; clear NextRunAtMs so the finished event does not
+			// advertise a stale next-run time for a job that no longer exists.
+			job.State.NextRunAtMs = nil
+		} else {
 			switch {
 			case job.Schedule.Kind == "at" && statusVal == "ok":
 				job.Enabled = false
