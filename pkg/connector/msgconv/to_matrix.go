@@ -198,6 +198,9 @@ func RelatesToThread(threadRoot id.EventID, replyTo id.EventID) map[string]any {
 
 // RelatesToReplace builds a m.relates_to payload for an edit (m.replace) event.
 func RelatesToReplace(initialEventID id.EventID, replyTo id.EventID) map[string]any {
+	if initialEventID == "" {
+		return nil
+	}
 	rel := map[string]any{
 		"rel_type": matrixevents.RelReplace,
 		"event_id": initialEventID.String(),
@@ -233,9 +236,11 @@ func BuildFinalEditContent(p FinalEditContentParams) *event.Content {
 			"formatted_body": p.Rendered.FormattedBody,
 			"m.mentions":     map[string]any{},
 		},
-		"m.relates_to":           p.RelatesTo,
 		matrixevents.BeeperAIKey: p.UIMessage,
 		"m.mentions":             map[string]any{},
+	}
+	if p.RelatesTo != nil {
+		raw["m.relates_to"] = p.RelatesTo
 	}
 	if p.DontShowEdited {
 		raw["com.beeper.dont_render_edited"] = true

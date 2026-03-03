@@ -172,9 +172,9 @@ func fnModel(ce *commands.Event) {
 		return
 	}
 
-	modelID := ce.Args[0]
-	valid, err := client.validateModel(ce.Ctx, modelID)
-	if err != nil || !valid {
+	modelID := strings.TrimSpace(ce.Args[0])
+	resolvedModel, valid, err := client.resolveModelID(ce.Ctx, modelID)
+	if err != nil || !valid || resolvedModel == "" {
 		ce.Reply("That model isn't available: %s", modelID)
 		return
 	}
@@ -185,11 +185,16 @@ func fnModel(ce *commands.Event) {
 		return
 	}
 
-	meta.Model = modelID
-	meta.Capabilities = getModelCapabilities(modelID, client.findModelInfo(modelID))
+	if err := client.validateDMModelSwitch(ce.Portal, meta, resolvedModel); err != nil {
+		ce.Reply("%s", dmModelSwitchGuidance(resolvedModel))
+		return
+	}
+
+	meta.Model = resolvedModel
+	meta.Capabilities = getModelCapabilities(resolvedModel, client.findModelInfo(resolvedModel))
 	client.savePortalQuiet(ce.Ctx, ce.Portal, "model change")
-	client.ensureGhostDisplayName(ce.Ctx, modelID)
-	ce.Reply("Model set to %s.", modelID)
+	client.ensureGhostDisplayName(ce.Ctx, resolvedModel)
+	ce.Reply("Model set to %s.", resolvedModel)
 }
 
 // CommandTemp handles the !ai temp command

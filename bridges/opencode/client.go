@@ -71,9 +71,11 @@ func (oc *OpenCodeClient) Connect(ctx context.Context) {
 	oc.loggedIn.Store(true)
 	oc.UserLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected, Message: "Connected"})
 	if oc.bridge != nil {
-		if err := oc.bridge.RestoreConnections(oc.BackgroundContext(ctx)); err != nil {
-			oc.UserLogin.Log.Warn().Err(err).Msg("Failed to restore OpenCode connections")
-		}
+		go func() {
+			if err := oc.bridge.RestoreConnections(oc.BackgroundContext(ctx)); err != nil {
+				oc.UserLogin.Log.Warn().Err(err).Msg("Failed to restore OpenCode connections")
+			}
+		}()
 	}
 }
 

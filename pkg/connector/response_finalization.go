@@ -637,6 +637,12 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 		replyTo = *replyToEventID
 	}
 	relatesTo := msgconv.RelatesToReplace(state.initialEventID, replyTo)
+	if relatesTo == nil && state.networkMessageID != "" {
+		oc.loggerForContext(ctx).Debug().
+			Str("turn_id", state.turnID).
+			Str("target_message_id", string(state.networkMessageID)).
+			Msg("Final assistant edit using network target without initial event ID")
+	}
 
 	// Generate link previews for URLs in the response
 	intent, _ := oc.getIntentForPortal(ctx, portal, bridgev2.RemoteEventMessage)

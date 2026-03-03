@@ -37,6 +37,7 @@ var (
 	_ bridgev2.IdentifierResolvingNetworkAPI    = (*AIClient)(nil)
 	_ bridgev2.ContactListingNetworkAPI         = (*AIClient)(nil)
 	_ bridgev2.UserSearchingNetworkAPI          = (*AIClient)(nil)
+	_ bridgev2.GhostDMCreatingNetworkAPI        = (*AIClient)(nil)
 	_ bridgev2.EditHandlingNetworkAPI           = (*AIClient)(nil)
 	_ bridgev2.ReactionHandlingNetworkAPI       = (*AIClient)(nil)
 	_ bridgev2.RedactionHandlingNetworkAPI      = (*AIClient)(nil)
@@ -1115,7 +1116,7 @@ func (oc *AIClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*br
 		}
 		identifiers := []string{agentID}
 		if modelID != "" {
-			identifiers = append(identifiers, modelContactIdentifiers(modelID, oc.findModelInfo(modelID))...)
+			identifiers = agentContactIdentifiers(agentID, modelID, oc.findModelInfo(modelID))
 		}
 		return &bridgev2.UserInfo{
 			Name:         ptr.Ptr(displayName),
@@ -2516,7 +2517,7 @@ func (oc *AIClient) ensureAgentGhostDisplayName(ctx context.Context, agentID, mo
 		ghost.UpdateInfo(ctx, &bridgev2.UserInfo{
 			Name:        ptr.Ptr(displayName),
 			IsBot:       ptr.Ptr(true),
-			Identifiers: modelContactIdentifiers(modelID, oc.findModelInfo(modelID)),
+			Identifiers: agentContactIdentifiers(agentID, modelID, oc.findModelInfo(modelID)),
 			Avatar:      avatar,
 		})
 		oc.loggerForContext(ctx).Debug().Str("agent", agentID).Str("model", modelID).Str("name", displayName).Msg("Updated agent ghost display name")

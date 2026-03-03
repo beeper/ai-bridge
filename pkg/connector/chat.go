@@ -13,8 +13,10 @@ import (
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/shared/stringutil"
 	"github.com/beeper/ai-bridge/pkg/shared/toolspec"
 
+	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -32,6 +34,8 @@ const (
 // defaultSimpleModeSystemPrompt is the default system prompt for simple mode rooms.
 const defaultSimpleModeSystemPrompt = "You are a helpful assistant."
 
+var ErrDMGhostImmutable = errors.New("can't change the counterpart ghost in a DM")
+
 func hasAssignedAgent(meta *PortalMetadata) bool {
 	if meta == nil {
 		return false
@@ -44,6 +48,50 @@ func hasBossAgent(meta *PortalMetadata) bool {
 		return false
 	}
 	return agents.IsBossAgent(meta.AgentID)
+}
+
+func dmModelSwitchGuidance(targetModel string) string {
+	if strings.TrimSpace(targetModel) == "" {
+		return "This is a DM. Switching to a different model requires creating a new chat."
+	}
+	return fmt.Sprintf("This is a DM. Switching to %s requires creating a new chat (for example: `!ai simple new %s`).", targetModel, targetModel)
+}
+
+func dmModelSwitchBlockedError(targetModel string) error {
+	return fmt.Errorf("%w: %s", ErrDMGhostImmutable, dmModelSwitchGuidance(targetModel))
+}
+
+func modelRedirectTarget(requested, resolved string) networkid.UserID {
+	requested = strings.TrimSpace(requested)
+	resolved = strings.TrimSpace(resolved)
+	if requested == "" || resolved == "" || requested == resolved {
+		return ""
+	}
+	return modelUserID(resolved)
+}
+
+// validateDMModelSwitch enforces the DM invariant that counterpart ghosts are immutable.
+// Agent rooms are exempt because the stable counterpart ghost is the agent ghost.
+func (oc *AIClient) validateDMModelSwitch(portal *bridgev2.Portal, meta *PortalMetadata, targetModel string) error {
+	if oc == nil || portal == nil || meta == nil || strings.TrimSpace(targetModel) == "" {
+		return nil
+	}
+	if portal.RoomType != database.RoomTypeDM {
+		return nil
+	}
+	if resolveAgentID(meta) != "" {
+		return nil
+	}
+	currentModel := oc.effectiveModel(meta)
+	if currentModel == "" || currentModel == targetModel {
+		return nil
+	}
+	currentGhost := modelUserID(currentModel)
+	targetGhost := modelUserID(targetModel)
+	if currentGhost == targetGhost {
+		return nil
+	}
+	return fmt.Errorf("%w: %s -> %s", ErrDMGhostImmutable, currentModel, targetModel)
 }
 
 // buildAvailableTools returns a list of ToolInfo for all tools based on tool policy.
@@ -116,9 +164,40 @@ func (oc *AIClient) canUseImageGeneration() bool {
 	}
 }
 
-// SearchUsers searches available AI agents by name/ID
+func modelMatchesQuery(query string, model *ModelInfo) bool {
+	if query == "" || model == nil {
+		return false
+	}
+	if strings.Contains(strings.ToLower(model.ID), query) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(modelContactName(model.ID, model)), query) {
+		return true
+	}
+	for _, ident := range modelContactIdentifiers(model.ID, model) {
+		if strings.Contains(strings.ToLower(ident), query) {
+			return true
+		}
+	}
+	return false
+}
+
+func agentContactIdentifiers(agentID, modelID string, info *ModelInfo) []string {
+	identifiers := []string{}
+	agentID = strings.TrimSpace(agentID)
+	if agentID != "" {
+		identifiers = append(identifiers, agentID)
+	}
+	identifiers = append(identifiers, modelContactIdentifiers(modelID, info)...)
+	return stringutil.DedupeStrings(identifiers)
+}
+
+// SearchUsers searches available AI models and agents by name/ID.
 func (oc *AIClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.ResolveIdentifierResponse, error) {
-	oc.loggerForContext(ctx).Debug().Str("query", query).Msg("Agent search requested")
+	oc.loggerForContext(ctx).Debug().Str("query", query).Msg("Model/agent search requested")
+	if !oc.IsLoggedIn() {
+		return nil, mautrix.MForbidden.WithMessage("You must be logged in to search contacts")
+	}
 
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
@@ -134,6 +213,7 @@ func (oc *AIClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.
 
 	// Filter agents by query (match ID, name, or description)
 	var results []*bridgev2.ResolveIdentifierResponse
+	seen := make(map[networkid.UserID]struct{})
 	for _, agent := range agentsMap {
 		agentName := oc.resolveAgentDisplayName(ctx, agent)
 		// Check if query matches agent ID, name, or description (case-insensitive)
@@ -159,19 +239,56 @@ func (oc *AIClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.
 			UserInfo: &bridgev2.UserInfo{
 				Name:        ptr.Ptr(displayName),
 				IsBot:       ptr.Ptr(true),
-				Identifiers: []string{agent.ID},
+				Identifiers: agentContactIdentifiers(agent.ID, modelID, oc.findModelInfo(modelID)),
 			},
 			Ghost: ghost,
 		})
+		seen[userID] = struct{}{}
 	}
 
-	oc.loggerForContext(ctx).Info().Str("query", query).Int("results", len(results)).Msg("Agent search completed")
+	// Filter models by query (match ID, display name, aliases, provider URIs)
+	models, err := oc.listAvailableModels(ctx, false)
+	if err != nil {
+		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to load models for search")
+	} else {
+		for i := range models {
+			model := &models[i]
+			if model.ID == "" || !modelMatchesQuery(query, model) {
+				continue
+			}
+			userID := modelUserID(model.ID)
+			if _, ok := seen[userID]; ok {
+				continue
+			}
+			ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userID)
+			if err != nil {
+				oc.loggerForContext(ctx).Warn().Err(err).Str("model", model.ID).Msg("Failed to get ghost for model search result")
+				continue
+			}
+			oc.ensureGhostDisplayNameWithGhost(ctx, ghost, model.ID, model)
+			results = append(results, &bridgev2.ResolveIdentifierResponse{
+				UserID: userID,
+				UserInfo: &bridgev2.UserInfo{
+					Name:        ptr.Ptr(modelContactName(model.ID, model)),
+					IsBot:       ptr.Ptr(false),
+					Identifiers: modelContactIdentifiers(model.ID, model),
+				},
+				Ghost: ghost,
+			})
+			seen[userID] = struct{}{}
+		}
+	}
+
+	oc.loggerForContext(ctx).Info().Str("query", query).Int("results", len(results)).Msg("Model/agent search completed")
 	return results, nil
 }
 
 // GetContactList returns a list of available AI agents and models as contacts
 func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
 	oc.loggerForContext(ctx).Debug().Msg("Contact list requested")
+	if !oc.IsLoggedIn() {
+		return nil, mautrix.MForbidden.WithMessage("You must be logged in to list contacts")
+	}
 
 	// Load agents
 	store := NewAgentStoreAdapter(oc)
@@ -204,7 +321,7 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 			UserInfo: &bridgev2.UserInfo{
 				Name:        ptr.Ptr(displayName),
 				IsBot:       ptr.Ptr(true),
-				Identifiers: []string{agent.ID},
+				Identifiers: agentContactIdentifiers(agent.ID, modelID, oc.findModelInfo(modelID)),
 			},
 			Ghost: ghost,
 		})
@@ -250,16 +367,35 @@ func (oc *AIClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIden
 func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
 	id := strings.TrimSpace(identifier)
 	if id == "" {
-		return nil, errors.New("identifier is required")
+		return nil, bridgev2.WrapRespErr(errors.New("identifier is required"), mautrix.MInvalidParam)
 	}
 
 	store := NewAgentStoreAdapter(oc)
+
+	// Check if identifier is a model ghost ID (model-{id}).
+	if modelID := parseModelFromGhostID(id); modelID != "" {
+		resolved, valid, err := oc.resolveModelID(ctx, modelID)
+		if err != nil {
+			return nil, err
+		}
+		if !valid || resolved == "" {
+			return nil, bridgev2.WrapRespErr(fmt.Errorf("model '%s' not found", modelID), mautrix.MNotFound)
+		}
+		resp, err := oc.resolveModelIdentifier(ctx, resolved, createChat)
+		if err != nil {
+			return nil, err
+		}
+		if createChat && resp != nil && resp.Chat != nil {
+			resp.Chat.DMRedirectedTo = modelRedirectTarget(modelID, resolved)
+		}
+		return resp, nil
+	}
 
 	// Check if identifier is an agent ghost ID (agent-{id})
 	if agentID, ok := parseAgentFromGhostID(id); ok {
 		agent, err := store.GetAgentByID(ctx, agentID)
 		if err != nil || agent == nil {
-			return nil, fmt.Errorf("agent '%s' not found", agentID)
+			return nil, bridgev2.WrapRespErr(fmt.Errorf("agent '%s' not found", agentID), mautrix.MNotFound)
 		}
 		return oc.resolveAgentIdentifier(ctx, agent, createChat)
 	}
@@ -276,9 +412,54 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 		return nil, err
 	}
 	if valid && resolved != "" {
-		return oc.resolveModelIdentifier(ctx, resolved, createChat)
+		resp, err := oc.resolveModelIdentifier(ctx, resolved, createChat)
+		if err != nil {
+			return nil, err
+		}
+		if createChat && resp != nil && resp.Chat != nil {
+			resp.Chat.DMRedirectedTo = modelRedirectTarget(id, resolved)
+		}
+		return resp, nil
 	}
-	return nil, fmt.Errorf("agent '%s' not found", id)
+	return nil, bridgev2.WrapRespErr(fmt.Errorf("identifier '%s' not found", id), mautrix.MNotFound)
+}
+
+// CreateChatWithGhost creates a DM for a known model or agent ghost.
+func (oc *AIClient) CreateChatWithGhost(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.CreateChatResponse, error) {
+	if ghost == nil {
+		return nil, bridgev2.WrapRespErr(errors.New("ghost is required"), mautrix.MInvalidParam)
+	}
+	ghostID := string(ghost.ID)
+	if modelID := parseModelFromGhostID(ghostID); modelID != "" {
+		resolved, valid, err := oc.resolveModelID(ctx, modelID)
+		if err != nil {
+			return nil, err
+		}
+		if !valid || resolved == "" {
+			return nil, bridgev2.WrapRespErr(fmt.Errorf("model '%s' not found", modelID), mautrix.MNotFound)
+		}
+		resp, err := oc.resolveModelIdentifier(ctx, resolved, true)
+		if err != nil {
+			return nil, err
+		}
+		if resp != nil && resp.Chat != nil {
+			resp.Chat.DMRedirectedTo = modelRedirectTarget(modelID, resolved)
+		}
+		return resp.Chat, nil
+	}
+	if agentID, ok := parseAgentFromGhostID(ghostID); ok {
+		store := NewAgentStoreAdapter(oc)
+		agent, err := store.GetAgentByID(ctx, agentID)
+		if err != nil || agent == nil {
+			return nil, bridgev2.WrapRespErr(fmt.Errorf("agent '%s' not found", agentID), mautrix.MNotFound)
+		}
+		resp, err := oc.resolveAgentIdentifier(ctx, agent, true)
+		if err != nil {
+			return nil, err
+		}
+		return resp.Chat, nil
+	}
+	return nil, bridgev2.WrapRespErr(fmt.Errorf("unsupported ghost ID: %s", ghostID), mautrix.MInvalidParam)
 }
 
 // resolveAgentIdentifier resolves an agent to a ghost and optionally creates a chat
@@ -315,7 +496,7 @@ func (oc *AIClient) resolveAgentIdentifierWithModel(ctx context.Context, agent *
 		UserInfo: &bridgev2.UserInfo{
 			Name:        ptr.Ptr(displayName),
 			IsBot:       ptr.Ptr(true),
-			Identifiers: []string{agent.ID},
+			Identifiers: agentContactIdentifiers(agent.ID, modelID, oc.findModelInfo(modelID)),
 		},
 		Ghost: ghost,
 		Chat:  chatResp,
@@ -405,6 +586,7 @@ func (oc *AIClient) createAgentChatWithModel(ctx context.Context, agent *agents.
 	if err := portal.Save(ctx); err != nil {
 		return nil, fmt.Errorf("failed to save portal with agent config: %w", err)
 	}
+	oc.ensureAgentGhostDisplayName(ctx, agent.ID, modelID, agentName)
 
 	// Update chat info members to use agent ghost only
 	oc.applyAgentChatInfo(chatInfo, agent.ID, agentName, modelID)
@@ -556,6 +738,7 @@ func (oc *AIClient) initPortalForChat(ctx context.Context, opts PortalInitOpts) 
 	if err := portal.Save(ctx); err != nil {
 		return nil, nil, fmt.Errorf("failed to save portal: %w", err)
 	}
+	oc.ensureGhostDisplayName(ctx, modelID)
 
 	chatInfo := oc.composeChatInfo(title, modelID)
 	return portal, chatInfo, nil
@@ -853,6 +1036,7 @@ func (oc *AIClient) createForkedChat(
 			portal.AvatarMXC = id.ContentURIString(agentAvatar)
 		}
 		oc.applyAgentChatInfo(chatInfo, agentID, agentName, modelID)
+		oc.ensureAgentGhostDisplayName(ctx, agentID, modelID, agentName)
 
 		if err := portal.Save(ctx); err != nil {
 			return nil, nil, err
@@ -1074,7 +1258,7 @@ func (oc *AIClient) applyAgentChatInfo(chatInfo *bridgev2.ChatInfo, agentID, age
 	agentMember.UserInfo = &bridgev2.UserInfo{
 		Name:        ptr.Ptr(agentDisplayName),
 		IsBot:       ptr.Ptr(true),
-		Identifiers: modelContactIdentifiers(modelID, modelInfo),
+		Identifiers: agentContactIdentifiers(agentID, modelID, modelInfo),
 	}
 	agentMember.MemberEventExtra = map[string]any{
 		"displayname":            agentDisplayName,
@@ -1097,6 +1281,12 @@ func (oc *AIClient) updatePortalConfig(ctx context.Context, portal *bridgev2.Por
 
 	// Track old model for membership change
 	oldModel := meta.Model
+
+	if config.Model != "" {
+		if err := oc.validateDMModelSwitch(portal, meta, config.Model); err != nil {
+			return dmModelSwitchBlockedError(config.Model)
+		}
+	}
 
 	// Update only non-empty/non-zero values
 	if config.Model != "" {
@@ -1301,7 +1491,7 @@ func (oc *AIClient) handleAgentModelSwitch(ctx context.Context, portal *bridgev2
 			UserInfo: &bridgev2.UserInfo{
 				Name:        ptr.Ptr(displayName),
 				IsBot:       ptr.Ptr(true),
-				Identifiers: modelContactIdentifiers(newModel, oc.findModelInfo(newModel)),
+				Identifiers: agentContactIdentifiers(agentID, newModel, oc.findModelInfo(newModel)),
 			},
 			MemberEventExtra: map[string]any{
 				"displayname":            displayName,
@@ -1820,7 +2010,9 @@ func (oc *AIClient) ensureDefaultChat(ctx context.Context) error {
 	}
 
 	// Update chat info members to use agent ghost only
-	oc.applyAgentChatInfo(chatInfo, beeperAgent.ID, oc.resolveAgentDisplayName(ctx, beeperAgent), modelID)
+	agentName := oc.resolveAgentDisplayName(ctx, beeperAgent)
+	oc.applyAgentChatInfo(chatInfo, beeperAgent.ID, agentName, modelID)
+	oc.ensureAgentGhostDisplayName(ctx, beeperAgent.ID, modelID, agentName)
 
 	loginMeta.DefaultChatPortalID = string(portal.PortalKey.ID)
 	if err := oc.UserLogin.Save(ctx); err != nil {

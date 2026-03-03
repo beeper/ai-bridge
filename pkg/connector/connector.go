@@ -34,6 +34,7 @@ const (
 var (
 	_ bridgev2.NetworkConnector               = (*OpenAIConnector)(nil)
 	_ bridgev2.PortalBridgeInfoFillingNetwork = (*OpenAIConnector)(nil)
+	_ bridgev2.IdentifierValidatingNetwork    = (*OpenAIConnector)(nil)
 )
 
 // OpenAIConnector wires mautrix bridgev2 to the OpenAI chat APIs.
@@ -338,6 +339,16 @@ func sendStateEventSuccessStatus(ctx context.Context, portal *bridgev2.Portal, e
 
 func (oc *OpenAIConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
 	return bridgeadapter.DefaultNetworkCapabilities()
+}
+
+func (oc *OpenAIConnector) ValidateUserID(id networkid.UserID) bool {
+	if modelID := parseModelFromGhostID(string(id)); strings.TrimSpace(modelID) != "" {
+		return resolveModelIDFromManifest(modelID) != ""
+	}
+	if agentID, ok := parseAgentFromGhostID(string(id)); ok && isValidAgentID(strings.TrimSpace(agentID)) {
+		return true
+	}
+	return false
 }
 
 func (oc *OpenAIConnector) GetBridgeInfoVersion() (info, capabilities int) {

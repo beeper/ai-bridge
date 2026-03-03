@@ -1627,9 +1627,16 @@ func executeSessionStatus(ctx context.Context, args map[string]any) (string, err
 
 	if newModel != "" {
 		if strings.EqualFold(newModel, "default") || strings.EqualFold(newModel, "reset") {
+			metaCopy := *meta
+			metaCopy.Model = ""
+			effective := btc.Client.effectiveModel(&metaCopy)
+			if err := btc.Client.validateDMModelSwitch(btc.Portal, meta, effective); err != nil {
+				return "", dmModelSwitchBlockedError(effective)
+			}
+
 			// Clear override and recompute capabilities from effective model
 			meta.Model = ""
-			effective := btc.Client.effectiveModel(meta)
+			effective = btc.Client.effectiveModel(meta)
 			meta.Capabilities = getModelCapabilities(effective, btc.Client.findModelInfo(effective))
 			if err := btc.Portal.Save(ctx); err != nil {
 				return "", fmt.Errorf("couldn't save model reset: %w", err)
@@ -1645,22 +1652,30 @@ func executeSessionStatus(ctx context.Context, args map[string]any) (string, err
 				modelName = effective
 			}
 		} else {
+			resolvedModel, valid, err := btc.Client.resolveModelID(ctx, newModel)
+			if err != nil || !valid || resolvedModel == "" {
+				return "", fmt.Errorf("invalid model: %s", newModel)
+			}
+			if err := btc.Client.validateDMModelSwitch(btc.Portal, meta, resolvedModel); err != nil {
+				return "", dmModelSwitchBlockedError(resolvedModel)
+			}
+
 			// Update the model in metadata
-			meta.Model = newModel
-			meta.Capabilities = getModelCapabilities(newModel, btc.Client.findModelInfo(newModel))
+			meta.Model = resolvedModel
+			meta.Capabilities = getModelCapabilities(resolvedModel, btc.Client.findModelInfo(resolvedModel))
 			// Save portal metadata
 			if err := btc.Portal.Save(ctx); err != nil {
 				return "", fmt.Errorf("couldn't save model change: %w", err)
 			}
 			btc.Portal.UpdateBridgeInfo(ctx)
-			btc.Client.ensureGhostDisplayName(ctx, newModel)
-			modelChanged = fmt.Sprintf("\n\nModel set to %s.", newModel)
-			model = newModel
-			if parts := strings.SplitN(newModel, "/", 2); len(parts) == 2 {
+			btc.Client.ensureGhostDisplayName(ctx, resolvedModel)
+			modelChanged = fmt.Sprintf("\n\nModel set to %s.", resolvedModel)
+			model = resolvedModel
+			if parts := strings.SplitN(resolvedModel, "/", 2); len(parts) == 2 {
 				provider = parts[0]
 				modelName = parts[1]
 			} else {
-				modelName = newModel
+				modelName = resolvedModel
 			}
 		}
 	}

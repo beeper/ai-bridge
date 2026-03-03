@@ -133,7 +133,7 @@ func (oc *AIClient) ensureFunctionCallTool(
 		}
 		activeTools[itemID] = tool
 
-		if state.initialEventID == "" && !state.suppressSend {
+		if !state.hasInitialMessageTarget() && !state.suppressSend {
 			oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
 		}
 		if strings.TrimSpace(tool.toolName) != "" {

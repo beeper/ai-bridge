@@ -681,10 +681,15 @@ func (i *Integration) writeMemoryCommandFile(
 
 func (i *Integration) agentIDFromEventMeta(meta any) string {
 	ma, ok := i.host.(iruntime.MetadataAccess)
-	if !ok || meta == nil {
-		return ""
+	rawAgentID := ""
+	if ok && meta != nil {
+		rawAgentID = ma.AgentIDFromMeta(meta)
 	}
-	return ma.AgentIDFromMeta(meta)
+	ah, ok := i.host.(iruntime.AgentHelper)
+	if !ok {
+		return strings.TrimSpace(rawAgentID)
+	}
+	return ah.ResolveAgentID(rawAgentID, ah.DefaultAgentID())
 }
 
 func (i *Integration) resolveBridgeDB() *dbutil.Database {

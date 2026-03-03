@@ -223,7 +223,7 @@ func (oc *AIClient) streamChatCompletions(
 		if err := stream.Err(); err != nil {
 			if errors.Is(err, context.Canceled) {
 				state.finishReason = "cancelled"
-				if state.initialEventID != "" && state.accumulated.Len() > 0 {
+				if state.hasInitialMessageTarget() && state.accumulated.Len() > 0 {
 					oc.flushPartialStreamingMessage(context.Background(), portal, state, meta)
 				}
 				oc.uiEmitter(state).EmitUIAbort(ctx, portal, "cancelled")
@@ -408,8 +408,8 @@ func (oc *AIClient) streamChatCompletions(
 	oc.finalizeStreamingReplyAccumulator(state)
 	oc.emitUIFinish(ctx, portal, state, meta)
 
-	// Send final edit and save to database
-	if state.initialEventID != "" {
+	// Send final edit and save to database.
+	if state.hasInitialMessageTarget() {
 		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
 		if !state.suppressSave {
 			oc.saveAssistantMessage(ctx, log, portal, state, meta)

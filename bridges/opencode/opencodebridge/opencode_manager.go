@@ -342,6 +342,20 @@ func (m *OpenCodeManager) DeleteSession(ctx context.Context, instanceID, session
 	return inst.client.DeleteSession(ctx, sessionID)
 }
 
+func (m *OpenCodeManager) AbortSession(ctx context.Context, instanceID, sessionID string) error {
+	inst, err := m.requireConnectedInstance(instanceID)
+	if err != nil {
+		return err
+	}
+	if err := inst.client.AbortSession(ctx, sessionID); err != nil {
+		if opencode.IsAuthError(err) {
+			m.setConnected(inst, false)
+		}
+		return err
+	}
+	return nil
+}
+
 func (m *OpenCodeManager) CreateSession(ctx context.Context, instanceID, title, directory string) (*opencode.Session, error) {
 	inst, err := m.requireConnectedInstance(instanceID)
 	if err != nil {
@@ -512,6 +526,19 @@ func (m *OpenCodeManager) handleEvent(ctx context.Context, inst *openCodeInstanc
 			}
 		}
 		m.handlePartUpdated(ctx, inst, part, payload.Delta)
+	case "message.part.delta":
+		var payload struct {
+			SessionID string `json:"sessionID"`
+			MessageID string `json:"messageID"`
+			PartID    string `json:"partID"`
+			Field     string `json:"field"`
+			Delta     string `json:"delta"`
+		}
+		if err := json.Unmarshal(evt.Properties, &payload); err != nil {
+			m.log().Warn().Err(err).Msg("Failed to decode OpenCode part delta event")
+			return
+		}
+		m.handlePartDelta(ctx, inst, payload.SessionID, payload.MessageID, payload.PartID, payload.Field, payload.Delta)
 	case "message.part.removed":
 		var payload struct {
 			SessionID string `json:"sessionID"`
@@ -625,6 +652,41 @@ func (m *OpenCodeManager) handlePartUpdated(ctx context.Context, inst *openCodeI
 	}
 	m.emitTextStreamEnd(ctx, inst, portal, part)
 	m.handlePart(ctx, inst, portal, role, part, true)
+}
+
+func (m *OpenCodeManager) handlePartDelta(ctx context.Context, inst *openCodeInstance, sessionID, messageID, partID, field, delta string) {
+	if sessionID == "" || partID == "" || delta == "" {
+		return
+	}
+	portal := m.bridge.findOpenCodePortal(ctx, inst.cfg.ID, sessionID)
+	if portal == nil {
+		return
+	}
+	role := inst.seenRole(sessionID, messageID)
+	if role == "user" && inst.isSeen(sessionID, messageID) {
+		return
+	}
+	if role == "" {
+		role = "assistant"
+	}
+
+	// Build a synthetic Part with enough fields for the stream emitters.
+	part := opencode.Part{
+		ID:        partID,
+		SessionID: sessionID,
+		MessageID: messageID,
+		Type:      field, // field corresponds to the part type (text, reasoning, tool)
+	}
+	inst.ensurePartState(sessionID, messageID, partID, role, field)
+
+	switch field {
+	case "text":
+		m.emitTextStreamDelta(ctx, inst, portal, part, delta)
+	case "reasoning":
+		m.emitReasoningStreamDelta(ctx, inst, portal, part, delta)
+	case "tool":
+		m.emitToolStreamDelta(ctx, inst, portal, part, delta)
+	}
 }
 
 func (m *OpenCodeManager) handlePartRemoved(ctx context.Context, inst *openCodeInstance, sessionID, messageID, partID string) {

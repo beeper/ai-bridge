@@ -809,6 +809,8 @@ func (h *runtimeIntegrationHost) SessionPortals(ctx context.Context, loginID str
 	if strings.TrimSpace(loginID) == "" {
 		loginID = string(h.client.UserLogin.ID)
 	}
+	targetAgentID := h.ResolveAgentID(agentID, h.DefaultAgentID())
+	targetAgentID = h.NormalizeAgentID(targetAgentID)
 
 	allowedShared := map[string]struct{}{}
 	ups, err := h.client.UserLogin.Bridge.DB.UserPortal.GetAllForLogin(ctx, h.client.UserLogin.UserLogin)
@@ -847,7 +849,9 @@ func (h *runtimeIntegrationHost) SessionPortals(ctx context.Context, loginID str
 		if !ok || meta == nil || isModuleInternalRoom(meta) {
 			continue
 		}
-		if resolveAgentID(meta) != agentID {
+		portalAgentID := h.ResolveAgentID(resolveAgentID(meta), h.DefaultAgentID())
+		portalAgentID = h.NormalizeAgentID(portalAgentID)
+		if portalAgentID != targetAgentID {
 			continue
 		}
 		key := portal.PortalKey.String()

@@ -122,7 +122,7 @@ func (oc *AIClient) createBuilderRoom(ctx context.Context) (*bridgev2.Portal, *b
 		bossMember.UserInfo = &bridgev2.UserInfo{
 			Name:        ptr.Ptr(bossDisplayName),
 			IsBot:       ptr.Ptr(true),
-			Identifiers: modelContactIdentifiers(modelID, oc.findModelInfo(modelID)),
+			Identifiers: agentContactIdentifiers(bossAgent.ID, modelID, oc.findModelInfo(modelID)),
 		}
 		bossMember.MemberEventExtra = map[string]any{
 			"displayname":            bossDisplayName,
@@ -140,6 +140,7 @@ func (oc *AIClient) createBuilderRoom(ctx context.Context) (*bridgev2.Portal, *b
 	if err := portal.Save(ctx); err != nil {
 		return nil, nil, fmt.Errorf("failed to save portal with agent config: %w", err)
 	}
+	oc.ensureAgentGhostDisplayName(ctx, bossAgent.ID, modelID, bossDisplayName)
 
 	return portal, chatInfo, nil
 }

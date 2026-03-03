@@ -8,7 +8,7 @@ import (
 )
 
 func streamFailureError(state *streamingState, err error) error {
-	if state != nil && state.initialEventID != "" {
+	if state != nil && state.hasInitialMessageTarget() {
 		return &NonFallbackError{Err: err}
 	}
 	return &PreDeltaError{Err: err}
@@ -24,7 +24,7 @@ func (oc *AIClient) handleResponsesStreamErr(
 ) (*ContextLengthError, error) {
 	if errors.Is(err, context.Canceled) {
 		state.finishReason = "cancelled"
-		if state.initialEventID != "" && state.accumulated.Len() > 0 {
+		if state.hasInitialMessageTarget() && state.accumulated.Len() > 0 {
 			oc.flushPartialStreamingMessage(context.Background(), portal, state, meta)
 		}
 		oc.uiEmitter(state).EmitUIAbort(context.Background(), portal, "cancelled")

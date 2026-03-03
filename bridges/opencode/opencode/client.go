@@ -244,6 +244,18 @@ func (c *Client) SendMessageAsync(ctx context.Context, sessionID, messageID stri
 	return c.do(req, nil)
 }
 
+// AbortSession aborts a running session.
+func (c *Client) AbortSession(ctx context.Context, sessionID string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return errors.New("session id is required")
+	}
+	req, err := c.newRequest(ctx, http.MethodPost, "/session/"+url.PathEscape(sessionID)+"/abort", nil)
+	if err != nil {
+		return err
+	}
+	return c.do(req, nil)
+}
+
 // IsAuthError returns true if the error is an auth error.
 func IsAuthError(err error) bool {
 	var apiErr *APIError

@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"slices"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 
+	"github.com/beeper/ai-bridge/bridges/codex/codexrpc"
 	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
 )
 
@@ -63,12 +65,149 @@ func (cc *CodexConnector) Start(ctx context.Context) error {
 
 	cc.applyRuntimeDefaults()
 	cc.primeUserLoginCache(ctx)
+	cc.autoProvisionExistingCodex(ctx)
 
 	return nil
 }
 
 func (cc *CodexConnector) primeUserLoginCache(ctx context.Context) {
 	bridgeadapter.PrimeUserLoginCache(ctx, cc.br)
+}
+
+// autoProvisionExistingCodex checks whether the system `codex` CLI is already
+// authenticated and, if so, creates a Codex login for every Matrix user that
+// doesn't already have one. This lets users skip the manual login step when
+// codex is pre-authenticated (e.g. via `codex auth login`).
+func (cc *CodexConnector) autoProvisionExistingCodex(ctx context.Context) {
+	if !cc.codexEnabled() {
+		return
+	}
+	cmd := "codex"
+	if cc.Config.Codex != nil && strings.TrimSpace(cc.Config.Codex.Command) != "" {
+		cmd = strings.TrimSpace(cc.Config.Codex.Command)
+	}
+	if _, err := exec.LookPath(cmd); err != nil {
+		return
+	}
+
+	launch, err := cc.resolveAppServerLaunch()
+	if err != nil {
+		return
+	}
+
+	// Spawn a temporary app-server without CODEX_HOME override so it picks up
+	// the system's default Codex auth (~/.codex or $CODEX_HOME).
+	probeCtx, probeCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer probeCancel()
+	rpc, err := codexrpc.StartProcess(probeCtx, codexrpc.ProcessConfig{
+		Command:      cmd,
+		Args:         launch.Args,
+		Env:          nil, // inherit system env — use default Codex auth
+		WebSocketURL: launch.WebSocketURL,
+	})
+	if err != nil {
+		cc.br.Log.Debug().Err(err).Msg("Auto-provision: failed to start probe codex app-server")
+		return
+	}
+	defer func() { _ = rpc.Close() }()
+
+	ci := cc.Config.Codex.ClientInfo
+	initCtx, initCancel := context.WithTimeout(probeCtx, 20*time.Second)
+	_, err = rpc.Initialize(initCtx, codexrpc.ClientInfo{Name: ci.Name, Title: ci.Title, Version: ci.Version}, false)
+	initCancel()
+	if err != nil {
+		cc.br.Log.Debug().Err(err).Msg("Auto-provision: codex initialize failed")
+		return
+	}
+
+	var resp struct {
+		Account *codexAccountInfo `json:"account"`
+	}
+	readCtx, readCancel := context.WithTimeout(probeCtx, 10*time.Second)
+	err = rpc.Call(readCtx, "account/read", map[string]any{"refreshToken": false}, &resp)
+	readCancel()
+	if err != nil || resp.Account == nil {
+		cc.br.Log.Debug().Err(err).Msg("Auto-provision: system codex is not authenticated")
+		return
+	}
+
+	cc.br.Log.Debug().
+		Str("account_type", resp.Account.Type).
+		Str("account_email", resp.Account.Email).
+		Msg("Auto-provision: detected existing Codex authentication")
+
+	userIDs, err := cc.br.DB.UserLogin.GetAllUserIDsWithLogins(ctx)
+	if err != nil {
+		cc.br.Log.Warn().Err(err).Msg("Auto-provision: failed to list user IDs")
+		return
+	}
+
+	for _, mxid := range userIDs {
+		user, err := cc.br.GetUserByMXID(ctx, mxid)
+		if err != nil || user == nil {
+			continue
+		}
+
+		// Check if this user already has a Codex login.
+		hasCodex := false
+		for _, existing := range user.GetUserLogins() {
+			if existing == nil || existing.Metadata == nil {
+				continue
+			}
+			meta, ok := existing.Metadata.(*UserLoginMetadata)
+			if !ok || meta == nil {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderCodex) {
+				hasCodex = true
+				break
+			}
+		}
+		if hasCodex {
+			continue
+		}
+
+		// Use a deterministic instance ID so restarts won't create duplicates.
+		loginID := makeCodexUserLoginID(mxid, "system-codex")
+
+		// If this login already exists in the DB (e.g. from a previous run), skip creation.
+		existing, err := cc.br.GetExistingUserLoginByID(ctx, loginID)
+		if err != nil {
+			cc.br.Log.Debug().Err(err).Stringer("mxid", mxid).Msg("Auto-provision: failed to check existing login")
+			continue
+		}
+		if existing != nil {
+			continue
+		}
+
+		meta := &UserLoginMetadata{
+			Provider:          ProviderCodex,
+			CodexHome:         "",    // empty = use system default
+			CodexHomeManaged:  false, // don't delete the user's own Codex home on logout
+			CodexAuthMode:     resp.Account.Type,
+			CodexAccountEmail: resp.Account.Email,
+		}
+
+		login, err := user.NewLogin(ctx, &database.UserLogin{
+			ID:         loginID,
+			RemoteName: "Codex",
+			Metadata:   meta,
+		}, nil)
+		if err != nil {
+			cc.br.Log.Warn().Err(err).Stringer("mxid", mxid).Msg("Auto-provision: failed to create login")
+			continue
+		}
+
+		if err := cc.LoadUserLogin(ctx, login); err != nil {
+			cc.br.Log.Warn().Err(err).Stringer("mxid", mxid).Msg("Auto-provision: failed to load login")
+			continue
+		}
+
+		cc.br.Log.Info().
+			Stringer("mxid", mxid).
+			Str("login_id", string(login.ID)).
+			Msg("Auto-provisioned Codex login for user")
+	}
 }
 
 func (cc *CodexConnector) applyRuntimeDefaults() {
@@ -191,6 +330,9 @@ func (cc *CodexConnector) loadCodexUserLogin(login *bridgev2.UserLogin) error {
 		return nil
 	}
 	login.Client = client
+	if codexClient, ok := client.(*CodexClient); ok {
+		codexClient.scheduleBootstrap()
+	}
 	return nil
 }
 

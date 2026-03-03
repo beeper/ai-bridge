@@ -294,7 +294,7 @@ func (oc *AIClient) handleProviderToolInProgress(
 		activeTools[itemID] = tool
 		tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
 
-		if state.initialEventID == "" && !state.suppressSend {
+		if !state.hasInitialMessageTarget() && !state.suppressSend {
 			oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
 		}
 	}
@@ -477,7 +477,7 @@ func (oc *AIClient) streamingResponse(
 		// Check for context cancellation before starting a new continuation round
 		if ctx.Err() != nil {
 			state.finishReason = "cancelled"
-			if state.initialEventID != "" && state.accumulated.Len() > 0 {
+			if state.hasInitialMessageTarget() && state.accumulated.Len() > 0 {
 				oc.flushPartialStreamingMessage(context.Background(), portal, state, meta)
 			}
 			oc.uiEmitter(state).EmitUIAbort(ctx, portal, "cancelled")

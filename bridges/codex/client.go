@@ -92,6 +92,8 @@ type CodexClient struct {
 
 	approvals *bridgeadapter.ApprovalManager[ToolApprovalDecisionCodex]
 
+	bootstrapOnce sync.Once
+
 	roomMu          sync.Mutex
 	activeRooms     map[id.RoomID]bool
 	pendingMessages map[id.RoomID]*codexPendingMessage
@@ -109,9 +111,6 @@ func newCodexClient(login *bridgev2.UserLogin, connector *CodexConnector) (*Code
 	meta := loginMetadata(login)
 	if !strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderCodex) {
 		return nil, fmt.Errorf("invalid provider for CodexClient: %s", meta.Provider)
-	}
-	if strings.TrimSpace(meta.CodexHome) == "" {
-		return nil, errors.New("missing codex_home in login metadata")
 	}
 	log := login.Log.With().Str("component", "codex").Logger()
 	return &CodexClient{
@@ -168,11 +167,6 @@ func (cc *CodexClient) Connect(ctx context.Context) {
 		StateEvent: status.StateConnected,
 		Message:    "Connected",
 	})
-
-	// Ensure default Codex chat + thread.
-	if err := cc.ensureDefaultCodexChat(cc.backgroundContext(ctx)); err != nil {
-		cc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure default Codex chat")
-	}
 }
 
 func (cc *CodexClient) Disconnect() {
@@ -1136,11 +1130,12 @@ func (cc *CodexClient) ensureRPC(ctx context.Context) error {
 		return err
 	}
 	codexHome := strings.TrimSpace(meta.CodexHome)
-	if codexHome == "" {
-		return errors.New("missing CODEX_HOME")
-	}
-	if err := os.MkdirAll(codexHome, 0o700); err != nil {
-		return err
+	var env []string
+	if codexHome != "" {
+		if err := os.MkdirAll(codexHome, 0o700); err != nil {
+			return err
+		}
+		env = []string{"CODEX_HOME=" + codexHome}
 	}
 	launch, err := cc.connector.resolveAppServerLaunch()
 	if err != nil {
@@ -1149,7 +1144,7 @@ func (cc *CodexClient) ensureRPC(ctx context.Context) error {
 	rpc, err := codexrpc.StartProcess(ctx, codexrpc.ProcessConfig{
 		Command:      cmd,
 		Args:         launch.Args,
-		Env:          []string{"CODEX_HOME=" + codexHome},
+		Env:          env,
 		WebSocketURL: launch.WebSocketURL,
 	})
 	if err != nil {
@@ -1312,6 +1307,45 @@ func (cc *CodexClient) backgroundContext(ctx context.Context) context.Context {
 		base = cc.UserLogin.Bridge.BackgroundCtx
 	}
 	return cc.loggerForContext(ctx).WithContext(base)
+}
+
+func (cc *CodexClient) scheduleBootstrap() {
+	cc.bootstrapOnce.Do(func() {
+		go cc.bootstrap(cc.UserLogin.Bridge.BackgroundCtx)
+	})
+}
+
+func (cc *CodexClient) bootstrap(ctx context.Context) {
+	cc.waitForLoginPersisted(ctx)
+	meta := loginMetadata(cc.UserLogin)
+	if meta.ChatsSynced {
+		return
+	}
+	if err := cc.ensureDefaultCodexChat(cc.backgroundContext(ctx)); err != nil {
+		cc.log.Warn().Err(err).Msg("Failed to ensure default Codex chat during bootstrap")
+	}
+	meta.ChatsSynced = true
+	_ = cc.UserLogin.Save(ctx)
+}
+
+func (cc *CodexClient) waitForLoginPersisted(ctx context.Context) {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.After(60 * time.Second)
+	for {
+		_, err := cc.UserLogin.Bridge.DB.UserLogin.GetByID(ctx, cc.UserLogin.ID)
+		if err == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-timeout:
+			cc.log.Warn().Msg("Timed out waiting for login to persist, continuing anyway")
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (cc *CodexClient) ensureDefaultCodexChat(ctx context.Context) error {

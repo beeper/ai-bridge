@@ -101,6 +101,13 @@ func (b *Bridge) CreateSessionChat(ctx context.Context, instanceID, title string
 	return b.createOpenCodeSessionChat(ctx, instanceID, title, pendingTitle)
 }
 
+func (b *Bridge) AbortSession(ctx context.Context, instanceID, sessionID string) error {
+	if b == nil || b.manager == nil {
+		return ErrUnavailable
+	}
+	return b.manager.AbortSession(ctx, instanceID, sessionID)
+}
+
 func (b *Bridge) RestoreConnections(ctx context.Context) error {
 	if b == nil || b.manager == nil {
 		return nil
