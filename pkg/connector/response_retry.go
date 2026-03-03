@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
@@ -298,7 +297,10 @@ func projectedCompactionFlushTokens(meta *PortalMetadata, promptTokens int) int 
 	if lastPrompt <= 0 {
 		return promptTokens
 	}
-	projected := lastPrompt + int(math.Max(0, float64(lastOutput))) + promptTokens
+	if lastOutput < 0 {
+		lastOutput = 0
+	}
+	projected := lastPrompt + lastOutput + promptTokens
 	if projected < promptTokens {
 		return promptTokens
 	}

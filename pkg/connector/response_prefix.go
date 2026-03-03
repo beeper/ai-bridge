@@ -91,7 +91,9 @@ func buildResponsePrefixContext(oc *AIClient, agentID string, meta *PortalMetada
 	return ctx
 }
 
-func resolveResponsePrefixForHeartbeat(oc *AIClient, cfg *Config, agentID string, meta *PortalMetadata) string {
+// resolveResponsePrefix resolves the response prefix for a given agent and portal metadata.
+// Both heartbeat and reply callers share this implementation.
+func resolveResponsePrefix(oc *AIClient, cfg *Config, agentID string, meta *PortalMetadata) string {
 	raw := resolveResponsePrefixRaw(oc, cfg, meta)
 	if raw == "" {
 		return ""
@@ -107,19 +109,10 @@ func resolveResponsePrefixForHeartbeat(oc *AIClient, cfg *Config, agentID string
 	return resolveResponsePrefixTemplate(raw, ctx)
 }
 
+func resolveResponsePrefixForHeartbeat(oc *AIClient, cfg *Config, agentID string, meta *PortalMetadata) string {
+	return resolveResponsePrefix(oc, cfg, agentID, meta)
+}
+
 func resolveResponsePrefixForReply(oc *AIClient, cfg *Config, meta *PortalMetadata) string {
-	raw := resolveResponsePrefixRaw(oc, cfg, meta)
-	if raw == "" {
-		return ""
-	}
-	agentID := resolveAgentID(meta)
-	if strings.EqualFold(raw, "auto") {
-		name := resolveIdentityNameForPrefix(oc, agentID)
-		if name == "" {
-			return ""
-		}
-		return "[" + name + "]"
-	}
-	ctx := buildResponsePrefixContext(oc, agentID, meta)
-	return resolveResponsePrefixTemplate(raw, ctx)
+	return resolveResponsePrefix(oc, cfg, resolveAgentID(meta), meta)
 }

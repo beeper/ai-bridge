@@ -56,17 +56,14 @@ func NewOpenAIProviderWithBaseURL(apiKey, baseURL string, log zerolog.Logger) (*
 	return NewOpenAIProviderWithUserID(apiKey, baseURL, "", log)
 }
 
-// NewOpenAIProviderWithUserID creates an OpenAI provider that passes user_id with each request.
-// Used for Beeper proxy to ensure correct rate limiting and feature flags per user.
-func NewOpenAIProviderWithUserID(apiKey, baseURL, userID string, log zerolog.Logger) (*OpenAIProvider, error) {
+// baseProviderOpts returns the common option set for all OpenAI provider constructors.
+func baseProviderOpts(apiKey, baseURL, userID string) []option.RequestOption {
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
 	}
-
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}
-
 	if userID != "" {
 		opts = append(opts, option.WithMiddleware(func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
 			q := req.URL.Query()
@@ -75,12 +72,17 @@ func NewOpenAIProviderWithUserID(apiKey, baseURL, userID string, log zerolog.Log
 			return next(req)
 		}))
 	}
+	return opts
+}
+
+// NewOpenAIProviderWithUserID creates an OpenAI provider that passes user_id with each request.
+// Used for Beeper proxy to ensure correct rate limiting and feature flags per user.
+func NewOpenAIProviderWithUserID(apiKey, baseURL, userID string, log zerolog.Logger) (*OpenAIProvider, error) {
+	opts := baseProviderOpts(apiKey, baseURL, userID)
 	opts = append(opts, option.WithMiddleware(makeRequestTraceMiddleware(log)))
 
-	client := openai.NewClient(opts...)
-
 	return &OpenAIProvider{
-		client:  client,
+		client:  openai.NewClient(opts...),
 		log:     log.With().Str("provider", "openai").Logger(),
 		baseURL: baseURL,
 	}, nil
@@ -164,36 +166,17 @@ func makeRequestTraceMiddleware(log zerolog.Logger) option.Middleware {
 // NewOpenAIProviderWithPDFPlugin creates an OpenAI provider with PDF plugin middleware.
 // Used for OpenRouter/Beeper to enable universal PDF support via file-parser plugin.
 func NewOpenAIProviderWithPDFPlugin(apiKey, baseURL, userID, pdfEngine string, headers map[string]string, log zerolog.Logger) (*OpenAIProvider, error) {
-	opts := []option.RequestOption{
-		option.WithAPIKey(apiKey),
-	}
-
-	if baseURL != "" {
-		opts = append(opts, option.WithBaseURL(baseURL))
-	}
-
-	// Add user_id query parameter if provided
-	if userID != "" {
-		opts = append(opts, option.WithMiddleware(func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
-			q := req.URL.Query()
-			q.Set("user_id", userID)
-			req.URL.RawQuery = q.Encode()
-			return next(req)
-		}))
-	}
-
+	opts := baseProviderOpts(apiKey, baseURL, userID)
 	opts = httputil.AppendHeaderOptions(opts, headers)
 
-	// Add PDF plugin middleware
-	opts = append(opts, option.WithMiddleware(MakePDFPluginMiddleware(pdfEngine)))
-	// Deduplicate tools in the final request payload (OpenRouter/Anthropic requires unique names)
-	opts = append(opts, option.WithMiddleware(MakeToolDedupMiddleware(log)))
-	opts = append(opts, option.WithMiddleware(makeRequestTraceMiddleware(log)))
-
-	client := openai.NewClient(opts...)
+	opts = append(opts,
+		option.WithMiddleware(MakePDFPluginMiddleware(pdfEngine)),
+		option.WithMiddleware(MakeToolDedupMiddleware(log)),
+		option.WithMiddleware(makeRequestTraceMiddleware(log)),
+	)
 
 	return &OpenAIProvider{
-		client:  client,
+		client:  openai.NewClient(opts...),
 		log:     log.With().Str("provider", "openai").Str("pdf_engine", pdfEngine).Logger(),
 		baseURL: baseURL,
 	}, nil
@@ -478,8 +461,7 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	// Try to list models from API
 	page, err := o.client.Models.List(ctx)
 	if err != nil {
-		// Fallback to known models
-		return defaultOpenAIModels(), nil
+		return nil, nil
 	}
 
 	var models []ModelInfo
@@ -496,7 +478,7 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 			fullModelID := AddModelPrefix(BackendOpenAI, model.ID)
 			models = append(models, ModelInfo{
 				ID:                  fullModelID,
-				Name:                GetModelDisplayName(fullModelID),
+				Name:                ResolveAlias(fullModelID),
 				Provider:            "openai",
 				API:                 "openai-responses",
 				SupportsVision:      strings.Contains(model.ID, "vision") || strings.Contains(model.ID, "4o") || strings.Contains(model.ID, "4-turbo"),
@@ -505,23 +487,14 @@ func (o *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 			})
 		}
 
-		// Get next page
 		page, err = page.GetNextPage()
 		if err != nil {
 			break
 		}
 	}
 
-	if len(models) == 0 {
-		return defaultOpenAIModels(), nil
-	}
-
+	// Model catalog is primarily provided via VFS; nil is fine when API lists nothing.
 	return models, nil
-}
-
-// defaultOpenAIModels returns an empty list (model catalog is provided via VFS).
-func defaultOpenAIModels() []ModelInfo {
-	return nil
 }
 
 // PDFPluginConfig holds configuration for the PDF file-parser plugin
@@ -939,14 +912,7 @@ func toChatCompletionContentParts(parts []ContentPart, supportsVideoURL bool) []
 				},
 			})
 		case ContentTypeImage:
-			imageURL := strings.TrimSpace(part.ImageURL)
-			if imageURL == "" && part.ImageB64 != "" {
-				mimeType := part.MimeType
-				if mimeType == "" {
-					mimeType = "image/jpeg"
-				}
-				imageURL = buildDataURL(mimeType, part.ImageB64)
-			}
+			imageURL := part.ResolveImageURL()
 			if imageURL == "" {
 				continue
 			}

@@ -73,6 +73,21 @@ func (m *UnifiedMessage) HasImages() bool {
 	return false
 }
 
+// ResolveImageURL returns the image URL for this part, constructing a data URL from base64 if needed.
+func (p *ContentPart) ResolveImageURL() string {
+	if url := strings.TrimSpace(p.ImageURL); url != "" {
+		return url
+	}
+	if p.ImageB64 != "" {
+		mimeType := p.MimeType
+		if mimeType == "" {
+			mimeType = "image/jpeg"
+		}
+		return buildDataURL(mimeType, p.ImageB64)
+	}
+	return ""
+}
+
 // HasMultimodalContent returns true if the message contains any non-text content
 func (m *UnifiedMessage) HasMultimodalContent() bool {
 	for _, part := range m.Content {
@@ -117,14 +132,7 @@ func ToOpenAIResponsesInput(messages []UnifiedMessage) responses.ResponseInputPa
 					}
 					textContent += part.Text
 				case ContentTypeImage:
-					imageURL := strings.TrimSpace(part.ImageURL)
-					if imageURL == "" && part.ImageB64 != "" {
-						mimeType := part.MimeType
-						if mimeType == "" {
-							mimeType = "image/jpeg"
-						}
-						imageURL = buildDataURL(mimeType, part.ImageB64)
-					}
+					imageURL := part.ResolveImageURL()
 					if imageURL == "" {
 						continue
 					}

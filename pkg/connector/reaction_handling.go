@@ -75,13 +75,7 @@ func (oc *AIClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2.Matr
 	} else if content != nil && content.RelatesTo.EventID != "" {
 		targetEventID = content.RelatesTo.EventID
 	}
-
-	messageID := ""
-	if msg.TargetMessage != nil && msg.TargetMessage.MXID != "" {
-		messageID = msg.TargetMessage.MXID.String()
-	} else if targetEventID != "" {
-		messageID = targetEventID.String()
-	}
+	messageID := targetEventID.String()
 
 	feedback := ReactionFeedback{
 		Emoji:     emoji,
