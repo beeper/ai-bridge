@@ -38,25 +38,20 @@ type GeneratedFilePart struct {
 // "siteName" in camelCase). Emit both siteName and site_name during transition.
 func ProviderMetadata(c SourceCitation) map[string]any {
 	meta := map[string]any{}
-	if v := strings.TrimSpace(c.Description); v != "" {
-		meta["description"] = v
+	setIfNonEmpty := func(key, val string) {
+		if v := strings.TrimSpace(val); v != "" {
+			meta[key] = v
+		}
 	}
-	if v := strings.TrimSpace(c.Published); v != "" {
-		meta["published"] = v
-	}
+	setIfNonEmpty("description", c.Description)
+	setIfNonEmpty("published", c.Published)
 	if v := strings.TrimSpace(c.SiteName); v != "" {
 		meta["siteName"] = v
 		meta["site_name"] = v
 	}
-	if v := strings.TrimSpace(c.Author); v != "" {
-		meta["author"] = v
-	}
-	if v := strings.TrimSpace(c.Image); v != "" {
-		meta["image"] = v
-	}
-	if v := strings.TrimSpace(c.Favicon); v != "" {
-		meta["favicon"] = v
-	}
+	setIfNonEmpty("author", c.Author)
+	setIfNonEmpty("image", c.Image)
+	setIfNonEmpty("favicon", c.Favicon)
 	if len(meta) == 0 {
 		return nil
 	}
@@ -65,28 +60,21 @@ func ProviderMetadata(c SourceCitation) map[string]any {
 
 // MergeCitationFields fills empty fields of dst from src.
 func MergeCitationFields(dst, src SourceCitation) SourceCitation {
-	if strings.TrimSpace(dst.Title) == "" {
-		dst.Title = src.Title
-	}
-	if strings.TrimSpace(dst.Description) == "" {
-		dst.Description = src.Description
-	}
-	if strings.TrimSpace(dst.Published) == "" {
-		dst.Published = src.Published
-	}
-	if strings.TrimSpace(dst.SiteName) == "" {
-		dst.SiteName = src.SiteName
-	}
-	if strings.TrimSpace(dst.Author) == "" {
-		dst.Author = src.Author
-	}
-	if strings.TrimSpace(dst.Image) == "" {
-		dst.Image = src.Image
-	}
-	if strings.TrimSpace(dst.Favicon) == "" {
-		dst.Favicon = src.Favicon
-	}
+	mergeField(&dst.Title, src.Title)
+	mergeField(&dst.Description, src.Description)
+	mergeField(&dst.Published, src.Published)
+	mergeField(&dst.SiteName, src.SiteName)
+	mergeField(&dst.Author, src.Author)
+	mergeField(&dst.Image, src.Image)
+	mergeField(&dst.Favicon, src.Favicon)
 	return dst
+}
+
+// mergeField sets dst to src if dst is empty after trimming.
+func mergeField(dst *string, src string) {
+	if strings.TrimSpace(*dst) == "" {
+		*dst = src
+	}
 }
 
 // MergeSourceCitations deduplicates citations by URL, merging fields when the
