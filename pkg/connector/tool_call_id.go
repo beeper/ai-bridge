@@ -19,26 +19,18 @@ func SanitizeToolCallID(id string, mode string) string {
 		return NewCallID()
 	}
 
-	// Preserve the "call_" prefix convention if present
-	prefix := ""
-	body := id
+	prefix, body := "", id
 	if strings.HasPrefix(id, "call_") {
 		prefix = "call_"
 		body = id[5:]
 	}
 
 	sanitized := nonAlphanumericRE.ReplaceAllString(body, "")
-
-	switch mode {
-	case "strict9":
-		if len(sanitized) > 9 {
-			sanitized = sanitized[:9]
-		}
+	if mode == "strict9" && len(sanitized) > 9 {
+		sanitized = sanitized[:9]
 	}
-
 	if sanitized == "" {
 		return NewCallID()
 	}
-
 	return prefix + sanitized
 }

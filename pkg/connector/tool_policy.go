@@ -12,17 +12,14 @@ import (
 
 func (oc *AIClient) resolveToolPolicyModelContext(meta *PortalMetadata) (provider string, modelID string) {
 	modelID = oc.effectiveModel(meta)
-	backend, actual := ParseModelPrefix(modelID)
-	if backend != "" {
+	if _, actual := ParseModelPrefix(modelID); actual != modelID {
 		modelID = actual
 	}
-	provider = ""
 	if parts := strings.SplitN(modelID, "/", 2); len(parts) == 2 {
 		provider = parts[0]
 	}
 	if provider == "" {
-		loginMeta := loginMetadata(oc.UserLogin)
-		if loginMeta != nil {
+		if loginMeta := loginMetadata(oc.UserLogin); loginMeta != nil {
 			provider = loginMeta.Provider
 		}
 	}
@@ -130,34 +127,28 @@ func applyPatchModelAllowed(allow []string, modelID string, provider string) boo
 	}
 	normalizedProvider := strings.ToLower(strings.TrimSpace(provider))
 	_, actual := ParseModelPrefix(modelID)
-	normalizedFull := strings.ToLower(strings.TrimSpace(modelID))
+	normalizedFull := strings.ToLower(modelID)
 	normalizedActual := strings.ToLower(strings.TrimSpace(actual))
 
-	candidates := map[string]struct{}{}
-	if normalizedFull != "" {
-		candidates[normalizedFull] = struct{}{}
-	}
-	if normalizedActual != "" {
+	candidates := make(map[string]struct{}, 5)
+	candidates[normalizedFull] = struct{}{}
+	if normalizedActual != normalizedFull {
 		candidates[normalizedActual] = struct{}{}
 	}
-	if normalizedActual != "" {
-		if parts := strings.SplitN(normalizedActual, "/", 2); len(parts) == 2 {
-			candidates[parts[1]] = struct{}{}
-			if normalizedProvider != "" {
-				candidates[normalizedProvider+"/"+parts[1]] = struct{}{}
-			}
-		} else if normalizedProvider != "" {
-			candidates[normalizedProvider+"/"+normalizedActual] = struct{}{}
+	if parts := strings.SplitN(normalizedActual, "/", 2); len(parts) == 2 {
+		candidates[parts[1]] = struct{}{}
+		if normalizedProvider != "" {
+			candidates[normalizedProvider+"/"+parts[1]] = struct{}{}
 		}
+	} else if normalizedProvider != "" {
+		candidates[normalizedProvider+"/"+normalizedActual] = struct{}{}
 	}
 
 	for _, raw := range allow {
-		entry := strings.ToLower(strings.TrimSpace(raw))
-		if entry == "" {
-			continue
-		}
-		if _, ok := candidates[entry]; ok {
-			return true
+		if entry := strings.ToLower(strings.TrimSpace(raw)); entry != "" {
+			if _, ok := candidates[entry]; ok {
+				return true
+			}
 		}
 	}
 	return false

@@ -13,35 +13,32 @@ import (
 // Tool policy ("allow/deny") is handled elsewhere; these checks are about runtime
 // prerequisites like API keys and service initialization.
 
-func (oc *AIClient) effectiveSearchConfig(_ context.Context) *search.Config {
-	var cfg *search.Config
+func (oc *AIClient) connectorAndLoginMeta() (*OpenAIConnector, *UserLoginMetadata) {
+	if oc == nil {
+		return nil, nil
+	}
 	var meta *UserLoginMetadata
-	var connector *OpenAIConnector
-	if oc != nil {
-		connector = oc.connector
-		if connector != nil {
-			cfg = mapSearchConfig(connector.Config.Tools.Search)
-		}
-		if oc.UserLogin != nil {
-			meta = loginMetadata(oc.UserLogin)
-		}
+	if oc.UserLogin != nil {
+		meta = loginMetadata(oc.UserLogin)
+	}
+	return oc.connector, meta
+}
+
+func (oc *AIClient) effectiveSearchConfig(_ context.Context) *search.Config {
+	connector, meta := oc.connectorAndLoginMeta()
+	var cfg *search.Config
+	if connector != nil {
+		cfg = mapSearchConfig(connector.Config.Tools.Search)
 	}
 	cfg = applyLoginTokensToSearchConfig(cfg, meta, connector)
 	return search.ApplyEnvDefaults(cfg).WithDefaults()
 }
 
 func (oc *AIClient) effectiveFetchConfig(_ context.Context) *fetch.Config {
+	connector, meta := oc.connectorAndLoginMeta()
 	var cfg *fetch.Config
-	var meta *UserLoginMetadata
-	var connector *OpenAIConnector
-	if oc != nil {
-		connector = oc.connector
-		if connector != nil {
-			cfg = mapFetchConfig(connector.Config.Tools.Fetch)
-		}
-		if oc.UserLogin != nil {
-			meta = loginMetadata(oc.UserLogin)
-		}
+	if connector != nil {
+		cfg = mapFetchConfig(connector.Config.Tools.Fetch)
 	}
 	cfg = applyLoginTokensToFetchConfig(cfg, meta, connector)
 	return fetch.ApplyEnvDefaults(cfg).WithDefaults()
