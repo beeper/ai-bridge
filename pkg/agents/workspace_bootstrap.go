@@ -29,16 +29,9 @@ const (
 	DefaultMemoryAltFilename = "memory.md"
 )
 
-var coreBootstrapFiles = []string{
-	DefaultAgentsFilename,
-	DefaultSoulFilename,
-	DefaultToolsFilename,
-	DefaultIdentityFilename,
-	DefaultUserFilename,
-	DefaultHeartbeatFilename,
-}
-
-var baseBootstrapFiles = []string{
+// bootstrapFiles lists the core workspace files that are always ensured/loaded.
+// Used by both EnsureBootstrapFiles and LoadBootstrapFiles.
+var bootstrapFiles = []string{
 	DefaultAgentsFilename,
 	DefaultSoulFilename,
 	DefaultToolsFilename,
@@ -67,7 +60,7 @@ func EnsureBootstrapFiles(ctx context.Context, store *textfs.Store) (bool, error
 		return false, errors.New("textfs store is required")
 	}
 	brandNew := true
-	for _, name := range coreBootstrapFiles {
+	for _, name := range bootstrapFiles {
 		_, found, err := store.Read(ctx, name)
 		if err != nil {
 			return false, err
@@ -77,7 +70,7 @@ func EnsureBootstrapFiles(ctx context.Context, store *textfs.Store) (bool, error
 		}
 	}
 
-	for _, name := range coreBootstrapFiles {
+	for _, name := range bootstrapFiles {
 		content, err := loadWorkspaceTemplate(name)
 		if err != nil {
 			return brandNew, err
@@ -105,8 +98,8 @@ func LoadBootstrapFiles(ctx context.Context, store *textfs.Store) ([]WorkspaceBo
 	if store == nil {
 		return nil, errors.New("textfs store is required")
 	}
-	files := make([]WorkspaceBootstrapFile, 0, len(baseBootstrapFiles)+2)
-	for _, name := range baseBootstrapFiles {
+	files := make([]WorkspaceBootstrapFile, 0, len(bootstrapFiles)+2)
+	for _, name := range bootstrapFiles {
 		entry, found, err := store.Read(ctx, name)
 		if err != nil {
 			return nil, err

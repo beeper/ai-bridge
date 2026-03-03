@@ -26,8 +26,6 @@ var BeeperAIAgent = &AgentDefinition{
 	SystemPrompt: BeeperDelegationPrompt,
 	PromptMode:   PromptModeFull,
 	IsPreset:     true,
-	CreatedAt:    0,
-	UpdatedAt:    0,
 }
 
 // GetBeeperAI returns a copy of the default Beep agent.

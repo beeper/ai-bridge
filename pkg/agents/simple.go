@@ -18,6 +18,4 @@ var SimpleAgent = &AgentDefinition{
 	PromptMode:   PromptModeNone,     // no system prompt sections
 	ResponseMode: ResponseModeSimple, // no directive processing
 	IsPreset:     true,
-	CreatedAt:    0,
-	UpdatedAt:    0,
 }
