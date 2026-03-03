@@ -236,6 +236,14 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	}
 }
 
+// optionalIndicator returns a heartbeat indicator for the given status if enabled, nil otherwise.
+func optionalIndicator(useIndicator bool, status string) *HeartbeatIndicatorType {
+	if !useIndicator {
+		return nil
+	}
+	return resolveIndicatorType(status)
+}
+
 // sendFinalHeartbeatTurn handles heartbeat-specific response delivery.
 func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata) {
 	if portal == nil || portal.MXID == "" || state == nil || state.heartbeat == nil {
@@ -316,10 +324,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		if strings.TrimSpace(rawContent) == "" {
 			status = "ok-empty"
 		}
-		indicator := (*HeartbeatIndicatorType)(nil)
-		if hb.UseIndicator {
-			indicator = resolveIndicatorType(status)
-		}
+		indicator := optionalIndicator(hb.UseIndicator, status)
 		oc.emitHeartbeatEvent(&HeartbeatEventPayload{
 			TS:            time.Now().UnixMilli(),
 			Status:        status,
@@ -341,10 +346,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 			oc.restoreHeartbeatUpdatedAt(storeRef, hb.SessionKey, hb.PrevUpdatedAt)
 			oc.redactInitialStreamingMessage(ctx, portal, state)
 			state.pendingImages = nil
-			indicator := (*HeartbeatIndicatorType)(nil)
-			if hb.UseIndicator {
-				indicator = resolveIndicatorType("skipped")
-			}
+			indicator := optionalIndicator(hb.UseIndicator, "skipped")
 			oc.emitHeartbeatEvent(&HeartbeatEventPayload{
 				TS:            time.Now().UnixMilli(),
 				Status:        "skipped",
@@ -385,10 +387,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		oc.restoreHeartbeatUpdatedAt(storeRef, hb.SessionKey, hb.PrevUpdatedAt)
 		oc.redactInitialStreamingMessage(ctx, portal, state)
 		state.pendingImages = nil
-		indicator := (*HeartbeatIndicatorType)(nil)
-		if hb.UseIndicator {
-			indicator = resolveIndicatorType("sent")
-		}
+		indicator := optionalIndicator(hb.UseIndicator, "sent")
 		preview := cleaned
 		if preview == "" && hasReasoning {
 			preview = reasoningText
@@ -426,10 +425,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 		oc.recordHeartbeatText(storeRef, hb.SessionKey, cleaned, state.startedAtMs)
 	}
 
-	indicator := (*HeartbeatIndicatorType)(nil)
-	if hb.UseIndicator {
-		indicator = resolveIndicatorType("sent")
-	}
+	indicator := optionalIndicator(hb.UseIndicator, "sent")
 	preview := cleaned
 	if preview == "" && hasReasoning {
 		preview = reasoningText
@@ -452,17 +448,18 @@ func (oc *AIClient) redactInitialStreamingMessage(ctx context.Context, portal *b
 	if portal == nil || state == nil {
 		return
 	}
-	if state.networkMessageID != "" {
-		if err := oc.redactViaPortal(ctx, portal, state.networkMessageID); err != nil {
-			oc.loggerForContext(ctx).Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact streaming message via network ID")
-		}
+
+	var err error
+	switch {
+	case state.networkMessageID != "":
+		err = oc.redactViaPortal(ctx, portal, state.networkMessageID)
+	case state.initialEventID != "":
+		err = oc.redactEventViaPortal(ctx, portal, state.initialEventID)
+	default:
 		return
 	}
-	if state.initialEventID == "" {
-		return
-	}
-	if err := oc.redactEventViaPortal(ctx, portal, state.initialEventID); err != nil {
-		oc.loggerForContext(ctx).Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact streaming message via event ID")
+	if err != nil {
+		oc.loggerForContext(ctx).Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact streaming message")
 	}
 }
 

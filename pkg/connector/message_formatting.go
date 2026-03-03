@@ -63,19 +63,21 @@ func formatLocationText(location NormalizedLocation) string {
 	if resolved.Accuracy != nil {
 		accuracy = fmt.Sprintf(" ±%dm", int(*resolved.Accuracy+0.5))
 	}
+
 	var header string
-	if resolved.Source == "live" || resolved.IsLive {
+	switch {
+	case resolved.IsLive: // resolveLocation already sets IsLive for source=="live"
 		header = "Live location: " + coords + accuracy
-	} else if resolved.Name != "" || resolved.Address != "" {
+	case resolved.Name != "" || resolved.Address != "":
 		label := strings.TrimSpace(strings.Join([]string{strings.TrimSpace(resolved.Name), strings.TrimSpace(resolved.Address)}, " - "))
 		label = strings.Trim(label, " -")
 		header = "Location: " + label + " (" + coords + accuracy + ")"
-	} else {
+	default:
 		header = "Location: " + coords + accuracy
 	}
-	caption := strings.TrimSpace(resolved.Caption)
-	if caption == "" {
-		return header
+
+	if caption := strings.TrimSpace(resolved.Caption); caption != "" {
+		return header + "\n" + caption
 	}
-	return header + "\n" + caption
+	return header
 }
