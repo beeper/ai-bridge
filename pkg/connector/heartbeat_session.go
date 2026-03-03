@@ -14,7 +14,7 @@ type heartbeatSessionResolution struct {
 }
 
 func (oc *AIClient) resolveHeartbeatSession(agentID string, heartbeat *HeartbeatConfig) heartbeatSessionResolution {
-	cfg := (*Config)(nil)
+	var cfg *Config
 	if oc != nil && oc.connector != nil {
 		cfg = &oc.connector.Config
 	}
@@ -22,33 +22,24 @@ func (oc *AIClient) resolveHeartbeatSession(agentID string, heartbeat *Heartbeat
 	if resolvedAgent == "" {
 		resolvedAgent = normalizeAgentID(agents.DefaultAgentID)
 	}
+	storeRef, mainSessionKey := resolveHeartbeatStoreParams(oc, agentID)
 	scope := sessionScopePerSender
 	if cfg != nil && cfg.Session != nil {
 		scope = normalizeSessionScope(cfg.Session.Scope)
 	}
-	mainSessionKey := resolveAgentMainSessionKey(cfg, resolvedAgent)
-	if scope == sessionScopeGlobal {
-		mainSessionKey = sessionScopeGlobal
-	}
-	storeAgentID := resolvedAgent
-	if scope == sessionScopeGlobal {
-		storeAgentID = normalizeAgentID(agents.DefaultAgentID)
-		if storeAgentID == "" {
-			storeAgentID = resolvedAgent
-		}
-	}
-	storeRef := sessionStoreRef{
-		AgentID: storeAgentID,
-		Path:    resolveSessionStorePath(cfg, storeAgentID),
-	}
 	store, _ := oc.loadSessionStore(context.Background(), storeRef)
-	mainEntry, hasMain := store.Sessions[mainSessionKey]
-	if scope == sessionScopeGlobal {
-		if hasMain {
-			entry := mainEntry
-			return heartbeatSessionResolution{StoreRef: storeRef, SessionKey: mainSessionKey, Entry: &entry}
+
+	// Helper to build a resolution, optionally attaching an entry if found.
+	makeResolution := func(key string) heartbeatSessionResolution {
+		if entry, ok := store.Sessions[key]; ok {
+			entryCopy := entry
+			return heartbeatSessionResolution{StoreRef: storeRef, SessionKey: key, Entry: &entryCopy}
 		}
-		return heartbeatSessionResolution{StoreRef: storeRef, SessionKey: mainSessionKey}
+		return heartbeatSessionResolution{StoreRef: storeRef, SessionKey: key}
+	}
+
+	if scope == sessionScopeGlobal {
+		return makeResolution(mainSessionKey)
 	}
 
 	trimmed := ""
@@ -56,19 +47,11 @@ func (oc *AIClient) resolveHeartbeatSession(agentID string, heartbeat *Heartbeat
 		trimmed = strings.TrimSpace(*heartbeat.Session)
 	}
 	if trimmed == "" || strings.EqualFold(trimmed, "main") || strings.EqualFold(trimmed, "global") {
-		if hasMain {
-			entry := mainEntry
-			return heartbeatSessionResolution{StoreRef: storeRef, SessionKey: mainSessionKey, Entry: &entry}
-		}
-		return heartbeatSessionResolution{StoreRef: storeRef, SessionKey: mainSessionKey}
+		return makeResolution(mainSessionKey)
 	}
 
 	if strings.HasPrefix(trimmed, "!") {
-		if entry, ok := store.Sessions[trimmed]; ok {
-			copyEntry := entry
-			return heartbeatSessionResolution{StoreRef: storeRef, SessionKey: trimmed, Entry: &copyEntry}
-		}
-		return heartbeatSessionResolution{StoreRef: storeRef, SessionKey: trimmed}
+		return makeResolution(trimmed)
 	}
 
 	candidate := toAgentStoreSessionKey(resolvedAgent, trimmed, "")
@@ -76,26 +59,21 @@ func (oc *AIClient) resolveHeartbeatSession(agentID string, heartbeat *Heartbeat
 		candidate = toAgentStoreSessionKey(resolvedAgent, trimmed, cfg.Session.MainKey)
 	}
 	canonical := canonicalizeMainSessionAlias(cfg, resolvedAgent, candidate)
-	if canonical != sessionScopeGlobal {
-		sessionAgent := resolveAgentIdFromSessionKey(canonical)
-		if sessionAgent == resolvedAgent {
-			if entry, ok := store.Sessions[canonical]; ok {
-				copyEntry := entry
-				return heartbeatSessionResolution{StoreRef: storeRef, SessionKey: canonical, Entry: &copyEntry}
-			}
-			return heartbeatSessionResolution{StoreRef: storeRef, SessionKey: canonical}
-		}
+	if canonical != sessionScopeGlobal && resolveAgentIdFromSessionKey(canonical) == resolvedAgent {
+		return makeResolution(canonical)
 	}
 
-	if hasMain {
-		entry := mainEntry
-		return heartbeatSessionResolution{StoreRef: storeRef, SessionKey: mainSessionKey, Entry: &entry}
-	}
-	return heartbeatSessionResolution{StoreRef: storeRef, SessionKey: mainSessionKey}
+	return makeResolution(mainSessionKey)
 }
 
 func (oc *AIClient) resolveHeartbeatMainSessionRef(agentID string) (sessionStoreRef, string) {
-	cfg := (*Config)(nil)
+	return resolveHeartbeatStoreParams(oc, agentID)
+}
+
+// resolveHeartbeatStoreParams computes the store ref and main session key
+// without loading the session store (lightweight, no I/O).
+func resolveHeartbeatStoreParams(oc *AIClient, agentID string) (sessionStoreRef, string) {
+	var cfg *Config
 	if oc != nil && oc.connector != nil {
 		cfg = &oc.connector.Config
 	}
@@ -118,9 +96,8 @@ func (oc *AIClient) resolveHeartbeatMainSessionRef(agentID string) (sessionStore
 			storeAgentID = resolvedAgent
 		}
 	}
-	storeRef := sessionStoreRef{
+	return sessionStoreRef{
 		AgentID: storeAgentID,
 		Path:    resolveSessionStorePath(cfg, storeAgentID),
-	}
-	return storeRef, mainSessionKey
+	}, mainSessionKey
 }

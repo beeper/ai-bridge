@@ -144,18 +144,13 @@ func (tc *TypingController) MarkDispatchIdle() {
 	tc.maybeStop()
 }
 
-// maybeStop stops typing if conditions are met.
+// maybeStop stops typing if both run is complete and dispatch is idle.
 func (tc *TypingController) maybeStop() {
 	tc.mu.Lock()
-	if !tc.active || tc.sealed {
-		tc.mu.Unlock()
-		return
-	}
-	if tc.runComplete && tc.dispatchIdle {
-		tc.mu.Unlock()
+	shouldStop := tc.active && !tc.sealed && tc.runComplete && tc.dispatchIdle
+	tc.mu.Unlock()
+	if shouldStop {
 		tc.Stop()
-	} else {
-		tc.mu.Unlock()
 	}
 }
 

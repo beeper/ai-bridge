@@ -28,7 +28,6 @@ func normalizeTypingMode(raw string) (TypingMode, bool) {
 		return TypingModeThinking, true
 	case "message":
 		return TypingModeMessage, true
-	default:
 	}
 	return "", false
 }
@@ -140,24 +139,12 @@ func (ts *TypingSignaler) SignalTextDelta(text string) {
 		return
 	}
 	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
+	if trimmed == "" || runtimeparse.IsSilentReplyText(trimmed, runtimeparse.SilentReplyToken) {
 		return
 	}
-	renderable := !runtimeparse.IsSilentReplyText(trimmed, runtimeparse.SilentReplyToken)
-	if renderable {
-		ts.hasRenderableText = true
-	} else {
-		return
-	}
-	if ts.shouldStartOnText {
+	ts.hasRenderableText = true
+	if ts.shouldStartOnText || ts.shouldStartOnReason {
 		ts.typing.Start()
-		ts.typing.RefreshTTL()
-		return
-	}
-	if ts.shouldStartOnReason {
-		if !ts.typing.IsActive() {
-			ts.typing.Start()
-		}
 		ts.typing.RefreshTTL()
 	}
 }
@@ -177,10 +164,6 @@ func (ts *TypingSignaler) SignalToolStart() {
 	if ts == nil || ts.disabled {
 		return
 	}
-	if !ts.typing.IsActive() {
-		ts.typing.Start()
-		ts.typing.RefreshTTL()
-		return
-	}
+	ts.typing.Start()
 	ts.typing.RefreshTTL()
 }
