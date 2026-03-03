@@ -22,7 +22,7 @@ func toolPolicySchema() map[string]any {
 		"properties": map[string]any{
 			"profile": map[string]any{
 				"type":        "string",
-				"enum":        []string{"minimal", "coding", "messaging", "full", "boss"},
+				"enum":        []string{"simple", "coding", "messaging", "full", "boss"},
 				"description": "Tool access profile (OpenClaw-style)",
 			},
 			"allow": map[string]any{
