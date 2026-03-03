@@ -239,28 +239,7 @@ func (oc *OpenAIConnector) processRoomSettingsContent(
 	sendStateEventSuccessStatus(ctx, portal, evt)
 
 	// Send confirmation notice
-	var changes []string
-	if content.Model != "" {
-		changes = append(changes, fmt.Sprintf("model=%s", content.Model))
-	}
-	if content.Temperature != nil {
-		changes = append(changes, fmt.Sprintf("temperature=%.2f", *content.Temperature))
-	}
-	if content.MaxContextMessages > 0 {
-		changes = append(changes, fmt.Sprintf("context=%d messages", content.MaxContextMessages))
-	}
-	if content.MaxCompletionTokens > 0 {
-		changes = append(changes, fmt.Sprintf("max_tokens=%d", content.MaxCompletionTokens))
-	}
-	if content.SystemPrompt != "" {
-		changes = append(changes, "system_prompt updated")
-	}
-	if content.ReasoningEffort != "" {
-		changes = append(changes, fmt.Sprintf("reasoning_effort=%s", content.ReasoningEffort))
-	}
-	if content.ConversationMode != "" {
-		changes = append(changes, fmt.Sprintf("conversation_mode=%s", content.ConversationMode))
-	}
+	changes := settingsChangesSummary(content)
 	if len(changes) > 0 {
 		client.sendSystemNotice(ctx, portal, fmt.Sprintf("Configuration updated: %s", strings.Join(changes, ", ")))
 	}
@@ -311,6 +290,33 @@ func (oc *OpenAIConnector) handleBeeperSendStateEvent(ctx context.Context, evt *
 
 	// Reuse existing handler logic with the parsed content
 	oc.processRoomSettingsContent(ctx, evt, &content, log)
+}
+
+// settingsChangesSummary returns a human-readable list of changed settings.
+func settingsChangesSummary(content *RoomSettingsEventContent) []string {
+	var changes []string
+	if content.Model != "" {
+		changes = append(changes, fmt.Sprintf("model=%s", content.Model))
+	}
+	if content.Temperature != nil {
+		changes = append(changes, fmt.Sprintf("temperature=%.2f", *content.Temperature))
+	}
+	if content.MaxContextMessages > 0 {
+		changes = append(changes, fmt.Sprintf("context=%d messages", content.MaxContextMessages))
+	}
+	if content.MaxCompletionTokens > 0 {
+		changes = append(changes, fmt.Sprintf("max_tokens=%d", content.MaxCompletionTokens))
+	}
+	if content.SystemPrompt != "" {
+		changes = append(changes, "system_prompt updated")
+	}
+	if content.ReasoningEffort != "" {
+		changes = append(changes, fmt.Sprintf("reasoning_effort=%s", content.ReasoningEffort))
+	}
+	if content.ConversationMode != "" {
+		changes = append(changes, fmt.Sprintf("conversation_mode=%s", content.ConversationMode))
+	}
+	return changes
 }
 
 func sendStateEventFailureStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, err error) {
@@ -387,36 +393,25 @@ func (oc *OpenAIConnector) GetDBMetaTypes() database.MetaTypes {
 	)
 }
 
-func (oc *OpenAIConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
-	_ = ctx
-	meta := loginMetadata(login)
-	return oc.loadAIUserLogin(login, meta)
+func (oc *OpenAIConnector) LoadUserLogin(_ context.Context, login *bridgev2.UserLogin) error {
+	return oc.loadAIUserLogin(login, loginMetadata(login))
 }
 
-// Package-level flow definitions (use Provider* constants as flow IDs)
 func (oc *OpenAIConnector) GetLoginFlows() []bridgev2.LoginFlow {
-	flows := []bridgev2.LoginFlow{
+	return []bridgev2.LoginFlow{
 		{ID: ProviderBeeper, Name: "Beeper AI"},
 		{ID: ProviderMagicProxy, Name: "Magic Proxy"},
 		{ID: FlowCustom, Name: "Manual"},
 	}
-	return flows
 }
 
-func (oc *OpenAIConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
-	// Validate by checking if flowID is in available flows
-	flows := oc.GetLoginFlows()
-	valid := false
-	for _, f := range flows {
+func (oc *OpenAIConnector) CreateLogin(_ context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
+	for _, f := range oc.GetLoginFlows() {
 		if f.ID == flowID {
-			valid = true
-			break
+			return &OpenAILogin{User: user, Connector: oc, FlowID: flowID}, nil
 		}
 	}
-	if !valid {
-		return nil, fmt.Errorf("login flow %s is not available", flowID)
-	}
-	return &OpenAILogin{User: user, Connector: oc, FlowID: flowID}, nil
+	return nil, fmt.Errorf("login flow %s is not available", flowID)
 }
 
 // getLoginForPortal finds the correct user login based on the portal's Receiver.

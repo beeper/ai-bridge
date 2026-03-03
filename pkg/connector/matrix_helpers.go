@@ -56,7 +56,7 @@ func (oc *AIClient) isCommandAuthorizedSender(sender id.UserID) bool {
 }
 
 func (oc *AIClient) buildMatrixInboundBody(
-	ctx context.Context,
+	_ context.Context,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	evt *event.Event,
@@ -65,8 +65,6 @@ func (oc *AIClient) buildMatrixInboundBody(
 	roomName string,
 	isGroup bool,
 ) string {
-	_ = ctx
-	_ = portal
 	// Simple mode must not inject any envelope/sender/event-id context.
 	if isSimpleMode(meta) {
 		simpleCtx := runtimeparse.FinalizeInboundContext(runtimeparse.InboundContext{

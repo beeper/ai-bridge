@@ -63,16 +63,13 @@ type PreDeltaError struct {
 }
 
 func (e *PreDeltaError) Error() string {
-	if e == nil || e.Err == nil {
+	if e.Err == nil {
 		return "pre-delta error"
 	}
 	return e.Err.Error()
 }
 
 func (e *PreDeltaError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
 	return e.Err
 }
 
@@ -114,10 +111,10 @@ func hasContextLengthSignal(text string) bool {
 		strings.Contains(lower, "exceeds model context window")
 }
 
+// safeErrorString calls err.Error() with panic recovery.
+// Some error types (e.g. openai.Error constructed without internal fields)
+// can panic when Error() is called.
 func safeErrorString(err error) (text string) {
-	if err == nil {
-		return ""
-	}
 	defer func() {
 		if recover() != nil {
 			text = ""
@@ -127,7 +124,7 @@ func safeErrorString(err error) (text string) {
 }
 
 // ParseContextLengthError checks if err is a context length exceeded error
-// and extracts the token counts from the error message
+// and extracts the token counts from the error message.
 func ParseContextLengthError(err error) *ContextLengthError {
 	if err == nil {
 		return nil
@@ -183,14 +180,11 @@ func ParseContextLengthError(err error) *ContextLengthError {
 	}
 }
 
-// IsRateLimitError checks if the error is a rate limit (429) error
+// IsRateLimitError checks if the error is a rate limit (429) error.
 func IsRateLimitError(err error) bool {
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) {
-		if strings.EqualFold(apiErr.Code, "rate_limit_exceeded") {
-			return true
-		}
-		if apiErr.StatusCode == 429 {
+		if apiErr.StatusCode == 429 || strings.EqualFold(apiErr.Code, "rate_limit_exceeded") {
 			return true
 		}
 	}
@@ -201,14 +195,11 @@ func IsRateLimitError(err error) bool {
 	})
 }
 
-// IsServerError checks if the error is a server-side (5xx) error
+// IsServerError checks if the error is a server-side (5xx) error.
 func IsServerError(err error) bool {
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) {
-		if strings.EqualFold(apiErr.Code, "server_error") {
-			return true
-		}
-		return apiErr.StatusCode >= 500
+		return apiErr.StatusCode >= 500 || strings.EqualFold(apiErr.Code, "server_error")
 	}
 	return false
 }
@@ -250,28 +241,24 @@ func IsModelNotFound(err error) bool {
 // IsToolSchemaError checks if the error indicates a tool schema validation failure.
 func IsToolSchemaError(err error) bool {
 	var apiErr *openai.Error
-	if errors.As(err, &apiErr) {
-		lowerMsg := strings.ToLower(apiErr.Message)
-		if strings.EqualFold(apiErr.Code, "invalid_function_parameters") {
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if strings.EqualFold(apiErr.Code, "invalid_function_parameters") {
+		return true
+	}
+	// Check both the message and raw JSON for schema-related patterns.
+	for _, text := range []string{apiErr.Message, apiErr.RawJSON()} {
+		if text == "" {
+			continue
+		}
+		if strings.Contains(text, "invalid_function_parameters") || strings.Contains(text, "Invalid schema for function") {
 			return true
 		}
-		if strings.Contains(apiErr.Message, "Invalid schema for function") {
+		lower := strings.ToLower(text)
+		if strings.Contains(lower, "input_schema") &&
+			(strings.Contains(lower, "oneof") || strings.Contains(lower, "allof") || strings.Contains(lower, "anyof")) {
 			return true
-		}
-		if strings.Contains(lowerMsg, "input_schema") &&
-			(strings.Contains(lowerMsg, "oneof") || strings.Contains(lowerMsg, "allof") || strings.Contains(lowerMsg, "anyof")) {
-			return true
-		}
-		raw := apiErr.RawJSON()
-		if raw != "" {
-			lowerRaw := strings.ToLower(raw)
-			if strings.Contains(raw, "invalid_function_parameters") || strings.Contains(raw, "Invalid schema for function") {
-				return true
-			}
-			if strings.Contains(lowerRaw, "input_schema") &&
-				(strings.Contains(lowerRaw, "oneof") || strings.Contains(lowerRaw, "allof") || strings.Contains(lowerRaw, "anyof")) {
-				return true
-			}
 		}
 	}
 	return false
@@ -280,25 +267,14 @@ func IsToolSchemaError(err error) bool {
 // IsToolUniquenessError checks if the error indicates duplicate tool names.
 func IsToolUniquenessError(err error) bool {
 	var apiErr *openai.Error
-	if errors.As(err, &apiErr) {
-		if strings.Contains(apiErr.Message, "tools: Tool names must be unique") {
-			return true
-		}
-		raw := apiErr.RawJSON()
-		if raw != "" && strings.Contains(raw, "tools: Tool names must be unique") {
-			return true
-		}
+	if !errors.As(err, &apiErr) {
+		return false
 	}
-	return false
+	const needle = "tools: Tool names must be unique"
+	return strings.Contains(apiErr.Message, needle) || strings.Contains(apiErr.RawJSON(), needle)
 }
 
 // IsNoResponseChunksError checks if the Responses streaming returned no chunks.
 func IsNoResponseChunksError(err error) bool {
-	for err != nil {
-		if strings.Contains(err.Error(), "No response chunks received") {
-			return true
-		}
-		err = errors.Unwrap(err)
-	}
-	return false
+	return containsAnyPattern(err, []string{"no response chunks received"})
 }
