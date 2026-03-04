@@ -90,16 +90,11 @@ func RegisterBuiltInAPIProviders() {
 		Stream:       streamBedrockConverse,
 		StreamSimple: streamSimpleBedrockConverse,
 	}, BuiltinProviderSourceID)
-
-	for _, apiID := range []ai.Api{
-		ai.APIGoogleGeminiCLI,
-	} {
-		ai.RegisterAPIProvider(ai.APIProvider{
-			API:          apiID,
-			Stream:       notImplementedStream(apiID),
-			StreamSimple: notImplementedSimpleStream(apiID),
-		}, BuiltinProviderSourceID)
-	}
+	ai.RegisterAPIProvider(ai.APIProvider{
+		API:          ai.APIGoogleGeminiCLI,
+		Stream:       streamGoogleGeminiCLI,
+		StreamSimple: streamSimpleGoogleGeminiCLI,
+	}, BuiltinProviderSourceID)
 }
 
 func ResetAPIProviders() {
