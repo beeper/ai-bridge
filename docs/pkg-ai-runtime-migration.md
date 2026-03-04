@@ -69,6 +69,7 @@ The `pkg/ai/e2e` suite now includes live provider parity checks for:
 - tool-result image handling (`image-tool-result.test.ts` OpenAI subset).
 - tool-call-id normalization (`tool-call-id-normalization.test.ts` OpenAI subset).
 - xhigh reasoning request path (`xhigh.test.ts` OpenAI subset).
+- empty-message handling (`empty.test.ts` OpenAI subset).
 - cross-provider handoff smoke coverage (`cross-provider-handoff.test.ts` subset).
 - Anthropic and Google complete/stream smoke coverage.
 
@@ -76,7 +77,7 @@ Run with:
 
 ```bash
 PI_AI_E2E=1 OPENAI_API_KEY=... ANTHROPIC_API_KEY=... GEMINI_API_KEY=... \
-  go test ./pkg/ai/e2e -run "TestGenerateE2E_OpenAI|TestAbortE2E_OpenAIStream|TestToolCallWithoutResultE2E_OpenAI|TestTotalTokensE2E_OpenAI|TestContextOverflowE2E_OpenAI|TestOpenAIReasoningReplayE2E_|TestImageToolResultE2E_OpenAI|TestToolCallIDNormalizationE2E_OpenAI|TestXhighE2E_OpenAIResponses|TestCrossProviderHandoffE2E_|TestGenerateE2E_Anthropic|TestGenerateE2E_Google"
+  go test ./pkg/ai/e2e -run "TestGenerateE2E_OpenAI|TestAbortE2E_OpenAIStream|TestToolCallWithoutResultE2E_OpenAI|TestTotalTokensE2E_OpenAI|TestContextOverflowE2E_OpenAI|TestOpenAIReasoningReplayE2E_|TestImageToolResultE2E_OpenAI|TestToolCallIDNormalizationE2E_OpenAI|TestXhighE2E_OpenAIResponses|TestEmptyE2E_OpenAI|TestCrossProviderHandoffE2E_|TestGenerateE2E_Anthropic|TestGenerateE2E_Google"
 ```
 
 Optional overrides:

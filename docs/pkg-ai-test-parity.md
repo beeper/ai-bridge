@@ -23,6 +23,7 @@ Legend:
 - `cross-provider-handoff.test.ts` → ✅🧪 `pkg/ai/e2e/cross_provider_handoff_e2e_test.go` (OpenAI↔Anthropic subset)
 - `tool-call-id-normalization.test.ts` → ✅🧪 `pkg/ai/e2e/tool_call_id_normalization_e2e_test.go` (OpenAI subset) + deterministic ID normalization tests in providers
 - `xhigh.test.ts` → ✅🧪 `pkg/ai/e2e/xhigh_e2e_test.go` (OpenAI subset) + deterministic support checks in `pkg/ai/models_test.go`
+- `empty.test.ts` → ✅🧪 `pkg/ai/e2e/empty_e2e_test.go` (OpenAI subset)
 
 ### Provider/unit parity
 
@@ -55,5 +56,4 @@ The following are currently kept as env-gated scaffolds in
 
 - 📝 `google-gemini-cli-empty-stream.test.ts` (full live parity)
 - 📝 `zen.test.ts`
-- 📝 `empty.test.ts`
 - 📝 `github-copilot-anthropic.test.ts` (live)
