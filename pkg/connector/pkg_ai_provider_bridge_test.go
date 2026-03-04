@@ -84,7 +84,7 @@ func TestShouldFallbackFromPkgAIEvent(t *testing.T) {
 	}
 }
 
-func TestTryGenerateStreamWithPkgAIFallsBackOnStubbedProviders(t *testing.T) {
+func TestTryGenerateStreamWithPkgAIReturnsRuntimeErrorEventsWhenProviderResolved(t *testing.T) {
 	events, ok := tryGenerateStreamWithPkgAI(context.Background(), "https://my-openai.azure.com", "", GenerateParams{
 		Model: "gpt-4.1-mini",
 		Messages: []UnifiedMessage{
@@ -96,7 +96,11 @@ func TestTryGenerateStreamWithPkgAIFallsBackOnStubbedProviders(t *testing.T) {
 			},
 		},
 	})
-	if ok {
-		t.Fatalf("expected fallback mode with stubbed providers, got events=%v", events)
+	if !ok {
+		t.Fatalf("expected pkg/ai stream to be selected")
+	}
+	event := <-events
+	if event.Type != StreamEventError {
+		t.Fatalf("expected runtime error event without credentials, got %#v", event)
 	}
 }
