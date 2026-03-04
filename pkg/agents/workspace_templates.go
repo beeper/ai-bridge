@@ -25,10 +25,9 @@ func stripFrontMatter(content string) string {
 }
 
 func loadWorkspaceTemplate(name string) (string, error) {
-	path := "workspace_templates/" + name
-	data, err := workspaceTemplates.ReadFile(path)
+	data, err := workspaceTemplates.ReadFile("workspace_templates/" + name)
 	if err != nil {
-		return "", fmt.Errorf("missing workspace template: %s", name)
+		return "", fmt.Errorf("loading workspace template %s: %w", name, err)
 	}
 	return stripFrontMatter(string(data)), nil
 }

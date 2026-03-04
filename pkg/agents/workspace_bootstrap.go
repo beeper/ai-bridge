@@ -29,16 +29,8 @@ const (
 	DefaultMemoryAltFilename = "memory.md"
 )
 
+// coreBootstrapFiles lists the workspace files ensured and loaded on every session.
 var coreBootstrapFiles = []string{
-	DefaultAgentsFilename,
-	DefaultSoulFilename,
-	DefaultToolsFilename,
-	DefaultIdentityFilename,
-	DefaultUserFilename,
-	DefaultHeartbeatFilename,
-}
-
-var baseBootstrapFiles = []string{
 	DefaultAgentsFilename,
 	DefaultSoulFilename,
 	DefaultToolsFilename,
@@ -70,7 +62,7 @@ func EnsureBootstrapFiles(ctx context.Context, store *textfs.Store) (bool, error
 	for _, name := range coreBootstrapFiles {
 		_, found, err := store.Read(ctx, name)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("checking bootstrap file %s: %w", name, err)
 		}
 		if found {
 			brandNew = false
@@ -80,20 +72,20 @@ func EnsureBootstrapFiles(ctx context.Context, store *textfs.Store) (bool, error
 	for _, name := range coreBootstrapFiles {
 		content, err := loadWorkspaceTemplate(name)
 		if err != nil {
-			return brandNew, err
+			return brandNew, fmt.Errorf("loading template %s: %w", name, err)
 		}
 		if _, err := store.WriteIfMissing(ctx, name, content); err != nil {
-			return brandNew, err
+			return brandNew, fmt.Errorf("writing bootstrap file %s: %w", name, err)
 		}
 	}
 
 	if brandNew {
 		content, err := loadWorkspaceTemplate(DefaultBootstrapFilename)
 		if err != nil {
-			return brandNew, err
+			return brandNew, fmt.Errorf("loading template %s: %w", DefaultBootstrapFilename, err)
 		}
 		if _, err := store.WriteIfMissing(ctx, DefaultBootstrapFilename, content); err != nil {
-			return brandNew, err
+			return brandNew, fmt.Errorf("writing bootstrap file %s: %w", DefaultBootstrapFilename, err)
 		}
 	}
 
@@ -105,11 +97,11 @@ func LoadBootstrapFiles(ctx context.Context, store *textfs.Store) ([]WorkspaceBo
 	if store == nil {
 		return nil, errors.New("textfs store is required")
 	}
-	files := make([]WorkspaceBootstrapFile, 0, len(baseBootstrapFiles)+2)
-	for _, name := range baseBootstrapFiles {
+	files := make([]WorkspaceBootstrapFile, 0, len(coreBootstrapFiles)+2)
+	for _, name := range coreBootstrapFiles {
 		entry, found, err := store.Read(ctx, name)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("reading bootstrap file %s: %w", name, err)
 		}
 		file := WorkspaceBootstrapFile{Name: name, Path: name, Missing: !found}
 		if found && entry != nil {
@@ -140,11 +132,11 @@ func LoadBootstrapFiles(ctx context.Context, store *textfs.Store) ([]WorkspaceBo
 }
 
 func loadMemoryBootstrapEntries(ctx context.Context, store *textfs.Store) ([]WorkspaceBootstrapFile, error) {
-	entries := []WorkspaceBootstrapFile{}
+	var entries []WorkspaceBootstrapFile
 	for _, name := range []string{DefaultMemoryFilename, DefaultMemoryAltFilename} {
 		entry, found, err := store.Read(ctx, name)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("reading memory file %s: %w", name, err)
 		}
 		if !found || entry == nil {
 			continue
@@ -153,7 +145,6 @@ func loadMemoryBootstrapEntries(ctx context.Context, store *textfs.Store) ([]Wor
 			Name:    name,
 			Path:    name,
 			Content: entry.Content,
-			Missing: false,
 		})
 	}
 	return entries, nil

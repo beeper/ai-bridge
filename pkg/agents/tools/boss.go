@@ -15,6 +15,58 @@ import (
 // Boss tools for agent management.
 // These are executed via the executor when the Boss agent is active.
 
+// toolPolicySchema returns the shared JSON schema for tool policy config parameters.
+func toolPolicySchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"profile": map[string]any{
+				"type":        "string",
+				"enum":        []string{"simple", "coding", "messaging", "full", "boss"},
+				"description": "Tool access profile (OpenClaw-style)",
+			},
+			"allow": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Explicit tool allowlist (supports wildcards like 'web_*' or group:... shorthands)",
+			},
+			"alsoAllow": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Additional allowlist entries merged into allow",
+			},
+			"deny": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Explicit tool denylist (deny wins)",
+			},
+			"byProvider": map[string]any{
+				"type":                 "object",
+				"additionalProperties": map[string]any{"type": "object"},
+				"description":          "Optional provider- or model-specific overrides keyed by provider or provider/model",
+			},
+		},
+	}
+}
+
+// subagentSchema returns the shared JSON schema for subagent config parameters.
+func subagentSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"model": map[string]any{
+				"type":        "string",
+				"description": "Default model override for subagents spawned by this agent",
+			},
+			"allowAgents": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Agent ids allowed for sessions_spawn (use \"*\" for any)",
+			},
+		},
+	}
+}
+
 // BossToolExecutor handles boss tool execution with access to the agent store.
 type BossToolExecutor struct {
 	store AgentStoreInterface
@@ -72,7 +124,7 @@ func NewBossToolExecutor(store AgentStoreInterface) *BossToolExecutor {
 	return &BossToolExecutor{store: store}
 }
 
-// CreateAgent tool definition.
+// CreateAgentTool tool definition.
 var CreateAgentTool = &Tool{
 	Tool: mcp.Tool{
 		Name:        "create_agent",
@@ -81,66 +133,12 @@ var CreateAgentTool = &Tool{
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"name": map[string]any{
-					"type":        "string",
-					"description": "Display name for the agent",
-				},
-				"description": map[string]any{
-					"type":        "string",
-					"description": "Brief description of what the agent does",
-				},
-				"model": map[string]any{
-					"type":        "string",
-					"description": "Model ID to use (e.g., 'anthropic/claude-sonnet-4.5'). Leave empty for default.",
-				},
-				"system_prompt": map[string]any{
-					"type":        "string",
-					"description": "Custom system prompt for the agent",
-				},
-				"tools": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"profile": map[string]any{
-							"type":        "string",
-							"enum":        []string{"minimal", "coding", "messaging", "full", "boss"},
-							"description": "Tool access profile (OpenClaw-style)",
-						},
-						"allow": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Explicit tool allowlist (supports wildcards like 'web_*' or group:... shorthands)",
-						},
-						"alsoAllow": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Additional allowlist entries merged into allow",
-						},
-						"deny": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Explicit tool denylist (deny wins)",
-						},
-						"byProvider": map[string]any{
-							"type":                 "object",
-							"additionalProperties": map[string]any{"type": "object"},
-							"description":          "Optional provider- or model-specific overrides keyed by provider or provider/model",
-						},
-					},
-				},
-				"subagents": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"model": map[string]any{
-							"type":        "string",
-							"description": "Default model override for subagents spawned by this agent",
-						},
-						"allowAgents": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Agent ids allowed for sessions_spawn (use \"*\" for any)",
-						},
-					},
-				},
+				"name":          map[string]any{"type": "string", "description": "Display name for the agent"},
+				"description":   map[string]any{"type": "string", "description": "Brief description of what the agent does"},
+				"model":         map[string]any{"type": "string", "description": "Model ID to use (e.g., 'anthropic/claude-sonnet-4.5'). Leave empty for default."},
+				"system_prompt": map[string]any{"type": "string", "description": "Custom system prompt for the agent"},
+				"tools":         toolPolicySchema(),
+				"subagents":     subagentSchema(),
 			},
 			"required": []string{"name"},
 		},
@@ -183,70 +181,13 @@ var EditAgentTool = &Tool{
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"agent_id": map[string]any{
-					"type":        "string",
-					"description": "ID of the agent to edit",
-				},
-				"name": map[string]any{
-					"type":        "string",
-					"description": "New display name",
-				},
-				"description": map[string]any{
-					"type":        "string",
-					"description": "New description",
-				},
-				"model": map[string]any{
-					"type":        "string",
-					"description": "New model ID",
-				},
-				"system_prompt": map[string]any{
-					"type":        "string",
-					"description": "New system prompt",
-				},
-				"tools": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"profile": map[string]any{
-							"type":        "string",
-							"enum":        []string{"minimal", "coding", "messaging", "full", "boss"},
-							"description": "Tool access profile (OpenClaw-style)",
-						},
-						"allow": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Explicit tool allowlist (supports wildcards like 'web_*' or group:... shorthands)",
-						},
-						"alsoAllow": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Additional allowlist entries merged into allow",
-						},
-						"deny": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Explicit tool denylist (deny wins)",
-						},
-						"byProvider": map[string]any{
-							"type":                 "object",
-							"additionalProperties": map[string]any{"type": "object"},
-							"description":          "Optional provider- or model-specific overrides keyed by provider or provider/model",
-						},
-					},
-				},
-				"subagents": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"model": map[string]any{
-							"type":        "string",
-							"description": "Default model override for subagents spawned by this agent",
-						},
-						"allowAgents": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "Agent ids allowed for sessions_spawn (use \"*\" for any)",
-						},
-					},
-				},
+				"agent_id":      map[string]any{"type": "string", "description": "ID of the agent to edit"},
+				"name":          map[string]any{"type": "string", "description": "New display name"},
+				"description":   map[string]any{"type": "string", "description": "New description"},
+				"model":         map[string]any{"type": "string", "description": "New model ID"},
+				"system_prompt": map[string]any{"type": "string", "description": "New system prompt"},
+				"tools":         toolPolicySchema(),
+				"subagents":     subagentSchema(),
 			},
 			"required": []string{"agent_id"},
 		},
@@ -534,53 +475,66 @@ func SessionTools() []*Tool {
 	}
 }
 
+// toolNameSet builds a name lookup set from a tool list.
+func toolNameSet(tools []*Tool) map[string]struct{} {
+	m := make(map[string]struct{}, len(tools))
+	for _, t := range tools {
+		m[t.Name] = struct{}{}
+	}
+	return m
+}
+
+var (
+	sessionToolNames = toolNameSet(SessionTools())
+	bossToolNames    = toolNameSet(BossTools())
+)
+
 // IsSessionTool checks if a tool name is a session tool.
 func IsSessionTool(toolName string) bool {
-	for _, t := range SessionTools() {
-		if t.Name == toolName {
-			return true
-		}
-	}
-	return false
+	_, ok := sessionToolNames[toolName]
+	return ok
 }
 
 // IsBossTool checks if a tool name is a Boss agent tool.
 func IsBossTool(toolName string) bool {
-	for _, t := range BossTools() {
-		if t.Name == toolName {
-			return true
-		}
+	_, ok := bossToolNames[toolName]
+	return ok
+}
+
+// unmarshalParam reads a map key from input and JSON-decodes it into dest.
+// Returns nil without modifying dest if the key is absent or nil.
+func unmarshalParam(input map[string]any, key string, dest any) error {
+	raw, err := ReadMap(input, key, false)
+	if err != nil {
+		return err
 	}
-	return false
+	if raw == nil {
+		return nil
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return fmt.Errorf("marshal %s: %w", key, err)
+	}
+	if err := json.Unmarshal(data, dest); err != nil {
+		return fmt.Errorf("unmarshal %s: %w", key, err)
+	}
+	return nil
 }
 
 func readToolPolicyConfig(input map[string]any) (*toolpolicy.ToolPolicyConfig, error) {
-	raw, err := ReadMap(input, "tools", false)
-	if err != nil || raw == nil {
-		return nil, err
-	}
-	bytes, err := json.Marshal(raw)
-	if err != nil {
-		return nil, err
-	}
 	var cfg toolpolicy.ToolPolicyConfig
-	if err := json.Unmarshal(bytes, &cfg); err != nil {
+	if err := unmarshalParam(input, "tools", &cfg); err != nil {
 		return nil, err
+	}
+	if cfg.Profile == "" && len(cfg.Allow) == 0 && len(cfg.AlsoAllow) == 0 && len(cfg.Deny) == 0 && len(cfg.ByProvider) == 0 {
+		return nil, nil
 	}
 	return &cfg, nil
 }
 
 func readSubagentConfig(input map[string]any) (*SubagentConfig, error) {
-	raw, err := ReadMap(input, "subagents", false)
-	if err != nil || raw == nil {
-		return nil, err
-	}
-	bytes, err := json.Marshal(raw)
-	if err != nil {
-		return nil, err
-	}
 	var cfg SubagentConfig
-	if err := json.Unmarshal(bytes, &cfg); err != nil {
+	if err := unmarshalParam(input, "subagents", &cfg); err != nil {
 		return nil, err
 	}
 	if cfg.Model == "" && len(cfg.AllowAgents) == 0 {
@@ -590,17 +544,17 @@ func readSubagentConfig(input map[string]any) (*SubagentConfig, error) {
 }
 
 // loadAgent loads all agents and looks up the one with the given ID.
-// On failure it returns an ErrorResult that the caller can return directly.
-func (e *BossToolExecutor) loadAgent(ctx context.Context, toolName, agentID string) (AgentData, *Result, error) {
+// Returns an ErrorResult on failure that the caller can return directly.
+func (e *BossToolExecutor) loadAgent(ctx context.Context, toolName, agentID string) (AgentData, *Result) {
 	agents, err := e.store.LoadAgents(ctx)
 	if err != nil {
-		return AgentData{}, ErrorResult(toolName, fmt.Sprintf("failed to load agents: %v", err)), nil
+		return AgentData{}, ErrorResult(toolName, fmt.Sprintf("load agents: %v", err))
 	}
 	agent, ok := agents[agentID]
 	if !ok {
-		return AgentData{}, ErrorResult(toolName, fmt.Sprintf("agent '%s' not found", agentID)), nil
+		return AgentData{}, ErrorResult(toolName, fmt.Sprintf("agent %q not found", agentID))
 	}
-	return agent, nil, nil
+	return agent, nil
 }
 
 // ExecuteCreateAgent handles the create_agent tool.
@@ -660,9 +614,9 @@ func (e *BossToolExecutor) ExecuteForkAgent(ctx context.Context, input map[strin
 		return ErrorResult("fork_agent", err.Error()), nil
 	}
 
-	source, errResult, err := e.loadAgent(ctx, "fork_agent", sourceID)
-	if errResult != nil || err != nil {
-		return errResult, err
+	source, errResult := e.loadAgent(ctx, "fork_agent", sourceID)
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	newName := ReadStringDefault(input, "new_name", fmt.Sprintf("%s (Fork)", source.Name))
@@ -704,9 +658,9 @@ func (e *BossToolExecutor) ExecuteEditAgent(ctx context.Context, input map[strin
 		return ErrorResult("edit_agent", err.Error()), nil
 	}
 
-	agent, errResult, err := e.loadAgent(ctx, "edit_agent", agentID)
-	if errResult != nil || err != nil {
-		return errResult, err
+	agent, errResult := e.loadAgent(ctx, "edit_agent", agentID)
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	if agent.IsPreset {
@@ -757,9 +711,9 @@ func (e *BossToolExecutor) ExecuteDeleteAgent(ctx context.Context, input map[str
 		return ErrorResult("delete_agent", err.Error()), nil
 	}
 
-	agent, errResult, err := e.loadAgent(ctx, "delete_agent", agentID)
-	if errResult != nil || err != nil {
-		return errResult, err
+	agent, errResult := e.loadAgent(ctx, "delete_agent", agentID)
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	if agent.IsPreset {
