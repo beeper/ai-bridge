@@ -75,7 +75,7 @@ func (oc *AIClient) streamWithPkgAIBridge(
 	if pkgAIRuntimeDryRunEnabled() {
 		oc.runPkgAIBridgeDryRun(ctx, aiModel, aiContext)
 	}
-	if oc.shouldUsePkgAIBridgeStreaming(meta, prompt) {
+	if oc.shouldUsePkgAIBridgeStreaming(ctx, meta, prompt) {
 		if baseURL, apiKey, ok := oc.pkgAIProviderBridgeCredentials(); ok {
 			params := oc.buildPkgAIBridgeGenerateParams(meta, prompt)
 			if events, handled := tryGenerateStreamWithPkgAI(ctx, baseURL, apiKey, params); handled {
@@ -229,13 +229,31 @@ func (oc *AIClient) pkgAIProviderBridgeCredentials() (string, string, bool) {
 }
 
 func (oc *AIClient) shouldUsePkgAIBridgeStreaming(
+	ctx context.Context,
 	meta *PortalMetadata,
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) bool {
 	if meta != nil && meta.Capabilities.SupportsToolCalling {
+		if oc.selectedBuiltinToolCountSafe(ctx, meta) > 0 {
+			return false
+		}
+		if resolveAgentID(meta) != "" {
+			return false
+		}
+	}
+	if promptContainsToolCalls(prompt) {
 		return false
 	}
-	return !promptContainsToolCalls(prompt)
+	return true
+}
+
+func (oc *AIClient) selectedBuiltinToolCountSafe(ctx context.Context, meta *PortalMetadata) (count int) {
+	defer func() {
+		if recover() != nil {
+			count = 0
+		}
+	}()
+	return len(oc.selectedBuiltinToolsForTurn(ctx, meta))
 }
 
 func promptContainsToolCalls(prompt []openai.ChatCompletionMessageParamUnion) bool {
