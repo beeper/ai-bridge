@@ -1,6 +1,9 @@
 package calc
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestEvalExpression(t *testing.T) {
 	tests := []struct {
@@ -31,7 +34,7 @@ func TestEvalExpression(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
 				}
-				if tc.errSubstr != "" && !contains(err.Error(), tc.errSubstr) {
+				if tc.errSubstr != "" && !strings.Contains(err.Error(), tc.errSubstr) {
 					t.Fatalf("expected error containing %q, got %q", tc.errSubstr, err.Error())
 				}
 				return
@@ -55,20 +58,4 @@ func almostEqual(a, b float64) bool {
 		diff = -diff
 	}
 	return diff < 1e-9
-}
-
-func contains(haystack, needle string) bool {
-	if needle == "" {
-		return true
-	}
-	return len(haystack) >= len(needle) && indexOf(haystack, needle) >= 0
-}
-
-func indexOf(s, substr string) int {
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }

@@ -1,21 +1,12 @@
 package websearch
 
-import "strings"
+import "github.com/beeper/ai-bridge/pkg/shared/maputil"
 
 // ParseCountAndIgnoredOptions extracts count and unsupported option warnings from args.
 func ParseCountAndIgnoredOptions(args map[string]any) (int, []string) {
 	count := 5
-	if args != nil {
-		if rawCount, ok := args["count"]; ok {
-			switch v := rawCount.(type) {
-			case float64:
-				count = int(v)
-			case int:
-				count = v
-			case int64:
-				count = int(v)
-			}
-		}
+	if v, ok := maputil.IntArg(args, "count"); ok {
+		count = v
 	}
 	if count < 1 {
 		count = 1
@@ -24,17 +15,10 @@ func ParseCountAndIgnoredOptions(args map[string]any) (int, []string) {
 	}
 
 	var ignoredOptions []string
-	if v, _ := args["country"].(string); strings.TrimSpace(v) != "" {
-		ignoredOptions = append(ignoredOptions, "country")
-	}
-	if v, _ := args["search_lang"].(string); strings.TrimSpace(v) != "" {
-		ignoredOptions = append(ignoredOptions, "search_lang")
-	}
-	if v, _ := args["ui_lang"].(string); strings.TrimSpace(v) != "" {
-		ignoredOptions = append(ignoredOptions, "ui_lang")
-	}
-	if v, _ := args["freshness"].(string); strings.TrimSpace(v) != "" {
-		ignoredOptions = append(ignoredOptions, "freshness")
+	for _, key := range []string{"country", "search_lang", "ui_lang", "freshness"} {
+		if maputil.StringArg(args, key) != "" {
+			ignoredOptions = append(ignoredOptions, key)
+		}
 	}
 
 	return count, ignoredOptions
