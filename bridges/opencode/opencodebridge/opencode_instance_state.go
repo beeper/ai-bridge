@@ -46,10 +46,10 @@ type openCodeInstance struct {
 	disconnectTimer *time.Timer
 
 	seenMu         sync.Mutex
-	seenMsg        map[string]map[string]string                   // session -> message -> role
-	seenPart       map[string]map[string]*openCodePartState       // session -> part -> state
-	partsByMessage map[string]map[string]map[string]struct{}      // session -> message -> {part IDs}
-	turnState      map[string]map[string]*openCodeTurnState       // session -> message -> turn state
+	seenMsg        map[string]map[string]string              // session -> message -> role
+	seenPart       map[string]map[string]*openCodePartState  // session -> part -> state
+	partsByMessage map[string]map[string]map[string]struct{} // session -> message -> {part IDs}
+	turnState      map[string]map[string]*openCodeTurnState  // session -> message -> turn state
 
 	cacheMu      sync.Mutex
 	messageCache map[string]*openCodeMessageCache

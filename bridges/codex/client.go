@@ -85,7 +85,7 @@ type CodexClient struct {
 
 	subMu            sync.Mutex
 	turnSubs         map[string]chan codexNotif // turnKey(threadId, turnId) -> notification channel
-	startDispatching func()                    // starts dispatchNotifications goroutine exactly once
+	startDispatching func()                     // starts dispatchNotifications goroutine exactly once
 
 	loadedMu      sync.Mutex
 	loadedThreads map[string]bool // threadId -> loaded via thread/start|thread/resume
