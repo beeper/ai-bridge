@@ -68,4 +68,11 @@ func TestAbortE2E_OpenAIStream(t *testing.T) {
 	if result.StopReason != ai.StopReasonAborted {
 		t.Fatalf("expected stop reason %q after cancel, got %q (error: %s)", ai.StopReasonAborted, result.StopReason, result.ErrorMessage)
 	}
+	if result.Usage.Input != 0 || result.Usage.Output != 0 {
+		t.Fatalf(
+			"expected OpenAI aborted stream usage to be zero, got input=%d output=%d",
+			result.Usage.Input,
+			result.Usage.Output,
+		)
+	}
 }
