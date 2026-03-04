@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/beeper/ai-bridge/pkg/ai"
 )
 
 func ExtractRetryDelay(errorText string, headers http.Header) (int, bool) {
@@ -110,4 +112,21 @@ func headerGetCI(headers http.Header, key string) string {
 		return values[0]
 	}
 	return ""
+}
+
+func NormalizeGoogleToolCall(name string, args map[string]any, id string, thoughtSignature string) ai.ContentBlock {
+	normalizedArgs := args
+	if normalizedArgs == nil {
+		normalizedArgs = map[string]any{}
+	}
+	block := ai.ContentBlock{
+		Type:      ai.ContentTypeToolCall,
+		ID:        id,
+		Name:      name,
+		Arguments: normalizedArgs,
+	}
+	if strings.TrimSpace(thoughtSignature) != "" {
+		block.ThoughtSignature = thoughtSignature
+	}
+	return block
 }
