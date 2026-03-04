@@ -15,11 +15,6 @@ func requirePIAIE2E(t *testing.T) {
 	}
 }
 
-func TestToolCallWithoutResultE2EParityScaffold(t *testing.T) {
-	requirePIAIE2E(t)
-	t.Skip("parity scaffold for tool-call-without-result.test.ts pending runtime implementation")
-}
-
 func TestInterleavedThinkingE2EParityScaffold(t *testing.T) {
 	requirePIAIE2E(t)
 	t.Skip("parity scaffold for interleaved-thinking.test.ts pending runtime implementation")
@@ -38,16 +33,6 @@ func TestToolCallIDNormalizationE2EParityScaffold(t *testing.T) {
 func TestAnthropicToolNameNormalizationE2EParityScaffold(t *testing.T) {
 	requirePIAIE2E(t)
 	t.Skip("parity scaffold for anthropic-tool-name-normalization.test.ts pending runtime implementation")
-}
-
-func TestTokenStatsOnAbortE2EParityScaffold(t *testing.T) {
-	requirePIAIE2E(t)
-	t.Skip("parity scaffold for tokens.test.ts pending runtime implementation")
-}
-
-func TestTotalTokensE2EParityScaffold(t *testing.T) {
-	requirePIAIE2E(t)
-	t.Skip("parity scaffold for total-tokens.test.ts pending runtime implementation")
 }
 
 func TestCrossProviderHandoffE2EParityScaffold(t *testing.T) {

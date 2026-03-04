@@ -56,6 +56,26 @@ Optional model overrides:
 - `PI_AI_E2E_ANTHROPIC_MODEL`
 - `PI_AI_E2E_GOOGLE_MODEL`
 
+## pkg/ai env-gated OpenAI parity e2e tests
+
+The `pkg/ai/e2e` suite now includes live OpenAI parity checks for:
+
+- basic complete/stream flows (`stream.test.ts` parity subset),
+- stream cancel behavior (`abort.test.ts` parity subset),
+- orphan tool-call recovery (`tool-call-without-result.test.ts` parity subset),
+- usage total-token accounting (`total-tokens.test.ts` parity subset).
+
+Run with:
+
+```bash
+PI_AI_E2E=1 OPENAI_API_KEY=... go test ./pkg/ai/e2e -run "TestGenerateE2E_OpenAI|TestAbortE2E_OpenAIStream|TestToolCallWithoutResultE2E_OpenAI|TestTotalTokensE2E_OpenAI"
+```
+
+Optional overrides:
+
+- `PI_AI_E2E_OPENAI_MODEL` (default: `gpt-4o-mini`)
+- `PI_AI_E2E_OPENAI_BASE_URL` (for OpenAI-compatible endpoints)
+
 ## Notes
 
 - Full integration remains feature-gated.
