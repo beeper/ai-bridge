@@ -48,10 +48,24 @@ func (oc *AIClient) streamWithPkgAIBridge(
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) (bool, *ContextLengthError, error) {
 	aiContext := buildPkgAIContext(oc.effectivePrompt(meta), prompt)
+	providerName := ""
+	if loginMeta := loginMetadata(oc.UserLogin); loginMeta != nil {
+		providerName = string(loginMeta.Provider)
+	}
+	aiModel := derivePkgAIModelDescriptor(
+		oc.effectiveModel(meta),
+		oc.effectiveModelForAPI(meta),
+		providerName,
+		oc.resolveModelAPI(meta),
+		oc.effectiveMaxTokens(meta),
+	)
 	oc.loggerForContext(ctx).Debug().
 		Int("prompt_messages", len(prompt)).
 		Int("ai_messages", len(aiContext.Messages)).
-		Msg("pkg/ai runtime bridge flag enabled; prepared adapter context and delegating to existing runtime path")
+		Str("ai_model_api", string(aiModel.API)).
+		Str("ai_model_provider", string(aiModel.Provider)).
+		Str("ai_model_id", aiModel.ID).
+		Msg("pkg/ai runtime bridge flag enabled; prepared adapter context/model and delegating to existing runtime path")
 	switch oc.resolveModelAPI(meta) {
 	case ModelAPIChatCompletions:
 		return oc.streamChatCompletions(ctx, evt, portal, meta, prompt)
