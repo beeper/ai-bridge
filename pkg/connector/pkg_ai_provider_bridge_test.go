@@ -177,7 +177,7 @@ func TestTryGenerateStreamWithPkgAIReturnsRuntimeErrorEventsWhenProviderResolved
 	}
 }
 
-func TestTryGenerateWithPkgAIFallsBackOnStubbedProviders(t *testing.T) {
+func TestTryGenerateWithPkgAIReturnsRuntimeErrorForGeminiCLI(t *testing.T) {
 	resp, handled, err := tryGenerateWithPkgAI(context.Background(), "https://cloudcode-pa.googleapis.com", "", GenerateParams{
 		Model: "gemini-2.5-flash",
 		Messages: []UnifiedMessage{
@@ -189,14 +189,14 @@ func TestTryGenerateWithPkgAIFallsBackOnStubbedProviders(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("expected nil error on fallback path, got %v", err)
+	if !handled {
+		t.Fatalf("expected gemini-cli provider to be handled by pkg/ai runtime")
 	}
-	if handled {
-		t.Fatalf("expected fallback for stubbed google-gemini-cli runtime")
+	if err == nil {
+		t.Fatalf("expected runtime error without OAuth credentials")
 	}
 	if resp != nil {
-		t.Fatalf("expected nil response on fallback path")
+		t.Fatalf("expected nil response when runtime returns error")
 	}
 }
 

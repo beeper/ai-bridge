@@ -124,6 +124,25 @@ func TestRegisterBuiltInAPIProviders(t *testing.T) {
 		t.Fatalf("expected google runtime implementation, got stub error: %q", googleEvt.Error.ErrorMessage)
 	}
 
+	geminiCLIStream, err := ai.Stream(ai.Model{
+		ID:       "gemini-2.5-flash",
+		Provider: "google-gemini-cli",
+		API:      ai.APIGoogleGeminiCLI,
+	}, ai.Context{}, nil)
+	if err != nil {
+		t.Fatalf("unexpected gemini-cli stream resolve error: %v", err)
+	}
+	geminiCLIEvt, err := geminiCLIStream.Next(ctx)
+	if err != nil {
+		t.Fatalf("expected gemini-cli terminal error event, got %v", err)
+	}
+	if geminiCLIEvt.Type != ai.EventError {
+		t.Fatalf("expected gemini-cli error event, got %s", geminiCLIEvt.Type)
+	}
+	if strings.Contains(strings.ToLower(geminiCLIEvt.Error.ErrorMessage), "not implemented") {
+		t.Fatalf("expected gemini-cli runtime implementation, got stub error: %q", geminiCLIEvt.Error.ErrorMessage)
+	}
+
 	vertexStream, err := ai.Stream(ai.Model{
 		ID:       "gemini-2.5-flash",
 		Provider: "google-vertex",
