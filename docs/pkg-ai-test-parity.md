@@ -20,6 +20,7 @@ Legend:
 - `total-tokens.test.ts` → ✅🧪 `pkg/ai/e2e/parity_openai_test.go`
 - `tokens.test.ts` → ✅🧪 `pkg/ai/e2e/abort_test.go` (OpenAI subset)
 - `openai-responses-reasoning-replay-e2e.test.ts` → ✅🧪 `pkg/ai/e2e/openai_reasoning_replay_e2e_test.go` (+ deterministic conversion assertions in `pkg/ai/providers/openai_responses_shared_test.go`)
+- `cross-provider-handoff.test.ts` → ✅🧪 `pkg/ai/e2e/cross_provider_handoff_e2e_test.go` (OpenAI↔Anthropic subset)
 
 ### Provider/unit parity
 
@@ -53,7 +54,6 @@ The following are currently kept as env-gated scaffolds in
 
 - 📝 `interleaved-thinking.test.ts`
 - 📝 `bedrock-models.test.ts`
-- 📝 `cross-provider-handoff.test.ts`
 - 📝 `google-gemini-cli-empty-stream.test.ts` (full live parity)
 - 📝 `xhigh.test.ts` (live)
 - 📝 `zen.test.ts`
