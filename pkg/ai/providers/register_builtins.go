@@ -1,12 +1,73 @@
 package providers
 
-import "github.com/beeper/ai-bridge/pkg/ai"
+import (
+	"time"
+
+	"github.com/beeper/ai-bridge/pkg/ai"
+)
 
 const BuiltinProviderSourceID = "pkg/ai/providers/register_builtins"
 
+func notImplementedStream(apiID ai.Api) ai.StreamFn {
+	return func(model ai.Model, _ ai.Context, _ *ai.StreamOptions) *ai.AssistantMessageEventStream {
+		stream := ai.NewAssistantMessageEventStream(2)
+		stream.Push(ai.AssistantMessageEvent{
+			Type: ai.EventError,
+			Error: ai.Message{
+				Role:         ai.RoleAssistant,
+				API:          apiID,
+				Provider:     model.Provider,
+				Model:        model.ID,
+				StopReason:   ai.StopReasonError,
+				ErrorMessage: "provider runtime is not implemented yet",
+				Timestamp:    time.Now().UnixMilli(),
+			},
+			Reason: ai.StopReasonError,
+		})
+		return stream
+	}
+}
+
+func notImplementedSimpleStream(apiID ai.Api) ai.StreamSimpleFn {
+	return func(model ai.Model, _ ai.Context, _ *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		stream := ai.NewAssistantMessageEventStream(2)
+		stream.Push(ai.AssistantMessageEvent{
+			Type: ai.EventError,
+			Error: ai.Message{
+				Role:         ai.RoleAssistant,
+				API:          apiID,
+				Provider:     model.Provider,
+				Model:        model.ID,
+				StopReason:   ai.StopReasonError,
+				ErrorMessage: "provider runtime is not implemented yet",
+				Timestamp:    time.Now().UnixMilli(),
+			},
+			Reason: ai.StopReasonError,
+		})
+		return stream
+	}
+}
+
 // RegisterBuiltInAPIProviders registers providers implemented in this package.
-// Initial scaffold keeps registry empty until concrete provider streamers are ported.
-func RegisterBuiltInAPIProviders() {}
+func RegisterBuiltInAPIProviders() {
+	for _, apiID := range []ai.Api{
+		ai.APIOpenAICompletions,
+		ai.APIOpenAIResponses,
+		ai.APIAzureOpenAIResponse,
+		ai.APIOpenAICodexResponse,
+		ai.APIAnthropicMessages,
+		ai.APIGoogleGenerativeAI,
+		ai.APIGoogleGeminiCLI,
+		ai.APIGoogleVertex,
+		ai.APIBedrockConverse,
+	} {
+		ai.RegisterAPIProvider(ai.APIProvider{
+			API:          apiID,
+			Stream:       notImplementedStream(apiID),
+			StreamSimple: notImplementedSimpleStream(apiID),
+		}, BuiltinProviderSourceID)
+	}
+}
 
 func ResetAPIProviders() {
 	ai.ClearAPIProviders()
