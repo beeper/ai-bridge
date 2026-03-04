@@ -1,52 +1,8 @@
 package providers
 
-import (
-	"time"
-
-	"github.com/beeper/ai-bridge/pkg/ai"
-)
+import "github.com/beeper/ai-bridge/pkg/ai"
 
 const BuiltinProviderSourceID = "pkg/ai/providers/register_builtins"
-
-func notImplementedStream(apiID ai.Api) ai.StreamFn {
-	return func(model ai.Model, _ ai.Context, _ *ai.StreamOptions) *ai.AssistantMessageEventStream {
-		stream := ai.NewAssistantMessageEventStream(2)
-		stream.Push(ai.AssistantMessageEvent{
-			Type: ai.EventError,
-			Error: ai.Message{
-				Role:         ai.RoleAssistant,
-				API:          apiID,
-				Provider:     model.Provider,
-				Model:        model.ID,
-				StopReason:   ai.StopReasonError,
-				ErrorMessage: "provider runtime is not implemented yet",
-				Timestamp:    time.Now().UnixMilli(),
-			},
-			Reason: ai.StopReasonError,
-		})
-		return stream
-	}
-}
-
-func notImplementedSimpleStream(apiID ai.Api) ai.StreamSimpleFn {
-	return func(model ai.Model, _ ai.Context, _ *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
-		stream := ai.NewAssistantMessageEventStream(2)
-		stream.Push(ai.AssistantMessageEvent{
-			Type: ai.EventError,
-			Error: ai.Message{
-				Role:         ai.RoleAssistant,
-				API:          apiID,
-				Provider:     model.Provider,
-				Model:        model.ID,
-				StopReason:   ai.StopReasonError,
-				ErrorMessage: "provider runtime is not implemented yet",
-				Timestamp:    time.Now().UnixMilli(),
-			},
-			Reason: ai.StopReasonError,
-		})
-		return stream
-	}
-}
 
 // RegisterBuiltInAPIProviders registers providers implemented in this package.
 func RegisterBuiltInAPIProviders() {
