@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"context"
 	"testing"
 
 	"github.com/openai/openai-go/v3"
@@ -153,17 +154,25 @@ func TestPromptContainsToolCalls(t *testing.T) {
 
 func TestShouldUsePkgAIBridgeStreaming(t *testing.T) {
 	client := &AIClient{}
-	if !client.shouldUsePkgAIBridgeStreaming(&PortalMetadata{}, []openai.ChatCompletionMessageParamUnion{
+	if !client.shouldUsePkgAIBridgeStreaming(context.Background(), &PortalMetadata{}, []openai.ChatCompletionMessageParamUnion{
 		openai.UserMessage("hello"),
 	}) {
 		t.Fatalf("expected bridge streaming to be enabled for non-tool prompt")
 	}
-	if client.shouldUsePkgAIBridgeStreaming(&PortalMetadata{
+	if !client.shouldUsePkgAIBridgeStreaming(context.Background(), &PortalMetadata{
 		Capabilities: ModelCapabilities{SupportsToolCalling: true},
 	}, []openai.ChatCompletionMessageParamUnion{
 		openai.UserMessage("hello"),
 	}) {
-		t.Fatalf("expected bridge streaming disabled when tool calling is enabled")
+		t.Fatalf("expected bridge streaming enabled when tool calling has no active tools")
+	}
+	if client.shouldUsePkgAIBridgeStreaming(context.Background(), &PortalMetadata{
+		Capabilities: ModelCapabilities{SupportsToolCalling: true},
+		AgentID:      "agent-1",
+	}, []openai.ChatCompletionMessageParamUnion{
+		openai.UserMessage("hello"),
+	}) {
+		t.Fatalf("expected bridge streaming disabled when agent tool mode is active")
 	}
 }
 
