@@ -36,7 +36,6 @@ const (
 	AIMessageText       AIMessageVariant = iota // Plain assistant text
 	AIMessageToolCall                           // Tool call timeline event
 	AIMessageToolResult                         // Tool result timeline event
-	AIMessageMedia                              // Uploaded media (image, audio, video)
 )
 
 // AIRemoteMessage is a RemoteMessage for AI-generated content routed through bridgev2.
@@ -355,56 +354,6 @@ func NewAITextMessage(
 				Type:    event.EventMessage,
 				Content: &event.MessageEventContent{MsgType: event.MsgText, Body: text},
 				Extra:   rendered.Raw,
-			}},
-		},
-	}
-}
-
-// NewAIToolCallMessage creates an AIRemoteMessage for a tool call timeline event.
-func NewAIToolCallMessage(
-	portal *bridgev2.Portal,
-	login *bridgev2.UserLogin,
-	params msgconv.ToolCallEventParams,
-	modelID string,
-) *AIRemoteMessage {
-	content := msgconv.BuildToolCallEventContent(params)
-	senderID := modelUserID(modelID)
-	return &AIRemoteMessage{
-		portal:    portal.PortalKey,
-		id:        newMessageID(),
-		sender:    bridgev2.EventSender{Sender: senderID, SenderLogin: login.ID},
-		timestamp: time.Now(),
-		variant:   AIMessageToolCall,
-		preBuilt: &bridgev2.ConvertedMessage{
-			Parts: []*bridgev2.ConvertedMessagePart{{
-				ID:    networkid.PartID("0"),
-				Type:  ToolCallEventType,
-				Extra: content.Raw,
-			}},
-		},
-	}
-}
-
-// NewAIToolResultMessage creates an AIRemoteMessage for a tool result timeline event.
-func NewAIToolResultMessage(
-	portal *bridgev2.Portal,
-	login *bridgev2.UserLogin,
-	params msgconv.ToolResultEventParams,
-	modelID string,
-) *AIRemoteMessage {
-	content := msgconv.BuildToolResultEventContent(params)
-	senderID := modelUserID(modelID)
-	return &AIRemoteMessage{
-		portal:    portal.PortalKey,
-		id:        newMessageID(),
-		sender:    bridgev2.EventSender{Sender: senderID, SenderLogin: login.ID},
-		timestamp: time.Now(),
-		variant:   AIMessageToolResult,
-		preBuilt: &bridgev2.ConvertedMessage{
-			Parts: []*bridgev2.ConvertedMessagePart{{
-				ID:    networkid.PartID("0"),
-				Type:  ToolResultEventType,
-				Extra: content.Raw,
 			}},
 		},
 	}
