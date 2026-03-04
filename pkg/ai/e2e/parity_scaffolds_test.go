@@ -30,11 +30,6 @@ func TestGoogleGeminiCLIEmptyStreamE2EParityScaffold(t *testing.T) {
 	t.Skip("parity scaffold for google-gemini-cli-empty-stream.test.ts pending runtime implementation")
 }
 
-func TestXhighE2EParityScaffold(t *testing.T) {
-	requirePIAIE2E(t)
-	t.Skip("parity scaffold for xhigh.test.ts pending runtime implementation")
-}
-
 func TestZenE2EParityScaffold(t *testing.T) {
 	requirePIAIE2E(t)
 	t.Skip("parity scaffold for zen.test.ts pending runtime implementation")
