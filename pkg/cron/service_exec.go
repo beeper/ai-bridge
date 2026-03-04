@@ -273,7 +273,10 @@ func (c *CronService) runMainJob(ctx context.Context, job CronJob) (statusVal, e
 		waitStarted := time.Now()
 		for {
 			if ctx.Err() != nil {
-				return "error", "cron job timed out", text, ""
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					return "error", "cron job timed out", text, ""
+				}
+				return "error", ctx.Err().Error(), text, ""
 			}
 			res := c.deps.RunHeartbeatOnce(ctx, reason)
 			if res.Status != "skipped" || res.Reason != "requests-in-flight" {
