@@ -684,10 +684,10 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 	linkPreviews := generateOutboundLinkPreviews(ctx, rendered.Body, intent, portal, state.sourceCitations, getLinkPreviewConfig(&oc.connector.Config))
 
 	uiMessage := msgconv.BuildUIMessage(msgconv.UIMessageParams{
-		TurnID:     state.turnID,
-		Role:       "assistant",
-		Metadata:   oc.buildUIMessageMetadata(state, meta, true),
-		Parts:      parts,
+		TurnID:   state.turnID,
+		Role:     "assistant",
+		Metadata: oc.buildUIMessageMetadata(state, meta, true),
+		Parts:    parts,
 	})
 
 	topLevelExtra := map[string]any{

@@ -31,4 +31,3 @@ func TestModelMatchesQuery(t *testing.T) {
 		})
 	}
 }
-
