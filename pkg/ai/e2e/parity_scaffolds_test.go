@@ -55,11 +55,6 @@ func TestEmptyE2EParityScaffold(t *testing.T) {
 	t.Skip("parity scaffold for empty.test.ts pending runtime implementation")
 }
 
-func TestImageToolResultE2EParityScaffold(t *testing.T) {
-	requirePIAIE2E(t)
-	t.Skip("parity scaffold for image-tool-result.test.ts pending runtime implementation")
-}
-
 func TestGoogleGeminiCliClaudeThinkingHeaderE2EParityScaffold(t *testing.T) {
 	requirePIAIE2E(t)
 	t.Skip("parity scaffold for google-gemini-cli-claude-thinking-header.test.ts pending runtime implementation")
