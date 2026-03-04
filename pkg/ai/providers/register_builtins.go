@@ -85,10 +85,14 @@ func RegisterBuiltInAPIProviders() {
 		Stream:       streamGoogleVertex,
 		StreamSimple: streamSimpleGoogleVertex,
 	}, BuiltinProviderSourceID)
+	ai.RegisterAPIProvider(ai.APIProvider{
+		API:          ai.APIBedrockConverse,
+		Stream:       streamBedrockConverse,
+		StreamSimple: streamSimpleBedrockConverse,
+	}, BuiltinProviderSourceID)
 
 	for _, apiID := range []ai.Api{
 		ai.APIGoogleGeminiCLI,
-		ai.APIBedrockConverse,
 	} {
 		ai.RegisterAPIProvider(ai.APIProvider{
 			API:          apiID,

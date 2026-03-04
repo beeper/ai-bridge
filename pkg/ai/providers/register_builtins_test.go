@@ -142,4 +142,23 @@ func TestRegisterBuiltInAPIProviders(t *testing.T) {
 	if strings.Contains(strings.ToLower(vertexEvt.Error.ErrorMessage), "not implemented") {
 		t.Fatalf("expected vertex runtime implementation, got stub error: %q", vertexEvt.Error.ErrorMessage)
 	}
+
+	bedrockStream, err := ai.Stream(ai.Model{
+		ID:       "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+		Provider: "amazon-bedrock",
+		API:      ai.APIBedrockConverse,
+	}, ai.Context{}, nil)
+	if err != nil {
+		t.Fatalf("unexpected bedrock stream resolve error: %v", err)
+	}
+	bedrockEvt, err := bedrockStream.Next(ctx)
+	if err != nil {
+		t.Fatalf("expected bedrock terminal error event, got %v", err)
+	}
+	if bedrockEvt.Type != ai.EventError {
+		t.Fatalf("expected bedrock error event, got %s", bedrockEvt.Type)
+	}
+	if strings.Contains(strings.ToLower(bedrockEvt.Error.ErrorMessage), "not implemented") {
+		t.Fatalf("expected bedrock runtime implementation, got stub error: %q", bedrockEvt.Error.ErrorMessage)
+	}
 }
