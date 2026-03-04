@@ -100,3 +100,82 @@ func TestConvertResponsesMessages_CanOmitSystemPrompt(t *testing.T) {
 		t.Fatalf("expected no system/developer prompt in output when omitted, got %#v", first)
 	}
 }
+
+func TestConvertResponsesMessages_OmitsFunctionCallItemIDForDifferentModel(t *testing.T) {
+	model := ai.Model{
+		ID:       "gpt-5.2-codex",
+		Provider: "openai",
+		API:      ai.APIOpenAIResponses,
+	}
+	context := ai.Context{
+		Messages: []ai.Message{
+			{Role: ai.RoleUser, Text: "use tool"},
+			{
+				Role: ai.RoleAssistant,
+				Content: []ai.ContentBlock{
+					{
+						Type:      ai.ContentTypeToolCall,
+						ID:        "call_123|fc_456",
+						Name:      "double_number",
+						Arguments: map[string]any{"value": 21},
+					},
+				},
+				Provider:   "openai",
+				API:        ai.APIOpenAIResponses,
+				Model:      "gpt-5-mini",
+				StopReason: ai.StopReasonToolUse,
+			},
+		},
+	}
+
+	output := ConvertResponsesMessages(model, context, openAIToolCallProviders, nil)
+	if len(output) < 2 {
+		t.Fatalf("expected function call message in output, got %d entries", len(output))
+	}
+	functionCall := output[len(output)-1]
+	if functionCall["type"] != "function_call" {
+		t.Fatalf("expected function_call entry, got %#v", functionCall)
+	}
+	if _, hasID := functionCall["id"]; hasID {
+		t.Fatalf("expected function_call id to be omitted for different-model handoff, got %#v", functionCall["id"])
+	}
+	if callID, _ := functionCall["call_id"].(string); callID != "call_123" {
+		t.Fatalf("expected call_id preserved, got %q", callID)
+	}
+}
+
+func TestConvertResponsesMessages_DropsAbortedReasoningOnlyAssistant(t *testing.T) {
+	model := ai.Model{
+		ID:       "gpt-5-mini",
+		Provider: "openai",
+		API:      ai.APIOpenAIResponses,
+	}
+	context := ai.Context{
+		Messages: []ai.Message{
+			{Role: ai.RoleUser, Text: "use tool"},
+			{
+				Role: ai.RoleAssistant,
+				Content: []ai.ContentBlock{
+					{
+						Type:              ai.ContentTypeThinking,
+						Thinking:          "",
+						ThinkingSignature: `{"type":"reasoning","id":"rs_123","summary":[]}`,
+					},
+				},
+				Provider:   "openai",
+				API:        ai.APIOpenAIResponses,
+				Model:      "gpt-5-mini",
+				StopReason: ai.StopReasonAborted,
+			},
+			{Role: ai.RoleUser, Text: "say hi"},
+		},
+	}
+
+	output := ConvertResponsesMessages(model, context, openAIToolCallProviders, nil)
+	for _, item := range output {
+		itemType, _ := item["type"].(string)
+		if itemType == "reasoning" {
+			t.Fatalf("expected aborted reasoning history to be omitted, got %#v", item)
+		}
+	}
+}

@@ -96,6 +96,10 @@ func ConvertResponsesMessages(
 				"content": content,
 			})
 		case ai.RoleAssistant:
+			isDifferentModel := msg.Model != "" &&
+				msg.Model != model.ID &&
+				msg.Provider == model.Provider &&
+				msg.API == model.API
 			for _, block := range msg.Content {
 				switch block.Type {
 				case ai.ContentTypeText:
@@ -130,13 +134,21 @@ func ConvertResponsesMessages(
 						b, _ := json.Marshal(block.Arguments)
 						args = string(b)
 					}
-					messages = append(messages, map[string]any{
+					functionCall := map[string]any{
 						"type":      "function_call",
-						"id":        itemID,
 						"call_id":   callID,
 						"name":      block.Name,
 						"arguments": args,
-					})
+					}
+					if itemID != "" {
+						// For same-provider different-model handoffs, omit item IDs that
+						// can trigger OpenAI pairing validation against foreign reasoning
+						// history from prior model turns.
+						if !(isDifferentModel && strings.HasPrefix(itemID, "fc_")) {
+							functionCall["id"] = itemID
+						}
+					}
+					messages = append(messages, functionCall)
 				}
 			}
 		case ai.RoleToolResult:
