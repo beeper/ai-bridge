@@ -3,10 +3,125 @@ package providers
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/beeper/ai-bridge/pkg/ai"
 )
+
+const defaultCodexBaseURL = "https://chatgpt.com/backend-api"
+
+var codexToolCallProviders = map[string]struct{}{
+	"openai":       {},
+	"openai-codex": {},
+	"opencode":     {},
+}
+
+type OpenAICodexResponsesOptions struct {
+	StreamOptions    ai.StreamOptions
+	ReasoningEffort  string
+	ReasoningSummary string
+	TextVerbosity    string
+}
+
+func BuildOpenAICodexResponsesParams(model ai.Model, context ai.Context, options OpenAICodexResponsesOptions) map[string]any {
+	messages := ConvertResponsesMessages(model, context, codexToolCallProviders, &ConvertResponsesMessagesOptions{
+		IncludeSystemPrompt: false,
+	})
+	params := map[string]any{
+		"model":               model.ID,
+		"store":               false,
+		"stream":              true,
+		"instructions":        context.SystemPrompt,
+		"input":               messages,
+		"include":             []string{"reasoning.encrypted_content"},
+		"tool_choice":         "auto",
+		"parallel_tool_calls": true,
+		"text": map[string]any{
+			"verbosity": coalesceCodexTextVerbosity(options.TextVerbosity),
+		},
+	}
+	if strings.TrimSpace(options.StreamOptions.SessionID) != "" {
+		params["prompt_cache_key"] = options.StreamOptions.SessionID
+	}
+	if options.StreamOptions.Temperature != nil {
+		params["temperature"] = *options.StreamOptions.Temperature
+	}
+	if len(context.Tools) > 0 {
+		params["tools"] = ConvertResponsesTools(context.Tools, false)
+	}
+	if strings.TrimSpace(options.ReasoningEffort) != "" {
+		effort := ClampCodexReasoningEffort(model.ID, options.ReasoningEffort)
+		summary := strings.TrimSpace(options.ReasoningSummary)
+		if summary == "" {
+			summary = "auto"
+		}
+		params["reasoning"] = map[string]any{
+			"effort":  effort,
+			"summary": summary,
+		}
+	}
+	return params
+}
+
+func ClampCodexReasoningEffort(modelID string, effort string) string {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	id := modelID
+	if strings.Contains(id, "/") {
+		parts := strings.Split(id, "/")
+		id = parts[len(parts)-1]
+	}
+	if (strings.HasPrefix(id, "gpt-5.2") || strings.HasPrefix(id, "gpt-5.3")) && effort == "minimal" {
+		return "low"
+	}
+	if id == "gpt-5.1" && effort == "xhigh" {
+		return "high"
+	}
+	if id == "gpt-5.1-codex-mini" {
+		if effort == "high" || effort == "xhigh" {
+			return "high"
+		}
+		return "medium"
+	}
+	return effort
+}
+
+func ResolveCodexURL(baseURL string) string {
+	normalized := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if normalized == "" {
+		normalized = defaultCodexBaseURL
+	}
+	if strings.HasSuffix(normalized, "/codex/responses") {
+		return normalized
+	}
+	if strings.HasSuffix(normalized, "/codex") {
+		return normalized + "/responses"
+	}
+	return normalized + "/codex/responses"
+}
+
+func ResolveCodexWebSocketURL(baseURL string) string {
+	resolved := ResolveCodexURL(baseURL)
+	parsed, err := url.Parse(resolved)
+	if err != nil {
+		return resolved
+	}
+	if parsed.Scheme == "https" {
+		parsed.Scheme = "wss"
+	} else if parsed.Scheme == "http" {
+		parsed.Scheme = "ws"
+	}
+	return parsed.String()
+}
+
+func coalesceCodexTextVerbosity(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "low", "high":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "medium"
+	}
+}
 
 // ProcessCodexSSEPayload maps Codex SSE payload chunks into unified stream events.
 // This is a deterministic helper used by tests while the full transport integration
