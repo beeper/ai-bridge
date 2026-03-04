@@ -31,6 +31,16 @@ func TestSupportsXhigh(t *testing.T) {
 	}
 }
 
+func TestGeneratedModelsRegisteredOnInit(t *testing.T) {
+	model, ok := GetModel("openai", "gpt-5")
+	if !ok {
+		t.Fatalf("expected generated openai gpt-5 model to be registered")
+	}
+	if model.API != APIOpenAIResponses {
+		t.Fatalf("expected openai gpt-5 to use responses api, got %s", model.API)
+	}
+}
+
 func TestModelsAreEqual(t *testing.T) {
 	a := &Model{ID: "gpt-4o", Provider: "openai"}
 	b := &Model{ID: "gpt-4o", Provider: "openai"}
