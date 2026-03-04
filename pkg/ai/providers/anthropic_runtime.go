@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 
 	"github.com/beeper/ai-bridge/pkg/ai"
 )
+
+const anthropicFineGrainedToolStreamingBeta = "fine-grained-tool-streaming-2025-05-14"
 
 func streamAnthropicMessages(model ai.Model, c ai.Context, options *ai.StreamOptions) *ai.AssistantMessageEventStream {
 	anthropicOptions := AnthropicOptions{}
@@ -77,8 +80,9 @@ func streamAnthropicMessagesWithOptions(
 		}
 		request := anthropicparam.Override[anthropic.MessageNewParams](payload)
 
+		clientConfig := buildAnthropicClientConfig(model, c, apiKey, betaHeader, options.StreamOptions.Headers)
 		reqOptions := []anthropicoption.RequestOption{}
-		if isOAuthAnthropicToken(apiKey) || model.Provider == "github-copilot" {
+		if clientConfig.UseAuthToken {
 			reqOptions = append(reqOptions, anthropicoption.WithAuthToken(apiKey))
 		} else {
 			reqOptions = append(reqOptions, anthropicoption.WithAPIKey(apiKey))
@@ -86,11 +90,10 @@ func streamAnthropicMessagesWithOptions(
 		if baseURL := strings.TrimSpace(model.BaseURL); baseURL != "" {
 			reqOptions = append(reqOptions, anthropicoption.WithBaseURL(baseURL))
 		}
-		if betaHeader != "" {
-			reqOptions = append(reqOptions, anthropicoption.WithHeader("anthropic-beta", betaHeader))
+		if clientConfig.BetaHeader != "" {
+			reqOptions = append(reqOptions, anthropicoption.WithHeader("anthropic-beta", clientConfig.BetaHeader))
 		}
-		reqOptions = appendAnthropicHeaderOptions(reqOptions, model.Headers)
-		reqOptions = appendAnthropicHeaderOptions(reqOptions, options.StreamOptions.Headers)
+		reqOptions = appendAnthropicHeaderOptions(reqOptions, clientConfig.Headers)
 
 		client := anthropic.NewClient(reqOptions...)
 		runCtx := options.StreamOptions.Ctx
@@ -250,6 +253,63 @@ func appendAnthropicHeaderOptions(
 
 func isOAuthAnthropicToken(apiKey string) bool {
 	return strings.Contains(apiKey, "sk-ant-oat")
+}
+
+type anthropicClientConfig struct {
+	UseAuthToken bool
+	BetaHeader   string
+	Headers      map[string]string
+}
+
+func buildAnthropicClientConfig(
+	model ai.Model,
+	context ai.Context,
+	apiKey string,
+	payloadBetaHeader string,
+	optionHeaders map[string]string,
+) anthropicClientConfig {
+	isCopilot := model.Provider == "github-copilot"
+	isOAuth := isOAuthAnthropicToken(apiKey)
+	config := anthropicClientConfig{
+		UseAuthToken: isCopilot || isOAuth,
+		Headers:      map[string]string{},
+	}
+
+	betaFeatures := make([]string, 0, 2)
+	if !isCopilot {
+		betaFeatures = append(betaFeatures, anthropicFineGrainedToolStreamingBeta)
+	}
+	for _, token := range strings.Split(payloadBetaHeader, ",") {
+		trimmed := strings.TrimSpace(token)
+		if trimmed == "" {
+			continue
+		}
+		if !slices.Contains(betaFeatures, trimmed) {
+			betaFeatures = append(betaFeatures, trimmed)
+		}
+	}
+	if len(betaFeatures) > 0 {
+		config.BetaHeader = strings.Join(betaFeatures, ",")
+	}
+
+	mergeHeaderMaps(config.Headers, model.Headers)
+	if isCopilot {
+		mergeHeaderMaps(config.Headers, BuildCopilotDynamicHeaders(context.Messages, HasCopilotVisionInput(context.Messages)))
+	}
+	mergeHeaderMaps(config.Headers, optionHeaders)
+	return config
+}
+
+func mergeHeaderMaps(target map[string]string, maps ...map[string]string) {
+	for _, m := range maps {
+		for key, value := range m {
+			trimmed := strings.TrimSpace(value)
+			if trimmed == "" {
+				continue
+			}
+			target[key] = trimmed
+		}
+	}
 }
 
 func supportsAdaptiveThinkingModel(modelID string) bool {
