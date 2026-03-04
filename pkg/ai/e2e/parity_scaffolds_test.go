@@ -25,11 +25,6 @@ func TestBedrockModelsE2EParityScaffold(t *testing.T) {
 	t.Skip("parity scaffold for bedrock-models.test.ts pending runtime implementation")
 }
 
-func TestToolCallIDNormalizationE2EParityScaffold(t *testing.T) {
-	requirePIAIE2E(t)
-	t.Skip("parity scaffold for tool-call-id-normalization.test.ts pending runtime implementation")
-}
-
 func TestAnthropicToolNameNormalizationE2EParityScaffold(t *testing.T) {
 	requirePIAIE2E(t)
 	t.Skip("parity scaffold for anthropic-tool-name-normalization.test.ts pending runtime implementation")
