@@ -53,8 +53,6 @@ Legend:
 The following are currently kept as env-gated scaffolds in
 `pkg/ai/e2e/parity_scaffolds_test.go`:
 
-- 📝 `interleaved-thinking.test.ts`
-- 📝 `bedrock-models.test.ts`
 - 📝 `google-gemini-cli-empty-stream.test.ts` (full live parity)
 - 📝 `zen.test.ts`
 - 📝 `empty.test.ts`
