@@ -46,8 +46,34 @@ func buildPkgAIModelFromGenerateParams(params GenerateParams, baseURL string) ai
 		Provider:  aipkg.Provider(provider),
 		API:       api,
 		BaseURL:   strings.TrimSpace(baseURL),
+		Reasoning: modelSupportsReasoning(modelID) || strings.TrimSpace(params.ReasoningEffort) != "",
 		Input:     []string{"text"},
 		MaxTokens: max(params.MaxCompletionTokens, 4096),
+	}
+}
+
+func modelSupportsReasoning(modelID string) bool {
+	modelID = strings.ToLower(strings.TrimSpace(modelID))
+	return strings.HasPrefix(modelID, "gpt-5") ||
+		strings.HasPrefix(modelID, "o1") ||
+		strings.HasPrefix(modelID, "o3") ||
+		strings.Contains(modelID, "thinking")
+}
+
+func parseThinkingLevel(value string) aipkg.ThinkingLevel {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "minimal":
+		return aipkg.ThinkingMinimal
+	case "low":
+		return aipkg.ThinkingLow
+	case "medium":
+		return aipkg.ThinkingMedium
+	case "high":
+		return aipkg.ThinkingHigh
+	case "xhigh":
+		return aipkg.ThinkingXHigh
+	default:
+		return ""
 	}
 }
 
@@ -78,7 +104,18 @@ func tryGenerateStreamWithPkgAI(
 		APIKey:      strings.TrimSpace(apiKey),
 	}
 
-	stream, err := aipkg.Stream(model, aiContext, options)
+	var (
+		stream *aipkg.AssistantMessageEventStream
+		err    error
+	)
+	if reasoning := parseThinkingLevel(params.ReasoningEffort); reasoning != "" {
+		stream, err = aipkg.StreamSimple(model, aiContext, &aipkg.SimpleStreamOptions{
+			StreamOptions: *options,
+			Reasoning:     reasoning,
+		})
+	} else {
+		stream, err = aipkg.Stream(model, aiContext, options)
+	}
 	if err != nil {
 		return nil, false
 	}
