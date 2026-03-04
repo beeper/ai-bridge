@@ -167,6 +167,9 @@ func (s *StreamSession) EmitPart(ctx context.Context, part map[string]any) {
 		AgentID:       strings.TrimSpace(s.params.AgentID),
 	})
 	if err != nil {
+		if s.params.Logger != nil {
+			s.params.Logger.Warn().Err(err).Msg("Failed to build stream event envelope")
+		}
 		return
 	}
 	txnID := matrixevents.BuildStreamEventTxnID(turnID, seq)
@@ -336,10 +339,6 @@ func (s *StreamSession) runDebouncedWorker() {
 			}
 		case <-timerCh:
 			stopTimer()
-			if !pending {
-				pending = false
-				continue
-			}
 			pending = false
 			_ = s.sendDebounced(context.Background(), false)
 		}
@@ -353,11 +352,7 @@ func (s *StreamSession) sendDebounced(ctx context.Context, force bool) error {
 	if s.params.SendDebouncedEdit == nil {
 		return nil
 	}
-	sendCtx := ctx
-	if sendCtx == nil {
-		sendCtx = context.Background()
-	}
-	return s.params.SendDebouncedEdit(sendCtx, force)
+	return s.params.SendDebouncedEdit(ctx, force)
 }
 
 func debouncedPartMode(partType string) (eligible bool, force bool) {

@@ -9,14 +9,6 @@ func NormalizeBaseURL(value string) string {
 	return strings.TrimRight(strings.TrimSpace(value), "/")
 }
 
-// BoolPtrOr dereferences a *bool, returning fallback if the pointer is nil.
-func BoolPtrOr(ptr *bool, fallback bool) bool {
-	if ptr == nil {
-		return fallback
-	}
-	return *ptr
-}
-
 // NormalizeMimeType lowercases, trims whitespace, and strips parameters from a MIME type.
 func NormalizeMimeType(mimeType string) string {
 	lower := strings.ToLower(strings.TrimSpace(mimeType))

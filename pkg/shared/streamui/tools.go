@@ -23,31 +23,29 @@ func (e *Emitter) EnsureUIToolInputStart(
 	if e.State == nil {
 		return
 	}
-	if !e.State.UIToolStarted[toolCallID] {
-		e.State.UIToolStarted[toolCallID] = true
-		if strings.TrimSpace(toolName) != "" {
-			e.State.UIToolNameByToolCallID[toolCallID] = toolName
-		}
-		part := map[string]any{
-			"type":             "tool-input-start",
-			"toolCallId":       toolCallID,
-			"toolName":         toolName,
-			"providerExecuted": providerExecuted,
-		}
-		if dynamic {
-			part["dynamic"] = true
-		}
-		if strings.TrimSpace(title) != "" {
-			part["title"] = title
-		}
-		if len(providerMetadata) > 0 {
-			part["providerMetadata"] = providerMetadata
-		}
-		e.Emit(ctx, portal, part)
-	}
 	if strings.TrimSpace(toolName) != "" {
 		e.State.UIToolNameByToolCallID[toolCallID] = toolName
 	}
+	if e.State.UIToolStarted[toolCallID] {
+		return
+	}
+	e.State.UIToolStarted[toolCallID] = true
+	part := map[string]any{
+		"type":             "tool-input-start",
+		"toolCallId":       toolCallID,
+		"toolName":         toolName,
+		"providerExecuted": providerExecuted,
+	}
+	if dynamic {
+		part["dynamic"] = true
+	}
+	if strings.TrimSpace(title) != "" {
+		part["title"] = title
+	}
+	if len(providerMetadata) > 0 {
+		part["providerMetadata"] = providerMetadata
+	}
+	e.Emit(ctx, portal, part)
 }
 
 // EmitUIToolInputDelta sends a "tool-input-delta" event.

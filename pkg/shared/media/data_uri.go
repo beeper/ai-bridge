@@ -37,15 +37,14 @@ func ParseDataURI(dataURI string) (string, string, error) {
 func DecodeBase64(b64Data string) ([]byte, string, error) {
 	mimeType := ""
 
-	if after, found := strings.CutPrefix(b64Data, "data:"); found {
-		prefix, data, hasComma := strings.Cut(after, ",")
-		if !hasComma {
-			return nil, "", errors.New("invalid data URL: no comma found")
+	// Strip data-URI prefix if present, extracting the mime type.
+	if strings.HasPrefix(b64Data, "data:") {
+		rawB64, parsedMime, err := ParseDataURI(b64Data)
+		if err != nil {
+			return nil, "", fmt.Errorf("parsing data URI: %w", err)
 		}
-		if mime, _, hasBase64 := strings.Cut(prefix, ";base64"); hasBase64 {
-			mimeType = mime
-		}
-		b64Data = data
+		b64Data = rawB64
+		mimeType = parsedMime
 	}
 
 	data, err := base64.StdEncoding.DecodeString(b64Data)
