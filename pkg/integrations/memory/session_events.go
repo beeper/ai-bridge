@@ -34,9 +34,6 @@ func (m *MemorySearchManager) scheduleSessionSync(sessionKey string) {
 	}
 	key := strings.TrimSpace(sessionKey)
 	delay := defaultSessionSyncDebounce
-	if delay <= 0 {
-		delay = 5 * time.Second
-	}
 	m.mu.Lock()
 	m.sessionWatchKey = key
 	if m.sessionWatchTimer != nil {

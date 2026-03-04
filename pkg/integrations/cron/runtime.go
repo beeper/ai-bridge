@@ -59,45 +59,31 @@ func (a *storeBackendAdapter) List(ctx context.Context, prefix string) ([]cronco
 	return out, nil
 }
 
-func ResolveCronEnabled(enabled *bool) bool {
-	if enabled == nil {
-		return true
-	}
-	return *enabled
-}
-
 func ResolveCronStorePath(raw string) string {
 	return croncore.ResolveCronStorePath(raw)
 }
 
 func ResolveCronMaxConcurrentRuns(maxConcurrentRuns int) int {
-	if maxConcurrentRuns > 0 {
-		return maxConcurrentRuns
-	}
-	return 1
+	return max(maxConcurrentRuns, 1)
 }
 
 func ResolveCronJobTimeoutMs(job croncore.CronJob, defaultTimeoutSeconds int) int64 {
 	if job.SessionTarget != croncore.CronSessionIsolated {
-		return int64((10 * time.Minute) / time.Millisecond)
+		return int64(10 * time.Minute / time.Millisecond)
 	}
 	if defaultTimeoutSeconds <= 0 {
 		defaultTimeoutSeconds = 600
 	}
 	timeoutSeconds := defaultTimeoutSeconds
 	if job.Payload.TimeoutSeconds != nil {
-		override := *job.Payload.TimeoutSeconds
-		switch {
+		switch override := *job.Payload.TimeoutSeconds; {
 		case override == 0:
-			return int64((30 * 24 * time.Hour) / time.Millisecond)
+			return int64(30 * 24 * time.Hour / time.Millisecond)
 		case override > 0:
 			timeoutSeconds = override
 		}
 	}
-	if timeoutSeconds < 1 {
-		timeoutSeconds = 1
-	}
-	return int64(timeoutSeconds) * 1000
+	return int64(max(timeoutSeconds, 1)) * 1000
 }
 
 type ServiceBuildDeps struct {
@@ -158,13 +144,17 @@ func HandleCronEvent(evt croncore.CronEvent, deps EventLogDeps) {
 	}
 	path := croncore.ResolveCronRunLogPath(deps.StorePath, evt.JobID)
 	entry := CronRunLogEntryFromEvent(evt, deps.NowMs)
-	_ = deps.AppendRunLog(context.Background(), path, entry)
+	if err := deps.AppendRunLog(context.Background(), path, entry); err != nil && deps.Log != nil {
+		deps.Log.Warn("cron event: failed to append run log", map[string]any{"job_id": evt.JobID, "error": err.Error()})
+	}
 }
 
 func CronRunLogEntryFromEvent(evt croncore.CronEvent, nowMs func() int64) croncore.CronRunLogEntry {
-	ts := time.Now().UnixMilli()
+	var ts int64
 	if nowMs != nil {
 		ts = nowMs()
+	} else {
+		ts = time.Now().UnixMilli()
 	}
 	return croncore.CronRunLogEntry{
 		TS:          ts,

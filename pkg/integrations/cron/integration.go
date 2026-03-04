@@ -245,42 +245,50 @@ func (i *Integration) executeCronCommand(call iruntime.CommandCall) (bool, error
 
 // ---- private: tool deps wiring ----
 
+var errCronServiceNotAvailable = errors.New("cron service not available")
+
 func (i *Integration) buildToolExecDeps(scope iruntime.ToolScope) ToolExecDeps {
 	svc := i.service
+	requireSvc := func() error {
+		if svc == nil {
+			return errCronServiceNotAvailable
+		}
+		return nil
+	}
 	return ToolExecDeps{
 		Status: func() (bool, string, int, *int64, error) {
-			if svc == nil {
-				return false, "", 0, nil, errors.New("cron service not available")
+			if err := requireSvc(); err != nil {
+				return false, "", 0, nil, err
 			}
 			return svc.Status()
 		},
 		List: func(includeDisabled bool) ([]Job, error) {
-			if svc == nil {
-				return nil, errors.New("cron service not available")
+			if err := requireSvc(); err != nil {
+				return nil, err
 			}
 			return svc.List(includeDisabled)
 		},
 		Add: func(input JobCreate) (Job, error) {
-			if svc == nil {
-				return Job{}, errors.New("cron service not available")
+			if err := requireSvc(); err != nil {
+				return Job{}, err
 			}
 			return svc.Add(input)
 		},
 		Update: func(id string, patch JobPatch) (Job, error) {
-			if svc == nil {
-				return Job{}, errors.New("cron service not available")
+			if err := requireSvc(); err != nil {
+				return Job{}, err
 			}
 			return svc.Update(id, patch)
 		},
 		Remove: func(id string) (bool, error) {
-			if svc == nil {
-				return false, errors.New("cron service not available")
+			if err := requireSvc(); err != nil {
+				return false, err
 			}
 			return svc.Remove(id)
 		},
 		Run: func(id string, mode string) (bool, string, error) {
-			if svc == nil {
-				return false, "", errors.New("cron service not available")
+			if err := requireSvc(); err != nil {
+				return false, "", err
 			}
 			return svc.Run(id, mode)
 		},
@@ -288,8 +296,8 @@ func (i *Integration) buildToolExecDeps(scope iruntime.ToolScope) ToolExecDeps {
 			return i.readRuns(jobID, limit)
 		},
 		Wake: func(mode string, text string) (bool, error) {
-			if svc == nil {
-				return false, errors.New("cron service not available")
+			if err := requireSvc(); err != nil {
+				return false, err
 			}
 			return svc.Wake(mode, text)
 		},
@@ -633,7 +641,7 @@ func (i *Integration) readRuns(jobID string, limit int) ([]RunLogEntry, error) {
 	runDir := ResolveRunLogDir(i.storePath)
 	storeEntries, err := sb.List(context.Background(), runDir)
 	if err != nil {
-		return entries, nil
+		return entries, fmt.Errorf("list run logs: %w", err)
 	}
 	for _, se := range storeEntries {
 		if !strings.HasSuffix(strings.ToLower(se.Key), ".jsonl") {
