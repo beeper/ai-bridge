@@ -21,6 +21,7 @@ Legend:
 - `tokens.test.ts` → ✅🧪 `pkg/ai/e2e/abort_test.go` (OpenAI subset)
 - `openai-responses-reasoning-replay-e2e.test.ts` → ✅🧪 `pkg/ai/e2e/openai_reasoning_replay_e2e_test.go` (+ deterministic conversion assertions in `pkg/ai/providers/openai_responses_shared_test.go`)
 - `cross-provider-handoff.test.ts` → ✅🧪 `pkg/ai/e2e/cross_provider_handoff_e2e_test.go` (OpenAI↔Anthropic subset)
+- `tool-call-id-normalization.test.ts` → ✅🧪 `pkg/ai/e2e/tool_call_id_normalization_e2e_test.go` (OpenAI subset) + deterministic ID normalization tests in providers
 
 ### Provider/unit parity
 
@@ -34,7 +35,6 @@ Legend:
 - `google-shared-gemini3-unsigned-tool-call.test.ts` → ✅ `pkg/ai/providers/google_shared_test.go`
 - `google-thinking-signature.test.ts` → ✅ `pkg/ai/providers/google_shared_test.go`
 - `transform-messages-copilot-openai-to-anthropic.test.ts` → ✅ `pkg/ai/providers/transform_messages_test.go`
-- `tool-call-id-normalization.test.ts` → ✅ `pkg/ai/providers/openai_responses_shared_test.go`, `pkg/ai/providers/openai_completions_convert_test.go`
 - `anthropic-tool-name-normalization.test.ts` → ✅ `pkg/ai/providers/anthropic_test.go`
 - `cache-retention.test.ts` → ✅ `pkg/ai/providers/cache_retention_test.go`
 - `image-tool-result.test.ts` → ✅🧪 `pkg/ai/e2e/image_tool_result_e2e_test.go` (OpenAI subset) + deterministic conversion tests in `pkg/ai/providers/openai_completions_test.go`, `pkg/ai/providers/openai_responses_shared_test.go`
