@@ -42,6 +42,20 @@ go test ./pkg/ai/...
 CGO_ENABLED=0 go test ./pkg/connector -run "TestPkgAIProviderRuntimeEnabled|TestInferProviderNameFromBaseURL|TestBuildPkgAIModelFromGenerateParams|TestShouldFallbackFromPkgAIEvent|TestShouldFallbackFromPkgAIError|TestTryGenerateStreamWithPkgAIReturnsRuntimeErrorEventsWhenProviderResolved|TestTryGenerateWithPkgAIFallsBackOnStubbedProviders|TestTryGenerateWithPkgAIReturnsRuntimeErrorWhenProviderResolved|TestGenerateResponseFromAIMessage|TestParseThinkingLevel|TestOpenAIProviderGenerate_UsesPkgAIBridgeWhenEnabled|TestPkgAIRuntimeEnabledFromEnv|TestChooseStreamingRuntimePath|TestPromptContainsToolCalls|TestShouldUsePkgAIBridgeStreaming|TestBuildPkgAIBridgeGenerateParams|TestPkgAIProviderBridgeCredentials|TestAIEventToStreamEvent_Mapping|TestStreamEventsFromAIStream|TestToAIContext_MapsMessagesAndTools"
 ```
 
+## Connector bridge env-gated provider validation
+
+To validate real provider happy paths for connector bridge routing (OpenAI, Anthropic, Google), set credentials and:
+
+```bash
+PI_AI_E2E=1 CGO_ENABLED=0 go test ./pkg/connector -run "TestPkgAIProviderBridgeE2E_"
+```
+
+Optional model overrides:
+
+- `PI_AI_E2E_OPENAI_MODEL`
+- `PI_AI_E2E_ANTHROPIC_MODEL`
+- `PI_AI_E2E_GOOGLE_MODEL`
+
 ## Notes
 
 - Full integration remains feature-gated.
