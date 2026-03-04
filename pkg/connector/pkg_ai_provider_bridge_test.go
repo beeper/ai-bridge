@@ -54,7 +54,7 @@ func TestBuildPkgAIModelFromGenerateParams(t *testing.T) {
 	}
 
 	openAI := buildPkgAIModelFromGenerateParams(GenerateParams{
-		Model:               "gpt-4.1-mini",
+		Model:               "gpt-5-mini",
 		MaxCompletionTokens: 16384,
 	}, "")
 	if openAI.API != "openai-responses" {
@@ -63,12 +63,30 @@ func TestBuildPkgAIModelFromGenerateParams(t *testing.T) {
 	if openAI.MaxTokens != 16384 {
 		t.Fatalf("unexpected max tokens: %d", openAI.MaxTokens)
 	}
+	if !openAI.Reasoning {
+		t.Fatalf("expected gpt-5 family model to be marked as reasoning capable")
+	}
 
 	azure := buildPkgAIModelFromGenerateParams(GenerateParams{
 		Model: "gpt-4.1-mini",
 	}, "https://my-openai.azure.com")
 	if azure.API != "azure-openai-responses" {
 		t.Fatalf("expected azure base URL to map to azure-openai-responses API, got %q", azure.API)
+	}
+
+	nonReasoning := buildPkgAIModelFromGenerateParams(GenerateParams{
+		Model: "gpt-4.1-mini",
+	}, "")
+	if nonReasoning.Reasoning {
+		t.Fatalf("did not expect non-reasoning model to be marked as reasoning capable")
+	}
+
+	withReasoningOverride := buildPkgAIModelFromGenerateParams(GenerateParams{
+		Model:           "gpt-4.1-mini",
+		ReasoningEffort: "high",
+	}, "")
+	if !withReasoningOverride.Reasoning {
+		t.Fatalf("expected reasoning effort override to mark model as reasoning capable")
 	}
 }
 
@@ -102,5 +120,22 @@ func TestTryGenerateStreamWithPkgAIReturnsRuntimeErrorEventsWhenProviderResolved
 	event := <-events
 	if event.Type != StreamEventError {
 		t.Fatalf("expected runtime error event without credentials, got %#v", event)
+	}
+}
+
+func TestParseThinkingLevel(t *testing.T) {
+	cases := map[string]string{
+		"minimal": "minimal",
+		"low":     "low",
+		"medium":  "medium",
+		"high":    "high",
+		"xhigh":   "xhigh",
+		"none":    "",
+		"":        "",
+	}
+	for in, want := range cases {
+		if got := string(parseThinkingLevel(in)); got != want {
+			t.Fatalf("parseThinkingLevel(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
