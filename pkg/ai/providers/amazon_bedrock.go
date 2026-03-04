@@ -23,6 +23,23 @@ type BedrockOptions struct {
 	InterleavedThinking *bool
 }
 
+func BuildBedrockConverseInput(model ai.Model, context ai.Context, options BedrockOptions) map[string]any {
+	cacheRetention := ResolveBedrockCacheRetention(options.StreamOptions.CacheRetention)
+	input := map[string]any{
+		"modelId":         model.ID,
+		"messages":        ConvertBedrockMessages(context, model, cacheRetention),
+		"system":          BuildBedrockSystemPrompt(context.SystemPrompt, model, cacheRetention),
+		"inferenceConfig": map[string]any{"maxTokens": options.StreamOptions.MaxTokens, "temperature": options.StreamOptions.Temperature},
+	}
+	if tc := ConvertBedrockToolConfig(context.Tools, options.ToolChoice); tc != nil {
+		input["toolConfig"] = tc
+	}
+	if extra := BuildBedrockAdditionalModelRequestFields(model, options); extra != nil {
+		input["additionalModelRequestFields"] = extra
+	}
+	return input
+}
+
 func SupportsAdaptiveThinking(modelID string) bool {
 	id := strings.ToLower(modelID)
 	return strings.Contains(id, "opus-4-6") ||
@@ -75,6 +92,183 @@ func supportsBedrockPromptCaching(model ai.Model) bool {
 		return true
 	}
 	return false
+}
+
+func NormalizeBedrockToolCallID(id string) string {
+	sanitized := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			return r
+		}
+		return '_'
+	}, id)
+	if len(sanitized) > 64 {
+		return sanitized[:64]
+	}
+	return sanitized
+}
+
+func ConvertBedrockMessages(context ai.Context, model ai.Model, cacheRetention ai.CacheRetention) []map[string]any {
+	transformed := TransformMessages(context.Messages, model, func(id string, _ ai.Model, _ ai.Message) string {
+		return NormalizeBedrockToolCallID(id)
+	})
+	result := make([]map[string]any, 0, len(transformed))
+	supportsThinkingSignature := supportsBedrockThinkingSignature(model)
+
+	for i := 0; i < len(transformed); i++ {
+		msg := transformed[i]
+		switch msg.Role {
+		case ai.RoleUser:
+			content := make([]map[string]any, 0, max(1, len(msg.Content)))
+			if strings.TrimSpace(msg.Text) != "" {
+				content = append(content, map[string]any{"text": utils.SanitizeSurrogates(msg.Text)})
+			}
+			for _, c := range msg.Content {
+				switch c.Type {
+				case ai.ContentTypeText:
+					if strings.TrimSpace(c.Text) == "" {
+						continue
+					}
+					content = append(content, map[string]any{"text": utils.SanitizeSurrogates(c.Text)})
+				case ai.ContentTypeImage:
+					content = append(content, map[string]any{
+						"image": map[string]any{
+							"format": imageFormatFromMIME(c.MimeType),
+							"source": map[string]any{"bytes": c.Data},
+						},
+					})
+				}
+			}
+			if len(content) == 0 {
+				continue
+			}
+			result = append(result, map[string]any{
+				"role":    "user",
+				"content": content,
+			})
+		case ai.RoleAssistant:
+			content := make([]map[string]any, 0, len(msg.Content))
+			for _, c := range msg.Content {
+				switch c.Type {
+				case ai.ContentTypeText:
+					if strings.TrimSpace(c.Text) == "" {
+						continue
+					}
+					content = append(content, map[string]any{"text": utils.SanitizeSurrogates(c.Text)})
+				case ai.ContentTypeToolCall:
+					content = append(content, map[string]any{
+						"toolUse": map[string]any{
+							"toolUseId": c.ID,
+							"name":      c.Name,
+							"input":     c.Arguments,
+						},
+					})
+				case ai.ContentTypeThinking:
+					if strings.TrimSpace(c.Thinking) == "" {
+						continue
+					}
+					reasoningText := map[string]any{"text": utils.SanitizeSurrogates(c.Thinking)}
+					if supportsThinkingSignature && strings.TrimSpace(c.ThinkingSignature) != "" {
+						reasoningText["signature"] = c.ThinkingSignature
+					}
+					content = append(content, map[string]any{
+						"reasoningContent": map[string]any{
+							"reasoningText": reasoningText,
+						},
+					})
+				}
+			}
+			if len(content) == 0 {
+				continue
+			}
+			result = append(result, map[string]any{
+				"role":    "assistant",
+				"content": content,
+			})
+		case ai.RoleToolResult:
+			toolResults := make([]map[string]any, 0, 2)
+			toolResults = append(toolResults, map[string]any{
+				"toolResult": map[string]any{
+					"toolUseId": msg.ToolCallID,
+					"content":   bedrockToolResultContent(msg.Content),
+					"status":    bedrockToolResultStatus(msg.IsError),
+				},
+			})
+
+			j := i + 1
+			for ; j < len(transformed) && transformed[j].Role == ai.RoleToolResult; j++ {
+				next := transformed[j]
+				toolResults = append(toolResults, map[string]any{
+					"toolResult": map[string]any{
+						"toolUseId": next.ToolCallID,
+						"content":   bedrockToolResultContent(next.Content),
+						"status":    bedrockToolResultStatus(next.IsError),
+					},
+				})
+			}
+			i = j - 1
+			result = append(result, map[string]any{
+				"role":    "user",
+				"content": toolResults,
+			})
+		}
+	}
+
+	if cacheRetention != ai.CacheRetentionNone && supportsBedrockPromptCaching(model) && len(result) > 0 {
+		last := result[len(result)-1]
+		if lastRole, _ := last["role"].(string); lastRole == "user" {
+			content, _ := last["content"].([]map[string]any)
+			cachePoint := map[string]any{
+				"cachePoint": map[string]any{"type": "default"},
+			}
+			if cacheRetention == ai.CacheRetentionLong {
+				cachePoint["cachePoint"].(map[string]any)["ttl"] = "1h"
+			}
+			last["content"] = append(content, cachePoint)
+			result[len(result)-1] = last
+		}
+	}
+	return result
+}
+
+func ConvertBedrockToolConfig(tools []ai.Tool, toolChoice any) map[string]any {
+	if len(tools) == 0 {
+		return nil
+	}
+	if choice, ok := toolChoice.(string); ok && strings.EqualFold(choice, "none") {
+		return nil
+	}
+	bedrockTools := make([]map[string]any, 0, len(tools))
+	for _, tool := range tools {
+		bedrockTools = append(bedrockTools, map[string]any{
+			"toolSpec": map[string]any{
+				"name":        tool.Name,
+				"description": tool.Description,
+				"inputSchema": map[string]any{"json": tool.Parameters},
+			},
+		})
+	}
+
+	config := map[string]any{
+		"tools": bedrockTools,
+	}
+	switch choice := toolChoice.(type) {
+	case string:
+		switch strings.ToLower(strings.TrimSpace(choice)) {
+		case "auto":
+			config["toolChoice"] = map[string]any{"auto": map[string]any{}}
+		case "any":
+			config["toolChoice"] = map[string]any{"any": map[string]any{}}
+		}
+	case BedrockToolChoice:
+		if strings.EqualFold(choice.Type, "tool") && strings.TrimSpace(choice.Name) != "" {
+			config["toolChoice"] = map[string]any{"tool": map[string]any{"name": choice.Name}}
+		}
+	case *BedrockToolChoice:
+		if choice != nil && strings.EqualFold(choice.Type, "tool") && strings.TrimSpace(choice.Name) != "" {
+			config["toolChoice"] = map[string]any{"tool": map[string]any{"name": choice.Name}}
+		}
+	}
+	return config
 }
 
 func MapBedrockStopReason(reason string) ai.StopReason {
@@ -155,4 +349,53 @@ func mapBedrockThinkingEffort(level ai.ThinkingLevel) string {
 	default:
 		return "high"
 	}
+}
+
+func supportsBedrockThinkingSignature(model ai.Model) bool {
+	id := strings.ToLower(model.ID)
+	return strings.Contains(id, "anthropic.claude") || strings.Contains(id, "anthropic/claude")
+}
+
+func imageFormatFromMIME(mimeType string) string {
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "image/jpeg", "image/jpg":
+		return "jpeg"
+	case "image/png":
+		return "png"
+	case "image/gif":
+		return "gif"
+	case "image/webp":
+		return "webp"
+	default:
+		return "png"
+	}
+}
+
+func bedrockToolResultStatus(isError bool) string {
+	if isError {
+		return "error"
+	}
+	return "success"
+}
+
+func bedrockToolResultContent(content []ai.ContentBlock) []map[string]any {
+	out := make([]map[string]any, 0, len(content))
+	for _, c := range content {
+		if c.Type == ai.ContentTypeImage {
+			out = append(out, map[string]any{
+				"image": map[string]any{
+					"format": imageFormatFromMIME(c.MimeType),
+					"source": map[string]any{"bytes": c.Data},
+				},
+			})
+			continue
+		}
+		if c.Type == ai.ContentTypeText {
+			out = append(out, map[string]any{"text": utils.SanitizeSurrogates(c.Text)})
+		}
+	}
+	if len(out) == 0 {
+		return []map[string]any{{"text": ""}}
+	}
+	return out
 }
