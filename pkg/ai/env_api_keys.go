@@ -1,6 +1,9 @@
 package ai
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+)
 
 func GetEnvAPIKey(provider string) string {
 	switch provider {
@@ -21,6 +24,21 @@ func GetEnvAPIKey(provider string) string {
 		return os.Getenv("OPENAI_API_KEY")
 	case "azure-openai-responses":
 		return os.Getenv("AZURE_OPENAI_API_KEY")
+	case "google-vertex":
+		if hasVertexADCCredentials() && hasVertexProject() && os.Getenv("GOOGLE_CLOUD_LOCATION") != "" {
+			return "<authenticated>"
+		}
+		return ""
+	case "amazon-bedrock":
+		if os.Getenv("AWS_PROFILE") != "" ||
+			(os.Getenv("AWS_ACCESS_KEY_ID") != "" && os.Getenv("AWS_SECRET_ACCESS_KEY") != "") ||
+			os.Getenv("AWS_BEARER_TOKEN_BEDROCK") != "" ||
+			os.Getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") != "" ||
+			os.Getenv("AWS_CONTAINER_CREDENTIALS_FULL_URI") != "" ||
+			os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE") != "" {
+			return "<authenticated>"
+		}
+		return ""
 	case "google":
 		return os.Getenv("GEMINI_API_KEY")
 	case "groq":
@@ -50,4 +68,25 @@ func GetEnvAPIKey(provider string) string {
 	default:
 		return ""
 	}
+}
+
+func hasVertexProject() bool {
+	return os.Getenv("GOOGLE_CLOUD_PROJECT") != "" || os.Getenv("GCLOUD_PROJECT") != ""
+}
+
+func hasVertexADCCredentials() bool {
+	if path := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); path != "" {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	adcPath := filepath.Join(home, ".config", "gcloud", "application_default_credentials.json")
+	if _, err := os.Stat(adcPath); err == nil {
+		return true
+	}
+	return false
 }
