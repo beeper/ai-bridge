@@ -75,6 +75,20 @@ func (oc *AIClient) streamWithPkgAIBridge(
 	if pkgAIRuntimeDryRunEnabled() {
 		oc.runPkgAIBridgeDryRun(ctx, aiModel, aiContext)
 	}
+	if oc.shouldUsePkgAIBridgeStreaming(meta, prompt) {
+		if baseURL, apiKey, ok := oc.pkgAIProviderBridgeCredentials(); ok {
+			params := oc.buildPkgAIBridgeGenerateParams(meta, prompt)
+			if events, handled := tryGenerateStreamWithPkgAI(ctx, baseURL, apiKey, params); handled {
+				oc.loggerForContext(ctx).Debug().
+					Str("model", params.Model).
+					Msg("Executing pkg/ai runtime bridge event stream path")
+				return oc.streamPkgAIBridgeEvents(ctx, evt, portal, meta, prompt, events)
+			}
+			oc.loggerForContext(ctx).Debug().
+				Str("model", params.Model).
+				Msg("pkg/ai bridge event stream path requested fallback")
+		}
+	}
 	switch oc.resolveModelAPI(meta) {
 	case ModelAPIChatCompletions:
 		return oc.streamChatCompletions(ctx, evt, portal, meta, prompt)
@@ -204,4 +218,143 @@ func chatPromptToUnifiedMessages(prompt []openai.ChatCompletionMessageParamUnion
 		}
 	}
 	return out
+}
+
+func (oc *AIClient) pkgAIProviderBridgeCredentials() (string, string, bool) {
+	provider, ok := oc.provider.(*OpenAIProvider)
+	if !ok || provider == nil {
+		return "", "", false
+	}
+	return provider.baseURL, provider.apiKey, true
+}
+
+func (oc *AIClient) shouldUsePkgAIBridgeStreaming(
+	meta *PortalMetadata,
+	prompt []openai.ChatCompletionMessageParamUnion,
+) bool {
+	if meta != nil && meta.Capabilities.SupportsToolCalling {
+		return false
+	}
+	return !promptContainsToolCalls(prompt)
+}
+
+func promptContainsToolCalls(prompt []openai.ChatCompletionMessageParamUnion) bool {
+	for _, msg := range prompt {
+		if msg.OfTool != nil {
+			return true
+		}
+		if msg.OfAssistant != nil && len(msg.OfAssistant.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (oc *AIClient) buildPkgAIBridgeGenerateParams(
+	meta *PortalMetadata,
+	prompt []openai.ChatCompletionMessageParamUnion,
+) GenerateParams {
+	return GenerateParams{
+		Model:               oc.effectiveModel(meta),
+		Messages:            chatPromptToUnifiedMessages(prompt),
+		SystemPrompt:        oc.effectivePrompt(meta),
+		Temperature:         oc.effectiveTemperature(meta),
+		MaxCompletionTokens: oc.effectiveMaxTokens(meta),
+		ReasoningEffort:     oc.effectiveReasoningEffort(meta),
+	}
+}
+
+func (oc *AIClient) streamPkgAIBridgeEvents(
+	ctx context.Context,
+	evt *event.Event,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	prompt []openai.ChatCompletionMessageParamUnion,
+	events <-chan StreamEvent,
+) (bool, *ContextLengthError, error) {
+	log := oc.loggerForContext(ctx).With().
+		Str("action", "stream_pkg_ai_bridge_events").
+		Logger()
+
+	prep, _, typingCleanup := oc.prepareStreamingRun(ctx, log, evt, portal, meta, prompt)
+	defer typingCleanup()
+	state := prep.State
+	typingSignals := prep.TypingSignals
+	touchTyping := prep.TouchTyping
+	isHeartbeat := prep.IsHeartbeat
+
+	oc.emitUIStart(ctx, portal, state, meta)
+
+	for {
+		select {
+		case <-ctx.Done():
+			state.finishReason = "cancelled"
+			if state.hasInitialMessageTarget() && state.accumulated.Len() > 0 {
+				oc.flushPartialStreamingMessage(context.Background(), portal, state, meta)
+			}
+			oc.uiEmitter(state).EmitUIAbort(ctx, portal, "cancelled")
+			oc.emitUIFinish(ctx, portal, state, meta)
+			return false, nil, streamFailureError(state, ctx.Err())
+		case event, ok := <-events:
+			if !ok {
+				state.completedAtMs = time.Now().UnixMilli()
+				oc.finalizeResponsesStream(ctx, log, portal, state, meta)
+				return true, nil, nil
+			}
+
+			oc.markMessageSendSuccess(ctx, portal, evt, state)
+			switch event.Type {
+			case StreamEventDelta:
+				touchTyping()
+				if err := oc.handleResponseOutputTextDelta(
+					ctx,
+					log,
+					portal,
+					state,
+					meta,
+					typingSignals,
+					isHeartbeat,
+					event.Delta,
+					"failed to send initial streaming message",
+					"Failed to send initial streaming message",
+				); err != nil {
+					return false, nil, &PreDeltaError{Err: err}
+				}
+			case StreamEventReasoning:
+				touchTyping()
+				if err := oc.handleResponseReasoningTextDelta(
+					ctx,
+					log,
+					portal,
+					state,
+					meta,
+					isHeartbeat,
+					event.ReasoningDelta,
+					"failed to send initial streaming message",
+					"Failed to send initial streaming message",
+				); err != nil {
+					return false, nil, &PreDeltaError{Err: err}
+				}
+			case StreamEventComplete:
+				if reason := strings.TrimSpace(event.FinishReason); reason != "" {
+					state.finishReason = reason
+				}
+				state.responseID = strings.TrimSpace(event.ResponseID)
+				if event.Usage != nil {
+					state.promptTokens = int64(event.Usage.PromptTokens)
+					state.completionTokens = int64(event.Usage.CompletionTokens)
+					state.reasoningTokens = int64(event.Usage.ReasoningTokens)
+					state.totalTokens = int64(event.Usage.TotalTokens)
+					oc.uiEmitter(state).EmitUIMessageMetadata(ctx, portal, oc.buildUIMessageMetadata(state, meta, true))
+				}
+			case StreamEventError:
+				if cle := ParseContextLengthError(event.Error); cle != nil {
+					return false, cle, nil
+				}
+				oc.uiEmitter(state).EmitUIError(ctx, portal, event.Error.Error())
+				oc.emitUIFinish(ctx, portal, state, meta)
+				return false, nil, streamFailureError(state, event.Error)
+			}
+		}
+	}
 }

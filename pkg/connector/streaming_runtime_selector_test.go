@@ -118,3 +118,104 @@ func TestBuildPkgAIContext_UsesSystemPromptAndMappedMessages(t *testing.T) {
 		t.Fatalf("unexpected mapped roles: %#v", ctx.Messages)
 	}
 }
+
+func TestPromptContainsToolCalls(t *testing.T) {
+	if promptContainsToolCalls([]openai.ChatCompletionMessageParamUnion{
+		openai.UserMessage("hello"),
+	}) {
+		t.Fatalf("did not expect tool call detection for plain user prompt")
+	}
+	if !promptContainsToolCalls([]openai.ChatCompletionMessageParamUnion{
+		{
+			OfAssistant: &openai.ChatCompletionAssistantMessageParam{
+				ToolCalls: []openai.ChatCompletionMessageToolCallUnionParam{
+					{
+						OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+							ID: "call_1",
+							Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+								Name:      "search",
+								Arguments: "{}",
+							},
+						},
+					},
+				},
+			},
+		},
+	}) {
+		t.Fatalf("expected assistant tool calls to be detected")
+	}
+	if !promptContainsToolCalls([]openai.ChatCompletionMessageParamUnion{
+		openai.ToolMessage("tool result", "call_1"),
+	}) {
+		t.Fatalf("expected tool role messages to be detected")
+	}
+}
+
+func TestShouldUsePkgAIBridgeStreaming(t *testing.T) {
+	client := &AIClient{}
+	if !client.shouldUsePkgAIBridgeStreaming(&PortalMetadata{}, []openai.ChatCompletionMessageParamUnion{
+		openai.UserMessage("hello"),
+	}) {
+		t.Fatalf("expected bridge streaming to be enabled for non-tool prompt")
+	}
+	if client.shouldUsePkgAIBridgeStreaming(&PortalMetadata{
+		Capabilities: ModelCapabilities{SupportsToolCalling: true},
+	}, []openai.ChatCompletionMessageParamUnion{
+		openai.UserMessage("hello"),
+	}) {
+		t.Fatalf("expected bridge streaming disabled when tool calling is enabled")
+	}
+}
+
+func TestBuildPkgAIBridgeGenerateParams(t *testing.T) {
+	client := &AIClient{}
+	meta := &PortalMetadata{
+		Model:               "claude-sonnet-4-5",
+		SystemPrompt:        "You are helpful",
+		Temperature:         0.2,
+		MaxCompletionTokens: 2048,
+		ReasoningEffort:     "medium",
+		Capabilities: ModelCapabilities{
+			SupportsReasoning: true,
+		},
+	}
+	params := client.buildPkgAIBridgeGenerateParams(meta, []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage("ignored"),
+		openai.UserMessage("hello"),
+		openai.AssistantMessage("hi"),
+	})
+	if params.Model != "claude-sonnet-4-5" {
+		t.Fatalf("unexpected model mapping: %q", params.Model)
+	}
+	if params.SystemPrompt != "You are helpful" {
+		t.Fatalf("unexpected system prompt mapping: %q", params.SystemPrompt)
+	}
+	if params.Temperature != 0.2 {
+		t.Fatalf("unexpected temperature mapping: %f", params.Temperature)
+	}
+	if params.MaxCompletionTokens != 2048 {
+		t.Fatalf("unexpected max token mapping: %d", params.MaxCompletionTokens)
+	}
+	if params.ReasoningEffort != "medium" {
+		t.Fatalf("unexpected reasoning mapping: %q", params.ReasoningEffort)
+	}
+	if len(params.Messages) != 2 {
+		t.Fatalf("expected mapped user+assistant messages, got %d", len(params.Messages))
+	}
+}
+
+func TestPkgAIProviderBridgeCredentials(t *testing.T) {
+	client := &AIClient{
+		provider: &OpenAIProvider{
+			baseURL: "https://api.anthropic.com",
+			apiKey:  "secret",
+		},
+	}
+	baseURL, apiKey, ok := client.pkgAIProviderBridgeCredentials()
+	if !ok {
+		t.Fatalf("expected credential extraction for OpenAIProvider")
+	}
+	if baseURL != "https://api.anthropic.com" || apiKey != "secret" {
+		t.Fatalf("unexpected credential extraction: %q %q", baseURL, apiKey)
+	}
+}
