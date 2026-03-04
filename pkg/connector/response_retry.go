@@ -383,17 +383,14 @@ func (oc *AIClient) streamingResponseWithRetry(
 }
 
 func (oc *AIClient) selectResponseFn(meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (responseFunc, string) {
-	// Use Chat Completions API for audio (native support)
-	// SDK v3.16.0 has ResponseInputAudioParam but it's not wired into the union
-	if hasAudioContent(prompt) {
-		return oc.streamChatCompletions, "chat_completions"
-	}
-	switch oc.resolveModelAPI(meta) {
-	case ModelAPIChatCompletions:
-		return oc.streamChatCompletions, "chat_completions"
+	path := chooseStreamingRuntimePath(hasAudioContent(prompt), oc.resolveModelAPI(meta), pkgAIRuntimeEnabled())
+	switch path {
+	case streamingRuntimePkgAI:
+		return oc.streamWithPkgAIBridge, string(streamingRuntimePkgAI)
+	case streamingRuntimeChatCompletions:
+		return oc.streamChatCompletions, string(streamingRuntimeChatCompletions)
 	default:
-		// Use Responses API for other content (images, files, text)
-		return oc.streamingResponseWithToolSchemaFallback, "responses"
+		return oc.streamingResponseWithToolSchemaFallback, string(streamingRuntimeResponses)
 	}
 }
 
