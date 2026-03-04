@@ -25,11 +25,6 @@ func TestZenE2EParityScaffold(t *testing.T) {
 	t.Skip("parity scaffold for zen.test.ts pending runtime implementation")
 }
 
-func TestEmptyE2EParityScaffold(t *testing.T) {
-	requirePIAIE2E(t)
-	t.Skip("parity scaffold for empty.test.ts pending runtime implementation")
-}
-
 func TestGithubCopilotAnthropicE2EParityScaffold(t *testing.T) {
 	requirePIAIE2E(t)
 	t.Skip("parity scaffold for github-copilot-anthropic.test.ts pending runtime implementation")
