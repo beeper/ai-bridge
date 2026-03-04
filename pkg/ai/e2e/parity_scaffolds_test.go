@@ -1,0 +1,66 @@
+package e2e
+
+import (
+	"os"
+	"testing"
+)
+
+func requirePIAIE2E(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping e2e parity scaffolds in short mode")
+	}
+	if os.Getenv("PI_AI_E2E") == "" {
+		t.Skip("set PI_AI_E2E=1 to enable ai package e2e tests")
+	}
+}
+
+func TestToolCallWithoutResultE2EParityScaffold(t *testing.T) {
+	requirePIAIE2E(t)
+	t.Skip("parity scaffold for tool-call-without-result.test.ts pending runtime implementation")
+}
+
+func TestInterleavedThinkingE2EParityScaffold(t *testing.T) {
+	requirePIAIE2E(t)
+	t.Skip("parity scaffold for interleaved-thinking.test.ts pending runtime implementation")
+}
+
+func TestBedrockModelsE2EParityScaffold(t *testing.T) {
+	requirePIAIE2E(t)
+	t.Skip("parity scaffold for bedrock-models.test.ts pending runtime implementation")
+}
+
+func TestToolCallIDNormalizationE2EParityScaffold(t *testing.T) {
+	requirePIAIE2E(t)
+	t.Skip("parity scaffold for tool-call-id-normalization.test.ts pending runtime implementation")
+}
+
+func TestAnthropicToolNameNormalizationE2EParityScaffold(t *testing.T) {
+	requirePIAIE2E(t)
+	t.Skip("parity scaffold for anthropic-tool-name-normalization.test.ts pending runtime implementation")
+}
+
+func TestTokenStatsOnAbortE2EParityScaffold(t *testing.T) {
+	requirePIAIE2E(t)
+	t.Skip("parity scaffold for tokens.test.ts pending runtime implementation")
+}
+
+func TestTotalTokensE2EParityScaffold(t *testing.T) {
+	requirePIAIE2E(t)
+	t.Skip("parity scaffold for total-tokens.test.ts pending runtime implementation")
+}
+
+func TestCrossProviderHandoffE2EParityScaffold(t *testing.T) {
+	requirePIAIE2E(t)
+	t.Skip("parity scaffold for cross-provider-handoff.test.ts pending runtime implementation")
+}
+
+func TestOpenAIResponsesReasoningReplayE2EParityScaffold(t *testing.T) {
+	requirePIAIE2E(t)
+	t.Skip("parity scaffold for openai-responses-reasoning-replay-e2e.test.ts pending runtime implementation")
+}
+
+func TestGoogleGeminiCLIEmptyStreamE2EParityScaffold(t *testing.T) {
+	requirePIAIE2E(t)
+	t.Skip("parity scaffold for google-gemini-cli-empty-stream.test.ts pending runtime implementation")
+}
