@@ -11,12 +11,6 @@ const (
 	AIAuthFailed status.BridgeStateErrorCode = "ai-auth-failed"
 )
 
-type aiToastType string
-
-const (
-	aiToastTypeError aiToastType = "error"
-)
-
 func toolDisplayTitle(toolName string) string {
 	toolName = strings.TrimSpace(toolName)
 	if toolName == "" {

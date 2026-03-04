@@ -27,4 +27,3 @@ func TestAgentContactIdentifiers(t *testing.T) {
 		t.Fatalf("expected model id %q to be present in identifiers: %#v", modelID, identifiers)
 	}
 }
-

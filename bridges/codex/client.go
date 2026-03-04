@@ -1612,36 +1612,6 @@ func (cc *CodexClient) sendSystemNotice(ctx context.Context, portal *bridgev2.Po
 	cc.sendViaPortal(sendCtx, portal, converted, "")
 }
 
-func (cc *CodexClient) sendToast(ctx context.Context, portal *bridgev2.Portal, text string, toastType aiToastType) {
-	if portal == nil || portal.MXID == "" || cc.UserLogin == nil || cc.UserLogin.Bridge == nil {
-		return
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	raw := map[string]any{
-		"msgtype": event.MsgNotice,
-		"body":    text,
-		"com.beeper.ai.toast": map[string]any{
-			"text": text,
-			"type": string(toastType),
-		},
-		"m.mentions": map[string]any{},
-	}
-	converted := &bridgev2.ConvertedMessage{
-		Parts: []*bridgev2.ConvertedMessagePart{{
-			ID:    networkid.PartID("0"),
-			Type:  event.EventMessage,
-			Extra: raw,
-		}},
-	}
-	bg := cc.backgroundContext(ctx)
-	sendCtx, cancel := context.WithTimeout(bg, 10*time.Second)
-	defer cancel()
-	cc.sendViaPortal(sendCtx, portal, converted, "")
-}
-
 func (cc *CodexClient) sendPendingStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, message string) {
 	if portal == nil || portal.Bridge == nil || evt == nil {
 		return
