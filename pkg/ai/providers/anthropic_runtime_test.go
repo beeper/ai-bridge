@@ -77,3 +77,54 @@ func TestSupportsAdaptiveThinkingModel(t *testing.T) {
 		t.Fatalf("did not expect sonnet 4.5 to support adaptive thinking")
 	}
 }
+
+func TestBuildAnthropicClientConfig_CopilotAuthAndHeaders(t *testing.T) {
+	model := ai.Model{
+		ID:       "claude-sonnet-4",
+		Provider: "github-copilot",
+		API:      ai.APIAnthropicMessages,
+		Headers: map[string]string{
+			"User-Agent":             "GitHubCopilotChat/0.27.0",
+			"Copilot-Integration-Id": "vscode-chat",
+			"anthropic-dangerous-direct-browser-access": "true",
+		},
+	}
+	ctx := ai.Context{
+		Messages: []ai.Message{
+			{Role: ai.RoleUser, Text: "Hello"},
+		},
+	}
+	config := buildAnthropicClientConfig(model, ctx, "tid_copilot_session_test_token", "", nil)
+	if !config.UseAuthToken {
+		t.Fatalf("expected copilot config to use bearer auth token")
+	}
+	if strings.Contains(config.BetaHeader, anthropicFineGrainedToolStreamingBeta) {
+		t.Fatalf("did not expect copilot beta header to include fine-grained tool streaming")
+	}
+	if config.Headers["X-Initiator"] != "user" {
+		t.Fatalf("expected X-Initiator=user, got %q", config.Headers["X-Initiator"])
+	}
+	if config.Headers["Openai-Intent"] != "conversation-edits" {
+		t.Fatalf("expected Openai-Intent header, got %q", config.Headers["Openai-Intent"])
+	}
+	if !strings.Contains(config.Headers["User-Agent"], "GitHubCopilotChat") {
+		t.Fatalf("expected copilot user-agent header, got %q", config.Headers["User-Agent"])
+	}
+}
+
+func TestBuildAnthropicClientConfig_CopilotInterleavedThinkingHeader(t *testing.T) {
+	model := ai.Model{Provider: "github-copilot"}
+	config := buildAnthropicClientConfig(
+		model,
+		ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Text: "hello"}}},
+		"tid_copilot_session_test_token",
+		"interleaved-thinking-2025-05-14",
+		nil,
+	)
+	if !strings.Contains(config.BetaHeader, "interleaved-thinking-2025-05-14") {
+		t.Fatalf("expected interleaved-thinking beta header, got %q", config.BetaHeader)
+	}
+	if strings.Contains(config.BetaHeader, anthropicFineGrainedToolStreamingBeta) {
+		t.Fatalf("did not expect copilot beta header to include %q", anthropicFineGrainedToolStreamingBeta)
+	}
+}

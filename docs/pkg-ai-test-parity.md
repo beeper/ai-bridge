@@ -33,6 +33,7 @@ Legend:
 - `google-gemini-cli-retry-delay.test.ts` → ✅ `pkg/ai/providers/google_gemini_cli_test.go`
 - `google-gemini-cli-empty-stream.test.ts` → ✅ `pkg/ai/providers/google_gemini_cli_test.go`
 - `google-gemini-cli-claude-thinking-header.test.ts` → ✅ `pkg/ai/providers/google_gemini_cli_test.go`
+- `github-copilot-anthropic.test.ts` → ✅ `pkg/ai/providers/anthropic_runtime_test.go`, `pkg/ai/providers/github_copilot_headers_test.go`
 - `google-tool-call-missing-args.test.ts` → ✅ `pkg/ai/providers/google_tool_call_missing_args_test.go`
 - `google-shared-gemini3-unsigned-tool-call.test.ts` → ✅ `pkg/ai/providers/google_shared_test.go`
 - `google-thinking-signature.test.ts` → ✅ `pkg/ai/providers/google_shared_test.go`
@@ -55,4 +56,3 @@ The following are currently kept as env-gated scaffolds in
 `pkg/ai/e2e/parity_scaffolds_test.go`:
 
 - 📝 `zen.test.ts`
-- 📝 `github-copilot-anthropic.test.ts` (live)
