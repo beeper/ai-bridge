@@ -2,6 +2,7 @@ package ai
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 )
 
@@ -47,6 +48,15 @@ func GetAPIProviders() []APIProvider {
 	for _, entry := range registry {
 		out = append(out, entry.provider)
 	}
+	slices.SortFunc(out, func(a, b APIProvider) int {
+		if a.API == b.API {
+			return 0
+		}
+		if a.API < b.API {
+			return -1
+		}
+		return 1
+	})
 	return out
 }
 
