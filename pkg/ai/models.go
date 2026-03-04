@@ -7,6 +7,10 @@ import (
 
 var modelRegistry = map[string]map[string]Model{}
 
+func init() {
+	registerGeneratedModels()
+}
+
 func RegisterModels(provider string, models []Model) {
 	key := strings.TrimSpace(provider)
 	if key == "" {
