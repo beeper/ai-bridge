@@ -1,45 +1,27 @@
 # pkg/ai Runtime Migration Notes
 
 This repository now includes a standalone `pkg/ai` Go port of `pi-mono/packages/ai`,
-plus controlled connector bridge paths that can route runtime execution to `pkg/ai`.
+and the connector now runs on `pkg/ai` as the primary runtime.
 
-## Feature flags
+## Runtime architecture (current)
 
-### Connector runtime selector
+- Connector streaming path:
+  - `selectResponseFn` now selects `pkg_ai` by default for all non-audio prompts.
+  - `streamWithPkgAIBridge` is the primary streaming implementation.
+  - Tool-call rounds are executed via connector tool infrastructure and continued
+    through `pkg/ai` context updates.
+  - Audio prompts continue using Chat Completions path until audio parity lands in
+    `pkg/ai`.
 
-- `PI_USE_PKG_AI_RUNTIME=1`
-  - Enables connector runtime selection path (`streamWithPkgAIBridge`).
-  - Keeps safe fallback to existing Responses/Chat Completions code paths.
-
-- `PI_USE_PKG_AI_RUNTIME_DRY_RUN=1`
-  - Runs optional `pkg/ai` dry-run stream consumption for diagnostics while still
-    executing the existing connector runtime path.
-
-### Provider runtime bridge
-
-- `PI_USE_PKG_AI_PROVIDER_RUNTIME=1`
-  - Enables `OpenAIProvider` bridging for:
-    - `GenerateStream(...)` via `tryGenerateStreamWithPkgAI(...)`
-    - `Generate(...)` via `tryGenerateWithPkgAI(...)`
-  - Includes guarded fallback for unresolved/stubbed provider APIs.
-
-## Current bridge behavior
-
-- Streaming (`PI_USE_PKG_AI_RUNTIME`):
-  - Controlled live pkg/ai event consumption is enabled for safe non-tool
-    scenarios.
-  - Falls back to legacy streaming runtime when bridge conditions are not met.
-
-- Provider abstraction (`PI_USE_PKG_AI_PROVIDER_RUNTIME`):
-  - Routes both streaming and non-streaming provider calls through pkg/ai where
-    possible.
-  - Preserves existing connector behavior on fallback-class errors.
+- Provider abstraction:
+  - `OpenAIProvider.GenerateStream(...)` and `Generate(...)` route through
+    `tryGenerateStreamWithPkgAI(...)` / `tryGenerateWithPkgAI(...)` as primary paths.
 
 ## High-signal test commands
 
 ```bash
 go test ./pkg/ai/...
-CGO_ENABLED=0 go test ./pkg/connector -run "TestPkgAIProviderRuntimeEnabled|TestInferProviderNameFromBaseURL|TestBuildPkgAIModelFromGenerateParams|TestShouldFallbackFromPkgAIEvent|TestShouldFallbackFromPkgAIError|TestTryGenerateStreamWithPkgAIReturnsRuntimeErrorEventsWhenProviderResolved|TestTryGenerateWithPkgAIFallsBackOnStubbedProviders|TestTryGenerateWithPkgAIReturnsRuntimeErrorWhenProviderResolved|TestGenerateResponseFromAIMessage|TestParseThinkingLevel|TestOpenAIProviderGenerate_UsesPkgAIBridgeWhenEnabled|TestPkgAIRuntimeEnabledFromEnv|TestChooseStreamingRuntimePath|TestPromptContainsToolCalls|TestShouldUsePkgAIBridgeStreaming|TestBuildPkgAIBridgeGenerateParams|TestPkgAIProviderBridgeCredentials|TestAIEventToStreamEvent_Mapping|TestStreamEventsFromAIStream|TestToAIContext_MapsMessagesAndTools"
+go test ./pkg/connector -run "TestPkgAIProviderRuntimeEnabled|TestInferProviderNameFromBaseURL|TestBuildPkgAIModelFromGenerateParams|TestShouldFallbackFromPkgAIEvent|TestShouldFallbackFromPkgAIError|TestTryGenerateStreamWithPkgAIReturnsRuntimeErrorEventsWhenProviderResolved|TestTryGenerateWithPkgAIReturnsRuntimeErrorForGeminiCLI|TestTryGenerateWithPkgAIReturnsRuntimeErrorWhenProviderResolved|TestGenerateResponseFromAIMessage|TestParseThinkingLevel|TestOpenAIProviderGenerate_UsesPkgAIBridgeWhenEnabled|TestPkgAIRuntimeEnabledFromEnv|TestChooseStreamingRuntimePath|TestBuildPkgAIBridgeGenerateParams|TestPkgAIProviderBridgeCredentials|TestAIEventToStreamEvent_Mapping|TestStreamEventsFromAIStream|TestToAIContext_MapsMessagesAndTools"
 ```
 
 ## Connector bridge env-gated provider validation
@@ -47,7 +29,7 @@ CGO_ENABLED=0 go test ./pkg/connector -run "TestPkgAIProviderRuntimeEnabled|Test
 To validate real provider happy paths for connector bridge routing (OpenAI, Anthropic, Google), set credentials and:
 
 ```bash
-PI_AI_E2E=1 CGO_ENABLED=0 go test ./pkg/connector -run "TestPkgAIProviderBridgeE2E_"
+PI_AI_E2E=1 go test ./pkg/connector -run "TestPkgAIProviderBridgeE2E_"
 ```
 
 Optional model overrides:
@@ -91,5 +73,6 @@ Optional overrides:
 
 ## Notes
 
-- Full integration remains feature-gated.
-- Fallback behavior is intentional and required for incremental rollout safety.
+- `pkg/ai` is now the default bridge runtime for connector turn execution.
+- Legacy streaming/provider implementations remain in-tree for now, but are no
+  longer selected on the primary non-audio path.

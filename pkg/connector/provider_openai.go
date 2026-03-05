@@ -268,194 +268,27 @@ func (o *OpenAIProvider) buildResponsesParams(params GenerateParams) responses.R
 
 // GenerateStream generates a streaming response from OpenAI using Responses API
 func (o *OpenAIProvider) GenerateStream(ctx context.Context, params GenerateParams) (<-chan StreamEvent, error) {
-	if pkgAIProviderRuntimeEnabled() {
-		if pkgAIEvents, ok := tryGenerateStreamWithPkgAI(ctx, o.baseURL, o.apiKey, params); ok {
-			o.log.Debug().
-				Str("model", params.Model).
-				Msg("Using pkg/ai provider runtime for OpenAI stream")
-			return pkgAIEvents, nil
-		}
-		o.log.Warn().
+	if pkgAIEvents, ok := tryGenerateStreamWithPkgAI(ctx, o.baseURL, o.apiKey, params); ok {
+		o.log.Debug().
 			Str("model", params.Model).
-			Msg("pkg/ai provider runtime fallback to existing OpenAI stream path")
+			Msg("Using pkg/ai provider runtime for OpenAI stream")
+		return pkgAIEvents, nil
 	}
-
-	events := make(chan StreamEvent, 100)
-
-	go func() {
-		defer close(events)
-
-		responsesParams := o.buildResponsesParams(params)
-
-		// Create streaming request
-		stream := o.client.Responses.NewStreaming(ctx, responsesParams)
-		if stream == nil {
-			events <- StreamEvent{
-				Type:  StreamEventError,
-				Error: errors.New("failed to create streaming request"),
-			}
-			return
-		}
-
-		var responseID string
-
-		// Process stream events
-		for stream.Next() {
-			streamEvent := stream.Current()
-
-			switch streamEvent.Type {
-			case "response.output_text.delta":
-				events <- StreamEvent{
-					Type:  StreamEventDelta,
-					Delta: streamEvent.Delta,
-				}
-
-			case "response.reasoning_text.delta":
-				events <- StreamEvent{
-					Type:           StreamEventReasoning,
-					ReasoningDelta: streamEvent.Delta,
-				}
-
-			case "response.function_call_arguments.done":
-				events <- StreamEvent{
-					Type: StreamEventToolCall,
-					ToolCall: &ToolCallResult{
-						ID:        streamEvent.ItemID,
-						Name:      streamEvent.Name,
-						Arguments: streamEvent.Arguments,
-					},
-				}
-
-			case "response.completed":
-				responseID = streamEvent.Response.ID
-				finishReason := "stop"
-				if streamEvent.Response.Status != "completed" {
-					finishReason = string(streamEvent.Response.Status)
-				}
-
-				// Extract usage
-				var usage *UsageInfo
-				if streamEvent.Response.Usage.InputTokens > 0 || streamEvent.Response.Usage.OutputTokens > 0 {
-					usage = &UsageInfo{
-						PromptTokens:     int(streamEvent.Response.Usage.InputTokens),
-						CompletionTokens: int(streamEvent.Response.Usage.OutputTokens),
-						TotalTokens:      int(streamEvent.Response.Usage.TotalTokens),
-					}
-					if streamEvent.Response.Usage.OutputTokensDetails.ReasoningTokens > 0 {
-						usage.ReasoningTokens = int(streamEvent.Response.Usage.OutputTokensDetails.ReasoningTokens)
-					}
-				}
-
-				events <- StreamEvent{
-					Type:         StreamEventComplete,
-					FinishReason: finishReason,
-					ResponseID:   responseID,
-					Usage:        usage,
-				}
-
-			case "error":
-				events <- StreamEvent{
-					Type:  StreamEventError,
-					Error: fmt.Errorf("API error: %s", streamEvent.Message),
-				}
-				return
-			}
-		}
-
-		if err := stream.Err(); err != nil {
-			events <- StreamEvent{
-				Type:  StreamEventError,
-				Error: err,
-			}
-		}
-	}()
-
-	return events, nil
+	return nil, errors.New("pkg/ai stream runtime unavailable")
 }
 
 // Generate performs a non-streaming generation using Responses API
 func (o *OpenAIProvider) Generate(ctx context.Context, params GenerateParams) (*GenerateResponse, error) {
-	if pkgAIProviderRuntimeEnabled() {
-		if pkgAIResp, handled, err := tryGenerateWithPkgAI(ctx, o.baseURL, o.apiKey, params); handled {
-			if err != nil {
-				return nil, fmt.Errorf("pkg/ai generation failed: %w", err)
-			}
-			o.log.Debug().
-				Str("model", params.Model).
-				Msg("Using pkg/ai provider runtime for OpenAI generate")
-			return pkgAIResp, nil
+	if pkgAIResp, handled, err := tryGenerateWithPkgAI(ctx, o.baseURL, o.apiKey, params); handled {
+		if err != nil {
+			return nil, fmt.Errorf("pkg/ai generation failed: %w", err)
 		}
-		o.log.Warn().
+		o.log.Debug().
 			Str("model", params.Model).
-			Msg("pkg/ai provider runtime fallback to existing OpenAI generate path")
+			Msg("Using pkg/ai provider runtime for OpenAI generate")
+		return pkgAIResp, nil
 	}
-
-	// Responses input supports images and PDFs but not audio/video, so fall back to
-	// Chat Completions when unsupported media is present.
-	if hasUnsupportedResponsesUnifiedMessages(params.Messages) {
-		return o.generateChatCompletions(ctx, params)
-	}
-
-	responsesParams := o.buildResponsesParams(params)
-
-	// Make request
-	resp, err := o.client.Responses.New(ctx, responsesParams)
-	if err != nil {
-		return nil, fmt.Errorf("OpenAI generation failed: %w", err)
-	}
-
-	// Extract response content
-	var content strings.Builder
-	var toolCalls []ToolCallResult
-
-	var reasoning strings.Builder
-	for _, item := range resp.Output {
-		switch item := item.AsAny().(type) {
-		case responses.ResponseOutputMessage:
-			for _, contentPart := range item.Content {
-				switch part := contentPart.AsAny().(type) {
-				case responses.ResponseOutputText:
-					content.WriteString(part.Text)
-				}
-			}
-		case responses.ResponseReasoningItem:
-			// Handle reasoning model output - extract from summary
-			for _, summary := range item.Summary {
-				if summary.Text != "" {
-					reasoning.WriteString(summary.Text)
-				}
-			}
-		case responses.ResponseFunctionToolCall:
-			toolCalls = append(toolCalls, ToolCallResult{
-				ID:        item.ID,
-				Name:      item.Name,
-				Arguments: item.Arguments,
-			})
-		}
-	}
-
-	// If no regular content but we have reasoning, use that as content
-	if content.Len() == 0 && reasoning.Len() > 0 {
-		content = reasoning
-	}
-
-	finishReason := "stop"
-	if resp.Status != "completed" {
-		finishReason = string(resp.Status)
-	}
-
-	return &GenerateResponse{
-		Content:      content.String(),
-		FinishReason: finishReason,
-		ResponseID:   resp.ID,
-		ToolCalls:    toolCalls,
-		Usage: UsageInfo{
-			PromptTokens:     int(resp.Usage.InputTokens),
-			CompletionTokens: int(resp.Usage.OutputTokens),
-			TotalTokens:      int(resp.Usage.TotalTokens),
-			ReasoningTokens:  int(resp.Usage.OutputTokensDetails.ReasoningTokens),
-		},
-	}, nil
+	return nil, errors.New("pkg/ai generate runtime unavailable")
 }
 
 func (o *OpenAIProvider) generateChatCompletions(ctx context.Context, params GenerateParams) (*GenerateResponse, error) {

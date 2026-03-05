@@ -9,14 +9,8 @@ import (
 )
 
 func TestPkgAIProviderRuntimeEnabled(t *testing.T) {
-	t.Setenv("PI_USE_PKG_AI_PROVIDER_RUNTIME", "true")
 	if !pkgAIProviderRuntimeEnabled() {
-		t.Fatalf("expected runtime flag to be enabled")
-	}
-
-	t.Setenv("PI_USE_PKG_AI_PROVIDER_RUNTIME", "0")
-	if pkgAIProviderRuntimeEnabled() {
-		t.Fatalf("expected runtime flag to be disabled")
+		t.Fatalf("expected pkg/ai provider runtime to be always enabled")
 	}
 }
 
