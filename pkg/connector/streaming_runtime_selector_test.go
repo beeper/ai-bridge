@@ -8,37 +8,8 @@ import (
 )
 
 func TestPkgAIRuntimeEnabledFromEnv(t *testing.T) {
-	t.Setenv("PI_USE_PKG_AI_RUNTIME", "")
-	if pkgAIRuntimeEnabled() {
-		t.Fatalf("expected runtime flag disabled by default")
-	}
-
-	t.Setenv("PI_USE_PKG_AI_RUNTIME", "1")
 	if !pkgAIRuntimeEnabled() {
-		t.Fatalf("expected runtime flag enabled for value 1")
-	}
-
-	t.Setenv("PI_USE_PKG_AI_RUNTIME", "true")
-	if !pkgAIRuntimeEnabled() {
-		t.Fatalf("expected runtime flag enabled for value true")
-	}
-
-	t.Setenv("PI_USE_PKG_AI_RUNTIME", "off")
-	if pkgAIRuntimeEnabled() {
-		t.Fatalf("expected runtime flag disabled for value off")
-	}
-
-	t.Setenv("PI_USE_PKG_AI_RUNTIME_DRY_RUN", "")
-	if pkgAIRuntimeDryRunEnabled() {
-		t.Fatalf("expected dry-run flag disabled by default")
-	}
-	t.Setenv("PI_USE_PKG_AI_RUNTIME_DRY_RUN", "yes")
-	if !pkgAIRuntimeDryRunEnabled() {
-		t.Fatalf("expected dry-run flag enabled for value yes")
-	}
-	t.Setenv("PI_USE_PKG_AI_RUNTIME_DRY_RUN", "0")
-	if pkgAIRuntimeDryRunEnabled() {
-		t.Fatalf("expected dry-run flag disabled for value 0")
+		t.Fatalf("expected pkg/ai runtime to be always enabled")
 	}
 }
 
@@ -49,11 +20,8 @@ func TestChooseStreamingRuntimePath(t *testing.T) {
 	if got := chooseStreamingRuntimePath(false, ModelAPIResponses, true); got != streamingRuntimePkgAI {
 		t.Fatalf("expected pkg_ai path when preferred and no audio, got %s", got)
 	}
-	if got := chooseStreamingRuntimePath(false, ModelAPIChatCompletions, false); got != streamingRuntimeChatCompletions {
-		t.Fatalf("expected chat model api path, got %s", got)
-	}
-	if got := chooseStreamingRuntimePath(false, ModelAPIResponses, false); got != streamingRuntimeResponses {
-		t.Fatalf("expected responses path fallback, got %s", got)
+	if got := chooseStreamingRuntimePath(false, ModelAPIChatCompletions, false); got != streamingRuntimePkgAI {
+		t.Fatalf("expected pkg_ai path regardless of model API, got %s", got)
 	}
 }
 
@@ -120,62 +88,6 @@ func TestBuildPkgAIContext_UsesSystemPromptAndMappedMessages(t *testing.T) {
 	}
 }
 
-func TestPromptContainsToolCalls(t *testing.T) {
-	if promptContainsToolCalls([]openai.ChatCompletionMessageParamUnion{
-		openai.UserMessage("hello"),
-	}) {
-		t.Fatalf("did not expect tool call detection for plain user prompt")
-	}
-	if !promptContainsToolCalls([]openai.ChatCompletionMessageParamUnion{
-		{
-			OfAssistant: &openai.ChatCompletionAssistantMessageParam{
-				ToolCalls: []openai.ChatCompletionMessageToolCallUnionParam{
-					{
-						OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-							ID: "call_1",
-							Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-								Name:      "search",
-								Arguments: "{}",
-							},
-						},
-					},
-				},
-			},
-		},
-	}) {
-		t.Fatalf("expected assistant tool calls to be detected")
-	}
-	if !promptContainsToolCalls([]openai.ChatCompletionMessageParamUnion{
-		openai.ToolMessage("tool result", "call_1"),
-	}) {
-		t.Fatalf("expected tool role messages to be detected")
-	}
-}
-
-func TestShouldUsePkgAIBridgeStreaming(t *testing.T) {
-	client := &AIClient{}
-	if !client.shouldUsePkgAIBridgeStreaming(context.Background(), &PortalMetadata{}, []openai.ChatCompletionMessageParamUnion{
-		openai.UserMessage("hello"),
-	}) {
-		t.Fatalf("expected bridge streaming to be enabled for non-tool prompt")
-	}
-	if !client.shouldUsePkgAIBridgeStreaming(context.Background(), &PortalMetadata{
-		Capabilities: ModelCapabilities{SupportsToolCalling: true},
-	}, []openai.ChatCompletionMessageParamUnion{
-		openai.UserMessage("hello"),
-	}) {
-		t.Fatalf("expected bridge streaming enabled when tool calling has no active tools")
-	}
-	if client.shouldUsePkgAIBridgeStreaming(context.Background(), &PortalMetadata{
-		Capabilities: ModelCapabilities{SupportsToolCalling: true},
-		AgentID:      "agent-1",
-	}, []openai.ChatCompletionMessageParamUnion{
-		openai.UserMessage("hello"),
-	}) {
-		t.Fatalf("expected bridge streaming disabled when agent tool mode is active")
-	}
-}
-
 func TestBuildPkgAIBridgeGenerateParams(t *testing.T) {
 	client := &AIClient{}
 	meta := &PortalMetadata{
@@ -188,7 +100,7 @@ func TestBuildPkgAIBridgeGenerateParams(t *testing.T) {
 			SupportsReasoning: true,
 		},
 	}
-	params := client.buildPkgAIBridgeGenerateParams(meta, []openai.ChatCompletionMessageParamUnion{
+	params := client.buildPkgAIBridgeGenerateParams(context.Background(), nil, meta, []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage("ignored"),
 		openai.UserMessage("hello"),
 		openai.AssistantMessage("hi"),
@@ -210,6 +122,9 @@ func TestBuildPkgAIBridgeGenerateParams(t *testing.T) {
 	}
 	if len(params.Messages) != 2 {
 		t.Fatalf("expected mapped user+assistant messages, got %d", len(params.Messages))
+	}
+	if len(params.Tools) != 0 {
+		t.Fatalf("expected no tools without tool-calling metadata, got %d", len(params.Tools))
 	}
 }
 

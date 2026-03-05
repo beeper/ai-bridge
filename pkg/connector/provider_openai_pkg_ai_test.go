@@ -9,7 +9,6 @@ import (
 )
 
 func TestOpenAIProviderGenerate_UsesPkgAIBridgeWhenEnabled(t *testing.T) {
-	t.Setenv("PI_USE_PKG_AI_PROVIDER_RUNTIME", "true")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "")
 

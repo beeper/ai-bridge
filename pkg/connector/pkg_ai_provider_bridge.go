@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 	"time"
 
@@ -13,8 +12,7 @@ import (
 )
 
 func pkgAIProviderRuntimeEnabled() bool {
-	value := strings.ToLower(strings.TrimSpace(os.Getenv("PI_USE_PKG_AI_PROVIDER_RUNTIME")))
-	return value == "1" || value == "true" || value == "yes" || value == "on"
+	return true
 }
 
 func inferProviderNameFromBaseURL(baseURL string) string {
@@ -167,17 +165,20 @@ func tryGenerateStreamWithPkgAI(
 		stream, err = aipkg.Stream(model, aiContext, options)
 	}
 	if err != nil {
-		return nil, false
+		out := make(chan StreamEvent, 1)
+		out <- StreamEvent{Type: StreamEventError, Error: err}
+		close(out)
+		return out, true
 	}
 
 	mapped := streamEventsFromAIStream(ctx, stream)
 	select {
 	case first, ok := <-mapped:
 		if !ok {
-			return nil, false
-		}
-		if shouldFallbackFromPkgAIEvent(first) {
-			return nil, false
+			out := make(chan StreamEvent, 1)
+			out <- StreamEvent{Type: StreamEventError, Error: errors.New("pkg/ai stream ended before emitting events")}
+			close(out)
+			return out, true
 		}
 		out := make(chan StreamEvent, 64)
 		go func() {
@@ -225,16 +226,10 @@ func tryGenerateWithPkgAI(
 		message, err = aipkg.Complete(model, aiContext, options)
 	}
 	if err != nil {
-		if shouldFallbackFromPkgAIError(err) {
-			return nil, false, nil
-		}
 		return nil, true, err
 	}
 	if message.StopReason == aipkg.StopReasonError && strings.TrimSpace(message.ErrorMessage) != "" {
 		runtimeErr := errors.New(strings.TrimSpace(message.ErrorMessage))
-		if shouldFallbackFromPkgAIError(runtimeErr) {
-			return nil, false, nil
-		}
 		return nil, true, runtimeErr
 	}
 	return generateResponseFromAIMessage(message), true, nil

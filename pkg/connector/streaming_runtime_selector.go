@@ -2,13 +2,14 @@ package connector
 
 import (
 	"context"
-	"os"
+	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/beeper/ai-bridge/pkg/agents/tools"
 	aipkg "github.com/beeper/ai-bridge/pkg/ai"
-	aiproviders "github.com/beeper/ai-bridge/pkg/ai/providers"
 	airuntime "github.com/beeper/ai-bridge/pkg/runtime"
 	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
@@ -24,26 +25,14 @@ const (
 )
 
 func pkgAIRuntimeEnabled() bool {
-	value := strings.ToLower(strings.TrimSpace(os.Getenv("PI_USE_PKG_AI_RUNTIME")))
-	return value == "1" || value == "true" || value == "yes" || value == "on"
+	return true
 }
 
-func pkgAIRuntimeDryRunEnabled() bool {
-	value := strings.ToLower(strings.TrimSpace(os.Getenv("PI_USE_PKG_AI_RUNTIME_DRY_RUN")))
-	return value == "1" || value == "true" || value == "yes" || value == "on"
-}
-
-func chooseStreamingRuntimePath(hasAudio bool, modelAPI ModelAPI, preferPkgAI bool) streamingRuntimePath {
+func chooseStreamingRuntimePath(hasAudio bool, _ ModelAPI, _ bool) streamingRuntimePath {
 	if hasAudio {
 		return streamingRuntimeChatCompletions
 	}
-	if preferPkgAI {
-		return streamingRuntimePkgAI
-	}
-	if modelAPI == ModelAPIChatCompletions {
-		return streamingRuntimeChatCompletions
-	}
-	return streamingRuntimeResponses
+	return streamingRuntimePkgAI
 }
 
 func (oc *AIClient) streamWithPkgAIBridge(
@@ -71,55 +60,15 @@ func (oc *AIClient) streamWithPkgAIBridge(
 		Str("ai_model_api", string(aiModel.API)).
 		Str("ai_model_provider", string(aiModel.Provider)).
 		Str("ai_model_id", aiModel.ID).
-		Msg("pkg/ai runtime bridge flag enabled; prepared adapter context/model and delegating to existing runtime path")
-	if pkgAIRuntimeDryRunEnabled() {
-		oc.runPkgAIBridgeDryRun(ctx, aiModel, aiContext)
-	}
-	if oc.shouldUsePkgAIBridgeStreaming(ctx, meta, prompt) {
-		if baseURL, apiKey, ok := oc.pkgAIProviderBridgeCredentials(); ok {
-			params := oc.buildPkgAIBridgeGenerateParams(meta, prompt)
-			if events, handled := tryGenerateStreamWithPkgAI(ctx, baseURL, apiKey, params); handled {
-				oc.loggerForContext(ctx).Debug().
-					Str("model", params.Model).
-					Msg("Executing pkg/ai runtime bridge event stream path")
-				return oc.streamPkgAIBridgeEvents(ctx, evt, portal, meta, prompt, events)
-			}
-			oc.loggerForContext(ctx).Debug().
-				Str("model", params.Model).
-				Msg("pkg/ai bridge event stream path requested fallback")
-		}
-	}
-	switch oc.resolveModelAPI(meta) {
-	case ModelAPIChatCompletions:
-		return oc.streamChatCompletions(ctx, evt, portal, meta, prompt)
-	default:
-		return oc.streamingResponseWithToolSchemaFallback(ctx, evt, portal, meta, prompt)
-	}
-}
+		Msg("Using pkg/ai runtime bridge as primary streaming path")
 
-func (oc *AIClient) runPkgAIBridgeDryRun(ctx context.Context, model aipkg.Model, aiContext aipkg.Context) {
-	aiproviders.RegisterBuiltInAPIProviders()
-	stream, err := aipkg.Stream(model, aiContext, &aipkg.StreamOptions{
-		Ctx:       ctx,
-		MaxTokens: model.MaxTokens,
-	})
-	if err != nil {
-		oc.loggerForContext(ctx).Warn().Err(err).Msg("pkg/ai dry-run failed to create stream")
-		return
+	baseURL, apiKey, ok := oc.pkgAIProviderBridgeCredentials()
+	if !ok {
+		return false, nil, errors.New("pkg/ai runtime requires OpenAI-compatible provider credentials")
 	}
-	events := streamEventsFromAIStream(ctx, stream)
-	count := 0
-	for evt := range events {
-		count++
-		if evt.Type == StreamEventError {
-			oc.loggerForContext(ctx).Debug().Err(evt.Error).Int("event_count", count).Msg("pkg/ai dry-run produced error event")
-			return
-		}
-		if evt.Type == StreamEventComplete {
-			oc.loggerForContext(ctx).Debug().Int("event_count", count).Str("finish_reason", evt.FinishReason).Msg("pkg/ai dry-run completed")
-			return
-		}
-	}
+
+	params := oc.buildPkgAIBridgeGenerateParams(ctx, portal, meta, prompt)
+	return oc.streamPkgAIBridgeEvents(ctx, evt, portal, meta, prompt, baseURL, apiKey, params)
 }
 
 func buildPkgAIContext(systemPrompt string, prompt []openai.ChatCompletionMessageParamUnion) aipkg.Context {
@@ -228,47 +177,9 @@ func (oc *AIClient) pkgAIProviderBridgeCredentials() (string, string, bool) {
 	return provider.baseURL, provider.apiKey, true
 }
 
-func (oc *AIClient) shouldUsePkgAIBridgeStreaming(
-	ctx context.Context,
-	meta *PortalMetadata,
-	prompt []openai.ChatCompletionMessageParamUnion,
-) bool {
-	if meta != nil && meta.Capabilities.SupportsToolCalling {
-		if oc.selectedBuiltinToolCountSafe(ctx, meta) > 0 {
-			return false
-		}
-		if resolveAgentID(meta) != "" {
-			return false
-		}
-	}
-	if promptContainsToolCalls(prompt) {
-		return false
-	}
-	return true
-}
-
-func (oc *AIClient) selectedBuiltinToolCountSafe(ctx context.Context, meta *PortalMetadata) (count int) {
-	defer func() {
-		if recover() != nil {
-			count = 0
-		}
-	}()
-	return len(oc.selectedBuiltinToolsForTurn(ctx, meta))
-}
-
-func promptContainsToolCalls(prompt []openai.ChatCompletionMessageParamUnion) bool {
-	for _, msg := range prompt {
-		if msg.OfTool != nil {
-			return true
-		}
-		if msg.OfAssistant != nil && len(msg.OfAssistant.ToolCalls) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
 func (oc *AIClient) buildPkgAIBridgeGenerateParams(
+	ctx context.Context,
+	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) GenerateParams {
@@ -279,6 +190,83 @@ func (oc *AIClient) buildPkgAIBridgeGenerateParams(
 		Temperature:         oc.effectiveTemperature(meta),
 		MaxCompletionTokens: oc.effectiveMaxTokens(meta),
 		ReasoningEffort:     oc.effectiveReasoningEffort(meta),
+		Tools:               oc.buildPkgAIBridgeTools(ctx, portal, meta),
+	}
+}
+
+func (oc *AIClient) buildPkgAIBridgeTools(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+) []ToolDefinition {
+	definitions := append([]ToolDefinition(nil), oc.selectedBuiltinToolsForTurn(ctx, meta)...)
+	if meta == nil || !meta.Capabilities.SupportsToolCalling {
+		return dedupeToolDefinitionsByName(definitions)
+	}
+
+	hasAgent := resolveAgentID(meta) != ""
+	if hasAgent && !hasBossAgent(meta) && !oc.isBuilderRoom(portal) {
+		for _, tool := range tools.SessionTools() {
+			if !oc.isToolEnabled(meta, tool.Name) {
+				continue
+			}
+			definitions = append(definitions, toToolDefinitionFromAgentTool(tool))
+		}
+	}
+	if hasBossAgent(meta) || oc.isBuilderRoom(portal) {
+		for _, tool := range tools.BossTools() {
+			if !oc.isToolEnabled(meta, tool.Name) {
+				continue
+			}
+			definitions = append(definitions, toToolDefinitionFromAgentTool(tool))
+		}
+	}
+	return dedupeToolDefinitionsByName(definitions)
+}
+
+func dedupeToolDefinitionsByName(tools []ToolDefinition) []ToolDefinition {
+	if len(tools) == 0 {
+		return nil
+	}
+	deduped := make([]ToolDefinition, 0, len(tools))
+	seen := make(map[string]struct{}, len(tools))
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		deduped = append(deduped, tool)
+	}
+	return deduped
+}
+
+func toToolDefinitionFromAgentTool(tool *tools.Tool) ToolDefinition {
+	if tool == nil {
+		return ToolDefinition{}
+	}
+	var parameters map[string]any
+	switch schema := tool.InputSchema.(type) {
+	case nil:
+		parameters = nil
+	case map[string]any:
+		parameters = schema
+	default:
+		blob, err := json.Marshal(schema)
+		if err == nil {
+			_ = json.Unmarshal(blob, &parameters)
+		}
+		if len(parameters) == 0 {
+			parameters = nil
+		}
+	}
+	return ToolDefinition{
+		Name:        tool.Name,
+		Description: tool.Description,
+		Parameters:  parameters,
 	}
 }
 
@@ -288,7 +276,9 @@ func (oc *AIClient) streamPkgAIBridgeEvents(
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	prompt []openai.ChatCompletionMessageParamUnion,
-	events <-chan StreamEvent,
+	baseURL string,
+	apiKey string,
+	params GenerateParams,
 ) (bool, *ContextLengthError, error) {
 	log := oc.loggerForContext(ctx).With().
 		Str("action", "stream_pkg_ai_bridge_events").
@@ -302,77 +292,175 @@ func (oc *AIClient) streamPkgAIBridgeEvents(
 	isHeartbeat := prep.IsHeartbeat
 
 	oc.emitUIStart(ctx, portal, state, meta)
+	currentParams := params
+	const maxToolRounds = 10
 
-	for {
-		select {
-		case <-ctx.Done():
-			state.finishReason = "cancelled"
-			if state.hasInitialMessageTarget() && state.accumulated.Len() > 0 {
-				oc.flushPartialStreamingMessage(context.Background(), portal, state, meta)
-			}
-			oc.uiEmitter(state).EmitUIAbort(ctx, portal, "cancelled")
+	for round := 0; ; round++ {
+		state.pendingFunctionOutputs = nil
+		toolCallsThisRound := make([]ToolCallResult, 0, 4)
+		activeTools := make(map[string]*activeToolCall)
+		var roundContent strings.Builder
+		events, handled := tryGenerateStreamWithPkgAI(ctx, baseURL, apiKey, currentParams)
+		if !handled {
+			err := errors.New("pkg/ai runtime stream was not handled by registered providers")
+			oc.uiEmitter(state).EmitUIError(ctx, portal, err.Error())
 			oc.emitUIFinish(ctx, portal, state, meta)
-			return false, nil, streamFailureError(state, ctx.Err())
-		case event, ok := <-events:
-			if !ok {
-				state.completedAtMs = time.Now().UnixMilli()
-				oc.finalizeResponsesStream(ctx, log, portal, state, meta)
-				return true, nil, nil
-			}
+			return false, nil, streamFailureError(state, err)
+		}
 
-			oc.markMessageSendSuccess(ctx, portal, evt, state)
-			switch event.Type {
-			case StreamEventDelta:
-				touchTyping()
-				if err := oc.handleResponseOutputTextDelta(
-					ctx,
-					log,
-					portal,
-					state,
-					meta,
-					typingSignals,
-					isHeartbeat,
-					event.Delta,
-					"failed to send initial streaming message",
-					"Failed to send initial streaming message",
-				); err != nil {
-					return false, nil, &PreDeltaError{Err: err}
+		for {
+			select {
+			case <-ctx.Done():
+				state.finishReason = "cancelled"
+				if state.hasInitialMessageTarget() && state.accumulated.Len() > 0 {
+					oc.flushPartialStreamingMessage(context.Background(), portal, state, meta)
 				}
-			case StreamEventReasoning:
-				touchTyping()
-				if err := oc.handleResponseReasoningTextDelta(
-					ctx,
-					log,
-					portal,
-					state,
-					meta,
-					isHeartbeat,
-					event.ReasoningDelta,
-					"failed to send initial streaming message",
-					"Failed to send initial streaming message",
-				); err != nil {
-					return false, nil, &PreDeltaError{Err: err}
-				}
-			case StreamEventComplete:
-				if reason := strings.TrimSpace(event.FinishReason); reason != "" {
-					state.finishReason = reason
-				}
-				state.responseID = strings.TrimSpace(event.ResponseID)
-				if event.Usage != nil {
-					state.promptTokens = int64(event.Usage.PromptTokens)
-					state.completionTokens = int64(event.Usage.CompletionTokens)
-					state.reasoningTokens = int64(event.Usage.ReasoningTokens)
-					state.totalTokens = int64(event.Usage.TotalTokens)
-					oc.uiEmitter(state).EmitUIMessageMetadata(ctx, portal, oc.buildUIMessageMetadata(state, meta, true))
-				}
-			case StreamEventError:
-				if cle := ParseContextLengthError(event.Error); cle != nil {
-					return false, cle, nil
-				}
-				oc.uiEmitter(state).EmitUIError(ctx, portal, event.Error.Error())
+				oc.uiEmitter(state).EmitUIAbort(ctx, portal, "cancelled")
 				oc.emitUIFinish(ctx, portal, state, meta)
-				return false, nil, streamFailureError(state, event.Error)
+				return false, nil, streamFailureError(state, ctx.Err())
+			case event, ok := <-events:
+				if !ok {
+					if shouldContinueChatToolLoop(state.finishReason, len(toolCallsThisRound)) {
+						if round >= maxToolRounds {
+							err := errors.New("max pkg/ai tool call rounds reached")
+							oc.uiEmitter(state).EmitUIError(ctx, portal, err.Error())
+							oc.emitUIFinish(ctx, portal, state, meta)
+							return false, nil, streamFailureError(state, err)
+						}
+
+						assistantContent := make([]ContentPart, 0, 1)
+						if text := strings.TrimSpace(roundContent.String()); text != "" {
+							assistantContent = append(assistantContent, ContentPart{Type: ContentTypeText, Text: text})
+						}
+						currentParams.Messages = append(currentParams.Messages, UnifiedMessage{
+							Role:      RoleAssistant,
+							Content:   assistantContent,
+							ToolCalls: toolCallsThisRound,
+						})
+						for _, output := range state.pendingFunctionOutputs {
+							currentParams.Messages = append(currentParams.Messages, UnifiedMessage{
+								Role:       RoleTool,
+								ToolCallID: output.callID,
+								Name:       output.name,
+								Content: []ContentPart{
+									{Type: ContentTypeText, Text: output.output},
+								},
+							})
+						}
+						state.pendingFunctionOutputs = nil
+						state.needsTextSeparator = true
+
+						if steerItems := oc.drainSteerQueue(state.roomID); len(steerItems) > 0 {
+							for _, item := range steerItems {
+								if item.pending.Type != pendingTypeText {
+									continue
+								}
+								userPrompt := strings.TrimSpace(item.prompt)
+								if userPrompt == "" {
+									userPrompt = strings.TrimSpace(item.pending.MessageBody)
+								}
+								if userPrompt == "" {
+									continue
+								}
+								currentParams.Messages = append(currentParams.Messages, UnifiedMessage{
+									Role:    RoleUser,
+									Content: []ContentPart{{Type: ContentTypeText, Text: userPrompt}},
+								})
+							}
+						}
+						goto nextRound
+					}
+
+					state.completedAtMs = time.Now().UnixMilli()
+					oc.finalizeResponsesStream(ctx, log, portal, state, meta)
+					return true, nil, nil
+				}
+
+				oc.markMessageSendSuccess(ctx, portal, evt, state)
+				switch event.Type {
+				case StreamEventDelta:
+					touchTyping()
+					roundContent.WriteString(event.Delta)
+					if err := oc.handleResponseOutputTextDelta(
+						ctx,
+						log,
+						portal,
+						state,
+						meta,
+						typingSignals,
+						isHeartbeat,
+						event.Delta,
+						"failed to send initial streaming message",
+						"Failed to send initial streaming message",
+					); err != nil {
+						return false, nil, &PreDeltaError{Err: err}
+					}
+				case StreamEventReasoning:
+					touchTyping()
+					if err := oc.handleResponseReasoningTextDelta(
+						ctx,
+						log,
+						portal,
+						state,
+						meta,
+						isHeartbeat,
+						event.ReasoningDelta,
+						"failed to send initial streaming message",
+						"Failed to send initial streaming message",
+					); err != nil {
+						return false, nil, &PreDeltaError{Err: err}
+					}
+				case StreamEventToolCall:
+					if event.ToolCall == nil {
+						continue
+					}
+					toolCallID := strings.TrimSpace(event.ToolCall.ID)
+					if toolCallID == "" {
+						toolCallID = NewCallID()
+					}
+					toolName := strings.TrimSpace(event.ToolCall.Name)
+					arguments := normalizeToolArgsJSON(strings.TrimSpace(event.ToolCall.Arguments))
+					toolCallsThisRound = append(toolCallsThisRound, ToolCallResult{
+						ID:        toolCallID,
+						Name:      toolName,
+						Arguments: arguments,
+					})
+					oc.handleFunctionCallArgumentsDone(
+						ctx,
+						log,
+						portal,
+						state,
+						meta,
+						activeTools,
+						toolCallID,
+						toolName,
+						arguments,
+						true,
+						" (pkg/ai)",
+					)
+				case StreamEventComplete:
+					if reason := strings.TrimSpace(event.FinishReason); reason != "" {
+						state.finishReason = reason
+					}
+					state.responseID = strings.TrimSpace(event.ResponseID)
+					if event.Usage != nil {
+						state.promptTokens = int64(event.Usage.PromptTokens)
+						state.completionTokens = int64(event.Usage.CompletionTokens)
+						state.reasoningTokens = int64(event.Usage.ReasoningTokens)
+						state.totalTokens = int64(event.Usage.TotalTokens)
+						oc.uiEmitter(state).EmitUIMessageMetadata(ctx, portal, oc.buildUIMessageMetadata(state, meta, true))
+					}
+				case StreamEventError:
+					if cle := ParseContextLengthError(event.Error); cle != nil {
+						return false, cle, nil
+					}
+					oc.uiEmitter(state).EmitUIError(ctx, portal, event.Error.Error())
+					oc.emitUIFinish(ctx, portal, state, meta)
+					return false, nil, streamFailureError(state, event.Error)
+				}
 			}
 		}
+
+	nextRound:
 	}
 }
