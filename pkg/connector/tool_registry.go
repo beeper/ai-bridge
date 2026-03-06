@@ -12,10 +12,10 @@ type toolExecutor func(ctx context.Context, args map[string]any) (string, error)
 func builtinToolExecutors() map[string]toolExecutor {
 	return map[string]toolExecutor{
 		ToolNameCalculator:         executeCalculator,
-		ToolNameWebSearch:          executeWebSearch,
+		ToolNameWebSearch:          executeWebSearchWithProviders,
 		ToolNameMessage:            executeMessage,
 		ToolNameTTS:                executeTTS,
-		ToolNameWebFetch:           executeWebFetch,
+		ToolNameWebFetch:           executeWebFetchWithProviders,
 		ToolNameImage:              executeAnalyzeImage,
 		ToolNameImageGenerate:      executeImageGeneration,
 		ToolNameSessionStatus:      executeSessionStatus,

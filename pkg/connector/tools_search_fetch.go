@@ -195,7 +195,7 @@ func applyLoginTokensToSearchConfig(cfg *search.Config, meta *UserLoginMetadata,
 		applyExaProxyDefaults(cfg, meta, connector)
 	}
 	if shouldForceExaProvider(cfg.Exa.APIKey, cfg.Exa.BaseURL, meta) {
-		forceSearchProviderExa(cfg)
+		cfg.Provider = search.ProviderExa
 		cfg.Fallbacks = []string{search.ProviderExa}
 	}
 
@@ -242,21 +242,10 @@ func shouldApplyExaProxyDefaults(meta *UserLoginMetadata) bool {
 }
 
 func shouldForceExaProvider(apiKey, baseURL string, meta *UserLoginMetadata) bool {
-	if isMagicProxyLogin(meta) {
+	if meta != nil && meta.Provider == ProviderMagicProxy {
 		return true
 	}
-	return hasExaTokenAndCustomEndpoint(apiKey, baseURL)
-}
-
-func isMagicProxyLogin(meta *UserLoginMetadata) bool {
-	return meta != nil && meta.Provider == ProviderMagicProxy
-}
-
-func hasExaTokenAndCustomEndpoint(apiKey, baseURL string) bool {
-	if strings.TrimSpace(apiKey) == "" {
-		return false
-	}
-	return isCustomExaEndpoint(baseURL)
+	return strings.TrimSpace(apiKey) != "" && isCustomExaEndpoint(baseURL)
 }
 
 func isCustomExaEndpoint(baseURL string) bool {
@@ -267,13 +256,6 @@ func isCustomExaEndpoint(baseURL string) bool {
 	return !strings.EqualFold(trimmed, "https://api.exa.ai")
 }
 
-func forceSearchProviderExa(cfg *search.Config) {
-	if cfg == nil {
-		return
-	}
-	cfg.Provider = search.ProviderExa
-}
-
 func applyExaProxyDefaultsTo(baseURL *string, apiKey *string, meta *UserLoginMetadata, connector *OpenAIConnector) {
 	if connector == nil {
 		return
@@ -282,7 +264,7 @@ func applyExaProxyDefaultsTo(baseURL *string, apiKey *string, meta *UserLoginMet
 	if proxyRoot == "" {
 		return
 	}
-	if isRelativePath(*baseURL) {
+	if strings.HasPrefix(strings.TrimSpace(*baseURL), "/") {
 		*baseURL = joinProxyPath(proxyRoot, *baseURL)
 	} else if shouldUseExaProxyBase(*baseURL) {
 		if proxyBase := connector.resolveExaProxyBaseURL(meta); proxyBase != "" {
@@ -322,11 +304,6 @@ func shouldUseExaProxyBase(baseURL string) bool {
 		return true
 	}
 	return strings.EqualFold(trimmed, "https://api.exa.ai")
-}
-
-func isRelativePath(value string) bool {
-	trimmed := strings.TrimSpace(value)
-	return strings.HasPrefix(trimmed, "/")
 }
 
 func mapSearchConfig(src *SearchConfig) *search.Config {

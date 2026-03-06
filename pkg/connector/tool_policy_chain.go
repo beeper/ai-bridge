@@ -33,19 +33,18 @@ func (oc *AIClient) resolveToolPolicies(meta *PortalMetadata) toolPolicyResoluti
 	globalTools := oc.connector.Config.ToolPolicy
 	provider, modelID := oc.resolveToolPolicyModelContext(meta)
 
+	var agentTools *toolpolicy.ToolPolicyConfig
+	if agent != nil {
+		agentTools = agent.Tools
+	}
 	effective := toolpolicy.ResolveEffectiveToolPolicy(struct {
 		Global        *toolpolicy.GlobalToolPolicyConfig
 		Agent         *toolpolicy.ToolPolicyConfig
 		ModelProvider string
 		ModelID       string
 	}{
-		Global: globalTools,
-		Agent: func() *toolpolicy.ToolPolicyConfig {
-			if agent != nil {
-				return agent.Tools
-			}
-			return nil
-		}(),
+		Global:        globalTools,
+		Agent:         agentTools,
 		ModelProvider: provider,
 		ModelID:       modelID,
 	})

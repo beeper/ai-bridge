@@ -131,10 +131,8 @@ func (oc *AIClient) persistAlwaysAllow(ctx context.Context, pending *pendingTool
 		if sl == "" || tn == "" {
 			return nil
 		}
-		for _, rule := range meta.ToolApprovals.MCPAlwaysAllow {
-			if normalizeApprovalToken(rule.ServerLabel) == sl && normalizeMcpRuleToolName(rule.ToolName) == tn {
-				return nil
-			}
+		if oc.isMcpAlwaysAllowed(sl, tn) {
+			return nil // Already persisted.
 		}
 		meta.ToolApprovals.MCPAlwaysAllow = append(meta.ToolApprovals.MCPAlwaysAllow, MCPAlwaysAllowRule{
 			ServerLabel: sl,
@@ -146,10 +144,8 @@ func (oc *AIClient) persistAlwaysAllow(ctx context.Context, pending *pendingTool
 		if tn == "" {
 			return nil
 		}
-		for _, rule := range meta.ToolApprovals.BuiltinAlwaysAllow {
-			if normalizeApprovalToken(rule.ToolName) == tn && normalizeApprovalToken(rule.Action) == act {
-				return nil
-			}
+		if oc.isBuiltinAlwaysAllowed(tn, act) {
+			return nil // Already persisted.
 		}
 		meta.ToolApprovals.BuiltinAlwaysAllow = append(meta.ToolApprovals.BuiltinAlwaysAllow, BuiltinAlwaysAllowRule{
 			ToolName: tn,

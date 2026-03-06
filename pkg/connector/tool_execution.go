@@ -36,34 +36,29 @@ func normalizeToolArgsJSON(argsJSON string) string {
 	return trimmed
 }
 
-func parseToolInputPayload(argsJSON string) map[string]any {
-	trimmed := strings.TrimSpace(argsJSON)
+// parseJSONPayload parses a JSON string into a map. If parsing fails or the
+// result is not an object, it wraps the value under fallbackKey.
+func parseJSONPayload(raw string, fallbackKey string) map[string]any {
+	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil
 	}
 	var parsed any
 	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
-		return map[string]any{"_raw": trimmed}
+		return map[string]any{fallbackKey: trimmed}
 	}
 	if m, ok := parsed.(map[string]any); ok {
 		return m
 	}
-	return map[string]any{"value": parsed}
+	return map[string]any{fallbackKey: parsed}
+}
+
+func parseToolInputPayload(argsJSON string) map[string]any {
+	return parseJSONPayload(argsJSON, "_raw")
 }
 
 func parseToolOutputPayload(result string) map[string]any {
-	trimmed := strings.TrimSpace(result)
-	if trimmed == "" {
-		return nil
-	}
-	var parsed any
-	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
-		return map[string]any{"result": result}
-	}
-	if m, ok := parsed.(map[string]any); ok {
-		return m
-	}
-	return map[string]any{"result": parsed}
+	return parseJSONPayload(result, "result")
 }
 
 func toolDisplayTitle(toolName string) string {

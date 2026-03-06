@@ -104,10 +104,10 @@ func (oc *AIClient) resolveToolApproval(
 	if approvalID == "" {
 		return bridgeadapter.ErrApprovalMissingID
 	}
-	if strings.TrimSpace(roomID.String()) == "" {
+	if roomID == "" {
 		return bridgeadapter.ErrApprovalMissingRoom
 	}
-	if decidedBy == "" || decidedBy != oc.UserLogin.UserMXID {
+	if decidedBy != oc.UserLogin.UserMXID {
 		return bridgeadapter.ErrApprovalOnlyOwner
 	}
 
@@ -121,7 +121,7 @@ func (oc *AIClient) resolveToolApproval(
 	}
 
 	decision.Reason = strings.TrimSpace(decision.Reason)
-	if strings.TrimSpace(string(decision.State)) == "" {
+	if decision.State == "" {
 		decision.State = airuntime.ToolApprovalDenied
 	}
 	resolution := toolApprovalResolution{
