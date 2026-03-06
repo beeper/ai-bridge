@@ -140,9 +140,6 @@ func (oc *AIClient) setupEmitter(state *streamingState) {
 }
 
 func (oc *AIClient) uiEmitter(state *streamingState) *streamui.Emitter {
-	if state != nil && state.emitter != nil {
-		return state.emitter
-	}
 	if state == nil {
 		fallback := &streamui.UIState{}
 		fallback.InitMaps()
@@ -151,12 +148,12 @@ func (oc *AIClient) uiEmitter(state *streamingState) *streamui.Emitter {
 			Emit:  func(context.Context, *bridgev2.Portal, map[string]any) {},
 		}
 	}
-	return &streamui.Emitter{
-		State: &state.ui,
-		Emit: func(ctx context.Context, portal *bridgev2.Portal, part map[string]any) {
-			oc.emitStreamEvent(ctx, portal, state, part)
-		},
+	if state.emitter != nil {
+		return state.emitter
 	}
+	// Lazy-initialize when setupEmitter was not called.
+	oc.setupEmitter(state)
+	return state.emitter
 }
 
 func (oc *AIClient) applyStreamingReplyTarget(state *streamingState, parsed *runtimeparse.StreamingDirectiveResult) {

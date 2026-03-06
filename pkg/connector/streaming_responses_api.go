@@ -111,17 +111,22 @@ func (oc *AIClient) processResponseStreamEvent(
 		}
 
 	case "response.reasoning_summary_text.delta":
-		oc.handleResponseReasoningSummaryDelta(ctx, portal, state, strings.TrimSpace(streamEvent.Delta))
+		oc.appendReasoningDelta(ctx, portal, state, strings.TrimSpace(streamEvent.Delta))
 
 	case "response.reasoning_text.done", "response.reasoning_summary_text.done":
-		oc.handleResponseReasoningDone(ctx, portal, state, strings.TrimSpace(streamEvent.Text))
+		oc.appendReasoningDelta(ctx, portal, state, strings.TrimSpace(streamEvent.Text))
 
 	case "response.refusal.delta":
 		touchTyping()
-		oc.handleResponseRefusalDelta(ctx, portal, state, typingSignals, streamEvent.Delta)
+		if typingSignals != nil {
+			typingSignals.SignalTextDelta(streamEvent.Delta)
+		}
+		oc.uiEmitter(state).EmitUITextDelta(ctx, portal, streamEvent.Delta)
 
 	case "response.refusal.done":
-		oc.handleResponseRefusalDone(ctx, portal, state, strings.TrimSpace(streamEvent.Refusal))
+		if text := strings.TrimSpace(streamEvent.Refusal); text != "" {
+			oc.uiEmitter(state).EmitUITextDelta(ctx, portal, text)
+		}
 
 	case "response.output_text.done":
 		// text-end is emitted from emitUIFinish to keep one contiguous part.
@@ -184,7 +189,6 @@ func (oc *AIClient) processResponseStreamEvent(
 			typingSignals.SignalToolStart()
 		}
 		oc.handleProviderToolInProgress(ctx, portal, state, meta, activeTools, streamEvent.ItemID, "image_generation", ToolTypeProvider)
-		log.Debug().Str("item_id", streamEvent.ItemID).Msg("Image generation in progress")
 
 	case "response.image_generation_call.completed":
 		touchTyping()
@@ -192,7 +196,6 @@ func (oc *AIClient) processResponseStreamEvent(
 			typingSignals.SignalToolStart()
 		}
 		oc.handleProviderToolCompleted(ctx, portal, state, activeTools, streamEvent.ItemID, "image_generation", ToolTypeProvider, "")
-		log.Info().Str("item_id", streamEvent.ItemID).Msg("Image generation completed")
 
 	case "response.image_generation_call.partial_image":
 		touchTyping()
@@ -267,6 +270,36 @@ func (oc *AIClient) processResponseStreamEvent(
 	return false, nil, nil
 }
 
+// ensureProviderTool returns (or creates) the activeToolCall for a provider/MCP tool item.
+func (oc *AIClient) ensureProviderTool(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	activeTools map[string]*activeToolCall,
+	itemID string,
+	toolName string,
+	toolType ToolType,
+	startedAtMs int64,
+) *activeToolCall {
+	if tool, exists := activeTools[itemID]; exists {
+		return tool
+	}
+	callID := strings.TrimSpace(itemID)
+	if callID == "" {
+		callID = NewCallID()
+	}
+	tool := &activeToolCall{
+		callID:      callID,
+		toolName:    toolName,
+		toolType:    toolType,
+		startedAtMs: startedAtMs,
+		itemID:      itemID,
+	}
+	activeTools[itemID] = tool
+	tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
+	return tool
+}
+
 // handleProviderToolInProgress ensures a provider/MCP tool entry exists and emits input delta.
 func (oc *AIClient) handleProviderToolInProgress(
 	ctx context.Context,
@@ -278,25 +311,10 @@ func (oc *AIClient) handleProviderToolInProgress(
 	toolName string,
 	toolType ToolType,
 ) {
-	callID := strings.TrimSpace(itemID)
-	if callID == "" {
-		callID = NewCallID()
-	}
-	tool, exists := activeTools[itemID]
-	if !exists {
-		tool = &activeToolCall{
-			callID:      callID,
-			toolName:    toolName,
-			toolType:    toolType,
-			startedAtMs: time.Now().UnixMilli(),
-			itemID:      itemID,
-		}
-		activeTools[itemID] = tool
-		tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
-
-		if !state.hasInitialMessageTarget() && !state.suppressSend {
-			oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
-		}
+	_, alreadyExists := activeTools[itemID]
+	tool := oc.ensureProviderTool(ctx, portal, state, activeTools, itemID, toolName, toolType, time.Now().UnixMilli())
+	if !alreadyExists && !state.hasInitialMessageTarget() && !state.suppressSend {
+		oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
 	}
 	oc.uiEmitter(state).EmitUIToolInputDelta(ctx, portal, tool.callID, tool.toolName, "", true)
 }
@@ -312,59 +330,37 @@ func (oc *AIClient) handleProviderToolCompleted(
 	toolType ToolType,
 	failureText string,
 ) {
-	tool, exists := activeTools[itemID]
-	callID := strings.TrimSpace(itemID)
-	if callID == "" {
-		callID = NewCallID()
-	}
-	if exists && tool != nil {
-		callID = tool.callID
-	}
-	if state != nil && state.ui.UIToolOutputFinalized[callID] {
+	// startedAtMs 0 means the in_progress event was missed.
+	tool := oc.ensureProviderTool(ctx, portal, state, activeTools, itemID, toolName, toolType, 0)
+	if state != nil && state.ui.UIToolOutputFinalized[tool.callID] {
 		return
 	}
-	if !exists {
-		tool = &activeToolCall{
-			callID:      callID,
-			toolName:    toolName,
-			toolType:    toolType,
-			startedAtMs: 0, // Unknown; in_progress event was missed
-			itemID:      itemID,
-		}
-		activeTools[itemID] = tool
-		tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
+
+	resultStatus := ResultStatusSuccess
+	status := ToolStatusCompleted
+	output := map[string]any{"status": "completed"}
+	if failureText != "" {
+		resultStatus = ResultStatusError
+		status = ToolStatusFailed
+		output = map[string]any{"error": failureText}
 	}
 
 	if failureText != "" {
-		oc.uiEmitter(state).EmitUIToolOutputError(ctx, portal, callID, failureText, true)
-		resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, failureText, ResultStatusError)
-		state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-			CallID:        callID,
-			ToolName:      toolName,
-			ToolType:      string(tool.toolType),
-			Output:        map[string]any{"error": failureText},
-			Status:        string(ToolStatusFailed),
-			ResultStatus:  string(ResultStatusError),
-			ErrorMessage:  failureText,
-			StartedAtMs:   tool.startedAtMs,
-			CompletedAtMs: time.Now().UnixMilli(),
-			CallEventID:   string(tool.eventID),
-			ResultEventID: string(resultEventID),
-		})
-		return
+		oc.uiEmitter(state).EmitUIToolOutputError(ctx, portal, tool.callID, failureText, true)
+	} else {
+		oc.uiEmitter(state).EmitUIToolOutputAvailable(ctx, portal, tool.callID, output, true, false)
 	}
 
-	output := map[string]any{"status": "completed"}
-	oc.uiEmitter(state).EmitUIToolOutputAvailable(ctx, portal, callID, output, true, false)
 	resultJSON, _ := json.Marshal(output)
-	resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, string(resultJSON), ResultStatusSuccess)
+	resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, string(resultJSON), resultStatus)
 	state.toolCalls = append(state.toolCalls, ToolCallMetadata{
-		CallID:        callID,
+		CallID:        tool.callID,
 		ToolName:      toolName,
 		ToolType:      string(tool.toolType),
 		Output:        output,
-		Status:        string(ToolStatusCompleted),
-		ResultStatus:  string(ResultStatusSuccess),
+		Status:        string(status),
+		ResultStatus:  string(resultStatus),
+		ErrorMessage:  failureText,
 		StartedAtMs:   tool.startedAtMs,
 		CompletedAtMs: time.Now().UnixMilli(),
 		CallEventID:   string(tool.eventID),

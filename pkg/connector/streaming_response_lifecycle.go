@@ -8,6 +8,13 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 )
 
+// captureResponseID stores the response ID from the API response if present.
+func captureResponseID(state *streamingState, resp responses.Response) {
+	if id := strings.TrimSpace(resp.ID); id != "" {
+		state.responseID = id
+	}
+}
+
 func (oc *AIClient) handleResponseLifecycleEvent(
 	ctx context.Context,
 	portal *bridgev2.Portal,
@@ -16,29 +23,19 @@ func (oc *AIClient) handleResponseLifecycleEvent(
 	eventType string,
 	response responses.Response,
 ) {
+	captureResponseID(state, response)
+	oc.emitUIRuntimeMetadata(ctx, portal, state, meta, responseMetadataDeltaFromResponse(response))
+
 	switch eventType {
-	case "response.created", "response.queued", "response.in_progress":
-		if strings.TrimSpace(response.ID) != "" {
-			state.responseID = response.ID
-		}
-		oc.emitUIRuntimeMetadata(ctx, portal, state, meta, responseMetadataDeltaFromResponse(response))
 	case "response.failed":
 		state.finishReason = "error"
-		if strings.TrimSpace(response.ID) != "" {
-			state.responseID = response.ID
-		}
-		oc.emitUIRuntimeMetadata(ctx, portal, state, meta, responseMetadataDeltaFromResponse(response))
 		if msg := strings.TrimSpace(response.Error.Message); msg != "" {
 			oc.uiEmitter(state).EmitUIError(ctx, portal, msg)
 		}
 	case "response.incomplete":
 		state.finishReason = strings.TrimSpace(string(response.IncompleteDetails.Reason))
-		if strings.TrimSpace(state.finishReason) == "" {
+		if state.finishReason == "" {
 			state.finishReason = "other"
 		}
-		if strings.TrimSpace(response.ID) != "" {
-			state.responseID = response.ID
-		}
-		oc.emitUIRuntimeMetadata(ctx, portal, state, meta, responseMetadataDeltaFromResponse(response))
 	}
 }
