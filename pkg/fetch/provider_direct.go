@@ -37,13 +37,6 @@ func (p *directProvider) Fetch(ctx context.Context, req Request) (*Response, err
 	if !isAllowedURL(req.URL) {
 		return nil, errors.New("url not allowed")
 	}
-	parsedURL, err := url.Parse(req.URL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid url: %w", err)
-	}
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return nil, errors.New("url must use http or https")
-	}
 
 	client := &http.Client{Timeout: time.Duration(p.cfg.TimeoutSecs) * time.Second}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, req.URL, nil)
@@ -85,13 +78,8 @@ func (p *directProvider) Fetch(ctx context.Context, req Request) (*Response, err
 	text := string(body)
 	extractor := "basic"
 	if strings.Contains(contentType, "text/html") {
-		if strings.EqualFold(req.ExtractMode, "text") {
-			text = extractTextFromHTML(text)
-			extractor = "basic-text"
-		} else {
-			text = htmlToMarkdownBasic(text)
-			extractor = "basic-markdown"
-		}
+		text = extractTextFromHTML(text)
+		extractor = "basic-text"
 	} else if strings.Contains(contentType, "application/json") {
 		var decoded any
 		if err := json.Unmarshal(body, &decoded); err == nil {
@@ -101,13 +89,11 @@ func (p *directProvider) Fetch(ctx context.Context, req Request) (*Response, err
 		}
 	}
 
-	truncated := false
 	rawLength := len(text)
-	if maxChars > 0 && len(text) > maxChars {
+	truncated := maxChars > 0 && len(text) > maxChars
+	if truncated {
 		text = text[:maxChars] + "...[truncated]"
-		truncated = true
 	}
-	wrappedLength := len(text)
 
 	finalURL := req.URL
 	if resp.Request != nil && resp.Request.URL != nil {
@@ -124,7 +110,7 @@ func (p *directProvider) Fetch(ctx context.Context, req Request) (*Response, err
 		Truncated:     truncated,
 		Length:        len(text),
 		RawLength:     rawLength,
-		WrappedLength: wrappedLength,
+		WrappedLength: len(text),
 		FetchedAt:     time.Now().UTC().Format(time.RFC3339),
 		TookMs:        time.Since(start).Milliseconds(),
 		Text:          text,
@@ -181,11 +167,6 @@ func isAllowedURL(rawURL string) bool {
 		}
 	}
 	return true
-}
-
-func htmlToMarkdownBasic(input string) string {
-	// Minimal HTML stripping for now; can be improved with readability later.
-	return extractTextFromHTML(input)
 }
 
 func extractTextFromHTML(html string) string {
