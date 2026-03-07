@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -276,11 +277,7 @@ func normalizeCatalogInput(input []string, extra map[string]bool) []string {
 		ordered = append(ordered, "image")
 		delete(seen, "image")
 	}
-	rest := make([]string, 0, len(seen))
-	for key := range seen {
-		rest = append(rest, key)
-	}
-	slices.Sort(rest)
+	rest := slices.Sorted(maps.Keys(seen))
 	return append(ordered, rest...)
 }
 

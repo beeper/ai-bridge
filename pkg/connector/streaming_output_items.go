@@ -2,6 +2,7 @@ package connector
 
 import (
 	"encoding/json"
+	"maps"
 	"net/url"
 	"path"
 	"strings"
@@ -9,29 +10,16 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 
 	"github.com/beeper/ai-bridge/pkg/shared/citations"
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 )
 
 func mergeMaps(base map[string]any, extra map[string]any) map[string]any {
-	out := make(map[string]any, len(base)+len(extra))
-	for k, v := range base {
-		out[k] = v
+	out := maps.Clone(base)
+	if out == nil {
+		out = make(map[string]any, len(extra))
 	}
-	for k, v := range extra {
-		out[k] = v
-	}
+	maps.Copy(out, extra)
 	return out
-}
-
-func toJSONObject(value any) map[string]any {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return nil
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		return nil
-	}
-	return decoded
 }
 
 func parseJSONOrRaw(input string) any {
@@ -61,7 +49,11 @@ func stringifyJSONValue(value any) string {
 }
 
 func responseOutputItemToMap(item responses.ResponseOutputItemUnion) map[string]any {
-	return toJSONObject(item)
+	return jsonutil.ToMap(item)
+}
+
+func toJSONObject(value any) map[string]any {
+	return jsonutil.ToMap(value)
 }
 
 type responseToolDescriptor struct {

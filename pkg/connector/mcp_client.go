@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 )
 
 const (
@@ -192,7 +194,7 @@ func (oc *AIClient) fetchMCPToolsForServer(ctx context.Context, server namedMCPS
 		defs = append(defs, ToolDefinition{
 			Name:        name,
 			Description: description,
-			Parameters:  toolSchemaToMap(tool.InputSchema),
+			Parameters:  jsonutil.ToMap(tool.InputSchema),
 		})
 	}
 

@@ -354,18 +354,6 @@ func providerSupportsCapability(providerID string, capability MediaUnderstanding
 	return false
 }
 
-func splitModelProvider(modelID string) (string, string) {
-	trimmed := strings.TrimSpace(modelID)
-	if trimmed == "" {
-		return "", ""
-	}
-	parts := strings.SplitN(trimmed, "/", 2)
-	if len(parts) < 2 {
-		return "", trimmed
-	}
-	return strings.ToLower(strings.TrimSpace(parts[0])), strings.TrimSpace(parts[1])
-}
-
 var hasBinaryCache sync.Map
 
 func hasBinary(name string) bool {

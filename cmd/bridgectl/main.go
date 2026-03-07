@@ -18,6 +18,7 @@ import (
 
 	"github.com/beeper/bridge-manager/api/beeperapi"
 	"github.com/beeper/bridge-manager/api/hungryapi"
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 	"gopkg.in/yaml.v3"
 	"maunium.net/go/mautrix"
 )
@@ -1282,8 +1283,5 @@ func promptLine(label string) (string, error) {
 }
 
 func toMap(v any) map[string]any {
-	data, _ := json.Marshal(v)
-	out := map[string]any{}
-	_ = json.Unmarshal(data, &out)
-	return out
+	return jsonutil.ToMap(v)
 }

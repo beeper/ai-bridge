@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 
@@ -17,9 +18,7 @@ func (oc *AIClient) resolveToolPolicyModelContext(meta *PortalMetadata) (provide
 		modelID = actual
 	}
 	provider = ""
-	if parts := strings.SplitN(modelID, "/", 2); len(parts) == 2 {
-		provider = parts[0]
-	}
+	provider, _ = splitModelProvider(modelID)
 	if provider == "" {
 		loginMeta := loginMetadata(oc.UserLogin)
 		if loginMeta != nil {
@@ -141,10 +140,10 @@ func applyPatchModelAllowed(allow []string, modelID string, provider string) boo
 		candidates[normalizedActual] = struct{}{}
 	}
 	if normalizedActual != "" {
-		if parts := strings.SplitN(normalizedActual, "/", 2); len(parts) == 2 {
-			candidates[parts[1]] = struct{}{}
+		if parsedProvider, parsedModel := splitModelProvider(normalizedActual); parsedProvider != "" && parsedModel != "" {
+			candidates[parsedModel] = struct{}{}
 			if normalizedProvider != "" {
-				candidates[normalizedProvider+"/"+parts[1]] = struct{}{}
+				candidates[normalizedProvider+"/"+parsedModel] = struct{}{}
 			}
 		} else if normalizedProvider != "" {
 			candidates[normalizedProvider+"/"+normalizedActual] = struct{}{}
@@ -205,10 +204,5 @@ func (oc *AIClient) toolNamesForPortal(meta *PortalMetadata) []string {
 		}
 		cancel()
 	}
-	names := make([]string, 0, len(nameSet))
-	for name := range nameSet {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
+	return slices.Sorted(maps.Keys(nameSet))
 }

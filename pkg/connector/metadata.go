@@ -2,6 +2,7 @@ package connector
 
 import (
 	"maps"
+	"slices"
 
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/random"
@@ -9,6 +10,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 )
 
 // ModelCache stores available models (cached in UserLoginMetadata)
@@ -254,53 +256,17 @@ func clonePortalMetadata(src *PortalMetadata) *PortalMetadata {
 	}
 
 	if len(src.DisabledTools) > 0 {
-		clone.DisabledTools = append([]string(nil), src.DisabledTools...)
+		clone.DisabledTools = slices.Clone(src.DisabledTools)
 	}
 
 	if src.ModuleMeta != nil {
 		clone.ModuleMeta = make(map[string]any, len(src.ModuleMeta))
 		for k, v := range src.ModuleMeta {
-			clone.ModuleMeta[k] = deepCloneAny(v)
+			clone.ModuleMeta[k] = jsonutil.DeepCloneAny(v)
 		}
 	}
 
 	return &clone
-}
-
-func deepCloneAny(v any) any {
-	switch val := v.(type) {
-	case map[string]any:
-		return deepCloneMap(val)
-	case []any:
-		out := make([]any, len(val))
-		for i, item := range val {
-			out[i] = deepCloneAny(item)
-		}
-		return out
-	case []string:
-		return append([]string(nil), val...)
-	case []int:
-		return append([]int(nil), val...)
-	case []int64:
-		return append([]int64(nil), val...)
-	case []float64:
-		return append([]float64(nil), val...)
-	case []bool:
-		return append([]bool(nil), val...)
-	default:
-		return val
-	}
-}
-
-func deepCloneMap(src map[string]any) map[string]any {
-	if src == nil {
-		return nil
-	}
-	out := make(map[string]any, len(src))
-	for k, v := range src {
-		out[k] = deepCloneAny(v)
-	}
-	return out
 }
 
 // MessageMetadata keeps a tiny summary of each exchange so we can rebuild

@@ -190,8 +190,8 @@ func (m *MemorySearchManager) deriveIndexGeneration(ctx context.Context) string 
 	if id == "" {
 		return ""
 	}
-	if parts := strings.SplitN(id, ":", 2); len(parts) == 2 {
-		return parts[0]
+	if generation, _, ok := strings.Cut(id, ":"); ok {
+		return generation
 	}
 	return ""
 }

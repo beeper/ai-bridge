@@ -149,16 +149,18 @@ default_system_prompt: |
   # Memory search configuration (OpenClaw-style).
   # Indexes MEMORY.md + memory/*.md stored in the bridge DB.
   # Per-agent overrides can be set via agent definitions.
+  # Current runtime behavior is lexical-only; provider/model/remote/vector
+  # settings are retained for compatibility with existing configs.
   memory_search:
     enabled: true
     sources: ["memory"]
     extra_paths: []
-    provider: "auto" # auto | openai | gemini | local
-    model: ""        # e.g., text-embedding-3-small or gemini-embedding-001
+    provider: "auto" # retained for compatibility; runtime currently uses builtin lexical search
+    model: ""        # retained for compatibility; not used by lexical runtime
     fallback: "none"
     remote:
-      base_url: ""
-      api_key: ""
+      base_url: ""   # retained for compatibility; not used by lexical runtime
+      api_key: ""    # retained for compatibility; not used by lexical runtime
       headers: {}
       batch:
         enabled: true
@@ -175,7 +177,7 @@ default_system_prompt: |
       driver: "sqlite"
       path: ""
       vector:
-        enabled: true
+        enabled: true       # retained for compatibility; runtime currently does not use vector search
         extension_path: ""
     chunking:
       tokens: 400

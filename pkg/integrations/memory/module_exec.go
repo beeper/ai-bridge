@@ -205,24 +205,15 @@ func ExecuteCommand(ctx context.Context, call iruntime.CommandCall, deps Command
 			reply("Memory search disabled: %s", errMsgOrDefault(errMsg))
 			return true, nil
 		}
-		deep := len(call.Args) > 1 && isDeepStatusArg(call.Args[1])
+		if len(call.Args) > 1 {
+			_ = isDeepStatusArg(call.Args[1])
+		}
 		status, statusErr := manager.StatusDetails(ctx)
 		if statusErr != nil {
 			reply("Couldn't load memory status: %v", statusErr)
 			return true, nil
 		}
 		lines := formatStatusLines(status)
-		if deep {
-			if status.Vector != nil && status.Vector.Enabled {
-				lines = append(lines, fmt.Sprintf("Vector probe: %t", manager.ProbeVectorAvailability(ctx)))
-			}
-			ok, probeErr := manager.ProbeEmbeddingAvailability(ctx)
-			if probeErr != "" {
-				lines = append(lines, fmt.Sprintf("Embedding probe: %t (%s)", ok, probeErr))
-			} else {
-				lines = append(lines, fmt.Sprintf("Embedding probe: %t", ok))
-			}
-		}
 		reply(strings.Join(lines, "\n"))
 	case "reindex":
 		manager, errMsg := deps.GetManager(scope)
@@ -474,7 +465,6 @@ func formatStatusLines(status *StatusDetails) []string {
 		"Memory status:",
 		fmt.Sprintf("Provider: %s", status.Provider),
 		fmt.Sprintf("Model: %s", status.Model),
-		fmt.Sprintf("Requested provider: %s", status.RequestedProvider),
 		fmt.Sprintf("Workspace: %s", status.WorkspaceDir),
 		fmt.Sprintf("DB: %s", status.DBPath),
 		fmt.Sprintf("Sources: %s", strings.Join(status.Sources, ", ")),
@@ -487,22 +477,6 @@ func formatStatusLines(status *StatusDetails) []string {
 			lines = append(lines, fmt.Sprintf("Source %s: %d files / %d chunks", source.Source, source.Files, source.Chunks))
 		}
 	}
-	if status.Vector != nil {
-		ready := "unknown"
-		if status.Vector.Available != nil {
-			ready = fmt.Sprintf("%t", *status.Vector.Available)
-		}
-		lines = append(lines, fmt.Sprintf("Vector enabled: %t (available=%s)", status.Vector.Enabled, ready))
-		if status.Vector.ExtensionPath != "" {
-			lines = append(lines, fmt.Sprintf("Vector extension: %s", status.Vector.ExtensionPath))
-		}
-		if status.Vector.Dims > 0 {
-			lines = append(lines, fmt.Sprintf("Vector dims: %d", status.Vector.Dims))
-		}
-		if status.Vector.LoadError != "" {
-			lines = append(lines, fmt.Sprintf("Vector error: %s", status.Vector.LoadError))
-		}
-	}
 	if status.FTS != nil {
 		lines = append(lines, fmt.Sprintf("FTS enabled: %t (available=%t)", status.FTS.Enabled, status.FTS.Available))
 		if status.FTS.Error != "" {
@@ -511,16 +485,6 @@ func formatStatusLines(status *StatusDetails) []string {
 	}
 	if status.Cache != nil {
 		lines = append(lines, fmt.Sprintf("Cache enabled: %t (entries=%d max=%d)", status.Cache.Enabled, status.Cache.Entries, status.Cache.MaxEntries))
-	}
-	if status.Batch != nil {
-		lines = append(lines, fmt.Sprintf("Batch enabled: %t (failures=%d limit=%d)", status.Batch.Enabled, status.Batch.Failures, status.Batch.Limit))
-		lines = append(lines, fmt.Sprintf("Batch wait: %t concurrency=%d poll=%dms timeout=%dms", status.Batch.Wait, status.Batch.Concurrency, status.Batch.PollIntervalMs, status.Batch.TimeoutMs))
-		if status.Batch.LastError != "" {
-			lines = append(lines, fmt.Sprintf("Batch error: %s", status.Batch.LastError))
-		}
-		if status.Batch.LastProvider != "" {
-			lines = append(lines, fmt.Sprintf("Batch provider: %s", status.Batch.LastProvider))
-		}
 	}
 	if status.Fallback != nil {
 		lines = append(lines, fmt.Sprintf("Fallback: %s (%s)", status.Fallback.From, status.Fallback.Reason))
