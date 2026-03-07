@@ -29,6 +29,36 @@ func (oc *AIClient) convertToResponsesInput(messages []openai.ChatCompletionMess
 			continue
 		}
 
+		if msg.OfAssistant != nil {
+			assistantText := strings.TrimSpace(airuntime.ExtractAssistantContent(msg.OfAssistant.Content))
+			if assistantText != "" {
+				input = append(input, responses.ResponseInputItemUnionParam{
+					OfMessage: &responses.EasyInputMessageParam{
+						Role: responses.EasyInputMessageRoleAssistant,
+						Content: responses.EasyInputMessageContentUnionParam{
+							OfString: openai.String(assistantText),
+						},
+					},
+				})
+			}
+			for _, toolCall := range msg.OfAssistant.ToolCalls {
+				if toolCall.OfFunction == nil {
+					continue
+				}
+				callID := strings.TrimSpace(toolCall.OfFunction.ID)
+				name := strings.TrimSpace(toolCall.OfFunction.Function.Name)
+				arguments := strings.TrimSpace(toolCall.OfFunction.Function.Arguments)
+				if callID == "" || name == "" {
+					continue
+				}
+				if arguments == "" {
+					arguments = "{}"
+				}
+				input = append(input, responses.ResponseInputItemParamOfFunctionCall(arguments, callID, name))
+			}
+			continue
+		}
+
 		if msg.OfUser != nil {
 			var contentParts responses.ResponseInputMessageContentListParam
 			hasMultimodal := false

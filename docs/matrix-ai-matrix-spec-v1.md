@@ -38,7 +38,7 @@ This document specifies a Matrix transport profile for real-time AI:
 This spec is intended to be usable by any Matrix bot/client/bridge. Where this document references "the bridge", it refers to the producing implementation (for this repo, `ai-bridge`).
 
 Upstream reference (AI SDK):
-- Vercel AI SDK inspected at commit `ff7dd528f3933f67bf4568126db0a81cd4a47a96` (2026-02-06 UTC).
+- Normative message model target: Vercel AI SDK `ai@6.0.121`.
 - Core types:
   - `packages/ai/src/ui/ui-messages.ts`
   - `packages/ai/src/ui-message-stream/ui-message-chunks.ts`
@@ -197,6 +197,8 @@ Consumer requirements:
 - MUST accept and safely handle all valid AI SDK chunk types.
 - MUST ignore unknown future chunk types.
 - MUST NOT persist `data-*` chunks with `transient: true`.
+- MUST treat `start`, `finish`, `abort`, and `message-metadata` as stream-only events.
+- MUST persist `start-step` as a `step-start` part in the canonical `UIMessage`.
 
 ### Bridge-specific `data-*` chunks
 This bridge emits some `data-*` chunks in `part` for UI coordination. Clients that do not recognize them SHOULD ignore them.
@@ -355,12 +357,16 @@ When approval is needed, the bridge emits:
 1. An ephemeral stream chunk (`com.beeper.ai.stream_event`) where `part.type = "tool-approval-request"` containing:
    - `approvalId: string`
    - `toolCallId: string`
-2. A timeline-visible fallback notice (for clients that drop/ignore ephemeral events) instructing the user to run `!ai approve ...`.
-   - The notice is an `m.room.message` with `msgtype = "m.notice"`, SHOULD reply to the originating assistant turn via `m.relates_to.m.in_reply_to`, and includes a `com.beeper.ai` `UIMessage` whose `metadata` contains `approval_id` and whose `parts` contains a `dynamic-tool` part with:
+2. A timeline-visible fallback notice (for clients that drop/ignore ephemeral events).
+   - The notice is an `m.room.message` with `msgtype = "m.notice"`, SHOULD reply to the originating assistant turn via `m.relates_to.m.in_reply_to`, and includes a `com.beeper.ai` `UIMessage` whose `metadata` contains `approvalId` and whose `parts` contains a `dynamic-tool` part with:
      - `state = "approval-requested"`
      - `toolCallId: string`
      - `toolName: string`
      - `approval: { id: string }`
+
+Canonical approval data in persisted `dynamic-tool` parts follows the AI SDK:
+- pending approval: `approval: { id: string }`
+- responded approval: `approval: { id: string, approved: boolean, reason?: string }`
 
 <a id="approvals-decision"></a>
 ### Approving / Denying
@@ -382,23 +388,24 @@ Approvals are resolved through a canonical owner reply event:
       "m.in_reply_to": { "event_id": "$assistant_turn" }
     },
     "com.beeper.ai.approval_decision": {
-      "approval_id": "abc123",
-      "decision": "allow",
+      "approvalId": "abc123",
+      "approved": true,
       "always": false
     }
   }
 }
 ```
 
-Allowed `decision` values:
-- `"allow"` or `"once"`: approve just this request
-- `"always"`: approve and persist an allow rule
-- `"deny"`: reject the request
-
-3. **Legacy fallback**: `!ai approve <approvalId> <allow|always|deny> [reason]` text command (owner-only).
+Rules:
+- `approvalId` is required.
+- `approved` is required and is the canonical allow/deny decision.
+- `always` is optional and, when `true`, persists an allow rule for future matching approvals.
+- `reason` is optional.
+- Approval decision events are control events. They MUST NOT create a user turn in canonical replay history.
+- Timeline fallback notices are UI affordances only. They MUST NOT be projected into provider replay history.
 
 Always-allow:
-- `always` persists an allow rule in login metadata.
+- `always: true` persists an allow rule in login metadata.
 
 TTL:
 - Pending approvals expire after `ttlSeconds`.

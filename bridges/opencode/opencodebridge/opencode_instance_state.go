@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/beeper/ai-bridge/bridges/opencode/opencode"
+	"maunium.net/go/mautrix/id"
 )
 
 // openCodePartState tracks the bridge-side delivery state of a single OpenCode
@@ -20,11 +21,14 @@ type openCodePartState struct {
 	textStreamEnded        bool
 	reasoningStreamStarted bool
 	reasoningStreamEnded   bool
+	textContent            string
+	reasoningContent       string
 	streamInputStarted     bool
 	streamInputAvailable   bool
 	streamOutputAvailable  bool
 	streamOutputError      bool
 	artifactStreamSent     bool
+	dataStreamSent         bool
 }
 
 // openCodeTurnState tracks whether turn-level stream events (start, step, finish)
@@ -35,15 +39,28 @@ type openCodeTurnState struct {
 	finished bool
 }
 
+type queuedUserMessage struct {
+	sessionID string
+	eventID   id.EventID
+	parts     []opencode.PartInput
+}
+
+type openCodeSessionQueue struct {
+	active bool
+	items  []*queuedUserMessage
+}
+
 // openCodeInstance holds the runtime state for a single OpenCode server connection.
 type openCodeInstance struct {
 	cfg       OpenCodeInstance
+	password  string
 	client    *opencode.Client
 	connected bool
 	cancel    func()
 
 	disconnectMu    sync.Mutex
 	disconnectTimer *time.Timer
+	queueMu         sync.Mutex
 
 	seenMu         sync.Mutex
 	seenMsg        map[string]map[string]string              // session -> message -> role
@@ -53,6 +70,7 @@ type openCodeInstance struct {
 
 	cacheMu      sync.Mutex
 	messageCache map[string]*openCodeMessageCache
+	sendQueue    map[string]*openCodeSessionQueue
 }
 
 // ---------- seen-message helpers ----------
@@ -148,6 +166,15 @@ func (inst *openCodeInstance) partTextStreamFlags(sessionID, partID string) text
 	})
 }
 
+func (inst *openCodeInstance) partTextContent(sessionID, partID, kind string) string {
+	return readPartState(inst, sessionID, partID, func(ps *openCodePartState) string {
+		if kind == "reasoning" {
+			return ps.reasoningContent
+		}
+		return ps.textContent
+	})
+}
+
 func (inst *openCodeInstance) partCallStatus(sessionID, partID string) string {
 	return readPartState(inst, sessionID, partID, func(ps *openCodePartState) string { return ps.callStatus })
 }
@@ -174,6 +201,16 @@ func (inst *openCodeInstance) setPartTextStreamEnded(sessionID, partID, kind str
 			ps.reasoningStreamEnded = true
 		} else {
 			ps.textStreamEnded = true
+		}
+	})
+}
+
+func (inst *openCodeInstance) appendPartTextContent(sessionID, partID, kind, delta string) {
+	inst.withPartState(sessionID, partID, func(ps *openCodePartState) {
+		if kind == "reasoning" {
+			ps.reasoningContent += delta
+		} else {
+			ps.textContent += delta
 		}
 	})
 }
@@ -207,6 +244,17 @@ func (inst *openCodeInstance) markPartArtifactStreamSent(sessionID, partID strin
 	inst.withPartState(sessionID, partID, func(ps *openCodePartState) {
 		if !ps.artifactStreamSent {
 			ps.artifactStreamSent = true
+			changed = true
+		}
+	})
+	return changed
+}
+
+func (inst *openCodeInstance) markPartDataStreamSent(sessionID, partID string) bool {
+	changed := false
+	inst.withPartState(sessionID, partID, func(ps *openCodePartState) {
+		if !ps.dataStreamSent {
+			ps.dataStreamSent = true
 			changed = true
 		}
 	})

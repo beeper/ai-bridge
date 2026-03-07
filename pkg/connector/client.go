@@ -606,6 +606,7 @@ func (oc *AIClient) saveUserMessage(ctx context.Context, evt *event.Event, msg *
 	if evt != nil {
 		msg.MXID = evt.ID
 	}
+	ensureCanonicalUserMessage(msg)
 	if _, err := oc.UserLogin.Bridge.GetGhostByID(ctx, msg.SenderID); err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure user ghost before saving message")
 	}
@@ -2029,45 +2030,9 @@ func (oc *AIClient) buildBasePrompt(
 			if resetAt > 0 && history[i].Timestamp.UnixMilli() < resetAt {
 				continue
 			}
-			// Normalize historical body content for replay.
-			body := sanitizeHistoryImages(msgMeta.Body)
-			body = cleanHistoryBody(body, isSimple, history[i].MXID)
-
 			// Only inject images for recent messages and vision-capable models.
 			injectImages := hasVision && i < maxHistoryImageMessages
-
-			switch msgMeta.Role {
-			case "assistant":
-				// Strip thinking traces from historical assistant messages to avoid
-				// confusing models or wasting tokens on replayed reasoning.
-				body = stripThinkTags(body)
-				body = airuntime.SanitizeChatMessageForDisplay(body, false)
-				if body == "" {
-					continue
-				}
-				prompt = append(prompt, openai.AssistantMessage(body))
-				// Inject synthetic user message for assistant-generated images so the model
-				// can see what it previously created (Chat Completions API doesn't support
-				// images in assistant messages).
-				if injectImages && len(msgMeta.GeneratedFiles) > 0 {
-					if imgParts := oc.downloadGeneratedFileImages(ctx, msgMeta.GeneratedFiles); len(imgParts) > 0 {
-						prompt = append(prompt, buildSyntheticGeneratedImagesMessage(msgMeta.GeneratedFiles, imgParts))
-					}
-				}
-			default:
-				// Strip injected metadata and transport envelope from user display/history paths.
-				body = airuntime.SanitizeChatMessageForDisplay(body, true)
-				// Re-inject user-sent images as multimodal content so the model can reference them.
-				if injectImages && msgMeta.MediaURL != "" && isImageMimeType(msgMeta.MimeType) {
-					if imgPart := oc.downloadHistoryImage(ctx, msgMeta.MediaURL, msgMeta.MimeType); imgPart != nil {
-						// Append the media URL so the model can reference it for editing tools (e.g. input_images).
-						bodyWithURL := body + fmt.Sprintf("\n[media_url: %s]", msgMeta.MediaURL)
-						prompt = append(prompt, buildMultimodalUserMessage(bodyWithURL, []openai.ChatCompletionContentPartUnionParam{*imgPart}))
-						continue
-					}
-				}
-				prompt = append(prompt, openai.UserMessage(body))
-			}
+			prompt = oc.appendHistoryMessageFromCanonical(ctx, prompt, history[i], msgMeta, isSimple, injectImages)
 		}
 	}
 
@@ -2424,37 +2389,9 @@ func (oc *AIClient) buildPromptUpToMessage(
 				continue
 			}
 
-			// Skip assistant messages that came after the target (we're going backwards)
-			body := cleanHistoryBody(msgMeta.Body, isSimple, msg.MXID)
-
 			// Only inject images for recent messages and vision-capable models.
 			injectImages := hasVision && i < maxHistoryImageMessages
-
-			switch msgMeta.Role {
-			case "assistant":
-				body = stripThinkTags(body)
-				body = airuntime.SanitizeChatMessageForDisplay(body, false)
-				if body == "" {
-					continue
-				}
-				prompt = append(prompt, openai.AssistantMessage(body))
-				if injectImages && len(msgMeta.GeneratedFiles) > 0 {
-					if imgParts := oc.downloadGeneratedFileImages(ctx, msgMeta.GeneratedFiles); len(imgParts) > 0 {
-						prompt = append(prompt, buildSyntheticGeneratedImagesMessage(msgMeta.GeneratedFiles, imgParts))
-					}
-				}
-			default:
-				body = airuntime.SanitizeChatMessageForDisplay(body, true)
-				if injectImages && msgMeta.MediaURL != "" && isImageMimeType(msgMeta.MimeType) {
-					if imgPart := oc.downloadHistoryImage(ctx, msgMeta.MediaURL, msgMeta.MimeType); imgPart != nil {
-						// Append the media URL so the model can reference it for editing tools (e.g. input_images).
-						bodyWithURL := body + fmt.Sprintf("\n[media_url: %s]", msgMeta.MediaURL)
-						prompt = append(prompt, buildMultimodalUserMessage(bodyWithURL, []openai.ChatCompletionContentPartUnionParam{*imgPart}))
-						continue
-					}
-				}
-				prompt = append(prompt, openai.UserMessage(body))
-			}
+			prompt = oc.appendHistoryMessageFromCanonical(ctx, prompt, msg, msgMeta, isSimple, injectImages)
 		}
 	} else {
 		// No history, just add the new message
@@ -2715,6 +2652,7 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 		},
 		Timestamp: time.Now(),
 	}
+	ensureCanonicalUserMessage(userMessage)
 
 	// Save user message to database - we must do this ourselves since we already
 	// returned Pending: true to the bridge framework when debouncing started

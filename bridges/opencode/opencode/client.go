@@ -256,6 +256,43 @@ func (c *Client) AbortSession(ctx context.Context, sessionID string) error {
 	return c.do(req, nil)
 }
 
+func (c *Client) RespondPermission(ctx context.Context, sessionID, permissionID, response string) error {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(permissionID) == "" {
+		return errors.New("session id and permission id are required")
+	}
+	payload := map[string]any{"response": strings.TrimSpace(response)}
+	path := fmt.Sprintf("/session/%s/permissions/%s", url.PathEscape(sessionID), url.PathEscape(permissionID))
+	req, err := c.newRequest(ctx, http.MethodPost, path, payload)
+	if err != nil {
+		return err
+	}
+	return c.do(req, nil)
+}
+
+func (c *Client) ReplyQuestion(ctx context.Context, requestID string, answers [][]string) error {
+	if strings.TrimSpace(requestID) == "" {
+		return errors.New("question request id is required")
+	}
+	path := fmt.Sprintf("/question/%s/reply", url.PathEscape(requestID))
+	req, err := c.newRequest(ctx, http.MethodPost, path, map[string]any{"answers": answers})
+	if err != nil {
+		return err
+	}
+	return c.do(req, nil)
+}
+
+func (c *Client) RejectQuestion(ctx context.Context, requestID string) error {
+	if strings.TrimSpace(requestID) == "" {
+		return errors.New("question request id is required")
+	}
+	path := fmt.Sprintf("/question/%s/reject", url.PathEscape(requestID))
+	req, err := c.newRequest(ctx, http.MethodPost, path, map[string]any{})
+	if err != nil {
+		return err
+	}
+	return c.do(req, nil)
+}
+
 // IsAuthError returns true if the error is an auth error.
 func IsAuthError(err error) bool {
 	var apiErr *APIError

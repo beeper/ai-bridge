@@ -1,0 +1,461 @@
+package opencodebridge
+
+import (
+	"encoding/json"
+	"strings"
+
+	"maunium.net/go/mautrix/event"
+
+	"github.com/beeper/ai-bridge/bridges/opencode/opencode"
+	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
+	"github.com/beeper/ai-bridge/pkg/matrixevents"
+	"github.com/beeper/ai-bridge/pkg/shared/streamui"
+)
+
+type canonicalBackfillSnapshot struct {
+	body string
+	ui   map[string]any
+	meta *MessageMetadata
+}
+
+func buildCanonicalAssistantBackfill(msg opencode.MessageWithParts, agentID string) canonicalBackfillSnapshot {
+	turnID := opencodeMessageStreamTurnID(msg.Info.SessionID, msg.Info.ID)
+	if turnID == "" {
+		turnID = "opencode-msg-" + strings.TrimSpace(msg.Info.ID)
+	}
+	state := streamui.UIState{TurnID: turnID}
+	startMeta := buildTurnStartMetadata(&msg, agentID)
+	streamui.ApplyChunk(&state, map[string]any{
+		"type":            "start",
+		"messageId":       turnID,
+		"messageMetadata": startMeta,
+	})
+
+	var visible strings.Builder
+	for _, part := range msg.Parts {
+		if part.MessageID == "" {
+			part.MessageID = msg.Info.ID
+		}
+		if part.SessionID == "" {
+			part.SessionID = msg.Info.SessionID
+		}
+		appendCanonicalAssistantPart(&state, &visible, part)
+	}
+
+	finishReason := strings.TrimSpace(msg.Info.Finish)
+	if finishReason == "" {
+		finishReason = "stop"
+	}
+	finishMeta := buildTurnFinishMetadata(&msg, agentID, finishReason)
+	streamui.ApplyChunk(&state, map[string]any{
+		"type":            "finish",
+		"finishReason":    finishReason,
+		"messageMetadata": finishMeta,
+	})
+
+	uiMessage := streamui.SnapshotCanonicalUIMessage(&state)
+	body := strings.TrimSpace(visible.String())
+	if body == "" {
+		body = "..."
+	}
+	return canonicalBackfillSnapshot{
+		body: body,
+		ui:   uiMessage,
+		meta: &MessageMetadata{
+			Role:               firstNonEmptyString(strings.TrimSpace(msg.Info.Role), "assistant"),
+			Body:               body,
+			SessionID:          strings.TrimSpace(msg.Info.SessionID),
+			MessageID:          strings.TrimSpace(msg.Info.ID),
+			ParentMessageID:    strings.TrimSpace(msg.Info.ParentID),
+			Agent:              strings.TrimSpace(msg.Info.Agent),
+			ModelID:            strings.TrimSpace(msg.Info.ModelID),
+			ProviderID:         strings.TrimSpace(msg.Info.ProviderID),
+			Mode:               strings.TrimSpace(msg.Info.Mode),
+			FinishReason:       firstNonEmptyString(strings.TrimSpace(msg.Info.Finish), finishReason),
+			Cost:               backfillCost(msg),
+			PromptTokens:       backfillPromptTokens(msg),
+			CompletionTokens:   backfillCompletionTokens(msg),
+			ReasoningTokens:    backfillReasoningTokens(msg),
+			TotalTokens:        backfillTotalTokens(msg),
+			TurnID:             turnID,
+			AgentID:            strings.TrimSpace(agentID),
+			CanonicalSchema:    "ai-sdk-ui-message-v1",
+			CanonicalUIMessage: uiMessage,
+			StartedAtMs:        int64(msg.Info.Time.Created),
+			CompletedAtMs:      int64(msg.Info.Time.Completed),
+			ThinkingContent:    canonicalReasoningTextBridge(uiMessage),
+			ToolCalls:          canonicalToolCallsBridge(uiMessage),
+			GeneratedFiles:     canonicalGeneratedFilesBridge(uiMessage),
+		},
+	}
+}
+
+func appendCanonicalAssistantPart(state *streamui.UIState, visible *strings.Builder, part opencode.Part) {
+	switch part.Type {
+	case "text":
+		if part.ID == "" || part.Text == "" {
+			return
+		}
+		partID := opencodePartStreamID(part, "text")
+		streamui.ApplyChunk(state, map[string]any{"type": "text-start", "id": partID})
+		streamui.ApplyChunk(state, map[string]any{"type": "text-delta", "id": partID, "delta": part.Text})
+		streamui.ApplyChunk(state, map[string]any{"type": "text-end", "id": partID})
+		visible.WriteString(part.Text)
+	case "reasoning":
+		if part.ID == "" || part.Text == "" {
+			return
+		}
+		partID := opencodePartStreamID(part, "reasoning")
+		streamui.ApplyChunk(state, map[string]any{"type": "reasoning-start", "id": partID})
+		streamui.ApplyChunk(state, map[string]any{"type": "reasoning-delta", "id": partID, "delta": part.Text})
+		streamui.ApplyChunk(state, map[string]any{"type": "reasoning-end", "id": partID})
+	case "tool":
+		appendCanonicalToolPart(state, part)
+		if part.State != nil {
+			for _, attachment := range part.State.Attachments {
+				if attachment.MessageID == "" {
+					attachment.MessageID = part.MessageID
+				}
+				if attachment.SessionID == "" {
+					attachment.SessionID = part.SessionID
+				}
+				appendCanonicalAssistantPart(state, visible, attachment)
+			}
+		}
+	case "file":
+		appendCanonicalArtifactParts(state, part)
+	case "step-start":
+		streamui.ApplyChunk(state, map[string]any{"type": "start-step"})
+	case "step-finish":
+		streamui.ApplyChunk(state, map[string]any{"type": "finish-step"})
+		if data := canonicalDataPart(part); data != nil {
+			streamui.ApplyChunk(state, data)
+		}
+	case "patch", "snapshot", "agent", "subtask", "retry", "compaction":
+		if data := canonicalDataPart(part); data != nil {
+			streamui.ApplyChunk(state, data)
+		}
+	}
+}
+
+func appendCanonicalToolPart(state *streamui.UIState, part opencode.Part) {
+	toolCallID := opencodeToolCallID(part)
+	if toolCallID == "" {
+		return
+	}
+	toolName := opencodeToolName(part)
+	if part.State != nil {
+		if len(part.State.Input) > 0 {
+			streamui.ApplyChunk(state, map[string]any{
+				"type":             "tool-input-available",
+				"toolCallId":       toolCallID,
+				"toolName":         toolName,
+				"input":            part.State.Input,
+				"providerExecuted": false,
+			})
+		} else if strings.TrimSpace(part.State.Raw) != "" {
+			streamui.ApplyChunk(state, map[string]any{
+				"type":             "tool-input-start",
+				"toolCallId":       toolCallID,
+				"toolName":         toolName,
+				"title":            toolDisplayTitle(toolName),
+				"providerExecuted": false,
+			})
+			streamui.ApplyChunk(state, map[string]any{
+				"type":           "tool-input-delta",
+				"toolCallId":     toolCallID,
+				"inputTextDelta": part.State.Raw,
+			})
+		}
+		switch strings.TrimSpace(part.State.Status) {
+		case "completed":
+			if part.State.Output != "" {
+				streamui.ApplyChunk(state, map[string]any{
+					"type":             "tool-output-available",
+					"toolCallId":       toolCallID,
+					"output":           part.State.Output,
+					"providerExecuted": false,
+				})
+			}
+		case "error":
+			streamui.ApplyChunk(state, map[string]any{
+				"type":             "tool-output-error",
+				"toolCallId":       toolCallID,
+				"errorText":        part.State.Error,
+				"providerExecuted": false,
+			})
+		case "denied", "rejected":
+			streamui.ApplyChunk(state, map[string]any{
+				"type":       "tool-output-denied",
+				"toolCallId": toolCallID,
+			})
+		}
+	}
+}
+
+func appendCanonicalArtifactParts(state *streamui.UIState, part opencode.Part) {
+	sourceURL := strings.TrimSpace(part.URL)
+	title := strings.TrimSpace(part.Filename)
+	if title == "" {
+		title = strings.TrimSpace(part.Name)
+	}
+	mediaType := strings.TrimSpace(part.Mime)
+	if mediaType == "" {
+		mediaType = "application/octet-stream"
+	}
+	if sourceURL != "" {
+		streamui.ApplyChunk(state, map[string]any{
+			"type":      "file",
+			"url":       sourceURL,
+			"mediaType": mediaType,
+			"filename":  strings.TrimSpace(part.Filename),
+		})
+		streamui.ApplyChunk(state, map[string]any{
+			"type":     "source-url",
+			"sourceId": "opencode-source-" + part.ID,
+			"url":      sourceURL,
+			"title":    title,
+		})
+	}
+	if title != "" {
+		filename := strings.TrimSpace(part.Filename)
+		if filename == "" {
+			filename = title
+		}
+		streamui.ApplyChunk(state, map[string]any{
+			"type":      "source-document",
+			"sourceId":  "opencode-doc-" + part.ID,
+			"title":     title,
+			"filename":  filename,
+			"mediaType": mediaType,
+		})
+	}
+}
+
+func canonicalDataPart(part opencode.Part) map[string]any {
+	if strings.TrimSpace(part.ID) == "" {
+		return nil
+	}
+	data := map[string]any{
+		"type": "data-opencode-" + strings.TrimSpace(part.Type),
+		"id":   strings.TrimSpace(part.ID),
+	}
+	switch part.Type {
+	case "step-finish":
+		if reason := strings.TrimSpace(part.Reason); reason != "" {
+			data["reason"] = reason
+		}
+		if part.Cost != 0 {
+			data["cost"] = part.Cost
+		}
+	case "patch":
+		if hash := strings.TrimSpace(part.Hash); hash != "" {
+			data["hash"] = hash
+		}
+		if len(part.Files) > 0 {
+			data["files"] = append([]string(nil), part.Files...)
+		}
+	case "snapshot":
+		if snapshot := strings.TrimSpace(part.Snapshot); snapshot != "" {
+			data["snapshot"] = snapshot
+		}
+	case "agent":
+		if name := strings.TrimSpace(part.Name); name != "" {
+			data["name"] = name
+		}
+	case "subtask":
+		if desc := strings.TrimSpace(part.Description); desc != "" {
+			data["description"] = desc
+		}
+		if prompt := strings.TrimSpace(part.Prompt); prompt != "" {
+			data["prompt"] = prompt
+		}
+		if agent := strings.TrimSpace(part.Agent); agent != "" {
+			data["agent"] = agent
+		}
+	case "retry":
+		if part.Attempt != 0 {
+			data["attempt"] = part.Attempt
+		}
+		if len(part.Error) > 0 {
+			data["error"] = string(part.Error)
+		}
+	case "compaction":
+		data["auto"] = part.Auto
+	default:
+		return nil
+	}
+	return data
+}
+
+func canonicalReasoningTextBridge(uiMessage map[string]any) string {
+	parts, _ := uiMessage["parts"].([]any)
+	var sb strings.Builder
+	for _, raw := range parts {
+		part, ok := raw.(map[string]any)
+		if !ok || strings.TrimSpace(stringValueBridge(part["type"])) != "reasoning" {
+			continue
+		}
+		text := strings.TrimSpace(stringValueBridge(part["text"]))
+		if text == "" {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(text)
+	}
+	return sb.String()
+}
+
+func canonicalToolCallsBridge(uiMessage map[string]any) []bridgeadapter.ToolCallMetadata {
+	parts, _ := uiMessage["parts"].([]any)
+	calls := make([]bridgeadapter.ToolCallMetadata, 0, len(parts))
+	for _, raw := range parts {
+		part, ok := raw.(map[string]any)
+		if !ok || strings.TrimSpace(stringValueBridge(part["type"])) != "dynamic-tool" {
+			continue
+		}
+		call := bridgeadapter.ToolCallMetadata{
+			CallID:   strings.TrimSpace(stringValueBridge(part["toolCallId"])),
+			ToolName: strings.TrimSpace(stringValueBridge(part["toolName"])),
+			ToolType: "opencode",
+			Status:   strings.TrimSpace(stringValueBridge(part["state"])),
+		}
+		if input, ok := part["input"].(map[string]any); ok {
+			call.Input = input
+		}
+		if output, ok := part["output"].(map[string]any); ok {
+			call.Output = output
+		} else if output := strings.TrimSpace(stringValueBridge(part["output"])); output != "" {
+			call.Output = map[string]any{"text": output}
+		}
+		switch call.Status {
+		case "output-available":
+			call.ResultStatus = "completed"
+		case "output-error":
+			call.ResultStatus = "error"
+			call.ErrorMessage = strings.TrimSpace(stringValueBridge(part["errorText"]))
+		case "output-denied":
+			call.ResultStatus = "denied"
+		case "approval-requested":
+			call.ResultStatus = "pending_approval"
+		default:
+			call.ResultStatus = call.Status
+		}
+		if call.CallID != "" {
+			calls = append(calls, call)
+		}
+	}
+	return calls
+}
+
+func canonicalGeneratedFilesBridge(uiMessage map[string]any) []bridgeadapter.GeneratedFileRef {
+	parts, _ := uiMessage["parts"].([]any)
+	files := make([]bridgeadapter.GeneratedFileRef, 0, len(parts))
+	for _, raw := range parts {
+		part, ok := raw.(map[string]any)
+		if !ok || strings.TrimSpace(stringValueBridge(part["type"])) != "file" {
+			continue
+		}
+		url := strings.TrimSpace(stringValueBridge(part["url"]))
+		if url == "" {
+			continue
+		}
+		files = append(files, bridgeadapter.GeneratedFileRef{
+			URL:      url,
+			MimeType: firstNonEmptyString(strings.TrimSpace(stringValueBridge(part["mediaType"])), "application/octet-stream"),
+		})
+	}
+	return files
+}
+
+func backfillCost(msg opencode.MessageWithParts) float64 {
+	if msg.Info.Cost != 0 {
+		return msg.Info.Cost
+	}
+	for _, part := range msg.Parts {
+		if part.Type == "step-finish" && part.Cost != 0 {
+			return part.Cost
+		}
+	}
+	return 0
+}
+
+func backfillPromptTokens(msg opencode.MessageWithParts) int64 {
+	if msg.Info.Tokens != nil {
+		return int64(msg.Info.Tokens.Input)
+	}
+	for _, part := range msg.Parts {
+		if part.Type == "step-finish" && part.Tokens != nil {
+			return int64(part.Tokens.Input)
+		}
+	}
+	return 0
+}
+
+func backfillCompletionTokens(msg opencode.MessageWithParts) int64 {
+	if msg.Info.Tokens != nil {
+		return int64(msg.Info.Tokens.Output)
+	}
+	for _, part := range msg.Parts {
+		if part.Type == "step-finish" && part.Tokens != nil {
+			return int64(part.Tokens.Output)
+		}
+	}
+	return 0
+}
+
+func backfillReasoningTokens(msg opencode.MessageWithParts) int64 {
+	if msg.Info.Tokens != nil {
+		return int64(msg.Info.Tokens.Reasoning)
+	}
+	for _, part := range msg.Parts {
+		if part.Type == "step-finish" && part.Tokens != nil {
+			return int64(part.Tokens.Reasoning)
+		}
+	}
+	return 0
+}
+
+func backfillTotalTokens(msg opencode.MessageWithParts) int64 {
+	total := backfillPromptTokens(msg) + backfillCompletionTokens(msg) + backfillReasoningTokens(msg)
+	if total != 0 {
+		return total
+	}
+	return 0
+}
+
+func stringValueBridge(raw any) string {
+	switch value := raw.(type) {
+	case string:
+		return value
+	case json.Number:
+		return value.String()
+	default:
+		return ""
+	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func buildCanonicalBackfillPart(snapshot canonicalBackfillSnapshot) *event.MessageEventContent {
+	return &event.MessageEventContent{
+		MsgType: event.MsgText,
+		Body:    snapshot.body,
+	}
+}
+
+func canonicalBackfillExtra(snapshot canonicalBackfillSnapshot) map[string]any {
+	return map[string]any{
+		matrixevents.BeeperAIKey: snapshot.ui,
+		"m.mentions":             map[string]any{},
+	}
+}
