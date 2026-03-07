@@ -49,6 +49,12 @@ func DeepCloneAny(value any) any {
 			out[i] = DeepCloneAny(item)
 		}
 		return out
+	case []map[string]any:
+		out := make([]map[string]any, len(typed))
+		for i, item := range typed {
+			out[i] = DeepCloneMap(item)
+		}
+		return out
 	case []string:
 		return slices.Clone(typed)
 	case []int:

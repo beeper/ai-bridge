@@ -16,11 +16,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 	"github.com/beeper/bridge-manager/api/beeperapi"
 	"github.com/beeper/bridge-manager/api/hungryapi"
 	"gopkg.in/yaml.v3"
 	"maunium.net/go/mautrix"
+
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 )
 
 const (

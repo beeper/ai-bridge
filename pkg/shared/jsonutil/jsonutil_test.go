@@ -42,6 +42,9 @@ func TestDeepCloneAny(t *testing.T) {
 				map[string]any{"value": "x"},
 			},
 		},
+		"typed_maps": []map[string]any{
+			{"value": "typed"},
+		},
 		"strings": []string{"a", "b"},
 		"ints":    []int{1, 2},
 		"int64s":  []int64{3, 4},
@@ -56,6 +59,7 @@ func TestDeepCloneAny(t *testing.T) {
 	clonedNested := cloned["nested"].(map[string]any)
 	clonedList := clonedNested["list"].([]any)
 	clonedList[0].(map[string]any)["value"] = "y"
+	cloned["typed_maps"].([]map[string]any)[0]["value"] = "changed"
 	cloned["strings"].([]string)[0] = "c"
 	cloned["ints"].([]int)[0] = 9
 	cloned["int64s"].([]int64)[0] = 10
@@ -64,6 +68,9 @@ func TestDeepCloneAny(t *testing.T) {
 
 	if original["nested"].(map[string]any)["list"].([]any)[0].(map[string]any)["value"] != "x" {
 		t.Fatal("nested map was not deep cloned")
+	}
+	if original["typed_maps"].([]map[string]any)[0]["value"] != "typed" {
+		t.Fatal("[]map[string]any was not deep cloned")
 	}
 	if original["strings"].([]string)[0] != "a" {
 		t.Fatal("[]string was not cloned")

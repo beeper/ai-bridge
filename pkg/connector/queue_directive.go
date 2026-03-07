@@ -8,21 +8,19 @@ import (
 )
 
 type queueDirective struct {
-	Cleaned      string
-	QueueMode    airuntime.QueueMode
-	QueueReset   bool
-	RawMode      string
-	DebounceMs   *int
-	Cap          *int
-	DropPolicy   *airuntime.QueueDropPolicy
-	RawDebounce  string
-	RawCap       string
-	RawDrop      string
-	HasDirective bool
-	HasOptions   bool
-	HasDebounce  bool
-	HasCap       bool
-	HasDrop      bool
+	QueueMode   airuntime.QueueMode
+	QueueReset  bool
+	RawMode     string
+	DebounceMs  *int
+	Cap         *int
+	DropPolicy  *airuntime.QueueDropPolicy
+	RawDebounce string
+	RawCap      string
+	RawDrop     string
+	HasOptions  bool
+	HasDebounce bool
+	HasCap      bool
+	HasDrop     bool
 }
 
 func parseQueueDebounce(raw string) *int {

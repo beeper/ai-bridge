@@ -51,7 +51,7 @@ func normalizeAbortTriggerText(text string) string {
 	cleaned := strings.TrimSpace(strings.ToLower(text))
 	cleaned = strings.ReplaceAll(cleaned, "’", "'")
 	cleaned = strings.Join(strings.Fields(cleaned), " ")
-	cleaned = strings.TrimRight(cleaned, " \t\r\n.!?…,，。;；:：'\"”’)]}")
+	cleaned = strings.Trim(cleaned, " \t\r\n.!?…,，。;；:：'\"“”‘’()[]{}")
 	return strings.TrimSpace(cleaned)
 }
 
