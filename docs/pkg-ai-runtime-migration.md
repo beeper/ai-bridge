@@ -1,0 +1,78 @@
+# pkg/ai Runtime Migration Notes
+
+This repository now includes a standalone `pkg/ai` Go port of `pi-mono/packages/ai`,
+and the connector now runs on `pkg/ai` as the primary runtime.
+
+## Runtime architecture (current)
+
+- Connector streaming path:
+  - `selectResponseFn` now selects `pkg_ai` by default for all non-audio prompts.
+  - `streamWithPkgAIBridge` is the primary streaming implementation.
+  - Tool-call rounds are executed via connector tool infrastructure and continued
+    through `pkg/ai` context updates.
+  - Audio prompts continue using Chat Completions path until audio parity lands in
+    `pkg/ai`.
+
+- Provider abstraction:
+  - `OpenAIProvider.GenerateStream(...)` and `Generate(...)` route through
+    `tryGenerateStreamWithPkgAI(...)` / `tryGenerateWithPkgAI(...)` as primary paths.
+
+## High-signal test commands
+
+```bash
+go test ./pkg/ai/...
+go test ./pkg/connector -run "TestPkgAIProviderRuntimeEnabled|TestInferProviderNameFromBaseURL|TestBuildPkgAIModelFromGenerateParams|TestShouldFallbackFromPkgAIEvent|TestShouldFallbackFromPkgAIError|TestTryGenerateStreamWithPkgAIReturnsRuntimeErrorEventsWhenProviderResolved|TestTryGenerateWithPkgAIReturnsRuntimeErrorForGeminiCLI|TestTryGenerateWithPkgAIReturnsRuntimeErrorWhenProviderResolved|TestGenerateResponseFromAIMessage|TestParseThinkingLevel|TestOpenAIProviderGenerate_UsesPkgAIBridgeWhenEnabled|TestPkgAIRuntimeEnabledFromEnv|TestChooseStreamingRuntimePath|TestBuildPkgAIBridgeGenerateParams|TestPkgAIProviderBridgeCredentials|TestAIEventToStreamEvent_Mapping|TestStreamEventsFromAIStream|TestToAIContext_MapsMessagesAndTools"
+```
+
+## Connector bridge env-gated provider validation
+
+To validate real provider happy paths for connector bridge routing (OpenAI, Anthropic, Google), set credentials and:
+
+```bash
+PI_AI_E2E=1 go test ./pkg/connector -run "TestPkgAIProviderBridgeE2E_"
+```
+
+Optional model overrides:
+
+- `PI_AI_E2E_OPENAI_MODEL`
+- `PI_AI_E2E_ANTHROPIC_MODEL`
+- `PI_AI_E2E_GOOGLE_MODEL`
+
+## pkg/ai env-gated provider parity e2e tests
+
+The `pkg/ai/e2e` suite now includes live provider parity checks for:
+
+- OpenAI basic complete/stream flows (`stream.test.ts` parity subset),
+- stream cancel behavior (`abort.test.ts` parity subset),
+- orphan tool-call recovery (`tool-call-without-result.test.ts` parity subset),
+- usage total-token accounting (`total-tokens.test.ts` parity subset).
+- context-overflow detection (`context-overflow.test.ts` parity subset).
+- OpenAI Responses reasoning replay/handoff (`openai-responses-reasoning-replay-e2e.test.ts` subset).
+- tool-result image handling (`image-tool-result.test.ts` OpenAI subset).
+- tool-call-id normalization (`tool-call-id-normalization.test.ts` OpenAI subset).
+- xhigh reasoning request path (`xhigh.test.ts` OpenAI subset).
+- empty-message handling (`empty.test.ts` OpenAI subset).
+- cross-provider handoff smoke coverage (`cross-provider-handoff.test.ts` subset).
+- Anthropic and Google complete/stream smoke coverage.
+
+Run with:
+
+```bash
+PI_AI_E2E=1 OPENAI_API_KEY=... ANTHROPIC_API_KEY=... GEMINI_API_KEY=... \
+  go test ./pkg/ai/e2e -run "TestGenerateE2E_OpenAI|TestAbortE2E_OpenAIStream|TestToolCallWithoutResultE2E_OpenAI|TestTotalTokensE2E_OpenAI|TestContextOverflowE2E_OpenAI|TestOpenAIReasoningReplayE2E_|TestImageToolResultE2E_OpenAI|TestToolCallIDNormalizationE2E_OpenAI|TestXhighE2E_OpenAIResponses|TestEmptyE2E_OpenAI|TestCrossProviderHandoffE2E_|TestGenerateE2E_Anthropic|TestGenerateE2E_Google"
+```
+
+Optional overrides:
+
+- `PI_AI_E2E_OPENAI_MODEL` (default: `gpt-4o-mini`)
+- `PI_AI_E2E_OPENAI_BASE_URL` (for OpenAI-compatible endpoints)
+- `PI_AI_E2E_OPENAI_CONTEXT_WINDOW` (default: `128000`, or `400000` for `gpt-5*` models)
+- `PI_AI_E2E_OPENAI_REASONING_SOURCE_MODEL` / `PI_AI_E2E_OPENAI_REASONING_TARGET_MODEL`
+- `PI_AI_E2E_ANTHROPIC_MODEL` / `PI_AI_E2E_ANTHROPIC_BASE_URL`
+- `PI_AI_E2E_GOOGLE_MODEL` / `PI_AI_E2E_GOOGLE_BASE_URL`
+
+## Notes
+
+- `pkg/ai` is now the default bridge runtime for connector turn execution.
+- Legacy streaming/provider implementations remain in-tree for now, but are no
+  longer selected on the primary non-audio path.
