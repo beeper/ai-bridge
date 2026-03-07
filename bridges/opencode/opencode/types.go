@@ -45,11 +45,18 @@ type SessionTime struct {
 
 // Message represents the info block for a session message.
 type Message struct {
-	ID        string      `json:"id"`
-	SessionID string      `json:"sessionID"`
-	Role      string      `json:"role"`
-	Agent     string      `json:"agent,omitempty"`
-	Time      MessageTime `json:"time"`
+	ID         string      `json:"id"`
+	SessionID  string      `json:"sessionID"`
+	Role       string      `json:"role"`
+	ParentID   string      `json:"parentID,omitempty"`
+	Agent      string      `json:"agent,omitempty"`
+	ModelID    string      `json:"modelID,omitempty"`
+	ProviderID string      `json:"providerID,omitempty"`
+	Mode       string      `json:"mode,omitempty"`
+	Finish     string      `json:"finish,omitempty"`
+	Cost       float64     `json:"cost,omitempty"`
+	Tokens     *TokenUsage `json:"tokens,omitempty"`
+	Time       MessageTime `json:"time"`
 }
 
 // MessageTime holds timing info for a message.
@@ -158,6 +165,41 @@ type PartInput struct {
 type MessageWithParts struct {
 	Info  Message `json:"info"`
 	Parts []Part  `json:"parts"`
+}
+
+type RequestToolRef struct {
+	MessageID string `json:"messageID,omitempty"`
+	CallID    string `json:"callID,omitempty"`
+}
+
+type PermissionRequest struct {
+	ID         string          `json:"id"`
+	SessionID  string          `json:"sessionID"`
+	Permission string          `json:"permission"`
+	Patterns   []string        `json:"patterns"`
+	Metadata   map[string]any  `json:"metadata"`
+	Always     []string        `json:"always"`
+	Tool       *RequestToolRef `json:"tool,omitempty"`
+}
+
+type QuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+type QuestionInfo struct {
+	Question string           `json:"question"`
+	Header   string           `json:"header"`
+	Options  []QuestionOption `json:"options"`
+	Multiple bool             `json:"multiple,omitempty"`
+	Custom   bool             `json:"custom,omitempty"`
+}
+
+type QuestionRequest struct {
+	ID        string          `json:"id"`
+	SessionID string          `json:"sessionID"`
+	Questions []QuestionInfo  `json:"questions"`
+	Tool      *RequestToolRef `json:"tool,omitempty"`
 }
 
 // Event represents a server-sent event from the OpenCode event stream.

@@ -227,9 +227,6 @@ func (cc *CodexConnector) applyRuntimeDefaults() {
 	if strings.TrimSpace(cc.Config.Codex.Command) == "" {
 		cc.Config.Codex.Command = "codex"
 	}
-	if strings.TrimSpace(cc.Config.Codex.Listen) == "" {
-		cc.Config.Codex.Listen = "stdio://"
-	}
 	if strings.TrimSpace(cc.Config.Codex.DefaultModel) == "" {
 		cc.Config.Codex.DefaultModel = "gpt-5.1-codex"
 	}

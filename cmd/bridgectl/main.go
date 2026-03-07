@@ -770,12 +770,6 @@ func ensureInitialized(instance string, cfg instanceConfig, sp *statePaths) (*me
 }
 
 func readOrSynthesizeMetadata(instance string, cfg instanceConfig, sp *statePaths) (*metadata, error) {
-	if data, err := os.ReadFile(sp.MetaPath); err == nil {
-		var m metadata
-		if err = json.Unmarshal(data, &m); err == nil {
-			return &m, nil
-		}
-	}
 	repo, err := expandPath(cfg.RepoPath)
 	if err != nil {
 		return nil, err
@@ -786,6 +780,24 @@ func readOrSynthesizeMetadata(instance string, cfg instanceConfig, sp *statePath
 	}
 	if !filepath.IsAbs(binPath) {
 		binPath = filepath.Join(repo, binPath)
+	}
+	if data, err := os.ReadFile(sp.MetaPath); err == nil {
+		var m metadata
+		if err = json.Unmarshal(data, &m); err == nil {
+			// Repo and binary locations are derived from the current manifest.
+			// Refresh them on every load so moving the checkout doesn't strand
+			// an instance on stale absolute paths from an older clone.
+			m.Instance = instance
+			m.BridgeType = cfg.BridgeType
+			m.RepoPath = repo
+			m.BinaryPath = binPath
+			m.ConfigPath = sp.ConfigPath
+			m.RegistrationPath = sp.RegistrationPath
+			m.LogPath = sp.LogPath
+			m.PIDPath = sp.PIDPath
+			m.BeeperBridgeName = cfg.BeeperBridgeName
+			return &m, nil
+		}
 	}
 	return &metadata{
 		Instance:         instance,

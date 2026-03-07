@@ -2,6 +2,9 @@ package opencodebridge
 
 import (
 	"context"
+	"time"
+
+	"maunium.net/go/mautrix/id"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
@@ -49,10 +52,10 @@ type PortalMeta struct {
 
 // OpenCodeInstance stores connection details for an OpenCode server.
 type OpenCodeInstance struct {
-	ID       string `json:"id,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
+	ID          string `json:"id,omitempty"`
+	URL         string `json:"url,omitempty"`
+	Username    string `json:"username,omitempty"`
+	HasPassword bool   `json:"has_password,omitempty"`
 }
 
 // Bridge coordinates OpenCode sessions with Matrix rooms.
@@ -106,6 +109,25 @@ func (b *Bridge) AbortSession(ctx context.Context, instanceID, sessionID string)
 		return ErrUnavailable
 	}
 	return b.manager.AbortSession(ctx, instanceID, sessionID)
+}
+
+func (b *Bridge) ResolveApprovalDecision(ctx context.Context, roomID id.RoomID, approvalID string, approved, always bool, reason string, decidedBy id.UserID) error {
+	if b == nil || b.manager == nil {
+		return ErrUnavailable
+	}
+	response := "reject"
+	if approved {
+		response = "once"
+		if always {
+			response = "always"
+		}
+	}
+	return b.manager.resolvePermissionDecision(ctx, roomID, approvalID, permissionDecision{
+		Response:  response,
+		Reason:    reason,
+		DecidedAt: time.Now(),
+		DecidedBy: decidedBy,
+	})
 }
 
 func (b *Bridge) RestoreConnections(ctx context.Context) error {

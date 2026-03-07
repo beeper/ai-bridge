@@ -16,6 +16,7 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	airuntime "github.com/beeper/ai-bridge/pkg/runtime"
+	"github.com/beeper/ai-bridge/pkg/shared/streamui"
 )
 
 // responseStreamContext holds loop-invariant parameters for processing a Responses API
@@ -515,6 +516,7 @@ func (oc *AIClient) streamingResponse(
 				}
 			}
 			approved := approvalAllowed(decision)
+			streamui.RecordApprovalResponse(&state.ui, approval.approvalID, approval.toolCallID, approved, decision.Reason)
 			item := responses.ResponseInputItemParamOfMcpApprovalResponse(approval.approvalID, approved)
 			if decision.Reason != "" && item.OfMcpApprovalResponse != nil {
 				item.OfMcpApprovalResponse.Reason = param.NewOpt(decision.Reason)

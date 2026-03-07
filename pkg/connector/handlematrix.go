@@ -1388,40 +1388,11 @@ func (oc *AIClient) buildPromptForRegenerate(
 				continue
 			}
 
-			body := cleanHistoryBody(msgMeta.Body, isSimple, msg.MXID)
-
 			// Only inject images for recent messages and vision-capable models.
 			// This loop builds newest-to-oldest, so early entries are the most recent.
 			injectImages := hasVision && includedCount < maxHistoryImageMessages
 			includedCount++
-
-			switch msgMeta.Role {
-			case "assistant":
-				body = stripThinkTags(body)
-				body = airuntime.SanitizeChatMessageForDisplay(body, false)
-				if body == "" {
-					continue
-				}
-				// In the reverse-then-flip loop, add synthetic BEFORE assistant
-				// so it ends up AFTER the assistant in chronological order after reversal.
-				if injectImages && len(msgMeta.GeneratedFiles) > 0 {
-					if imgParts := oc.downloadGeneratedFileImages(ctx, msgMeta.GeneratedFiles); len(imgParts) > 0 {
-						prompt = append(prompt, buildSyntheticGeneratedImagesMessage(msgMeta.GeneratedFiles, imgParts))
-					}
-				}
-				prompt = append(prompt, openai.AssistantMessage(body))
-			default:
-				body = airuntime.SanitizeChatMessageForDisplay(body, true)
-				if injectImages && msgMeta.MediaURL != "" && isImageMimeType(msgMeta.MimeType) {
-					if imgPart := oc.downloadHistoryImage(ctx, msgMeta.MediaURL, msgMeta.MimeType); imgPart != nil {
-						// Append the media URL so the model can reference it for editing tools (e.g. input_images).
-						bodyWithURL := body + fmt.Sprintf("\n[media_url: %s]", msgMeta.MediaURL)
-						prompt = append(prompt, buildMultimodalUserMessage(bodyWithURL, []openai.ChatCompletionContentPartUnionParam{*imgPart}))
-						continue
-					}
-				}
-				prompt = append(prompt, openai.UserMessage(body))
-			}
+			prompt = oc.appendHistoryMessageFromCanonical(ctx, prompt, msg, msgMeta, isSimple, injectImages)
 		}
 
 		// Reverse to get chronological order (skip system message at index 0 if present)
@@ -1462,7 +1433,7 @@ func (oc *AIClient) tryApprovalDecisionEvent(
 	}
 
 	state := airuntime.ToolApprovalDenied
-	if decision.Approve {
+	if decision.Approved {
 		state = airuntime.ToolApprovalApproved
 	}
 	err := oc.resolveToolApproval(

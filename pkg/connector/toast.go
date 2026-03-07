@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -17,6 +18,76 @@ type aiToastType string
 const (
 	aiToastTypeError aiToastType = "error"
 )
+
+func (oc *AIClient) sendApprovalRequestFallbackEvent(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	approvalID string,
+	toolCallID string,
+	toolName string,
+	replyToEventID id.EventID,
+) {
+	if oc == nil || portal == nil || portal.MXID == "" {
+		return
+	}
+	approvalID = strings.TrimSpace(approvalID)
+	toolCallID = strings.TrimSpace(toolCallID)
+	toolName = strings.TrimSpace(toolName)
+	if approvalID == "" || toolCallID == "" {
+		return
+	}
+	if toolName == "" {
+		toolName = "tool"
+	}
+	uiMessage := map[string]any{
+		"id":   approvalID,
+		"role": "assistant",
+		"metadata": map[string]any{
+			"turn_id":    state.turnID,
+			"approvalId": approvalID,
+		},
+		"parts": []map[string]any{{
+			"type":       "dynamic-tool",
+			"toolName":   toolName,
+			"toolCallId": toolCallID,
+			"state":      "approval-requested",
+			"approval": map[string]any{
+				"id": approvalID,
+			},
+		}},
+	}
+	raw := map[string]any{
+		"msgtype":    event.MsgNotice,
+		"body":       "Tool approval required",
+		BeeperAIKey:  uiMessage,
+		"m.mentions": map[string]any{},
+	}
+	if replyToEventID != "" {
+		raw["m.relates_to"] = map[string]any{
+			"m.in_reply_to": map[string]any{
+				"event_id": replyToEventID.String(),
+			},
+		}
+	}
+	converted := &bridgev2.ConvertedMessage{
+		Parts: []*bridgev2.ConvertedMessagePart{{
+			ID:      networkid.PartID("0"),
+			Type:    event.EventMessage,
+			Content: &event.MessageEventContent{MsgType: event.MsgNotice, Body: "Tool approval required"},
+			Extra:   raw,
+			DBMetadata: &MessageMetadata{
+				Role:               "assistant",
+				ExcludeFromHistory: true,
+				CanonicalSchema:    "ai-sdk-ui-message-v1",
+				CanonicalUIMessage: uiMessage,
+			},
+		}},
+	}
+	if _, _, err := oc.sendViaPortal(ctx, portal, converted, ""); err != nil {
+		oc.loggerForContext(ctx).Warn().Err(err).Str("approval_id", approvalID).Msg("Failed to send approval request fallback event")
+	}
+}
 
 // sendApprovalRejectionEvent sends a combined toast + com.beeper.ai snapshot
 // marking an approval as output-denied. This is used when resolveToolApproval
@@ -49,14 +120,19 @@ func (oc *AIClient) sendApprovalRejectionEvent(ctx context.Context, portal *brid
 			"id":   approvalID,
 			"role": "assistant",
 			"metadata": map[string]any{
-				"approval_id": approvalID,
+				"approvalId": approvalID,
 			},
 			"parts": []map[string]any{{
 				"type":       "dynamic-tool",
 				"toolName":   "tool",
 				"toolCallId": approvalID,
 				"state":      "output-denied",
-				"errorText":  errorText,
+				"approval": map[string]any{
+					"id":       approvalID,
+					"approved": false,
+					"reason":   errorText,
+				},
+				"errorText": errorText,
 			}},
 		},
 		"m.mentions": map[string]any{},

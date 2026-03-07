@@ -13,6 +13,7 @@ import (
 	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
 	"github.com/beeper/ai-bridge/pkg/connector/msgconv"
 	"github.com/beeper/ai-bridge/pkg/shared/citations"
+	"github.com/beeper/ai-bridge/pkg/shared/streamui"
 )
 
 // saveAssistantMessage saves the completed assistant message to the database.
@@ -162,36 +163,27 @@ func (oc *AIClient) buildCanonicalUIMessage(state *streamingState, meta *PortalM
 	if state == nil {
 		return nil
 	}
-
-	parts := msgconv.ContentParts(state.accumulated.String(), strings.TrimSpace(state.reasoning.String()))
-	if toolParts := msgconv.ToolCallParts(state.toolCalls, string(ToolTypeProvider), string(ResultStatusSuccess), string(ResultStatusDenied)); len(toolParts) > 0 {
-		parts = append(parts, toolParts...)
+	if uiMessage := streamui.SnapshotCanonicalUIMessage(&state.ui); len(uiMessage) > 0 {
+		metadata, _ := uiMessage["metadata"].(map[string]any)
+		uiMessage["metadata"] = msgconv.MergeUIMessageMetadata(metadata, msgconv.BuildUIMessageMetadata(msgconv.UIMessageMetadataParams{
+			TurnID:           state.turnID,
+			AgentID:          state.agentID,
+			Model:            oc.effectiveModel(meta),
+			FinishReason:     state.finishReason,
+			PromptTokens:     state.promptTokens,
+			CompletionTokens: state.completionTokens,
+			ReasoningTokens:  state.reasoningTokens,
+			StartedAtMs:      state.startedAtMs,
+			FirstTokenAtMs:   state.firstTokenAtMs,
+			CompletedAtMs:    state.completedAtMs,
+			IncludeUsage:     true,
+		}))
+		return msgconv.AppendUIMessageArtifacts(uiMessage, buildSourceParts(state.sourceCitations, state.sourceDocuments, nil), citations.GeneratedFilesToParts(state.generatedFiles))
 	}
-
-	messageID := state.turnID
-	if strings.TrimSpace(messageID) == "" && state.initialEventID != "" {
-		messageID = state.initialEventID.String()
-	}
-
-	metadata := msgconv.BuildUIMessageMetadata(msgconv.UIMessageMetadataParams{
-		TurnID:           state.turnID,
-		AgentID:          state.agentID,
-		Model:            oc.effectiveModel(meta),
-		FinishReason:     state.finishReason,
-		PromptTokens:     state.promptTokens,
-		CompletionTokens: state.completionTokens,
-		ReasoningTokens:  state.reasoningTokens,
-		StartedAtMs:      state.startedAtMs,
-		FirstTokenAtMs:   state.firstTokenAtMs,
-		CompletedAtMs:    state.completedAtMs,
-		IncludeUsage:     true,
-	})
-
 	return msgconv.BuildUIMessage(msgconv.UIMessageParams{
-		TurnID:     messageID,
+		TurnID:     state.turnID,
 		Role:       "assistant",
-		Metadata:   metadata,
-		Parts:      parts,
+		Metadata:   oc.buildUIMessageMetadata(state, meta, true),
 		SourceURLs: buildSourceParts(state.sourceCitations, state.sourceDocuments, nil),
 		FileParts:  citations.GeneratedFilesToParts(state.generatedFiles),
 	})

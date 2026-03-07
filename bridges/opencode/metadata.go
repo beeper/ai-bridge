@@ -27,7 +27,7 @@ type PortalMetadata struct {
 	VerboseLevel         string `json:"verbose_level,omitempty"`
 }
 
-type MessageMetadata struct{}
+type MessageMetadata = opencodebridge.MessageMetadata
 
 type GhostMetadata struct{}
 

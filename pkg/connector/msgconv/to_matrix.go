@@ -152,6 +152,152 @@ func BuildUIMessage(p UIMessageParams) map[string]any {
 	return msg
 }
 
+type UserUIMessageParams struct {
+	MessageID string
+	Text      string
+	MediaURL  string
+	MimeType  string
+	Metadata  map[string]any
+}
+
+func BuildUserUIMessage(p UserUIMessageParams) map[string]any {
+	parts := make([]map[string]any, 0, 2)
+	if strings.TrimSpace(p.Text) != "" {
+		parts = append(parts, map[string]any{
+			"type": "text",
+			"text": p.Text,
+		})
+	}
+	if strings.TrimSpace(p.MediaURL) != "" {
+		part := map[string]any{
+			"type":      "file",
+			"url":       strings.TrimSpace(p.MediaURL),
+			"mediaType": strings.TrimSpace(p.MimeType),
+		}
+		if part["mediaType"] == "" {
+			part["mediaType"] = "application/octet-stream"
+		}
+		parts = append(parts, part)
+	}
+	return BuildUIMessage(UIMessageParams{
+		TurnID:   p.MessageID,
+		Role:     "user",
+		Metadata: p.Metadata,
+		Parts:    parts,
+	})
+}
+
+// MergeUIMessageMetadata deep-merges message-level metadata maps.
+func MergeUIMessageMetadata(base, update map[string]any) map[string]any {
+	if len(base) == 0 && len(update) == 0 {
+		return nil
+	}
+	if len(base) == 0 {
+		return cloneMap(update)
+	}
+	if len(update) == 0 {
+		return cloneMap(base)
+	}
+	out := cloneMap(base)
+	for key, value := range update {
+		if existing, ok := out[key].(map[string]any); ok {
+			if next, ok := value.(map[string]any); ok {
+				out[key] = MergeUIMessageMetadata(existing, next)
+				continue
+			}
+		}
+		out[key] = cloneAny(value)
+	}
+	return out
+}
+
+// AppendUIMessageArtifacts appends source/file parts to an existing UIMessage.
+func AppendUIMessageArtifacts(uiMessage map[string]any, sourceParts, fileParts []map[string]any) map[string]any {
+	if len(uiMessage) == 0 {
+		return nil
+	}
+	out := cloneMap(uiMessage)
+	parts, _ := out["parts"].([]any)
+	seen := make(map[string]struct{}, len(parts))
+	for _, raw := range parts {
+		part, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		seen[artifactPartKey(part)] = struct{}{}
+	}
+	for _, part := range sourceParts {
+		key := artifactPartKey(part)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		parts = append(parts, cloneMap(part))
+		seen[key] = struct{}{}
+	}
+	for _, part := range fileParts {
+		key := artifactPartKey(part)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		parts = append(parts, cloneMap(part))
+		seen[key] = struct{}{}
+	}
+	out["parts"] = parts
+	return out
+}
+
+func artifactPartKey(part map[string]any) string {
+	partType := strings.TrimSpace(stringFromAny(part["type"]))
+	switch partType {
+	case "source-url", "file":
+		return partType + ":" + strings.TrimSpace(stringFromAny(part["url"]))
+	case "source-document":
+		sourceID := strings.TrimSpace(stringFromAny(part["sourceId"]))
+		if sourceID == "" {
+			sourceID = strings.TrimSpace(stringFromAny(part["filename"]))
+		}
+		if sourceID == "" {
+			sourceID = strings.TrimSpace(stringFromAny(part["title"]))
+		}
+		return partType + ":" + sourceID
+	default:
+		return partType
+	}
+}
+
+func cloneMap(src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(src))
+	for key, value := range src {
+		out[key] = cloneAny(value)
+	}
+	return out
+}
+
+func cloneAny(src any) any {
+	switch typed := src.(type) {
+	case map[string]any:
+		return cloneMap(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for i, value := range typed {
+			out[i] = cloneAny(value)
+		}
+		return out
+	default:
+		return typed
+	}
+}
+
+func stringFromAny(src any) string {
+	if value, ok := src.(string); ok {
+		return value
+	}
+	return ""
+}
+
 // ContentParts builds the standard text + reasoning parts for a UIMessage.
 func ContentParts(textContent, reasoningContent string) []map[string]any {
 	parts := make([]map[string]any, 0, 2)
