@@ -35,13 +35,11 @@ func resolveHeartbeatConfig(cfg *Config, agentID string) *HeartbeatConfig {
 			break
 		}
 	}
-	if base == nil && override == nil {
-		return override
-	}
-	if base == nil {
-		return override
-	}
-	if override == nil {
+	if base == nil || override == nil {
+		// If both are nil, either works; if only one is non-nil, return it.
+		if override != nil {
+			return override
+		}
 		return base
 	}
 	merged := *base
@@ -79,43 +77,32 @@ func resolveHeartbeatConfig(cfg *Config, agentID string) *HeartbeatConfig {
 func isHeartbeatEnabledForAgent(cfg *Config, agentID string) bool {
 	resolved := normalizeAgentID(agentID)
 	defaultAgent := normalizeAgentID(agents.DefaultAgentID)
-	if cfg == nil {
+	if cfg == nil || cfg.Agents == nil {
 		return resolved == defaultAgent
 	}
-	if cfg.Agents == nil {
+	if !hasExplicitHeartbeatAgents(cfg) {
 		return resolved == defaultAgent
 	}
-	if hasExplicitHeartbeatAgents(cfg) {
-		for _, entry := range cfg.Agents.List {
-			if entry.Heartbeat == nil {
-				continue
-			}
-			if normalizeAgentID(entry.ID) == resolved {
-				return true
-			}
+	for _, entry := range cfg.Agents.List {
+		if entry.Heartbeat != nil && normalizeAgentID(entry.ID) == resolved {
+			return true
 		}
-		return false
 	}
-	return resolved == defaultAgent
+	return false
 }
 
 func resolveHeartbeatIntervalMs(cfg *Config, overrideEvery string, heartbeat *HeartbeatConfig) int64 {
-	raw := ""
-	hasRaw := false
-	if strings.TrimSpace(overrideEvery) != "" {
-		raw = strings.TrimSpace(overrideEvery)
-		hasRaw = true
-	} else if heartbeat != nil && heartbeat.Every != nil {
+	raw := strings.TrimSpace(overrideEvery)
+	if raw == "" && heartbeat != nil && heartbeat.Every != nil {
 		raw = strings.TrimSpace(*heartbeat.Every)
-		hasRaw = true
-	} else if cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil && cfg.Agents.Defaults.Heartbeat.Every != nil {
-		raw = strings.TrimSpace(*cfg.Agents.Defaults.Heartbeat.Every)
-		hasRaw = true
 	}
-	if !hasRaw {
+	if raw == "" && cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil && cfg.Agents.Defaults.Heartbeat.Every != nil {
+		raw = strings.TrimSpace(*cfg.Agents.Defaults.Heartbeat.Every)
+	}
+	if raw == "" {
 		raw = agents.DefaultHeartbeatEvery
 	}
-	if strings.TrimSpace(raw) == "" {
+	if raw == "" {
 		return 0
 	}
 	ms, err := parseDurationMs(raw, "m")
@@ -129,33 +116,21 @@ func resolveHeartbeatPrompt(cfg *Config, heartbeat *HeartbeatConfig, agent *agen
 	if agent != nil && strings.TrimSpace(agent.HeartbeatPrompt) != "" {
 		return agents.ResolveHeartbeatPrompt(agent.HeartbeatPrompt)
 	}
-	raw := ""
-	hasRaw := false
 	if heartbeat != nil && heartbeat.Prompt != nil {
-		raw = *heartbeat.Prompt
-		hasRaw = true
-	} else if cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil && cfg.Agents.Defaults.Heartbeat.Prompt != nil {
-		raw = *cfg.Agents.Defaults.Heartbeat.Prompt
-		hasRaw = true
+		return agents.ResolveHeartbeatPrompt(*heartbeat.Prompt)
 	}
-	if !hasRaw {
-		raw = ""
+	if cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil && cfg.Agents.Defaults.Heartbeat.Prompt != nil {
+		return agents.ResolveHeartbeatPrompt(*cfg.Agents.Defaults.Heartbeat.Prompt)
 	}
-	return agents.ResolveHeartbeatPrompt(raw)
+	return agents.ResolveHeartbeatPrompt("")
 }
 
 func resolveHeartbeatAckMaxChars(cfg *Config, heartbeat *HeartbeatConfig) int {
 	if heartbeat != nil && heartbeat.AckMaxChars != nil {
-		if *heartbeat.AckMaxChars < 0 {
-			return 0
-		}
-		return *heartbeat.AckMaxChars
+		return max(*heartbeat.AckMaxChars, 0)
 	}
 	if cfg != nil && cfg.Agents != nil && cfg.Agents.Defaults != nil && cfg.Agents.Defaults.Heartbeat != nil && cfg.Agents.Defaults.Heartbeat.AckMaxChars != nil {
-		if *cfg.Agents.Defaults.Heartbeat.AckMaxChars < 0 {
-			return 0
-		}
-		return *cfg.Agents.Defaults.Heartbeat.AckMaxChars
+		return max(*cfg.Agents.Defaults.Heartbeat.AckMaxChars, 0)
 	}
 	return agents.DefaultMaxAckChars
 }

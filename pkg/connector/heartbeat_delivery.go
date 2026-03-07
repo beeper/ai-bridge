@@ -42,11 +42,9 @@ func (oc *AIClient) resolveHeartbeatDeliveryTarget(agentID string, heartbeat *He
 		if lastTo != "" && (lastChannel == "" || strings.EqualFold(lastChannel, "matrix")) {
 			target := oc.resolveHeartbeatDeliveryRoom(lastTo)
 			if target.Portal != nil && target.RoomID != "" {
-				// Stale agent routing guard: skip if portal is now assigned to a
-				// different agent (matches resolveHeartbeatSessionPortal behavior).
-				if meta := portalMeta(target.Portal); meta != nil && normalizeAgentID(meta.AgentID) != normalizeAgentID(agentID) {
-					// Fall through to lastActivePortal / defaultChatPortal.
-				} else {
+				// Stale agent routing guard: skip if portal is now assigned to a different agent.
+				meta := portalMeta(target.Portal)
+				if meta == nil || normalizeAgentID(meta.AgentID) == normalizeAgentID(agentID) {
 					return target
 				}
 			}
@@ -67,24 +65,15 @@ func (oc *AIClient) resolveHeartbeatDeliveryTarget(agentID string, heartbeat *He
 
 func (oc *AIClient) resolveHeartbeatDeliveryRoom(raw string) deliveryTarget {
 	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return deliveryTarget{Reason: "no-target"}
-	}
-	if !strings.HasPrefix(trimmed, "!") {
+	if trimmed == "" || !strings.HasPrefix(trimmed, "!") {
 		return deliveryTarget{Reason: "no-target"}
 	}
 	portal := oc.portalByRoomID(context.Background(), id.RoomID(trimmed))
 	if portal == nil || portal.MXID == "" {
 		return deliveryTarget{Reason: "no-target"}
 	}
-	// Guard: don't deliver if the bridge isn't connected
-	// (matches resolveCronDeliveryTarget's IsLoggedIn check).
 	if !oc.IsLoggedIn() {
 		return deliveryTarget{Channel: "matrix", Reason: "channel-not-ready"}
 	}
-	return deliveryTarget{
-		Portal:  portal,
-		RoomID:  portal.MXID,
-		Channel: "matrix",
-	}
+	return deliveryTarget{Portal: portal, RoomID: portal.MXID, Channel: "matrix"}
 }

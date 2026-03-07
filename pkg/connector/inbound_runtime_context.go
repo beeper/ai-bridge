@@ -21,11 +21,7 @@ func inboundContextFromContext(ctx context.Context) (airuntime.InboundContext, b
 	if ctx == nil {
 		return airuntime.InboundContext{}, false
 	}
-	raw := ctx.Value(inboundContextKey{})
-	if raw == nil {
-		return airuntime.InboundContext{}, false
-	}
-	inbound, ok := raw.(airuntime.InboundContext)
+	inbound, ok := ctx.Value(inboundContextKey{}).(airuntime.InboundContext)
 	if !ok {
 		return airuntime.InboundContext{}, false
 	}
