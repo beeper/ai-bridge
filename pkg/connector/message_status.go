@@ -20,6 +20,8 @@ func messageStatusForError(err error) event.MessageStatus {
 }
 
 func messageStatusReasonForError(err error) event.MessageStatusReason {
+	// Use the runtime classifier first; fall back to per-error checks
+	// for errors that DecideFallback does not yet classify.
 	switch airuntime.DecideFallback(err).Class {
 	case airuntime.FailureClassAuth:
 		return event.MessageStatusNoPermission
@@ -27,13 +29,17 @@ func messageStatusReasonForError(err error) event.MessageStatusReason {
 		return event.MessageStatusNetworkError
 	case airuntime.FailureClassContextOverflow:
 		return event.MessageStatusUnsupported
+	default:
+		return messageStatusReasonFallback(err)
 	}
+}
+
+// messageStatusReasonFallback handles errors that the runtime classifier does not cover.
+func messageStatusReasonFallback(err error) event.MessageStatusReason {
 	switch {
 	case IsAuthError(err), IsBillingError(err):
 		return event.MessageStatusNoPermission
-	case IsModelNotFound(err):
-		return event.MessageStatusUnsupported
-	case ParseContextLengthError(err) != nil, IsImageError(err):
+	case IsModelNotFound(err), ParseContextLengthError(err) != nil, IsImageError(err):
 		return event.MessageStatusUnsupported
 	case IsRateLimitError(err), IsOverloadedError(err), IsTimeoutError(err), IsServerError(err):
 		return event.MessageStatusNetworkError

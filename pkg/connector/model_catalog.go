@@ -139,34 +139,25 @@ func (oc *AIClient) implicitModelCatalogEntries(meta *UserLoginMetadata) []Model
 	if meta == nil {
 		return nil
 	}
+
+	// Resolve the API key for the provider; return nil if no key is available.
+	var apiKey string
+	var providerFilter func(string) bool
 	switch meta.Provider {
-	case ProviderMagicProxy:
-		// Magic Proxy is OpenRouter-compatible. It should expose the same model catalog
-		// as OpenRouter when an API key is present.
-		if strings.TrimSpace(oc.connector.resolveOpenRouterAPIKey(meta)) == "" {
-			return nil
-		}
-		return modelCatalogEntriesFromManifest(nil)
-	case ProviderOpenRouter:
-		if strings.TrimSpace(oc.connector.resolveOpenRouterAPIKey(meta)) == "" {
-			return nil
-		}
-		return modelCatalogEntriesFromManifest(nil)
+	case ProviderMagicProxy, ProviderOpenRouter:
+		apiKey = oc.connector.resolveOpenRouterAPIKey(meta)
 	case ProviderBeeper:
-		if strings.TrimSpace(oc.connector.resolveBeeperToken(meta)) == "" {
-			return nil
-		}
-		return modelCatalogEntriesFromManifest(nil)
+		apiKey = oc.connector.resolveBeeperToken(meta)
 	case ProviderOpenAI:
-		if strings.TrimSpace(oc.connector.resolveOpenAIAPIKey(meta)) == "" {
-			return nil
-		}
-		return modelCatalogEntriesFromManifest(func(provider string) bool {
-			return provider == ProviderOpenAI
-		})
+		apiKey = oc.connector.resolveOpenAIAPIKey(meta)
+		providerFilter = func(provider string) bool { return provider == ProviderOpenAI }
 	default:
 		return nil
 	}
+	if strings.TrimSpace(apiKey) == "" {
+		return nil
+	}
+	return modelCatalogEntriesFromManifest(providerFilter)
 }
 
 func modelCatalogEntriesFromManifest(filter func(provider string) bool) []ModelCatalogEntry {
@@ -247,34 +238,28 @@ func explicitModelCatalogEntries(cfg *ModelsConfig) []ModelCatalogEntry {
 }
 
 func normalizeCatalogInput(input []string, extra map[string]bool) []string {
-	seen := map[string]bool{}
-	add := func(value string) {
-		normalized := strings.ToLower(strings.TrimSpace(value))
-		if normalized == "" || seen[normalized] {
-			return
-		}
-		seen[normalized] = true
-	}
-	add("text")
+	seen := make(map[string]bool, len(input)+len(extra)+2)
+	seen["text"] = true // always included
 	for _, value := range input {
-		add(value)
+		if n := strings.ToLower(strings.TrimSpace(value)); n != "" {
+			seen[n] = true
+		}
 	}
 	for key, enabled := range extra {
 		if enabled {
-			add(key)
+			if n := strings.ToLower(strings.TrimSpace(key)); n != "" {
+				seen[n] = true
+			}
 		}
 	}
-	if len(seen) == 0 {
-		return nil
-	}
-	var ordered []string
-	if seen["text"] {
-		ordered = append(ordered, "text")
-		delete(seen, "text")
-	}
-	if seen["image"] {
-		ordered = append(ordered, "image")
-		delete(seen, "image")
+
+	// Stable ordering: text first, image second, rest sorted.
+	ordered := make([]string, 0, len(seen))
+	for _, priority := range []string{"text", "image"} {
+		if seen[priority] {
+			ordered = append(ordered, priority)
+			delete(seen, priority)
+		}
 	}
 	rest := make([]string, 0, len(seen))
 	for key := range seen {
@@ -513,6 +498,35 @@ func normalizeCatalogModelID(entry ModelCatalogEntry) string {
 	return id
 }
 
+// catalogEntryToModelInfo converts a ModelCatalogEntry to a ModelInfo.
+// Returns nil if the entry has no valid ID or provider.
+func catalogEntryToModelInfo(entry ModelCatalogEntry) *ModelInfo {
+	if strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.Provider) == "" {
+		return nil
+	}
+	normalizedID := normalizeCatalogModelID(entry)
+	if normalizedID == "" {
+		return nil
+	}
+	info := ModelInfo{
+		ID:                  normalizedID,
+		Name:                strings.TrimSpace(entry.Name),
+		Provider:            normalizeCatalogProvider(entry.Provider),
+		SupportsVision:      catalogInputIncludes(&entry, "image"),
+		SupportsAudio:       catalogInputIncludes(&entry, "audio"),
+		SupportsVideo:       catalogInputIncludes(&entry, "video"),
+		SupportsPDF:         catalogInputIncludes(&entry, "pdf"),
+		SupportsToolCalling: true,
+		SupportsReasoning:   entry.Reasoning,
+		ContextWindow:       entry.ContextWindow,
+		MaxOutputTokens:     entry.MaxOutputTokens,
+	}
+	if info.Name == "" {
+		info.Name = normalizedID
+	}
+	return &info
+}
+
 func (oc *AIClient) loadModelCatalogModels(ctx context.Context) []ModelInfo {
 	entries := oc.loadModelCatalog(ctx, true)
 	if len(entries) == 0 {
@@ -520,31 +534,9 @@ func (oc *AIClient) loadModelCatalogModels(ctx context.Context) []ModelInfo {
 	}
 	models := make([]ModelInfo, 0, len(entries))
 	for _, entry := range entries {
-		if strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.Provider) == "" {
-			continue
+		if info := catalogEntryToModelInfo(entry); info != nil {
+			models = append(models, *info)
 		}
-		normalizedID := normalizeCatalogModelID(entry)
-		if normalizedID == "" {
-			continue
-		}
-		provider := normalizeCatalogProvider(entry.Provider)
-		info := ModelInfo{
-			ID:                  normalizedID,
-			Name:                strings.TrimSpace(entry.Name),
-			Provider:            provider,
-			SupportsVision:      catalogInputIncludes(&entry, "image"),
-			SupportsAudio:       catalogInputIncludes(&entry, "audio"),
-			SupportsVideo:       catalogInputIncludes(&entry, "video"),
-			SupportsPDF:         catalogInputIncludes(&entry, "pdf"),
-			SupportsToolCalling: true,
-			SupportsReasoning:   entry.Reasoning,
-			ContextWindow:       entry.ContextWindow,
-			MaxOutputTokens:     entry.MaxOutputTokens,
-		}
-		if info.Name == "" {
-			info.Name = normalizedID
-		}
-		models = append(models, info)
 	}
 	return models
 }
@@ -560,29 +552,10 @@ func (oc *AIClient) findModelInfoInCatalog(modelID string) *ModelInfo {
 	}
 	normalizedTarget := strings.TrimSpace(modelID)
 	for _, entry := range entries {
-		if strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.Provider) == "" {
-			continue
-		}
 		normalizedID := normalizeCatalogModelID(entry)
 		if strings.EqualFold(normalizedTarget, normalizedID) ||
 			strings.EqualFold(normalizedTarget, entry.ID) {
-			info := ModelInfo{
-				ID:                  normalizedID,
-				Name:                strings.TrimSpace(entry.Name),
-				Provider:            normalizeCatalogProvider(entry.Provider),
-				SupportsVision:      catalogInputIncludes(&entry, "image"),
-				SupportsAudio:       catalogInputIncludes(&entry, "audio"),
-				SupportsVideo:       catalogInputIncludes(&entry, "video"),
-				SupportsPDF:         catalogInputIncludes(&entry, "pdf"),
-				SupportsToolCalling: true,
-				SupportsReasoning:   entry.Reasoning,
-				ContextWindow:       entry.ContextWindow,
-				MaxOutputTokens:     entry.MaxOutputTokens,
-			}
-			if info.Name == "" {
-				info.Name = normalizedID
-			}
-			return &info
+			return catalogEntryToModelInfo(entry)
 		}
 	}
 	return nil

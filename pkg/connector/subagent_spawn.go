@@ -16,6 +16,7 @@ import (
 
 	"github.com/beeper/ai-bridge/pkg/agents"
 	"github.com/beeper/ai-bridge/pkg/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/shared/stringutil"
 )
 
 func normalizeAgentID(value string) string {
@@ -54,37 +55,27 @@ func (oc *AIClient) resolveSubagentAllowlist(ctx context.Context, requesterAgent
 }
 
 func resolveSubagentModel(override string, agent *agents.AgentDefinition, defaults *agents.SubagentConfig) string {
-	if trimmed := strings.TrimSpace(override); trimmed != "" {
-		return trimmed
-	}
+	agentVal := ""
 	if agent != nil && agent.Subagents != nil {
-		if trimmed := strings.TrimSpace(agent.Subagents.Model); trimmed != "" {
-			return trimmed
-		}
+		agentVal = agent.Subagents.Model
 	}
+	defaultVal := ""
 	if defaults != nil {
-		if trimmed := strings.TrimSpace(defaults.Model); trimmed != "" {
-			return trimmed
-		}
+		defaultVal = defaults.Model
 	}
-	return ""
+	return stringutil.FirstNonEmpty(override, agentVal, defaultVal)
 }
 
 func resolveSubagentThinking(override string, agent *agents.AgentDefinition, defaults *agents.SubagentConfig) string {
-	if trimmed := strings.TrimSpace(override); trimmed != "" {
-		return trimmed
-	}
+	agentVal := ""
 	if agent != nil && agent.Subagents != nil {
-		if trimmed := strings.TrimSpace(agent.Subagents.Thinking); trimmed != "" {
-			return trimmed
-		}
+		agentVal = agent.Subagents.Thinking
 	}
+	defaultVal := ""
 	if defaults != nil {
-		if trimmed := strings.TrimSpace(defaults.Thinking); trimmed != "" {
-			return trimmed
-		}
+		defaultVal = defaults.Thinking
 	}
-	return ""
+	return stringutil.FirstNonEmpty(override, agentVal, defaultVal)
 }
 
 func normalizeThinkingLevel(raw string) (string, bool) {
