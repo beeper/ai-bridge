@@ -524,7 +524,7 @@ func (cc *CodexClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Ma
 		cc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to insert user message")
 	}
 
-	if !cc.acquireRoom(roomID) {
+	if !cc.acquireRoomIfQueueEmpty(roomID) {
 		cc.sendPendingStatus(ctx, portal, msg.Event, "Queued — waiting for current turn to finish...")
 		cc.queuePendingCodex(roomID, &codexPendingMessage{
 			event:  msg.Event,
@@ -1794,10 +1794,10 @@ func (cc *CodexClient) markMessageSendSuccess(ctx context.Context, portal *bridg
 	portal.Bridge.Matrix.SendMessageStatus(ctx, &st, bridgev2.StatusEventInfoFromEvent(evt))
 }
 
-func (cc *CodexClient) acquireRoom(roomID id.RoomID) bool {
+func (cc *CodexClient) acquireRoomIfQueueEmpty(roomID id.RoomID) bool {
 	cc.roomMu.Lock()
 	defer cc.roomMu.Unlock()
-	if cc.activeRooms[roomID] {
+	if cc.activeRooms[roomID] || len(cc.pendingMessages[roomID]) > 0 {
 		return false
 	}
 	cc.activeRooms[roomID] = true
@@ -1814,6 +1814,21 @@ func (cc *CodexClient) queuePendingCodex(roomID id.RoomID, pm *codexPendingMessa
 	cc.roomMu.Lock()
 	defer cc.roomMu.Unlock()
 	cc.pendingMessages[roomID] = append(cc.pendingMessages[roomID], pm)
+}
+
+func (cc *CodexClient) beginPendingCodex(roomID id.RoomID) *codexPendingMessage {
+	cc.roomMu.Lock()
+	defer cc.roomMu.Unlock()
+	if cc.activeRooms[roomID] {
+		return nil
+	}
+	queue := cc.pendingMessages[roomID]
+	if len(queue) == 0 {
+		delete(cc.pendingMessages, roomID)
+		return nil
+	}
+	cc.activeRooms[roomID] = true
+	return queue[0]
 }
 
 func (cc *CodexClient) popPendingCodex(roomID id.RoomID) *codexPendingMessage {
@@ -1834,33 +1849,27 @@ func (cc *CodexClient) popPendingCodex(roomID id.RoomID) *codexPendingMessage {
 }
 
 func (cc *CodexClient) processPendingCodex(roomID id.RoomID) {
-	// Peek — don't remove yet so the message isn't lost on transient failures.
-	cc.roomMu.Lock()
-	queue := cc.pendingMessages[roomID]
-	cc.roomMu.Unlock()
-	var pm *codexPendingMessage
-	if len(queue) > 0 {
-		pm = queue[0]
-	}
+	pm := cc.beginPendingCodex(roomID)
 	if pm == nil {
 		return
 	}
 	ctx := cc.backgroundContext(context.Background())
 	if err := cc.ensureRPC(ctx); err != nil {
 		cc.log.Warn().Err(err).Stringer("room", roomID).Msg("Pending codex message: RPC unavailable")
+		cc.releaseRoom(roomID)
 		return
 	}
 	meta := portalMeta(pm.portal)
 	if meta == nil {
 		// Bad portal — discard.
 		cc.popPendingCodex(roomID)
+		cc.releaseRoom(roomID)
+		cc.processPendingCodex(roomID)
 		return
 	}
 	if err := cc.ensureCodexThreadLoaded(ctx, pm.portal, meta); err != nil {
 		cc.log.Warn().Err(err).Stringer("room", roomID).Msg("Pending codex message: thread load failed")
-		return
-	}
-	if !cc.acquireRoom(roomID) {
+		cc.releaseRoom(roomID)
 		return
 	}
 	// Committed — now pop.

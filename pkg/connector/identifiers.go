@@ -140,7 +140,11 @@ func shouldIncludeInHistory(meta *MessageMetadata) bool {
 	if meta.Role != "user" && meta.Role != "assistant" {
 		return false
 	}
-	return meta.CanonicalSchema == "ai-sdk-ui-message-v1" && len(meta.CanonicalUIMessage) > 0
+	return len(meta.CanonicalUIMessage) > 0 ||
+		strings.TrimSpace(meta.Body) != "" ||
+		len(meta.ToolCalls) > 0 ||
+		strings.TrimSpace(meta.MediaURL) != "" ||
+		len(meta.GeneratedFiles) > 0
 }
 
 func loginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
