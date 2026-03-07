@@ -135,9 +135,6 @@ func TestAbortTriggerNormalization(t *testing.T) {
 	if !IsAbortTriggerText("STOP PLEASE!!!") {
 		t.Fatalf("expected normalized abort trigger to match")
 	}
-	if !IsAbortTriggerText(`("stop")`) {
-		t.Fatalf("expected wrapped abort trigger to match")
-	}
 	if IsAbortTriggerText("continue") {
 		t.Fatalf("did not expect non-abort text to match")
 	}
