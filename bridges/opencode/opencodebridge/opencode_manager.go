@@ -112,13 +112,14 @@ func (m *OpenCodeManager) RestoreConnections(ctx context.Context) error {
 		if cfg == nil || strings.TrimSpace(cfg.URL) == "" {
 			continue
 		}
-		if cfg.HasPassword {
+		password := strings.TrimSpace(cfg.Password)
+		if cfg.HasPassword && password == "" {
 			m.log().Warn().
 				Str("instance", cfg.ID).
-				Msg("Skipping OpenCode restore because credentials are not persisted; re-authentication is required")
+				Msg("Skipping OpenCode restore because the password is missing from persisted metadata")
 			continue
 		}
-		if _, _, err := m.Connect(ctx, cfg.URL, "", cfg.Username); err != nil {
+		if _, _, err := m.Connect(ctx, cfg.URL, password, cfg.Username); err != nil {
 			m.log().Warn().Err(err).Str("instance", cfg.ID).Msg("Failed to restore OpenCode instance")
 		}
 	}
@@ -157,6 +158,7 @@ func (m *OpenCodeManager) Connect(ctx context.Context, baseURL, password, userna
 			ID:          instanceID,
 			URL:         normalized,
 			Username:    user,
+			Password:    strings.TrimSpace(password),
 			HasPassword: strings.TrimSpace(password) != "",
 		},
 		password:       strings.TrimSpace(password),
@@ -201,6 +203,7 @@ func (m *OpenCodeManager) persistInstance(ctx context.Context, inst *openCodeIns
 		ID:          inst.cfg.ID,
 		URL:         inst.cfg.URL,
 		Username:    inst.cfg.Username,
+		Password:    strings.TrimSpace(inst.password),
 		HasPassword: inst.cfg.HasPassword,
 	}
 	if err := m.bridge.host.SaveOpenCodeInstances(ctx, meta); err != nil {

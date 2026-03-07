@@ -1363,6 +1363,7 @@ func (oc *AIClient) buildPromptForRegenerate(
 
 		// Determine whether to inject images into history (requires vision-capable model).
 		hasVision := oc.getModelCapabilitiesForMeta(meta).SupportsVision
+		historyBundles := make([][]openai.ChatCompletionMessageParamUnion, 0, len(history))
 
 		// Skip the most recent messages (last user and assistant) and build from older history
 		skippedUser := false
@@ -1392,16 +1393,14 @@ func (oc *AIClient) buildPromptForRegenerate(
 			// This loop builds newest-to-oldest, so early entries are the most recent.
 			injectImages := hasVision && includedCount < maxHistoryImageMessages
 			includedCount++
-			prompt = oc.appendHistoryMessageFromCanonical(ctx, prompt, msg, msgMeta, isSimple, injectImages)
+			bundle := oc.historyMessageBundle(ctx, msgMeta, injectImages)
+			if len(bundle) > 0 {
+				historyBundles = append(historyBundles, bundle)
+			}
 		}
 
-		// Reverse to get chronological order (skip system message at index 0 if present)
-		startIdx := 0
-		if len(prompt) > 0 && prompt[0].OfSystem != nil {
-			startIdx = 1
-		}
-		for i, j := len(prompt)-1, startIdx; i > j; i, j = i-1, j+1 {
-			prompt[i], prompt[j] = prompt[j], prompt[i]
+		for i := len(historyBundles) - 1; i >= 0; i-- {
+			prompt = append(prompt, historyBundles[i]...)
 		}
 	}
 

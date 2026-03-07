@@ -85,12 +85,17 @@ func (oc *OpenCodeClient) currentCanonicalUIMessage(state *openCodeStreamState) 
 			TurnID: state.turnID,
 			Role:   "assistant",
 			Metadata: msgconv.BuildUIMessageMetadata(msgconv.UIMessageMetadataParams{
-				TurnID:        state.turnID,
-				AgentID:       state.agentID,
-				FinishReason:  state.finishReason,
-				StartedAtMs:   state.startedAtMs,
-				CompletedAtMs: state.completedAtMs,
-				IncludeUsage:  true,
+				TurnID:           state.turnID,
+				AgentID:          state.agentID,
+				Model:            state.modelID,
+				FinishReason:     state.finishReason,
+				PromptTokens:     state.promptTokens,
+				CompletionTokens: state.completionTokens,
+				ReasoningTokens:  state.reasoningTokens,
+				TotalTokens:      state.totalTokens,
+				StartedAtMs:      state.startedAtMs,
+				CompletedAtMs:    state.completedAtMs,
+				IncludeUsage:     true,
 			}),
 		})
 	}
@@ -162,11 +167,27 @@ func (oc *OpenCodeClient) persistStreamDBMetadata(ctx context.Context, portal *b
 	if existing == nil && state.initialEventID != "" {
 		existing, err = oc.UserLogin.Bridge.DB.Message.GetPartByMXID(ctx, state.initialEventID)
 	}
-	if err != nil || existing == nil {
+	if err != nil {
+		oc.Log().Warn().
+			Err(err).
+			Str("receiver", string(receiver)).
+			Str("network_message_id", string(state.networkMessageID)).
+			Stringer("initial_event_id", state.initialEventID).
+			Msg("Failed to load OpenCode stream message for metadata update")
+		return
+	}
+	if existing == nil {
 		return
 	}
 	existing.Metadata = meta
-	_ = oc.UserLogin.Bridge.DB.Message.Update(ctx, existing)
+	if err := oc.UserLogin.Bridge.DB.Message.Update(ctx, existing); err != nil {
+		oc.Log().Warn().
+			Err(err).
+			Str("receiver", string(receiver)).
+			Str("network_message_id", string(state.networkMessageID)).
+			Stringer("initial_event_id", state.initialEventID).
+			Msg("Failed to persist OpenCode stream metadata")
+	}
 }
 
 func (oc *OpenCodeClient) queueFinalStreamEdit(ctx context.Context, portal *bridgev2.Portal, state *openCodeStreamState) {

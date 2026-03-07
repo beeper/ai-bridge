@@ -102,6 +102,7 @@ func (ol *OpenCodeLogin) SubmitUserInput(ctx context.Context, input map[string]s
 			ID:          instanceID,
 			URL:         normalizedURL,
 			Username:    username,
+			Password:    password,
 			HasPassword: password != "",
 		},
 	}

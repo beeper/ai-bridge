@@ -55,6 +55,7 @@ type OpenCodeInstance struct {
 	ID          string `json:"id,omitempty"`
 	URL         string `json:"url,omitempty"`
 	Username    string `json:"username,omitempty"`
+	Password    string `json:"password,omitempty"`
 	HasPassword bool   `json:"has_password,omitempty"`
 }
 

@@ -40,13 +40,16 @@ func (oc *AIClient) sendApprovalRequestFallbackEvent(
 	if toolName == "" {
 		toolName = "tool"
 	}
+	metadata := map[string]any{
+		"approvalId": approvalID,
+	}
+	if state != nil && strings.TrimSpace(state.turnID) != "" {
+		metadata["turn_id"] = state.turnID
+	}
 	uiMessage := map[string]any{
-		"id":   approvalID,
-		"role": "assistant",
-		"metadata": map[string]any{
-			"turn_id":    state.turnID,
-			"approvalId": approvalID,
-		},
+		"id":       approvalID,
+		"role":     "assistant",
+		"metadata": metadata,
 		"parts": []map[string]any{{
 			"type":       "dynamic-tool",
 			"toolName":   toolName,

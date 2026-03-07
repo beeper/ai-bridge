@@ -63,6 +63,9 @@ func buildTurnFinishMetadata(msg *opencode.MessageWithParts, agentID, finishReas
 		}
 		metadata["total_tokens"] = total
 	}
+	if msg == nil {
+		return metadata
+	}
 	for _, part := range msg.Parts {
 		if part.Type != "step-finish" {
 			continue

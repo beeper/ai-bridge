@@ -37,51 +37,84 @@ func (oc *AIClient) appendHistoryMessageFromCanonical(
 	_ bool,
 	injectImages bool,
 ) []openai.ChatCompletionMessageParamUnion {
-	if msgMeta == nil || len(msgMeta.CanonicalUIMessage) == 0 {
-		return prompt
+	return append(prompt, oc.historyMessageBundle(ctx, msgMeta, injectImages)...)
+}
+
+func (oc *AIClient) historyMessageBundle(
+	ctx context.Context,
+	msgMeta *MessageMetadata,
+	injectImages bool,
+) []openai.ChatCompletionMessageParamUnion {
+	if msgMeta == nil {
+		return nil
 	}
 
-	role := strings.TrimSpace(stringValue(msgMeta.CanonicalUIMessage["role"]))
-	text := canonicalUIMessageText(msgMeta.CanonicalUIMessage)
-	files := canonicalUIMessageFiles(msgMeta.CanonicalUIMessage)
+	role := strings.TrimSpace(msgMeta.Role)
+	text := msgMeta.Body
+	files := legacyUIMessageFiles(msgMeta)
+	toolCalls := legacyToolCalls(msgMeta.ToolCalls)
+	toolOutputs := legacyToolOutputs(msgMeta.ToolCalls)
+	if len(msgMeta.CanonicalUIMessage) > 0 {
+		role = strings.TrimSpace(stringValue(msgMeta.CanonicalUIMessage["role"]))
+		text = canonicalUIMessageText(msgMeta.CanonicalUIMessage)
+		files = canonicalUIMessageFiles(msgMeta.CanonicalUIMessage)
+		toolCalls = canonicalUIToolCalls(msgMeta.CanonicalUIMessage)
+		toolOutputs = canonicalUIToolOutputs(msgMeta.CanonicalUIMessage)
+	}
 
+	bundle := make([]openai.ChatCompletionMessageParamUnion, 0, 2+len(toolOutputs))
 	switch role {
 	case "assistant":
 		body := airuntime.SanitizeChatMessageForDisplay(stripThinkTags(text), false)
-		toolCalls := canonicalUIToolCalls(msgMeta.CanonicalUIMessage)
 		if assistantMsg, ok := canonicalAssistantHistoryMessage(body, toolCalls); ok {
-			prompt = append(prompt, assistantMsg)
+			bundle = append(bundle, assistantMsg)
 		}
-		for _, toolOutput := range canonicalUIToolOutputs(msgMeta.CanonicalUIMessage) {
+		for _, toolOutput := range toolOutputs {
 			if toolOutput.callID == "" || toolOutput.outputText == "" {
 				continue
 			}
-			prompt = append(prompt, openai.ToolMessage(toolOutput.outputText, toolOutput.callID))
+			bundle = append(bundle, openai.ToolMessage(toolOutput.outputText, toolOutput.callID))
 		}
 		if injectImages && len(msgMeta.GeneratedFiles) > 0 {
 			if imgParts := oc.downloadGeneratedFileImages(ctx, msgMeta.GeneratedFiles); len(imgParts) > 0 {
-				prompt = append(prompt, buildSyntheticGeneratedImagesMessage(msgMeta.GeneratedFiles, imgParts))
+				bundle = append(bundle, buildSyntheticGeneratedImagesMessage(msgMeta.GeneratedFiles, imgParts))
 			}
 		}
 	case "user":
 		body := airuntime.SanitizeChatMessageForDisplay(text, true)
 		if userMsg, ok := oc.canonicalUserHistoryMessage(ctx, body, files, injectImages); ok {
-			prompt = append(prompt, userMsg)
-			return prompt
+			return append(bundle, userMsg)
 		}
 		if body != "" {
-			prompt = append(prompt, openai.UserMessage(body))
+			bundle = append(bundle, openai.UserMessage(body))
 		}
 	}
-	return prompt
+	return bundle
+}
+
+func canonicalUIParts(uiMessage map[string]any) []map[string]any {
+	switch parts := uiMessage["parts"].(type) {
+	case []map[string]any:
+		return parts
+	case []any:
+		out := make([]map[string]any, 0, len(parts))
+		for _, raw := range parts {
+			part, ok := raw.(map[string]any)
+			if ok {
+				out = append(out, part)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func canonicalUIMessageText(uiMessage map[string]any) string {
-	parts, _ := uiMessage["parts"].([]any)
+	parts := canonicalUIParts(uiMessage)
 	texts := make([]string, 0, len(parts))
-	for _, raw := range parts {
-		part, ok := raw.(map[string]any)
-		if !ok || strings.TrimSpace(stringValue(part["type"])) != "text" {
+	for _, part := range parts {
+		if strings.TrimSpace(stringValue(part["type"])) != "text" {
 			continue
 		}
 		if text := stringValue(part["text"]); text != "" {
@@ -92,11 +125,10 @@ func canonicalUIMessageText(uiMessage map[string]any) string {
 }
 
 func canonicalUIMessageFiles(uiMessage map[string]any) []canonicalFilePart {
-	parts, _ := uiMessage["parts"].([]any)
+	parts := canonicalUIParts(uiMessage)
 	files := make([]canonicalFilePart, 0, len(parts))
-	for _, raw := range parts {
-		part, ok := raw.(map[string]any)
-		if !ok || strings.TrimSpace(stringValue(part["type"])) != "file" {
+	for _, part := range parts {
+		if strings.TrimSpace(stringValue(part["type"])) != "file" {
 			continue
 		}
 		url := strings.TrimSpace(stringValue(part["url"]))
@@ -113,13 +145,9 @@ func canonicalUIMessageFiles(uiMessage map[string]any) []canonicalFilePart {
 }
 
 func canonicalUIToolCalls(uiMessage map[string]any) []canonicalToolCall {
-	parts, _ := uiMessage["parts"].([]any)
+	parts := canonicalUIParts(uiMessage)
 	toolCalls := make([]canonicalToolCall, 0, len(parts))
-	for _, raw := range parts {
-		part, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
+	for _, part := range parts {
 		partType := strings.TrimSpace(stringValue(part["type"]))
 		if partType != "dynamic-tool" && !strings.HasPrefix(partType, "tool-") {
 			continue
@@ -145,11 +173,10 @@ func canonicalUIToolCalls(uiMessage map[string]any) []canonicalToolCall {
 }
 
 func canonicalUIToolOutputs(uiMessage map[string]any) []canonicalToolOutput {
-	parts, _ := uiMessage["parts"].([]any)
+	parts := canonicalUIParts(uiMessage)
 	outputs := make([]canonicalToolOutput, 0, len(parts))
-	for _, raw := range parts {
-		part, ok := raw.(map[string]any)
-		if !ok || strings.TrimSpace(stringValue(part["type"])) != "dynamic-tool" {
+	for _, part := range parts {
+		if strings.TrimSpace(stringValue(part["type"])) != "dynamic-tool" {
 			continue
 		}
 		callID := strings.TrimSpace(stringValue(part["toolCallId"]))
@@ -171,6 +198,58 @@ func canonicalUIToolOutputs(uiMessage map[string]any) []canonicalToolOutput {
 		}
 	}
 	return outputs
+}
+
+func legacyUIMessageFiles(msgMeta *MessageMetadata) []canonicalFilePart {
+	if msgMeta == nil || strings.TrimSpace(msgMeta.MediaURL) == "" {
+		return nil
+	}
+	return []canonicalFilePart{{
+		URL:       strings.TrimSpace(msgMeta.MediaURL),
+		MediaType: strings.TrimSpace(msgMeta.MimeType),
+	}}
+}
+
+func legacyToolCalls(toolCalls []ToolCallMetadata) []canonicalToolCall {
+	if len(toolCalls) == 0 {
+		return nil
+	}
+	out := make([]canonicalToolCall, 0, len(toolCalls))
+	for _, toolCall := range toolCalls {
+		callID := strings.TrimSpace(toolCall.CallID)
+		toolName := strings.TrimSpace(toolCall.ToolName)
+		if callID == "" || toolName == "" {
+			continue
+		}
+		out = append(out, canonicalToolCall{
+			callID:    callID,
+			toolName:  toolName,
+			arguments: canonicalToolArguments(toolCall.Input),
+		})
+	}
+	return out
+}
+
+func legacyToolOutputs(toolCalls []ToolCallMetadata) []canonicalToolOutput {
+	if len(toolCalls) == 0 {
+		return nil
+	}
+	out := make([]canonicalToolOutput, 0, len(toolCalls))
+	for _, toolCall := range toolCalls {
+		callID := strings.TrimSpace(toolCall.CallID)
+		if callID == "" {
+			continue
+		}
+		switch {
+		case len(toolCall.Output) > 0:
+			if text := formatCanonicalValue(toolCall.Output); text != "" {
+				out = append(out, canonicalToolOutput{callID: callID, outputText: text})
+			}
+		case strings.TrimSpace(toolCall.ErrorMessage) != "":
+			out = append(out, canonicalToolOutput{callID: callID, outputText: strings.TrimSpace(toolCall.ErrorMessage)})
+		}
+	}
+	return out
 }
 
 func canonicalAssistantHistoryMessage(text string, toolCalls []canonicalToolCall) (openai.ChatCompletionMessageParamUnion, bool) {

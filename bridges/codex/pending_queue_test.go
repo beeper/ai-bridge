@@ -29,3 +29,24 @@ func TestCodexPendingQueueFIFO(t *testing.T) {
 		t.Fatalf("expected queue to be empty, got %#v", got)
 	}
 }
+
+func TestCodexAcquireRoomIfQueueEmpty(t *testing.T) {
+	roomID := id.RoomID("!room:example.com")
+	cc := &CodexClient{
+		activeRooms:     make(map[id.RoomID]bool),
+		pendingMessages: make(map[id.RoomID]codexPendingQueue),
+	}
+
+	cc.queuePendingCodex(roomID, &codexPendingMessage{body: "queued"})
+	if cc.acquireRoomIfQueueEmpty(roomID) {
+		t.Fatalf("expected queued room to remain unavailable for immediate dispatch")
+	}
+
+	if got := cc.beginPendingCodex(roomID); got == nil || got.body != "queued" {
+		t.Fatalf("expected beginPendingCodex to reserve queued head, got %#v", got)
+	}
+	if !cc.activeRooms[roomID] {
+		t.Fatalf("expected beginPendingCodex to reserve the room")
+	}
+	cc.releaseRoom(roomID)
+}
