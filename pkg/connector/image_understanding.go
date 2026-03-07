@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -198,50 +197,70 @@ func (oc *AIClient) resolveAudioModelForInput(ctx context.Context, meta *PortalM
 	)
 }
 
-func (oc *AIClient) analyzeImageWithModel(
+// analyzeMediaWithModel is the shared core for image and audio analysis via an LLM.
+func (oc *AIClient) analyzeMediaWithModel(
 	ctx context.Context,
+	capability MediaUnderstandingCapability,
 	modelID string,
-	imageURL string,
+	mediaURL string,
 	mimeType string,
 	encryptedFile *event.EncryptedFileInfo,
 	prompt string,
 ) (string, error) {
 	if strings.TrimSpace(modelID) == "" {
-		return "", errors.New("missing model for image analysis")
+		return "", fmt.Errorf("missing model for %s analysis", capability)
 	}
 	if strings.TrimSpace(prompt) == "" {
-		prompt = defaultPromptByCapability[MediaCapabilityImage]
+		prompt = defaultPromptByCapability[capability]
 	}
 
 	modelIDForAPI := oc.modelIDForAPI(modelID)
-	imageRef := mediaSourceLabel(imageURL, encryptedFile)
-	b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, imageURL, encryptedFile, 20, mimeType)
+	ref := mediaSourceLabel(mediaURL, encryptedFile)
+
+	maxSizeMB := 20
+	defaultMime := "image/jpeg"
+	if capability == MediaCapabilityAudio {
+		maxSizeMB = 25
+		defaultMime = ""
+	}
+
+	b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, mediaURL, encryptedFile, maxSizeMB, mimeType)
 	if err != nil {
-		return "", fmt.Errorf("failed to download image %s for model %s: %w", imageRef, modelIDForAPI, err)
+		return "", fmt.Errorf("failed to download %s %s for model %s: %w", capability, ref, modelIDForAPI, err)
 	}
 	actualMimeType = strings.TrimSpace(actualMimeType)
 	if actualMimeType == "" {
 		actualMimeType = strings.TrimSpace(mimeType)
 	}
-	if actualMimeType == "" {
-		actualMimeType = "image/jpeg"
+	if actualMimeType == "" && defaultMime != "" {
+		actualMimeType = defaultMime
 	}
 
-	dataURL := buildDataURL(actualMimeType, b64Data)
+	var mediaPart ContentPart
+	if capability == MediaCapabilityAudio {
+		format := getAudioFormat(actualMimeType)
+		if format == "" {
+			format = "mp3"
+		}
+		mediaPart = ContentPart{
+			Type:        ContentTypeAudio,
+			AudioB64:    b64Data,
+			AudioFormat: format,
+		}
+	} else {
+		mediaPart = ContentPart{
+			Type:     ContentTypeImage,
+			ImageURL: buildDataURL(actualMimeType, b64Data),
+			MimeType: actualMimeType,
+		}
+	}
 
 	messages := []UnifiedMessage{
 		{
 			Role: RoleUser,
 			Content: []ContentPart{
-				{
-					Type:     ContentTypeImage,
-					ImageURL: dataURL,
-					MimeType: actualMimeType,
-				},
-				{
-					Type: ContentTypeText,
-					Text: prompt,
-				},
+				mediaPart,
+				{Type: ContentTypeText, Text: prompt},
 			},
 		},
 	}
@@ -252,10 +271,21 @@ func (oc *AIClient) analyzeImageWithModel(
 		MaxCompletionTokens: defaultImageUnderstandingLimit,
 	})
 	if err != nil {
-		return "", fmt.Errorf("image analysis failed for model %s (image %s): %w", modelIDForAPI, imageRef, err)
+		return "", fmt.Errorf("%s analysis failed for model %s (%s): %w", capability, modelIDForAPI, ref, err)
 	}
 
 	return strings.TrimSpace(resp.Content), nil
+}
+
+func (oc *AIClient) analyzeImageWithModel(
+	ctx context.Context,
+	modelID string,
+	imageURL string,
+	mimeType string,
+	encryptedFile *event.EncryptedFileInfo,
+	prompt string,
+) (string, error) {
+	return oc.analyzeMediaWithModel(ctx, MediaCapabilityImage, modelID, imageURL, mimeType, encryptedFile, prompt)
 }
 
 func (oc *AIClient) analyzeAudioWithModel(
@@ -266,55 +296,7 @@ func (oc *AIClient) analyzeAudioWithModel(
 	encryptedFile *event.EncryptedFileInfo,
 	prompt string,
 ) (string, error) {
-	if strings.TrimSpace(modelID) == "" {
-		return "", errors.New("missing model for audio analysis")
-	}
-	if strings.TrimSpace(prompt) == "" {
-		prompt = defaultPromptByCapability[MediaCapabilityAudio]
-	}
-
-	modelIDForAPI := oc.modelIDForAPI(modelID)
-	audioRef := mediaSourceLabel(audioURL, encryptedFile)
-	b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, audioURL, encryptedFile, 25, mimeType)
-	if err != nil {
-		return "", fmt.Errorf("failed to download audio %s for model %s: %w", audioRef, modelIDForAPI, err)
-	}
-	actualMimeType = strings.TrimSpace(actualMimeType)
-	if actualMimeType == "" {
-		actualMimeType = strings.TrimSpace(mimeType)
-	}
-	format := getAudioFormat(actualMimeType)
-	if format == "" {
-		format = "mp3"
-	}
-
-	messages := []UnifiedMessage{
-		{
-			Role: RoleUser,
-			Content: []ContentPart{
-				{
-					Type:        ContentTypeAudio,
-					AudioB64:    b64Data,
-					AudioFormat: format,
-				},
-				{
-					Type: ContentTypeText,
-					Text: prompt,
-				},
-			},
-		},
-	}
-
-	resp, err := oc.provider.Generate(ctx, GenerateParams{
-		Model:               modelIDForAPI,
-		Messages:            messages,
-		MaxCompletionTokens: defaultImageUnderstandingLimit,
-	})
-	if err != nil {
-		return "", fmt.Errorf("audio analysis failed for model %s (audio %s): %w", modelIDForAPI, audioRef, err)
-	}
-
-	return strings.TrimSpace(resp.Content), nil
+	return oc.analyzeMediaWithModel(ctx, MediaCapabilityAudio, modelID, audioURL, mimeType, encryptedFile, prompt)
 }
 
 func mediaSourceLabel(mediaURL string, encryptedFile *event.EncryptedFileInfo) string {
@@ -352,24 +334,21 @@ func buildAudioUnderstandingPrompt(caption string, hasUserCaption bool) string {
 	return buildMediaPromptFromCaption(caption, hasUserCaption, defaultPromptByCapability[MediaCapabilityAudio])
 }
 
-func buildImageUnderstandingMessage(caption string, hasUserCaption bool, description string) string {
-	if strings.TrimSpace(description) == "" {
+func buildUnderstandingMessage(title, kind, caption string, hasUserCaption bool, text string) string {
+	if strings.TrimSpace(text) == "" {
 		return ""
 	}
 	userText := ""
 	if hasUserCaption {
 		userText = strings.TrimSpace(caption)
 	}
-	return formatMediaSection("Image", "Description", strings.TrimSpace(description), userText)
+	return formatMediaSection(title, kind, strings.TrimSpace(text), userText)
+}
+
+func buildImageUnderstandingMessage(caption string, hasUserCaption bool, description string) string {
+	return buildUnderstandingMessage("Image", "Description", caption, hasUserCaption, description)
 }
 
 func buildAudioUnderstandingMessage(caption string, hasUserCaption bool, transcript string) string {
-	if strings.TrimSpace(transcript) == "" {
-		return ""
-	}
-	userText := ""
-	if hasUserCaption {
-		userText = strings.TrimSpace(caption)
-	}
-	return formatMediaSection("Audio", "Transcript", strings.TrimSpace(transcript), userText)
+	return buildUnderstandingMessage("Audio", "Transcript", caption, hasUserCaption, transcript)
 }

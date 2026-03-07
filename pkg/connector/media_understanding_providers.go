@@ -61,7 +61,6 @@ func readErrorResponse(res *http.Response) string {
 	if res == nil || res.Body == nil {
 		return ""
 	}
-	defer res.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(res.Body, 4096))
 	if err != nil {
 		return ""
@@ -145,10 +144,10 @@ func transcribeOpenAICompatibleAudio(ctx context.Context, params mediaAudioReque
 	writer := multipart.NewWriter(body)
 	part, err := writer.CreateFormFile("file", params.FileName)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("creating multipart form: %w", err)
 	}
 	if _, err := part.Write(params.Data); err != nil {
-		return "", err
+		return "", fmt.Errorf("writing audio data: %w", err)
 	}
 	_ = writer.WriteField("model", model)
 	if params.Language != "" {
@@ -174,8 +173,9 @@ func transcribeOpenAICompatibleAudio(ctx context.Context, params mediaAudioReque
 	client := &http.Client{Timeout: params.Timeout}
 	res, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("audio transcription request failed: %w", err)
 	}
+	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		detail := readErrorResponse(res)
 		if detail != "" {
@@ -183,12 +183,11 @@ func transcribeOpenAICompatibleAudio(ctx context.Context, params mediaAudioReque
 		}
 		return "", fmt.Errorf("audio transcription failed (HTTP %d)", res.StatusCode)
 	}
-	defer res.Body.Close()
 	var payload struct {
 		Text string `json:"text"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-		return "", err
+		return "", fmt.Errorf("decoding transcription response: %w", err)
 	}
 	text := strings.TrimSpace(payload.Text)
 	if text == "" {
@@ -243,8 +242,9 @@ func transcribeDeepgramAudio(ctx context.Context, params mediaAudioRequest, quer
 	client := &http.Client{Timeout: params.Timeout}
 	res, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("deepgram transcription request failed: %w", err)
 	}
+	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		detail := readErrorResponse(res)
 		if detail != "" {
@@ -252,7 +252,6 @@ func transcribeDeepgramAudio(ctx context.Context, params mediaAudioRequest, quer
 		}
 		return "", fmt.Errorf("audio transcription failed (HTTP %d)", res.StatusCode)
 	}
-	defer res.Body.Close()
 	var payload struct {
 		Results struct {
 			Channels []struct {
@@ -263,7 +262,7 @@ func transcribeDeepgramAudio(ctx context.Context, params mediaAudioRequest, quer
 		} `json:"results"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-		return "", err
+		return "", fmt.Errorf("decoding deepgram response: %w", err)
 	}
 	if len(payload.Results.Channels) == 0 || len(payload.Results.Channels[0].Alternatives) == 0 {
 		return "", errors.New("audio transcription response missing transcript")
@@ -313,8 +312,9 @@ func callGeminiGenerateContent(ctx context.Context, baseURL, model, apiKey strin
 	client := &http.Client{Timeout: timeout}
 	res, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s request failed: %w", errorLabel, err)
 	}
+	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		detail := readErrorResponse(res)
 		if detail != "" {
@@ -322,7 +322,6 @@ func callGeminiGenerateContent(ctx context.Context, baseURL, model, apiKey strin
 		}
 		return "", fmt.Errorf("%s failed (HTTP %d)", errorLabel, res.StatusCode)
 	}
-	defer res.Body.Close()
 	var payloadResp struct {
 		Candidates []struct {
 			Content struct {
@@ -333,7 +332,7 @@ func callGeminiGenerateContent(ctx context.Context, baseURL, model, apiKey strin
 		} `json:"candidates"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&payloadResp); err != nil {
-		return "", err
+		return "", fmt.Errorf("decoding %s response: %w", errorLabel, err)
 	}
 	if len(payloadResp.Candidates) == 0 {
 		return "", fmt.Errorf("%s response missing text", errorLabel)
@@ -389,10 +388,6 @@ type mediaRequestBase struct {
 	Timeout  time.Duration
 }
 
-func (r mediaRequestBase) Base64Data() string {
-	return base64.StdEncoding.EncodeToString(r.Data)
-}
-
 func (r mediaRequestBase) MimeTypeOrDefault(fallback string) string {
 	if trimmed := strings.TrimSpace(r.MimeType); trimmed != "" {
 		return trimmed
@@ -407,8 +402,6 @@ type mediaAudioRequest struct {
 	FileName string
 }
 
-type mediaVideoRequest = mediaRequestBase
-type mediaImageRequest = mediaRequestBase
 
 func resolveMediaFileName(fallback string, msgType string, mediaURL string) string {
 	base := strings.TrimSpace(fallback)
@@ -416,16 +409,8 @@ func resolveMediaFileName(fallback string, msgType string, mediaURL string) stri
 		return base
 	}
 	if mediaURL != "" {
-		if parsed, err := url.Parse(mediaURL); err == nil {
-			if parsed.Path != "" {
-				if name := filepath.Base(parsed.Path); name != "." && name != "/" {
-					return name
-				}
-			}
-		}
-		if strings.HasPrefix(mediaURL, "file://") {
-			path := strings.TrimPrefix(mediaURL, "file://")
-			if name := filepath.Base(path); name != "." && name != "/" {
+		if parsed, err := url.Parse(mediaURL); err == nil && parsed.Path != "" {
+			if name := filepath.Base(parsed.Path); name != "." && name != "/" {
 				return name
 			}
 		}

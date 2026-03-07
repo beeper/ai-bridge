@@ -57,8 +57,7 @@ func (oc *AIClient) downloadMediaBytes(
 		if mimeType == "" {
 			mimeType = http.DetectContentType(data)
 		}
-		mimeType = normalizeFallbackMime(mimeType, fallbackMime)
-		return data, mimeType, nil
+		return data, normalizeFallbackMime(mimeType, fallbackMime), nil
 	}
 
 	if strings.HasPrefix(downloadURL, "mxc://") {
@@ -72,13 +71,12 @@ func (oc *AIClient) downloadMediaBytes(
 		if maxBytes > 0 && len(data) > maxBytes {
 			return nil, "", fmt.Errorf("media too large (max %d bytes)", maxBytes)
 		}
-		mimeType := normalizeFallbackMime(http.DetectContentType(data), fallbackMime)
-		return data, mimeType, nil
+		return data, normalizeFallbackMime(http.DetectContentType(data), fallbackMime), nil
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("failed to create download request: %w", err)
 	}
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
@@ -108,8 +106,7 @@ func (oc *AIClient) downloadMediaBytes(
 	if mimeType == "" {
 		mimeType = http.DetectContentType(data)
 	}
-	mimeType = normalizeFallbackMime(mimeType, fallbackMime)
-	return data, mimeType, nil
+	return data, normalizeFallbackMime(mimeType, fallbackMime), nil
 }
 
 func normalizeFallbackMime(actual string, fallback string) string {
@@ -121,4 +118,26 @@ func normalizeFallbackMime(actual string, fallback string) string {
 		actual = "application/octet-stream"
 	}
 	return actual
+}
+
+// downloadMediaBase64 downloads media and returns base64-encoded data with MIME type.
+func (oc *AIClient) downloadMediaBase64(
+	ctx context.Context,
+	mediaURL string,
+	encryptedFile *event.EncryptedFileInfo,
+	maxSizeMB int,
+	fallbackMime string,
+) (string, string, error) {
+	b64Data, actualMimeType, err := oc.downloadAndEncodeMedia(ctx, mediaURL, encryptedFile, maxSizeMB)
+	if err != nil {
+		return "", "", err
+	}
+	if actualMimeType == "" || actualMimeType == "application/octet-stream" {
+		actualMimeType = fallbackMime
+	}
+	return b64Data, actualMimeType, nil
+}
+
+func buildDataURL(mimeType, b64Data string) string {
+	return "data:" + mimeType + ";base64," + b64Data
 }
