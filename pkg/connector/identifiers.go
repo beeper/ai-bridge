@@ -126,21 +126,13 @@ func messageMeta(msg *database.Message) *MessageMetadata {
 	return msg.Metadata.(*MessageMetadata)
 }
 
-// Filters out non-conversation messages and messages explicitly excluded
-// (e.g., welcome messages).
+// shouldIncludeInHistory filters out non-conversation messages and messages
+// explicitly excluded (e.g., welcome messages).
 func shouldIncludeInHistory(meta *MessageMetadata) bool {
-	if meta == nil || meta.Body == "" {
-		return false
-	}
-	// Skip messages explicitly excluded (welcome messages, etc.)
-	if meta.ExcludeFromHistory {
-		return false
-	}
-	// Only include user and assistant messages
-	if meta.Role != "user" && meta.Role != "assistant" {
-		return false
-	}
-	return true
+	return meta != nil &&
+		meta.Body != "" &&
+		!meta.ExcludeFromHistory &&
+		(meta.Role == "user" || meta.Role == "assistant")
 }
 
 func loginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {

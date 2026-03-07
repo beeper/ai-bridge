@@ -1388,7 +1388,7 @@ func (oc *AIClient) buildPromptForRegenerate(
 				continue
 			}
 
-			body := cleanHistoryBody(msgMeta.Body, isSimple, msg.MXID)
+			body := cleanHistoryBody(msgMeta.Body, isSimple)
 
 			// Only inject images for recent messages and vision-capable models.
 			// This loop builds newest-to-oldest, so early entries are the most recent.

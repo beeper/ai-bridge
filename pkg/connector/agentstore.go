@@ -32,9 +32,7 @@ func NewAgentStoreAdapter(client *AIClient) *AgentStoreAdapter {
 
 // LoadAgents implements agents.AgentStore.
 // It loads agents from presets and metadata-backed custom agents.
-func (s *AgentStoreAdapter) LoadAgents(ctx context.Context) (map[string]*agents.AgentDefinition, error) {
-	_ = ctx
-	// Start with preset agents
+func (s *AgentStoreAdapter) LoadAgents(_ context.Context) (map[string]*agents.AgentDefinition, error) {
 	result := make(map[string]*agents.AgentDefinition)
 
 	// Resolve login metadata for provider gating

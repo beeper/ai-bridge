@@ -69,13 +69,11 @@ const (
 	modelValidationTimeout = 5 * time.Second
 )
 
-func aiCapID() string {
-	return "com.beeper.ai.capabilities.2026_02_05"
-}
+const aiCapID = "com.beeper.ai.capabilities.2026_02_05"
 
 // aiBaseCaps defines the base capabilities for AI chat rooms
 var aiBaseCaps = &event.RoomFeatures{
-	ID: aiCapID(),
+	ID: aiCapID,
 	Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
 		event.FmtBold:          event.CapLevelFullySupported,
 		event.FmtItalic:        event.CapLevelFullySupported,
@@ -160,9 +158,9 @@ func buildCapabilityID(caps ModelCapabilities, opts capabilityIDOptions) string 
 	}
 
 	if len(suffixes) == 0 {
-		return aiCapID()
+		return aiCapID
 	}
-	return aiCapID() + "+" + strings.Join(suffixes, "+")
+	return aiCapID + "+" + strings.Join(suffixes, "+")
 }
 
 // visionFileFeatures returns FileFeatures for vision-capable models
@@ -2031,7 +2029,7 @@ func (oc *AIClient) buildBasePrompt(
 			}
 			// Normalize historical body content for replay.
 			body := sanitizeHistoryImages(msgMeta.Body)
-			body = cleanHistoryBody(body, isSimple, history[i].MXID)
+			body = cleanHistoryBody(body, isSimple)
 
 			// Only inject images for recent messages and vision-capable models.
 			injectImages := hasVision && i < maxHistoryImageMessages
@@ -2411,7 +2409,7 @@ func (oc *AIClient) buildPromptUpToMessage(
 			// Stop after adding the target message
 			if msg.ID == targetMessageID {
 				// Use the new body for the edited message
-				body := cleanHistoryBody(newBody, isSimple, msg.MXID)
+				body := cleanHistoryBody(newBody, isSimple)
 				prompt = append(prompt, openai.UserMessage(body))
 				break
 			}
@@ -2425,7 +2423,7 @@ func (oc *AIClient) buildPromptUpToMessage(
 			}
 
 			// Skip assistant messages that came after the target (we're going backwards)
-			body := cleanHistoryBody(msgMeta.Body, isSimple, msg.MXID)
+			body := cleanHistoryBody(msgMeta.Body, isSimple)
 
 			// Only inject images for recent messages and vision-capable models.
 			injectImages := hasVision && i < maxHistoryImageMessages
