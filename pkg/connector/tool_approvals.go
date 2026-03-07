@@ -12,6 +12,7 @@ import (
 
 	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
 	airuntime "github.com/beeper/ai-bridge/pkg/runtime"
+	"github.com/beeper/ai-bridge/pkg/shared/streamui"
 )
 
 type ToolApprovalKind string
@@ -256,6 +257,7 @@ func (oc *AIClient) isBuiltinToolDenied(
 			decision = airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalTimedOut, Reason: "timeout"}
 		}
 	}
+	streamui.RecordApprovalResponse(&state.ui, approvalID, tool.callID, approvalAllowed(decision), decision.Reason)
 	if !approvalAllowed(decision) {
 		oc.uiEmitter(state).EmitUIToolOutputDenied(ctx, portal, tool.callID)
 		return true

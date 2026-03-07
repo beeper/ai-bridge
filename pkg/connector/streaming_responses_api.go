@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	airuntime "github.com/beeper/ai-bridge/pkg/runtime"
+	"github.com/beeper/ai-bridge/pkg/shared/streamui"
 )
 
 // responseStreamContext holds loop-invariant parameters for processing a Responses API
@@ -500,8 +502,8 @@ func (oc *AIClient) streamingResponse(
 			Str("previous_response_id", state.responseID).
 			Msg("Continuing response with pending tool actions")
 
-		pendingOutputs := append([]functionCallOutput(nil), state.pendingFunctionOutputs...)
-		pendingApprovals := append([]mcpApprovalRequest(nil), state.pendingMcpApprovals...)
+		pendingOutputs := slices.Clone(state.pendingFunctionOutputs)
+		pendingApprovals := slices.Clone(state.pendingMcpApprovals)
 
 		approvalInputs := make([]responses.ResponseInputItemUnionParam, 0, len(pendingApprovals))
 		for _, approval := range pendingApprovals {
@@ -515,6 +517,7 @@ func (oc *AIClient) streamingResponse(
 				}
 			}
 			approved := approvalAllowed(decision)
+			streamui.RecordApprovalResponse(&state.ui, approval.approvalID, approval.toolCallID, approved, decision.Reason)
 			item := responses.ResponseInputItemParamOfMcpApprovalResponse(approval.approvalID, approved)
 			if decision.Reason != "" && item.OfMcpApprovalResponse != nil {
 				item.OfMcpApprovalResponse.Reason = param.NewOpt(decision.Reason)

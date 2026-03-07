@@ -4,6 +4,7 @@ import (
 	"reflect"
 
 	"maunium.net/go/mautrix/event"
+	_ "maunium.net/go/mautrix/event/cmdschema"
 
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 	"github.com/beeper/ai-bridge/pkg/matrixevents"
@@ -162,7 +163,7 @@ const (
 	BeeperAIKey = matrixevents.BeeperAIKey
 )
 
-// CommandDescriptionEventType is the state event type for com.beeper.command_description.
+// CommandDescriptionEventType is the state event type for MSC4391 command descriptions.
 var CommandDescriptionEventType = matrixevents.CommandDescriptionEventType
 
 // ModelInfo describes a single AI model's capabilities

@@ -35,6 +35,8 @@ import (
 
 var _ bridgev2.NetworkAPI = (*CodexClient)(nil)
 var _ bridgev2.DeleteChatHandlingNetworkAPI = (*CodexClient)(nil)
+var _ bridgev2.IdentifierResolvingNetworkAPI = (*CodexClient)(nil)
+var _ bridgev2.ContactListingNetworkAPI = (*CodexClient)(nil)
 
 const codexGhostID = networkid.UserID("codex")
 
@@ -62,6 +64,8 @@ type codexPendingMessage struct {
 	meta   *PortalMetadata
 	body   string
 }
+
+type codexPendingQueue []*codexPendingMessage
 
 type CodexClient struct {
 	UserLogin *bridgev2.UserLogin
@@ -96,7 +100,7 @@ type CodexClient struct {
 
 	roomMu          sync.Mutex
 	activeRooms     map[id.RoomID]bool
-	pendingMessages map[id.RoomID]*codexPendingMessage
+	pendingMessages map[id.RoomID]codexPendingQueue
 
 	streamFallbackToDebounced atomic.Bool
 }
@@ -124,7 +128,7 @@ func newCodexClient(login *bridgev2.UserLogin, connector *CodexConnector) (*Code
 		activeTurns:     make(map[string]*codexActiveTurn),
 		turnSubs:        make(map[string]chan codexNotif),
 		activeRooms:     make(map[id.RoomID]bool),
-		pendingMessages: make(map[id.RoomID]*codexPendingMessage),
+		pendingMessages: make(map[id.RoomID]codexPendingQueue),
 	}
 	cc.startDispatching = sync.OnceFunc(func() {
 		go cc.dispatchNotifications()
@@ -210,7 +214,7 @@ func (cc *CodexClient) Disconnect() {
 
 	cc.roomMu.Lock()
 	cc.activeRooms = make(map[id.RoomID]bool)
-	cc.pendingMessages = make(map[id.RoomID]*codexPendingMessage)
+	cc.pendingMessages = make(map[id.RoomID]codexPendingQueue)
 	cc.roomMu.Unlock()
 }
 
@@ -345,16 +349,83 @@ func (cc *CodexClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal)
 
 func (cc *CodexClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	if ghost == nil {
-		return &bridgev2.UserInfo{Name: ptr.Ptr("Codex")}, nil
+		return defaultCodexUserInfo(), nil
 	}
 	if ghost.ID == codexGhostID {
-		return &bridgev2.UserInfo{
-			Name:        ptr.Ptr("Codex"),
-			IsBot:       ptr.Ptr(true),
-			Identifiers: []string{"codex"},
-		}, nil
+		return defaultCodexUserInfo(), nil
 	}
-	return &bridgev2.UserInfo{Name: ptr.Ptr("Codex")}, nil
+	return defaultCodexUserInfo(), nil
+}
+
+func defaultCodexUserInfo() *bridgev2.UserInfo {
+	return &bridgev2.UserInfo{
+		Name:        ptr.Ptr("Codex"),
+		IsBot:       ptr.Ptr(true),
+		Identifiers: []string{"codex"},
+	}
+}
+
+func (cc *CodexClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
+	if cc == nil || cc.UserLogin == nil || cc.UserLogin.Bridge == nil {
+		return nil, errors.New("login unavailable")
+	}
+	if !isCodexIdentifier(identifier) {
+		return nil, fmt.Errorf("unknown identifier: %s", identifier)
+	}
+
+	ghost, err := cc.UserLogin.Bridge.GetGhostByID(ctx, codexGhostID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Codex ghost: %w", err)
+	}
+
+	var chat *bridgev2.CreateChatResponse
+	if createChat {
+		if err := cc.ensureDefaultCodexChat(ctx); err != nil {
+			return nil, fmt.Errorf("failed to ensure Codex chat: %w", err)
+		}
+		portal, err := cc.UserLogin.Bridge.GetPortalByKey(ctx, defaultCodexChatPortalKey(cc.UserLogin.ID))
+		if err != nil {
+			return nil, fmt.Errorf("failed to load Codex chat: %w", err)
+		}
+		if portal == nil {
+			return nil, errors.New("codex chat unavailable")
+		}
+		chatInfo := cc.composeCodexChatInfo(codexPortalTitle(portal))
+		chat = &bridgev2.CreateChatResponse{
+			PortalKey:  portal.PortalKey,
+			PortalInfo: chatInfo,
+			Portal:     portal,
+		}
+	}
+
+	return &bridgev2.ResolveIdentifierResponse{
+		UserID:   codexGhostID,
+		UserInfo: defaultCodexUserInfo(),
+		Ghost:    ghost,
+		Chat:     chat,
+	}, nil
+}
+
+func (cc *CodexClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
+	resp, err := cc.ResolveIdentifier(ctx, "codex", false)
+	if err != nil {
+		return nil, err
+	}
+	return []*bridgev2.ResolveIdentifierResponse{resp}, nil
+}
+
+func codexPortalTitle(portal *bridgev2.Portal) string {
+	if portal == nil {
+		return "Codex"
+	}
+	meta := portalMeta(portal)
+	if meta != nil && strings.TrimSpace(meta.Title) != "" {
+		return strings.TrimSpace(meta.Title)
+	}
+	if strings.TrimSpace(portal.Name) != "" {
+		return strings.TrimSpace(portal.Name)
+	}
+	return "Codex"
 }
 
 func (cc *CodexClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
@@ -453,7 +524,7 @@ func (cc *CodexClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Ma
 		cc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to insert user message")
 	}
 
-	if !cc.acquireRoom(roomID) {
+	if !cc.acquireRoomIfQueueEmpty(roomID) {
 		cc.sendPendingStatus(ctx, portal, msg.Event, "Queued — waiting for current turn to finish...")
 		cc.queuePendingCodex(roomID, &codexPendingMessage{
 			event:  msg.Event,
@@ -1630,6 +1701,79 @@ func (cc *CodexClient) sendSystemNotice(ctx context.Context, portal *bridgev2.Po
 	cc.sendViaPortal(sendCtx, portal, converted, "")
 }
 
+func (cc *CodexClient) sendApprovalRequestFallbackEvent(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	approvalID string,
+	toolCallID string,
+	toolName string,
+) {
+	if portal == nil || portal.MXID == "" || state == nil {
+		return
+	}
+	approvalID = strings.TrimSpace(approvalID)
+	toolCallID = strings.TrimSpace(toolCallID)
+	toolName = strings.TrimSpace(toolName)
+	if approvalID == "" || toolCallID == "" {
+		return
+	}
+	if toolName == "" {
+		toolName = "tool"
+	}
+
+	uiMessage := map[string]any{
+		"id":   approvalID,
+		"role": "assistant",
+		"metadata": map[string]any{
+			"turn_id":    state.turnID,
+			"approvalId": approvalID,
+		},
+		"parts": []map[string]any{{
+			"type":       "dynamic-tool",
+			"toolName":   toolName,
+			"toolCallId": toolCallID,
+			"state":      "approval-requested",
+			"approval": map[string]any{
+				"id": approvalID,
+			},
+		}},
+	}
+	raw := map[string]any{
+		"msgtype":                event.MsgNotice,
+		"body":                   "Tool approval required",
+		"m.mentions":             map[string]any{},
+		matrixevents.BeeperAIKey: uiMessage,
+	}
+	if state.initialEventID != "" {
+		raw["m.relates_to"] = map[string]any{
+			"m.in_reply_to": map[string]any{
+				"event_id": state.initialEventID.String(),
+			},
+		}
+	}
+	converted := &bridgev2.ConvertedMessage{
+		Parts: []*bridgev2.ConvertedMessagePart{{
+			ID:      networkid.PartID("0"),
+			Type:    event.EventMessage,
+			Content: &event.MessageEventContent{MsgType: event.MsgNotice, Body: "Tool approval required"},
+			Extra:   raw,
+			DBMetadata: &MessageMetadata{
+				Role:               "assistant",
+				ExcludeFromHistory: true,
+				CanonicalSchema:    "ai-sdk-ui-message-v1",
+				CanonicalUIMessage: uiMessage,
+			},
+		}},
+	}
+	bg := cc.backgroundContext(ctx)
+	sendCtx, cancel := context.WithTimeout(bg, 10*time.Second)
+	defer cancel()
+	if _, _, err := cc.sendViaPortal(sendCtx, portal, converted, ""); err != nil {
+		cc.loggerForContext(ctx).Warn().Err(err).Str("approval_id", approvalID).Msg("Failed to send approval request fallback event")
+	}
+}
+
 func (cc *CodexClient) sendPendingStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, message string) {
 	if portal == nil || portal.Bridge == nil || evt == nil {
 		return
@@ -1650,10 +1794,10 @@ func (cc *CodexClient) markMessageSendSuccess(ctx context.Context, portal *bridg
 	portal.Bridge.Matrix.SendMessageStatus(ctx, &st, bridgev2.StatusEventInfoFromEvent(evt))
 }
 
-func (cc *CodexClient) acquireRoom(roomID id.RoomID) bool {
+func (cc *CodexClient) acquireRoomIfQueueEmpty(roomID id.RoomID) bool {
 	cc.roomMu.Lock()
 	defer cc.roomMu.Unlock()
-	if cc.activeRooms[roomID] {
+	if cc.activeRooms[roomID] || len(cc.pendingMessages[roomID]) > 0 {
 		return false
 	}
 	cc.activeRooms[roomID] = true
@@ -1669,41 +1813,63 @@ func (cc *CodexClient) releaseRoom(roomID id.RoomID) {
 func (cc *CodexClient) queuePendingCodex(roomID id.RoomID, pm *codexPendingMessage) {
 	cc.roomMu.Lock()
 	defer cc.roomMu.Unlock()
-	cc.pendingMessages[roomID] = pm
+	cc.pendingMessages[roomID] = append(cc.pendingMessages[roomID], pm)
+}
+
+func (cc *CodexClient) beginPendingCodex(roomID id.RoomID) *codexPendingMessage {
+	cc.roomMu.Lock()
+	defer cc.roomMu.Unlock()
+	if cc.activeRooms[roomID] {
+		return nil
+	}
+	queue := cc.pendingMessages[roomID]
+	if len(queue) == 0 {
+		delete(cc.pendingMessages, roomID)
+		return nil
+	}
+	cc.activeRooms[roomID] = true
+	return queue[0]
 }
 
 func (cc *CodexClient) popPendingCodex(roomID id.RoomID) *codexPendingMessage {
 	cc.roomMu.Lock()
 	defer cc.roomMu.Unlock()
-	pm := cc.pendingMessages[roomID]
-	delete(cc.pendingMessages, roomID)
+	queue := cc.pendingMessages[roomID]
+	if len(queue) == 0 {
+		delete(cc.pendingMessages, roomID)
+		return nil
+	}
+	pm := queue[0]
+	if len(queue) == 1 {
+		delete(cc.pendingMessages, roomID)
+	} else {
+		cc.pendingMessages[roomID] = queue[1:]
+	}
 	return pm
 }
 
 func (cc *CodexClient) processPendingCodex(roomID id.RoomID) {
-	// Peek — don't remove yet so the message isn't lost on transient failures.
-	cc.roomMu.Lock()
-	pm := cc.pendingMessages[roomID]
-	cc.roomMu.Unlock()
+	pm := cc.beginPendingCodex(roomID)
 	if pm == nil {
 		return
 	}
 	ctx := cc.backgroundContext(context.Background())
 	if err := cc.ensureRPC(ctx); err != nil {
 		cc.log.Warn().Err(err).Stringer("room", roomID).Msg("Pending codex message: RPC unavailable")
+		cc.releaseRoom(roomID)
 		return
 	}
 	meta := portalMeta(pm.portal)
 	if meta == nil {
 		// Bad portal — discard.
 		cc.popPendingCodex(roomID)
+		cc.releaseRoom(roomID)
+		cc.processPendingCodex(roomID)
 		return
 	}
 	if err := cc.ensureCodexThreadLoaded(ctx, pm.portal, meta); err != nil {
 		cc.log.Warn().Err(err).Stringer("room", roomID).Msg("Pending codex message: thread load failed")
-		return
-	}
-	if !cc.acquireRoom(roomID) {
+		cc.releaseRoom(roomID)
 		return
 	}
 	// Committed — now pop.
@@ -1794,6 +1960,7 @@ func (cc *CodexClient) emitUIToolApprovalRequest(
 	approvalID, toolCallID, toolName string, ttlSeconds int,
 ) {
 	cc.uiEmitter(state).EmitUIToolApprovalRequest(ctx, portal, approvalID, toolCallID, toolName, ttlSeconds)
+	cc.sendApprovalRequestFallbackEvent(ctx, portal, state, approvalID, toolCallID, toolName)
 }
 
 func (cc *CodexClient) emitUIFinish(ctx context.Context, portal *bridgev2.Portal, state *streamingState, model string, finishReason string) {
@@ -1805,18 +1972,19 @@ func (cc *CodexClient) emitUIFinish(ctx context.Context, portal *bridgev2.Portal
 }
 
 func (cc *CodexClient) buildCanonicalUIMessage(state *streamingState, model string, finishReason string) map[string]any {
-	parts := msgconv.ContentParts(
-		strings.TrimSpace(state.accumulated.String()),
-		strings.TrimSpace(state.reasoning.String()),
-	)
-	if toolParts := msgconv.ToolCallParts(state.toolCalls, string(matrixevents.ToolTypeProvider), string(matrixevents.ResultStatusSuccess), string(matrixevents.ResultStatusDenied)); len(toolParts) > 0 {
-		parts = append(parts, toolParts...)
+	if uiMessage := streamui.SnapshotCanonicalUIMessage(&state.ui); len(uiMessage) > 0 {
+		metadata, _ := uiMessage["metadata"].(map[string]any)
+		uiMessage["metadata"] = msgconv.MergeUIMessageMetadata(metadata, cc.buildUIMessageMetadata(state, model, true, finishReason))
+		return msgconv.AppendUIMessageArtifacts(
+			uiMessage,
+			citations.BuildSourceParts(state.sourceCitations, state.sourceDocuments),
+			citations.GeneratedFilesToParts(state.generatedFiles),
+		)
 	}
 	return msgconv.BuildUIMessage(msgconv.UIMessageParams{
 		TurnID:     state.turnID,
 		Role:       "assistant",
 		Metadata:   cc.buildUIMessageMetadata(state, model, true, finishReason),
-		Parts:      parts,
 		SourceURLs: citations.BuildSourceParts(state.sourceCitations, state.sourceDocuments),
 		FileParts:  citations.GeneratedFilesToParts(state.generatedFiles),
 	})
@@ -2093,14 +2261,17 @@ func (cc *CodexClient) handleApprovalRequest(
 
 	if active.meta != nil {
 		if lvl, _ := stringutil.NormalizeElevatedLevel(active.meta.ElevatedLevel); lvl == "full" {
+			streamui.RecordApprovalResponse(&active.state.ui, approvalID, toolCallID, true, "auto-approved")
 			return map[string]any{"decision": "accept"}, nil
 		}
 	}
 
 	decision, ok := cc.waitToolApproval(ctx, approvalID)
 	if !ok {
+		streamui.RecordApprovalResponse(&active.state.ui, approvalID, toolCallID, false, "timeout")
 		return map[string]any{"decision": "decline"}, nil
 	}
+	streamui.RecordApprovalResponse(&active.state.ui, approvalID, toolCallID, decision.Approve, decision.Reason)
 	if decision.Approve {
 		return map[string]any{"decision": "accept"}, nil
 	}
@@ -2120,7 +2291,7 @@ func (cc *CodexClient) tryApprovalDecisionEvent(ctx context.Context, msg *bridge
 		return true, &bridgev2.MatrixMessageResponse{Pending: false}
 	}
 	err := cc.resolveToolApproval(msg.Portal.MXID, decision.ApprovalID, ToolApprovalDecisionCodex{
-		Approve:   decision.Approve,
+		Approve:   decision.Approved,
 		Reason:    decision.Reason,
 		DecidedAt: time.Now(),
 		DecidedBy: msg.Event.Sender,

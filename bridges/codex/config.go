@@ -40,7 +40,7 @@ bridge:
 codex:
   enabled: true
   command: "codex"
-  listen: "stdio://"
+  listen: ""
   default_model: "gpt-5.1-codex"
   network_access: true
   client_info:

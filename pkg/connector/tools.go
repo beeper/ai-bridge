@@ -97,11 +97,11 @@ func GetBuiltinTool(name string) *ToolDefinition {
 }
 
 const ToolNameMessage = toolspec.MessageName
-const ToolNameTTS = toolspec.TTSName
-const ToolNameWebFetch = toolspec.WebFetchName
+const toolNameTTS = toolspec.TTSName
+const toolNameWebFetch = toolspec.WebFetchName
 const ToolNameImage = toolspec.ImageName
 const ToolNameImageGenerate = toolspec.ImageGenerateName
-const ToolNameSessionStatus = toolspec.SessionStatusName
+const toolNameSessionStatus = toolspec.SessionStatusName
 
 const (
 	ToolNameGravatarFetch      = toolspec.GravatarFetchName
@@ -117,8 +117,8 @@ const (
 const ImageResultPrefix = "IMAGE:"
 const ImagesResultPrefix = "IMAGES:"
 const DefaultImageModel = "google/gemini-3-pro-image-preview"
-const DefaultOpenAIImageModel = "gpt-image-1"
-const DefaultGeminiImageModel = "gemini-3-pro-image-preview"
+const defaultOpenAIImageModel = "gpt-image-1"
+const defaultGeminiImageModel = "gemini-3-pro-image-preview"
 const TTSResultPrefix = "AUDIO:"
 
 // parseBoolArg extracts a boolean argument from args, handling JSON's bool, float64,
@@ -1591,9 +1591,9 @@ func executeSessionStatus(ctx context.Context, args map[string]any) (string, err
 	// Parse provider from model string (format: "provider/model" or just "model")
 	provider := "unknown"
 	modelName := model
-	if parts := strings.SplitN(model, "/", 2); len(parts) == 2 {
-		provider = parts[0]
-		modelName = parts[1]
+	if parsedProvider, parsedModel := splitModelProvider(model); parsedProvider != "" && parsedModel != "" {
+		provider = parsedProvider
+		modelName = parsedModel
 	}
 
 	// Get context/token info from metadata
@@ -1645,9 +1645,9 @@ func executeSessionStatus(ctx context.Context, args map[string]any) (string, err
 			btc.Client.ensureGhostDisplayName(ctx, effective)
 			modelChanged = fmt.Sprintf("\n\nModel reset to %s.", effective)
 			model = effective
-			if parts := strings.SplitN(effective, "/", 2); len(parts) == 2 {
-				provider = parts[0]
-				modelName = parts[1]
+			if parsedProvider, parsedModel := splitModelProvider(effective); parsedProvider != "" && parsedModel != "" {
+				provider = parsedProvider
+				modelName = parsedModel
 			} else {
 				modelName = effective
 			}
@@ -1671,9 +1671,9 @@ func executeSessionStatus(ctx context.Context, args map[string]any) (string, err
 			btc.Client.ensureGhostDisplayName(ctx, resolvedModel)
 			modelChanged = fmt.Sprintf("\n\nModel set to %s.", resolvedModel)
 			model = resolvedModel
-			if parts := strings.SplitN(resolvedModel, "/", 2); len(parts) == 2 {
-				provider = parts[0]
-				modelName = parts[1]
+			if parsedProvider, parsedModel := splitModelProvider(resolvedModel); parsedProvider != "" && parsedModel != "" {
+				provider = parsedProvider
+				modelName = parsedModel
 			} else {
 				modelName = resolvedModel
 			}

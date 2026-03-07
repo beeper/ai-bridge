@@ -207,3 +207,86 @@ func (inst *openCodeInstance) listCachedMessages(sessionID string) []opencode.Me
 	cache.mu.Unlock()
 	return out
 }
+
+func (inst *openCodeInstance) enqueueMessage(sessionID string, item *queuedUserMessage) *queuedUserMessage {
+	if inst == nil || sessionID == "" || item == nil {
+		return nil
+	}
+	inst.queueMu.Lock()
+	defer inst.queueMu.Unlock()
+	if inst.sendQueue == nil {
+		inst.sendQueue = make(map[string]*openCodeSessionQueue)
+	}
+	queue := inst.sendQueue[sessionID]
+	if queue == nil {
+		queue = &openCodeSessionQueue{}
+		inst.sendQueue[sessionID] = queue
+	}
+	if !queue.active && len(queue.items) == 0 {
+		queue.active = true
+		return item
+	}
+	if !queue.active {
+		queue.items = append(queue.items, item)
+		next := queue.items[0]
+		queue.items = queue.items[1:]
+		queue.active = true
+		return next
+	}
+	queue.items = append(queue.items, item)
+	return nil
+}
+
+func (inst *openCodeInstance) requeueMessageFront(sessionID string, item *queuedUserMessage) {
+	if inst == nil || sessionID == "" || item == nil {
+		return
+	}
+	inst.queueMu.Lock()
+	defer inst.queueMu.Unlock()
+	if inst.sendQueue == nil {
+		inst.sendQueue = make(map[string]*openCodeSessionQueue)
+	}
+	queue := inst.sendQueue[sessionID]
+	if queue == nil {
+		queue = &openCodeSessionQueue{}
+		inst.sendQueue[sessionID] = queue
+	}
+	queue.items = append([]*queuedUserMessage{item}, queue.items...)
+}
+
+func (inst *openCodeInstance) markSessionIdle(sessionID string) *queuedUserMessage {
+	if inst == nil || sessionID == "" {
+		return nil
+	}
+	inst.queueMu.Lock()
+	defer inst.queueMu.Unlock()
+	queue := inst.sendQueue[sessionID]
+	if queue == nil {
+		return nil
+	}
+	if len(queue.items) == 0 {
+		queue.active = false
+		delete(inst.sendQueue, sessionID)
+		return nil
+	}
+	next := queue.items[0]
+	queue.items = queue.items[1:]
+	queue.active = true
+	return next
+}
+
+func (inst *openCodeInstance) releaseActiveSession(sessionID string) {
+	if inst == nil || sessionID == "" {
+		return
+	}
+	inst.queueMu.Lock()
+	defer inst.queueMu.Unlock()
+	queue := inst.sendQueue[sessionID]
+	if queue == nil {
+		return
+	}
+	queue.active = false
+	if len(queue.items) == 0 {
+		delete(inst.sendQueue, sessionID)
+	}
+}

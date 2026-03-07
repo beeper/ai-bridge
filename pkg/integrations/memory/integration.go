@@ -34,8 +34,6 @@ type Manager interface {
 	Search(ctx context.Context, query string, opts SearchOptions) ([]SearchResult, error)
 	ReadFile(ctx context.Context, relPath string, from, lines *int) (map[string]any, error)
 	StatusDetails(ctx context.Context) (*StatusDetails, error)
-	ProbeVectorAvailability(ctx context.Context) bool
-	ProbeEmbeddingAvailability(ctx context.Context) (bool, string)
 	SyncWithProgress(ctx context.Context, onProgress func(completed, total int, label string)) error
 }
 
@@ -729,37 +727,6 @@ func (a *hostRuntimeAdapter) ResolveConfig(agentID string) (*ResolvedConfig, err
 	cfg := cl.ModuleConfig("memory_search")
 	agentCfg := cl.AgentModuleConfig(agentID, "memory_search")
 	return resolveMemorySearchConfigFromMaps(cfg, agentCfg)
-}
-
-func embeddingParamsFromConfig(cfg *ResolvedConfig) (string, string, map[string]string) {
-	if cfg == nil {
-		return "", "", nil
-	}
-	return cfg.Remote.APIKey, cfg.Remote.BaseURL, cfg.Remote.Headers
-}
-
-func (a *hostRuntimeAdapter) ResolveOpenAIEmbeddingConfig(cfg *ResolvedConfig) (string, string, map[string]string) {
-	eh, ok := a.host.(iruntime.EmbeddingHelper)
-	if !ok {
-		return "", "", nil
-	}
-	return eh.ResolveOpenAIEmbeddingConfig(embeddingParamsFromConfig(cfg))
-}
-
-func (a *hostRuntimeAdapter) ResolveDirectOpenAIEmbeddingConfig(cfg *ResolvedConfig) (string, string, map[string]string) {
-	eh, ok := a.host.(iruntime.EmbeddingHelper)
-	if !ok {
-		return "", "", nil
-	}
-	return eh.ResolveDirectOpenAIEmbeddingConfig(embeddingParamsFromConfig(cfg))
-}
-
-func (a *hostRuntimeAdapter) ResolveGeminiEmbeddingConfig(cfg *ResolvedConfig) (string, string, map[string]string) {
-	eh, ok := a.host.(iruntime.EmbeddingHelper)
-	if !ok {
-		return "", "", nil
-	}
-	return eh.ResolveGeminiEmbeddingConfig(embeddingParamsFromConfig(cfg))
 }
 
 func (a *hostRuntimeAdapter) ResolvePromptWorkspaceDir() string {

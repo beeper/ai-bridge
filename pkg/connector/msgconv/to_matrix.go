@@ -1,6 +1,7 @@
 package msgconv
 
 import (
+	"encoding/json"
 	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
 	"github.com/beeper/ai-bridge/pkg/matrixevents"
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 )
 
 // ToolCallPart builds a single AI SDK UIMessage dynamic-tool part from tool call metadata.
@@ -152,6 +154,128 @@ func BuildUIMessage(p UIMessageParams) map[string]any {
 	return msg
 }
 
+type UserUIMessageParams struct {
+	MessageID string
+	Text      string
+	MediaURL  string
+	MimeType  string
+	Metadata  map[string]any
+}
+
+func BuildUserUIMessage(p UserUIMessageParams) map[string]any {
+	parts := make([]map[string]any, 0, 2)
+	if strings.TrimSpace(p.Text) != "" {
+		parts = append(parts, map[string]any{
+			"type": "text",
+			"text": p.Text,
+		})
+	}
+	if strings.TrimSpace(p.MediaURL) != "" {
+		part := map[string]any{
+			"type":      "file",
+			"url":       strings.TrimSpace(p.MediaURL),
+			"mediaType": strings.TrimSpace(p.MimeType),
+		}
+		if part["mediaType"] == "" {
+			part["mediaType"] = "application/octet-stream"
+		}
+		parts = append(parts, part)
+	}
+	return BuildUIMessage(UIMessageParams{
+		TurnID:   p.MessageID,
+		Role:     "user",
+		Metadata: p.Metadata,
+		Parts:    parts,
+	})
+}
+
+// MergeUIMessageMetadata deep-merges message-level metadata maps.
+func MergeUIMessageMetadata(base, update map[string]any) map[string]any {
+	return jsonutil.MergeRecursive(base, update)
+}
+
+func normalizeUIParts(raw any) []map[string]any {
+	switch typed := raw.(type) {
+	case nil:
+		return nil
+	case []map[string]any:
+		return typed
+	case []any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			part := jsonutil.ToMap(item)
+			if len(part) == 0 {
+				continue
+			}
+			out = append(out, part)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// AppendUIMessageArtifacts appends source/file parts to an existing UIMessage.
+func AppendUIMessageArtifacts(uiMessage map[string]any, sourceParts, fileParts []map[string]any) map[string]any {
+	if len(uiMessage) == 0 {
+		return nil
+	}
+	out := jsonutil.DeepCloneMap(jsonutil.ToMap(uiMessage))
+	parts := normalizeUIParts(out["parts"])
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		seen[artifactPartKey(part)] = struct{}{}
+	}
+	for _, part := range sourceParts {
+		key := artifactPartKey(part)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		parts = append(parts, jsonutil.DeepCloneMap(part))
+		seen[key] = struct{}{}
+	}
+	for _, part := range fileParts {
+		key := artifactPartKey(part)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		parts = append(parts, jsonutil.DeepCloneMap(part))
+		seen[key] = struct{}{}
+	}
+	out["parts"] = parts
+	return out
+}
+
+func artifactPartKey(part map[string]any) string {
+	partType := strings.TrimSpace(stringFromAny(part["type"]))
+	switch partType {
+	case "source-url", "file":
+		return partType + ":" + strings.TrimSpace(stringFromAny(part["url"]))
+	case "source-document":
+		sourceID := strings.TrimSpace(stringFromAny(part["sourceId"]))
+		if sourceID == "" {
+			sourceID = strings.TrimSpace(stringFromAny(part["filename"]))
+		}
+		if sourceID == "" {
+			sourceID = strings.TrimSpace(stringFromAny(part["title"]))
+		}
+		return partType + ":" + sourceID
+	default:
+		data, err := json.Marshal(part)
+		if err != nil {
+			return partType
+		}
+		return partType + ":" + string(data)
+	}
+}
+
+func stringFromAny(src any) string {
+	if value, ok := src.(string); ok {
+		return value
+	}
+	return ""
+}
+
 // ContentParts builds the standard text + reasoning parts for a UIMessage.
 func ContentParts(textContent, reasoningContent string) []map[string]any {
 	parts := make([]map[string]any, 0, 2)
@@ -210,44 +334,6 @@ func RelatesToReplace(initialEventID id.EventID, replyTo id.EventID) map[string]
 		}
 	}
 	return rel
-}
-
-// FinalEditContentParams contains parameters for building a streaming final edit event.
-type FinalEditContentParams struct {
-	Rendered       event.MessageEventContent
-	RelatesTo      map[string]any
-	UIMessage      map[string]any
-	LinkPreviews   []map[string]any
-	DontShowEdited bool
-}
-
-// BuildFinalEditContent builds the event content for a streaming final edit (m.replace).
-func BuildFinalEditContent(p FinalEditContentParams) *event.Content {
-	raw := map[string]any{
-		"msgtype":        event.MsgText,
-		"body":           "* AI response",
-		"format":         p.Rendered.Format,
-		"formatted_body": "* AI response",
-		"m.new_content": map[string]any{
-			"msgtype":        event.MsgText,
-			"body":           p.Rendered.Body,
-			"format":         p.Rendered.Format,
-			"formatted_body": p.Rendered.FormattedBody,
-			"m.mentions":     map[string]any{},
-		},
-		matrixevents.BeeperAIKey: p.UIMessage,
-		"m.mentions":             map[string]any{},
-	}
-	if p.RelatesTo != nil {
-		raw["m.relates_to"] = p.RelatesTo
-	}
-	if p.DontShowEdited {
-		raw["com.beeper.dont_render_edited"] = true
-	}
-	if len(p.LinkPreviews) > 0 {
-		raw["com.beeper.linkpreviews"] = p.LinkPreviews
-	}
-	return &event.Content{Raw: raw}
 }
 
 // PlainMessageContentParams contains parameters for building a plain text message.

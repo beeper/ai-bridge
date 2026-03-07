@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 )
 
 const (
@@ -72,9 +74,7 @@ func copyToolDefinitions(defs []ToolDefinition) []ToolDefinition {
 	if len(defs) == 0 {
 		return nil
 	}
-	out := make([]ToolDefinition, len(defs))
-	copy(out, defs)
-	return out
+	return slices.Clone(defs)
 }
 
 func copyStringMap(src map[string]string) map[string]string {
@@ -192,7 +192,7 @@ func (oc *AIClient) fetchMCPToolsForServer(ctx context.Context, server namedMCPS
 		defs = append(defs, ToolDefinition{
 			Name:        name,
 			Description: description,
-			Parameters:  toolSchemaToMap(tool.InputSchema),
+			Parameters:  jsonutil.ToMap(tool.InputSchema),
 		})
 	}
 

@@ -2,9 +2,9 @@ package connector
 
 import (
 	"context"
-	"encoding/json"
 
 	agenttools "github.com/beeper/ai-bridge/pkg/agents/tools"
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 )
 
 type toolExecutor func(ctx context.Context, args map[string]any) (string, error)
@@ -14,11 +14,11 @@ func builtinToolExecutors() map[string]toolExecutor {
 		ToolNameCalculator:         executeCalculator,
 		ToolNameWebSearch:          executeWebSearch,
 		ToolNameMessage:            executeMessage,
-		ToolNameTTS:                executeTTS,
-		ToolNameWebFetch:           executeWebFetch,
+		toolNameTTS:                executeTTS,
+		toolNameWebFetch:           executeWebFetch,
 		ToolNameImage:              executeAnalyzeImage,
 		ToolNameImageGenerate:      executeImageGeneration,
-		ToolNameSessionStatus:      executeSessionStatus,
+		toolNameSessionStatus:      executeSessionStatus,
 		ToolNameRead:               executeReadFile,
 		ToolNameApplyPatch:         executeApplyPatch,
 		ToolNameWrite:              executeWriteFile,
@@ -45,28 +45,9 @@ func buildBuiltinToolDefinitions() []ToolDefinition {
 		defs = append(defs, ToolDefinition{
 			Name:        tool.Name,
 			Description: tool.Description,
-			Parameters:  toolSchemaToMap(tool.InputSchema),
+			Parameters:  jsonutil.ToMap(tool.InputSchema),
 			Execute:     exec,
 		})
 	}
 	return defs
-}
-
-func toolSchemaToMap(schema any) map[string]any {
-	switch v := schema.(type) {
-	case nil:
-		return nil
-	case map[string]any:
-		return v
-	default:
-		encoded, err := json.Marshal(v)
-		if err != nil {
-			return nil
-		}
-		var out map[string]any
-		if err := json.Unmarshal(encoded, &out); err != nil {
-			return nil
-		}
-		return out
-	}
 }

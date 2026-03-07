@@ -58,7 +58,7 @@ func (oc *AIClient) executeAgentsList(ctx context.Context, portal *bridgev2.Port
 	}
 	slices.Sort(ordered)
 	if requesterAgentID != "" {
-		ordered = append([]string{requesterAgentID}, ordered...)
+		ordered = slices.Insert(ordered, 0, requesterAgentID)
 	}
 
 	entries := make([]agentListEntry, 0, len(ordered))

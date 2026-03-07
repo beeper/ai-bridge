@@ -99,10 +99,11 @@ func (ol *OpenCodeLogin) SubmitUserInput(ctx context.Context, input map[string]s
 
 	instances := map[string]*opencodebridge.OpenCodeInstance{
 		instanceID: {
-			ID:       instanceID,
-			URL:      normalizedURL,
-			Username: username,
-			Password: password,
+			ID:          instanceID,
+			URL:         normalizedURL,
+			Username:    username,
+			Password:    password,
+			HasPassword: password != "",
 		},
 	}
 

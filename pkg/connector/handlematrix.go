@@ -1363,6 +1363,7 @@ func (oc *AIClient) buildPromptForRegenerate(
 
 		// Determine whether to inject images into history (requires vision-capable model).
 		hasVision := oc.getModelCapabilitiesForMeta(meta).SupportsVision
+		historyBundles := make([][]openai.ChatCompletionMessageParamUnion, 0, len(history))
 
 		// Skip the most recent messages (last user and assistant) and build from older history
 		skippedUser := false
@@ -1388,49 +1389,18 @@ func (oc *AIClient) buildPromptForRegenerate(
 				continue
 			}
 
-			body := cleanHistoryBody(msgMeta.Body, isSimple, msg.MXID)
-
 			// Only inject images for recent messages and vision-capable models.
 			// This loop builds newest-to-oldest, so early entries are the most recent.
 			injectImages := hasVision && includedCount < maxHistoryImageMessages
 			includedCount++
-
-			switch msgMeta.Role {
-			case "assistant":
-				body = stripThinkTags(body)
-				body = airuntime.SanitizeChatMessageForDisplay(body, false)
-				if body == "" {
-					continue
-				}
-				// In the reverse-then-flip loop, add synthetic BEFORE assistant
-				// so it ends up AFTER the assistant in chronological order after reversal.
-				if injectImages && len(msgMeta.GeneratedFiles) > 0 {
-					if imgParts := oc.downloadGeneratedFileImages(ctx, msgMeta.GeneratedFiles); len(imgParts) > 0 {
-						prompt = append(prompt, buildSyntheticGeneratedImagesMessage(msgMeta.GeneratedFiles, imgParts))
-					}
-				}
-				prompt = append(prompt, openai.AssistantMessage(body))
-			default:
-				body = airuntime.SanitizeChatMessageForDisplay(body, true)
-				if injectImages && msgMeta.MediaURL != "" && isImageMimeType(msgMeta.MimeType) {
-					if imgPart := oc.downloadHistoryImage(ctx, msgMeta.MediaURL, msgMeta.MimeType); imgPart != nil {
-						// Append the media URL so the model can reference it for editing tools (e.g. input_images).
-						bodyWithURL := body + fmt.Sprintf("\n[media_url: %s]", msgMeta.MediaURL)
-						prompt = append(prompt, buildMultimodalUserMessage(bodyWithURL, []openai.ChatCompletionContentPartUnionParam{*imgPart}))
-						continue
-					}
-				}
-				prompt = append(prompt, openai.UserMessage(body))
+			bundle := oc.historyMessageBundle(ctx, msgMeta, injectImages)
+			if len(bundle) > 0 {
+				historyBundles = append(historyBundles, bundle)
 			}
 		}
 
-		// Reverse to get chronological order (skip system message at index 0 if present)
-		startIdx := 0
-		if len(prompt) > 0 && prompt[0].OfSystem != nil {
-			startIdx = 1
-		}
-		for i, j := len(prompt)-1, startIdx; i > j; i, j = i-1, j+1 {
-			prompt[i], prompt[j] = prompt[j], prompt[i]
+		for i := len(historyBundles) - 1; i >= 0; i-- {
+			prompt = append(prompt, historyBundles[i]...)
 		}
 	}
 
@@ -1462,7 +1432,7 @@ func (oc *AIClient) tryApprovalDecisionEvent(
 	}
 
 	state := airuntime.ToolApprovalDenied
-	if decision.Approve {
+	if decision.Approved {
 		state = airuntime.ToolApprovalApproved
 	}
 	err := oc.resolveToolApproval(
