@@ -2011,20 +2011,44 @@ type ToolApprovalDecisionCodex struct {
 // ApprovalManager's PendingApproval.Data field.
 type pendingToolApprovalDataCodex struct {
 	ApprovalID string
+	RoomID     id.RoomID
 	ToolCallID string
 	ToolName   string
 }
 
-func (cc *CodexClient) registerToolApproval(approvalID, toolCallID, toolName string, ttl time.Duration) (*bridgeadapter.PendingApproval[ToolApprovalDecisionCodex], bool) {
+func (cc *CodexClient) registerToolApproval(roomID id.RoomID, approvalID, toolCallID, toolName string, ttl time.Duration) (*bridgeadapter.PendingApproval[ToolApprovalDecisionCodex], bool) {
 	data := &pendingToolApprovalDataCodex{
 		ApprovalID: strings.TrimSpace(approvalID),
+		RoomID:     roomID,
 		ToolCallID: strings.TrimSpace(toolCallID),
 		ToolName:   strings.TrimSpace(toolName),
 	}
 	return cc.approvals.Register(approvalID, ttl, data)
 }
 
-func (cc *CodexClient) resolveToolApproval(approvalID string, decision ToolApprovalDecisionCodex) error {
+func (cc *CodexClient) resolveToolApproval(roomID id.RoomID, approvalID string, decision ToolApprovalDecisionCodex) error {
+	if cc == nil || cc.UserLogin == nil {
+		return errors.New("bridge not available")
+	}
+	approvalID = strings.TrimSpace(approvalID)
+	if approvalID == "" {
+		return bridgeadapter.ErrApprovalMissingID
+	}
+	if strings.TrimSpace(roomID.String()) == "" {
+		return bridgeadapter.ErrApprovalMissingRoom
+	}
+	if decision.DecidedBy == "" || decision.DecidedBy != cc.UserLogin.UserMXID {
+		return bridgeadapter.ErrApprovalOnlyOwner
+	}
+
+	p := cc.approvals.Get(approvalID)
+	if p == nil {
+		return fmt.Errorf("%w: %s", bridgeadapter.ErrApprovalUnknown, approvalID)
+	}
+	d, _ := p.Data.(*pendingToolApprovalDataCodex)
+	if d != nil && d.RoomID != "" && d.RoomID != roomID {
+		return bridgeadapter.ErrApprovalWrongRoom
+	}
 	return cc.approvals.Resolve(approvalID, decision)
 }
 
@@ -2063,7 +2087,7 @@ func (cc *CodexClient) handleApprovalRequest(
 	inputMap := extractInput(req.Params)
 	cc.ensureUIToolInputStart(ctx, active.portal, active.state, toolCallID, toolName, true, inputMap)
 	approvalTTL := time.Duration(ttlSeconds) * time.Second
-	cc.registerToolApproval(approvalID, toolCallID, toolName, approvalTTL)
+	cc.registerToolApproval(active.portal.MXID, approvalID, toolCallID, toolName, approvalTTL)
 
 	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID, toolName, ttlSeconds)
 
@@ -2095,7 +2119,7 @@ func (cc *CodexClient) tryApprovalDecisionEvent(ctx context.Context, msg *bridge
 			Msg("codex approval decision missing required fields")
 		return true, &bridgev2.MatrixMessageResponse{Pending: false}
 	}
-	err := cc.resolveToolApproval(decision.ApprovalID, ToolApprovalDecisionCodex{
+	err := cc.resolveToolApproval(msg.Portal.MXID, decision.ApprovalID, ToolApprovalDecisionCodex{
 		Approve:   decision.Approve,
 		Reason:    decision.Reason,
 		DecidedAt: time.Now(),
