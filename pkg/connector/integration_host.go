@@ -735,26 +735,6 @@ func (h *runtimeIntegrationHost) WriteTextFile(ctx context.Context, portal any, 
 	return path, nil
 }
 
-// ---- Optional Host capability: EmbeddingHelper ----
-
-func (h *runtimeIntegrationHost) ResolveOpenAIEmbeddingConfig(apiKey string, baseURL string, headers map[string]string) (string, string, map[string]string) {
-	if h == nil || h.client == nil {
-		return apiKey, baseURL, headers
-	}
-	return resolveEmbeddingConfigGeneric(h.client, apiKey, baseURL, headers, serviceOpenRouter, "/openrouter/v1")
-}
-
-func (h *runtimeIntegrationHost) ResolveDirectOpenAIEmbeddingConfig(apiKey string, baseURL string, headers map[string]string) (string, string, map[string]string) {
-	if h == nil || h.client == nil {
-		return apiKey, baseURL, headers
-	}
-	return resolveEmbeddingConfigGeneric(h.client, apiKey, baseURL, headers, serviceOpenAI, "/openai/v1")
-}
-
-func (h *runtimeIntegrationHost) ResolveGeminiEmbeddingConfig(apiKey string, baseURL string, headers map[string]string) (string, string, map[string]string) {
-	return apiKey, baseURL, headers
-}
-
 // ---- Optional Host capability: OverflowHelper ----
 
 func (h *runtimeIntegrationHost) SmartTruncatePrompt(prompt []openai.ChatCompletionMessageParamUnion, ratio float64) []openai.ChatCompletionMessageParamUnion {
@@ -1149,46 +1129,6 @@ func textStoreForAgent(client *AIClient, agentID string) *textfs.Store {
 		string(client.UserLogin.ID),
 		agentID,
 	)
-}
-
-func resolveEmbeddingConfigGeneric(client *AIClient, apiKey string, baseURL string, headers map[string]string, serviceName string, proxyPath string) (string, string, map[string]string) {
-	if strings.TrimSpace(apiKey) == "" && client != nil && client.connector != nil {
-		meta := loginMetadata(client.UserLogin)
-		apiKey = strings.TrimSpace(client.connector.resolveOpenAIAPIKey(meta))
-		if meta != nil {
-			if apiKey == "" && meta.Provider == ProviderMagicProxy {
-				apiKey = strings.TrimSpace(meta.APIKey)
-			}
-			if apiKey == "" && meta.Provider == ProviderBeeper {
-				services := client.connector.resolveServiceConfig(meta)
-				if svc, ok := services[serviceName]; ok {
-					apiKey = strings.TrimSpace(svc.APIKey)
-					if baseURL == "" {
-						baseURL = strings.TrimSpace(svc.BaseURL)
-					}
-				}
-			}
-		}
-	}
-	if strings.TrimSpace(baseURL) == "" && client != nil && client.connector != nil {
-		if meta := loginMetadata(client.UserLogin); meta != nil {
-			if meta.Provider == ProviderMagicProxy {
-				base := normalizeMagicProxyBaseURL(meta.BaseURL)
-				if base != "" {
-					baseURL = joinProxyPath(base, proxyPath)
-				}
-			} else if meta.Provider == ProviderBeeper {
-				services := client.connector.resolveServiceConfig(meta)
-				if svc, ok := services[serviceName]; ok && strings.TrimSpace(svc.BaseURL) != "" {
-					baseURL = strings.TrimSpace(svc.BaseURL)
-				}
-			}
-		}
-		if baseURL == "" {
-			baseURL = client.connector.resolveOpenAIBaseURL()
-		}
-	}
-	return apiKey, baseURL, headers
 }
 
 // ---- Small helpers used by host sub-adapters ----

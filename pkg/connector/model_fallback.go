@@ -10,6 +10,7 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	airuntime "github.com/beeper/ai-bridge/pkg/runtime"
+	"github.com/beeper/ai-bridge/pkg/shared/stringutil"
 )
 
 // NonFallbackError marks an error as ineligible for model fallback.
@@ -62,20 +63,7 @@ func (oc *AIClient) modelFallbackChain(ctx context.Context, meta *PortalMetadata
 }
 
 func dedupeModels(models []string) []string {
-	seen := make(map[string]struct{}, len(models))
-	out := make([]string, 0, len(models))
-	for _, model := range models {
-		model = strings.TrimSpace(model)
-		if model == "" {
-			continue
-		}
-		if _, ok := seen[model]; ok {
-			continue
-		}
-		seen[model] = struct{}{}
-		out = append(out, model)
-	}
-	return out
+	return stringutil.DedupeStrings(models)
 }
 
 // overrideModel returns a shallow copy of meta with a different model and refreshed capabilities.

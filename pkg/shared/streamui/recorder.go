@@ -3,6 +3,8 @@ package streamui
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 )
 
 func ApplyChunk(state *UIState, chunk map[string]any) {
@@ -367,7 +369,7 @@ func mergeMessageMetadata(message map[string]any, raw any) {
 	if message == nil {
 		return
 	}
-	next := cloneMap(raw)
+	next := jsonutil.ToMap(raw)
 	if len(next) == 0 {
 		return
 	}
@@ -376,7 +378,7 @@ func mergeMessageMetadata(message map[string]any, raw any) {
 		message["metadata"] = next
 		return
 	}
-	message["metadata"] = mergeMaps(existing, next)
+	message["metadata"] = jsonutil.MergeRecursive(existing, next)
 }
 
 func setTerminalState(message map[string]any, typ string, reason string) {
@@ -395,55 +397,16 @@ func setTerminalState(message map[string]any, typ string, reason string) {
 	message["metadata"] = metadata
 }
 
-func mergeMaps(base map[string]any, update map[string]any) map[string]any {
-	out := cloneMap(base)
-	for key, value := range update {
-		if baseMap, ok := out[key].(map[string]any); ok {
-			if updateMap, ok := value.(map[string]any); ok {
-				out[key] = mergeMaps(baseMap, updateMap)
-				continue
-			}
-		}
-		out[key] = deepCloneAny(value)
-	}
-	return out
-}
-
 func cloneMap(raw any) map[string]any {
-	if raw == nil {
-		return nil
-	}
-	switch typed := raw.(type) {
-	case map[string]any:
-		return deepCloneMap(typed)
-	}
-	return nil
+	return jsonutil.DeepCloneMap(jsonutil.ToMap(raw))
 }
 
-func deepCloneMap(src map[string]any) map[string]any {
-	if len(src) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(src))
-	for key, value := range src {
-		out[key] = deepCloneAny(value)
-	}
-	return out
+func deepCloneMap(raw any) map[string]any {
+	return jsonutil.DeepCloneMap(jsonutil.ToMap(raw))
 }
 
 func deepCloneAny(raw any) any {
-	switch typed := raw.(type) {
-	case map[string]any:
-		return deepCloneMap(typed)
-	case []any:
-		out := make([]any, len(typed))
-		for i, value := range typed {
-			out[i] = deepCloneAny(value)
-		}
-		return out
-	default:
-		return typed
-	}
+	return jsonutil.DeepCloneAny(raw)
 }
 
 func stringValue(raw any) string {

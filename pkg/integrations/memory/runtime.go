@@ -18,10 +18,6 @@ type SessionPortal struct {
 type Runtime interface {
 	ResolveConfig(agentID string) (*ResolvedConfig, error)
 
-	ResolveOpenAIEmbeddingConfig(cfg *ResolvedConfig) (string, string, map[string]string)
-	ResolveDirectOpenAIEmbeddingConfig(cfg *ResolvedConfig) (string, string, map[string]string)
-	ResolveGeminiEmbeddingConfig(cfg *ResolvedConfig) (string, string, map[string]string)
-
 	ResolvePromptWorkspaceDir() string
 	ListSessionPortals(ctx context.Context, loginID, agentID string) ([]SessionPortal, error)
 

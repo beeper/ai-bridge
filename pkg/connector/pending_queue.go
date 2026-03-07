@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -156,8 +157,8 @@ func (oc *AIClient) getQueueSnapshot(roomID id.RoomID) *pendingQueue {
 		return nil
 	}
 	clone := *queue
-	clone.items = append([]pendingQueueItem(nil), queue.items...)
-	clone.summaryLines = append([]string(nil), queue.summaryLines...)
+	clone.items = slices.Clone(queue.items)
+	clone.summaryLines = slices.Clone(queue.summaryLines)
 	return &clone
 }
 

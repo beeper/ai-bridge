@@ -11,6 +11,7 @@ import (
 
 	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
 	"github.com/beeper/ai-bridge/pkg/matrixevents"
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 )
 
 // ToolCallPart builds a single AI SDK UIMessage dynamic-tool part from tool call metadata.
@@ -189,26 +190,11 @@ func BuildUserUIMessage(p UserUIMessageParams) map[string]any {
 
 // MergeUIMessageMetadata deep-merges message-level metadata maps.
 func MergeUIMessageMetadata(base, update map[string]any) map[string]any {
-	if len(base) == 0 && len(update) == 0 {
-		return nil
-	}
-	if len(base) == 0 {
-		return cloneMap(update)
-	}
-	if len(update) == 0 {
-		return cloneMap(base)
-	}
-	out := cloneMap(base)
-	for key, value := range update {
-		if existing, ok := out[key].(map[string]any); ok {
-			if next, ok := value.(map[string]any); ok {
-				out[key] = MergeUIMessageMetadata(existing, next)
-				continue
-			}
-		}
-		out[key] = cloneAny(value)
-	}
-	return out
+	return jsonutil.MergeRecursive(base, update)
+}
+
+func cloneMap(raw any) map[string]any {
+	return jsonutil.DeepCloneMap(jsonutil.ToMap(raw))
 }
 
 // AppendUIMessageArtifacts appends source/file parts to an existing UIMessage.
@@ -231,7 +217,7 @@ func AppendUIMessageArtifacts(uiMessage map[string]any, sourceParts, fileParts [
 		if _, ok := seen[key]; ok {
 			continue
 		}
-		parts = append(parts, cloneMap(part))
+		parts = append(parts, jsonutil.DeepCloneMap(part))
 		seen[key] = struct{}{}
 	}
 	for _, part := range fileParts {
@@ -239,7 +225,7 @@ func AppendUIMessageArtifacts(uiMessage map[string]any, sourceParts, fileParts [
 		if _, ok := seen[key]; ok {
 			continue
 		}
-		parts = append(parts, cloneMap(part))
+		parts = append(parts, jsonutil.DeepCloneMap(part))
 		seen[key] = struct{}{}
 	}
 	out["parts"] = parts
@@ -262,32 +248,6 @@ func artifactPartKey(part map[string]any) string {
 		return partType + ":" + sourceID
 	default:
 		return partType
-	}
-}
-
-func cloneMap(src map[string]any) map[string]any {
-	if len(src) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(src))
-	for key, value := range src {
-		out[key] = cloneAny(value)
-	}
-	return out
-}
-
-func cloneAny(src any) any {
-	switch typed := src.(type) {
-	case map[string]any:
-		return cloneMap(typed)
-	case []any:
-		out := make([]any, len(typed))
-		for i, value := range typed {
-			out[i] = cloneAny(value)
-		}
-		return out
-	default:
-		return typed
 	}
 }
 

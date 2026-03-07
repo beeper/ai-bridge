@@ -97,30 +97,30 @@ func parseQueueDirectiveArgs(raw string) (consumed int, result queueDirective) {
 			break
 		}
 		if strings.HasPrefix(lowered, "debounce:") {
-			parts := strings.SplitN(token, ":", 2)
-			if len(parts) > 1 {
-				result.RawDebounce = parts[1]
-				result.DebounceMs = parseQueueDebounce(parts[1])
+			_, value, _ := strings.Cut(token, ":")
+			if value != "" {
+				result.RawDebounce = value
+				result.DebounceMs = parseQueueDebounce(value)
 				result.HasOptions = true
 				result.HasDebounce = true
 			}
 			continue
 		}
 		if strings.HasPrefix(lowered, "cap:") {
-			parts := strings.SplitN(token, ":", 2)
-			if len(parts) > 1 {
-				result.RawCap = parts[1]
-				result.Cap = parseQueueCap(parts[1])
+			_, value, _ := strings.Cut(token, ":")
+			if value != "" {
+				result.RawCap = value
+				result.Cap = parseQueueCap(value)
 				result.HasOptions = true
 				result.HasCap = true
 			}
 			continue
 		}
 		if strings.HasPrefix(lowered, "drop:") {
-			parts := strings.SplitN(token, ":", 2)
-			if len(parts) > 1 {
-				result.RawDrop = parts[1]
-				if policy, ok := airuntime.NormalizeQueueDropPolicy(parts[1]); ok {
+			_, value, _ := strings.Cut(token, ":")
+			if value != "" {
+				result.RawDrop = value
+				if policy, ok := airuntime.NormalizeQueueDropPolicy(value); ok {
 					result.DropPolicy = &policy
 				}
 				result.HasOptions = true

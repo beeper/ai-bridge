@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -118,11 +119,7 @@ func flattenGravatarValue(value any, prefix string, out *[]string) {
 		if len(v) == 0 {
 			return
 		}
-		keys := make([]string, 0, len(v))
-		for key := range v {
-			keys = append(keys, key)
-		}
-		slices.Sort(keys)
+		keys := slices.Sorted(maps.Keys(v))
 		for _, key := range keys {
 			child := v[key]
 			if isGravatarEmpty(child) {

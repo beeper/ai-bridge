@@ -2,6 +2,7 @@ package opencodebridge
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"maunium.net/go/mautrix/event"
@@ -248,13 +249,13 @@ func canonicalDataPart(part opencode.Part) map[string]any {
 		if part.Cost != 0 {
 			data["cost"] = part.Cost
 		}
-	case "patch":
-		if hash := strings.TrimSpace(part.Hash); hash != "" {
-			data["hash"] = hash
-		}
-		if len(part.Files) > 0 {
-			data["files"] = append([]string(nil), part.Files...)
-		}
+		case "patch":
+			if hash := strings.TrimSpace(part.Hash); hash != "" {
+				data["hash"] = hash
+			}
+			if len(part.Files) > 0 {
+				data["files"] = slices.Clone(part.Files)
+			}
 	case "snapshot":
 		if snapshot := strings.TrimSpace(part.Snapshot); snapshot != "" {
 			data["snapshot"] = snapshot
