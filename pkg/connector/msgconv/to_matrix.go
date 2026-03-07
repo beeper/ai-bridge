@@ -1,6 +1,7 @@
 package msgconv
 
 import (
+	"encoding/json"
 	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
@@ -197,19 +198,36 @@ func cloneMap(raw any) map[string]any {
 	return jsonutil.DeepCloneMap(jsonutil.ToMap(raw))
 }
 
+func normalizeUIParts(raw any) []map[string]any {
+	switch typed := raw.(type) {
+	case nil:
+		return nil
+	case []map[string]any:
+		return typed
+	case []any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			part := jsonutil.ToMap(item)
+			if len(part) == 0 {
+				continue
+			}
+			out = append(out, part)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 // AppendUIMessageArtifacts appends source/file parts to an existing UIMessage.
 func AppendUIMessageArtifacts(uiMessage map[string]any, sourceParts, fileParts []map[string]any) map[string]any {
 	if len(uiMessage) == 0 {
 		return nil
 	}
 	out := cloneMap(uiMessage)
-	parts, _ := out["parts"].([]any)
+	parts := normalizeUIParts(out["parts"])
 	seen := make(map[string]struct{}, len(parts))
-	for _, raw := range parts {
-		part, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
+	for _, part := range parts {
 		seen[artifactPartKey(part)] = struct{}{}
 	}
 	for _, part := range sourceParts {
@@ -247,7 +265,11 @@ func artifactPartKey(part map[string]any) string {
 		}
 		return partType + ":" + sourceID
 	default:
-		return partType
+		data, err := json.Marshal(part)
+		if err != nil {
+			return partType
+		}
+		return partType + ":" + string(data)
 	}
 }
 
