@@ -202,8 +202,7 @@ func cmdLogin(args []string) error {
 	return nil
 }
 
-func cmdLogout(args []string) error {
-	_ = args
+func cmdLogout(_ []string) error {
 	path, err := authConfigPath()
 	if err != nil {
 		return err
@@ -240,7 +239,9 @@ func cmdWhoami(args []string) error {
 	fmt.Printf("Bridges: %d\n", len(resp.User.Bridges))
 	if cfg.Username == "" || cfg.Username != resp.UserInfo.Username {
 		cfg.Username = resp.UserInfo.Username
-		_ = saveAuthConfig(cfg)
+		if err := saveAuthConfig(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to save auth config: %v\n", err)
+		}
 	}
 	return nil
 }
@@ -255,11 +256,10 @@ func cmdUp(args []string) error {
 	if err != nil {
 		return err
 	}
-	mf, cfg, err := loadInstance(*manifestPath, instance)
+	_, cfg, err := loadInstance(*manifestPath, instance)
 	if err != nil {
 		return err
 	}
-	_ = mf
 	state, err := ensureInstanceLayout(instance)
 	if err != nil {
 		return err
@@ -669,7 +669,9 @@ func cmdAuth(args []string) error {
 		fmt.Printf("@%s:%s (%s)\n", resp.UserInfo.Username, cfg.Domain, resp.UserInfo.Email)
 		if cfg.Username == "" || cfg.Username != resp.UserInfo.Username {
 			cfg.Username = resp.UserInfo.Username
-			_ = saveAuthConfig(cfg)
+			if err := saveAuthConfig(cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to save auth config: %v\n", err)
+			}
 		}
 		return nil
 	default:
@@ -863,7 +865,9 @@ func ensureRegistration(meta *metadata, cfg instanceConfig) error {
 	}
 	if auth.Username == "" || auth.Username != who.UserInfo.Username {
 		auth.Username = who.UserInfo.Username
-		_ = saveAuthConfig(auth)
+		if err := saveAuthConfig(auth); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to save auth config: %v\n", err)
+		}
 	}
 	hc := hungryapi.NewClient(auth.Domain, auth.Username, auth.Token)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -894,7 +898,9 @@ func ensureRegistration(meta *metadata, cfg instanceConfig) error {
 		IsSelfHosted: true,
 		BridgeType:   cfg.BridgeType,
 	}
-	_ = beeperapi.PostBridgeState(auth.Domain, auth.Username, meta.BeeperBridgeName, reg.AppToken, state)
+	if err := beeperapi.PostBridgeState(auth.Domain, auth.Username, meta.BeeperBridgeName, reg.AppToken, state); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to post bridge state: %v\n", err)
+	}
 	return nil
 }
 
@@ -907,13 +913,17 @@ func deleteRemoteBridge(name string) error {
 		who, werr := beeperapi.Whoami(auth.Domain, auth.Token)
 		if werr == nil {
 			auth.Username = who.UserInfo.Username
-			_ = saveAuthConfig(auth)
+			if err := saveAuthConfig(auth); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to save auth config: %v\n", err)
+			}
 		}
 	}
 	if auth.Username != "" {
 		hc := hungryapi.NewClient(auth.Domain, auth.Username, auth.Token)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		_ = hc.DeleteAppService(ctx, name)
+		if err := hc.DeleteAppService(ctx, name); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to delete appservice: %v\n", err)
+		}
 		cancel()
 	}
 	if err = beeperapi.DeleteBridge(auth.Domain, name, auth.Token); err != nil {
