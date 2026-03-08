@@ -421,11 +421,7 @@ func backfillReasoningTokens(msg opencode.MessageWithParts) int64 {
 }
 
 func backfillTotalTokens(msg opencode.MessageWithParts) int64 {
-	total := backfillPromptTokens(msg) + backfillCompletionTokens(msg) + backfillReasoningTokens(msg)
-	if total != 0 {
-		return total
-	}
-	return 0
+	return backfillPromptTokens(msg) + backfillCompletionTokens(msg) + backfillReasoningTokens(msg)
 }
 
 func stringValueBridge(raw any) string {
