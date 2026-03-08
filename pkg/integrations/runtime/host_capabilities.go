@@ -131,15 +131,6 @@ type TextFileHelper interface {
 	WriteTextFile(ctx context.Context, portal any, meta any, agentID string, mode string, path string, content string, maxBytes int) (finalPath string, err error)
 }
 
-// EmbeddingHelper provides embedding API configuration resolution.
-// The caller provides its own configured values; the host fills in defaults
-// from provider/proxy configuration where the caller's values are empty.
-type EmbeddingHelper interface {
-	ResolveOpenAIEmbeddingConfig(apiKey string, baseURL string, headers map[string]string) (string, string, map[string]string)
-	ResolveDirectOpenAIEmbeddingConfig(apiKey string, baseURL string, headers map[string]string) (string, string, map[string]string)
-	ResolveGeminiEmbeddingConfig(apiKey string, baseURL string, headers map[string]string) (string, string, map[string]string)
-}
-
 // OverflowHelper provides overflow handling support.
 type OverflowHelper interface {
 	SmartTruncatePrompt(prompt []openai.ChatCompletionMessageParamUnion, ratio float64) []openai.ChatCompletionMessageParamUnion

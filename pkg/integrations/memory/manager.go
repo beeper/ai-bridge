@@ -58,22 +58,19 @@ type MemorySearchManager struct {
 }
 
 type MemorySearchStatus struct {
-	Files             int
-	Chunks            int
-	Dirty             bool
-	WorkspaceDir      string
-	DBPath            string
-	Provider          string
-	Model             string
-	RequestedProvider string
-	Sources           []string
-	ExtraPaths        []string
-	SourceCounts      []MemorySearchSourceCount
-	Cache             *MemorySearchCacheStatus
-	FTS               *MemorySearchFTSStatus
-	Fallback          *memorycore.FallbackStatus
-	Vector            *MemorySearchVectorStatus
-	Batch             *MemorySearchBatchStatus
+	Files        int
+	Chunks       int
+	Dirty        bool
+	WorkspaceDir string
+	DBPath       string
+	Provider     string
+	Model        string
+	Sources      []string
+	ExtraPaths   []string
+	SourceCounts []MemorySearchSourceCount
+	Cache        *MemorySearchCacheStatus
+	FTS          *MemorySearchFTSStatus
+	Fallback     *memorycore.FallbackStatus
 }
 
 type MemorySearchSourceCount struct {
@@ -92,26 +89,6 @@ type MemorySearchFTSStatus struct {
 	Enabled   bool
 	Available bool
 	Error     string
-}
-
-type MemorySearchVectorStatus struct {
-	Enabled       bool
-	Available     *bool
-	ExtensionPath string
-	LoadError     string
-	Dims          int
-}
-
-type MemorySearchBatchStatus struct {
-	Enabled        bool
-	Failures       int
-	Limit          int
-	Wait           bool
-	Concurrency    int
-	PollIntervalMs int
-	TimeoutMs      int
-	LastError      string
-	LastProvider   string
 }
 
 var memoryManagerCache = struct {
@@ -226,21 +203,12 @@ func (m *MemorySearchManager) ensureDefaultMemoryFiles(ctx context.Context) {
 	_, _ = store.WriteIfMissing(ctx, "MEMORY.md", "")
 }
 
-func (m *MemorySearchManager) ProbeVectorAvailability(ctx context.Context) bool {
-	_ = ctx
-	return false
-}
-
-func (m *MemorySearchManager) ProbeEmbeddingAvailability(ctx context.Context) (bool, string) {
-	_ = ctx
-	return false, "embeddings disabled (lexical memory mode)"
-}
-
 func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchStatus, error) {
 	if m == nil {
 		return nil, errors.New("memory search unavailable")
 	}
-	// Avoid hanging on SQLite busy/locks during indexing.
+	// Memory status reflects the current lexical-only runtime behavior.
+	// Keep the report truthful and avoid placeholder vector/embedding fields.
 	statusCtx, cancel := context.WithTimeout(ctx, memoryStatusTimeout)
 	defer cancel()
 	start := time.Now()
@@ -256,15 +224,14 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 		workspaceDir = m.runtime.ResolvePromptWorkspaceDir()
 	}
 	status := &MemorySearchStatus{
-		Dirty:             dirty,
-		WorkspaceDir:      workspaceDir,
-		DBPath:            memoryDBPath,
-		Provider:          m.status.Provider,
-		Model:             m.status.Model,
-		RequestedProvider: m.cfg.Provider,
-		Sources:           slices.Clone(m.cfg.Sources),
-		ExtraPaths:        resolveStatusExtraPaths(m.cfg.ExtraPaths, workspaceDir),
-		Fallback:          m.status.Fallback,
+		Dirty:        dirty,
+		WorkspaceDir: workspaceDir,
+		DBPath:       memoryDBPath,
+		Provider:     m.status.Provider,
+		Model:        m.status.Model,
+		Sources:      slices.Clone(m.cfg.Sources),
+		ExtraPaths:   resolveStatusExtraPaths(m.cfg.ExtraPaths, workspaceDir),
+		Fallback:     m.status.Fallback,
 	}
 
 	genSQL, genArgs := generationFilterSQL(5, indexGen)
@@ -301,14 +268,6 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 		Enabled:   true,
 		Available: m.ftsAvailable,
 		Error:     m.ftsError,
-	}
-	status.Vector = &MemorySearchVectorStatus{
-		Enabled:   false,
-		Available: nil,
-	}
-
-	status.Batch = &MemorySearchBatchStatus{
-		Enabled: false,
 	}
 
 	m.log.Debug().

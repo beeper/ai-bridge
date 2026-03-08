@@ -20,6 +20,7 @@ func (e *Emitter) EnsureUIToolInputStart(
 	if toolCallID == "" {
 		return
 	}
+	_ = dynamic
 	if e.State == nil {
 		return
 	}
@@ -36,9 +37,7 @@ func (e *Emitter) EnsureUIToolInputStart(
 		"toolName":         toolName,
 		"providerExecuted": providerExecuted,
 	}
-	if dynamic {
-		part["dynamic"] = true
-	}
+	part["dynamic"] = true
 	if strings.TrimSpace(title) != "" {
 		part["title"] = title
 	}
@@ -70,13 +69,14 @@ func (e *Emitter) EmitUIToolInputAvailable(ctx context.Context, portal *bridgev2
 	if toolCallID == "" {
 		return
 	}
-	e.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, false, ToolDisplayTitle(toolName), nil)
+	e.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, true, ToolDisplayTitle(toolName), nil)
 	e.Emit(ctx, portal, map[string]any{
 		"type":             "tool-input-available",
 		"toolCallId":       toolCallID,
 		"toolName":         toolName,
 		"input":            input,
 		"providerExecuted": providerExecuted,
+		"dynamic":          true,
 	})
 }
 
@@ -93,7 +93,7 @@ func (e *Emitter) EmitUIToolInputError(
 	if toolCallID == "" {
 		return
 	}
-	e.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, dynamic, ToolDisplayTitle(toolName), nil)
+	e.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, true, ToolDisplayTitle(toolName), nil)
 	part := map[string]any{
 		"type":             "tool-input-error",
 		"toolCallId":       toolCallID,
@@ -101,9 +101,7 @@ func (e *Emitter) EmitUIToolInputError(
 		"input":            input,
 		"errorText":        errorText,
 		"providerExecuted": providerExecuted,
-	}
-	if dynamic {
-		part["dynamic"] = true
+		"dynamic":          true,
 	}
 	e.Emit(ctx, portal, part)
 }
@@ -118,6 +116,8 @@ func (e *Emitter) EmitUIToolApprovalRequest(
 	if strings.TrimSpace(approvalID) == "" || strings.TrimSpace(toolCallID) == "" {
 		return
 	}
+	_ = toolName
+	_ = ttlSeconds
 	if e.State == nil {
 		return
 	}
@@ -126,8 +126,6 @@ func (e *Emitter) EmitUIToolApprovalRequest(
 		"type":       "tool-approval-request",
 		"approvalId": approvalID,
 		"toolCallId": toolCallID,
-		"toolName":   toolName,
-		"ttlSeconds": ttlSeconds,
 	})
 }
 

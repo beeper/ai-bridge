@@ -8,7 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+
+	"github.com/beeper/ai-bridge/pkg/shared/stringutil"
 )
 
 func runMediaCLI(
@@ -124,15 +127,7 @@ func resolveWhisperOutputPath(args []string, mediaPath string) string {
 	if outputDir == "" || outputFormat == "" {
 		return ""
 	}
-	formats := strings.Split(outputFormat, ",")
-	hasTxt := false
-	for _, format := range formats {
-		if strings.TrimSpace(format) == "txt" {
-			hasTxt = true
-			break
-		}
-	}
-	if !hasTxt {
+	if !slices.Contains(stringutil.SplitCSV(outputFormat), "txt") {
 		return ""
 	}
 	base := strings.TrimSuffix(filepath.Base(mediaPath), filepath.Ext(mediaPath))

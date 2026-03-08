@@ -22,3 +22,13 @@ func makeCodexUserLoginID(mxid id.UserID, instanceID string) networkid.UserLogin
 func generateShortID() string {
 	return xid.New().String()
 }
+
+func isCodexIdentifier(identifier string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(identifier))
+	switch trimmed {
+	case "", "codex", "@codex", "codex:default", "codex:codex":
+		return trimmed != ""
+	default:
+		return false
+	}
+}

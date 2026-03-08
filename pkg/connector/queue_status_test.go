@@ -92,7 +92,7 @@ func TestDispatchOrQueueQueueRejectReturnsNotPending(t *testing.T) {
 		nil,
 		queueItem,
 		airuntime.QueueSettings{Mode: airuntime.QueueModeCollect, Cap: 1, DropPolicy: airuntime.QueueDropNew},
-		nil,
+		PromptContext{},
 	)
 
 	if isPending {
@@ -126,7 +126,7 @@ func TestDispatchOrQueueQueueAcceptReturnsPending(t *testing.T) {
 		nil,
 		queueItem,
 		airuntime.QueueSettings{Mode: airuntime.QueueModeCollect, Cap: 10, DropPolicy: airuntime.QueueDropOld},
-		nil,
+		PromptContext{},
 	)
 
 	if !isPending {

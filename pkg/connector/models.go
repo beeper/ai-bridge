@@ -27,19 +27,31 @@ const (
 //   - "anthropic/claude-sonnet-4.5" (no routing prefix) → ("", "anthropic/claude-sonnet-4.5")
 //   - "gpt-4o" (no prefix) → ("", "gpt-4o")
 func ParseModelPrefix(modelID string) (backend ModelBackend, actualModel string) {
-	parts := strings.SplitN(modelID, "/", 2)
-	if len(parts) != 2 {
+	prefix, rest, ok := strings.Cut(modelID, "/")
+	if !ok {
 		return "", modelID // No prefix, return as-is
 	}
 
-	switch parts[0] {
+	switch prefix {
 	case "openai":
-		return BackendOpenAI, parts[1]
+		return BackendOpenAI, rest
 	case "openrouter":
-		return BackendOpenRouter, parts[1] // parts[1] = "openai/gpt-5" (nested)
+		return BackendOpenRouter, rest // rest = "openai/gpt-5" (nested)
 	default:
 		return "", modelID // Unknown prefix, return as-is
 	}
+}
+
+func splitModelProvider(modelID string) (string, string) {
+	trimmed := strings.TrimSpace(modelID)
+	if trimmed == "" {
+		return "", ""
+	}
+	provider, model, ok := strings.Cut(trimmed, "/")
+	if !ok {
+		return "", trimmed
+	}
+	return strings.ToLower(strings.TrimSpace(provider)), strings.TrimSpace(model)
 }
 
 func HasValidPrefix(modelID string) bool {

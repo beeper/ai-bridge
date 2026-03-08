@@ -56,6 +56,7 @@ func (cc *CodexClient) uiEmitter(state *streamingState) *streamui.Emitter {
 	return &streamui.Emitter{
 		State: &state.ui,
 		Emit: func(ctx context.Context, portal *bridgev2.Portal, part map[string]any) {
+			streamui.ApplyChunk(&state.ui, part)
 			cc.emitStreamEvent(ctx, portal, state, part)
 		},
 	}

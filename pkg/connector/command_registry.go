@@ -5,11 +5,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/event/cmdschema"
 
 	"github.com/beeper/ai-bridge/pkg/connector/commandregistry"
 	integrationruntime "github.com/beeper/ai-bridge/pkg/integrations/runtime"
@@ -126,7 +128,7 @@ func registerCommandsWithOwnerGuard(proc *commands.Processor, cfg *Config, log *
 		Msg("Registered AI commands: " + strings.Join(names, ", "))
 }
 
-// BroadcastCommandDescriptions sends com.beeper.command_description state events
+// BroadcastCommandDescriptions sends MSC4391 command-description state events
 // for all registered AI commands into the given room. This enables clients
 // to discover and render slash commands with autocomplete.
 func (oc *AIClient) BroadcastCommandDescriptions(ctx context.Context, portal *bridgev2.Portal) {
@@ -149,23 +151,10 @@ func (oc *AIClient) BroadcastCommandDescriptions(ctx context.Context, portal *br
 		if handler == nil || handler.Name == "" {
 			continue
 		}
-		description := strings.TrimSpace(handler.Help.Description)
-		if description == "" {
-			description = "AI command"
-		}
-
-		content := map[string]any{
-			"description": description,
-		}
-		// Parse args string into structured arguments map if present
-		args := strings.TrimSpace(handler.Help.Args)
-		if args != "" {
-			content["arguments"] = buildCommandArguments(args)
-		}
-
 		stateKey := handler.Name
+		content := buildCommandDescriptionContent(handler)
 		_, err := bot.SendState(ctx, portal.MXID, event.StateMSC4391BotCommand, stateKey, &event.Content{
-			Raw: content,
+			Parsed: content,
 		}, time.Time{})
 		if err != nil {
 			log.Warn().Err(err).Str("command", handler.Name).Msg("command_description: failed to send state event")
@@ -174,30 +163,107 @@ func (oc *AIClient) BroadcastCommandDescriptions(ctx context.Context, portal *br
 	log.Debug().Int("count", len(handlers)).Stringer("room", portal.MXID).Msg("command_description: broadcast command descriptions")
 }
 
-// buildCommandArguments converts a simple args string like "<model_id> [reason]"
-// into a structured arguments map for com.beeper.command_description.
-func buildCommandArguments(argsStr string) map[string]any {
-	args := map[string]any{}
-	for _, part := range tokenizeArgs(argsStr) {
-		required := false
-		name := part
-		if strings.HasPrefix(name, "<") && strings.HasSuffix(name, ">") {
-			name = name[1 : len(name)-1]
-			required = true
-		} else if strings.HasPrefix(name, "[") && strings.HasSuffix(name, "]") {
-			name = name[1 : len(name)-1]
-		}
-		// Strip pipes (e.g. "allow|always|deny" → use first as name)
-		if idx := strings.Index(name, "|"); idx > 0 {
-			name = name[:idx]
-		}
-		args[name] = map[string]any{
-			"description": part,
-			"required":    required,
-			"type":        "string",
+func buildCommandDescriptionContent(handler *commands.FullHandler) *cmdschema.EventContent {
+	description := "AI command"
+	if handler != nil {
+		if trimmed := strings.TrimSpace(handler.Help.Description); trimmed != "" {
+			description = trimmed
 		}
 	}
-	return args
+	content := &cmdschema.EventContent{
+		Command:     handler.Name,
+		Description: event.MakeExtensibleText(description),
+	}
+	content.Parameters, content.TailParam = buildCommandParameters(handler.Help.Args)
+	return content
+}
+
+// buildCommandParameters converts a simple args string like "<model_id> [reason]"
+// into MSC4391 parameter definitions.
+func buildCommandParameters(argsStr string) ([]*cmdschema.Parameter, string) {
+	var (
+		params    []*cmdschema.Parameter
+		tailParam string
+	)
+	for _, part := range tokenizeArgs(argsStr) {
+		required, name := parseCommandArgumentToken(part)
+		if name == "" {
+			continue
+		}
+		schema, key, isTail := buildCommandParameterSchema(name)
+		if schema == nil || key == "" {
+			continue
+		}
+		params = append(params, &cmdschema.Parameter{
+			Key:         key,
+			Schema:      schema,
+			Optional:    !required,
+			Description: event.MakeExtensibleText(part),
+		})
+		if isTail && tailParam == "" {
+			tailParam = key
+		}
+	}
+	return params, tailParam
+}
+
+func parseCommandArgumentToken(token string) (required bool, name string) {
+	name = strings.TrimSpace(token)
+	if strings.HasPrefix(name, "<") && strings.HasSuffix(name, ">") {
+		name = name[1 : len(name)-1]
+		required = true
+	} else if strings.HasPrefix(name, "[") && strings.HasSuffix(name, "]") {
+		name = name[1 : len(name)-1]
+	}
+	return required, strings.TrimSpace(name)
+}
+
+func buildCommandParameterSchema(name string) (*cmdschema.ParameterSchema, string, bool) {
+	isTail := strings.Contains(name, "...")
+	cleanName := strings.TrimSpace(strings.Trim(strings.ReplaceAll(name, "...", ""), "_"))
+	keySource := cleanName
+	if strings.Contains(cleanName, "|") {
+		keySource = strings.TrimSpace(strings.Split(cleanName, "|")[0])
+	}
+	key := normalizeCommandParameterKey(keySource)
+	if key == "" {
+		key = "args"
+	}
+
+	if strings.Contains(cleanName, "|") {
+		options := strings.Split(cleanName, "|")
+		var variants []*cmdschema.ParameterSchema
+		for _, option := range options {
+			option = strings.TrimSpace(option)
+			if option == "" {
+				continue
+			}
+			variants = append(variants, cmdschema.Literal(option))
+		}
+		if len(variants) > 0 {
+			return cmdschema.Union(variants...), key, isTail
+		}
+	}
+	return cmdschema.PrimitiveTypeString.Schema(), key, isTail
+}
+
+func normalizeCommandParameterKey(name string) string {
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range name {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			b.WriteRune(unicode.ToLower(r))
+			lastUnderscore = false
+		case r == '_' || r == '-' || unicode.IsSpace(r):
+			if b.Len() == 0 || lastUnderscore {
+				continue
+			}
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
 }
 
 // tokenizeArgs splits an args string into tokens, keeping bracketed segments

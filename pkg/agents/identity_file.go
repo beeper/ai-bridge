@@ -47,12 +47,12 @@ func ParseIdentityMarkdown(content string) IdentityFile {
 		cleaned := strings.TrimSpace(line)
 		cleaned = strings.TrimPrefix(cleaned, "-")
 		cleaned = strings.TrimSpace(cleaned)
-		colonIndex := strings.Index(cleaned, ":")
-		if colonIndex == -1 {
+		labelPart, valuePart, ok := strings.Cut(cleaned, ":")
+		if !ok {
 			continue
 		}
-		label := strings.ToLower(strings.TrimSpace(strings.Trim(cleaned[:colonIndex], "*_")))
-		value := strings.TrimSpace(strings.Trim(cleaned[colonIndex+1:], "*_"))
+		label := strings.ToLower(strings.TrimSpace(strings.Trim(labelPart, "*_")))
+		value := strings.TrimSpace(strings.Trim(valuePart, "*_"))
 		if value == "" {
 			continue
 		}

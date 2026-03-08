@@ -18,6 +18,7 @@ import (
 	airuntime "github.com/beeper/ai-bridge/pkg/runtime"
 	"github.com/beeper/ai-bridge/pkg/shared/citations"
 	"github.com/beeper/ai-bridge/pkg/shared/streamtransport"
+	"github.com/beeper/ai-bridge/pkg/shared/streamui"
 )
 
 const maxSafeEditPayloadBytes = 54 * 1024
@@ -631,6 +632,7 @@ func buildSourceParts(cits []citations.SourceCitation, documents []citations.Sou
 			meta["description"] = desc
 		}
 		if site := strings.TrimSpace(preview.SiteName); site != "" {
+			meta["siteName"] = site
 			meta["site_name"] = site
 		}
 		if len(meta) == 0 {
@@ -642,6 +644,28 @@ func buildSourceParts(cits []citations.SourceCitation, documents []citations.Sou
 	return parts
 }
 
+func (oc *AIClient) buildFinalEditUIMessage(state *streamingState, meta *PortalMetadata, linkPreviews []*event.BeeperLinkPreview) map[string]any {
+	if state == nil {
+		return nil
+	}
+	if uiMessage := streamui.SnapshotCanonicalUIMessage(&state.ui); len(uiMessage) > 0 {
+		metadata, _ := uiMessage["metadata"].(map[string]any)
+		uiMessage["metadata"] = msgconv.MergeUIMessageMetadata(metadata, oc.buildUIMessageMetadata(state, meta, true))
+		return msgconv.AppendUIMessageArtifacts(
+			uiMessage,
+			buildSourceParts(state.sourceCitations, state.sourceDocuments, linkPreviews),
+			citations.GeneratedFilesToParts(state.generatedFiles),
+		)
+	}
+	return msgconv.BuildUIMessage(msgconv.UIMessageParams{
+		TurnID:     state.turnID,
+		Role:       "assistant",
+		Metadata:   oc.buildUIMessageMetadata(state, meta, true),
+		SourceURLs: buildSourceParts(state.sourceCitations, state.sourceDocuments, linkPreviews),
+		FileParts:  citations.GeneratedFilesToParts(state.generatedFiles),
+	})
+}
+
 // sendFinalAssistantTurnContent is a helper for simple mode that sends content without directive processing.
 func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata, rendered event.MessageEventContent, replyToEventID *id.EventID, mode string) {
 	// Safety-split oversized responses into multiple Matrix events
@@ -650,21 +674,6 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 		firstBody, rest := streamtransport.SplitAtMarkdownBoundary(rendered.Body, streamtransport.MaxMatrixEventBodyBytes)
 		continuationBody = rest
 		rendered = format.RenderMarkdown(firstBody, true, true)
-	}
-
-	// Build AI metadata
-	// Keep edit payload lean: include only final text state, not accumulated
-	// tool/source/reasoning payloads from the full turn.
-	parts := []map[string]any{}
-	if rendered.Body != "" {
-		parts = append(parts, map[string]any{
-			"type":  "text",
-			"text":  "",
-			"state": "done",
-		})
-	}
-	if toolParts := msgconv.ToolCallParts(state.toolCalls, string(ToolTypeProvider), string(ResultStatusSuccess), string(ResultStatusDenied)); len(toolParts) > 0 {
-		parts = append(parts, toolParts...)
 	}
 
 	replyTo := id.EventID("")
@@ -683,12 +692,7 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 	intent, _ := oc.getIntentForPortal(ctx, portal, bridgev2.RemoteEventMessage)
 	linkPreviews := generateOutboundLinkPreviews(ctx, rendered.Body, intent, portal, state.sourceCitations, getLinkPreviewConfig(&oc.connector.Config))
 
-	uiMessage := msgconv.BuildUIMessage(msgconv.UIMessageParams{
-		TurnID:   state.turnID,
-		Role:     "assistant",
-		Metadata: oc.buildUIMessageMetadata(state, meta, true),
-		Parts:    parts,
-	})
+	uiMessage := oc.buildFinalEditUIMessage(state, meta, linkPreviews)
 
 	topLevelExtra := map[string]any{
 		"com.beeper.dont_render_edited": true,

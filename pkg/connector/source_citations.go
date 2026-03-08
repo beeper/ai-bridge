@@ -20,8 +20,8 @@ func extractURLCitation(annotation any) (citations.SourceCitation, bool) {
 	if typ != "url_citation" {
 		return citations.SourceCitation{}, false
 	}
-	urlStr, ok := maputil.StringArgMulti(raw, "url")
-	if !ok {
+	urlStr := maputil.StringArg(raw, "url")
+	if urlStr == "" {
 		return citations.SourceCitation{}, false
 	}
 	parsed, err := url.Parse(urlStr)
@@ -33,7 +33,7 @@ func extractURLCitation(annotation any) (citations.SourceCitation, bool) {
 	default:
 		return citations.SourceCitation{}, false
 	}
-	title, _ := maputil.StringArgMulti(raw, "title")
+	title := maputil.StringArg(raw, "title")
 	return citations.SourceCitation{URL: urlStr, Title: title}, true
 }
 
@@ -49,8 +49,8 @@ func extractDocumentCitation(annotation any) (citations.SourceDocument, bool) {
 		return citations.SourceDocument{}, false
 	}
 
-	fileID, _ := maputil.StringArgMulti(raw, "file_id")
-	filename, _ := maputil.StringArgMulti(raw, "filename")
+	fileID := maputil.StringArg(raw, "file_id")
+	filename := maputil.StringArg(raw, "filename")
 	title := filename
 	if strings.TrimSpace(title) == "" {
 		title = fileID
@@ -98,8 +98,8 @@ func extractWebSearchCitationsFromToolOutput(toolName, output string) []citation
 		if !ok {
 			continue
 		}
-		urlStr, ok := maputil.StringArgMulti(entry, "url")
-		if !ok {
+		urlStr := maputil.StringArg(entry, "url")
+		if urlStr == "" {
 			continue
 		}
 		parsed, err := url.Parse(urlStr)
@@ -111,13 +111,13 @@ func extractWebSearchCitationsFromToolOutput(toolName, output string) []citation
 		default:
 			continue
 		}
-		title, _ := maputil.StringArgMulti(entry, "title")
-		description, _ := maputil.StringArgMulti(entry, "description")
-		published, _ := maputil.StringArgMulti(entry, "published")
-		siteName, _ := maputil.StringArgMulti(entry, "siteName")
-		author, _ := maputil.StringArgMulti(entry, "author")
-		image, _ := maputil.StringArgMulti(entry, "image")
-		favicon, _ := maputil.StringArgMulti(entry, "favicon")
+		title := maputil.StringArg(entry, "title")
+		description := maputil.StringArg(entry, "description")
+		published := maputil.StringArg(entry, "published")
+		siteName := maputil.StringArg(entry, "siteName")
+		author := maputil.StringArg(entry, "author")
+		image := maputil.StringArg(entry, "image")
+		favicon := maputil.StringArg(entry, "favicon")
 		result = append(result, citations.SourceCitation{
 			URL:         urlStr,
 			Title:       title,

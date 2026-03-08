@@ -35,6 +35,7 @@ type PortalMetadata struct {
 type MessageMetadata struct {
 	Role               string             `json:"role,omitempty"`
 	Body               string             `json:"body,omitempty"`
+	ExcludeFromHistory bool               `json:"exclude_from_history,omitempty"`
 	CompletionID       string             `json:"completion_id,omitempty"`
 	FinishReason       string             `json:"finish_reason,omitempty"`
 	PromptTokens       int64              `json:"prompt_tokens,omitempty"`
@@ -76,6 +77,9 @@ func (mm *MessageMetadata) CopyFrom(other any) {
 	}
 	if src.Body != "" {
 		mm.Body = src.Body
+	}
+	if src.ExcludeFromHistory {
+		mm.ExcludeFromHistory = true
 	}
 	if src.CompletionID != "" {
 		mm.CompletionID = src.CompletionID

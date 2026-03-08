@@ -59,7 +59,7 @@ func (m *OpenCodeManager) emitTextStreamDeltaForKind(ctx context.Context, inst *
 	}
 	agentID := m.bridge.portalAgentID(portal)
 	m.closeStepIfOpen(ctx, inst, portal, part.SessionID, part.MessageID)
-	m.ensureTurnStarted(ctx, inst, portal, part.SessionID, part.MessageID)
+	m.ensureTurnStarted(ctx, inst, portal, part.SessionID, part.MessageID, nil)
 
 	tsf := inst.partTextStreamFlags(part.SessionID, part.ID)
 	started := tsf.textStarted
@@ -78,6 +78,7 @@ func (m *OpenCodeManager) emitTextStreamDeltaForKind(ctx context.Context, inst *
 		"id":    partID,
 		"delta": delta,
 	})
+	inst.appendPartTextContent(part.SessionID, part.ID, kind, delta)
 }
 
 func (m *OpenCodeManager) emitTextStreamEnd(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part opencode.Part) {

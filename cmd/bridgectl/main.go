@@ -20,6 +20,8 @@ import (
 	"github.com/beeper/bridge-manager/api/hungryapi"
 	"gopkg.in/yaml.v3"
 	"maunium.net/go/mautrix"
+
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 )
 
 const (
@@ -770,12 +772,6 @@ func ensureInitialized(instance string, cfg instanceConfig, sp *statePaths) (*me
 }
 
 func readOrSynthesizeMetadata(instance string, cfg instanceConfig, sp *statePaths) (*metadata, error) {
-	if data, err := os.ReadFile(sp.MetaPath); err == nil {
-		var m metadata
-		if err = json.Unmarshal(data, &m); err == nil {
-			return &m, nil
-		}
-	}
 	repo, err := expandPath(cfg.RepoPath)
 	if err != nil {
 		return nil, err
@@ -786,6 +782,24 @@ func readOrSynthesizeMetadata(instance string, cfg instanceConfig, sp *statePath
 	}
 	if !filepath.IsAbs(binPath) {
 		binPath = filepath.Join(repo, binPath)
+	}
+	if data, err := os.ReadFile(sp.MetaPath); err == nil {
+		var m metadata
+		if err = json.Unmarshal(data, &m); err == nil {
+			// Repo and binary locations are derived from the current manifest.
+			// Refresh them on every load so moving the checkout doesn't strand
+			// an instance on stale absolute paths from an older clone.
+			m.Instance = instance
+			m.BridgeType = cfg.BridgeType
+			m.RepoPath = repo
+			m.BinaryPath = binPath
+			m.ConfigPath = sp.ConfigPath
+			m.RegistrationPath = sp.RegistrationPath
+			m.LogPath = sp.LogPath
+			m.PIDPath = sp.PIDPath
+			m.BeeperBridgeName = cfg.BeeperBridgeName
+			return &m, nil
+		}
 	}
 	return &metadata{
 		Instance:         instance,
@@ -917,7 +931,7 @@ func patchConfigWithRegistration(configPath string, reg any, homeserverURL, brid
 	if err = yaml.Unmarshal(data, &doc); err != nil {
 		return err
 	}
-	regMap := toMap(reg)
+	regMap := jsonutil.ToMap(reg)
 
 	// Homeserver — hungryserv websocket mode
 	setPath(doc, []string{"homeserver", "address"}, homeserverURL)
@@ -1267,11 +1281,4 @@ func promptLine(label string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(s), nil
-}
-
-func toMap(v any) map[string]any {
-	data, _ := json.Marshal(v)
-	out := map[string]any{}
-	_ = json.Unmarshal(data, &out)
-	return out
 }

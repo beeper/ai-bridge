@@ -2,6 +2,7 @@ package connector
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -51,14 +52,6 @@ func (q *ReactionQueue) addReactionLocked(feedback ReactionFeedback) {
 	}
 }
 
-// AddReaction adds a reaction feedback to the queue.
-// Skips consecutive duplicates like OpenClaw does.
-func (q *ReactionQueue) AddReaction(feedback ReactionFeedback) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.addReactionLocked(feedback)
-}
-
 // DrainFeedback returns all queued feedback and clears the queue.
 func (q *ReactionQueue) DrainFeedback() []ReactionFeedback {
 	q.mu.Lock()
@@ -68,8 +61,7 @@ func (q *ReactionQueue) DrainFeedback() []ReactionFeedback {
 		return nil
 	}
 
-	result := make([]ReactionFeedback, len(q.feedback))
-	copy(result, q.feedback)
+	result := slices.Clone(q.feedback)
 	q.feedback = q.feedback[:0]
 	q.lastText = "" // Reset deduplication state
 	return result

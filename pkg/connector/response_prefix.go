@@ -74,9 +74,7 @@ func buildResponsePrefixContext(oc *AIClient, agentID string, meta *PortalMetada
 	if modelFull != "" {
 		ctx.ModelFull = modelFull
 		ctx.Model = extractShortModelName(modelFull)
-		if idx := strings.Index(modelFull, "/"); idx > 0 {
-			ctx.Provider = modelFull[:idx]
-		}
+		ctx.Provider, _ = splitModelProvider(modelFull)
 	}
 	if ctx.Provider == "" {
 		if login := loginMetadata(oc.UserLogin); login != nil {

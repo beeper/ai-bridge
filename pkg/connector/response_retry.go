@@ -60,17 +60,6 @@ func (oc *AIClient) responseWithRetry(
 		if cle != nil {
 			lastCLE = cle
 			oc.loggerForContext(ctx).Info().Int("attempt", attempt+1).Int("requested_tokens", cle.RequestedTokens).Int("max_tokens", cle.ModelMaxTokens).Str("log_label", logLabel).Msg("Context length exceeded, attempting recovery")
-			// In Responses conversation mode, previous_response_id can accumulate hidden server-side
-			// context that local truncation cannot affect. Reset it once and retry with local history.
-			if meta != nil && meta.ConversationMode == "responses" && meta.LastResponseID != "" && !oc.isOpenRouterProvider() {
-				oc.loggerForContext(ctx).Warn().
-					Str("last_response_id", meta.LastResponseID).
-					Msg("Context overflow in responses mode; clearing previous_response_id and retrying with local context")
-				meta.LastResponseID = ""
-				oc.savePortalQuiet(ctx, portal, "responses context reset")
-				continue
-			}
-
 			// Get context window from model.
 			contextWindow := oc.getModelContextWindow(meta)
 			if contextWindow <= 0 {
@@ -374,8 +363,9 @@ func (oc *AIClient) streamingResponseWithRetry(
 	evt *event.Event,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
-	prompt []openai.ChatCompletionMessageParamUnion,
+	promptContext PromptContext,
 ) {
+	prompt := oc.promptContextToDispatchMessages(ctx, portal, meta, promptContext)
 	selector := func(meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (responseFunc, string) {
 		return oc.selectResponseFn(meta, prompt)
 	}
@@ -393,7 +383,7 @@ func (oc *AIClient) selectResponseFn(meta *PortalMetadata, prompt []openai.ChatC
 		return oc.streamChatCompletions, "chat_completions"
 	default:
 		// Use Responses API for other content (images, files, text)
-		return oc.streamingResponseWithToolSchemaFallback, "responses"
+		return oc.streamingResponse, "responses"
 	}
 }
 

@@ -114,12 +114,12 @@ func userMdHasValues(content string) bool {
 
 		// Parse "- **Label:** value" style lines. Avoid substring matching to prevent bold markers
 		// (e.g. "**Pronouns:**") from polluting the extracted value.
-		colonIndex := strings.Index(line, ":")
-		if colonIndex == -1 {
+		labelPart, valuePart, ok := strings.Cut(line, ":")
+		if !ok {
 			continue
 		}
-		label := strings.ToLower(strings.TrimSpace(strings.Trim(line[:colonIndex], "*_")))
-		value := strings.TrimSpace(line[colonIndex+1:])
+		label := strings.ToLower(strings.TrimSpace(strings.Trim(labelPart, "*_")))
+		value := strings.TrimSpace(valuePart)
 		if isPlaceholder(value) {
 			continue
 		}
