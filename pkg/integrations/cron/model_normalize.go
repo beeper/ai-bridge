@@ -61,7 +61,7 @@ func NormalizeJobCreate(input JobCreate) JobCreate {
 func NormalizeJobCreateRaw(raw any) (JobCreate, error) {
 	normalized := normalizeCronJobInputRaw(raw, true)
 	if normalized == nil {
-		return JobCreate{}, errors.New("normalize create: invalid cron job input")
+		return JobCreate{}, errors.New("normalize create: unsupported or invalid cron job input")
 	}
 	data, err := json.Marshal(normalized)
 	if err != nil {
@@ -77,7 +77,7 @@ func NormalizeJobCreateRaw(raw any) (JobCreate, error) {
 func NormalizeJobPatchRaw(raw any) (JobPatch, error) {
 	normalized := normalizeCronJobInputRaw(raw, false)
 	if normalized == nil {
-		return JobPatch{}, errors.New("normalize patch: invalid cron job input")
+		return JobPatch{}, errors.New("normalize patch: unsupported or invalid cron job input")
 	}
 	agentIDPresent := false
 	agentIDNil := false
@@ -103,6 +103,15 @@ func NormalizeJobPatchRaw(raw any) (JobPatch, error) {
 func normalizeCronJobInputRaw(raw any, applyDefaults bool) map[string]any {
 	base, ok := unwrapCronJob(raw)
 	if !ok {
+		return nil
+	}
+	if _, ok := base["wakeMode"]; ok {
+		return nil
+	}
+	if _, ok := base["sessionTarget"]; ok {
+		return nil
+	}
+	if _, ok := base["isolation"]; ok {
 		return nil
 	}
 	next := maps.Clone(base)
@@ -148,11 +157,6 @@ func normalizeCronJobInputRaw(raw any, applyDefaults bool) map[string]any {
 			next["payload"] = maps.Clone(payloadMap)
 		}
 	}
-	if _, ok := base["isolation"]; ok {
-		delete(next, "isolation")
-	}
-	delete(next, "wakeMode")
-	delete(next, "sessionTarget")
 	if applyDefaults {
 		if payloadMap, ok := next["payload"].(map[string]any); ok {
 			payloadKind := ""
@@ -183,7 +187,7 @@ func coerceScheduleMap(schedule map[string]any) map[string]any {
 	kind, _ := schedule["kind"].(string)
 	if strings.TrimSpace(kind) == "" {
 		switch {
-		case schedule["at"] != nil || schedule["atMs"] != nil:
+		case schedule["at"] != nil:
 			next["kind"] = "at"
 		case schedule["everyMs"] != nil:
 			next["kind"] = "every"
@@ -193,7 +197,6 @@ func coerceScheduleMap(schedule map[string]any) map[string]any {
 	}
 	if atVal, ok := coerceScheduleAt(schedule); ok {
 		next["at"] = atVal
-		delete(next, "atMs")
 	}
 	return next
 }
@@ -208,29 +211,7 @@ func coerceScheduleAt(schedule map[string]any) (string, bool) {
 			return trimmed, true
 		}
 	}
-	if ts, ok := coerceAtMs(schedule["atMs"]); ok {
-		return time.UnixMilli(ts).UTC().Format("2006-01-02T15:04:05.000Z"), true
-	}
 	return "", false
-}
-
-func coerceAtMs(raw any) (int64, bool) {
-	switch v := raw.(type) {
-	case int64:
-		return v, true
-	case int32:
-		return int64(v), true
-	case int:
-		return int64(v), true
-	case float64:
-		return int64(v), true
-	case float32:
-		return int64(v), true
-	case string:
-		return parseAbsoluteTimeMs(strings.TrimSpace(v))
-	default:
-		return 0, false
-	}
 }
 
 func coerceDeliveryMap(delivery map[string]any) map[string]any {

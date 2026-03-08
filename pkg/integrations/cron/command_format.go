@@ -6,12 +6,12 @@ import (
 	"time"
 )
 
-func formatCronStatusText(enabled bool, storePath string, jobCount int, nextWakeAtMs *int64) string {
+func formatCronStatusText(enabled bool, backend string, jobCount int, nextRunAtMs *int64) string {
 	next := "none"
-	if nextWakeAtMs != nil && *nextWakeAtMs > 0 {
-		next = fmt.Sprintf("%s (%d)", formatUnixMs(*nextWakeAtMs), *nextWakeAtMs)
+	if nextRunAtMs != nil && *nextRunAtMs > 0 {
+		next = fmt.Sprintf("%s (%d)", formatUnixMs(*nextRunAtMs), *nextRunAtMs)
 	}
-	return fmt.Sprintf("Cron: enabled=%v jobs=%d store=%s next=%s", enabled, jobCount, strings.TrimSpace(storePath), next)
+	return fmt.Sprintf("Cron: enabled=%v jobs=%d backend=%s next=%s", enabled, jobCount, strings.TrimSpace(backend), next)
 }
 
 func formatCronJobListText(jobs []Job) string {

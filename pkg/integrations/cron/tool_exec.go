@@ -22,12 +22,12 @@ type ReminderContextLine struct {
 }
 
 type ToolExecDeps struct {
-	Status func() (enabled bool, storePath string, jobCount int, nextWake *int64, err error)
+	Status func() (enabled bool, backend string, jobCount int, nextRun *int64, err error)
 	List   func(includeDisabled bool) ([]Job, error)
 	Add    func(input JobCreate) (Job, error)
 	Update func(id string, patch JobPatch) (Job, error)
 	Remove func(id string) (bool, error)
-	Run    func(id string, mode string) (bool, string, error)
+	Run    func(id string) (bool, string, error)
 
 	NowMs                func() int64
 	ResolveCreateContext func() ToolCreateContext
@@ -61,19 +61,19 @@ func ExecuteTool(ctx context.Context, args map[string]any, deps ToolExecDeps) (s
 		if deps.Status == nil {
 			return errorJSON("cron status unavailable"), nil
 		}
-		enabled, storePath, jobCount, nextWake, err := deps.Status()
+		enabled, backend, jobCount, nextRun, err := deps.Status()
 		if err != nil {
 			return errorJSON(err.Error()), nil
 		}
 		out := map[string]any{
-			"enabled":   enabled,
-			"storePath": storePath,
-			"jobs":      jobCount,
+			"enabled": enabled,
+			"backend": backend,
+			"jobs":    jobCount,
 		}
-		if nextWake != nil {
-			out["nextWakeAtMs"] = *nextWake
+		if nextRun != nil {
+			out["nextRunAtMs"] = *nextRun
 		} else {
-			out["nextWakeAtMs"] = nil
+			out["nextRunAtMs"] = nil
 		}
 		return agenttools.JSONResult(out).Text(), nil
 	case "list":
@@ -186,7 +186,7 @@ func ExecuteTool(ctx context.Context, args map[string]any, deps ToolExecDeps) (s
 		if jobID == "" {
 			return errorJSON("jobId required"), nil
 		}
-		ran, reason, err := deps.Run(jobID, "")
+		ran, reason, err := deps.Run(jobID)
 		if err != nil {
 			return errorJSON(err.Error()), nil
 		}
@@ -255,13 +255,10 @@ func injectReminderContext(job *JobCreate, lines []ReminderContextLine, count in
 		return
 	}
 	kind := strings.ToLower(strings.TrimSpace(job.Payload.Kind))
-	if kind != "systemevent" && kind != "agentturn" {
+	if kind != "agentturn" {
 		return
 	}
-	text := strings.TrimSpace(job.Payload.Text)
-	if kind == "agentturn" {
-		text = strings.TrimSpace(job.Payload.Message)
-	}
+	text := strings.TrimSpace(job.Payload.Message)
 	if text == "" {
 		return
 	}
@@ -271,11 +268,7 @@ func injectReminderContext(job *JobCreate, lines []ReminderContextLine, count in
 	}
 	baseText := stripExistingReminderContext(text)
 	withContext := baseText + reminderContextMarker + strings.Join(contextLines, "\n")
-	if kind == "agentturn" {
-		job.Payload.Message = withContext
-		return
-	}
-	job.Payload.Text = withContext
+	job.Payload.Message = withContext
 }
 
 func stripExistingReminderContext(text string) string {

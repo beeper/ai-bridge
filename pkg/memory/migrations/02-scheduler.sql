@@ -45,6 +45,3 @@ CREATE TABLE IF NOT EXISTS ai_managed_heartbeats (
   processed_run_keys_json TEXT NOT NULL DEFAULT '[]',
   PRIMARY KEY (bridge_id, login_id, agent_id)
 );
-
-DELETE FROM ai_bridge_state
-WHERE store_key IN ('cron/jobs.v2.json', 'heartbeat/managed.v1.json');

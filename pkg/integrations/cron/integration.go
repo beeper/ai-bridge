@@ -12,7 +12,7 @@ import (
 const moduleName = "cron"
 
 type cronSchedulerHost interface {
-	CronStatus(ctx context.Context) (enabled bool, storePath string, jobCount int, nextWake *int64, err error)
+	CronStatus(ctx context.Context) (enabled bool, backend string, jobCount int, nextRun *int64, err error)
 	CronList(ctx context.Context, includeDisabled bool) ([]Job, error)
 	CronAdd(ctx context.Context, input JobCreate) (Job, error)
 	CronUpdate(ctx context.Context, jobID string, patch JobPatch) (Job, error)
@@ -96,12 +96,12 @@ func (i *Integration) executeCronCommand(ctx context.Context, call iruntime.Comm
 	}
 	switch action {
 	case "status":
-		enabled, storePath, jobCount, nextWake, err := scheduler.CronStatus(ctx)
+		enabled, backend, jobCount, nextRun, err := scheduler.CronStatus(ctx)
 		if err != nil {
 			reply("Cron status failed: %s", err.Error())
 			return nil
 		}
-		reply("%s", formatCronStatusText(enabled, storePath, jobCount, nextWake))
+		reply("%s", formatCronStatusText(enabled, backend, jobCount, nextRun))
 	case "list":
 		includeDisabled := false
 		if len(call.Args) > 1 && (strings.EqualFold(call.Args[1], "all") || strings.EqualFold(call.Args[1], "--all")) {
@@ -261,7 +261,7 @@ func (i *Integration) buildToolExecDeps(ctx context.Context, scope iruntime.Tool
 	deps.Remove = func(jobID string) (bool, error) {
 		return scheduler.CronRemove(ctx, jobID)
 	}
-	deps.Run = func(jobID string, _ string) (bool, string, error) {
+	deps.Run = func(jobID string) (bool, string, error) {
 		return scheduler.CronRun(ctx, jobID)
 	}
 	return deps
