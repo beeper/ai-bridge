@@ -141,7 +141,7 @@ func resolveTargetFromGhostID(ghostID networkid.UserID) *ResolvedTarget {
 
 func portalMeta(portal *bridgev2.Portal) *PortalMetadata {
 	meta := bridgeadapter.EnsurePortalMetadata[PortalMetadata](portal)
-	if meta != nil {
+	if meta != nil && portal != nil {
 		meta.ResolvedTarget = resolveTargetFromGhostID(portal.OtherUserID)
 	}
 	return meta

@@ -291,6 +291,12 @@ func backfillTotalTokens(msg opencode.MessageWithParts) int64 {
 	total := backfillPromptTokens(msg) + backfillCompletionTokens(msg) + backfillReasoningTokens(msg)
 	if msg.Info.Tokens != nil && msg.Info.Tokens.Cache != nil {
 		total += int64(msg.Info.Tokens.Cache.Read + msg.Info.Tokens.Cache.Write)
+		return total
+	}
+	for _, part := range msg.Parts {
+		if part.Tokens != nil && part.Tokens.Cache != nil {
+			total += int64(part.Tokens.Cache.Read + part.Tokens.Cache.Write)
+		}
 	}
 	return total
 }
