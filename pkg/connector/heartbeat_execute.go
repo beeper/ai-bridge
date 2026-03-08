@@ -148,13 +148,6 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 	if promptMeta == nil {
 		promptMeta = &PortalMetadata{}
 	}
-	promptMeta.AgentID = agentID
-	if heartbeat != nil && heartbeat.Model != nil {
-		if model := strings.TrimSpace(*heartbeat.Model); model != "" {
-			promptMeta.Model = model
-		}
-	}
-	responsePrefix := resolveResponsePrefixForHeartbeat(oc, cfg, agentID, promptMeta)
 	hbCfg := &HeartbeatRunConfig{
 		Reason:           reason,
 		AckMaxChars:      resolveHeartbeatAckMaxChars(cfg, heartbeat),
@@ -163,7 +156,6 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		UseIndicator:     visibility.UseIndicator,
 		IncludeReasoning: heartbeat != nil && heartbeat.IncludeReasoning != nil && *heartbeat.IncludeReasoning,
 		ExecEvent:        hasExecCompletion,
-		ResponsePrefix:   responsePrefix,
 		SessionKey:       storeKey,
 		StoreAgentID:     sessionResolution.StoreRef.AgentID,
 		PrevUpdatedAt:    prevUpdatedAt,
@@ -329,7 +321,7 @@ func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *Hea
 	}
 	if strings.HasPrefix(session, "!") {
 		if portal := oc.portalByRoomID(context.Background(), id.RoomID(session)); portal != nil {
-			if meta := portalMeta(portal); meta == nil || normalizeAgentID(meta.AgentID) == normalizeAgentID(agentID) {
+			if meta := portalMeta(portal); meta == nil || normalizeAgentID(resolveAgentID(meta)) == normalizeAgentID(agentID) {
 				return portal, portal.MXID.String(), nil
 			}
 		}
@@ -360,7 +352,7 @@ func (oc *AIClient) heartbeatSessionPortalCandidate(agentID string, session hear
 	if portal == nil {
 		return nil
 	}
-	if meta := portalMeta(portal); meta != nil && normalizeAgentID(meta.AgentID) != normalizeAgentID(agentID) {
+	if meta := portalMeta(portal); meta != nil && normalizeAgentID(resolveAgentID(meta)) != normalizeAgentID(agentID) {
 		return nil
 	}
 	return portal
