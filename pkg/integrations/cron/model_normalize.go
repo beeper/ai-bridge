@@ -5,20 +5,108 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"strings"
 	"time"
 )
 
-type rawRecord map[string]any
+var (
+	agentIDValidRe      = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+	agentIDInvalidChars = regexp.MustCompile(`[^a-z0-9_-]+`)
+	agentIDLeadingDash  = regexp.MustCompile(`^-+`)
+	agentIDTrailingDash = regexp.MustCompile(`-+$`)
+)
 
-func normalizeCronJobInputRaw(raw any, applyDefaults bool) rawRecord {
+const defaultAgentID = "main"
+
+func sanitizeAgentID(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return defaultAgentID
+	}
+	lowered := strings.ToLower(trimmed)
+	if agentIDValidRe.MatchString(lowered) {
+		return lowered
+	}
+	cleaned := agentIDInvalidChars.ReplaceAllString(lowered, "-")
+	cleaned = agentIDLeadingDash.ReplaceAllString(cleaned, "")
+	cleaned = agentIDTrailingDash.ReplaceAllString(cleaned, "")
+	if len(cleaned) > 64 {
+		cleaned = cleaned[:64]
+	}
+	if cleaned == "" {
+		return defaultAgentID
+	}
+	return cleaned
+}
+
+func NormalizeJobCreate(input JobCreate) JobCreate {
+	next := input
+	if next.Enabled == nil {
+		enabled := true
+		next.Enabled = &enabled
+	}
+	if next.DeleteAfterRun == nil && strings.EqualFold(strings.TrimSpace(next.Schedule.Kind), "at") {
+		deleteAfter := true
+		next.DeleteAfterRun = &deleteAfter
+	}
+	if next.Delivery == nil {
+		if normalizeString(next.Payload.Kind) == "agentturn" {
+			next.Delivery = &Delivery{Mode: DeliveryAnnounce}
+		}
+	}
+	return next
+}
+
+func NormalizeJobCreateRaw(raw any) (JobCreate, error) {
+	normalized := normalizeCronJobInputRaw(raw, true)
+	if normalized == nil {
+		return JobCreate{}, errors.New("normalize create: invalid cron job input")
+	}
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		return JobCreate{}, fmt.Errorf("normalize create marshal: %w", err)
+	}
+	var out JobCreate
+	if err := json.Unmarshal(data, &out); err != nil {
+		return JobCreate{}, fmt.Errorf("normalize create unmarshal: %w", err)
+	}
+	return NormalizeJobCreate(out), nil
+}
+
+func NormalizeJobPatchRaw(raw any) (JobPatch, error) {
+	normalized := normalizeCronJobInputRaw(raw, false)
+	if normalized == nil {
+		return JobPatch{}, errors.New("normalize patch: invalid cron job input")
+	}
+	agentIDPresent := false
+	agentIDNil := false
+	if val, ok := normalized["agentId"]; ok {
+		agentIDPresent = true
+		agentIDNil = val == nil
+	}
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		return JobPatch{}, fmt.Errorf("normalize patch marshal: %w", err)
+	}
+	var out JobPatch
+	if err := json.Unmarshal(data, &out); err != nil {
+		return JobPatch{}, fmt.Errorf("normalize patch unmarshal: %w", err)
+	}
+	if agentIDPresent && agentIDNil && out.AgentID == nil {
+		empty := ""
+		out.AgentID = &empty
+	}
+	return out, nil
+}
+
+func normalizeCronJobInputRaw(raw any, applyDefaults bool) map[string]any {
 	base, ok := unwrapCronJob(raw)
 	if !ok {
 		return nil
 	}
 	next := maps.Clone(base)
 
-	// agentId handling (trim, allow null to clear)
 	if val, ok := base["agentId"]; ok {
 		switch v := val.(type) {
 		case nil:
@@ -32,8 +120,6 @@ func normalizeCronJobInputRaw(raw any, applyDefaults bool) rawRecord {
 			}
 		}
 	}
-
-	// enabled coercion
 	if val, ok := base["enabled"]; ok {
 		switch v := val.(type) {
 		case bool:
@@ -47,8 +133,6 @@ func normalizeCronJobInputRaw(raw any, applyDefaults bool) rawRecord {
 			}
 		}
 	}
-
-	// schedule coercion
 	if schedRaw, ok := base["schedule"]; ok {
 		if schedMap, ok := schedRaw.(map[string]any); ok {
 			next["schedule"] = coerceScheduleMap(schedMap)
@@ -67,44 +151,23 @@ func normalizeCronJobInputRaw(raw any, applyDefaults bool) rawRecord {
 	if _, ok := base["isolation"]; ok {
 		delete(next, "isolation")
 	}
-
+	delete(next, "wakeMode")
+	delete(next, "sessionTarget")
 	if applyDefaults {
-		if _, ok := next["wakeMode"]; !ok {
-			next["wakeMode"] = string(CronWakeNextHeartbeat)
-		}
-		if _, ok := next["sessionTarget"]; !ok {
-			if payloadMap, ok := next["payload"].(map[string]any); ok {
-				if kind, ok := payloadMap["kind"].(string); ok {
-					switch normalizeString(kind) {
-					case "systemevent":
-						next["sessionTarget"] = string(CronSessionMain)
-					case "agentturn":
-						next["sessionTarget"] = string(CronSessionIsolated)
-					}
-				}
-			}
-		}
 		if payloadMap, ok := next["payload"].(map[string]any); ok {
 			payloadKind := ""
 			if kind, ok := payloadMap["kind"].(string); ok {
 				payloadKind = normalizeString(kind)
 			}
-			sessionTarget := ""
-			if target, ok := next["sessionTarget"].(string); ok {
-				sessionTarget = normalizeString(target)
-			}
-			isIsolatedAgentTurn := sessionTarget == "isolated" || (sessionTarget == "" && payloadKind == "agentturn")
-			_, hasDelivery := next["delivery"]
-			if !hasDelivery && isIsolatedAgentTurn && payloadKind == "agentturn" {
+			if _, hasDelivery := next["delivery"]; !hasDelivery && payloadKind == "agentturn" {
 				next["delivery"] = map[string]any{"mode": "announce"}
 			}
 		}
 	}
-
 	return next
 }
 
-func unwrapCronJob(raw any) (rawRecord, bool) {
+func unwrapCronJob(raw any) (map[string]any, bool) {
 	base, ok := raw.(map[string]any)
 	if !ok {
 		return nil, false
@@ -119,17 +182,15 @@ func coerceScheduleMap(schedule map[string]any) map[string]any {
 	next := maps.Clone(schedule)
 	kind, _ := schedule["kind"].(string)
 	if strings.TrimSpace(kind) == "" {
-		if schedule["at"] != nil {
+		switch {
+		case schedule["at"] != nil || schedule["atMs"] != nil:
 			next["kind"] = "at"
-		} else if schedule["atMs"] != nil {
-			next["kind"] = "at"
-		} else if schedule["everyMs"] != nil {
+		case schedule["everyMs"] != nil:
 			next["kind"] = "every"
-		} else if schedule["expr"] != nil {
+		case schedule["expr"] != nil:
 			next["kind"] = "cron"
 		}
 	}
-
 	if atVal, ok := coerceScheduleAt(schedule); ok {
 		next["at"] = atVal
 		delete(next, "atMs")
@@ -142,13 +203,13 @@ func coerceScheduleAt(schedule map[string]any) (string, bool) {
 		trimmed := strings.TrimSpace(rawAt)
 		if trimmed != "" {
 			if ts, ok := parseAbsoluteTimeMs(trimmed); ok {
-				return formatIsoMillis(ts), true
+				return time.UnixMilli(ts).UTC().Format("2006-01-02T15:04:05.000Z"), true
 			}
 			return trimmed, true
 		}
 	}
 	if ts, ok := coerceAtMs(schedule["atMs"]); ok {
-		return formatIsoMillis(ts), true
+		return time.UnixMilli(ts).UTC().Format("2006-01-02T15:04:05.000Z"), true
 	}
 	return "", false
 }
@@ -166,19 +227,10 @@ func coerceAtMs(raw any) (int64, bool) {
 	case float32:
 		return int64(v), true
 	case string:
-		trimmed := strings.TrimSpace(v)
-		if trimmed == "" {
-			return 0, false
-		}
-		if ts, ok := parseAbsoluteTimeMs(trimmed); ok {
-			return ts, true
-		}
+		return parseAbsoluteTimeMs(strings.TrimSpace(v))
+	default:
+		return 0, false
 	}
-	return 0, false
-}
-
-func formatIsoMillis(ts int64) string {
-	return time.UnixMilli(ts).UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
 func coerceDeliveryMap(delivery map[string]any) map[string]any {
@@ -208,48 +260,4 @@ func coerceDeliveryMap(delivery map[string]any) map[string]any {
 		}
 	}
 	return next
-}
-
-// NormalizeCronJobCreateRaw normalizes raw input into a CronJobCreate.
-func NormalizeCronJobCreateRaw(raw any) (CronJobCreate, error) {
-	normalized := normalizeCronJobInputRaw(raw, true)
-	if normalized == nil {
-		return CronJobCreate{}, errors.New("normalize create: invalid cron job input")
-	}
-	data, err := json.Marshal(normalized)
-	if err != nil {
-		return CronJobCreate{}, fmt.Errorf("normalize create marshal: %w", err)
-	}
-	var out CronJobCreate
-	if err := json.Unmarshal(data, &out); err != nil {
-		return CronJobCreate{}, fmt.Errorf("normalize create unmarshal: %w", err)
-	}
-	return NormalizeCronJobCreate(out), nil
-}
-
-// NormalizeCronJobPatchRaw normalizes raw input into a CronJobPatch.
-func NormalizeCronJobPatchRaw(raw any) (CronJobPatch, error) {
-	normalized := normalizeCronJobInputRaw(raw, false)
-	if normalized == nil {
-		return CronJobPatch{}, errors.New("normalize patch: invalid cron job input")
-	}
-	agentIDPresent := false
-	agentIDNil := false
-	if val, ok := normalized["agentId"]; ok {
-		agentIDPresent = true
-		agentIDNil = val == nil
-	}
-	data, err := json.Marshal(normalized)
-	if err != nil {
-		return CronJobPatch{}, fmt.Errorf("normalize patch marshal: %w", err)
-	}
-	var out CronJobPatch
-	if err := json.Unmarshal(data, &out); err != nil {
-		return CronJobPatch{}, fmt.Errorf("normalize patch unmarshal: %w", err)
-	}
-	if agentIDPresent && agentIDNil && out.AgentID == nil {
-		empty := ""
-		out.AgentID = &empty
-	}
-	return out, nil
 }
