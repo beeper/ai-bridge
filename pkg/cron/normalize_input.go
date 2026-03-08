@@ -4,14 +4,10 @@ import (
 	"strings"
 )
 
-type normalizeOptions struct {
-	applyDefaults bool
-}
-
-func normalizeCronJobInput(raw CronJobCreate, opts normalizeOptions) CronJobCreate {
+func normalizeCronJobInput(raw CronJobCreate, applyDefaults bool) CronJobCreate {
 	next := raw
 
-	if opts.applyDefaults {
+	if applyDefaults {
 		if next.Enabled == nil {
 			enabled := true
 			next.Enabled = &enabled
@@ -44,5 +40,5 @@ func normalizeCronJobInput(raw CronJobCreate, opts normalizeOptions) CronJobCrea
 
 // NormalizeCronJobCreate applies OpenClaw-like defaults.
 func NormalizeCronJobCreate(raw CronJobCreate) CronJobCreate {
-	return normalizeCronJobInput(raw, normalizeOptions{applyDefaults: true})
+	return normalizeCronJobInput(raw, true)
 }
