@@ -316,8 +316,8 @@ func availableToolsJSON(caps ModelCapabilities) []string {
 	return tools
 }
 
-func resolveModelAPIForManifest(modelID string, provider string) string {
-	if provider == "openai" || strings.HasPrefix(modelID, "openai/") {
+func resolveModelAPIForManifest(modelID string) string {
+	if strings.HasPrefix(modelID, "openai/") {
 		return "openai-responses"
 	}
 	return "openai-completions"
@@ -351,7 +351,7 @@ var ModelManifest = struct {
 			displayName = apiModel.Name
 		}
 		caps := detectCapabilities(modelID, apiModel, hasAPIData)
-		apiLabel := resolveModelAPIForManifest(modelID, "openrouter")
+		apiLabel := resolveModelAPIForManifest(modelID)
 
 		buf.WriteString(fmt.Sprintf(`		%q: {
 			ID:                  %q,
@@ -451,7 +451,7 @@ func generateJSONFile(apiModels map[string]OpenRouterModel, outputPath string) e
 			displayName = apiModel.Name
 		}
 		caps := detectCapabilities(modelID, apiModel, hasAPIData)
-		apiLabel := resolveModelAPIForManifest(modelID, "openrouter")
+		apiLabel := resolveModelAPIForManifest(modelID)
 
 		models = append(models, JSONModelInfo{
 			ID:                  modelID,

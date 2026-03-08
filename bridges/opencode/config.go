@@ -22,6 +22,4 @@ type OpenCode struct {
 	Enabled *bool `yaml:"enabled"`
 }
 
-func upgradeConfig(helper configupgrade.Helper) {
-	_ = helper
-}
+func upgradeConfig(_ configupgrade.Helper) {}
