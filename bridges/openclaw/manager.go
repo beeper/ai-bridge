@@ -431,6 +431,9 @@ func openClawStreamMessageMetadata(meta *PortalMetadata, payload gatewayChatEven
 		if value, ok := openClawUsageInt64(usage, "reasoning_tokens"); ok {
 			params.ReasoningTokens = value
 		}
+		if value, ok := openClawUsageInt64(usage, "total_tokens"); ok {
+			params.TotalTokens = value
+		}
 	}
 	metadata := msgconv.BuildUIMessageMetadata(params)
 	if sessionID := stringsTrimDefault(stringValue(payload.Message["sessionId"]), meta.OpenClawSessionID); sessionID != "" {
@@ -458,6 +461,9 @@ func normalizeOpenClawUsage(raw map[string]any) map[string]any {
 	}
 	if value, ok := openClawUsageNumber(raw, "reasoning_tokens", "reasoningTokens", "reasoning_tokens"); ok {
 		normalized["reasoning_tokens"] = int64(value)
+	}
+	if value, ok := openClawUsageNumber(raw, "total_tokens", "totalTokens", "total"); ok {
+		normalized["total_tokens"] = int64(value)
 	}
 	if len(normalized) == 0 {
 		return nil

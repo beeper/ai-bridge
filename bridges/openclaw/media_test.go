@@ -91,3 +91,24 @@ func TestOpenClawHistoryUIPartsToolResult(t *testing.T) {
 		t.Fatalf("unexpected tool result part: %#v", parts[0])
 	}
 }
+
+func TestNormalizeOpenClawUsage(t *testing.T) {
+	usage := normalizeOpenClawUsage(map[string]any{
+		"input":           float64(10),
+		"outputTokens":    int64(4),
+		"reasoningTokens": int64(2),
+		"total":           int64(16),
+	})
+	if usage["prompt_tokens"] != int64(10) {
+		t.Fatalf("expected prompt_tokens=10, got %#v", usage["prompt_tokens"])
+	}
+	if usage["completion_tokens"] != int64(4) {
+		t.Fatalf("expected completion_tokens=4, got %#v", usage["completion_tokens"])
+	}
+	if usage["reasoning_tokens"] != int64(2) {
+		t.Fatalf("expected reasoning_tokens=2, got %#v", usage["reasoning_tokens"])
+	}
+	if usage["total_tokens"] != int64(16) {
+		t.Fatalf("expected total_tokens=16, got %#v", usage["total_tokens"])
+	}
+}
