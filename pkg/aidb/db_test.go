@@ -58,8 +58,6 @@ func TestUpgradeV1Fresh(t *testing.T) {
 		"ai_managed_heartbeat_run_keys",
 		"ai_system_events",
 		"ai_sessions",
-		"ai_model_catalog_entries",
-		"ai_model_catalog_inputs",
 	} {
 		exists, err := bridgeDB.TableExists(ctx, table)
 		if err != nil {

@@ -20,58 +20,6 @@ type ModelCatalogEntry struct {
 	Input           []string `json:"input,omitempty"`
 }
 
-func (oc *AIClient) ensureModelCatalogRows(ctx context.Context) (bool, error) {
-	if oc == nil || oc.UserLogin == nil {
-		return false, nil
-	}
-	loginMeta := loginMetadata(oc.UserLogin)
-	if loginMeta == nil {
-		return false, nil
-	}
-
-	implicit := oc.implicitModelCatalogEntries(loginMeta)
-	explicit := explicitModelCatalogEntries(oc.connector.Config.Models)
-	if len(implicit) == 0 && len(explicit) == 0 {
-		return false, nil
-	}
-
-	mode := defaultModelCatalogMode
-	if oc.connector.Config.Models != nil {
-		if trimmed := strings.ToLower(strings.TrimSpace(oc.connector.Config.Models.Mode)); trimmed != "" {
-			switch trimmed {
-			case "replace":
-				mode = "replace"
-			case "merge":
-				mode = defaultModelCatalogMode
-			}
-		}
-	}
-
-	existing, err := oc.loadModelCatalogRows(ctx)
-	if err != nil {
-		return false, err
-	}
-	base := []ModelCatalogEntry(nil)
-	if mode == defaultModelCatalogMode {
-		base = existing
-	}
-
-	merged := mergeCatalogEntries(base, implicit, explicit)
-	if modelCatalogEntriesEqual(existing, merged) {
-		return false, nil
-	}
-	if err := oc.replaceModelCatalogRows(ctx, merged); err != nil {
-		return false, err
-	}
-
-	oc.modelCatalogMu.Lock()
-	oc.modelCatalogLoaded = false
-	oc.modelCatalogCache = nil
-	oc.modelCatalogMu.Unlock()
-
-	return true, nil
-}
-
 func mergeCatalogEntries(existing []ModelCatalogEntry, implicit []ModelCatalogEntry, explicit []ModelCatalogEntry) []ModelCatalogEntry {
 	merged := map[string]ModelCatalogEntry{}
 	for _, entry := range existing {
@@ -271,16 +219,7 @@ func (oc *AIClient) loadModelCatalog(ctx context.Context, useCache bool) []Model
 		oc.modelCatalogMu.Unlock()
 	}
 
-	entries, err := oc.loadModelCatalogRows(ctx)
-	if err != nil {
-		if useCache {
-			oc.modelCatalogMu.Lock()
-			oc.modelCatalogLoaded = true
-			oc.modelCatalogCache = nil
-			oc.modelCatalogMu.Unlock()
-		}
-		return nil
-	}
+	entries := oc.derivedModelCatalogEntries()
 	if useCache {
 		oc.modelCatalogMu.Lock()
 		oc.modelCatalogLoaded = true
@@ -288,6 +227,33 @@ func (oc *AIClient) loadModelCatalog(ctx context.Context, useCache bool) []Model
 		oc.modelCatalogMu.Unlock()
 	}
 	return entries
+}
+
+func (oc *AIClient) derivedModelCatalogEntries() []ModelCatalogEntry {
+	if oc == nil || oc.UserLogin == nil {
+		return nil
+	}
+	loginMeta := loginMetadata(oc.UserLogin)
+	if loginMeta == nil {
+		return nil
+	}
+
+	implicit := oc.implicitModelCatalogEntries(loginMeta)
+	explicit := explicitModelCatalogEntries(oc.connector.Config.Models)
+	mode := defaultModelCatalogMode
+	if oc.connector != nil && oc.connector.Config.Models != nil {
+		switch strings.ToLower(strings.TrimSpace(oc.connector.Config.Models.Mode)) {
+		case "replace":
+			mode = "replace"
+		case "merge":
+			mode = defaultModelCatalogMode
+		}
+	}
+
+	if mode == "replace" {
+		return mergeCatalogEntries(nil, nil, explicit)
+	}
+	return mergeCatalogEntries(nil, implicit, explicit)
 }
 
 func catalogInputIncludes(entry *ModelCatalogEntry, label string) bool {

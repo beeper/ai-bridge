@@ -211,29 +211,3 @@ CREATE INDEX IF NOT EXISTS idx_ai_sessions_lookup
 
 CREATE INDEX IF NOT EXISTS idx_ai_sessions_updated
   ON ai_sessions(bridge_id, login_id, store_agent_id, updated_at_ms);
-
-CREATE TABLE IF NOT EXISTS ai_model_catalog_entries (
-  bridge_id TEXT NOT NULL,
-  login_id TEXT NOT NULL,
-  provider TEXT NOT NULL,
-  model_id TEXT NOT NULL,
-  name TEXT NOT NULL DEFAULT '',
-  context_window INTEGER NOT NULL DEFAULT 0,
-  max_output_tokens INTEGER NOT NULL DEFAULT 0,
-  reasoning INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (bridge_id, login_id, provider, model_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_ai_model_catalog_lookup
-  ON ai_model_catalog_entries(bridge_id, login_id, provider);
-
-CREATE TABLE IF NOT EXISTS ai_model_catalog_inputs (
-  bridge_id TEXT NOT NULL,
-  login_id TEXT NOT NULL,
-  provider TEXT NOT NULL,
-  model_id TEXT NOT NULL,
-  input_index INTEGER NOT NULL,
-  input_kind TEXT NOT NULL,
-  PRIMARY KEY (bridge_id, login_id, provider, model_id, input_index),
-  UNIQUE (bridge_id, login_id, provider, model_id, input_kind)
-);
