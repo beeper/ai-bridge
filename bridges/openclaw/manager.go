@@ -30,16 +30,24 @@ type openClawManager struct {
 	mu        sync.RWMutex
 	gateway   *gatewayWSClient
 	sessions  map[string]gatewaySessionRow
-	approvals *bridgeadapter.ApprovalManager[string]
+	approvals *bridgeadapter.ApprovalManager[*openClawPendingApprovalData]
 
 	cancel context.CancelFunc
+}
+
+type openClawPendingApprovalData struct {
+	SessionKey string
+	TurnID     string
+	ToolCallID string
+	ToolName   string
+	Command    string
 }
 
 func newOpenClawManager(client *OpenClawClient) *openClawManager {
 	return &openClawManager{
 		client:    client,
 		sessions:  make(map[string]gatewaySessionRow),
-		approvals: bridgeadapter.NewApprovalManager[string](),
+		approvals: bridgeadapter.NewApprovalManager[*openClawPendingApprovalData](),
 	}
 }
 
@@ -218,8 +226,7 @@ func (m *openClawManager) ResolveApprovalDecision(ctx context.Context, portal *b
 		return bridgeadapter.ErrApprovalUnknown
 	}
 	if pending.Data != nil {
-		data, _ := pending.Data.(string)
-		if strings.TrimSpace(data) != strings.TrimSpace(portalMeta(portal).OpenClawSessionKey) {
+		if strings.TrimSpace(pending.Data.SessionKey) != strings.TrimSpace(portalMeta(portal).OpenClawSessionKey) {
 			return bridgeadapter.ErrApprovalWrongRoom
 		}
 	}
@@ -233,7 +240,6 @@ func (m *openClawManager) ResolveApprovalDecision(ctx context.Context, portal *b
 	if err := m.gatewayClient().ResolveApproval(ctx, decision.ApprovalID, upstreamDecision); err != nil {
 		return err
 	}
-	m.approvals.Drop(decision.ApprovalID)
 	return nil
 }
 
@@ -242,6 +248,15 @@ func (m *openClawManager) FetchMessages(ctx context.Context, params bridgev2.Fet
 	history, err := m.gatewayClient().RecentHistory(ctx, meta.OpenClawSessionKey, normalizeHistoryLimit(params.Count))
 	if err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(history.SessionID) != "" {
+		meta.OpenClawSessionID = strings.TrimSpace(history.SessionID)
+	}
+	if strings.TrimSpace(history.ThinkingLevel) != "" {
+		meta.ThinkingLevel = strings.TrimSpace(history.ThinkingLevel)
+	}
+	if strings.TrimSpace(history.VerboseLevel) != "" {
+		meta.VerboseLevel = strings.TrimSpace(history.VerboseLevel)
 	}
 	messages := make([]map[string]any, 0, len(history.Messages))
 	for _, message := range history.Messages {
@@ -432,6 +447,11 @@ func (m *openClawManager) handleEvent(ctx context.Context, evt gatewayEvent) {
 		if err := json.Unmarshal(evt.Payload, &payload); err == nil {
 			m.handleApprovalRequest(ctx, payload)
 		}
+	case "exec.approval.resolved":
+		var payload gatewayApprovalResolvedEvent
+		if err := json.Unmarshal(evt.Payload, &payload); err == nil {
+			m.handleApprovalResolved(ctx, payload)
+		}
 	}
 }
 
@@ -444,12 +464,54 @@ func (m *openClawManager) handleApprovalRequest(ctx context.Context, payload gat
 	if portal == nil || portal.MXID == "" {
 		return
 	}
-	m.approvals.Register(payload.ID, time.Until(time.UnixMilli(payload.ExpiresAtMs)), sessionKey)
 	body := "Tool approval required"
-	if command := strings.TrimSpace(stringValue(payload.Request["command"])); command != "" {
+	command := strings.TrimSpace(stringValue(payload.Request["command"]))
+	if command != "" {
 		body = "Tool approval required: " + command
 	}
+	m.approvals.Register(payload.ID, time.Until(time.UnixMilli(payload.ExpiresAtMs)), &openClawPendingApprovalData{
+		SessionKey: sessionKey,
+		Command:    command,
+	})
 	m.client.sendApprovalRequestFallbackEvent(ctx, portal, payload.ID, body)
+}
+
+func (m *openClawManager) handleApprovalResolved(ctx context.Context, payload gatewayApprovalResolvedEvent) {
+	approvalID := strings.TrimSpace(payload.ID)
+	if approvalID == "" {
+		return
+	}
+	pending := m.approvals.Get(approvalID)
+	var data *openClawPendingApprovalData
+	if pending != nil {
+		data = pending.Data
+	}
+	sessionKey := strings.TrimSpace(stringValue(payload.Request["sessionKey"]))
+	if sessionKey == "" && data != nil {
+		sessionKey = strings.TrimSpace(data.SessionKey)
+	}
+	if sessionKey == "" {
+		m.approvals.Drop(approvalID)
+		return
+	}
+	portal := m.resolvePortal(ctx, sessionKey)
+	if portal == nil || portal.MXID == "" {
+		m.approvals.Drop(approvalID)
+		return
+	}
+	if data != nil && strings.TrimSpace(data.TurnID) != "" && strings.TrimSpace(data.ToolCallID) != "" {
+		approved, reason := openClawApprovalDecisionStatus(payload.Decision)
+		m.client.EmitStreamPart(ctx, portal, data.TurnID, resolveOpenClawAgentID(portalMeta(portal), sessionKey, payload.Request), sessionKey, map[string]any{
+			"type":       "tool-approval-response",
+			"approvalId": approvalID,
+			"toolCallId": data.ToolCallID,
+			"approved":   approved,
+			"reason":     reason,
+		})
+	} else {
+		m.client.sendSystemNoticeViaPortal(ctx, portal, openClawApprovalResolvedText(payload.Decision))
+	}
+	m.approvals.Drop(approvalID)
 }
 
 func (m *openClawManager) handleChatEvent(ctx context.Context, payload gatewayChatEvent) {
@@ -464,8 +526,9 @@ func (m *openClawManager) handleChatEvent(ctx context.Context, payload gatewayCh
 	agentID := resolveOpenClawAgentID(meta, payload.SessionKey, payload.Message)
 	maybePersistPortalAgentID(ctx, portal, meta, agentID)
 	turnID := stringsTrimDefault(payload.RunID, "openclaw:"+payload.SessionKey)
+	messageMetadata := openClawStreamMessageMetadata(meta, payload, agentID, turnID)
 	if payload.State == "delta" {
-		m.ensureStreamStart(ctx, portal, meta, turnID, payload.RunID)
+		m.ensureStreamStart(ctx, portal, meta, turnID, payload.RunID, agentID, messageMetadata)
 		text := extractMessageText(payload.Message)
 		delta := m.client.computeVisibleDelta(turnID, text)
 		if delta != "" {
@@ -478,7 +541,7 @@ func (m *openClawManager) handleChatEvent(ctx context.Context, payload gatewayCh
 		return
 	}
 	if payload.State == "final" || payload.State == "aborted" || payload.State == "error" {
-		m.ensureStreamStart(ctx, portal, meta, turnID, payload.RunID)
+		m.ensureStreamStart(ctx, portal, meta, turnID, payload.RunID, agentID, messageMetadata)
 		text := extractMessageText(payload.Message)
 		if delta := m.client.computeVisibleDelta(turnID, text); delta != "" {
 			m.client.EmitStreamPart(ctx, portal, turnID, agentID, payload.SessionKey, map[string]any{
@@ -488,13 +551,13 @@ func (m *openClawManager) handleChatEvent(ctx context.Context, payload gatewayCh
 			})
 		}
 		if payload.State == "error" {
-			m.client.EmitStreamPart(ctx, portal, turnID, agentID, payload.SessionKey, map[string]any{"type": "error", "errorText": stringsTrimDefault(payload.StopReason, "OpenClaw run failed")})
+			m.client.EmitStreamPart(ctx, portal, turnID, agentID, payload.SessionKey, map[string]any{"type": "error", "errorText": openClawErrorText(payload)})
 		} else if payload.State == "aborted" {
 			m.client.EmitStreamPart(ctx, portal, turnID, agentID, payload.SessionKey, map[string]any{"type": "abort", "reason": stringsTrimDefault(payload.StopReason, "aborted")})
 		}
 		m.client.EmitStreamPart(ctx, portal, turnID, agentID, payload.SessionKey, map[string]any{
 			"type":            "finish",
-			"messageMetadata": msgconv.BuildUIMessageMetadata(msgconv.UIMessageMetadataParams{TurnID: turnID, AgentID: agentID, FinishReason: payload.State}),
+			"messageMetadata": messageMetadata,
 		})
 		m.client.FinishStream(turnID, payload.State)
 		meta.LastLiveSeq = payload.Seq
@@ -502,16 +565,23 @@ func (m *openClawManager) handleChatEvent(ctx context.Context, payload gatewayCh
 	}
 }
 
-func (m *openClawManager) ensureStreamStart(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, turnID, runID string) {
-	agentID := resolveOpenClawAgentID(meta, meta.OpenClawSessionKey, nil)
-	m.client.EmitStreamPart(ctx, portal, turnID, agentID, meta.OpenClawSessionKey, map[string]any{
-		"type":      "start",
-		"messageId": turnID,
-		"messageMetadata": msgconv.BuildUIMessageMetadata(msgconv.UIMessageMetadataParams{
+func (m *openClawManager) ensureStreamStart(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, turnID, runID, agentID string, messageMetadata map[string]any) {
+	if agentID == "" {
+		agentID = resolveOpenClawAgentID(meta, meta.OpenClawSessionKey, nil)
+	}
+	if len(messageMetadata) == 0 {
+		messageMetadata = msgconv.BuildUIMessageMetadata(msgconv.UIMessageMetadataParams{
 			TurnID:       turnID,
 			AgentID:      agentID,
 			CompletionID: runID,
-		}),
+			SessionID:    meta.OpenClawSessionID,
+			SessionKey:   meta.OpenClawSessionKey,
+		})
+	}
+	m.client.EmitStreamPart(ctx, portal, turnID, agentID, meta.OpenClawSessionKey, map[string]any{
+		"type":      "start",
+		"messageId": turnID,
+		"messageMetadata": messageMetadata,
 	})
 }
 
@@ -527,7 +597,13 @@ func (m *openClawManager) handleAgentEvent(ctx context.Context, payload gatewayA
 	agentID := resolveOpenClawAgentID(meta, payload.SessionKey, payload.Data)
 	maybePersistPortalAgentID(ctx, portal, meta, agentID)
 	turnID := stringsTrimDefault(payload.RunID, stringsTrimDefault(payload.SourceRunID, "openclaw:"+payload.SessionKey))
-	m.ensureStreamStart(ctx, portal, meta, turnID, payload.RunID)
+	m.ensureStreamStart(ctx, portal, meta, turnID, payload.RunID, agentID, msgconv.BuildUIMessageMetadata(msgconv.UIMessageMetadataParams{
+		TurnID:       turnID,
+		AgentID:      agentID,
+		CompletionID: payload.RunID,
+		SessionID:    meta.OpenClawSessionID,
+		SessionKey:   payload.SessionKey,
+	}))
 	stream := strings.ToLower(strings.TrimSpace(payload.Stream))
 	switch stream {
 	case "reasoning":
@@ -542,6 +618,7 @@ func (m *openClawManager) handleAgentEvent(ctx context.Context, payload gatewayA
 				m.client.EmitStreamPart(ctx, portal, turnID, agentID, payload.SessionKey, map[string]any{"type": "tool-input-available", "toolCallId": toolCallID, "toolName": toolName, "input": input, "providerExecuted": true})
 			}
 			if approvalID := strings.TrimSpace(stringValue(payload.Data["approvalId"])); approvalID != "" {
+				m.attachApprovalContext(approvalID, payload.SessionKey, turnID, toolCallID, toolName)
 				m.client.EmitStreamPart(ctx, portal, turnID, agentID, payload.SessionKey, map[string]any{"type": "tool-approval-request", "approvalId": approvalID, "toolCallId": toolCallID})
 			}
 			if output, ok := payload.Data["output"]; ok {
