@@ -32,7 +32,6 @@ type DeliveryPatch struct {
 
 type Payload struct {
 	Kind                string `json:"kind"`
-	Text                string `json:"text,omitempty"`
 	Message             string `json:"message,omitempty"`
 	Model               string `json:"model,omitempty"`
 	Thinking            string `json:"thinking,omitempty"`
@@ -42,7 +41,6 @@ type Payload struct {
 
 type PayloadPatch struct {
 	Kind                string  `json:"kind"`
-	Text                *string `json:"text,omitempty"`
 	Message             *string `json:"message,omitempty"`
 	Model               *string `json:"model,omitempty"`
 	Thinking            *string `json:"thinking,omitempty"`

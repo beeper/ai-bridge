@@ -16,7 +16,7 @@ const (
 	MessageDescription = "Send messages and channel actions. Supports actions: send, delete, react, poll, pin, threads, focus, and more."
 
 	CronName        = "cron"
-	CronDescription = "Manage scheduler-backed cron jobs.\n\nACTIONS:\n- status: Check scheduler status\n- list: List jobs (use includeDisabled:true to include disabled)\n- add: Create job (requires job object, see schema below)\n- update: Modify job (requires jobId + patch object)\n- remove: Delete job (requires jobId)\n- run: Trigger job immediately (requires jobId)\n\nJOB SCHEMA (for add action):\n{\n  \"name\": \"string (optional)\",\n  \"schedule\": { ... },\n  \"payload\": { ... },\n  \"delivery\": { ... },\n  \"enabled\": true | false\n}\n\nSCHEDULE TYPES (schedule.kind):\n- \"at\": One-shot at absolute time\n  { \"kind\": \"at\", \"at\": \"<ISO-8601 timestamp>\" }\n- \"every\": Recurring interval\n  { \"kind\": \"every\", \"everyMs\": <interval-ms>, \"anchorMs\": <optional-start-ms> }\n- \"cron\": Cron expression\n  { \"kind\": \"cron\", \"expr\": \"<cron-expression>\", \"tz\": \"<optional-timezone>\" }\n\nPAYLOAD TYPES (payload.kind):\n- \"systemEvent\": Legacy alias for an agent turn; normalized internally to agentTurn.message\n  { \"kind\": \"systemEvent\", \"text\": \"<message>\" }\n- \"agentTurn\": Run the agent inside a hidden background room\n  { \"kind\": \"agentTurn\", \"message\": \"<prompt>\", \"model\": \"<optional>\", \"thinking\": \"<optional>\", \"timeoutSeconds\": <optional> }\n\nDELIVERY:\n  { \"mode\": \"none|announce\", \"to\": \"<!room-id:server>\", \"bestEffort\": <optional-bool> }\n  - delivery.to: Matrix room ID (e.g. !abcdef:server.com). Omit to use the last active room or default chat.\n\nUse contextMessages (0-10) to add recent chat context to the scheduled payload."
+	CronDescription = "Manage scheduler-backed jobs that run in hidden background rooms.\n\nACTIONS:\n- status: Check scheduler status\n- list: List jobs (use includeDisabled:true to include disabled)\n- add: Create job (requires job object, see schema below)\n- update: Modify job (requires jobId + patch object)\n- remove: Delete job (requires jobId)\n- run: Trigger job immediately (requires jobId)\n\nJOB SCHEMA (for add action):\n{\n  \"name\": \"string (optional)\",\n  \"schedule\": { ... },\n  \"payload\": { ... },\n  \"delivery\": { ... },\n  \"enabled\": true | false\n}\n\nSCHEDULE TYPES (schedule.kind):\n- \"at\": One-shot at absolute time\n  { \"kind\": \"at\", \"at\": \"<ISO-8601 timestamp>\" }\n- \"every\": Recurring interval\n  { \"kind\": \"every\", \"everyMs\": <interval-ms>, \"anchorMs\": <optional-start-ms> }\n- \"cron\": Cron expression\n  { \"kind\": \"cron\", \"expr\": \"<cron-expression>\", \"tz\": \"<optional-timezone>\" }\n\nPAYLOAD:\n- \"agentTurn\": Run the agent inside a hidden background room\n  { \"kind\": \"agentTurn\", \"message\": \"<prompt>\", \"model\": \"<optional>\", \"thinking\": \"<optional>\", \"timeoutSeconds\": <optional> }\n\nDELIVERY:\n  { \"mode\": \"none|announce\", \"to\": \"<!room-id:server>\", \"bestEffort\": <optional-bool> }\n  - delivery.to: Matrix room ID (e.g. !abcdef:server.com). Omit to use the last active room or default chat.\n\nUse contextMessages (0-10) to add recent chat context to the scheduled payload."
 
 	SessionStatusName        = "session_status"
 	SessionStatusDescription = "Show a /status-equivalent session status card (usage + time + cost when available). Use for model-use questions (📊 session_status). Optional: set per-session model override (model=default resets overrides)."
@@ -444,18 +444,6 @@ func CronSchema() map[string]any {
 				"enum":        []string{"status", "list", "add", "update", "remove", "run"},
 				"description": "Action to perform: status, list, add, update, remove, run.",
 			},
-			"gatewayUrl": map[string]any{
-				"type":        "string",
-				"description": "Optional gateway URL override.",
-			},
-			"gatewayToken": map[string]any{
-				"type":        "string",
-				"description": "Optional gateway auth token.",
-			},
-			"timeoutMs": map[string]any{
-				"type":        "number",
-				"description": "Optional timeout for gateway call.",
-			},
 			"includeDisabled": map[string]any{
 				"type":        "boolean",
 				"description": "Include disabled jobs in list.",
@@ -478,7 +466,7 @@ func CronSchema() map[string]any {
 				"type":        "number",
 				"minimum":     0,
 				"maximum":     10,
-				"description": "For add: include recent context lines appended to payload text.",
+				"description": "For add: include recent context lines appended to payload.message.",
 			},
 		},
 		"required": []string{"action"},

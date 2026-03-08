@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 
 	"go.mau.fi/util/dbutil"
 
@@ -120,7 +121,11 @@ func (s *schedulerRuntime) saveCronStoreLocked(ctx context.Context, store schedu
 		return nil
 	}
 	return scope.db.DoTxn(ctx, nil, func(ctx context.Context) error {
-		if _, err := scope.db.Exec(ctx, `DELETE FROM ai_cron_jobs WHERE bridge_id=$1 AND login_id=$2`, scope.bridgeID, scope.loginID); err != nil {
+		keep := make(map[string]struct{}, len(store.Jobs))
+		for _, record := range store.Jobs {
+			keep[strings.TrimSpace(record.Job.ID)] = struct{}{}
+		}
+		if err := deleteMissingCronRows(ctx, scope, keep); err != nil {
 			return err
 		}
 		for _, record := range store.Jobs {
@@ -152,6 +157,25 @@ func (s *schedulerRuntime) saveCronStoreLocked(ctx context.Context, store schedu
 					room_id, revision, pending_delay_id, pending_delay_kind,
 					pending_run_key, last_output_preview, processed_run_keys_json
 				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+				ON CONFLICT (bridge_id, login_id, job_id) DO UPDATE SET
+					agent_id=excluded.agent_id,
+					name=excluded.name,
+					description=excluded.description,
+					enabled=excluded.enabled,
+					delete_after_run=excluded.delete_after_run,
+					created_at_ms=excluded.created_at_ms,
+					updated_at_ms=excluded.updated_at_ms,
+					schedule_json=excluded.schedule_json,
+					payload_json=excluded.payload_json,
+					delivery_json=excluded.delivery_json,
+					state_json=excluded.state_json,
+					room_id=excluded.room_id,
+					revision=excluded.revision,
+					pending_delay_id=excluded.pending_delay_id,
+					pending_delay_kind=excluded.pending_delay_kind,
+					pending_run_key=excluded.pending_run_key,
+					last_output_preview=excluded.last_output_preview,
+					processed_run_keys_json=excluded.processed_run_keys_json
 			`,
 				scope.bridgeID, scope.loginID, record.Job.ID, record.Job.AgentID, record.Job.Name, record.Job.Description,
 				record.Job.Enabled, record.Job.DeleteAfterRun, record.Job.CreatedAtMs, record.Job.UpdatedAtMs,
@@ -239,7 +263,11 @@ func (s *schedulerRuntime) saveHeartbeatStoreLocked(ctx context.Context, store m
 		return nil
 	}
 	return scope.db.DoTxn(ctx, nil, func(ctx context.Context) error {
-		if _, err := scope.db.Exec(ctx, `DELETE FROM ai_managed_heartbeats WHERE bridge_id=$1 AND login_id=$2`, scope.bridgeID, scope.loginID); err != nil {
+		keep := make(map[string]struct{}, len(store.Agents))
+		for _, state := range store.Agents {
+			keep[strings.TrimSpace(state.AgentID)] = struct{}{}
+		}
+		if err := deleteMissingHeartbeatRows(ctx, scope, keep); err != nil {
 			return err
 		}
 		for _, state := range store.Agents {
@@ -257,6 +285,20 @@ func (s *schedulerRuntime) saveHeartbeatStoreLocked(ctx context.Context, store m
 					room_id, revision, next_run_at_ms, pending_delay_id, pending_delay_kind,
 					pending_run_key, last_run_at_ms, last_result, last_error, processed_run_keys_json
 				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, 0), $10, $11, $12, NULLIF($13, 0), $14, $15, $16)
+				ON CONFLICT (bridge_id, login_id, agent_id) DO UPDATE SET
+					enabled=excluded.enabled,
+					interval_ms=excluded.interval_ms,
+					active_hours_json=excluded.active_hours_json,
+					room_id=excluded.room_id,
+					revision=excluded.revision,
+					next_run_at_ms=excluded.next_run_at_ms,
+					pending_delay_id=excluded.pending_delay_id,
+					pending_delay_kind=excluded.pending_delay_kind,
+					pending_run_key=excluded.pending_run_key,
+					last_run_at_ms=excluded.last_run_at_ms,
+					last_result=excluded.last_result,
+					last_error=excluded.last_error,
+					processed_run_keys_json=excluded.processed_run_keys_json
 			`,
 				scope.bridgeID, scope.loginID, state.AgentID, state.Enabled, state.IntervalMs, activeHoursJSON,
 				state.RoomID, state.Revision, state.NextRunAtMs, state.PendingDelayID, state.PendingDelayKind,
@@ -289,4 +331,46 @@ func schedulerUnmarshalJSON(raw string, target any) error {
 		return nil
 	}
 	return json.Unmarshal([]byte(raw), target)
+}
+
+func deleteMissingCronRows(ctx context.Context, scope *schedulerDBScope, keep map[string]struct{}) error {
+	rows, err := scope.db.Query(ctx, `SELECT job_id FROM ai_cron_jobs WHERE bridge_id=$1 AND login_id=$2`, scope.bridgeID, scope.loginID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var jobID string
+		if err := rows.Scan(&jobID); err != nil {
+			return err
+		}
+		if _, ok := keep[strings.TrimSpace(jobID)]; ok {
+			continue
+		}
+		if _, err := scope.db.Exec(ctx, `DELETE FROM ai_cron_jobs WHERE bridge_id=$1 AND login_id=$2 AND job_id=$3`, scope.bridgeID, scope.loginID, jobID); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func deleteMissingHeartbeatRows(ctx context.Context, scope *schedulerDBScope, keep map[string]struct{}) error {
+	rows, err := scope.db.Query(ctx, `SELECT agent_id FROM ai_managed_heartbeats WHERE bridge_id=$1 AND login_id=$2`, scope.bridgeID, scope.loginID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var agentID string
+		if err := rows.Scan(&agentID); err != nil {
+			return err
+		}
+		if _, ok := keep[strings.TrimSpace(agentID)]; ok {
+			continue
+		}
+		if _, err := scope.db.Exec(ctx, `DELETE FROM ai_managed_heartbeats WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`, scope.bridgeID, scope.loginID, agentID); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }
