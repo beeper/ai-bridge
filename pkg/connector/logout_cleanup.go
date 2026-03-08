@@ -57,10 +57,6 @@ func purgeLoginDataBestEffort(ctx context.Context, login *bridgev2.UserLogin) {
 		`DELETE FROM ai_system_events WHERE bridge_id=$1 AND login_id=$2`,
 		bridgeID, loginID,
 	)
-	bestEffortExec(ctx, db, logger,
-		`DELETE FROM ai_model_catalog_entries WHERE bridge_id=$1 AND login_id=$2`,
-		bridgeID, loginID,
-	)
 }
 
 func bestEffortExec(ctx context.Context, db *dbutil.Database, logger *zerolog.Logger, query string, args ...any) {
