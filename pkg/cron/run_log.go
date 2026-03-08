@@ -31,10 +31,7 @@ func ResolveCronRunLogDir(storePath string) string {
 		return "runs"
 	}
 	dir := path.Dir(trimmed)
-	if dir == "." {
-		dir = ""
-	}
-	if dir == "" {
+	if dir == "" || dir == "." {
 		return "runs"
 	}
 	return path.Join(dir, "runs")
@@ -48,8 +45,8 @@ func ResolveCronRunLogPath(storePath, jobID string) string {
 
 var cronRunLogLocks sync.Map
 
-func cronRunLogLock(path string) *sync.Mutex {
-	key := path
+func cronRunLogLock(p string) *sync.Mutex {
+	key := p
 	if key == "" {
 		key = "__run_log__"
 	}

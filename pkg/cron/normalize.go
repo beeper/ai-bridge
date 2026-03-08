@@ -24,14 +24,10 @@ func normalizeOptionalText(raw *string) string {
 }
 
 func normalizeOptionalAgentID(raw *string) string {
-	if raw == nil {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
 		return ""
 	}
-	trimmed := strings.TrimSpace(*raw)
-	if trimmed == "" {
-		return ""
-	}
-	return sanitizeAgentID(trimmed)
+	return sanitizeAgentID(*raw)
 }
 
 var (
