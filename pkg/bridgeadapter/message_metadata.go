@@ -53,10 +53,7 @@ func (b *BaseMessageMetadata) CopyFromBase(src *BaseMessageMetadata) {
 		b.CanonicalSchema = src.CanonicalSchema
 	}
 	if len(src.CanonicalUIMessage) > 0 {
-		b.CanonicalUIMessage = make(map[string]any, len(src.CanonicalUIMessage))
-		for k, v := range src.CanonicalUIMessage {
-			b.CanonicalUIMessage[k] = v
-		}
+		b.CanonicalUIMessage = cloneJSONMap(src.CanonicalUIMessage)
 	}
 	if src.StartedAtMs != 0 {
 		b.StartedAtMs = src.StartedAtMs
@@ -69,11 +66,59 @@ func (b *BaseMessageMetadata) CopyFromBase(src *BaseMessageMetadata) {
 	}
 	if len(src.ToolCalls) > 0 {
 		b.ToolCalls = make([]ToolCallMetadata, len(src.ToolCalls))
-		copy(b.ToolCalls, src.ToolCalls)
+		for i, call := range src.ToolCalls {
+			b.ToolCalls[i] = ToolCallMetadata{
+				CallID:        call.CallID,
+				ToolName:      call.ToolName,
+				ToolType:      call.ToolType,
+				Input:         cloneJSONMap(call.Input),
+				Output:        cloneJSONMap(call.Output),
+				Status:        call.Status,
+				ResultStatus:  call.ResultStatus,
+				ErrorMessage:  call.ErrorMessage,
+				StartedAtMs:   call.StartedAtMs,
+				CompletedAtMs: call.CompletedAtMs,
+				CallEventID:   call.CallEventID,
+				ResultEventID: call.ResultEventID,
+			}
+		}
 	}
 	if len(src.GeneratedFiles) > 0 {
 		b.GeneratedFiles = make([]GeneratedFileRef, len(src.GeneratedFiles))
 		copy(b.GeneratedFiles, src.GeneratedFiles)
+	}
+}
+
+func cloneJSONMap(src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(src))
+	for k, v := range src {
+		cloned[k] = cloneJSONValue(v)
+	}
+	return cloned
+}
+
+func cloneJSONSlice(src []any) []any {
+	if len(src) == 0 {
+		return nil
+	}
+	cloned := make([]any, len(src))
+	for i, v := range src {
+		cloned[i] = cloneJSONValue(v)
+	}
+	return cloned
+}
+
+func cloneJSONValue(v any) any {
+	switch typed := v.(type) {
+	case map[string]any:
+		return cloneJSONMap(typed)
+	case []any:
+		return cloneJSONSlice(typed)
+	default:
+		return v
 	}
 }
 
