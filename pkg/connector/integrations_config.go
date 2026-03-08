@@ -543,8 +543,6 @@ func upgradeConfig(helper configupgrade.Helper) {
 
 	// Cron configuration
 	helper.Copy(configupgrade.Bool, "cron", "enabled")
-	helper.Copy(configupgrade.Str, "cron", "store")
-	helper.Copy(configupgrade.Int, "cron", "maxConcurrentRuns")
 
 	// Messages configuration
 	helper.Copy(configupgrade.Str, "messages", "responsePrefix")

@@ -311,8 +311,7 @@ type AIClient struct {
 	queueTyping   map[id.RoomID]*TypingController
 
 	// Heartbeat + integrations
-	heartbeatRunner    *HeartbeatRunner
-	heartbeatWake      *HeartbeatWake
+	scheduler          *schedulerRuntime
 	integrationModules map[string]any
 	integrationOrder   []string
 
@@ -476,8 +475,7 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		return nil, fmt.Errorf("unsupported provider: %s", meta.Provider)
 	}
 
-	oc.heartbeatWake = &HeartbeatWake{log: oc.log}
-	oc.heartbeatRunner = NewHeartbeatRunner(oc)
+	oc.scheduler = newSchedulerRuntime(oc)
 	oc.initIntegrations()
 
 	// Seed last-heartbeat snapshot from persisted login metadata (command-only surface).
@@ -984,8 +982,8 @@ func (oc *AIClient) Connect(ctx context.Context) {
 
 	restoreSystemEventsFromDisk(oc.bridgeStateBackend(), oc.Log())
 
-	if oc.heartbeatRunner != nil {
-		oc.heartbeatRunner.Start()
+	if oc.scheduler != nil {
+		oc.scheduler.Start(ctx)
 	}
 	oc.startLifecycleIntegrations(ctx)
 }
@@ -1004,10 +1002,6 @@ func (oc *AIClient) Disconnect() {
 	oc.loggedIn.Store(false)
 
 	oc.stopLifecycleIntegrations()
-	if oc.heartbeatRunner != nil {
-		oc.heartbeatRunner.Stop()
-	}
-
 	// Stop all login-scoped integration workers for this login.
 	if oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.DB != nil {
 		bridgeID := string(oc.UserLogin.Bridge.DB.BridgeID)

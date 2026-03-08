@@ -401,11 +401,10 @@ func (h *runtimeIntegrationHost) WaitForAssistantMessage(ctx context.Context, po
 // ---- Optional Host capability: HeartbeatHelper ----
 
 func (h *runtimeIntegrationHost) RunHeartbeatOnce(ctx context.Context, reason string) (status string, reasonMsg string) {
-	if h == nil || h.client == nil || h.client.heartbeatRunner == nil {
+	if h == nil || h.client == nil || h.client.scheduler == nil {
 		return "skipped", "disabled"
 	}
-	res := h.client.heartbeatRunner.run(reason)
-	return res.Status, res.Reason
+	return h.client.scheduler.RunHeartbeatSweep(ctx, reason)
 }
 
 func (h *runtimeIntegrationHost) ResolveHeartbeatSessionPortal(agentID string) (portal any, sessionKey string, err error) {
@@ -961,10 +960,10 @@ type hostHeartbeat struct {
 }
 
 func (hb *hostHeartbeat) RequestNow(ctx context.Context, reason string) {
-	if hb == nil || hb.client == nil || hb.client.heartbeatWake == nil {
+	if hb == nil || hb.client == nil || hb.client.scheduler == nil {
 		return
 	}
-	hb.client.heartbeatWake.Request(reason, 0)
+	hb.client.scheduler.RequestHeartbeatNow(ctx, reason)
 }
 
 type hostToolExec struct {

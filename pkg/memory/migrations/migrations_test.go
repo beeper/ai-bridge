@@ -22,7 +22,7 @@ func setupTestDB(t *testing.T) *dbutil.Database {
 	return db
 }
 
-func TestUpgradeV1Fresh(t *testing.T) {
+func TestUpgradeV2Fresh(t *testing.T) {
 	ctx := context.Background()
 	parentDB := setupTestDB(t)
 	bridgeDB := parentDB.Child("ai_bridge_version", Table, dbutil.NoopLogger)
@@ -41,8 +41,8 @@ func TestUpgradeV1Fresh(t *testing.T) {
 	if err := bridgeDB.QueryRow(ctx, "SELECT version FROM ai_bridge_version").Scan(&version); err != nil {
 		t.Fatalf("read ai_bridge_version failed: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("expected ai_bridge_version=1, got %d", version)
+	if version != 2 {
+		t.Fatalf("expected ai_bridge_version=2, got %d", version)
 	}
 
 	for _, table := range []string{
@@ -53,6 +53,8 @@ func TestUpgradeV1Fresh(t *testing.T) {
 		"ai_memory_session_state",
 		"ai_memory_session_files",
 		"ai_bridge_state",
+		"ai_cron_jobs",
+		"ai_managed_heartbeats",
 	} {
 		exists, err := bridgeDB.TableExists(ctx, table)
 		if err != nil {

@@ -257,12 +257,7 @@ func (cc *CodexConnector) GetBridgeInfoVersion() (info, capabilities int) {
 }
 
 func (cc *CodexConnector) FillPortalBridgeInfo(portal *bridgev2.Portal, content *event.BridgeEventContent) {
-	meta := portalMeta(portal)
-	if meta.IsCronRoom {
-		content.BeeperRoomTypeV2 = "cron"
-	} else {
-		content.BeeperRoomTypeV2 = "codex"
-	}
+	content.BeeperRoomTypeV2 = "codex"
 }
 
 func (cc *CodexConnector) GetName() bridgev2.BridgeName {
