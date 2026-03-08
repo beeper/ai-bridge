@@ -84,7 +84,7 @@ func IsAttachmentBlock(block map[string]any) bool {
 	if len(jsonutil.ToMap(block["source"])) > 0 {
 		return true
 	}
-	for _, key := range []string{"file", "image_url", "imageUrl", "asset", "blob"} {
+	for _, key := range []string{"file", "image_url", "imageUrl", "asset", "blob", "src"} {
 		value := block[key]
 		if strings.TrimSpace(StringValue(value)) != "" {
 			return true
@@ -98,6 +98,11 @@ func IsAttachmentBlock(block map[string]any) bool {
 	}
 	if strings.TrimSpace(StringValue(block["content"])) != "" || strings.TrimSpace(StringValue(block["data"])) != "" {
 		return true
+	}
+	if strings.TrimSpace(StringValue(block["fileName"])) != "" || strings.TrimSpace(StringValue(block["filename"])) != "" {
+		if strings.TrimSpace(StringValue(block["mimeType"])) != "" || strings.TrimSpace(StringValue(block["mediaType"])) != "" || strings.TrimSpace(StringValue(block["contentType"])) != "" {
+			return true
+		}
 	}
 	return false
 }

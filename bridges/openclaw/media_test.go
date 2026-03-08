@@ -95,6 +95,63 @@ func TestOpenClawHistoryUIPartsToolResult(t *testing.T) {
 	}
 }
 
+func TestOpenClawHistoryUIPartsReasoningAndApproval(t *testing.T) {
+	parts := openClawHistoryUIParts(map[string]any{
+		"content": []any{
+			map[string]any{"type": "reasoning", "text": "checking context"},
+			map[string]any{
+				"type":       "toolCall",
+				"id":         "call-9",
+				"name":       "exec",
+				"arguments":  map[string]any{"cmd": "pwd"},
+				"approvalId": "approval-1",
+			},
+		},
+	}, "assistant")
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts, got %d", len(parts))
+	}
+	if parts[0]["type"] != "reasoning" || parts[0]["text"] != "checking context" {
+		t.Fatalf("unexpected reasoning part: %#v", parts[0])
+	}
+	if parts[1]["type"] != "dynamic-tool" || parts[1]["state"] != "approval-requested" {
+		t.Fatalf("unexpected tool approval part: %#v", parts[1])
+	}
+}
+
+func TestConvertHistoryToCanonicalUIMetadata(t *testing.T) {
+	meta := &PortalMetadata{
+		OpenClawSessionID:  "sess-1",
+		OpenClawSessionKey: "agent:main:matrix-dm",
+		Model:              "gpt-5",
+	}
+	parts, metadata := convertHistoryToCanonicalUI(map[string]any{
+		"role":         "assistant",
+		"runId":        "run-1",
+		"finishReason": "completed",
+		"usage": map[string]any{
+			"inputTokens":     int64(4),
+			"outputTokens":    int64(6),
+			"reasoningTokens": int64(2),
+			"totalTokens":     int64(12),
+		},
+		"content": []any{map[string]any{"type": "text", "text": "hello"}},
+	}, "assistant", meta)
+	if len(parts) != 1 || parts[0]["type"] != "text" {
+		t.Fatalf("unexpected parts: %#v", parts)
+	}
+	if metadata["session_id"] != "sess-1" || metadata["session_key"] != "agent:main:matrix-dm" {
+		t.Fatalf("unexpected session metadata: %#v", metadata)
+	}
+	usage, ok := metadata["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected usage metadata, got %#v", metadata["usage"])
+	}
+	if usage["prompt_tokens"] != int64(4) || usage["completion_tokens"] != int64(6) || usage["reasoning_tokens"] != int64(2) || usage["total_tokens"] != int64(12) {
+		t.Fatalf("unexpected usage metadata: %#v", usage)
+	}
+}
+
 func TestNormalizeOpenClawUsage(t *testing.T) {
 	usage := normalizeOpenClawUsage(map[string]any{
 		"input":           float64(10),
@@ -134,6 +191,26 @@ func TestOpenClawAttachmentSourceFromNestedFileMap(t *testing.T) {
 	}
 }
 
+func TestOpenClawAttachmentSourceFromNestedAssetSource(t *testing.T) {
+	block := map[string]any{
+		"type": "image",
+		"asset": map[string]any{
+			"source": map[string]any{
+				"url":         "https://example.com/image.png",
+				"contentType": "image/png",
+				"fileName":    "image.png",
+			},
+		},
+	}
+	source := openClawAttachmentSourceFromBlock(block)
+	if source == nil {
+		t.Fatal("expected source")
+	}
+	if source.Kind != "url" || source.URL != "https://example.com/image.png" || source.MimeType != "image/png" || source.FileName != "image.png" {
+		t.Fatalf("unexpected source: %#v", source)
+	}
+}
+
 func TestTopicForPortal(t *testing.T) {
 	oc := &OpenClawClient{}
 	topic := oc.topicForPortal(&PortalMetadata{
@@ -145,6 +222,22 @@ func TestTopicForPortal(t *testing.T) {
 		HistoryMode:                "recent_only",
 	})
 	want := "discord | Support | openai | gpt-5 | Recent: hello there | History: recent_only"
+	if topic != want {
+		t.Fatalf("unexpected topic: %q", topic)
+	}
+}
+
+func TestTopicForPortalWithPreviewAndCatalogCounts(t *testing.T) {
+	oc := &OpenClawClient{}
+	topic := oc.topicForPortal(&PortalMetadata{
+		OpenClawChannel:         "discord",
+		OpenClawPreviewSnippet:  "preview text",
+		HistoryMode:             "recent_only",
+		OpenClawToolProfile:     "default",
+		OpenClawToolCount:       3,
+		OpenClawKnownModelCount: 7,
+	})
+	want := "discord | Recent: preview text | History: recent_only | Tools: 3 (default) | Models: 7"
 	if topic != want {
 		t.Fatalf("unexpected topic: %q", topic)
 	}

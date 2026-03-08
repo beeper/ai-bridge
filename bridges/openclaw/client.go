@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
@@ -36,6 +38,21 @@ type OpenClawClient struct {
 	manager *openClawManager
 
 	loggedIn atomic.Bool
+
+	agentCatalogMu        sync.RWMutex
+	agentCatalog          []gatewayAgentSummary
+	agentCatalogDefaultID string
+	agentCatalogMainKey   string
+	agentCatalogScope     string
+	agentCatalogFetchedAt time.Time
+
+	modelCatalogMu        sync.RWMutex
+	modelCatalog          []gatewayModelChoice
+	modelCatalogFetchedAt time.Time
+
+	toolCatalogMu        sync.RWMutex
+	toolCatalog          map[string]gatewayToolsCatalogResponse
+	toolCatalogFetchedAt map[string]time.Time
 
 	streamMu                  sync.Mutex
 	streamSessions            map[string]*streamtransport.StreamSession
@@ -75,10 +92,12 @@ func newOpenClawClient(login *bridgev2.UserLogin, connector *OpenClawConnector) 
 		return nil, errors.New("missing login")
 	}
 	client := &OpenClawClient{
-		UserLogin:      login,
-		connector:      connector,
-		streamSessions: make(map[string]*streamtransport.StreamSession),
-		streamStates:   make(map[string]*openClawStreamState),
+		UserLogin:            login,
+		connector:            connector,
+		streamSessions:       make(map[string]*streamtransport.StreamSession),
+		streamStates:         make(map[string]*openClawStreamState),
+		toolCatalog:          make(map[string]gatewayToolsCatalogResponse),
+		toolCatalogFetchedAt: make(map[string]time.Time),
 	}
 	client.manager = newOpenClawManager(client)
 	return client, nil
@@ -92,6 +111,12 @@ func (oc *OpenClawClient) Connect(ctx context.Context) {
 			oc.loggedIn.Store(false)
 			oc.UserLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateBadCredentials, Message: err.Error()})
 			return
+		}
+		if _, err := oc.loadAgentCatalog(oc.BackgroundContext(ctx), true); err != nil {
+			oc.Log().Debug().Err(err).Msg("Failed to refresh OpenClaw agent catalog on connect")
+		}
+		if _, err := oc.loadModelCatalog(oc.BackgroundContext(ctx), true); err != nil {
+			oc.Log().Debug().Err(err).Msg("Failed to refresh OpenClaw model catalog on connect")
 		}
 		oc.UserLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected, Message: "Connected"})
 	}()
@@ -193,9 +218,19 @@ func (oc *OpenClawClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal)
 	}
 }
 
-func (oc *OpenClawClient) GetChatInfo(_ context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+func (oc *OpenClawClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 	meta := portalMeta(portal)
+	oc.enrichPortalMetadata(ctx, meta)
 	title := oc.displayNameForPortal(meta)
+	agentID := stringsTrimDefault(meta.OpenClawDMTargetAgentID, meta.OpenClawAgentID)
+	if agentID != "" {
+		info := oc.syntheticDMPortalInfo(agentID, title)
+		info.Topic = ptr.NonZero(oc.topicForPortal(meta))
+		if portal != nil && portal.RoomType == database.RoomTypeDM {
+			info.Type = ptr.Ptr(database.RoomTypeDM)
+		}
+		return info, nil
+	}
 	return &bridgev2.ChatInfo{
 		Name:  ptr.Ptr(title),
 		Topic: ptr.NonZero(oc.topicForPortal(meta)),
@@ -210,65 +245,13 @@ func (oc *OpenClawClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost
 	if !ok {
 		return &bridgev2.UserInfo{Name: ptr.Ptr("OpenClaw"), IsBot: ptr.Ptr(true)}, nil
 	}
-	meta := ghostMeta(ghost)
-	identity := oc.lookupAgentIdentity(ctx, agentID, "")
-	if identity != nil {
-		if strings.TrimSpace(identity.AgentID) != "" {
-			meta.OpenClawAgentID = strings.TrimSpace(identity.AgentID)
-		}
-		if strings.TrimSpace(identity.Name) != "" {
-			meta.OpenClawAgentName = strings.TrimSpace(identity.Name)
-		}
-		if strings.TrimSpace(identity.Avatar) != "" {
-			meta.OpenClawAgentAvatarURL = strings.TrimSpace(identity.Avatar)
-		}
-		if strings.TrimSpace(identity.Emoji) != "" {
-			meta.OpenClawAgentEmoji = strings.TrimSpace(identity.Emoji)
-		}
+	current := ghostMeta(ghost)
+	configured, err := oc.agentCatalogEntryByID(ctx, agentID)
+	if err != nil {
+		oc.Log().Debug().Err(err).Str("agent_id", agentID).Msg("Failed to refresh OpenClaw agent catalog for ghost info")
 	}
-	name := oc.formatAgentDisplayName(meta, agentID)
-	info := &bridgev2.UserInfo{
-		Name:        ptr.Ptr(name),
-		IsBot:       ptr.Ptr(true),
-		Identifiers: []string{"openclaw:" + agentID},
-		ExtraUpdates: func(_ context.Context, ghost *bridgev2.Ghost) bool {
-			if ghost == nil {
-				return false
-			}
-			current := ghostMeta(ghost)
-			changed := false
-			if value := strings.TrimSpace(meta.OpenClawAgentID); value != "" && current.OpenClawAgentID != value {
-				current.OpenClawAgentID = value
-				changed = true
-			}
-			if value := strings.TrimSpace(meta.OpenClawAgentName); value != "" && current.OpenClawAgentName != value {
-				current.OpenClawAgentName = value
-				changed = true
-			}
-			if value := strings.TrimSpace(meta.OpenClawAgentAvatarURL); value != "" && current.OpenClawAgentAvatarURL != value {
-				current.OpenClawAgentAvatarURL = value
-				changed = true
-			}
-			if value := strings.TrimSpace(meta.OpenClawAgentEmoji); value != "" && current.OpenClawAgentEmoji != value {
-				current.OpenClawAgentEmoji = value
-				changed = true
-			}
-			if current.OpenClawAgentRole != "assistant" {
-				current.OpenClawAgentRole = "assistant"
-				changed = true
-			}
-			now := time.Now().UnixMilli()
-			if current.LastSeenAt != now {
-				current.LastSeenAt = now
-				changed = true
-			}
-			return changed
-		},
-	}
-	if avatar := oc.agentAvatar(meta, agentID); avatar != nil {
-		info.Avatar = avatar
-	}
-	return info, nil
+	profile := oc.resolveAgentProfile(ctx, agentID, "", current, configured)
+	return oc.userInfoForAgentProfile(profile), nil
 }
 
 func (oc *OpenClawClient) Log() *zerolog.Logger {
@@ -328,6 +311,9 @@ func (oc *OpenClawClient) displayNameForPortal(meta *PortalMetadata) string {
 	if meta == nil {
 		return "OpenClaw"
 	}
+	if strings.TrimSpace(meta.OpenClawDMTargetAgentName) != "" {
+		return strings.TrimSpace(meta.OpenClawDMTargetAgentName)
+	}
 	for _, value := range []string{meta.OpenClawDerivedTitle, meta.OpenClawDisplayName, meta.OpenClawSessionLabel, meta.OpenClawSubject, meta.LastTo, meta.OpenClawChannel, meta.OpenClawSessionKey} {
 		if strings.TrimSpace(value) != "" {
 			return strings.TrimSpace(value)
@@ -340,6 +326,9 @@ func (oc *OpenClawClient) topicForPortal(meta *PortalMetadata) string {
 	if meta == nil {
 		return ""
 	}
+	if strings.TrimSpace(meta.OpenClawDMTargetAgentID) != "" || isOpenClawSyntheticDMSessionKey(meta.OpenClawSessionKey) {
+		return "OpenClaw agent DM"
+	}
 	parts := make([]string, 0, 6)
 	for _, value := range []string{meta.OpenClawChannel, meta.OpenClawSubject, meta.ModelProvider, meta.Model} {
 		value = strings.TrimSpace(value)
@@ -347,11 +336,21 @@ func (oc *OpenClawClient) topicForPortal(meta *PortalMetadata) string {
 			parts = append(parts, value)
 		}
 	}
-	if strings.TrimSpace(meta.OpenClawLastMessagePreview) != "" {
-		parts = append(parts, "Recent: "+strings.TrimSpace(meta.OpenClawLastMessagePreview))
+	if preview := stringsTrimDefault(meta.OpenClawPreviewSnippet, meta.OpenClawLastMessagePreview); strings.TrimSpace(preview) != "" {
+		parts = append(parts, "Recent: "+strings.TrimSpace(preview))
 	}
 	if meta.HistoryMode != "" {
 		parts = append(parts, "History: "+meta.HistoryMode)
+	}
+	if meta.OpenClawToolCount > 0 {
+		toolSummary := "Tools: " + fmt.Sprintf("%d", meta.OpenClawToolCount)
+		if profile := strings.TrimSpace(meta.OpenClawToolProfile); profile != "" {
+			toolSummary += " (" + profile + ")"
+		}
+		parts = append(parts, toolSummary)
+	}
+	if meta.OpenClawKnownModelCount > 0 {
+		parts = append(parts, fmt.Sprintf("Models: %d", meta.OpenClawKnownModelCount))
 	}
 	return strings.Join(parts, " | ")
 }

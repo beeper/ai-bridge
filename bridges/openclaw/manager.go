@@ -22,6 +22,7 @@ import (
 	"github.com/beeper/ai-bridge/pkg/matrixevents"
 	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 	"github.com/beeper/ai-bridge/pkg/shared/openclawconv"
+	"github.com/beeper/ai-bridge/pkg/shared/streamui"
 )
 
 type openClawManager struct {
@@ -37,11 +38,14 @@ type openClawManager struct {
 }
 
 type openClawPendingApprovalData struct {
-	SessionKey string
-	TurnID     string
-	ToolCallID string
-	ToolName   string
-	Command    string
+	SessionKey  string
+	TurnID      string
+	ToolCallID  string
+	ToolName    string
+	Command     string
+	Recovered   bool
+	CreatedAtMs int64
+	ExpiresAtMs int64
 }
 
 func newOpenClawManager(client *OpenClawClient) *openClawManager {
@@ -167,6 +171,12 @@ func (m *openClawManager) HandleMatrixMessage(ctx context.Context, msg *bridgev2
 	if text == "" && len(attachments) == 0 {
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 	}
+	if meta.OpenClawDMCreatedFromContact && meta.OpenClawSessionID == "" && isOpenClawSyntheticDMSessionKey(meta.OpenClawSessionKey) {
+		if resolvedKey, err := m.gatewayClient().ResolveSessionKey(ctx, meta.OpenClawSessionKey); err == nil && strings.TrimSpace(resolvedKey) != "" && strings.TrimSpace(resolvedKey) != strings.TrimSpace(meta.OpenClawSessionKey) {
+			meta.OpenClawSessionKey = strings.TrimSpace(resolvedKey)
+			_ = msg.Portal.Save(ctx)
+		}
+	}
 	_, err = m.gatewayClient().SendMessage(
 		ctx,
 		meta.OpenClawSessionKey,
@@ -178,6 +188,9 @@ func (m *openClawManager) HandleMatrixMessage(ctx context.Context, msg *bridgev2
 	)
 	if err != nil {
 		return nil, err
+	}
+	if meta.OpenClawDMCreatedFromContact && meta.OpenClawSessionID == "" && isOpenClawSyntheticDMSessionKey(meta.OpenClawSessionKey) {
+		go m.syncSessions(m.client.BackgroundContext(ctx))
 	}
 	return &bridgev2.MatrixMessageResponse{Pending: true}, nil
 }
@@ -339,9 +352,6 @@ func (m *openClawManager) convertHistoryMessage(ctx context.Context, portal *bri
 			}
 		}
 	}
-	if strings.TrimSpace(text) == "" && len(attachmentBlocks) == 0 && role != "toolresult" {
-		return nil, bridgev2.EventSender{}, ""
-	}
 	agentID := resolveOpenClawAgentID(meta, meta.OpenClawSessionKey, message)
 	sender := m.client.senderForAgent(agentID, false)
 	if role == "user" {
@@ -349,8 +359,14 @@ func (m *openClawManager) convertHistoryMessage(ctx context.Context, portal *bri
 	}
 	ts := extractMessageTimestamp(message)
 	messageID := historyFingerprintMessageID(meta.OpenClawSessionKey, role, ts, text, message)
+	uiParts, uiMetadata := convertHistoryToCanonicalUI(message, role, meta)
+	if len(uiParts) == 0 && strings.TrimSpace(text) == "" && len(attachmentBlocks) == 0 {
+		return nil, bridgev2.EventSender{}, ""
+	}
+	if turnID := strings.TrimSpace(stringValue(uiMetadata["turn_id"])); turnID == "" {
+		uiMetadata["turn_id"] = string(messageID)
+	}
 	parts := make([]*bridgev2.ConvertedMessagePart, 0, 1+len(attachmentBlocks))
-	uiParts := openClawHistoryUIParts(message, role)
 	if strings.TrimSpace(text) != "" {
 		parts = append(parts, &bridgev2.ConvertedMessagePart{
 			ID:      networkid.PartID("0"),
@@ -358,8 +374,15 @@ func (m *openClawManager) convertHistoryMessage(ctx context.Context, portal *bri
 			Content: &event.MessageEventContent{MsgType: event.MsgText, Body: text},
 			Extra:   map[string]any{"msgtype": event.MsgText, "body": text, "m.mentions": map[string]any{}},
 		})
-		if len(uiParts) == 0 || strings.ToLower(strings.TrimSpace(stringValue(uiParts[0]["type"]))) != "text" {
-			uiParts = append([]map[string]any{{"type": "text", "text": text, "state": "done"}}, uiParts...)
+	} else if len(uiParts) > 0 {
+		fallbackText := openClawHistoryFallbackText(uiParts)
+		if fallbackText != "" {
+			parts = append(parts, &bridgev2.ConvertedMessagePart{
+				ID:      networkid.PartID("0"),
+				Type:    event.EventMessage,
+				Content: &event.MessageEventContent{MsgType: event.MsgNotice, Body: fallbackText},
+				Extra:   map[string]any{"msgtype": event.MsgNotice, "body": fallbackText, "m.mentions": map[string]any{}},
+			})
 		}
 	}
 	for idx, block := range attachmentBlocks {
@@ -381,49 +404,76 @@ func (m *openClawManager) convertHistoryMessage(ctx context.Context, portal *bri
 			Content: uploaded.Content,
 			Extra:   uploaded.Metadata,
 		})
-		if uploaded.MatrixURL != "" {
-			uiParts = append(uiParts, map[string]any{
-				"type":      "file",
-				"url":       uploaded.MatrixURL,
-				"mediaType": uploaded.Content.Info.MimeType,
-				"filename":  uploaded.Content.FileName,
-			})
+		uiPart := map[string]any{
+			"type":      "file",
+			"mediaType": uploaded.Content.Info.MimeType,
+			"filename":  uploaded.Content.FileName,
 		}
+		if uploaded.MatrixURL != "" {
+			uiPart["url"] = uploaded.MatrixURL
+		}
+		uiParts = append(uiParts, uiPart)
+	}
+	if len(parts) == 0 {
+		return nil, bridgev2.EventSender{}, ""
 	}
 	converted := &bridgev2.ConvertedMessage{
 		Parts: parts,
 	}
 	if len(converted.Parts) > 0 {
-		converted.Parts[0].DBMetadata = &MessageMetadata{
-			Role:        role,
-			Body:        text,
-			SessionID:   meta.OpenClawSessionID,
-			SessionKey:  meta.OpenClawSessionKey,
-			Attachments: attachmentBlocks,
+		converted.Parts[0].DBMetadata = buildOpenClawHistoryMessageMetadata(message, meta, role, agentID, text, attachmentBlocks, uiMetadata)
+		uiRole := "assistant"
+		if role == "user" {
+			uiRole = "user"
 		}
-	}
-	if role == "assistant" || role == "toolresult" {
 		uiMessage := msgconv.BuildUIMessage(msgconv.UIMessageParams{
 			TurnID:   string(messageID),
-			Role:     "assistant",
-			Metadata: msgconv.BuildUIMessageMetadata(msgconv.UIMessageMetadataParams{TurnID: string(messageID), AgentID: agentID}),
-			Parts:    uiParts,
-		})
-		if len(converted.Parts) > 0 {
-			converted.Parts[0].Extra[matrixevents.BeeperAIKey] = uiMessage
-			converted.Parts[0].DBMetadata.(*MessageMetadata).CanonicalSchema = "ai-sdk-ui-message-v1"
-			converted.Parts[0].DBMetadata.(*MessageMetadata).CanonicalUIMessage = uiMessage
-		}
-	} else if len(converted.Parts) > 0 {
-		uiMessage := msgconv.BuildUIMessage(msgconv.UIMessageParams{
-			TurnID:   string(messageID),
-			Role:     "user",
-			Metadata: msgconv.BuildUIMessageMetadata(msgconv.UIMessageMetadataParams{TurnID: string(messageID)}),
+			Role:     uiRole,
+			Metadata: uiMetadata,
 			Parts:    uiParts,
 		})
 		converted.Parts[0].Extra[matrixevents.BeeperAIKey] = uiMessage
+		converted.Parts[0].DBMetadata.(*MessageMetadata).CanonicalSchema = "ai-sdk-ui-message-v1"
+		converted.Parts[0].DBMetadata.(*MessageMetadata).CanonicalUIMessage = uiMessage
 	}
 	return converted, sender, messageID
+}
+
+func buildOpenClawHistoryMessageMetadata(message map[string]any, meta *PortalMetadata, role, agentID, text string, attachmentBlocks []map[string]any, uiMetadata map[string]any) *MessageMetadata {
+	metadata := &MessageMetadata{
+		Role:        role,
+		Body:        text,
+		SessionID:   meta.OpenClawSessionID,
+		SessionKey:  meta.OpenClawSessionKey,
+		AgentID:     agentID,
+		Attachments: attachmentBlocks,
+	}
+	if value := strings.TrimSpace(stringValue(uiMetadata["completion_id"])); value != "" {
+		metadata.RunID = value
+	}
+	if value := strings.TrimSpace(stringValue(uiMetadata["turn_id"])); value != "" {
+		metadata.TurnID = value
+	}
+	if value := strings.TrimSpace(stringValue(uiMetadata["finish_reason"])); value != "" {
+		metadata.FinishReason = value
+	}
+	if value := strings.TrimSpace(stringValue(uiMetadata["error_text"])); value != "" {
+		metadata.ErrorText = value
+	}
+	usage := jsonutil.ToMap(uiMetadata["usage"])
+	if value, ok := openClawUsageInt64(usage, "prompt_tokens"); ok {
+		metadata.PromptTokens = value
+	}
+	if value, ok := openClawUsageInt64(usage, "completion_tokens"); ok {
+		metadata.CompletionTokens = value
+	}
+	if value, ok := openClawUsageInt64(usage, "reasoning_tokens"); ok {
+		metadata.ReasoningTokens = value
+	}
+	if value, ok := openClawUsageInt64(usage, "total_tokens"); ok {
+		metadata.TotalTokens = value
+	}
+	return metadata
 }
 
 func historyFingerprintMessageID(sessionKey, role string, ts time.Time, text string, raw map[string]any) networkid.MessageID {
@@ -604,8 +654,10 @@ func (m *openClawManager) handleApprovalRequest(ctx context.Context, payload gat
 		body = "Tool approval required: " + command
 	}
 	m.approvals.Register(payload.ID, time.Until(time.UnixMilli(payload.ExpiresAtMs)), &openClawPendingApprovalData{
-		SessionKey: sessionKey,
-		Command:    command,
+		SessionKey:  sessionKey,
+		Command:     command,
+		CreatedAtMs: payload.CreatedAtMs,
+		ExpiresAtMs: payload.ExpiresAtMs,
 	})
 	m.client.sendApprovalRequestFallbackEvent(ctx, portal, payload.ID, body)
 }
@@ -692,6 +744,10 @@ func (m *openClawManager) handleChatEvent(ctx context.Context, payload gatewayCh
 			meta.TotalTokensFresh = true
 		}
 		text := extractMessageText(payload.Message)
+		if trimmed := strings.TrimSpace(text); trimmed != "" {
+			meta.OpenClawPreviewSnippet = trimmed
+			meta.OpenClawLastPreviewAt = time.Now().UnixMilli()
+		}
 		if delta := m.client.computeVisibleDelta(turnID, text); delta != "" {
 			m.client.EmitStreamPart(ctx, portal, turnID, agentID, payload.SessionKey, map[string]any{
 				"type":  "text-delta",
@@ -865,7 +921,11 @@ func (m *openClawManager) waitForRunCompletion(ctx context.Context, portal *brid
 		return
 	}
 
-	if recoveredText := m.recoverRunText(ctx, meta.OpenClawSessionKey, turnID); recoveredText != "" {
+	recoveredText := m.recoverRunText(ctx, meta.OpenClawSessionKey, turnID)
+	if recoveredText == "" {
+		recoveredText = m.recoverRunPreview(ctx, portal, meta)
+	}
+	if recoveredText != "" {
 		if delta := m.client.computeVisibleDelta(turnID, recoveredText); delta != "" {
 			m.client.EmitStreamPart(ctx, portal, turnID, agentID, meta.OpenClawSessionKey, map[string]any{
 				"type":  "text-delta",
@@ -937,6 +997,22 @@ func (m *openClawManager) recoverRunText(ctx context.Context, sessionKey, turnID
 	return ""
 }
 
+func (m *openClawManager) recoverRunPreview(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata) string {
+	if m == nil || m.client == nil || meta == nil {
+		return ""
+	}
+	snippet := strings.TrimSpace(m.client.previewSessionSnippet(ctx, meta.OpenClawSessionKey))
+	if snippet == "" {
+		return ""
+	}
+	meta.OpenClawPreviewSnippet = snippet
+	meta.OpenClawLastPreviewAt = time.Now().UnixMilli()
+	if portal != nil {
+		_ = portal.Save(ctx)
+	}
+	return snippet
+}
+
 func (m *openClawManager) resolvePortal(ctx context.Context, sessionKey string) *bridgev2.Portal {
 	if strings.TrimSpace(sessionKey) == "" {
 		return nil
@@ -997,61 +1073,208 @@ func openClawAttachmentFallbackText(block map[string]any, err error) string {
 	return fmt.Sprintf("[Attachment unavailable: %s (%v)]", name, err)
 }
 
+func convertHistoryToCanonicalUI(message map[string]any, role string, meta *PortalMetadata) ([]map[string]any, map[string]any) {
+	agentID := resolveOpenClawAgentID(meta, stringsTrimDefault(meta.OpenClawSessionKey, stringValue(message["sessionKey"])), message)
+	turnID := strings.TrimSpace(stringsTrimDefault(
+		stringValue(message["turnId"]),
+		stringsTrimDefault(stringValue(message["runId"]), stringValue(message["id"])),
+	))
+	params := msgconv.UIMessageMetadataParams{
+		TurnID:       turnID,
+		AgentID:      agentID,
+		Model:        stringsTrimDefault(stringValue(message["model"]), meta.Model),
+		FinishReason: stringsTrimDefault(stringValue(message["finishReason"]), stringValue(message["stopReason"])),
+		CompletionID: stringValue(message["runId"]),
+		IncludeUsage: true,
+	}
+	if usage := normalizeOpenClawUsage(jsonutil.ToMap(message["usage"])); len(usage) > 0 {
+		if value, ok := openClawUsageInt64(usage, "prompt_tokens"); ok {
+			params.PromptTokens = value
+		}
+		if value, ok := openClawUsageInt64(usage, "completion_tokens"); ok {
+			params.CompletionTokens = value
+		}
+		if value, ok := openClawUsageInt64(usage, "reasoning_tokens"); ok {
+			params.ReasoningTokens = value
+		}
+		if value, ok := openClawUsageInt64(usage, "total_tokens"); ok {
+			params.TotalTokens = value
+		}
+	}
+	metadata := msgconv.BuildUIMessageMetadata(params)
+	if sessionID := stringsTrimDefault(stringValue(message["sessionId"]), meta.OpenClawSessionID); sessionID != "" {
+		metadata["session_id"] = sessionID
+	}
+	if sessionKey := stringsTrimDefault(stringValue(message["sessionKey"]), meta.OpenClawSessionKey); sessionKey != "" {
+		metadata["session_key"] = sessionKey
+	}
+	if errorText := stringsTrimDefault(stringValue(message["errorMessage"]), stringValue(message["error"])); errorText != "" {
+		metadata["error_text"] = errorText
+	}
+	return openClawHistoryUIParts(message, role), metadata
+}
+
 func openClawHistoryUIParts(message map[string]any, role string) []map[string]any {
+	state := &streamui.UIState{
+		TurnID: stringsTrimDefault(
+			stringValue(message["turnId"]),
+			stringsTrimDefault(stringValue(message["runId"]), "history"),
+		),
+	}
+	openClawApplyHistoryChunks(state, message, role)
+	snapshot := streamui.SnapshotCanonicalUIMessage(state)
+	return normalizeOpenClawUIParts(snapshot["parts"])
+}
+
+func openClawApplyHistoryChunks(state *streamui.UIState, message map[string]any, role string) {
+	if state == nil {
+		return
+	}
+	role = strings.ToLower(strings.TrimSpace(role))
 	if role == "toolresult" {
-		toolCallID := strings.TrimSpace(stringsTrimDefault(stringValue(message["toolCallId"]), stringValue(message["toolUseId"])))
-		toolName := strings.TrimSpace(stringValue(message["toolName"]))
-		if toolCallID == "" {
-			toolCallID = "tool-result"
-		}
-		part := map[string]any{
-			"type":       "dynamic-tool",
-			"toolCallId": toolCallID,
-			"toolName":   stringsTrimDefault(toolName, "tool"),
-		}
-		if isError, _ := message["isError"].(bool); isError {
-			part["state"] = "output-error"
-			part["errorText"] = extractMessageText(message)
-		} else {
-			part["state"] = "output-available"
-			if details, ok := message["details"]; ok && details != nil {
-				part["output"] = jsonutil.DeepCloneAny(details)
-			} else {
-				part["output"] = extractMessageText(message)
-			}
-		}
-		return []map[string]any{part}
+		openClawApplyHistoryToolResult(state, message)
+		return
 	}
 	blocks := contentBlocks(message)
-	uiParts := make([]map[string]any, 0, len(blocks))
-	for _, block := range blocks {
+	for idx, block := range blocks {
 		blockType := strings.ToLower(strings.TrimSpace(stringValue(block["type"])))
 		switch blockType {
 		case "text", "input_text", "output_text":
 			text := strings.TrimSpace(stringsTrimDefault(stringValue(block["text"]), stringValue(block["content"])))
-			if text != "" {
-				uiParts = append(uiParts, map[string]any{"type": "text", "text": text, "state": "done"})
+			if text == "" {
+				continue
 			}
+			partID := fmt.Sprintf("text-%d", idx)
+			streamui.ApplyChunk(state, map[string]any{"type": "text-start", "id": partID})
+			streamui.ApplyChunk(state, map[string]any{"type": "text-delta", "id": partID, "delta": text})
+			streamui.ApplyChunk(state, map[string]any{"type": "text-end", "id": partID})
+		case "reasoning", "thinking":
+			text := strings.TrimSpace(stringsTrimDefault(stringValue(block["text"]), stringValue(block["content"])))
+			if text == "" {
+				continue
+			}
+			partID := fmt.Sprintf("reasoning-%d", idx)
+			streamui.ApplyChunk(state, map[string]any{"type": "reasoning-start", "id": partID})
+			streamui.ApplyChunk(state, map[string]any{"type": "reasoning-delta", "id": partID, "delta": text})
+			streamui.ApplyChunk(state, map[string]any{"type": "reasoning-end", "id": partID})
 		case "toolcall", "tooluse", "functioncall":
 			toolCallID := strings.TrimSpace(stringsTrimDefault(stringValue(block["id"]), stringValue(block["call_id"])))
 			if toolCallID == "" {
-				toolCallID = "tool-call"
+				toolCallID = fmt.Sprintf("tool-call-%d", idx)
 			}
 			toolName := strings.TrimSpace(stringsTrimDefault(stringValue(block["name"]), stringValue(block["toolName"])))
 			input := jsonutil.ToMap(block["arguments"])
 			if len(input) == 0 {
 				input = jsonutil.ToMap(block["input"])
 			}
-			uiParts = append(uiParts, map[string]any{
-				"type":       "dynamic-tool",
+			streamui.ApplyChunk(state, map[string]any{
+				"type":       "tool-input-available",
 				"toolCallId": toolCallID,
 				"toolName":   stringsTrimDefault(toolName, "tool"),
-				"state":      "input-available",
 				"input":      input,
 			})
+			if approvalID := strings.TrimSpace(stringsTrimDefault(stringValue(block["approvalId"]), stringValue(jsonutil.ToMap(block["approval"])["id"]))); approvalID != "" {
+				streamui.ApplyChunk(state, map[string]any{
+					"type":       "tool-approval-request",
+					"approvalId": approvalID,
+					"toolCallId": toolCallID,
+				})
+			}
+		case "toolresult", "tool_result", "tool-output":
+			openClawApplyHistoryToolResult(state, block)
 		}
 	}
-	return uiParts
+	if len(blocks) == 0 {
+		if text := strings.TrimSpace(extractMessageText(message)); text != "" {
+			streamui.ApplyChunk(state, map[string]any{"type": "text-start", "id": "text-history"})
+			streamui.ApplyChunk(state, map[string]any{"type": "text-delta", "id": "text-history", "delta": text})
+			streamui.ApplyChunk(state, map[string]any{"type": "text-end", "id": "text-history"})
+		}
+	}
+}
+
+func openClawApplyHistoryToolResult(state *streamui.UIState, message map[string]any) {
+	toolCallID := strings.TrimSpace(stringsTrimDefault(stringValue(message["toolCallId"]), stringValue(message["toolUseId"])))
+	if toolCallID == "" {
+		toolCallID = "tool-result"
+	}
+	toolName := strings.TrimSpace(stringsTrimDefault(stringValue(message["toolName"]), stringValue(message["name"])))
+	if toolName != "" {
+		streamui.ApplyChunk(state, map[string]any{
+			"type":       "tool-input-available",
+			"toolCallId": toolCallID,
+			"toolName":   toolName,
+			"input":      jsonutil.DeepCloneAny(jsonutil.ToMap(message["input"])),
+		})
+	}
+	if approvalID := strings.TrimSpace(stringsTrimDefault(stringValue(message["approvalId"]), stringValue(jsonutil.ToMap(message["approval"])["id"]))); approvalID != "" {
+		streamui.ApplyChunk(state, map[string]any{
+			"type":       "tool-approval-request",
+			"approvalId": approvalID,
+			"toolCallId": toolCallID,
+		})
+	}
+	if isError, _ := message["isError"].(bool); isError {
+		streamui.ApplyChunk(state, map[string]any{
+			"type":       "tool-output-error",
+			"toolCallId": toolCallID,
+			"errorText":  stringsTrimDefault(extractMessageText(message), stringValue(message["error"])),
+		})
+		return
+	}
+	output := jsonutil.DeepCloneAny(message["details"])
+	if output == nil {
+		output = jsonutil.DeepCloneAny(stringsTrimDefault(extractMessageText(message), stringValue(message["result"])))
+	}
+	streamui.ApplyChunk(state, map[string]any{
+		"type":       "tool-output-available",
+		"toolCallId": toolCallID,
+		"output":     output,
+	})
+}
+
+func normalizeOpenClawUIParts(raw any) []map[string]any {
+	switch typed := raw.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			part := jsonutil.ToMap(item)
+			if len(part) == 0 {
+				continue
+			}
+			out = append(out, part)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func openClawHistoryFallbackText(uiParts []map[string]any) string {
+	for _, part := range uiParts {
+		partType := strings.TrimSpace(stringValue(part["type"]))
+		switch partType {
+		case "text", "reasoning":
+			if text := strings.TrimSpace(stringValue(part["text"])); text != "" {
+				return text
+			}
+		case "dynamic-tool":
+			toolName := strings.TrimSpace(stringsTrimDefault(stringValue(part["toolName"]), "tool"))
+			switch strings.TrimSpace(stringValue(part["state"])) {
+			case "approval-requested":
+				return "Tool approval required: " + toolName
+			case "output-error":
+				return "Tool failed: " + toolName
+			case "output-available":
+				return "Tool completed: " + toolName
+			default:
+				return "Tool activity: " + toolName
+			}
+		}
+	}
+	return ""
 }
 
 func isOpenClawAttachmentBlock(block map[string]any) bool {
