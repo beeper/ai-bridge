@@ -501,7 +501,7 @@ func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *Hea
 			lastTo := strings.TrimSpace(hbSession.Entry.LastTo)
 			if lastTo != "" && strings.HasPrefix(lastTo, "!") && (lastChannel == "" || strings.EqualFold(lastChannel, "matrix")) {
 				if portal := oc.portalByRoomID(context.Background(), id.RoomID(lastTo)); portal != nil {
-					if meta := portalMeta(portal); meta != nil && normalizeAgentID(meta.AgentID) != normalizeAgentID(agentID) {
+					if meta := portalMeta(portal); meta != nil && normalizeAgentID(resolveAgentID(meta)) != normalizeAgentID(agentID) {
 						// Stale routing: portal no longer uses this agent.
 						goto mainFallback
 					}
@@ -530,7 +530,7 @@ func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *Hea
 		lastTo := strings.TrimSpace(hbSession.Entry.LastTo)
 		if lastTo != "" && strings.HasPrefix(lastTo, "!") && (lastChannel == "" || strings.EqualFold(lastChannel, "matrix")) {
 			if portal := oc.portalByRoomID(context.Background(), id.RoomID(lastTo)); portal != nil {
-				if meta := portalMeta(portal); meta != nil && normalizeAgentID(meta.AgentID) != normalizeAgentID(agentID) {
+				if meta := portalMeta(portal); meta != nil && normalizeAgentID(resolveAgentID(meta)) != normalizeAgentID(agentID) {
 					goto finalFallback
 				}
 				return portal, portal.MXID.String(), nil

@@ -33,7 +33,7 @@ func TestBuildFinalEditUIMessage_IncludesSourceAndFileParts(t *testing.T) {
 	streamui.ApplyChunk(&state.ui, map[string]any{"type": "text-delta", "id": "text-1", "delta": "hello"})
 	streamui.ApplyChunk(&state.ui, map[string]any{"type": "text-end", "id": "text-1"})
 
-	ui := oc.buildFinalEditUIMessage(state, &PortalMetadata{Model: "gpt-4o"}, nil)
+	ui := oc.buildFinalEditUIMessage(state, &PortalMetadata{ResolvedTarget: &ResolvedTarget{Kind: ResolvedTargetModel, GhostID: modelUserID("openai/gpt-4o-mini"), ModelID: "openai/gpt-4o-mini"}}, nil)
 	if ui == nil {
 		t.Fatalf("expected final edit UI message")
 	}

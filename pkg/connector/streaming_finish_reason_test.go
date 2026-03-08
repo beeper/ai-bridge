@@ -87,7 +87,7 @@ func TestBuildCanonicalUIMessage_IncludesSourceAndFileParts(t *testing.T) {
 		}},
 	}
 
-	ui := oc.buildCanonicalUIMessage(state, &PortalMetadata{Model: "gpt-4o"})
+	ui := oc.buildCanonicalUIMessage(state, &PortalMetadata{ResolvedTarget: &ResolvedTarget{Kind: ResolvedTargetModel, GhostID: modelUserID("openai/gpt-4o-mini"), ModelID: "openai/gpt-4o-mini"}})
 	if ui == nil {
 		t.Fatalf("expected canonical message")
 	}

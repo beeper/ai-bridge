@@ -2,20 +2,17 @@ package connector
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog"
 	"go.mau.fi/util/configupgrade"
 	"go.mau.fi/util/dbutil"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/bridgev2/database"
-	"maunium.net/go/mautrix/bridgev2/matrix"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -47,10 +44,10 @@ type OpenAIConnector struct {
 	clientsMu sync.Mutex
 	clients   map[networkid.UserLoginID]bridgev2.NetworkAPI
 
-	runtimeMatrixMu          sync.RWMutex
-	runtimeMatrixUserMXID    id.UserID
-	runtimeMatrixAccessToken string
-	runtimeMatrixHomeserver  string
+	localAIBridgeLoginMu         sync.RWMutex
+	localAIBridgeLoginUserMXID   id.UserID
+	localAIBridgeLoginToken      string
+	localAIBridgeLoginHomeserver string
 }
 
 func (oc *OpenAIConnector) Init(bridge *bridgev2.Bridge) {
@@ -98,9 +95,6 @@ func (oc *OpenAIConnector) Start(ctx context.Context) error {
 		oc.br.Log.Warn().Type("commands_type", oc.br.Commands).Msg("Failed to register AI commands: command processor type assertion failed")
 	}
 
-	// Register custom Matrix event handlers
-	oc.registerCustomEventHandlers()
-
 	// Initialize provisioning API endpoints
 	oc.initProvisioning()
 
@@ -128,16 +122,15 @@ func (oc *OpenAIConnector) applyRuntimeDefaults() {
 	}
 }
 
-// SetMatrixCredentials seeds the runtime Beeper Cloud auth tuple from the Matrix account.
-func (oc *OpenAIConnector) SetMatrixCredentials(userMXID id.UserID, accessToken, homeserver string) {
+func (oc *OpenAIConnector) setLocalAIBridgeLogin(userMXID id.UserID, accessToken, homeserver string) {
 	if oc == nil {
 		return
 	}
-	oc.runtimeMatrixMu.Lock()
-	oc.runtimeMatrixUserMXID = id.UserID(strings.TrimSpace(string(userMXID)))
-	oc.runtimeMatrixAccessToken = strings.TrimSpace(accessToken)
-	oc.runtimeMatrixHomeserver = strings.TrimSpace(homeserver)
-	oc.runtimeMatrixMu.Unlock()
+	oc.localAIBridgeLoginMu.Lock()
+	oc.localAIBridgeLoginUserMXID = id.UserID(strings.TrimSpace(string(userMXID)))
+	oc.localAIBridgeLoginToken = strings.TrimSpace(accessToken)
+	oc.localAIBridgeLoginHomeserver = strings.TrimSpace(homeserver)
+	oc.localAIBridgeLoginMu.Unlock()
 	if oc.br != nil {
 		if _, err := oc.reconcileManagedBeeperLogin(context.Background()); err != nil {
 			oc.br.Log.Warn().Err(err).Stringer("user_mxid", userMXID).Msg("Failed to reconcile managed Beeper Cloud login after runtime credential update")
@@ -145,206 +138,9 @@ func (oc *OpenAIConnector) SetMatrixCredentials(userMXID id.UserID, accessToken,
 	}
 }
 
-// registerCustomEventHandlers registers handlers for custom Matrix state events
-func (oc *OpenAIConnector) registerCustomEventHandlers() {
-	// Type assert the Matrix connector to get the concrete type with EventProcessor
-	matrixConnector, ok := oc.br.Matrix.(*matrix.Connector)
-	if !ok {
-		oc.br.Log.Warn().Msg("Cannot register custom event handlers: Matrix connector type assertion failed")
-		return
-	}
-
-	// Register handler for direct room settings state events
-	matrixConnector.EventProcessor.On(RoomSettingsEventType, oc.handleRoomSettingsEvent)
-
-	// Register handler for BeeperSendState wrapper events (desktop E2EE state updates)
-	matrixConnector.EventProcessor.On(event.BeeperSendState, oc.handleBeeperSendStateEvent)
-
-	oc.br.Log.Info().
-		Str("beeper_send_state_type", event.BeeperSendState.Type).
-		Str("beeper_send_state_class", event.BeeperSendState.Class.Name()).
-		Msg("Registered room settings event handlers (direct and BeeperSendState)")
-}
-
-// handleRoomSettingsEvent processes Matrix room settings state events from users
-func (oc *OpenAIConnector) handleRoomSettingsEvent(ctx context.Context, evt *event.Event) {
-	log := oc.br.Log.With().
-		Str("component", "room_settings_handler").
-		Str("room_id", evt.RoomID.String()).
-		Str("sender", evt.Sender.String()).
-		Logger()
-
-	// Parse event content
-	var content RoomSettingsEventContent
-	if err := json.Unmarshal(evt.Content.VeryRaw, &content); err != nil {
-		log.Warn().Err(err).Msg("Failed to parse room settings event content")
-		return
-	}
-
-	oc.processRoomSettingsContent(ctx, evt, &content, log)
-}
-
-// processRoomSettingsContent handles the common logic for updating portal settings
-// Called by both handleRoomSettingsEvent and handleBeeperSendStateEvent
-func (oc *OpenAIConnector) processRoomSettingsContent(
-	ctx context.Context,
-	evt *event.Event,
-	content *RoomSettingsEventContent,
-	log zerolog.Logger,
-) {
-	if evt == nil {
-		return
-	}
-	roomID := evt.RoomID
-	sender := evt.Sender
-	// Look up portal by Matrix room ID
-	portal, err := oc.br.GetPortalByMXID(ctx, roomID)
-	if err != nil {
-		log.Err(err).Msg("Failed to get portal for room settings event")
-		return
-	}
-	if portal == nil {
-		log.Debug().Msg("No portal found for room, ignoring settings event")
-		return
-	}
-
-	// Get the user who sent the event and their login
-	user, err := oc.br.GetUserByMXID(ctx, sender)
-	if err != nil || user == nil {
-		log.Warn().Err(err).Msg("Failed to get user for room settings event")
-		return
-	}
-
-	// Use getLoginForPortal to find the correct login based on portal's receiver
-	// This ensures we use the right provider when user has multiple accounts
-	login := oc.getLoginForPortal(ctx, user, portal)
-	if login == nil {
-		log.Warn().Msg("User has no active login, cannot process settings")
-		return
-	}
-
-	client, ok := login.Client.(*AIClient)
-	if !ok || client == nil {
-		log.Warn().Msg("Invalid client type for user login")
-		return
-	}
-
-	// Validate model if specified
-	if content.Model != "" {
-		resolved, valid, err := client.resolveModelID(ctx, content.Model)
-		if err != nil {
-			log.Warn().Err(err).Str("model", content.Model).Msg("Failed to validate model")
-		} else if !valid {
-			log.Warn().Str("model", content.Model).Msg("Invalid model specified, ignoring")
-			client.sendSystemNotice(ctx, portal, fmt.Sprintf("That model isn't available: %s. Settings weren't applied.", content.Model))
-			return
-		}
-		content.Model = resolved
-	}
-
-	// Update portal metadata with optimistic update + rollback behavior.
-	if err := client.updatePortalConfig(ctx, portal, content); err != nil {
-		sendStateEventFailureStatus(ctx, portal, evt, err)
-		log.Warn().Err(err).Msg("Failed to apply room settings state event")
-		return
-	}
-
-	sendStateEventSuccessStatus(ctx, portal, evt)
-
-	// Send confirmation notice
-	var changes []string
-	if content.Model != "" {
-		changes = append(changes, fmt.Sprintf("model=%s", content.Model))
-	}
-	if content.Temperature != nil {
-		changes = append(changes, fmt.Sprintf("temperature=%.2f", *content.Temperature))
-	}
-	if content.MaxContextMessages > 0 {
-		changes = append(changes, fmt.Sprintf("context=%d messages", content.MaxContextMessages))
-	}
-	if content.MaxCompletionTokens > 0 {
-		changes = append(changes, fmt.Sprintf("max_tokens=%d", content.MaxCompletionTokens))
-	}
-	if content.SystemPrompt != "" {
-		changes = append(changes, "system_prompt updated")
-	}
-	if content.ReasoningEffort != "" {
-		changes = append(changes, fmt.Sprintf("reasoning_effort=%s", content.ReasoningEffort))
-	}
-	if len(changes) > 0 {
-		client.sendSystemNotice(ctx, portal, fmt.Sprintf("Configuration updated: %s", strings.Join(changes, ", ")))
-	}
-
-	logEvent := log.Info().Str("model", content.Model)
-	if content.Temperature != nil {
-		logEvent = logEvent.Float64("temperature", *content.Temperature)
-	}
-	logEvent.Msg("Updated room settings from state event")
-}
-
-// handleBeeperSendStateEvent processes com.beeper.send_state wrapper events
-// This is used by the desktop client to send state events in encrypted rooms
-func (oc *OpenAIConnector) handleBeeperSendStateEvent(ctx context.Context, evt *event.Event) {
-	log := oc.br.Log.With().
-		Str("component", "beeper_send_state_handler").
-		Str("room_id", evt.RoomID.String()).
-		Str("sender", evt.Sender.String()).
-		Str("event_type", evt.Type.Type).
-		Str("event_class", evt.Type.Class.Name()).
-		Logger()
-
-	log.Info().RawJSON("raw_content", evt.Content.VeryRaw).Msg("Received BeeperSendState event")
-
-	// Parse the wrapper content
-	var wrapperContent event.BeeperSendStateEventContent
-	if err := json.Unmarshal(evt.Content.VeryRaw, &wrapperContent); err != nil {
-		log.Debug().Err(err).Msg("Failed to parse BeeperSendState content")
-		return
-	}
-
-	// Only process AI room settings events
-	if wrapperContent.Type != RoomSettingsEventType.Type {
-		return
-	}
-
-	log.Debug().
-		Str("inner_type", wrapperContent.Type).
-		Str("state_key", wrapperContent.StateKey).
-		Msg("Processing BeeperSendState wrapper for AI room settings")
-
-	// Parse the inner room settings content
-	var content RoomSettingsEventContent
-	if err := json.Unmarshal(wrapperContent.Content.VeryRaw, &content); err != nil {
-		log.Warn().Err(err).Msg("Failed to parse inner room settings content")
-		return
-	}
-
-	// Reuse existing handler logic with the parsed content
-	oc.processRoomSettingsContent(ctx, evt, &content, log)
-}
-
-func sendStateEventFailureStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, err error) {
-	if portal == nil || portal.Bridge == nil || evt == nil || err == nil {
-		return
-	}
-	msgStatus := bridgev2.WrapErrorInStatus(err).
-		WithStatus(event.MessageStatusRetriable).
-		WithErrorReason(event.MessageStatusGenericError).
-		WithMessage("Failed to apply room settings. Your change was rolled back.").
-		WithIsCertain(true).
-		WithSendNotice(false)
-	portal.Bridge.Matrix.SendMessageStatus(ctx, &msgStatus, bridgev2.StatusEventInfoFromEvent(evt))
-}
-
-func sendStateEventSuccessStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event) {
-	if portal == nil || portal.Bridge == nil || evt == nil {
-		return
-	}
-	msgStatus := bridgev2.MessageStatus{
-		Status:    event.MessageStatusSuccess,
-		IsCertain: true,
-	}
-	portal.Bridge.Matrix.SendMessageStatus(ctx, &msgStatus, bridgev2.StatusEventInfoFromEvent(evt))
+// SetLocalAIBridgeLogin updates the local managed Beeper Cloud auth tuple for SDK-driven local AI bridge setup.
+func (oc *OpenAIConnector) SetLocalAIBridgeLogin(userMXID id.UserID, accessToken, homeserver string) {
+	oc.setLocalAIBridgeLogin(userMXID, accessToken, homeserver)
 }
 
 func (oc *OpenAIConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {

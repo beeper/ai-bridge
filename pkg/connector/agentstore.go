@@ -523,13 +523,12 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 		return "", fmt.Errorf("failed to get created portal: %w", err)
 	}
 
-	// Apply custom name and system prompt if provided
+	// Apply a custom room title if provided.
 	pm := portalMeta(portal)
 	originalName := portal.Name
 	originalNameSet := portal.NameSet
 	originalTitle := pm.Title
 	originalTitleGenerated := pm.TitleGenerated
-	originalSystemPrompt := pm.SystemPrompt
 
 	if room.Name != "" {
 		pm.Title = room.Name
@@ -539,12 +538,6 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 			resp.PortalInfo.Name = &room.Name
 		}
 	}
-	if room.SystemPrompt != "" {
-		pm.SystemPrompt = room.SystemPrompt
-		// Note: portal.Topic is NOT set to SystemPrompt - they are separate concepts
-		// Topic is for display only, SystemPrompt is for LLM context
-	}
-
 	// Create the Matrix room
 	if err := portal.CreateMatrixRoom(ctx, b.store.client.UserLogin, resp.PortalInfo); err != nil {
 		cleanupPortal(ctx, b.store.client, portal, "failed to create Matrix room")
@@ -563,13 +556,6 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 			pm.TitleGenerated = originalTitleGenerated
 		}
 	}
-	if room.SystemPrompt != "" {
-		if err := b.store.client.setRoomSystemPromptNoSave(ctx, portal, room.SystemPrompt); err != nil {
-			b.store.client.log.Warn().Err(err).Msg("Failed to set room system prompt")
-			pm.SystemPrompt = originalSystemPrompt
-		}
-	}
-
 	if err := portal.Save(ctx); err != nil {
 		return "", fmt.Errorf("failed to save room overrides: %w", err)
 	}
@@ -593,32 +579,15 @@ func (b *BossStoreAdapter) ModifyRoom(ctx context.Context, roomID string, update
 		portal.NameSet = true
 	}
 	if updates.AgentID != "" {
-		// Verify agent exists
-		agent, err := b.store.GetAgentByID(ctx, updates.AgentID)
-		if err != nil {
-			return fmt.Errorf("agent '%s' not found: %w", updates.AgentID, err)
-		}
-		pm.AgentID = agent.ID
-		pm.Model = ""
-		modelID := b.store.client.effectiveModel(pm)
-		pm.Capabilities = getModelCapabilities(modelID, b.store.client.findModelInfo(modelID))
-		portal.OtherUserID = agentUserID(agent.ID)
-		agentName := b.store.client.resolveAgentDisplayName(ctx, agent)
-		b.store.client.ensureAgentGhostDisplayName(ctx, agent.ID, modelID, agentName)
+		return fmt.Errorf("changing a room's agent is no longer supported; open or reuse the target agent chat instead")
 	}
 	if updates.SystemPrompt != "" {
-		pm.SystemPrompt = updates.SystemPrompt
-		// Note: portal.Topic is NOT set to SystemPrompt - they are separate concepts
+		return fmt.Errorf("room system prompt overrides are no longer supported")
 	}
 
 	if updates.Name != "" && portal.MXID != "" {
 		if err := b.store.client.setRoomName(ctx, portal, updates.Name); err != nil {
 			b.store.client.log.Warn().Err(err).Msg("Failed to set Matrix room name")
-		}
-	}
-	if updates.SystemPrompt != "" && portal.MXID != "" {
-		if err := b.store.client.setRoomSystemPrompt(ctx, portal, updates.SystemPrompt); err != nil {
-			b.store.client.log.Warn().Err(err).Msg("Failed to set room system prompt")
 		}
 	}
 
@@ -646,7 +615,7 @@ func (b *BossStoreAdapter) ListRooms(ctx context.Context) ([]tools.RoomData, err
 		rooms = append(rooms, tools.RoomData{
 			ID:      roomID,
 			Name:    name,
-			AgentID: pm.AgentID,
+			AgentID: resolvedAgentIDForGhost(portal.OtherUserID),
 		})
 	}
 

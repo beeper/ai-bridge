@@ -70,7 +70,7 @@ func TestBuildPromptWithLinkContext_SimpleModeSkipsInboundRuntimeMetadata(t *tes
 			},
 		},
 	}
-	meta := &PortalMetadata{IsSimpleMode: true}
+	meta := &PortalMetadata{ResolvedTarget: &ResolvedTarget{Kind: ResolvedTargetModel, GhostID: modelUserID("openai/gpt-5.2"), ModelID: "openai/gpt-5.2"}}
 	ctx := withInboundContext(context.Background(), airuntime.InboundContext{
 		Provider:     "matrix",
 		Surface:      "beeper-matrix",

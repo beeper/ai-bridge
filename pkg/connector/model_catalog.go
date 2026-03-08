@@ -550,12 +550,22 @@ func (oc *AIClient) findModelInfoInCatalog(modelID string) *ModelInfo {
 	if oc == nil || strings.TrimSpace(modelID) == "" {
 		return nil
 	}
+	normalizedTarget := strings.TrimSpace(modelID)
+	if manifestModel, ok := ModelManifest.Models[normalizedTarget]; ok {
+		info := manifestModel
+		return &info
+	}
+	if resolved := ResolveAlias(normalizedTarget); resolved != "" && resolved != normalizedTarget {
+		if manifestModel, ok := ModelManifest.Models[resolved]; ok {
+			info := manifestModel
+			return &info
+		}
+	}
 	ctx := oc.backgroundContext(context.Background())
 	entries := oc.loadModelCatalog(ctx, true)
 	if len(entries) == 0 {
 		return nil
 	}
-	normalizedTarget := strings.TrimSpace(modelID)
 	for _, entry := range entries {
 		if strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.Provider) == "" {
 			continue
