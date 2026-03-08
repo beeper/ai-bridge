@@ -16,9 +16,6 @@ type Chunk struct {
 
 func ChunkMarkdown(content string, tokens, overlap int) []Chunk {
 	lines := strings.Split(content, "\n")
-	if len(lines) == 0 {
-		return nil
-	}
 	maxChars := tokens * 4
 	if maxChars < 32 {
 		maxChars = 32
@@ -98,9 +95,6 @@ func ChunkMarkdown(content string, tokens, overlap int) []Chunk {
 func splitLineSegments(line string, maxChars int) []string {
 	if line == "" {
 		return []string{""}
-	}
-	if maxChars <= 0 {
-		return []string{line}
 	}
 	var segments []string
 	for start := 0; start < len(line); start += maxChars {
