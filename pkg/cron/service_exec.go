@@ -113,21 +113,11 @@ func (c *CronService) executeJob(jobID string, forced bool) (bool, string, error
 	// Phase 3: finalize under store lock.
 	var deleted bool
 	finishErr := c.finalizeJob(jobID, startedAt, statusVal, errVal, summaryVal, &deleted)
-	if finishErr != nil {
-		if err == nil {
-			err = finishErr
-		} else {
-			c.log("warn", "cron: finalize failed after run", map[string]any{"jobId": snapshot.ID, "error": finishErr.Error()})
-		}
-	}
 
 	// Post summary back to main session for isolated jobs (best-effort).
 	c.postIsolatedSummary(snapshot, deleted, statusVal, summaryVal)
 
-	if err != nil {
-		return true, "", err
-	}
-	return true, "", nil
+	return true, "", finishErr
 }
 
 func (c *CronService) finalizeJob(jobID string, startedAt int64, statusVal, errVal, summaryVal string, deleted *bool) error {
