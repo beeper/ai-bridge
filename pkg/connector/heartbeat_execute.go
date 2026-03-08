@@ -183,7 +183,7 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		systemEvents = formatSystemEvents(drainHeartbeatSystemEvents(sessionKey, storeKey))
 		if systemEvents != "" {
 			prompt = systemEvents + "\n\n" + prompt
-			persistSystemEventsSnapshot(oc.bridgeStateBackend(), oc.Log())
+			persistSystemEventsSnapshot(oc)
 		}
 	}
 

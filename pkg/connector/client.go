@@ -980,7 +980,7 @@ func (oc *AIClient) Connect(ctx context.Context) {
 		Message:    "Connected",
 	})
 
-	restoreSystemEventsFromDisk(oc.bridgeStateBackend(), oc.Log())
+	restoreSystemEventsFromDB(oc)
 
 	if oc.scheduler != nil {
 		oc.scheduler.Start(ctx)
