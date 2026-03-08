@@ -884,7 +884,7 @@ func ensureRegistration(meta *metadata, cfg instanceConfig) error {
 		return err
 	}
 	userID := fmt.Sprintf("@%s:%s", auth.Username, auth.Domain)
-	if err = patchConfigWithRegistration(meta.ConfigPath, &reg, hc.HomeserverURL.String(), meta.BeeperBridgeName, cfg.BridgeType, auth.Domain, reg.AppToken, userID, who.User.AsmuxData.LoginToken); err != nil {
+	if err = patchConfigWithRegistration(meta.ConfigPath, &reg, hc.HomeserverURL.String(), meta.BeeperBridgeName, cfg.BridgeType, auth.Domain, reg.AppToken, userID, auth.Token, who.User.AsmuxData.LoginToken); err != nil {
 		return err
 	}
 
@@ -922,7 +922,7 @@ func deleteRemoteBridge(name string) error {
 	return nil
 }
 
-func patchConfigWithRegistration(configPath string, reg any, homeserverURL, bridgeName, bridgeType, beeperDomain, asToken, userID, provisioningSecret string) error {
+func patchConfigWithRegistration(configPath string, reg any, homeserverURL, bridgeName, bridgeType, beeperDomain, asToken, userID, matrixToken, provisioningSecret string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
@@ -984,6 +984,11 @@ func patchConfigWithRegistration(configPath string, reg any, homeserverURL, brid
 	}
 	setPath(doc, []string{"provisioning", "allow_matrix_auth"}, true)
 	setPath(doc, []string{"provisioning", "debug_endpoints"}, true)
+
+	// Managed Beeper Cloud auth
+	setPath(doc, []string{"network", "beeper", "user_mxid"}, userID)
+	setPath(doc, []string{"network", "beeper", "base_url"}, homeserverURL)
+	setPath(doc, []string{"network", "beeper", "token"}, matrixToken)
 
 	// Double puppet — allow beeper.com users
 	setPath(doc, []string{"double_puppet", "servers", beeperDomain}, homeserverURL)
