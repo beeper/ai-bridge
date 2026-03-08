@@ -18,3 +18,5 @@ logs/
 .cache
 .gocache
 .conductor
+
+.claude/worktrees/
