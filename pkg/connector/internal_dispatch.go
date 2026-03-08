@@ -57,7 +57,7 @@ func (oc *AIClient) dispatchInternalMessage(
 
 	inboundCtx := oc.resolvePromptInboundContext(ctx, portal, trimmed, eventID)
 	promptCtx := withInboundContext(ctx, inboundCtx)
-	promptMessages, err := oc.buildPrompt(promptCtx, portal, meta, trimmed, eventID)
+	promptContext, err := oc.buildContextWithLinkContext(promptCtx, portal, meta, trimmed, nil, eventID)
 	if err != nil {
 		return eventID, false, err
 	}
@@ -111,7 +111,7 @@ func (oc *AIClient) dispatchInternalMessage(
 				oc.releaseRoom(portal.MXID)
 				oc.processPendingQueue(oc.backgroundContext(ctx), portal.MXID)
 			}()
-			oc.dispatchCompletionInternal(runCtx, nil, portal, metaSnapshot, promptMessages)
+			oc.dispatchCompletionInternal(runCtx, nil, portal, metaSnapshot, promptContext)
 		}(metaSnapshot)
 		oc.notifySessionMutation(ctx, portal, meta, false)
 		return eventID, false, nil

@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openai/openai-go/v3"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/id"
 
@@ -372,7 +371,7 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		}
 	}
 
-	promptMessages, err := oc.buildPromptWithHeartbeat(context.Background(), sessionPortal, promptMeta, prompt)
+	promptContext, err := oc.buildContextWithHeartbeat(context.Background(), sessionPortal, promptMeta, prompt)
 	if err != nil {
 		oc.log.Warn().Str("agent_id", agentID).Str("reason", reason).Err(err).Msg("Heartbeat failed to build prompt")
 		indicator := (*HeartbeatIndicatorType)(nil)
@@ -398,7 +397,7 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		Str("channel", channel).
 		Bool("suppress_send", suppressSend).
 		Bool("has_system_events", systemEvents != "").
-		Int("prompt_messages", len(promptMessages)).
+		Int("prompt_messages", len(promptContext.Messages)).
 		Msg("Heartbeat executing")
 
 	resultCh := make(chan HeartbeatRunOutcome, 1)
@@ -411,7 +410,7 @@ func (oc *AIClient) runHeartbeatOnce(agentID string, heartbeat *HeartbeatConfig,
 		sendPortal = deliveryPortal
 	}
 	go func() {
-		oc.streamingResponseWithRetry(runCtx, nil, sendPortal, promptMeta, promptMessages)
+		oc.streamingResponseWithRetry(runCtx, nil, sendPortal, promptMeta, promptContext)
 		close(done)
 	}()
 
@@ -468,13 +467,19 @@ func drainHeartbeatSystemEvents(primaryKey string, secondaryKey string) []System
 	return entries
 }
 
-func (oc *AIClient) buildPromptWithHeartbeat(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, prompt string) ([]openai.ChatCompletionMessageParamUnion, error) {
-	base, err := oc.buildBasePrompt(ctx, portal, meta)
+func (oc *AIClient) buildContextWithHeartbeat(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, prompt string) (PromptContext, error) {
+	base, err := oc.buildBaseContext(ctx, portal, meta)
 	if err != nil {
-		return nil, err
+		return PromptContext{}, err
 	}
-	base = oc.augmentPromptWithIntegrations(ctx, portal, meta, base)
-	return append(base, openai.UserMessage(prompt)), nil
+	base.Messages = append(base.Messages, PromptMessage{
+		Role: PromptRoleUser,
+		Blocks: []PromptBlock{{
+			Type: PromptBlockText,
+			Text: prompt,
+		}},
+	})
+	return base, nil
 }
 
 func (oc *AIClient) resolveHeartbeatSessionPortal(agentID string, heartbeat *HeartbeatConfig) (*bridgev2.Portal, string, error) {

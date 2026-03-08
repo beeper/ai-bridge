@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/ptr"
@@ -627,7 +626,7 @@ func (oc *AIClient) dispatchOrQueueCore(
 	userMessage *database.Message,
 	queueItem pendingQueueItem,
 	queueSettings airuntime.QueueSettings,
-	promptMessages []openai.ChatCompletionMessageParamUnion,
+	promptContext PromptContext,
 ) bool {
 	roomID := portal.MXID
 	behavior := airuntime.ResolveQueueBehavior(queueSettings.Mode)
@@ -687,7 +686,7 @@ func (oc *AIClient) dispatchOrQueueCore(
 				oc.releaseRoom(roomID)
 				oc.processPendingQueue(oc.backgroundContext(ctx), roomID)
 			}()
-			oc.dispatchCompletionInternal(runCtx, evt, portal, metaSnapshot, promptMessages)
+			oc.dispatchCompletionInternal(runCtx, evt, portal, metaSnapshot, promptContext)
 		}(metaSnapshot)
 		if hasDBMessage {
 			oc.notifySessionMutation(ctx, portal, meta, false)
@@ -760,9 +759,9 @@ func (oc *AIClient) dispatchOrQueue(
 	userMessage *database.Message,
 	queueItem pendingQueueItem,
 	queueSettings airuntime.QueueSettings,
-	promptMessages []openai.ChatCompletionMessageParamUnion,
+	promptContext PromptContext,
 ) (dbMessage *database.Message, isPending bool) {
-	isPending = oc.dispatchOrQueueCore(ctx, evt, portal, meta, userMessage, queueItem, queueSettings, promptMessages)
+	isPending = oc.dispatchOrQueueCore(ctx, evt, portal, meta, userMessage, queueItem, queueSettings, promptContext)
 	return userMessage, isPending
 }
 
@@ -775,9 +774,9 @@ func (oc *AIClient) dispatchOrQueueWithStatus(
 	meta *PortalMetadata,
 	queueItem pendingQueueItem,
 	queueSettings airuntime.QueueSettings,
-	promptMessages []openai.ChatCompletionMessageParamUnion,
+	promptContext PromptContext,
 ) {
-	oc.dispatchOrQueueCore(ctx, evt, portal, meta, nil, queueItem, queueSettings, promptMessages)
+	oc.dispatchOrQueueCore(ctx, evt, portal, meta, nil, queueItem, queueSettings, promptContext)
 }
 
 // processPendingQueue processes queued messages for a room.
@@ -842,7 +841,7 @@ func (oc *AIClient) processPendingQueue(ctx context.Context, roomID id.RoomID) {
 		}
 
 		var item pendingQueueItem
-		var promptMessages []openai.ChatCompletionMessageParamUnion
+		var promptContext PromptContext
 		var err error
 
 		if airuntime.ResolveQueueBehavior(actionSnapshot.mode).Collect && len(actionSnapshot.items) > 0 {
@@ -890,7 +889,7 @@ func (oc *AIClient) processPendingQueue(ctx context.Context, roomID id.RoomID) {
 			if item.pending.InboundContext != nil {
 				promptCtx = withInboundContext(promptCtx, *item.pending.InboundContext)
 			}
-			promptMessages, err = oc.buildPromptWithLinkContext(promptCtx, item.pending.Portal, metaSnapshot, combined, nil, "")
+			promptContext, err = oc.buildContextWithLinkContext(promptCtx, item.pending.Portal, metaSnapshot, combined, nil, "")
 		} else {
 			summaryPrompt := oc.takeQueueSummary(roomID, "message")
 			if summaryPrompt != "" {
@@ -935,13 +934,13 @@ func (oc *AIClient) processPendingQueue(ctx context.Context, roomID id.RoomID) {
 			}
 			switch item.pending.Type {
 			case pendingTypeText:
-				promptMessages, err = oc.buildPromptWithLinkContext(promptCtx, item.pending.Portal, metaSnapshot, item.pending.MessageBody, item.rawEventContent, eventID)
+				promptContext, err = oc.buildContextWithLinkContext(promptCtx, item.pending.Portal, metaSnapshot, item.pending.MessageBody, item.rawEventContent, eventID)
 			case pendingTypeImage, pendingTypePDF, pendingTypeAudio, pendingTypeVideo:
-				promptMessages, err = oc.buildPromptWithMedia(promptCtx, item.pending.Portal, metaSnapshot, item.pending.MessageBody, item.pending.MediaURL, item.pending.MimeType, item.pending.EncryptedFile, item.pending.Type, eventID)
+				promptContext, err = oc.buildContextWithMedia(promptCtx, item.pending.Portal, metaSnapshot, item.pending.MessageBody, item.pending.MediaURL, item.pending.MimeType, item.pending.EncryptedFile, item.pending.Type, eventID)
 			case pendingTypeRegenerate:
-				promptMessages, err = oc.buildPromptForRegenerate(promptCtx, item.pending.Portal, metaSnapshot, item.pending.MessageBody, item.pending.SourceEventID)
+				promptContext, err = oc.buildContextForRegenerate(promptCtx, item.pending.Portal, metaSnapshot, item.pending.MessageBody, item.pending.SourceEventID)
 			case pendingTypeEditRegenerate:
-				promptMessages, err = oc.buildPromptUpToMessage(promptCtx, item.pending.Portal, metaSnapshot, item.pending.TargetMsgID, item.pending.MessageBody)
+				promptContext, err = oc.buildContextUpToMessage(promptCtx, item.pending.Portal, metaSnapshot, item.pending.TargetMsgID, item.pending.MessageBody)
 			default:
 				err = fmt.Errorf("unknown pending message type: %s", item.pending.Type)
 			}
@@ -959,9 +958,9 @@ func (oc *AIClient) processPendingQueue(ctx context.Context, roomID id.RoomID) {
 		}
 
 		if trace {
-			logCtx.Debug().Int("prompt_messages", len(promptMessages)).Msg("Dispatching queued prompt")
+			logCtx.Debug().Int("prompt_messages", len(promptContext.Messages)).Msg("Dispatching queued prompt")
 		}
-		oc.dispatchQueuedPrompt(ctx, item, promptMessages)
+		oc.dispatchQueuedPrompt(ctx, item, promptContext)
 	}()
 }
 
@@ -1949,21 +1948,33 @@ func stripThinkTags(s string) string {
 	return strings.TrimSpace(thinkTagPattern.ReplaceAllString(s, ""))
 }
 
-func (oc *AIClient) buildBasePrompt(
+func (oc *AIClient) promptContextToDispatchMessages(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
-) ([]openai.ChatCompletionMessageParamUnion, error) {
-	var prompt []openai.ChatCompletionMessageParamUnion
+	promptContext PromptContext,
+) []openai.ChatCompletionMessageParamUnion {
+	promptMessages := PromptContextToChatCompletionMessages(promptContext, oc.isOpenRouterProvider())
+	promptMessages = oc.augmentPromptWithIntegrations(ctx, portal, meta, promptMessages)
+	if meta != nil && IsGoogleModel(oc.effectiveModel(meta)) {
+		promptMessages = SanitizeGoogleTurnOrdering(promptMessages)
+	}
+	return promptMessages
+}
+
+func (oc *AIClient) buildBaseContext(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+) (PromptContext, error) {
+	var promptContext PromptContext
 	isSimple := isSimpleMode(meta)
 	if !isSimple {
-		prompt = maybePrependSessionGreeting(ctx, portal, meta, prompt, oc.log)
+		appendChatMessagesToPromptContext(&promptContext, maybePrependSessionGreeting(ctx, portal, meta, nil, oc.log))
 	}
 
-	// Add system prompt - agent prompt takes priority, then room override, then config default
-	prompt = append(prompt, oc.buildSystemMessages(ctx, portal, meta)...)
+	appendChatMessagesToPromptContext(&promptContext, oc.buildSystemMessages(ctx, portal, meta))
 
-	// Add history
 	historyLimit := oc.historyLimit(ctx, portal, meta)
 	resetAt := int64(0)
 	if meta != nil {
@@ -1972,12 +1983,10 @@ func (oc *AIClient) buildBasePrompt(
 	if historyLimit > 0 {
 		history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, historyLimit)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load prompt history: %w", err)
+			return PromptContext{}, fmt.Errorf("failed to load prompt history: %w", err)
 		}
 
-		// Determine whether to inject images into history (requires vision-capable model).
 		hasVision := oc.getModelCapabilitiesForMeta(meta).SupportsVision
-
 		for i := len(history) - 1; i >= 0; i-- {
 			msgMeta := messageMeta(history[i])
 			if !shouldIncludeInHistory(msgMeta) {
@@ -1986,18 +1995,25 @@ func (oc *AIClient) buildBasePrompt(
 			if resetAt > 0 && history[i].Timestamp.UnixMilli() < resetAt {
 				continue
 			}
-			// Only inject images for recent messages and vision-capable models.
 			injectImages := hasVision && i < maxHistoryImageMessages
-			prompt = oc.appendHistoryMessageFromCanonical(ctx, prompt, history[i], msgMeta, isSimple, injectImages)
+			historyBundle := oc.historyMessageBundle(ctx, msgMeta, injectImages)
+			appendChatMessagesToPromptContext(&promptContext, historyBundle)
 		}
 	}
 
-	// Sanitize turn ordering for Google/Gemini models which require strict alternation
-	if meta != nil && IsGoogleModel(oc.effectiveModel(meta)) {
-		prompt = SanitizeGoogleTurnOrdering(prompt)
-	}
+	return promptContext, nil
+}
 
-	return prompt, nil
+func (oc *AIClient) buildBasePrompt(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+) ([]openai.ChatCompletionMessageParamUnion, error) {
+	promptContext, err := oc.buildBaseContext(ctx, portal, meta)
+	if err != nil {
+		return nil, err
+	}
+	return oc.promptContextToDispatchMessages(ctx, portal, meta, promptContext), nil
 }
 
 // buildPrompt builds a prompt with the latest user message
@@ -2020,6 +2036,61 @@ func (oc *AIClient) applyAbortHint(ctx context.Context, portal *bridgev2.Portal,
 	return note + "\n\n" + body
 }
 
+func (oc *AIClient) buildContextWithLinkContext(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	meta *PortalMetadata,
+	latest string,
+	rawEventContent map[string]any,
+	eventID id.EventID,
+) (PromptContext, error) {
+	promptContext, err := oc.buildBaseContext(ctx, portal, meta)
+	if err != nil {
+		return PromptContext{}, err
+	}
+	inboundCtx := oc.resolvePromptInboundContext(ctx, portal, latest, eventID)
+
+	isSimple := isSimpleMode(meta)
+	if !isSimple {
+		appendSystemPromptText(&promptContext, airuntime.BuildInboundMetaSystemPrompt(inboundCtx))
+	}
+
+	finalMessage := strings.TrimSpace(latest)
+	if body := strings.TrimSpace(inboundCtx.BodyForAgent); body != "" {
+		finalMessage = body
+	}
+	if !isSimple {
+		finalMessage = oc.applyAbortHint(ctx, portal, meta, finalMessage)
+		if linkContext := oc.buildLinkContext(ctx, latest, rawEventContent); linkContext != "" {
+			finalMessage += linkContext
+		}
+	}
+
+	if !isSimple && portal != nil && portal.MXID != "" {
+		reactionFeedback := DrainReactionFeedback(portal.MXID)
+		if len(reactionFeedback) > 0 {
+			if feedbackText := FormatReactionFeedback(reactionFeedback); feedbackText != "" {
+				finalMessage = feedbackText + "\n" + finalMessage
+			}
+		}
+	}
+
+	if !isSimple {
+		if untrustedPrefix := strings.TrimSpace(airuntime.BuildInboundUserContextPrefix(inboundCtx)); untrustedPrefix != "" {
+			finalMessage = untrustedPrefix + "\n\n" + finalMessage
+		}
+	}
+
+	promptContext.Messages = append(promptContext.Messages, PromptMessage{
+		Role: PromptRoleUser,
+		Blocks: []PromptBlock{{
+			Type: PromptBlockText,
+			Text: finalMessage,
+		}},
+	})
+	return promptContext, nil
+}
+
 // buildPromptWithLinkContext builds a prompt with the latest user message and optional link context.
 // If rawEventContent is provided, it will extract existing link previews from it.
 // URLs in the message will be auto-fetched if no preview exists.
@@ -2031,53 +2102,11 @@ func (oc *AIClient) buildPromptWithLinkContext(
 	rawEventContent map[string]any,
 	eventID id.EventID,
 ) ([]openai.ChatCompletionMessageParamUnion, error) {
-	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
+	promptContext, err := oc.buildContextWithLinkContext(ctx, portal, meta, latest, rawEventContent, eventID)
 	if err != nil {
 		return nil, err
 	}
-	prompt = oc.augmentPromptWithIntegrations(ctx, portal, meta, prompt)
-	inboundCtx := oc.resolvePromptInboundContext(ctx, portal, latest, eventID)
-
-	// Build final message with link context
-	isSimple := isSimpleMode(meta)
-	if !isSimple {
-		if trustedMeta := strings.TrimSpace(airuntime.BuildInboundMetaSystemPrompt(inboundCtx)); trustedMeta != "" {
-			prompt = append(prompt, openai.SystemMessage(trustedMeta))
-		}
-	}
-
-	finalMessage := strings.TrimSpace(latest)
-	if body := strings.TrimSpace(inboundCtx.BodyForAgent); body != "" {
-		finalMessage = body
-	}
-	if !isSimple {
-		finalMessage = oc.applyAbortHint(ctx, portal, meta, finalMessage)
-		linkContext := oc.buildLinkContext(ctx, latest, rawEventContent)
-		if linkContext != "" {
-			finalMessage = finalMessage + linkContext
-		}
-	}
-
-	// Include reaction feedback from users (like OpenClaw's system events)
-	// This lets the AI know when users react to its messages
-	if !isSimple && portal != nil && portal.MXID != "" {
-		reactionFeedback := DrainReactionFeedback(portal.MXID)
-		if len(reactionFeedback) > 0 {
-			feedbackText := FormatReactionFeedback(reactionFeedback)
-			if feedbackText != "" {
-				// Prepend feedback to user message so AI sees recent reactions
-				finalMessage = feedbackText + "\n" + finalMessage
-			}
-		}
-	}
-
-	if !isSimple {
-		if untrustedPrefix := strings.TrimSpace(airuntime.BuildInboundUserContextPrefix(inboundCtx)); untrustedPrefix != "" {
-			finalMessage = untrustedPrefix + "\n\n" + finalMessage
-		}
-	}
-	prompt = append(prompt, openai.UserMessage(finalMessage))
-	return prompt, nil
+	return oc.promptContextToDispatchMessages(ctx, portal, meta, promptContext), nil
 }
 
 // buildLinkContext extracts URLs from the message, fetches previews, and returns formatted context.
@@ -2141,7 +2170,7 @@ func (oc *AIClient) buildLinkContext(ctx context.Context, message string, rawEve
 }
 
 // buildPromptWithMedia builds a prompt with media content (image, PDF, audio, or video)
-func (oc *AIClient) buildPromptWithMedia(
+func (oc *AIClient) buildContextWithMedia(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
@@ -2151,18 +2180,15 @@ func (oc *AIClient) buildPromptWithMedia(
 	encryptedFile *event.EncryptedFileInfo,
 	mediaType pendingMessageType,
 	eventID id.EventID,
-) ([]openai.ChatCompletionMessageParamUnion, error) {
-	prompt, err := oc.buildBasePrompt(ctx, portal, meta)
+) (PromptContext, error) {
+	promptContext, err := oc.buildBaseContext(ctx, portal, meta)
 	if err != nil {
-		return nil, err
+		return PromptContext{}, err
 	}
 	isSimple := isSimpleMode(meta)
-	prompt = oc.augmentPromptWithIntegrations(ctx, portal, meta, prompt)
 	inboundCtx := oc.resolvePromptInboundContext(ctx, portal, caption, eventID)
 	if !isSimple {
-		if trustedMeta := strings.TrimSpace(airuntime.BuildInboundMetaSystemPrompt(inboundCtx)); trustedMeta != "" {
-			prompt = append(prompt, openai.SystemMessage(trustedMeta))
-		}
+		appendSystemPromptText(&promptContext, airuntime.BuildInboundMetaSystemPrompt(inboundCtx))
 	}
 
 	captionWithID := strings.TrimSpace(caption)
@@ -2175,139 +2201,96 @@ func (oc *AIClient) buildPromptWithMedia(
 			captionWithID = untrustedPrefix + "\n\n" + captionWithID
 		}
 	}
-	textContent := openai.ChatCompletionContentPartUnionParam{
-		OfText: &openai.ChatCompletionContentPartTextParam{
-			Text: captionWithID,
-		},
+	blocks := make([]PromptBlock, 0, 2)
+	if strings.TrimSpace(captionWithID) != "" {
+		blocks = append(blocks, PromptBlock{Type: PromptBlockText, Text: captionWithID})
 	}
-
-	var mediaContent openai.ChatCompletionContentPartUnionParam
 
 	switch mediaType {
 	case pendingTypeImage:
-		// Always download+base64 for images (consistent across cloud/self-hosted)
 		b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, mediaURL, encryptedFile, 20, mimeType) // 20MB limit for images
 		if err != nil {
-			return nil, fmt.Errorf("failed to download image: %w", err)
+			return PromptContext{}, fmt.Errorf("failed to download image: %w", err)
 		}
-		dataURL := buildDataURL(actualMimeType, b64Data)
-		mediaContent = openai.ChatCompletionContentPartUnionParam{
-			OfImageURL: &openai.ChatCompletionContentPartImageParam{
-				ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
-					URL:    dataURL,
-					Detail: "auto",
-				},
-			},
-		}
+		blocks = append(blocks, PromptBlock{
+			Type:     PromptBlockImage,
+			ImageB64: b64Data,
+			MimeType: actualMimeType,
+		})
 
 	case pendingTypePDF:
-		// Download and base64 encode the PDF (always need to encode, encrypted or not)
 		b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, mediaURL, encryptedFile, 50, mimeType) // 50MB limit
 		if err != nil {
-			return nil, fmt.Errorf("failed to download PDF: %w", err)
+			return PromptContext{}, fmt.Errorf("failed to download PDF: %w", err)
 		}
 		if actualMimeType == "" {
 			actualMimeType = "application/pdf"
 		}
-		dataURL := buildDataURL(actualMimeType, b64Data)
-		mediaContent = openai.ChatCompletionContentPartUnionParam{
-			OfFile: &openai.ChatCompletionContentPartFileParam{
-				File: openai.ChatCompletionContentPartFileFileParam{
-					FileData: openai.String(dataURL),
-				},
-			},
-		}
+		blocks = append(blocks, PromptBlock{
+			Type:     PromptBlockFile,
+			FileB64:  buildDataURL(actualMimeType, b64Data),
+			Filename: "document.pdf",
+			MimeType: actualMimeType,
+		})
 
 	case pendingTypeAudio:
-		// Download and base64 encode the audio (always need to encode)
 		b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, mediaURL, encryptedFile, 25, mimeType) // 25MB limit
 		if err != nil {
-			return nil, fmt.Errorf("failed to download audio: %w", err)
+			return PromptContext{}, fmt.Errorf("failed to download audio: %w", err)
 		}
-		audioFormat := getAudioFormat(actualMimeType)
-		mediaContent = openai.ChatCompletionContentPartUnionParam{
-			OfInputAudio: &openai.ChatCompletionContentPartInputAudioParam{
-				InputAudio: openai.ChatCompletionContentPartInputAudioInputAudioParam{
-					Data:   b64Data,
-					Format: audioFormat,
-				},
-			},
-		}
+		blocks = append(blocks, PromptBlock{
+			Type:        PromptBlockAudio,
+			AudioB64:    b64Data,
+			AudioFormat: getAudioFormat(actualMimeType),
+			MimeType:    actualMimeType,
+		})
 
 	case pendingTypeVideo:
-		// Always download+base64 for video (consistent across cloud/self-hosted)
 		b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, mediaURL, encryptedFile, 100, mimeType) // 100MB limit for video
 		if err != nil {
-			return nil, fmt.Errorf("failed to download video: %w", err)
+			return PromptContext{}, fmt.Errorf("failed to download video: %w", err)
 		}
-		dataURL := buildDataURL(actualMimeType, b64Data)
 		if oc.isOpenRouterProvider() {
-			videoPart := param.Override[openai.ChatCompletionContentPartUnionParam](map[string]any{
-				"type": "video_url",
-				"video_url": map[string]any{
-					"url": dataURL,
-				},
+			blocks = append(blocks, PromptBlock{
+				Type:     PromptBlockVideo,
+				VideoB64: b64Data,
+				MimeType: actualMimeType,
 			})
-			userMsg := openai.ChatCompletionMessageParamUnion{
-				OfUser: &openai.ChatCompletionUserMessageParam{
-					Content: openai.ChatCompletionUserMessageParamContentUnion{
-						OfArrayOfContentParts: []openai.ChatCompletionContentPartUnionParam{
-							textContent,
-							videoPart,
-						},
-					},
-				},
-			}
-			prompt = append(prompt, userMsg)
-			return prompt, nil
+			break
 		}
-		videoPrompt := fmt.Sprintf("%s\n\nVideo data URL: %s", captionWithID, dataURL)
-		if !isSimple {
-			// captionWithID already carries normalized inbound context for non-simple mode.
+		videoText := strings.TrimSpace(captionWithID)
+		dataURL := buildDataURL(actualMimeType, b64Data)
+		if videoText != "" {
+			videoText += "\n\n"
 		}
-		userMsg := openai.ChatCompletionMessageParamUnion{
-			OfUser: &openai.ChatCompletionUserMessageParam{
-				Content: openai.ChatCompletionUserMessageParamContentUnion{
-					OfString: openai.String(videoPrompt),
-				},
-			},
+		videoText += "Video data URL: " + dataURL
+		if len(blocks) > 0 && blocks[0].Type == PromptBlockText {
+			blocks[0].Text = videoText
+		} else {
+			blocks = append([]PromptBlock{{Type: PromptBlockText, Text: videoText}}, blocks...)
 		}
-		prompt = append(prompt, userMsg)
-		return prompt, nil
 
 	default:
-		return nil, fmt.Errorf("unsupported media type: %s", mediaType)
+		return PromptContext{}, fmt.Errorf("unsupported media type: %s", mediaType)
 	}
-
-	// Create user message with both text and media content
-	userMsg := openai.ChatCompletionMessageParamUnion{
-		OfUser: &openai.ChatCompletionUserMessageParam{
-			Content: openai.ChatCompletionUserMessageParamContentUnion{
-				OfArrayOfContentParts: []openai.ChatCompletionContentPartUnionParam{
-					textContent,
-					mediaContent,
-				},
-			},
-		},
-	}
-
-	prompt = append(prompt, userMsg)
-	return prompt, nil
+	promptContext.Messages = append(promptContext.Messages, PromptMessage{
+		Role:   PromptRoleUser,
+		Blocks: blocks,
+	})
+	return promptContext, nil
 }
 
 // buildPromptUpToMessage builds a prompt including messages up to and including the specified message
-func (oc *AIClient) buildPromptUpToMessage(
+func (oc *AIClient) buildContextUpToMessage(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	targetMessageID networkid.MessageID,
 	newBody string,
-) ([]openai.ChatCompletionMessageParamUnion, error) {
-	var prompt []openai.ChatCompletionMessageParamUnion
-
-	// Add system prompt - agent prompt takes priority, then room override, then config default
+) (PromptContext, error) {
+	var promptContext PromptContext
 	isSimple := isSimpleMode(meta)
-	prompt = append(prompt, oc.buildSystemMessages(ctx, portal, meta)...)
+	appendChatMessagesToPromptContext(&promptContext, oc.buildSystemMessages(ctx, portal, meta))
 
 	// Get history
 	historyLimit := oc.historyLimit(ctx, portal, meta)
@@ -2318,7 +2301,7 @@ func (oc *AIClient) buildPromptUpToMessage(
 	if historyLimit > 0 {
 		history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, historyLimit)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load prompt history: %w", err)
+			return PromptContext{}, fmt.Errorf("failed to load prompt history: %w", err)
 		}
 
 		// Determine whether to inject images into history (requires vision-capable model).
@@ -2331,9 +2314,14 @@ func (oc *AIClient) buildPromptUpToMessage(
 
 			// Stop after adding the target message
 			if msg.ID == targetMessageID {
-				// Use the new body for the edited message
 				body := cleanHistoryBody(newBody, isSimple, msg.MXID)
-				prompt = append(prompt, openai.UserMessage(body))
+				promptContext.Messages = append(promptContext.Messages, PromptMessage{
+					Role: PromptRoleUser,
+					Blocks: []PromptBlock{{
+						Type: PromptBlockText,
+						Text: body,
+					}},
+				})
 				break
 			}
 
@@ -2347,16 +2335,21 @@ func (oc *AIClient) buildPromptUpToMessage(
 
 			// Only inject images for recent messages and vision-capable models.
 			injectImages := hasVision && i < maxHistoryImageMessages
-			prompt = oc.appendHistoryMessageFromCanonical(ctx, prompt, msg, msgMeta, isSimple, injectImages)
+			appendChatMessagesToPromptContext(&promptContext, oc.historyMessageBundle(ctx, msgMeta, injectImages))
 		}
 	} else {
-		// No history, just add the new message
 		body := strings.TrimSpace(newBody)
 		body = airuntime.SanitizeChatMessageForDisplay(body, true)
-		prompt = append(prompt, openai.UserMessage(body))
+		promptContext.Messages = append(promptContext.Messages, PromptMessage{
+			Role: PromptRoleUser,
+			Blocks: []PromptBlock{{
+				Type: PromptBlockText,
+				Text: body,
+			}},
+		})
 	}
 
-	return prompt, nil
+	return promptContext, nil
 }
 
 // downloadAndEncodeMedia downloads media and returns base64-encoded data.
@@ -2583,7 +2576,7 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 	}
 
 	// Build prompt with combined body
-	promptMessages, err := oc.buildPromptWithLinkContext(statusCtx, last.Portal, last.Meta, combinedBody, rawEventContent, last.Event.ID)
+	promptContext, err := oc.buildContextWithLinkContext(statusCtx, last.Portal, last.Meta, combinedBody, rawEventContent, last.Event.ID)
 	if err != nil {
 		oc.loggerForContext(ctx).Err(err).Msg("Failed to build prompt for debounced messages")
 		oc.notifyMatrixSendFailure(statusCtx, last.Portal, last.Event, err)
@@ -2593,7 +2586,7 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 		return
 	}
 	if trace {
-		logCtx.Debug().Int("prompt_messages", len(promptMessages)).Msg("Built prompt for debounced messages")
+		logCtx.Debug().Int("prompt_messages", len(promptContext.Messages)).Msg("Built prompt for debounced messages")
 	}
 
 	// Create user message for database
@@ -2654,7 +2647,7 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 	}
 	queueSettings, _, _, _ := oc.resolveQueueSettingsForPortal(statusCtx, last.Portal, last.Meta, "", airuntime.QueueInlineOptions{})
 
-	_, _ = oc.dispatchOrQueue(statusCtx, last.Event, last.Portal, last.Meta, nil, queueItem, queueSettings, promptMessages)
+	_, _ = oc.dispatchOrQueue(statusCtx, last.Event, last.Portal, last.Meta, nil, queueItem, queueSettings, promptContext)
 
 }
 

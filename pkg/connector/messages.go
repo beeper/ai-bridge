@@ -264,6 +264,206 @@ func contentPartToPromptBlock(part ContentPart) PromptBlock {
 	}
 }
 
+// ChatMessagesToPromptContext converts chat-completions-shaped messages into the canonical prompt model.
+func ChatMessagesToPromptContext(messages []openai.ChatCompletionMessageParamUnion) PromptContext {
+	var ctx PromptContext
+	for _, msg := range messages {
+		appendChatMessageToPromptContext(&ctx, msg)
+	}
+	return ctx
+}
+
+func appendChatMessagesToPromptContext(ctx *PromptContext, messages []openai.ChatCompletionMessageParamUnion) {
+	if ctx == nil {
+		return
+	}
+	for _, msg := range messages {
+		appendChatMessageToPromptContext(ctx, msg)
+	}
+}
+
+func appendChatMessageToPromptContext(ctx *PromptContext, msg openai.ChatCompletionMessageParamUnion) {
+	if ctx == nil {
+		return
+	}
+	switch {
+	case msg.OfSystem != nil:
+		appendSystemPromptText(ctx, extractChatSystemText(msg.OfSystem.Content))
+	case msg.OfDeveloper != nil:
+		appendDeveloperPromptText(ctx, extractChatDeveloperText(msg.OfDeveloper.Content))
+	case msg.OfUser != nil:
+		ctx.Messages = append(ctx.Messages, promptMessageFromChatUser(msg.OfUser))
+	case msg.OfAssistant != nil:
+		ctx.Messages = append(ctx.Messages, promptMessageFromChatAssistant(msg.OfAssistant))
+	case msg.OfTool != nil:
+		ctx.Messages = append(ctx.Messages, promptMessageFromChatTool(msg.OfTool))
+	}
+}
+
+func appendSystemPromptText(ctx *PromptContext, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	if ctx.SystemPrompt == "" {
+		ctx.SystemPrompt = text
+		return
+	}
+	ctx.SystemPrompt = strings.TrimSpace(ctx.SystemPrompt + "\n\n" + text)
+}
+
+func appendDeveloperPromptText(ctx *PromptContext, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	if ctx.DeveloperPrompt == "" {
+		ctx.DeveloperPrompt = text
+		return
+	}
+	ctx.DeveloperPrompt = strings.TrimSpace(ctx.DeveloperPrompt + "\n\n" + text)
+}
+
+func promptMessageFromChatUser(msg *openai.ChatCompletionUserMessageParam) PromptMessage {
+	pm := PromptMessage{Role: PromptRoleUser}
+	if msg == nil {
+		return pm
+	}
+	if msg.Content.OfString.Value != "" {
+		pm.Blocks = append(pm.Blocks, PromptBlock{
+			Type: PromptBlockText,
+			Text: msg.Content.OfString.Value,
+		})
+	}
+	for _, part := range msg.Content.OfArrayOfContentParts {
+		pm.Blocks = append(pm.Blocks, promptBlockFromChatUserPart(part)...)
+	}
+	return pm
+}
+
+func promptBlockFromChatUserPart(part openai.ChatCompletionContentPartUnionParam) []PromptBlock {
+	switch {
+	case part.OfText != nil:
+		return []PromptBlock{{Type: PromptBlockText, Text: part.OfText.Text}}
+	case part.OfImageURL != nil:
+		return []PromptBlock{{
+			Type:     PromptBlockImage,
+			ImageURL: part.OfImageURL.ImageURL.URL,
+			MimeType: inferPromptMimeTypeFromDataURL(part.OfImageURL.ImageURL.URL),
+		}}
+	case part.OfFile != nil:
+		return []PromptBlock{{
+			Type:     PromptBlockFile,
+			FileB64:  part.OfFile.File.FileData.Value,
+			Filename: part.OfFile.File.Filename.Value,
+		}}
+	case part.OfInputAudio != nil:
+		return []PromptBlock{{
+			Type:        PromptBlockAudio,
+			AudioB64:    part.OfInputAudio.InputAudio.Data,
+			AudioFormat: part.OfInputAudio.InputAudio.Format,
+		}}
+	default:
+		return nil
+	}
+}
+
+func promptMessageFromChatAssistant(msg *openai.ChatCompletionAssistantMessageParam) PromptMessage {
+	pm := PromptMessage{Role: PromptRoleAssistant}
+	if msg == nil {
+		return pm
+	}
+	if msg.Content.OfString.Value != "" {
+		pm.Blocks = append(pm.Blocks, PromptBlock{
+			Type: PromptBlockText,
+			Text: msg.Content.OfString.Value,
+		})
+	}
+	for _, part := range msg.Content.OfArrayOfContentParts {
+		if part.OfText == nil {
+			continue
+		}
+		pm.Blocks = append(pm.Blocks, PromptBlock{
+			Type: PromptBlockText,
+			Text: part.OfText.Text,
+		})
+	}
+	for _, toolCall := range msg.ToolCalls {
+		if toolCall.OfFunction == nil {
+			continue
+		}
+		pm.Blocks = append(pm.Blocks, PromptBlock{
+			Type:              PromptBlockToolCall,
+			ToolCallID:        toolCall.OfFunction.ID,
+			ToolName:          toolCall.OfFunction.Function.Name,
+			ToolCallArguments: toolCall.OfFunction.Function.Arguments,
+		})
+	}
+	return pm
+}
+
+func promptMessageFromChatTool(msg *openai.ChatCompletionToolMessageParam) PromptMessage {
+	if msg == nil {
+		return PromptMessage{Role: PromptRoleToolResult}
+	}
+	pm := PromptMessage{
+		Role:       PromptRoleToolResult,
+		ToolCallID: msg.ToolCallID,
+	}
+	if msg.Content.OfString.Value != "" {
+		pm.Blocks = append(pm.Blocks, PromptBlock{
+			Type: PromptBlockText,
+			Text: msg.Content.OfString.Value,
+		})
+	}
+	for _, part := range msg.Content.OfArrayOfContentParts {
+		pm.Blocks = append(pm.Blocks, PromptBlock{
+			Type: PromptBlockText,
+			Text: part.Text,
+		})
+	}
+	return pm
+}
+
+func extractChatSystemText(content openai.ChatCompletionSystemMessageParamContentUnion) string {
+	if content.OfString.Value != "" {
+		return content.OfString.Value
+	}
+	var parts []string
+	for _, part := range content.OfArrayOfContentParts {
+		if strings.TrimSpace(part.Text) != "" {
+			parts = append(parts, part.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func extractChatDeveloperText(content openai.ChatCompletionDeveloperMessageParamContentUnion) string {
+	if content.OfString.Value != "" {
+		return content.OfString.Value
+	}
+	var parts []string
+	for _, part := range content.OfArrayOfContentParts {
+		if strings.TrimSpace(part.Text) != "" {
+			parts = append(parts, part.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func inferPromptMimeTypeFromDataURL(value string) string {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(value, "data:") {
+		return ""
+	}
+	value = strings.TrimPrefix(value, "data:")
+	idx := strings.Index(value, ";")
+	if idx <= 0 {
+		return ""
+	}
+	return value[:idx]
+}
+
 // ToOpenAIResponsesInput converts legacy unified messages to OpenAI Responses input.
 func ToOpenAIResponsesInput(messages []UnifiedMessage) responses.ResponseInputParam {
 	return PromptContextToResponsesInput(ToPromptContext("", nil, messages))

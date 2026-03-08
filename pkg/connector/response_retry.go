@@ -363,8 +363,9 @@ func (oc *AIClient) streamingResponseWithRetry(
 	evt *event.Event,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
-	prompt []openai.ChatCompletionMessageParamUnion,
+	promptContext PromptContext,
 ) {
+	prompt := oc.promptContextToDispatchMessages(ctx, portal, meta, promptContext)
 	selector := func(meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (responseFunc, string) {
 		return oc.selectResponseFn(meta, prompt)
 	}
