@@ -55,33 +55,36 @@ func (oc *AIClient) resolveSubagentAllowlist(ctx context.Context, requesterAgent
 }
 
 func resolveSubagentModel(override string, agent *agents.AgentDefinition, defaults *agents.SubagentConfig) string {
-	return firstNonEmptyTrimmed(
-		override,
-		subagentStringValue(agent, func(cfg *agents.SubagentConfig) string { return cfg.Model }),
-		subagentStringValue(defaults, func(cfg *agents.SubagentConfig) string { return cfg.Model }),
-	)
+	return resolveSubagentConfigValue(override, agent, defaults, "model")
 }
 
 func resolveSubagentThinking(override string, agent *agents.AgentDefinition, defaults *agents.SubagentConfig) string {
-	return firstNonEmptyTrimmed(
-		override,
-		subagentStringValue(agent, func(cfg *agents.SubagentConfig) string { return cfg.Thinking }),
-		subagentStringValue(defaults, func(cfg *agents.SubagentConfig) string { return cfg.Thinking }),
-	)
+	return resolveSubagentConfigValue(override, agent, defaults, "thinking")
 }
 
-func subagentStringValue(source any, extract func(*agents.SubagentConfig) string) string {
+func resolveSubagentConfigValue(override string, agent *agents.AgentDefinition, defaults *agents.SubagentConfig, field string) string {
+	return firstNonEmptyTrimmed(override, subagentStringValue(agent, field), subagentStringValue(defaults, field))
+}
+
+func subagentStringValue(source any, field string) string {
 	switch cfg := source.(type) {
 	case *agents.AgentDefinition:
 		if cfg == nil {
 			return ""
 		}
-		return subagentStringValue(cfg.Subagents, extract)
+		return subagentStringValue(cfg.Subagents, field)
 	case *agents.SubagentConfig:
 		if cfg == nil {
 			return ""
 		}
-		return extract(cfg)
+		switch field {
+		case "model":
+			return cfg.Model
+		case "thinking":
+			return cfg.Thinking
+		default:
+			return ""
+		}
 	default:
 		return ""
 	}

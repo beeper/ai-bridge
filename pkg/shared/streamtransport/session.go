@@ -125,6 +125,27 @@ func EmitStreamEvent(ctx context.Context, portal *bridgev2.Portal, state StreamE
 	session.EmitPart(ctx, part)
 }
 
+// EmitStreamEventWithSession is a convenience wrapper for callers that only need
+// to provide the common stream state fields.
+func EmitStreamEventWithSession(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	turnID string,
+	suppressSend bool,
+	loggedStart *bool,
+	logger *zerolog.Logger,
+	ensureSession func() *StreamSession,
+	part map[string]any,
+) {
+	EmitStreamEvent(ctx, portal, StreamEventState{
+		TurnID:        turnID,
+		SuppressSend:  suppressSend,
+		LoggedStart:   loggedStart,
+		EnsureSession: ensureSession,
+		Logger:        logger,
+	}, part)
+}
+
 func (s *StreamSession) IsClosed() bool {
 	return s == nil || s.closed.Load()
 }

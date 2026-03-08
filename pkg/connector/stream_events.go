@@ -61,13 +61,14 @@ func (oc *AIClient) emitStreamEvent(
 	if state == nil {
 		return
 	}
-	streamtransport.EmitStreamEvent(ctx, portal, streamtransport.StreamEventState{
-		TurnID:       state.turnID,
-		SuppressSend: state.suppressSend,
-		LoggedStart:  &state.loggedStreamStart,
-		EnsureSession: func() *streamtransport.StreamSession {
-			return oc.ensureStreamSession(ctx, portal, state)
-		},
-		Logger: oc.loggerForContext(ctx),
-	}, part)
+	streamtransport.EmitStreamEventWithSession(
+		ctx,
+		portal,
+		state.turnID,
+		state.suppressSend,
+		&state.loggedStreamStart,
+		oc.loggerForContext(ctx),
+		func() *streamtransport.StreamSession { return oc.ensureStreamSession(ctx, portal, state) },
+		part,
+	)
 }
