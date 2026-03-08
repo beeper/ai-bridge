@@ -25,11 +25,38 @@ type PortalMetadata struct {
 	OpenClawGatewayID         string `json:"openclaw_gateway_id,omitempty"`
 	OpenClawSessionID         string `json:"openclaw_session_id,omitempty"`
 	OpenClawSessionKey        string `json:"openclaw_session_key,omitempty"`
+	OpenClawSessionKind       string `json:"openclaw_session_kind,omitempty"`
+	OpenClawSessionLabel      string `json:"openclaw_session_label,omitempty"`
 	OpenClawDisplayName       string `json:"openclaw_display_name,omitempty"`
 	OpenClawDerivedTitle      string `json:"openclaw_derived_title,omitempty"`
+	OpenClawLastMessagePreview string `json:"openclaw_last_message_preview,omitempty"`
+	OpenClawChannel           string `json:"openclaw_channel,omitempty"`
+	OpenClawSubject           string `json:"openclaw_subject,omitempty"`
+	OpenClawGroupChannel      string `json:"openclaw_group_channel,omitempty"`
+	OpenClawSpace             string `json:"openclaw_space,omitempty"`
+	OpenClawChatType          string `json:"openclaw_chat_type,omitempty"`
+	OpenClawOrigin            string `json:"openclaw_origin,omitempty"`
 	OpenClawAgentID           string `json:"openclaw_agent_id,omitempty"`
+	OpenClawSystemSent        bool   `json:"openclaw_system_sent,omitempty"`
+	OpenClawAbortedLastRun    bool   `json:"openclaw_aborted_last_run,omitempty"`
 	ThinkingLevel             string `json:"thinking_level,omitempty"`
 	VerboseLevel              string `json:"verbose_level,omitempty"`
+	ReasoningLevel            string `json:"reasoning_level,omitempty"`
+	ElevatedLevel             string `json:"elevated_level,omitempty"`
+	SendPolicy                string `json:"send_policy,omitempty"`
+	InputTokens               int64  `json:"input_tokens,omitempty"`
+	OutputTokens              int64  `json:"output_tokens,omitempty"`
+	TotalTokens               int64  `json:"total_tokens,omitempty"`
+	TotalTokensFresh          bool   `json:"total_tokens_fresh,omitempty"`
+	ResponseUsage             string `json:"response_usage,omitempty"`
+	ModelProvider             string `json:"model_provider,omitempty"`
+	Model                     string `json:"model,omitempty"`
+	ContextTokens             int64  `json:"context_tokens,omitempty"`
+	DeliveryContext           map[string]any `json:"delivery_context,omitempty"`
+	LastChannel               string `json:"last_channel,omitempty"`
+	LastTo                    string `json:"last_to,omitempty"`
+	LastAccountID             string `json:"last_account_id,omitempty"`
+	SessionUpdatedAt          int64  `json:"session_updated_at,omitempty"`
 	HistoryMode               string `json:"history_mode,omitempty"`
 	RecentHistoryLimit        int    `json:"recent_history_limit,omitempty"`
 	LastHistorySyncAt         int64  `json:"last_history_sync_at,omitempty"`
@@ -41,6 +68,7 @@ type GhostMetadata struct {
 	OpenClawAgentID        string `json:"openclaw_agent_id,omitempty"`
 	OpenClawAgentName      string `json:"openclaw_agent_name,omitempty"`
 	OpenClawAgentAvatarURL string `json:"openclaw_agent_avatar_url,omitempty"`
+	OpenClawAgentEmoji     string `json:"openclaw_agent_emoji,omitempty"`
 	OpenClawAgentRole      string `json:"openclaw_agent_role,omitempty"`
 	LastSeenAt             int64  `json:"last_seen_at,omitempty"`
 }

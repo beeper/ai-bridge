@@ -47,10 +47,33 @@ type gatewaySessionRow struct {
 	DisplayName        string `json:"displayName,omitempty"`
 	DerivedTitle       string `json:"derivedTitle,omitempty"`
 	LastMessagePreview string `json:"lastMessagePreview,omitempty"`
+	Channel            string `json:"channel,omitempty"`
+	Subject            string `json:"subject,omitempty"`
+	GroupChannel       string `json:"groupChannel,omitempty"`
+	Space              string `json:"space,omitempty"`
+	ChatType           string `json:"chatType,omitempty"`
+	Origin             string `json:"origin,omitempty"`
 	UpdatedAt          int64  `json:"updatedAt,omitempty"`
 	SessionID          string `json:"sessionId,omitempty"`
+	SystemSent         bool   `json:"systemSent,omitempty"`
+	AbortedLastRun     bool   `json:"abortedLastRun,omitempty"`
 	ThinkingLevel      string `json:"thinkingLevel,omitempty"`
 	VerboseLevel       string `json:"verboseLevel,omitempty"`
+	ReasoningLevel     string `json:"reasoningLevel,omitempty"`
+	ElevatedLevel      string `json:"elevatedLevel,omitempty"`
+	SendPolicy         string `json:"sendPolicy,omitempty"`
+	InputTokens        int64  `json:"inputTokens,omitempty"`
+	OutputTokens       int64  `json:"outputTokens,omitempty"`
+	TotalTokens        int64  `json:"totalTokens,omitempty"`
+	TotalTokensFresh   bool   `json:"totalTokensFresh,omitempty"`
+	ResponseUsage      string `json:"responseUsage,omitempty"`
+	ModelProvider      string `json:"modelProvider,omitempty"`
+	Model              string `json:"model,omitempty"`
+	ContextTokens      int64  `json:"contextTokens,omitempty"`
+	DeliveryContext    map[string]any `json:"deliveryContext,omitempty"`
+	LastChannel        string `json:"lastChannel,omitempty"`
+	LastTo             string `json:"lastTo,omitempty"`
+	LastAccountID      string `json:"lastAccountId,omitempty"`
 }
 
 type gatewaySessionsListResponse struct {
@@ -69,9 +92,11 @@ type gatewayAbortResponse struct {
 }
 
 type gatewayHistoryResponse struct {
-	SessionKey string           `json:"sessionKey,omitempty"`
-	SessionID  string           `json:"sessionId,omitempty"`
-	Messages   []map[string]any `json:"messages"`
+	SessionKey    string           `json:"sessionKey,omitempty"`
+	SessionID     string           `json:"sessionId,omitempty"`
+	ThinkingLevel string           `json:"thinkingLevel,omitempty"`
+	VerboseLevel  string           `json:"verboseLevel,omitempty"`
+	Messages      []map[string]any `json:"messages"`
 }
 
 type gatewayApprovalRequestEvent struct {
@@ -81,13 +106,23 @@ type gatewayApprovalRequestEvent struct {
 	ExpiresAtMs int64          `json:"expiresAtMs,omitempty"`
 }
 
+type gatewayApprovalResolvedEvent struct {
+	ID         string         `json:"id"`
+	Decision   string         `json:"decision,omitempty"`
+	ResolvedBy string         `json:"resolvedBy,omitempty"`
+	TS         int64          `json:"ts,omitempty"`
+	Request    map[string]any `json:"request"`
+}
+
 type gatewayChatEvent struct {
-	RunID      string         `json:"runId,omitempty"`
-	SessionKey string         `json:"sessionKey,omitempty"`
-	Seq        int64          `json:"seq,omitempty"`
-	State      string         `json:"state,omitempty"`
-	StopReason string         `json:"stopReason,omitempty"`
-	Message    map[string]any `json:"message"`
+	RunID        string         `json:"runId,omitempty"`
+	SessionKey   string         `json:"sessionKey,omitempty"`
+	Seq          int64          `json:"seq,omitempty"`
+	State        string         `json:"state,omitempty"`
+	StopReason   string         `json:"stopReason,omitempty"`
+	ErrorMessage string         `json:"errorMessage,omitempty"`
+	Usage        map[string]any `json:"usage"`
+	Message      map[string]any `json:"message"`
 }
 
 type gatewayAgentEvent struct {
@@ -98,6 +133,13 @@ type gatewayAgentEvent struct {
 	Stream      string         `json:"stream,omitempty"`
 	TS          int64          `json:"ts,omitempty"`
 	Data        map[string]any `json:"data"`
+}
+
+type gatewayAgentIdentity struct {
+	AgentID string `json:"agentId"`
+	Name    string `json:"name,omitempty"`
+	Avatar  string `json:"avatar,omitempty"`
+	Emoji   string `json:"emoji,omitempty"`
 }
 
 type gatewayEvent struct {
@@ -300,6 +342,24 @@ func (c *gatewayWSClient) ResolveApproval(ctx context.Context, approvalID, decis
 		"id":       strings.TrimSpace(approvalID),
 		"decision": strings.TrimSpace(decision),
 	}, nil)
+}
+
+func (c *gatewayWSClient) GetAgentIdentity(ctx context.Context, agentID, sessionKey string) (*gatewayAgentIdentity, error) {
+	params := map[string]any{}
+	if strings.TrimSpace(agentID) != "" {
+		params["agentId"] = strings.TrimSpace(agentID)
+	}
+	if strings.TrimSpace(sessionKey) != "" {
+		params["sessionKey"] = strings.TrimSpace(sessionKey)
+	}
+	if len(params) == 0 {
+		return nil, errors.New("agent identity lookup requires agent id or session key")
+	}
+	var resp gatewayAgentIdentity
+	if err := c.Request(ctx, "agent.identity.get", params, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 func (c *gatewayWSClient) Request(ctx context.Context, method string, params map[string]any, out any) error {
