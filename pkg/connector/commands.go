@@ -147,7 +147,7 @@ func splitQuotedArgs(input string) ([]string, error) {
 }
 
 // CommandModel handles the !ai model command
-var CommandModel = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "model",
 	Description:    "Get or set the AI model for this chat",
 	Args:           "[_model name_]",
@@ -198,7 +198,7 @@ func fnModel(ce *commands.Event) {
 }
 
 // CommandTemp handles the !ai temp command
-var CommandTemp = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "temp",
 	Description:    "Get or set the temperature (0-2)",
 	Args:           "[_value_]",
@@ -243,7 +243,7 @@ func fnTemp(ce *commands.Event) {
 }
 
 // CommandSystemPrompt handles the !ai system-prompt command
-var CommandSystemPrompt = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "system-prompt",
 	Description:    "Get or set the system prompt (shows full constructed prompt)",
 	Args:           "[_text_]",
@@ -287,7 +287,7 @@ func fnSystemPrompt(ce *commands.Event) {
 }
 
 // CommandContext handles the !ai context command
-var CommandContext = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "context",
 	Description:    "Get or set context message limit (1-100)",
 	Args:           "[_count_]",
@@ -320,7 +320,7 @@ func fnContext(ce *commands.Event) {
 }
 
 // CommandTokens handles the !ai tokens command
-var CommandTokens = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "tokens",
 	Description:    "Get or set max completion tokens (1-16384)",
 	Args:           "[_count_]",
@@ -353,7 +353,7 @@ func fnTokens(ce *commands.Event) {
 }
 
 // CommandConfig handles the !ai config command
-var CommandConfig = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "config",
 	Description:    "Show current chat configuration",
 	Section:        HelpSectionAI,
@@ -363,7 +363,7 @@ var CommandConfig = registerAICommand(commandregistry.Definition{
 })
 
 // CommandDesktopAPI handles the !ai desktop-api command
-var CommandDesktopAPI = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "desktop-api",
 	Description:    "Manage Beeper Desktop API instances",
 	Args:           "<add|list|remove> [args]",
@@ -375,7 +375,7 @@ var CommandDesktopAPI = registerAICommand(commandregistry.Definition{
 
 const desktopAPIManageUsage = "`!ai desktop-api list` | `!ai desktop-api add <token> [baseURL]` | `!ai desktop-api add <name> <token> [baseURL]` | `!ai desktop-api remove [name]`."
 
-var CommandCommands = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "commands",
 	Description:    "Show AI command groups and recommended command forms",
 	Section:        HelpSectionAI,
@@ -395,7 +395,6 @@ func fnCommands(ce *commands.Event) {
 			"- `!ai system-prompt [text]`\n" +
 			"- `!ai context [1-100]`\n" +
 			"- `!ai tokens [1-16384]`\n" +
-			"- `!ai mode [messages|responses]`\n" +
 			"- `!ai tools [on|off] [tool]`\n" +
 			"- `!ai typing [never|instant|thinking|message|off|reset|interval <seconds>]`\n" +
 			"- `!ai debounce [ms|off|default]`\n\n" +
@@ -439,20 +438,15 @@ func fnConfig(ce *commands.Event) {
 		return
 	}
 
-	mode := meta.ConversationMode
-	if mode == "" {
-		mode = "messages"
-	}
-
 	roomCaps := client.getRoomCapabilities(ce.Ctx, meta)
 	tempLabel := "provider default"
 	if temp := client.effectiveTemperature(meta); temp > 0 {
 		tempLabel = fmt.Sprintf("%.2f", temp)
 	}
 	config := fmt.Sprintf(
-		"Current configuration:\n• Model: %s\n• Temperature: %s\n• Context: %d messages\n• Max tokens: %d\n• Vision: %v\n• Mode: %s",
+		"Current configuration:\n• Model: %s\n• Temperature: %s\n• Context: %d messages\n• Max tokens: %d\n• Vision: %v",
 		client.effectiveModel(meta), tempLabel, client.historyLimit(ce.Ctx, ce.Portal, meta),
-		client.effectiveMaxTokens(meta), roomCaps.SupportsVision, mode)
+		client.effectiveMaxTokens(meta), roomCaps.SupportsVision)
 	ce.Reply(config)
 }
 
@@ -771,7 +765,7 @@ func isLikelyHTTPURL(raw string) bool {
 }
 
 // CommandDebounce handles the !ai debounce command
-var CommandDebounce = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "debounce",
 	Description:    "Get or set message debounce delay (ms), 'off' to disable, 'default' to reset",
 	Args:           "[_delay_|off|default]",
@@ -828,7 +822,7 @@ func fnDebounce(ce *commands.Event) {
 }
 
 // CommandTyping handles the !ai typing command
-var CommandTyping = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "typing",
 	Description:    "Get or set typing indicator behavior for this chat",
 	Args:           "[never|instant|thinking|message|off|reset|interval <seconds>]",
@@ -904,7 +898,7 @@ func fnTyping(ce *commands.Event) {
 }
 
 // CommandTools handles the !ai tools command
-var CommandTools = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "tools",
 	Description:    "Enable/disable tools",
 	Args:           "[on|off] [_tool_]",
@@ -924,50 +918,8 @@ func fnTools(ce *commands.Event) {
 	go client.handleToolsCommand(ce.Ctx, ce.Portal, meta, ce.RawArgs)
 }
 
-// CommandMode handles the !ai mode command
-var CommandMode = registerAICommand(commandregistry.Definition{
-	Name:           "mode",
-	Description:    "Set conversation mode (messages|responses)",
-	Args:           "[_mode_]",
-	Section:        HelpSectionAI,
-	RequiresPortal: true,
-	RequiresLogin:  true,
-	Handler:        fnMode,
-})
-
-func fnMode(ce *commands.Event) {
-	client, meta, ok := requireClientMeta(ce)
-	if !ok {
-		return
-	}
-
-	mode := meta.ConversationMode
-	if mode == "" {
-		mode = "messages"
-	}
-
-	if len(ce.Args) == 0 {
-		ce.Reply("Conversation modes:\n• messages - Build full message history for each request (default)\n• responses - Use OpenAI's previous_response_id for context chaining\n\nCurrent mode: %s", mode)
-		return
-	}
-
-	newMode := strings.ToLower(ce.Args[0])
-	if newMode != "messages" && newMode != "responses" {
-		ce.Reply("Invalid mode. Use 'messages' or 'responses'.")
-		return
-	}
-
-	meta.ConversationMode = newMode
-	if newMode == "messages" {
-		meta.LastResponseID = ""
-	}
-	client.savePortalQuiet(ce.Ctx, ce.Portal, "mode change")
-	_ = client.BroadcastRoomState(ce.Ctx, ce.Portal)
-	ce.Reply("Conversation mode set to %s.", newMode)
-}
-
 // CommandNew handles the !ai new command
-var CommandNew = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "new",
 	Description:    "Create a new chat of the same type (agent or model)",
 	Args:           "[agent <agent_id>]",
@@ -988,7 +940,7 @@ func fnNew(ce *commands.Event) {
 }
 
 // CommandFork handles the !ai fork command
-var CommandFork = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "fork",
 	Description:    "Fork conversation to a new chat",
 	Args:           "[_event_id_]",
@@ -1014,7 +966,7 @@ func fnFork(ce *commands.Event) {
 }
 
 // CommandRegenerate handles the !ai regenerate command
-var CommandRegenerate = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "regenerate",
 	Description:    "Regenerate the last AI response",
 	Section:        HelpSectionAI,
@@ -1034,7 +986,7 @@ func fnRegenerate(ce *commands.Event) {
 }
 
 // CommandTitle handles the !ai title command
-var CommandTitle = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "title",
 	Description:    "Regenerate the chat room title",
 	Section:        HelpSectionAI,
@@ -1057,7 +1009,7 @@ func fnTitle(ce *commands.Event) {
 }
 
 // CommandModels handles the !ai models command
-var CommandModels = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:          "models",
 	Description:   "List all available models",
 	Section:       HelpSectionAI,
@@ -1120,7 +1072,7 @@ func fnModels(ce *commands.Event) {
 }
 
 // CommandTimezone handles the !ai timezone command
-var CommandTimezone = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "timezone",
 	Description:    "Get or set your timezone for all chats (IANA name)",
 	Args:           "[_timezone_|reset]",
@@ -1178,7 +1130,7 @@ func fnTimezone(ce *commands.Event) {
 }
 
 // CommandGravatar handles the !ai gravatar command
-var CommandGravatar = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "gravatar",
 	Description:    "Fetch or set the Gravatar profile for this login",
 	Args:           "[fetch|set] [email]",
@@ -1252,7 +1204,7 @@ func fnGravatar(ce *commands.Event) {
 }
 
 // CommandAgent handles the !ai agent command
-var CommandAgent = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:           "agent",
 	Description:    "Get or set the agent for this chat",
 	Args:           "[_agent id_]",
@@ -1339,7 +1291,7 @@ func fnAgent(ce *commands.Event) {
 }
 
 // CommandAgents handles the !ai agents command
-var CommandAgents = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:          "agents",
 	Description:   "List available agents",
 	Section:       HelpSectionAI,
@@ -1399,7 +1351,7 @@ func fnAgents(ce *commands.Event) {
 }
 
 // CommandCreateAgent handles the !ai create-agent command
-var CommandCreateAgent = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:          "create-agent",
 	Description:   "Create a new custom agent",
 	Args:          "<id> <name> [model] [system prompt...]",
@@ -1478,7 +1430,7 @@ func fnCreateAgent(ce *commands.Event) {
 }
 
 // CommandDeleteAgent handles the !ai delete-agent command
-var CommandDeleteAgent = registerAICommand(commandregistry.Definition{
+var _ = registerAICommand(commandregistry.Definition{
 	Name:          "delete-agent",
 	Description:   "Delete a custom agent",
 	Args:          "<id>",

@@ -16,8 +16,10 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/ai-bridge/bridges/opencode/opencodebridge"
+	"github.com/beeper/ai-bridge/pkg/connector/msgconv"
 	"github.com/beeper/ai-bridge/pkg/matrixevents"
 	"github.com/beeper/ai-bridge/pkg/shared/streamtransport"
+	"github.com/beeper/ai-bridge/pkg/shared/streamui"
 )
 
 var _ opencodebridge.Host = (*OpenCodeClient)(nil)
@@ -70,14 +72,25 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 	state := oc.streamStates[turnID]
 	if state == nil {
 		state = &openCodeStreamState{
+			portal:        portal,
 			turnID:        turnID,
 			agentID:       strings.TrimSpace(agentID),
 			targetEventID: strings.TrimSpace(targetEventID),
 		}
+		state.ui.TurnID = turnID
 		oc.streamStates[turnID] = state
 	}
 	if state.targetEventID == "" && strings.TrimSpace(targetEventID) != "" {
 		state.targetEventID = strings.TrimSpace(targetEventID)
+	}
+	if state.portal == nil {
+		state.portal = portal
+	}
+	if state.ui.TurnID == "" {
+		state.ui.TurnID = turnID
+	}
+	if metadata, _ := part["messageMetadata"].(map[string]any); len(metadata) > 0 {
+		oc.applyStreamMessageMetadata(state, metadata)
 	}
 	needPlaceholder := state.initialEventID == ""
 	partType, _ := part["type"].(string)
@@ -91,7 +104,12 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 		if delta, _ := part["delta"].(string); delta != "" {
 			state.accumulated.WriteString(delta)
 		}
+	case "error":
+		if errText, _ := part["errorText"].(string); strings.TrimSpace(errText) != "" {
+			state.errorText = strings.TrimSpace(errText)
+		}
 	}
+	streamui.ApplyChunk(&state.ui, part)
 	oc.streamMu.Unlock()
 
 	if needPlaceholder {
@@ -102,12 +120,34 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 		}
 		sender := oc.SenderForOpenCode(instanceID, false)
 		msgID := newOpenCodeMessageID()
+		uiMessage := msgconv.BuildUIMessage(msgconv.UIMessageParams{
+			TurnID: turnID,
+			Role:   "assistant",
+			Metadata: msgconv.BuildUIMessageMetadata(msgconv.UIMessageMetadataParams{
+				TurnID:      turnID,
+				AgentID:     strings.TrimSpace(agentID),
+				StartedAtMs: state.startedAtMs,
+			}),
+		})
+		extra := map[string]any{
+			"msgtype":                event.MsgText,
+			"body":                   "...",
+			matrixevents.BeeperAIKey: uiMessage,
+			"m.mentions":             map[string]any{},
+		}
 		converted := &bridgev2.ConvertedMessage{
 			Parts: []*bridgev2.ConvertedMessagePart{{
 				ID:      networkid.PartID("0"),
 				Type:    event.EventMessage,
 				Content: &event.MessageEventContent{MsgType: event.MsgText, Body: "..."},
-				Extra:   map[string]any{"msgtype": event.MsgText, "body": "...", "m.mentions": map[string]any{}},
+				Extra:   extra,
+				DBMetadata: &MessageMetadata{
+					Role:               "assistant",
+					TurnID:             turnID,
+					AgentID:            strings.TrimSpace(agentID),
+					CanonicalSchema:    "ai-sdk-ui-message-v1",
+					CanonicalUIMessage: uiMessage,
+				},
 			}},
 		}
 		result := oc.UserLogin.QueueRemoteEvent(&OpenCodeRemoteMessage{
@@ -177,10 +217,12 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 				st := oc.streamStates[turnID]
 				var visibleBody, fallbackBody string
 				var netMsgID networkid.MessageID
+				var uiMessage map[string]any
 				if st != nil {
 					visibleBody = st.visible.String()
 					fallbackBody = st.accumulated.String()
 					netMsgID = st.networkMessageID
+					uiMessage = oc.currentCanonicalUIMessage(st)
 				}
 				oc.streamMu.Unlock()
 				content := streamtransport.BuildDebouncedEditContent(streamtransport.DebouncedEditParams{
@@ -215,6 +257,7 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 							},
 							Extra: map[string]any{"m.mentions": map[string]any{}},
 							TopLevelExtra: map[string]any{
+								matrixevents.BeeperAIKey:        uiMessage,
 								"com.beeper.dont_render_edited": true,
 								"m.mentions":                    map[string]any{},
 							},
@@ -237,7 +280,17 @@ func (oc *OpenCodeClient) FinishOpenCodeStream(turnID string) {
 	}
 	oc.streamMu.Lock()
 	session := oc.streamSessions[turnID]
+	state := oc.streamStates[turnID]
 	delete(oc.streamSessions, turnID)
+	oc.streamMu.Unlock()
+	if state != nil {
+		portal := state.portal
+		if portal != nil {
+			oc.queueFinalStreamEdit(oc.BackgroundContext(context.Background()), portal, state)
+			oc.persistStreamDBMetadata(oc.BackgroundContext(context.Background()), portal, state, oc.buildStreamDBMetadata(state))
+		}
+	}
+	oc.streamMu.Lock()
 	delete(oc.streamStates, turnID)
 	oc.streamMu.Unlock()
 	if session != nil {

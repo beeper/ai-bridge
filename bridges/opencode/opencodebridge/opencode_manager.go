@@ -16,6 +16,7 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/ai-bridge/bridges/opencode/opencode"
+	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
 )
 
 // OpenCodeManager coordinates connections to OpenCode server instances,
@@ -24,12 +25,30 @@ type OpenCodeManager struct {
 	bridge    *Bridge
 	mu        sync.RWMutex
 	instances map[string]*openCodeInstance
+	approvals *bridgeadapter.ApprovalManager[permissionDecision]
+}
+
+type permissionApprovalRef struct {
+	RoomID       id.RoomID
+	InstanceID   string
+	SessionID    string
+	MessageID    string
+	ToolCallID   string
+	PermissionID string
+}
+
+type permissionDecision struct {
+	Response  string
+	Reason    string
+	DecidedAt time.Time
+	DecidedBy id.UserID
 }
 
 func NewOpenCodeManager(bridge *Bridge) *OpenCodeManager {
 	return &OpenCodeManager{
 		bridge:    bridge,
 		instances: make(map[string]*openCodeInstance),
+		approvals: bridgeadapter.NewApprovalManager[permissionDecision](),
 	}
 }
 
@@ -93,7 +112,14 @@ func (m *OpenCodeManager) RestoreConnections(ctx context.Context) error {
 		if cfg == nil || strings.TrimSpace(cfg.URL) == "" {
 			continue
 		}
-		if _, _, err := m.Connect(ctx, cfg.URL, cfg.Password, cfg.Username); err != nil {
+		password := strings.TrimSpace(cfg.Password)
+		if cfg.HasPassword && password == "" {
+			m.log().Warn().
+				Str("instance", cfg.ID).
+				Msg("Skipping OpenCode restore because the password is missing from persisted metadata")
+			continue
+		}
+		if _, _, err := m.Connect(ctx, cfg.URL, password, cfg.Username); err != nil {
 			m.log().Warn().Err(err).Str("instance", cfg.ID).Msg("Failed to restore OpenCode instance")
 		}
 	}
@@ -129,17 +155,20 @@ func (m *OpenCodeManager) Connect(ctx context.Context, baseURL, password, userna
 
 	inst := &openCodeInstance{
 		cfg: OpenCodeInstance{
-			ID:       instanceID,
-			URL:      normalized,
-			Username: user,
-			Password: strings.TrimSpace(password),
+			ID:          instanceID,
+			URL:         normalized,
+			Username:    user,
+			Password:    strings.TrimSpace(password),
+			HasPassword: strings.TrimSpace(password) != "",
 		},
+		password:       strings.TrimSpace(password),
 		client:         client,
 		connected:      true,
 		seenMsg:        make(map[string]map[string]string),
 		seenPart:       make(map[string]map[string]*openCodePartState),
 		partsByMessage: make(map[string]map[string]map[string]struct{}),
 		turnState:      make(map[string]map[string]*openCodeTurnState),
+		sendQueue:      make(map[string]*openCodeSessionQueue),
 	}
 
 	m.mu.Lock()
@@ -171,10 +200,11 @@ func (m *OpenCodeManager) persistInstance(ctx context.Context, inst *openCodeIns
 		meta = make(map[string]*OpenCodeInstance)
 	}
 	meta[inst.cfg.ID] = &OpenCodeInstance{
-		ID:       inst.cfg.ID,
-		URL:      inst.cfg.URL,
-		Username: inst.cfg.Username,
-		Password: inst.cfg.Password,
+		ID:          inst.cfg.ID,
+		URL:         inst.cfg.URL,
+		Username:    inst.cfg.Username,
+		Password:    strings.TrimSpace(inst.password),
+		HasPassword: inst.cfg.HasPassword,
 	}
 	if err := m.bridge.host.SaveOpenCodeInstances(ctx, meta); err != nil {
 		m.log().Warn().Err(err).Msg("Failed to persist OpenCode instance")
@@ -277,16 +307,56 @@ func (m *OpenCodeManager) SendMessage(ctx context.Context, instanceID, sessionID
 		if inst.isSeen(sessionID, msgID) {
 			return nil
 		}
-		inst.markSeen(sessionID, msgID, "user")
 	}
+	item := &queuedUserMessage{
+		sessionID: sessionID,
+		eventID:   eventID,
+		parts:     parts,
+	}
+	toSend := inst.enqueueMessage(sessionID, item)
+	if toSend == nil {
+		return nil
+	}
+	return m.sendQueuedMessage(ctx, inst, toSend)
+}
 
-	if err := inst.client.SendMessageAsync(ctx, sessionID, msgID, parts); err != nil {
+func (m *OpenCodeManager) sendQueuedMessage(ctx context.Context, inst *openCodeInstance, item *queuedUserMessage) error {
+	if inst == nil || item == nil {
+		return nil
+	}
+	msgID := opencodeMessageIDForEvent(item.eventID)
+	if err := inst.client.SendMessageAsync(ctx, item.sessionID, msgID, item.parts); err != nil {
+		inst.requeueMessageFront(item.sessionID, item)
+		inst.releaseActiveSession(item.sessionID)
 		if opencode.IsAuthError(err) {
 			m.setConnected(inst, false)
 		}
 		return fmt.Errorf("send message: %w", err)
 	}
+	if msgID != "" {
+		inst.markSeen(item.sessionID, msgID, "user")
+	}
 	return nil
+}
+
+func (m *OpenCodeManager) processNextQueued(ctx context.Context, inst *openCodeInstance, sessionID string) {
+	if inst == nil || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	next := inst.markSessionIdle(sessionID)
+	if next == nil {
+		return
+	}
+	if err := m.sendQueuedMessage(ctx, inst, next); err != nil {
+		m.log().Warn().Err(err).
+			Str("instance", inst.cfg.ID).
+			Str("session", sessionID).
+			Msg("Failed to send queued OpenCode message")
+		portal := m.bridge.findOpenCodePortal(ctx, inst.cfg.ID, sessionID)
+		if portal != nil {
+			m.bridge.host.SendSystemNotice(ctx, portal, "OpenCode send failed: "+err.Error())
+		}
+	}
 }
 
 func (m *OpenCodeManager) DeleteSession(ctx context.Context, instanceID, sessionID string) error {
@@ -443,6 +513,10 @@ func (m *OpenCodeManager) handleEvent(ctx context.Context, inst *openCodeInstanc
 		m.handleSessionEvent(ctx, inst, evt)
 	case "session.deleted":
 		m.handleSessionDeleted(ctx, inst, evt)
+	case "session.status":
+		m.handleSessionStatusEvent(ctx, inst, evt)
+	case "session.idle":
+		m.handleSessionIdleEvent(ctx, inst, evt)
 	case "message.updated":
 		m.handleMessageUpdated(ctx, inst, evt)
 	case "message.removed":
@@ -453,6 +527,14 @@ func (m *OpenCodeManager) handleEvent(ctx context.Context, inst *openCodeInstanc
 		m.handlePartDeltaEvent(ctx, inst, evt)
 	case "message.part.removed":
 		m.handlePartRemovedEvent(ctx, inst, evt)
+	case "permission.asked":
+		m.handlePermissionAskedEvent(ctx, inst, evt)
+	case "permission.replied":
+		m.handlePermissionRepliedEvent(ctx, inst, evt)
+	case "question.asked":
+		m.handleQuestionAskedEvent(ctx, inst, evt)
+	case "question.replied", "question.rejected":
+		// Question prompts are currently rejected by the bridge when asked.
 	}
 }
 
@@ -474,6 +556,33 @@ func (m *OpenCodeManager) handleSessionDeleted(ctx context.Context, inst *openCo
 		return
 	}
 	m.bridge.removeOpenCodeSessionPortal(ctx, inst.cfg.ID, session.ID, "opencode session deleted")
+}
+
+func (m *OpenCodeManager) handleSessionStatusEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
+	var payload struct {
+		SessionID string `json:"sessionID"`
+		Status    struct {
+			Type string `json:"type"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(evt.Properties, &payload); err != nil {
+		m.log().Warn().Err(err).Msg("Failed to decode session status event")
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(payload.Status.Type), "idle") {
+		m.processNextQueued(ctx, inst, payload.SessionID)
+	}
+}
+
+func (m *OpenCodeManager) handleSessionIdleEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
+	var payload struct {
+		SessionID string `json:"sessionID"`
+	}
+	if err := json.Unmarshal(evt.Properties, &payload); err != nil {
+		m.log().Warn().Err(err).Msg("Failed to decode session idle event")
+		return
+	}
+	m.processNextQueued(ctx, inst, payload.SessionID)
 }
 
 func (m *OpenCodeManager) handleMessageUpdated(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
@@ -545,6 +654,177 @@ func (m *OpenCodeManager) handlePartRemovedEvent(ctx context.Context, inst *open
 	m.handlePartRemoved(ctx, inst, payload.SessionID, payload.MessageID, payload.PartID)
 }
 
+func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
+	var req opencode.PermissionRequest
+	if err := json.Unmarshal(evt.Properties, &req); err != nil {
+		m.log().Warn().Err(err).Msg("Failed to decode permission request event")
+		return
+	}
+	if req.ID == "" || req.SessionID == "" {
+		return
+	}
+	portal := m.bridge.findOpenCodePortal(ctx, inst.cfg.ID, req.SessionID)
+	if portal == nil {
+		return
+	}
+	toolCallID := strings.TrimSpace(req.ID)
+	messageID := ""
+	if req.Tool != nil {
+		if strings.TrimSpace(req.Tool.CallID) != "" {
+			toolCallID = strings.TrimSpace(req.Tool.CallID)
+		}
+		messageID = strings.TrimSpace(req.Tool.MessageID)
+	}
+	if messageID == "" {
+		m.log().Warn().
+			Str("instance", inst.cfg.ID).
+			Str("session", req.SessionID).
+			Str("permission_id", req.ID).
+			Msg("Skipping permission request without message id")
+		return
+	}
+	approvalID := strings.TrimSpace(req.ID)
+	_, created := m.approvals.Register(approvalID, 10*time.Minute, &permissionApprovalRef{
+		RoomID:       portal.MXID,
+		InstanceID:   inst.cfg.ID,
+		SessionID:    req.SessionID,
+		MessageID:    messageID,
+		ToolCallID:   toolCallID,
+		PermissionID: approvalID,
+	})
+	if !created {
+		return
+	}
+	toolName := strings.TrimSpace(req.Permission)
+	if toolName == "" {
+		toolName = "tool"
+	}
+	m.ensureStepStarted(ctx, inst, portal, req.SessionID, messageID)
+	turnID := opencodeMessageStreamTurnID(req.SessionID, messageID)
+	m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, m.bridge.portalAgentID(portal), map[string]any{
+		"type":       "tool-approval-request",
+		"approvalId": approvalID,
+		"toolCallId": toolCallID,
+		"toolName":   toolName,
+	})
+}
+
+func (m *OpenCodeManager) handlePermissionRepliedEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
+	var payload struct {
+		SessionID string `json:"sessionID"`
+		RequestID string `json:"requestID"`
+		Reply     string `json:"reply"`
+	}
+	if err := json.Unmarshal(evt.Properties, &payload); err != nil {
+		m.log().Warn().Err(err).Msg("Failed to decode permission reply event")
+		return
+	}
+	pending := m.approvals.Get(strings.TrimSpace(payload.RequestID))
+	if pending == nil {
+		return
+	}
+	ref, _ := pending.Data.(*permissionApprovalRef)
+	if ref == nil {
+		m.approvals.Drop(payload.RequestID)
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(payload.Reply), "reject") {
+		portal := m.bridge.findOpenCodePortal(ctx, inst.cfg.ID, ref.SessionID)
+		if portal != nil {
+			m.ensureStepStarted(ctx, inst, portal, ref.SessionID, ref.MessageID)
+			turnID := opencodeMessageStreamTurnID(ref.SessionID, ref.MessageID)
+			m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, m.bridge.portalAgentID(portal), map[string]any{
+				"type":       "tool-output-denied",
+				"toolCallId": ref.ToolCallID,
+			})
+		}
+	}
+	m.approvals.Drop(payload.RequestID)
+}
+
+func (m *OpenCodeManager) handleQuestionAskedEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
+	var req opencode.QuestionRequest
+	if err := json.Unmarshal(evt.Properties, &req); err != nil {
+		m.log().Warn().Err(err).Msg("Failed to decode question request event")
+		return
+	}
+	if req.ID == "" || req.SessionID == "" {
+		return
+	}
+	portal := m.bridge.findOpenCodePortal(ctx, inst.cfg.ID, req.SessionID)
+	if portal != nil {
+		m.bridge.host.SendSystemNotice(ctx, portal, "OpenCode question requests are not yet supported in the Matrix bridge.")
+		if req.Tool != nil && strings.TrimSpace(req.Tool.CallID) != "" && strings.TrimSpace(req.Tool.MessageID) != "" {
+			m.ensureStepStarted(ctx, inst, portal, req.SessionID, strings.TrimSpace(req.Tool.MessageID))
+			turnID := opencodeMessageStreamTurnID(req.SessionID, strings.TrimSpace(req.Tool.MessageID))
+			m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, m.bridge.portalAgentID(portal), map[string]any{
+				"type":       "tool-output-error",
+				"toolCallId": strings.TrimSpace(req.Tool.CallID),
+				"errorText":  "Question requests are not supported by the Matrix bridge.",
+			})
+		}
+	}
+	if err := inst.client.RejectQuestion(ctx, req.ID); err != nil {
+		m.log().Warn().Err(err).
+			Str("instance", inst.cfg.ID).
+			Str("session", req.SessionID).
+			Str("request_id", req.ID).
+			Msg("Failed to reject unsupported question request")
+	}
+}
+
+func (m *OpenCodeManager) resolvePermissionDecision(ctx context.Context, roomID id.RoomID, approvalID string, decision permissionDecision) error {
+	if m == nil || m.bridge == nil || m.bridge.host == nil {
+		return errors.New("bridge not available")
+	}
+	approvalID = strings.TrimSpace(approvalID)
+	if approvalID == "" {
+		return bridgeadapter.ErrApprovalMissingID
+	}
+	if strings.TrimSpace(roomID.String()) == "" {
+		return bridgeadapter.ErrApprovalMissingRoom
+	}
+	login := m.bridge.host.Login()
+	if login == nil || decision.DecidedBy == "" || decision.DecidedBy != login.UserMXID {
+		return bridgeadapter.ErrApprovalOnlyOwner
+	}
+	pending := m.approvals.Get(approvalID)
+	if pending == nil {
+		return fmt.Errorf("%w: %s", bridgeadapter.ErrApprovalUnknown, approvalID)
+	}
+	ref, _ := pending.Data.(*permissionApprovalRef)
+	if ref == nil {
+		m.approvals.Drop(approvalID)
+		return fmt.Errorf("%w: %s", bridgeadapter.ErrApprovalUnknown, approvalID)
+	}
+	if ref.RoomID != "" && ref.RoomID != roomID {
+		return bridgeadapter.ErrApprovalWrongRoom
+	}
+	inst, err := m.requireConnectedInstance(ref.InstanceID)
+	if err != nil {
+		return err
+	}
+	if err := inst.client.RespondPermission(ctx, ref.SessionID, ref.PermissionID, decision.Response); err != nil {
+		if opencode.IsAuthError(err) {
+			m.setConnected(inst, false)
+		}
+		return fmt.Errorf("respond to permission: %w", err)
+	}
+	m.approvals.Drop(approvalID)
+	if decision.Response == "reject" {
+		portal := m.bridge.findOpenCodePortal(ctx, ref.InstanceID, ref.SessionID)
+		if portal != nil {
+			m.ensureStepStarted(ctx, inst, portal, ref.SessionID, ref.MessageID)
+			turnID := opencodeMessageStreamTurnID(ref.SessionID, ref.MessageID)
+			m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, m.bridge.portalAgentID(portal), map[string]any{
+				"type":       "tool-output-denied",
+				"toolCallId": ref.ToolCallID,
+			})
+		}
+	}
+	return nil
+}
+
 // ---------- message/part processing ----------
 
 func (m *OpenCodeManager) handleMessageEvent(ctx context.Context, inst *openCodeInstance, msg opencode.Message) {
@@ -555,8 +835,13 @@ func (m *OpenCodeManager) handleMessageEvent(ctx context.Context, inst *openCode
 
 	if inst.isSeen(msg.SessionID, msg.ID) {
 		if isCompleted && msg.Role != "user" {
-			if portal := m.bridge.findOpenCodePortal(ctx, inst.cfg.ID, msg.SessionID); portal != nil {
-				m.emitTurnFinish(ctx, inst, portal, msg.SessionID, msg.ID, "stop")
+			if portal := m.bridge.findOpenCodePortal(ctx, inst.cfg.ID, msg.SessionID); portal != nil && inst.turnStateFor(msg.SessionID, msg.ID) != nil {
+				if full, err := inst.client.GetMessage(ctx, msg.SessionID, msg.ID); err == nil && full != nil {
+					m.ensureTurnStarted(ctx, inst, portal, msg.SessionID, msg.ID, buildTurnStartMetadata(full, m.bridge.portalAgentID(portal)))
+					m.emitTurnFinish(ctx, inst, portal, msg.SessionID, msg.ID, "stop", buildTurnFinishMetadata(full, m.bridge.portalAgentID(portal), "stop"))
+				} else {
+					m.emitTurnFinish(ctx, inst, portal, msg.SessionID, msg.ID, "stop", nil)
+				}
 			}
 		}
 		return
@@ -575,9 +860,10 @@ func (m *OpenCodeManager) handleMessageEvent(ctx context.Context, inst *openCode
 	if portal == nil {
 		return
 	}
+	m.ensureTurnStarted(ctx, inst, portal, msg.SessionID, msg.ID, buildTurnStartMetadata(full, m.bridge.portalAgentID(portal)))
 	m.handleMessageParts(ctx, inst, portal, msg.Role, full)
 	if isCompleted {
-		m.emitTurnFinish(ctx, inst, portal, msg.SessionID, msg.ID, "stop")
+		m.emitTurnFinish(ctx, inst, portal, msg.SessionID, msg.ID, "stop", buildTurnFinishMetadata(full, m.bridge.portalAgentID(portal), "stop"))
 	}
 }
 
@@ -599,6 +885,7 @@ func (m *OpenCodeManager) handleMessageParts(ctx context.Context, inst *openCode
 		if part.SessionID == "" {
 			part.SessionID = msg.Info.SessionID
 		}
+		m.syncAssistantMessagePart(ctx, inst, portal, msg, part)
 		m.handlePart(ctx, inst, portal, role, part, false)
 	}
 }
@@ -722,11 +1009,27 @@ func (m *OpenCodeManager) handlePart(ctx context.Context, inst *openCodeInstance
 			m.emitArtifactStream(ctx, inst, portal, part)
 			return
 		}
+		if role != "user" {
+			if part.Type == "text" || part.Type == "reasoning" {
+				m.emitTextStreamEnd(ctx, inst, portal, part)
+				return
+			}
+			m.emitDataPartStream(ctx, inst, portal, part)
+			return
+		}
 		m.bridge.emitOpenCodePart(ctx, portal, inst.cfg.ID, part, role == "user")
 		return
 	}
 	if part.Type == "file" {
 		m.emitArtifactStream(ctx, inst, portal, part)
+		return
+	}
+	if role != "user" {
+		if part.Type == "text" || part.Type == "reasoning" {
+			m.emitTextStreamEnd(ctx, inst, portal, part)
+			return
+		}
+		m.emitDataPartStream(ctx, inst, portal, part)
 		return
 	}
 	if allowEdit && (part.Type == "text" || part.Type == "reasoning") {
@@ -786,22 +1089,13 @@ func (m *OpenCodeManager) handleMessageRemoved(ctx context.Context, inst *openCo
 	inst.removeCachedMessage(sessionID, messageID)
 	role := inst.seenRole(sessionID, messageID)
 	partStates := inst.messageParts(sessionID, messageID)
-	if len(partStates) == 0 {
-		m.bridge.emitOpenCodeMessageRemove(ctx, portal, inst.cfg.ID, messageID, role == "user")
-		return
+	if role != "user" {
+		m.bridge.emitOpenCodeMessageRemove(ctx, portal, inst.cfg.ID, messageID, false)
 	}
-	for partID, state := range partStates {
-		removedRole := role
-		partType := ""
-		if state != nil {
-			if state.role != "" {
-				removedRole = state.role
-			}
-			partType = state.partType
-		}
-		m.bridge.emitOpenCodePartRemove(ctx, portal, inst.cfg.ID, partID, partType, removedRole == "user")
+	for partID := range partStates {
 		inst.removePart(sessionID, messageID, partID)
 	}
+	inst.removeTurnState(sessionID, messageID)
 }
 
 // ---------- connection state management ----------

@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -229,11 +230,7 @@ func (oc *AIClient) executeSessionsSpawn(ctx context.Context, portal *bridgev2.P
 		if !allowed {
 			allowedText := "none"
 			if len(allowSet) > 0 {
-				ids := make([]string, 0, len(allowSet))
-				for id := range allowSet {
-					ids = append(ids, id)
-				}
-				slices.Sort(ids)
+				ids := slices.Sorted(maps.Keys(allowSet))
 				allowedText = strings.Join(ids, ", ")
 			}
 			return tools.JSONResult(map[string]any{
@@ -365,6 +362,7 @@ func (oc *AIClient) executeSessionsSpawn(ctx context.Context, portal *bridgev2.P
 		},
 		Timestamp: time.Now(),
 	}
+	ensureCanonicalUserMessage(userMessage)
 	if _, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userMessage.SenderID); err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure user ghost before saving subagent task message")
 	}

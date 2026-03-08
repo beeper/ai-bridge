@@ -8,6 +8,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 
 	runtimeparse "github.com/beeper/ai-bridge/pkg/runtime"
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 )
 
 const (
@@ -228,7 +229,7 @@ func parseCanonicalAssistantBlocks(meta *MessageMetadata) ([]map[string]any, []o
 			if toolName == "" {
 				toolName = "unknown_tool"
 			}
-			args := toMapAny(part["input"])
+			args := jsonutil.ToMap(part["input"])
 			if args == nil {
 				args = map[string]any{}
 			}
@@ -256,7 +257,7 @@ func parseCanonicalAssistantBlocks(meta *MessageMetadata) ([]map[string]any, []o
 					call.Input = tc.Input
 				}
 			} else {
-				call.Output = toMapAny(part["output"])
+				call.Output = jsonutil.ToMap(part["output"])
 				state := strings.TrimSpace(toString(part["state"]))
 				if state == "output-denied" {
 					call.ResultStatus = string(ResultStatusDenied)
@@ -484,23 +485,4 @@ func toString(value any) string {
 		return str
 	}
 	return fmt.Sprint(value)
-}
-
-func toMapAny(value any) map[string]any {
-	switch v := value.(type) {
-	case map[string]any:
-		return v
-	case nil:
-		return nil
-	default:
-		raw, err := json.Marshal(v)
-		if err != nil {
-			return nil
-		}
-		out := map[string]any{}
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return nil
-		}
-		return out
-	}
 }

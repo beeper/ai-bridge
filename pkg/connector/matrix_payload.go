@@ -53,12 +53,12 @@ func parseGeoURI(value string) (geoURI, bool) {
 	}
 	payload := strings.TrimPrefix(trimmed, "geo:")
 	parts := strings.Split(payload, ";")
-	coords := strings.Split(parts[0], ",")
-	if len(coords) < 2 {
+	latRaw, lonRaw, ok := strings.Cut(parts[0], ",")
+	if !ok {
 		return geoURI{}, false
 	}
-	lat, err1 := strconv.ParseFloat(coords[0], 64)
-	lon, err2 := strconv.ParseFloat(coords[1], 64)
+	lat, err1 := strconv.ParseFloat(latRaw, 64)
+	lon, err2 := strconv.ParseFloat(lonRaw, 64)
 	if err1 != nil || err2 != nil {
 		return geoURI{}, false
 	}
@@ -68,12 +68,9 @@ func parseGeoURI(value string) (geoURI, bool) {
 		if segment == "" {
 			continue
 		}
-		kv := strings.SplitN(segment, "=", 2)
-		key := strings.ToLower(strings.TrimSpace(kv[0]))
-		val := ""
-		if len(kv) > 1 {
-			val = strings.TrimSpace(kv[1])
-		}
+		keyPart, valPart, _ := strings.Cut(segment, "=")
+		key := strings.ToLower(strings.TrimSpace(keyPart))
+		val := strings.TrimSpace(valPart)
 		if key == "u" {
 			if v, err := strconv.ParseFloat(val, 64); err == nil {
 				accuracy = &v

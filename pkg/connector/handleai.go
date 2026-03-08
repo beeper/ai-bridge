@@ -23,12 +23,12 @@ func (oc *AIClient) dispatchCompletionInternal(
 	sourceEvent *event.Event,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
-	prompt []openai.ChatCompletionMessageParamUnion,
+	promptContext PromptContext,
 ) {
 	runCtx := oc.backgroundContext(ctx)
 
 	// Always use streaming responses
-	oc.streamingResponseWithRetry(runCtx, sourceEvent, portal, meta, prompt)
+	oc.streamingResponseWithRetry(runCtx, sourceEvent, portal, meta, promptContext)
 }
 
 func (oc *AIClient) notifyMatrixSendFailure(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, err error) {

@@ -668,6 +668,7 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 			if err := cl.Connector.LoadUserLogin(persistCtx, existing); err != nil {
 				return nil, fmt.Errorf("failed to load client: %w", err)
 			}
+			cl.startDefaultChatBootstrap(existing, log)
 			go existing.Client.Connect(existing.Log.WithContext(cl.backgroundProcessContext()))
 			cl.mu.Lock()
 			cl.closeRPCLocked()
@@ -695,6 +696,7 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 	if err := cl.Connector.LoadUserLogin(persistCtx, login); err != nil {
 		return nil, fmt.Errorf("failed to load client: %w", err)
 	}
+	cl.startDefaultChatBootstrap(login, log)
 	go login.Client.Connect(login.Log.WithContext(cl.backgroundProcessContext()))
 
 	cl.mu.Lock()
@@ -709,6 +711,39 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 			UserLogin:   login,
 		},
 	}, nil
+}
+
+func (cl *CodexLogin) ensureDefaultChatBestEffort(ctx context.Context, login *bridgev2.UserLogin, log *zerolog.Logger) {
+	if login == nil {
+		return
+	}
+	client, ok := login.Client.(*CodexClient)
+	if !ok || client == nil {
+		return
+	}
+	if err := client.ensureDefaultCodexChat(ctx); err != nil {
+		log.Warn().Err(err).Str("user_login_id", string(login.ID)).Msg("Failed to create default Codex chat during login")
+		return
+	}
+	meta := loginMetadata(login)
+	if meta == nil || meta.ChatsSynced {
+		return
+	}
+	meta.ChatsSynced = true
+	if err := login.Save(ctx); err != nil {
+		log.Warn().Err(err).Str("user_login_id", string(login.ID)).Msg("Failed to persist Codex chat bootstrap state")
+	}
+}
+
+func (cl *CodexLogin) startDefaultChatBootstrap(login *bridgev2.UserLogin, log *zerolog.Logger) {
+	if login == nil || log == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(cl.backgroundProcessContext(), 30*time.Second)
+		defer cancel()
+		cl.ensureDefaultChatBestEffort(ctx, login, log)
+	}()
 }
 
 func (cl *CodexLogin) resolveCodexCommand() string {

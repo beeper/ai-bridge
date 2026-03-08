@@ -354,18 +354,6 @@ func providerSupportsCapability(providerID string, capability MediaUnderstanding
 	return false
 }
 
-func splitModelProvider(modelID string) (string, string) {
-	trimmed := strings.TrimSpace(modelID)
-	if trimmed == "" {
-		return "", ""
-	}
-	parts := strings.SplitN(trimmed, "/", 2)
-	if len(parts) < 2 {
-		return "", trimmed
-	}
-	return strings.ToLower(strings.TrimSpace(parts[0])), strings.TrimSpace(parts[1])
-}
-
 var hasBinaryCache sync.Map
 
 func hasBinary(name string) bool {
@@ -744,7 +732,7 @@ func (oc *AIClient) describeImageWithEntry(
 	} else {
 		resp, err = oc.provider.Generate(ctx, GenerateParams{
 			Model:               modelIDForAPI,
-			Messages:            messages,
+			Context:             ToPromptContext("", nil, messages),
 			MaxCompletionTokens: defaultImageUnderstandingLimit,
 		})
 	}
@@ -899,7 +887,7 @@ func (oc *AIClient) describeVideoWithEntry(
 		} else {
 			resp, err = oc.provider.Generate(ctx, GenerateParams{
 				Model:               modelIDForAPI,
-				Messages:            messages,
+				Context:             ToPromptContext("", nil, messages),
 				MaxCompletionTokens: defaultImageUnderstandingLimit,
 			})
 		}
@@ -967,7 +955,7 @@ func (oc *AIClient) generateWithOpenRouter(
 	}
 	return provider.Generate(ctx, GenerateParams{
 		Model:               modelID,
-		Messages:            messages,
+		Context:             ToPromptContext("", nil, messages),
 		MaxCompletionTokens: defaultImageUnderstandingLimit,
 	})
 }

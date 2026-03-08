@@ -13,6 +13,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/event"
 
 	"github.com/beeper/ai-bridge/bridges/opencode/opencode"
 )
@@ -239,29 +240,6 @@ func parseOpenCodeMessageID(msgID networkid.MessageID) (string, bool) {
 	return "", false
 }
 
-// appendBackfillPart builds a converted part and appends it to out if non-nil.
-func (b *Bridge) appendBackfillPart(
-	ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI,
-	out *[]*bridgev2.BackfillMessage, sender bridgev2.EventSender, msgTime time.Time, nextOrder func() int64,
-	part opencode.Part, msgID networkid.MessageID,
-) error {
-	cmp, err := b.buildOpenCodeConvertedPart(ctx, portal, intent, part)
-	if err != nil && err != bridgev2.ErrIgnoringRemoteEvent {
-		return err
-	}
-	if cmp != nil {
-		*out = append(*out, &bridgev2.BackfillMessage{
-			ConvertedMessage: &bridgev2.ConvertedMessage{Parts: []*bridgev2.ConvertedMessagePart{cmp}},
-			Sender:           sender,
-			ID:               msgID,
-			TxnID:            networkid.TransactionID(msgID),
-			Timestamp:        msgTime,
-			StreamOrder:      nextOrder(),
-		})
-	}
-	return nil
-}
-
 func (b *Bridge) convertOpenCodeBackfill(ctx context.Context, portal *bridgev2.Portal, instanceID string, batch []backfillMessageEntry) ([]*bridgev2.BackfillMessage, error) {
 	if b == nil || portal == nil || b.host == nil {
 		return nil, nil
@@ -275,10 +253,12 @@ func (b *Bridge) convertOpenCodeBackfill(ctx context.Context, portal *bridgev2.P
 	for _, entry := range batch {
 		msg := entry.msg
 		role := strings.ToLower(strings.TrimSpace(msg.Info.Role))
-		fromMe := role == "user"
+		if role == "user" {
+			continue
+		}
+		fromMe := false
 		sender := b.opencodeSender(instanceID, fromMe)
-		intent, ok := portal.GetIntentFor(ctx, sender, login, bridgev2.RemoteEventMessage)
-		if !ok || intent == nil {
+		if intent, ok := portal.GetIntentFor(ctx, sender, login, bridgev2.RemoteEventMessage); !ok || intent == nil {
 			continue
 		}
 		msgTime := entry.when
@@ -295,43 +275,23 @@ func (b *Bridge) convertOpenCodeBackfill(ctx context.Context, portal *bridgev2.P
 			baseOrder = order + 1
 			return order
 		}
-		for _, part := range msg.Parts {
-			if part.MessageID == "" {
-				part.MessageID = msg.Info.ID
-			}
-			if part.SessionID == "" {
-				part.SessionID = msg.Info.SessionID
-			}
-			if part.Type == "tool" {
-				if part.State != nil && len(part.State.Attachments) > 0 {
-					for _, attachment := range part.State.Attachments {
-						if attachment.ID == "" {
-							continue
-						}
-						if attachment.SessionID == "" {
-							attachment.SessionID = part.SessionID
-						}
-						if attachment.MessageID == "" {
-							attachment.MessageID = part.MessageID
-						}
-						if err := b.appendBackfillPart(ctx, portal, intent, &out, sender, msgTime, nextOrder,
-							attachment,
-							opencodePartMessageID(attachment.ID)); err != nil {
-							return nil, err
-						}
-					}
-				}
-				continue
-			}
-			if part.ID == "" {
-				continue
-			}
-			if err := b.appendBackfillPart(ctx, portal, intent, &out, sender, msgTime, nextOrder,
-				part,
-				opencodePartMessageID(part.ID)); err != nil {
-				return nil, err
-			}
-		}
+		snapshot := buildCanonicalAssistantBackfill(msg, b.portalAgentID(portal))
+		out = append(out, &bridgev2.BackfillMessage{
+			ConvertedMessage: &bridgev2.ConvertedMessage{
+				Parts: []*bridgev2.ConvertedMessagePart{{
+					ID:         networkid.PartID("0"),
+					Type:       event.EventMessage,
+					Content:    buildCanonicalBackfillPart(snapshot),
+					Extra:      canonicalBackfillExtra(snapshot),
+					DBMetadata: snapshot.meta,
+				}},
+			},
+			Sender:      sender,
+			ID:          networkid.MessageID("opencode:" + msg.Info.ID),
+			TxnID:       networkid.TransactionID("opencode:" + msg.Info.ID),
+			Timestamp:   msgTime,
+			StreamOrder: nextOrder(),
+		})
 	}
 	return out, nil
 }

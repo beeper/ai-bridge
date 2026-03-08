@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -276,11 +277,7 @@ func normalizeCatalogInput(input []string, extra map[string]bool) []string {
 		ordered = append(ordered, "image")
 		delete(seen, "image")
 	}
-	rest := make([]string, 0, len(seen))
-	for key := range seen {
-		rest = append(rest, key)
-	}
-	slices.Sort(rest)
+	rest := slices.Sorted(maps.Keys(seen))
 	return append(ordered, rest...)
 }
 
@@ -291,7 +288,7 @@ func (oc *AIClient) loadModelCatalog(ctx context.Context, useCache bool) []Model
 	if useCache {
 		oc.modelCatalogMu.Lock()
 		if oc.modelCatalogLoaded {
-			cached := append([]ModelCatalogEntry(nil), oc.modelCatalogCache...)
+			cached := slices.Clone(oc.modelCatalogCache)
 			oc.modelCatalogMu.Unlock()
 			return cached
 		}
@@ -324,7 +321,7 @@ func (oc *AIClient) loadModelCatalog(ctx context.Context, useCache bool) []Model
 	if useCache {
 		oc.modelCatalogMu.Lock()
 		oc.modelCatalogLoaded = true
-		oc.modelCatalogCache = append([]ModelCatalogEntry(nil), entries...)
+		oc.modelCatalogCache = slices.Clone(entries)
 		oc.modelCatalogMu.Unlock()
 	}
 	return entries

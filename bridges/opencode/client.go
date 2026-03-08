@@ -18,6 +18,7 @@ import (
 	"github.com/beeper/ai-bridge/bridges/opencode/opencodebridge"
 	"github.com/beeper/ai-bridge/pkg/bridgeadapter"
 	"github.com/beeper/ai-bridge/pkg/shared/streamtransport"
+	"github.com/beeper/ai-bridge/pkg/shared/streamui"
 )
 
 var _ bridgev2.NetworkAPI = (*OpenCodeClient)(nil)
@@ -40,6 +41,7 @@ type OpenCodeClient struct {
 }
 
 type openCodeStreamState struct {
+	portal           *bridgev2.Portal
 	turnID           string
 	agentID          string
 	targetEventID    string
@@ -48,6 +50,24 @@ type openCodeStreamState struct {
 	sequenceNum      int
 	accumulated      strings.Builder
 	visible          strings.Builder
+	ui               streamui.UIState
+	role             string
+	sessionID        string
+	messageID        string
+	parentMessageID  string
+	agent            string
+	modelID          string
+	providerID       string
+	mode             string
+	finishReason     string
+	errorText        string
+	startedAtMs      int64
+	completedAtMs    int64
+	promptTokens     int64
+	completionTokens int64
+	reasoningTokens  int64
+	totalTokens      int64
+	cost             float64
 }
 
 func newOpenCodeClient(login *bridgev2.UserLogin, connector *OpenCodeConnector) (*OpenCodeClient, error) {
@@ -110,6 +130,9 @@ func (oc *OpenCodeClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2
 	if msg == nil || msg.Portal == nil {
 		return nil, errors.New("missing portal context")
 	}
+	if handled, resp := oc.tryApprovalDecisionEvent(ctx, msg); handled {
+		return resp, nil
+	}
 	if oc.bridge == nil {
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 	}
@@ -118,6 +141,43 @@ func (oc *OpenCodeClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 	}
 	return oc.bridge.HandleMatrixMessage(ctx, msg, msg.Portal, oc.PortalMeta(msg.Portal))
+}
+
+func (oc *OpenCodeClient) tryApprovalDecisionEvent(ctx context.Context, msg *bridgev2.MatrixMessage) (bool, *bridgev2.MatrixMessageResponse) {
+	if oc == nil || oc.bridge == nil || msg == nil || msg.Event == nil || msg.Portal == nil {
+		return false, nil
+	}
+	raw, ok := parseOpenCodeApprovalDecision(msg.Event)
+	if !ok {
+		return false, nil
+	}
+	decision, ok := bridgeadapter.ParseApprovalDecision(raw)
+	if !ok {
+		oc.Log().Warn().
+			Str("event_id", msg.Event.ID.String()).
+			Str("sender", msg.Event.Sender.String()).
+			Msg("OpenCode approval decision missing required fields")
+		return true, &bridgev2.MatrixMessageResponse{Pending: false}
+	}
+	err := oc.bridge.ResolveApprovalDecision(ctx, msg.Portal.MXID, decision.ApprovalID, decision.Approved, decision.Always, decision.Reason, msg.Event.Sender)
+	if err != nil {
+		oc.Log().Warn().Err(err).
+			Str("approval_id", decision.ApprovalID).
+			Msg("OpenCode approval decision failed")
+		oc.sendSystemNoticeViaPortal(ctx, msg.Portal, bridgeadapter.ApprovalErrorToastText(err))
+	}
+	return true, &bridgev2.MatrixMessageResponse{Pending: false}
+}
+
+func parseOpenCodeApprovalDecision(evt *event.Event) (map[string]any, bool) {
+	if evt == nil || evt.Content.Raw == nil {
+		return nil, false
+	}
+	raw, ok := evt.Content.Raw["com.beeper.ai.approval_decision"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	return raw, true
 }
 
 func (oc *OpenCodeClient) HandleMatrixDeleteChat(ctx context.Context, msg *bridgev2.MatrixDeleteChat) error {

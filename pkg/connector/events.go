@@ -4,6 +4,7 @@ import (
 	"reflect"
 
 	"maunium.net/go/mautrix/event"
+	_ "maunium.net/go/mautrix/event/cmdschema"
 
 	"github.com/beeper/ai-bridge/pkg/agents/toolpolicy"
 	"github.com/beeper/ai-bridge/pkg/matrixevents"
@@ -121,7 +122,6 @@ type RoomSettingsEventContent struct {
 	MaxContextMessages  int      `json:"max_context_messages,omitempty"`
 	MaxCompletionTokens int      `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string   `json:"reasoning_effort,omitempty"`
-	ConversationMode    string   `json:"conversation_mode,omitempty"` // "messages" or "responses"
 	AgentID             string   `json:"agent_id,omitempty"`
 	EmitThinking        *bool    `json:"emit_thinking,omitempty"`
 	EmitToolArgs        *bool    `json:"emit_tool_args,omitempty"`
@@ -162,7 +162,7 @@ const (
 	BeeperAIKey = matrixevents.BeeperAIKey
 )
 
-// CommandDescriptionEventType is the state event type for com.beeper.command_description.
+// CommandDescriptionEventType is the state event type for MSC4391 command descriptions.
 var CommandDescriptionEventType = matrixevents.CommandDescriptionEventType
 
 // ModelInfo describes a single AI model's capabilities

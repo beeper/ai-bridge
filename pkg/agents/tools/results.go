@@ -3,6 +3,8 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
 )
 
 // JSONResult creates a structured JSON result from any payload.
@@ -11,7 +13,7 @@ func JSONResult(payload any) *Result {
 	return &Result{
 		Status:  ResultSuccess,
 		Content: []ContentBlock{{Type: "text", Text: mustJSON(payload)}},
-		Details: toMap(payload),
+		Details: jsonutil.ToMap(payload),
 	}
 }
 
@@ -33,17 +35,4 @@ func mustJSON(v any) string {
 		return fmt.Sprintf(`{"error":"failed to marshal: %s"}`, err.Error())
 	}
 	return string(data)
-}
-
-// toMap converts a struct to map[string]any for Details field.
-func toMap(v any) map[string]any {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil
-	}
-	return m
 }

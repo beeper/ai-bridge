@@ -15,17 +15,7 @@ func BuildProviderOrder(primary string, fallbacks []string, defaultOrder []strin
 		order = append(order, p)
 	}
 	order = append(order, fallbacks...)
-
-	seen := make(map[string]bool, len(order))
-	result := make([]string, 0, len(order))
-	for _, item := range order {
-		name := strings.TrimSpace(item)
-		if name == "" || seen[name] {
-			continue
-		}
-		seen[name] = true
-		result = append(result, name)
-	}
+	result := DedupeStrings(order)
 	if len(result) == 0 {
 		return slices.Clone(defaultOrder)
 	}

@@ -6,7 +6,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 )
 
-func (m *OpenCodeManager) ensureTurnStarted(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, sessionID, messageID string) {
+func (m *OpenCodeManager) ensureTurnStarted(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, sessionID, messageID string, metadata map[string]any) {
 	if m == nil || m.bridge == nil || inst == nil || portal == nil {
 		return
 	}
@@ -14,7 +14,7 @@ func (m *OpenCodeManager) ensureTurnStarted(ctx context.Context, inst *openCodeI
 		return
 	}
 	state := inst.ensureTurnState(sessionID, messageID)
-	if state == nil || state.started {
+	if state == nil {
 		return
 	}
 	turnID := opencodeMessageStreamTurnID(sessionID, messageID)
@@ -22,10 +22,20 @@ func (m *OpenCodeManager) ensureTurnStarted(ctx context.Context, inst *openCodeI
 		return
 	}
 	agentID := m.bridge.portalAgentID(portal)
-	m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, agentID, map[string]any{
-		"type":      "start",
-		"messageId": turnID,
-	})
+	if state.started {
+		if len(metadata) > 0 {
+			m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, agentID, map[string]any{
+				"type":            "message-metadata",
+				"messageMetadata": metadata,
+			})
+		}
+		return
+	}
+	part := map[string]any{"type": "start", "messageId": turnID}
+	if len(metadata) > 0 {
+		part["messageMetadata"] = metadata
+	}
+	m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, agentID, part)
 	state.started = true
 }
 
@@ -36,7 +46,7 @@ func (m *OpenCodeManager) ensureStepStarted(ctx context.Context, inst *openCodeI
 	if sessionID == "" || messageID == "" {
 		return
 	}
-	m.ensureTurnStarted(ctx, inst, portal, sessionID, messageID)
+	m.ensureTurnStarted(ctx, inst, portal, sessionID, messageID, nil)
 	state := inst.turnStateFor(sessionID, messageID)
 	if state == nil || state.stepOpen {
 		return
@@ -74,7 +84,7 @@ func (m *OpenCodeManager) closeStepIfOpen(ctx context.Context, inst *openCodeIns
 	state.stepOpen = false
 }
 
-func (m *OpenCodeManager) emitTurnFinish(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, sessionID, messageID, finishReason string) {
+func (m *OpenCodeManager) emitTurnFinish(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, sessionID, messageID, finishReason string, metadata map[string]any) {
 	if m == nil || m.bridge == nil || inst == nil || portal == nil {
 		return
 	}
@@ -94,10 +104,14 @@ func (m *OpenCodeManager) emitTurnFinish(ctx context.Context, inst *openCodeInst
 		finishReason = "stop"
 	}
 	agentID := m.bridge.portalAgentID(portal)
-	m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, agentID, map[string]any{
+	part := map[string]any{
 		"type":         "finish",
 		"finishReason": finishReason,
-	})
+	}
+	if len(metadata) > 0 {
+		part["messageMetadata"] = metadata
+	}
+	m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, agentID, part)
 	m.bridge.finishOpenCodeStream(turnID)
 	state.finished = true
 	inst.removeTurnState(sessionID, messageID)

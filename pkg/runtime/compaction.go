@@ -1,5 +1,7 @@
 package runtime
 
+import "slices"
+
 // CompactionInput describes text-level compaction parameters.
 type CompactionInput struct {
 	Messages      []string
@@ -16,7 +18,7 @@ type CompactionResult struct {
 // ApplyCompaction drops oldest messages until the total character count fits within budget,
 // while respecting the protected tail window.
 func ApplyCompaction(input CompactionInput) CompactionResult {
-	messages := append([]string(nil), input.Messages...)
+	messages := slices.Clone(input.Messages)
 	originalChars := 0
 	for _, msg := range messages {
 		originalChars += len(msg)

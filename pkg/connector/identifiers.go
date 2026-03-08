@@ -129,7 +129,7 @@ func messageMeta(msg *database.Message) *MessageMetadata {
 // Filters out non-conversation messages and messages explicitly excluded
 // (e.g., welcome messages).
 func shouldIncludeInHistory(meta *MessageMetadata) bool {
-	if meta == nil || meta.Body == "" {
+	if meta == nil {
 		return false
 	}
 	// Skip messages explicitly excluded (welcome messages, etc.)
@@ -140,7 +140,11 @@ func shouldIncludeInHistory(meta *MessageMetadata) bool {
 	if meta.Role != "user" && meta.Role != "assistant" {
 		return false
 	}
-	return true
+	return len(meta.CanonicalUIMessage) > 0 ||
+		strings.TrimSpace(meta.Body) != "" ||
+		len(meta.ToolCalls) > 0 ||
+		strings.TrimSpace(meta.MediaURL) != "" ||
+		len(meta.GeneratedFiles) > 0
 }
 
 func loginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {

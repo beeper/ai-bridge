@@ -12,22 +12,27 @@ import (
 
 // UIState tracks AI SDK UIMessage stream state shared across bridges.
 type UIState struct {
-	TurnID                  string
-	UIStarted               bool
-	UIFinished              bool
-	UITextID                string
-	UIReasoningID           string
-	UIStepOpen              bool
-	UIStepCount             int
-	UIToolStarted           map[string]bool
-	UISourceURLSeen         map[string]bool
-	UISourceDocumentSeen    map[string]bool
-	UIFileSeen              map[string]bool
-	UIToolOutputFinalized   map[string]bool
-	UIToolCallIDByApproval  map[string]string
-	UIToolApprovalRequested map[string]bool
-	UIToolNameByToolCallID  map[string]string
-	UIToolTypeByToolCallID  map[string]matrixevents.ToolType
+	TurnID                   string
+	UIStarted                bool
+	UIFinished               bool
+	UITextID                 string
+	UIReasoningID            string
+	UIStepOpen               bool
+	UIStepCount              int
+	UICanonicalMessage       map[string]any
+	UIToolStarted            map[string]bool
+	UISourceURLSeen          map[string]bool
+	UISourceDocumentSeen     map[string]bool
+	UIFileSeen               map[string]bool
+	UIToolOutputFinalized    map[string]bool
+	UIToolCallIDByApproval   map[string]string
+	UIToolApprovalRequested  map[string]bool
+	UIToolNameByToolCallID   map[string]string
+	UIToolTypeByToolCallID   map[string]matrixevents.ToolType
+	UITextPartIndexByID      map[string]int
+	UIReasoningPartIndexByID map[string]int
+	UIToolPartIndexByID      map[string]int
+	UIToolInputTextByID      map[string]string
 }
 
 // InitMaps initialises all nil maps so callers don't need nil checks.
@@ -58,6 +63,18 @@ func (s *UIState) InitMaps() {
 	}
 	if s.UIToolTypeByToolCallID == nil {
 		s.UIToolTypeByToolCallID = make(map[string]matrixevents.ToolType)
+	}
+	if s.UITextPartIndexByID == nil {
+		s.UITextPartIndexByID = make(map[string]int)
+	}
+	if s.UIReasoningPartIndexByID == nil {
+		s.UIReasoningPartIndexByID = make(map[string]int)
+	}
+	if s.UIToolPartIndexByID == nil {
+		s.UIToolPartIndexByID = make(map[string]int)
+	}
+	if s.UIToolInputTextByID == nil {
+		s.UIToolInputTextByID = make(map[string]string)
 	}
 }
 
