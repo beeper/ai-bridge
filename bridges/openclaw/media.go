@@ -1,0 +1,370 @@
+package openclaw
+
+import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
+
+	"github.com/beeper/ai-bridge/pkg/shared/jsonutil"
+	"github.com/beeper/ai-bridge/pkg/shared/stringutil"
+)
+
+const openClawMaxMediaMB = 50
+
+type openClawUploadedAttachment struct {
+	Content   *event.MessageEventContent
+	Metadata  map[string]any
+	MatrixURL string
+}
+
+func (oc *OpenClawClient) buildOpenClawAttachmentContent(ctx context.Context, portal *bridgev2.Portal, block map[string]any) (*openClawUploadedAttachment, error) {
+	if portal == nil || oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || oc.UserLogin.Bridge.Bot == nil {
+		return nil, errors.New("matrix API unavailable")
+	}
+	source := openClawAttachmentSourceFromBlock(block)
+	if source == nil {
+		return nil, errors.New("unsupported attachment source")
+	}
+	data, mimeType, err := downloadOpenClawAttachment(ctx, source, openClawMaxMediaMB)
+	if err != nil {
+		return nil, err
+	}
+	filename := openClawAttachmentFilename(source)
+	if filename == "" {
+		filename = fallbackFilenameForMIME(mimeType)
+	}
+	uri, file, err := oc.UserLogin.Bridge.Bot.UploadMedia(ctx, portal.MXID, data, filename, mimeType)
+	if err != nil {
+		return nil, err
+	}
+
+	content := &event.MessageEventContent{
+		MsgType:  messageTypeForMIME(mimeType),
+		Body:     filename,
+		FileName: filename,
+		Info: &event.FileInfo{
+			MimeType: mimeType,
+			Size:     len(data),
+		},
+	}
+	matrixURL := string(uri)
+	if file != nil {
+		content.File = file
+		matrixURL = string(file.URL)
+	} else {
+		content.URL = uri
+	}
+	return &openClawUploadedAttachment{
+		Content:   content,
+		Metadata:  openClawMessageExtra(content),
+		MatrixURL: matrixURL,
+	}, nil
+}
+
+type openClawAttachmentSource struct {
+	Kind     string
+	URL      string
+	Data     string
+	MimeType string
+	FileName string
+}
+
+func openClawAttachmentSourceFromBlock(block map[string]any) *openClawAttachmentSource {
+	if len(block) == 0 {
+		return nil
+	}
+	source := jsonutil.ToMap(block["source"])
+	if len(source) > 0 {
+		sourceType := strings.ToLower(strings.TrimSpace(stringValue(source["type"])))
+		switch sourceType {
+		case "base64":
+			return &openClawAttachmentSource{
+				Kind:     sourceType,
+				Data:     strings.TrimSpace(stringValue(source["data"])),
+				MimeType: stringutil.NormalizeMimeType(stringsTrimDefault(stringValue(source["media_type"]), stringValue(block["mimeType"]))),
+				FileName: stringsTrimDefault(stringValue(source["filename"]), openClawBlockFilename(block)),
+			}
+		case "url":
+			return &openClawAttachmentSource{
+				Kind:     sourceType,
+				URL:      strings.TrimSpace(stringValue(source["url"])),
+				MimeType: stringutil.NormalizeMimeType(stringsTrimDefault(stringValue(block["mimeType"]), stringValue(block["mediaType"]))),
+				FileName: openClawBlockFilename(block),
+			}
+		}
+	}
+	if data := strings.TrimSpace(stringValue(block["content"])); data != "" {
+		return &openClawAttachmentSource{
+			Kind:     "base64",
+			Data:     data,
+			MimeType: stringutil.NormalizeMimeType(stringsTrimDefault(stringValue(block["mimeType"]), stringValue(block["mediaType"]))),
+			FileName: openClawBlockFilename(block),
+		}
+	}
+	if data := strings.TrimSpace(stringValue(block["data"])); data != "" {
+		return &openClawAttachmentSource{
+			Kind:     "base64",
+			Data:     data,
+			MimeType: stringutil.NormalizeMimeType(stringsTrimDefault(stringValue(block["mimeType"]), stringValue(block["mediaType"]))),
+			FileName: openClawBlockFilename(block),
+		}
+	}
+	if rawURL := strings.TrimSpace(stringsTrimDefault(stringValue(block["url"]), stringValue(block["href"]))); rawURL != "" {
+		return &openClawAttachmentSource{
+			Kind:     "url",
+			URL:      rawURL,
+			MimeType: stringutil.NormalizeMimeType(stringsTrimDefault(stringValue(block["mimeType"]), stringValue(block["mediaType"]))),
+			FileName: openClawBlockFilename(block),
+		}
+	}
+	return nil
+}
+
+func openClawBlockFilename(block map[string]any) string {
+	for _, key := range []string{"fileName", "filename", "name", "title"} {
+		if value := strings.TrimSpace(stringValue(block[key])); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func openClawAttachmentFilename(source *openClawAttachmentSource) string {
+	if source == nil {
+		return ""
+	}
+	if source.FileName != "" {
+		return source.FileName
+	}
+	if source.URL == "" {
+		return ""
+	}
+	if strings.HasPrefix(source.URL, "file://") {
+		pathValue := strings.TrimPrefix(source.URL, "file://")
+		if unescaped, err := url.PathUnescape(pathValue); err == nil {
+			pathValue = unescaped
+		}
+		return filepath.Base(pathValue)
+	}
+	if strings.HasPrefix(source.URL, "/") {
+		return filepath.Base(source.URL)
+	}
+	parsed, err := url.Parse(source.URL)
+	if err != nil {
+		return ""
+	}
+	base := path.Base(parsed.Path)
+	if base == "." || base == "/" {
+		return ""
+	}
+	return base
+}
+
+func downloadOpenClawAttachment(ctx context.Context, source *openClawAttachmentSource, maxSizeMB int) ([]byte, string, error) {
+	if source == nil {
+		return nil, "", errors.New("missing attachment source")
+	}
+	maxBytes := int64(maxSizeMB * 1024 * 1024)
+	switch source.Kind {
+	case "base64":
+		data, mimeType, err := decodeOpenClawDataOrBase64(source.Data, source.MimeType)
+		if err != nil {
+			return nil, "", err
+		}
+		if maxBytes > 0 && int64(len(data)) > maxBytes {
+			return nil, "", fmt.Errorf("file too large: %d bytes (max %d MB)", len(data), maxSizeMB)
+		}
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		return data, mimeType, nil
+	case "url":
+		return downloadOpenClawAttachmentURL(ctx, source.URL, source.MimeType, maxBytes, maxSizeMB)
+	default:
+		return nil, "", fmt.Errorf("unsupported attachment source kind %q", source.Kind)
+	}
+}
+
+func decodeOpenClawDataOrBase64(raw, fallbackMime string) ([]byte, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, "", errors.New("missing attachment data")
+	}
+	if strings.HasPrefix(raw, "data:") {
+		return decodeOpenClawDataURL(raw)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, "", err
+	}
+	mimeType := stringutil.NormalizeMimeType(fallbackMime)
+	if mimeType == "" {
+		mimeType = http.DetectContentType(decoded)
+	}
+	return decoded, mimeType, nil
+}
+
+func downloadOpenClawAttachmentURL(ctx context.Context, rawURL, fallbackMime string, maxBytes int64, maxSizeMB int) ([]byte, string, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return nil, "", errors.New("missing attachment URL")
+	}
+	if strings.HasPrefix(rawURL, "file://") || strings.HasPrefix(rawURL, "/") {
+		pathValue := rawURL
+		if strings.HasPrefix(pathValue, "file://") {
+			pathValue = strings.TrimPrefix(pathValue, "file://")
+			if unescaped, err := url.PathUnescape(pathValue); err == nil {
+				pathValue = unescaped
+			}
+		}
+		info, err := os.Stat(pathValue)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to stat file: %w", err)
+		}
+		if maxBytes > 0 && info.Size() > maxBytes {
+			return nil, "", fmt.Errorf("file too large: %d bytes (max %d MB)", info.Size(), maxSizeMB)
+		}
+		data, err := os.ReadFile(pathValue)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to read file: %w", err)
+		}
+		mimeType := stringutil.NormalizeMimeType(mime.TypeByExtension(filepath.Ext(pathValue)))
+		if mimeType == "" {
+			mimeType = http.DetectContentType(data)
+		}
+		if mimeType == "" {
+			mimeType = stringutil.NormalizeMimeType(fallbackMime)
+		}
+		return data, mimeType, nil
+	}
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("file download failed with status %d", resp.StatusCode)
+	}
+	if maxBytes > 0 && resp.ContentLength > 0 && resp.ContentLength > maxBytes {
+		return nil, "", fmt.Errorf("file too large: %d bytes (max %d MB)", resp.ContentLength, maxSizeMB)
+	}
+	var reader io.Reader = resp.Body
+	if maxBytes > 0 {
+		reader = io.LimitReader(resp.Body, maxBytes+1)
+	}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, "", err
+	}
+	if maxBytes > 0 && int64(len(data)) > maxBytes {
+		return nil, "", fmt.Errorf("file too large: %d bytes (max %d MB)", len(data), maxSizeMB)
+	}
+	mimeType := stringutil.NormalizeMimeType(resp.Header.Get("Content-Type"))
+	if mimeType == "" {
+		mimeType = stringutil.NormalizeMimeType(fallbackMime)
+	}
+	if mimeType == "" {
+		mimeType = http.DetectContentType(data)
+	}
+	return data, mimeType, nil
+}
+
+func decodeOpenClawDataURL(raw string) ([]byte, string, error) {
+	if !strings.HasPrefix(raw, "data:") {
+		return nil, "", errors.New("not a data URL")
+	}
+	comma := strings.IndexByte(raw, ',')
+	if comma < 0 {
+		return nil, "", errors.New("invalid data URL")
+	}
+	meta := raw[len("data:"):comma]
+	payload := raw[comma+1:]
+	mimeType := ""
+	if meta != "" {
+		mimeType = strings.TrimSpace(strings.Split(meta, ";")[0])
+	}
+	if strings.Contains(meta, ";base64") {
+		decoded, err := base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			return nil, "", err
+		}
+		return decoded, stringutil.NormalizeMimeType(mimeType), nil
+	}
+	decoded, err := url.PathUnescape(payload)
+	if err != nil {
+		return nil, "", err
+	}
+	return []byte(decoded), stringutil.NormalizeMimeType(mimeType), nil
+}
+
+func messageTypeForMIME(mimeType string) event.MessageType {
+	mimeType = stringutil.NormalizeMimeType(mimeType)
+	switch {
+	case strings.HasPrefix(mimeType, "image/"):
+		return event.MsgImage
+	case strings.HasPrefix(mimeType, "audio/"):
+		return event.MsgAudio
+	case strings.HasPrefix(mimeType, "video/"):
+		return event.MsgVideo
+	default:
+		return event.MsgFile
+	}
+}
+
+func fallbackFilenameForMIME(mimeType string) string {
+	mimeType = stringutil.NormalizeMimeType(mimeType)
+	exts, _ := mime.ExtensionsByType(mimeType)
+	if len(exts) > 0 {
+		return "file" + exts[0]
+	}
+	return "file"
+}
+
+func openClawMessageExtra(content *event.MessageEventContent) map[string]any {
+	extra := map[string]any{
+		"msgtype":    content.MsgType,
+		"body":       content.Body,
+		"m.mentions": map[string]any{},
+	}
+	if content.FileName != "" {
+		extra["filename"] = content.FileName
+	}
+	if content.Info != nil {
+		info := map[string]any{}
+		if content.Info.MimeType != "" {
+			info["mimetype"] = content.Info.MimeType
+		}
+		if content.Info.Size > 0 {
+			info["size"] = content.Info.Size
+		}
+		if len(info) > 0 {
+			extra["info"] = info
+		}
+	}
+	if content.File != nil {
+		extra["file"] = content.File
+	} else if content.URL != id.ContentURIString("") {
+		extra["url"] = string(content.URL)
+	}
+	return extra
+}
