@@ -99,6 +99,27 @@ type gatewayHistoryResponse struct {
 	Messages      []map[string]any `json:"messages"`
 }
 
+type gatewaySessionPreviewItem struct {
+	Role string `json:"role,omitempty"`
+	Text string `json:"text,omitempty"`
+}
+
+type gatewaySessionPreviewEntry struct {
+	Key    string                      `json:"key,omitempty"`
+	Status string                      `json:"status,omitempty"`
+	Items  []gatewaySessionPreviewItem `json:"items,omitempty"`
+}
+
+type gatewaySessionsPreviewResponse struct {
+	TS       int64                        `json:"ts,omitempty"`
+	Previews []gatewaySessionPreviewEntry `json:"previews,omitempty"`
+}
+
+type gatewayResolveSessionResponse struct {
+	OK  bool   `json:"ok,omitempty"`
+	Key string `json:"key,omitempty"`
+}
+
 type gatewayApprovalRequestEvent struct {
 	ID          string         `json:"id"`
 	Request     map[string]any `json:"request"`
@@ -136,10 +157,65 @@ type gatewayAgentEvent struct {
 }
 
 type gatewayAgentIdentity struct {
-	AgentID string `json:"agentId"`
-	Name    string `json:"name,omitempty"`
-	Avatar  string `json:"avatar,omitempty"`
-	Emoji   string `json:"emoji,omitempty"`
+	AgentID   string `json:"agentId"`
+	Name      string `json:"name,omitempty"`
+	Avatar    string `json:"avatar,omitempty"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
+	Emoji     string `json:"emoji,omitempty"`
+}
+
+type gatewayAgentSummary struct {
+	ID       string                `json:"id"`
+	Name     string                `json:"name,omitempty"`
+	Identity *gatewayAgentIdentity `json:"identity,omitempty"`
+}
+
+type gatewayAgentsListResponse struct {
+	DefaultID string                `json:"defaultId,omitempty"`
+	MainKey   string                `json:"mainKey,omitempty"`
+	Scope     string                `json:"scope,omitempty"`
+	Agents    []gatewayAgentSummary `json:"agents"`
+}
+
+type gatewayModelChoice struct {
+	ID            string `json:"id,omitempty"`
+	Name          string `json:"name,omitempty"`
+	Provider      string `json:"provider,omitempty"`
+	ContextWindow int64  `json:"contextWindow,omitempty"`
+	Reasoning     bool   `json:"reasoning,omitempty"`
+}
+
+type gatewayModelsListResponse struct {
+	Models []gatewayModelChoice `json:"models"`
+}
+
+type gatewayToolCatalogProfile struct {
+	ID    string `json:"id,omitempty"`
+	Label string `json:"label,omitempty"`
+}
+
+type gatewayToolCatalogEntry struct {
+	ID              string   `json:"id,omitempty"`
+	Label           string   `json:"label,omitempty"`
+	Description     string   `json:"description,omitempty"`
+	Source          string   `json:"source,omitempty"`
+	PluginID        string   `json:"pluginId,omitempty"`
+	Optional        bool     `json:"optional,omitempty"`
+	DefaultProfiles []string `json:"defaultProfiles,omitempty"`
+}
+
+type gatewayToolCatalogGroup struct {
+	ID       string                    `json:"id,omitempty"`
+	Label    string                    `json:"label,omitempty"`
+	Source   string                    `json:"source,omitempty"`
+	PluginID string                    `json:"pluginId,omitempty"`
+	Tools    []gatewayToolCatalogEntry `json:"tools,omitempty"`
+}
+
+type gatewayToolsCatalogResponse struct {
+	AgentID  string                      `json:"agentId,omitempty"`
+	Profiles []gatewayToolCatalogProfile `json:"profiles,omitempty"`
+	Groups   []gatewayToolCatalogGroup   `json:"groups,omitempty"`
 }
 
 type gatewayWaitRunResponse struct {
@@ -314,6 +390,85 @@ func (c *gatewayWSClient) RecentHistory(ctx context.Context, sessionKey string, 
 	return &resp, nil
 }
 
+func (c *gatewayWSClient) PreviewSessions(ctx context.Context, keys []string, limit, maxChars int) (*gatewaySessionsPreviewResponse, error) {
+	filtered := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if trimmed := strings.TrimSpace(key); trimmed != "" {
+			filtered = append(filtered, trimmed)
+		}
+	}
+	if len(filtered) == 0 {
+		return &gatewaySessionsPreviewResponse{}, nil
+	}
+	if limit <= 0 {
+		limit = 6
+	}
+	if maxChars <= 0 {
+		maxChars = 240
+	}
+	var resp gatewaySessionsPreviewResponse
+	if err := c.Request(ctx, "sessions.preview", map[string]any{
+		"keys":     filtered,
+		"limit":    limit,
+		"maxChars": maxChars,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *gatewayWSClient) ResolveSessionKey(ctx context.Context, key string) (string, error) {
+	var resp gatewayResolveSessionResponse
+	if err := c.Request(ctx, "sessions.resolve", map[string]any{
+		"key": strings.TrimSpace(key),
+	}, &resp); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(resp.Key), nil
+}
+
+func (c *gatewayWSClient) ListAgents(ctx context.Context) (*gatewayAgentsListResponse, error) {
+	var resp gatewayAgentsListResponse
+	if err := c.Request(ctx, "agents.list", map[string]any{}, &resp); err != nil {
+		return nil, err
+	}
+	for i := range resp.Agents {
+		resp.Agents[i].ID = strings.TrimSpace(resp.Agents[i].ID)
+		resp.Agents[i].Name = strings.TrimSpace(resp.Agents[i].Name)
+		resp.Agents[i].Identity = normalizeGatewayAgentIdentity(resp.Agents[i].Identity)
+	}
+	resp.DefaultID = strings.TrimSpace(resp.DefaultID)
+	resp.MainKey = strings.TrimSpace(resp.MainKey)
+	resp.Scope = strings.TrimSpace(resp.Scope)
+	return &resp, nil
+}
+
+func (c *gatewayWSClient) ListModels(ctx context.Context) (*gatewayModelsListResponse, error) {
+	var resp gatewayModelsListResponse
+	if err := c.Request(ctx, "models.list", map[string]any{}, &resp); err != nil {
+		return nil, err
+	}
+	for i := range resp.Models {
+		resp.Models[i].ID = strings.TrimSpace(resp.Models[i].ID)
+		resp.Models[i].Name = strings.TrimSpace(resp.Models[i].Name)
+		resp.Models[i].Provider = strings.TrimSpace(resp.Models[i].Provider)
+	}
+	return &resp, nil
+}
+
+func (c *gatewayWSClient) GetToolsCatalog(ctx context.Context, agentID string) (*gatewayToolsCatalogResponse, error) {
+	params := map[string]any{}
+	if trimmed := strings.TrimSpace(agentID); trimmed != "" {
+		params["agentId"] = trimmed
+	}
+	var resp gatewayToolsCatalogResponse
+	if err := c.Request(ctx, "tools.catalog", params, &resp); err != nil {
+		return nil, err
+	}
+	resp.AgentID = strings.TrimSpace(resp.AgentID)
+	return &resp, nil
+}
+
 func (c *gatewayWSClient) SendMessage(ctx context.Context, sessionKey, message string, attachments []map[string]any, thinking, verbose, idempotencyKey string) (*gatewaySendResponse, error) {
 	params := map[string]any{
 		"sessionKey":     strings.TrimSpace(sessionKey),
@@ -367,7 +522,7 @@ func (c *gatewayWSClient) GetAgentIdentity(ctx context.Context, agentID, session
 	if err := c.Request(ctx, "agent.identity.get", params, &resp); err != nil {
 		return nil, err
 	}
-	return &resp, nil
+	return normalizeGatewayAgentIdentity(&resp), nil
 }
 
 func (c *gatewayWSClient) WaitForRun(ctx context.Context, runID string, timeout time.Duration) (*gatewayWaitRunResponse, error) {
@@ -384,6 +539,22 @@ func (c *gatewayWSClient) WaitForRun(ctx context.Context, runID string, timeout 
 		return nil, err
 	}
 	return &resp, nil
+}
+
+func normalizeGatewayAgentIdentity(identity *gatewayAgentIdentity) *gatewayAgentIdentity {
+	if identity == nil {
+		return nil
+	}
+	normalized := *identity
+	normalized.AgentID = strings.TrimSpace(normalized.AgentID)
+	normalized.Name = strings.TrimSpace(normalized.Name)
+	normalized.Avatar = strings.TrimSpace(normalized.Avatar)
+	normalized.AvatarURL = strings.TrimSpace(normalized.AvatarURL)
+	normalized.Emoji = strings.TrimSpace(normalized.Emoji)
+	if normalized.Avatar == "" {
+		normalized.Avatar = normalized.AvatarURL
+	}
+	return &normalized
 }
 
 func (c *gatewayWSClient) Request(ctx context.Context, method string, params map[string]any, out any) error {

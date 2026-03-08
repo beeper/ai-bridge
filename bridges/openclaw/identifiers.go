@@ -84,3 +84,19 @@ func parseOpenClawGhostID(ghostID string) (string, bool) {
 func openClawAgentIDFromSessionKey(sessionKey string) string {
 	return openclawconv.AgentIDFromSessionKey(sessionKey)
 }
+
+func openClawDMAgentSessionKey(agentID string) string {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		agentID = "gateway"
+	}
+	return fmt.Sprintf("agent:%s:matrix-dm", strings.ToLower(agentID))
+}
+
+func isOpenClawSyntheticDMSessionKey(sessionKey string) bool {
+	sessionKey = strings.ToLower(strings.TrimSpace(sessionKey))
+	if !strings.HasSuffix(sessionKey, ":matrix-dm") {
+		return false
+	}
+	return openClawAgentIDFromSessionKey(sessionKey) != ""
+}

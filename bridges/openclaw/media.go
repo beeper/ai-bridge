@@ -94,6 +94,7 @@ func openClawAttachmentSourceFromBlock(block map[string]any) *openClawAttachment
 		block["imageUrl"],
 		block["asset"],
 		block["blob"],
+		block["src"],
 	} {
 		if source := openClawAttachmentSourceFromValue(candidate, block); source != nil {
 			return source
@@ -103,7 +104,7 @@ func openClawAttachmentSourceFromBlock(block map[string]any) *openClawAttachment
 		return &openClawAttachmentSource{
 			Kind:     openClawAttachmentKindFromString(data),
 			Data:     data,
-			MimeType: stringutil.NormalizeMimeType(stringsTrimDefault(stringValue(block["mimeType"]), stringValue(block["mediaType"]))),
+			MimeType: openClawBlockMimeType(block),
 			FileName: openClawBlockFilename(block),
 		}
 	}
@@ -111,7 +112,7 @@ func openClawAttachmentSourceFromBlock(block map[string]any) *openClawAttachment
 		return &openClawAttachmentSource{
 			Kind:     openClawAttachmentKindFromString(data),
 			Data:     data,
-			MimeType: stringutil.NormalizeMimeType(stringsTrimDefault(stringValue(block["mimeType"]), stringValue(block["mediaType"]))),
+			MimeType: openClawBlockMimeType(block),
 			FileName: openClawBlockFilename(block),
 		}
 	}
@@ -119,7 +120,7 @@ func openClawAttachmentSourceFromBlock(block map[string]any) *openClawAttachment
 		return &openClawAttachmentSource{
 			Kind:     "url",
 			URL:      rawURL,
-			MimeType: stringutil.NormalizeMimeType(stringsTrimDefault(stringValue(block["mimeType"]), stringValue(block["mediaType"]))),
+			MimeType: openClawBlockMimeType(block),
 			FileName: openClawBlockFilename(block),
 		}
 	}
@@ -130,7 +131,7 @@ func openClawAttachmentSourceFromValue(value any, block map[string]any) *openCla
 	if raw := strings.TrimSpace(stringValue(value)); raw != "" {
 		source := &openClawAttachmentSource{
 			Kind:     openClawAttachmentKindFromString(raw),
-			MimeType: stringutil.NormalizeMimeType(stringsTrimDefault(stringValue(block["mimeType"]), stringValue(block["mediaType"]))),
+			MimeType: openClawBlockMimeType(block),
 			FileName: openClawBlockFilename(block),
 		}
 		if source.Kind == "url" {
@@ -145,6 +146,11 @@ func openClawAttachmentSourceFromValue(value any, block map[string]any) *openCla
 	if len(source) == 0 {
 		return nil
 	}
+	for _, nestedKey := range []string{"source", "file", "image_url", "imageUrl", "asset", "blob", "src"} {
+		if nested := openClawAttachmentSourceFromValue(source[nestedKey], block); nested != nil {
+			return nested
+		}
+	}
 	sourceType := strings.ToLower(strings.TrimSpace(stringValue(source["type"])))
 	if sourceType == "" {
 		if rawURL := strings.TrimSpace(stringsTrimDefault(stringValue(source["url"]), stringValue(source["href"]))); rawURL != "" {
@@ -157,8 +163,8 @@ func openClawAttachmentSourceFromValue(value any, block map[string]any) *openCla
 		Kind:     sourceType,
 		URL:      strings.TrimSpace(stringsTrimDefault(stringValue(source["url"]), stringValue(source["href"]))),
 		Data:     strings.TrimSpace(stringsTrimDefault(stringValue(source["data"]), stringValue(source["content"]))),
-		MimeType: stringutil.NormalizeMimeType(stringsTrimDefault(stringsTrimDefault(stringValue(source["media_type"]), stringValue(source["mimeType"])), stringsTrimDefault(stringValue(block["mimeType"]), stringValue(block["mediaType"])))),
-		FileName: stringsTrimDefault(stringsTrimDefault(stringValue(source["filename"]), stringValue(source["name"])), openClawBlockFilename(block)),
+		MimeType: openClawSourceMimeType(source, block),
+		FileName: stringsTrimDefault(stringsTrimDefault(stringsTrimDefault(stringValue(source["filename"]), stringValue(source["fileName"])), stringsTrimDefault(stringValue(source["name"]), stringValue(source["path"]))), openClawBlockFilename(block)),
 	}
 	switch result.Kind {
 	case "base64", "url":
@@ -193,12 +199,39 @@ func openClawAttachmentKindFromString(raw string) string {
 }
 
 func openClawBlockFilename(block map[string]any) string {
-	for _, key := range []string{"fileName", "filename", "name", "title"} {
+	for _, key := range []string{"fileName", "filename", "name", "title", "path"} {
 		if value := strings.TrimSpace(stringValue(block[key])); value != "" {
 			return value
 		}
 	}
 	return ""
+}
+
+func openClawBlockMimeType(block map[string]any) string {
+	return stringutil.NormalizeMimeType(
+		stringsTrimDefault(
+			stringsTrimDefault(
+				stringsTrimDefault(stringValue(block["contentType"]), stringValue(block["mimeType"])),
+				stringValue(block["mime_type"]),
+			),
+			stringsTrimDefault(stringValue(block["mediaType"]), stringValue(block["media_type"])),
+		),
+	)
+}
+
+func openClawSourceMimeType(source, block map[string]any) string {
+	return stringutil.NormalizeMimeType(
+		stringsTrimDefault(
+			stringsTrimDefault(
+				stringsTrimDefault(stringValue(source["contentType"]), stringValue(source["mimeType"])),
+				stringValue(source["mime_type"]),
+			),
+			stringsTrimDefault(
+				stringsTrimDefault(stringValue(source["mediaType"]), stringValue(source["media_type"])),
+				openClawBlockMimeType(block),
+			),
+		),
+	)
 }
 
 func openClawAttachmentFilename(source *openClawAttachmentSource) string {

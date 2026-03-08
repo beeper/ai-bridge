@@ -27,6 +27,14 @@ func TestGatewaySmoke(t *testing.T) {
 	}
 	defer client.Close()
 
+	agents, err := client.ListAgents(ctx)
+	if err != nil {
+		t.Fatalf("agents.list: %v", err)
+	}
+	if agents == nil {
+		t.Fatal("expected non-nil agents.list response")
+	}
+
 	sessions, err := client.ListSessions(ctx, 20)
 	if err != nil {
 		t.Fatalf("sessions.list: %v", err)
@@ -55,6 +63,26 @@ func TestGatewaySmoke(t *testing.T) {
 		}
 		if identity == nil || strings.TrimSpace(identity.AgentID) == "" {
 			t.Fatal("expected non-empty agent identity")
+		}
+	}
+
+	dmAgentID := strings.TrimSpace(os.Getenv("OPENCLAW_SMOKE_DM_AGENT_ID"))
+	if dmAgentID == "" && agents != nil {
+		dmAgentID = strings.TrimSpace(agents.DefaultID)
+	}
+	if dmAgentID != "" {
+		dmSessionKey := openClawDMAgentSessionKey(dmAgentID)
+		if openClawAgentIDFromSessionKey(dmSessionKey) != dmAgentID {
+			t.Fatalf("expected synthetic dm session key for %q, got %q", dmAgentID, dmSessionKey)
+		}
+		if message := strings.TrimSpace(os.Getenv("OPENCLAW_SMOKE_SEND_MESSAGE")); message != "" {
+			resp, err := client.SendMessage(ctx, dmSessionKey, message, nil, "", "", "smoke-"+time.Now().UTC().Format("20060102150405"))
+			if err != nil {
+				t.Fatalf("chat.send synthetic dm: %v", err)
+			}
+			if resp == nil || strings.TrimSpace(resp.RunID) == "" {
+				t.Fatal("expected non-empty run id from synthetic dm send")
+			}
 		}
 	}
 }

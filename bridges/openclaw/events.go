@@ -65,6 +65,9 @@ func (evt *OpenClawSessionResyncEvent) GetChatInfo(ctx context.Context, portal *
 	meta.OpenClawChatType = evt.session.ChatType
 	meta.OpenClawOrigin = evt.session.Origin
 	meta.OpenClawAgentID = stringsTrimDefault(meta.OpenClawAgentID, openClawAgentIDFromSessionKey(evt.session.Key))
+	if isOpenClawSyntheticDMSessionKey(evt.session.Key) {
+		meta.OpenClawDMTargetAgentID = stringsTrimDefault(meta.OpenClawDMTargetAgentID, openClawAgentIDFromSessionKey(evt.session.Key))
+	}
 	meta.OpenClawSystemSent = evt.session.SystemSent
 	meta.OpenClawAbortedLastRun = evt.session.AbortedLastRun
 	meta.ThinkingLevel = evt.session.ThinkingLevel
@@ -85,8 +88,13 @@ func (evt *OpenClawSessionResyncEvent) GetChatInfo(ctx context.Context, portal *
 	meta.LastTo = evt.session.LastTo
 	meta.LastAccountID = evt.session.LastAccountID
 	meta.SessionUpdatedAt = evt.session.UpdatedAt
+	meta.OpenClawPreviewSnippet = stringsTrimDefault(meta.OpenClawPreviewSnippet, evt.session.LastMessagePreview)
+	if meta.OpenClawPreviewSnippet != "" && meta.OpenClawLastPreviewAt == 0 {
+		meta.OpenClawLastPreviewAt = time.Now().UnixMilli()
+	}
 	meta.HistoryMode = "recent_only"
 	meta.RecentHistoryLimit = openClawDefaultSessionLimit
+	evt.client.enrichPortalMetadata(ctx, meta)
 	portal.Metadata = meta
 
 	title := evt.client.displayNameForSession(evt.session)
@@ -100,27 +108,30 @@ func (evt *OpenClawSessionResyncEvent) GetChatInfo(ctx context.Context, portal *
 		},
 	}
 	agentID := stringsTrimDefault(meta.OpenClawAgentID, "gateway")
+	if strings.TrimSpace(meta.OpenClawDMTargetAgentID) != "" {
+		agentID = strings.TrimSpace(meta.OpenClawDMTargetAgentID)
+		meta.OpenClawAgentID = agentID
+	}
 	identity := evt.client.lookupAgentIdentity(ctx, agentID, evt.session.Key)
 	if identity != nil && strings.TrimSpace(identity.AgentID) != "" {
 		agentID = strings.TrimSpace(identity.AgentID)
 		meta.OpenClawAgentID = agentID
 	}
-	agentName := evt.client.displayNameForAgent(agentID)
-	if identity != nil {
-		if strings.TrimSpace(identity.Name) != "" {
-			agentName = evt.client.formatAgentDisplayName(&GhostMetadata{
-				OpenClawAgentID:    agentID,
-				OpenClawAgentName:  strings.TrimSpace(identity.Name),
-				OpenClawAgentEmoji: strings.TrimSpace(identity.Emoji),
-			}, agentID)
-		}
+	configured, err := evt.client.agentCatalogEntryByID(ctx, agentID)
+	if err != nil {
+		evt.client.Log().Debug().Err(err).Str("agent_id", agentID).Msg("Failed to refresh OpenClaw agent catalog during session resync")
+	}
+	profile := evt.client.resolveAgentProfile(ctx, agentID, evt.session.Key, nil, configured)
+	agentName := evt.client.displayNameFromAgentProfile(profile)
+	if strings.TrimSpace(meta.OpenClawDMTargetAgentName) == "" && strings.TrimSpace(meta.OpenClawDMTargetAgentID) == agentID {
+		meta.OpenClawDMTargetAgentName = agentName
+	}
+	if isOpenClawSyntheticDMSessionKey(evt.session.Key) && strings.TrimSpace(meta.OpenClawDMTargetAgentName) != "" {
+		title = strings.TrimSpace(meta.OpenClawDMTargetAgentName)
 	}
 	memberMap[openClawGhostUserID(agentID)] = bridgev2.ChatMember{
 		EventSender: evt.client.senderForAgent(agentID, false),
-		UserInfo: &bridgev2.UserInfo{
-			Name:  ptr.Ptr(agentName),
-			IsBot: ptr.Ptr(true),
-		},
+		UserInfo:    evt.client.userInfoForAgentProfile(profile),
 	}
 	return &bridgev2.ChatInfo{
 		Type:  ptr.Ptr(database.RoomTypeDM),

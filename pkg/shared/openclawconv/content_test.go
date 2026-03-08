@@ -42,4 +42,17 @@ func TestIsAttachmentBlock(t *testing.T) {
 	}) {
 		t.Fatal("nested file map should be treated as attachment")
 	}
+	if !IsAttachmentBlock(map[string]any{
+		"type":        "audio",
+		"fileName":    "clip.mp3",
+		"contentType": "audio/mpeg",
+	}) {
+		t.Fatal("audio block with filename/mime should be treated as attachment")
+	}
+	if !IsAttachmentBlock(map[string]any{
+		"type": "image",
+		"src":  map[string]any{"url": "https://example.com/image.png"},
+	}) {
+		t.Fatal("src map should be treated as attachment")
+	}
 }
