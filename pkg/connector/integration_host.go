@@ -440,7 +440,7 @@ func (h *runtimeIntegrationHost) PersistSystemEvents() {
 	if h == nil || h.client == nil {
 		return
 	}
-	persistSystemEventsSnapshot(h.client.bridgeStateBackend(), h.client.Log())
+	persistSystemEventsSnapshot(h.client)
 }
 
 func (h *runtimeIntegrationHost) ResolveLastTarget(agentID string) (channel string, target string, ok bool) {
