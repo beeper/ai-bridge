@@ -382,7 +382,7 @@ func (oc *AIClient) selectResponseFn(meta *PortalMetadata, prompt []openai.ChatC
 		return oc.streamChatCompletions, "chat_completions"
 	default:
 		// Use Responses API for other content (images, files, text)
-		return oc.streamingResponseWithToolSchemaFallback, "responses"
+		return oc.streamingResponse, "responses"
 	}
 }
 

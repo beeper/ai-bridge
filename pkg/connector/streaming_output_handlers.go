@@ -367,5 +367,4 @@ func (oc *AIClient) handleResponseOutputItemDone(
 	})
 }
 
-// streamingResponseWithToolSchemaFallback retries via Chat Completions when the provider
-// rejects tool schemas in the Responses API.
+// Response stream output helpers.
