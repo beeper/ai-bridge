@@ -307,11 +307,11 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		eventID = msg.Event.ID
 	}
 
-	promptMessages, err := oc.buildPromptWithLinkContext(runCtx, portal, runMeta, body, rawEventContent, eventID)
+	promptContext, err := oc.buildContextWithLinkContext(runCtx, portal, runMeta, body, rawEventContent, eventID)
 	if err != nil {
 		return nil, messageSendStatusError(err, "Couldn't prepare the message. Try again.", "")
 	}
-	logCtx.Debug().Int("prompt_messages", len(promptMessages)).Msg("Built prompt for inbound message")
+	logCtx.Debug().Int("prompt_messages", len(promptContext.Messages)).Msg("Built prompt for inbound message")
 	userMessage := &database.Message{
 		ID:       networkid.MessageID(fmt.Sprintf("mx:%s", string(eventID))),
 		MXID:     eventID,
@@ -349,7 +349,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		enqueuedAt:      time.Now().UnixMilli(),
 		rawEventContent: rawEventContent,
 	}
-	dbMsg, isPending := oc.dispatchOrQueue(runCtx, msg.Event, portal, runMeta, userMessage, queueItem, queueSettings, promptMessages)
+	dbMsg, isPending := oc.dispatchOrQueue(runCtx, msg.Event, portal, runMeta, userMessage, queueItem, queueSettings, promptContext)
 
 	return &bridgev2.MatrixMessageResponse{
 		DB:      dbMsg,
@@ -481,7 +481,7 @@ func (oc *AIClient) regenerateFromEdit(
 
 	// Build the prompt with the edited message included
 	// We need to rebuild from scratch up to the edited message
-	promptMessages, err := oc.buildPromptUpToMessage(ctx, portal, meta, editedMessage.ID, newBody)
+	promptContext, err := oc.buildContextUpToMessage(ctx, portal, meta, editedMessage.ID, newBody)
 	if err != nil {
 		return fmt.Errorf("failed to build prompt: %w", err)
 	}
@@ -519,7 +519,7 @@ func (oc *AIClient) regenerateFromEdit(
 		summaryLine: newBody,
 		enqueuedAt:  time.Now().UnixMilli(),
 	}
-	oc.dispatchOrQueueWithStatus(ctx, evt, portal, meta, queueItem, queueSettings, promptMessages)
+	oc.dispatchOrQueueWithStatus(ctx, evt, portal, meta, queueItem, queueSettings, promptContext)
 
 	return nil
 }
@@ -717,7 +717,7 @@ func (oc *AIClient) handleMediaMessage(
 		inboundCtx := oc.buildMatrixInboundContext(portal, msg.Event, rawBody, senderName, roomName, isGroup)
 		promptCtx := withInboundContext(ctx, inboundCtx)
 		body := oc.buildMatrixInboundBody(ctx, portal, meta, msg.Event, rawBody, senderName, roomName, isGroup)
-		promptMessages, err := oc.buildPrompt(promptCtx, portal, meta, body, eventID)
+		promptContext, err := oc.buildContextWithLinkContext(promptCtx, portal, meta, body, nil, eventID)
 		if err != nil {
 			return nil, messageSendStatusError(err, "Couldn't prepare the message. Try again.", "")
 		}
@@ -751,7 +751,7 @@ func (oc *AIClient) handleMediaMessage(
 			summaryLine: rawBody,
 			enqueuedAt:  time.Now().UnixMilli(),
 		}
-		dbMsg, isPending := oc.dispatchOrQueue(promptCtx, msg.Event, portal, meta, userMessage, queueItem, queueSettings, promptMessages)
+		dbMsg, isPending := oc.dispatchOrQueue(promptCtx, msg.Event, portal, meta, userMessage, queueItem, queueSettings, promptContext)
 		return &bridgev2.MatrixMessageResponse{
 			DB:      dbMsg,
 			Pending: isPending,
@@ -830,7 +830,7 @@ func (oc *AIClient) handleMediaMessage(
 	captionForPrompt := oc.buildMatrixInboundBody(ctx, portal, meta, msg.Event, caption, senderName, roomName, isGroup)
 	captionInboundCtx := oc.buildMatrixInboundContext(portal, msg.Event, caption, senderName, roomName, isGroup)
 	promptCtx := withInboundContext(ctx, captionInboundCtx)
-	promptMessages, err := oc.buildPromptWithMedia(promptCtx, portal, meta, captionForPrompt, string(mediaURL), mimeType, encryptedFile, config.msgType, eventID)
+	promptContext, err := oc.buildContextWithMedia(promptCtx, portal, meta, captionForPrompt, string(mediaURL), mimeType, encryptedFile, config.msgType, eventID)
 	if err != nil {
 		return nil, messageSendStatusError(err, "Couldn't prepare the media message. Try again.", "")
 	}
@@ -878,7 +878,7 @@ func (oc *AIClient) handleMediaMessage(
 		summaryLine: rawCaption,
 		enqueuedAt:  time.Now().UnixMilli(),
 	}
-	dbMsg, isPending := oc.dispatchOrQueue(promptCtx, msg.Event, portal, meta, userMessage, queueItem, queueSettings, promptMessages)
+	dbMsg, isPending := oc.dispatchOrQueue(promptCtx, msg.Event, portal, meta, userMessage, queueItem, queueSettings, promptContext)
 
 	return &bridgev2.MatrixMessageResponse{
 		DB:      dbMsg,
@@ -968,7 +968,7 @@ func (oc *AIClient) handleTextFileMessage(
 
 	inboundCtx := oc.buildMatrixInboundContext(portal, msg.Event, combined, senderName, roomName, isGroup)
 	promptCtx := withInboundContext(ctx, inboundCtx)
-	promptMessages, err := oc.buildPrompt(promptCtx, portal, meta, combined, eventID)
+	promptContext, err := oc.buildContextWithLinkContext(promptCtx, portal, meta, combined, nil, eventID)
 	if err != nil {
 		return nil, messageSendStatusError(err, "Couldn't prepare the message. Try again.", "")
 	}
@@ -1004,7 +1004,7 @@ func (oc *AIClient) handleTextFileMessage(
 		summaryLine: strings.TrimSpace(rawCaption),
 		enqueuedAt:  time.Now().UnixMilli(),
 	}
-	dbMsg, isPending := oc.dispatchOrQueue(promptCtx, msg.Event, portal, meta, userMessage, queueItem, queueSettings, promptMessages)
+	dbMsg, isPending := oc.dispatchOrQueue(promptCtx, msg.Event, portal, meta, userMessage, queueItem, queueSettings, promptContext)
 
 	return &bridgev2.MatrixMessageResponse{
 		DB:      dbMsg,
@@ -1237,7 +1237,7 @@ func (oc *AIClient) handleRegenerate(
 	oc.sendSystemNotice(runCtx, portal, "Regenerating response...")
 
 	// Build prompt excluding the old assistant response
-	prompt, err := oc.buildPromptForRegenerate(runCtx, portal, meta, userMeta.Body, lastUserMessage.MXID)
+	promptContext, err := oc.buildContextForRegenerate(runCtx, portal, meta, userMeta.Body, lastUserMessage.MXID)
 	if err != nil {
 		oc.sendSystemNotice(runCtx, portal, "Couldn't regenerate: "+err.Error())
 		return
@@ -1263,7 +1263,7 @@ func (oc *AIClient) handleRegenerate(
 		summaryLine: userMeta.Body,
 		enqueuedAt:  time.Now().UnixMilli(),
 	}
-	oc.dispatchOrQueueWithStatus(runCtx, evt, portal, meta, queueItem, queueSettings, prompt)
+	oc.dispatchOrQueueWithStatus(runCtx, evt, portal, meta, queueItem, queueSettings, promptContext)
 }
 
 // handleRegenerateTitle regenerates the current room title from recent messages.
@@ -1339,16 +1339,16 @@ func (oc *AIClient) handleRegenerateTitle(
 }
 
 // buildPromptForRegenerate builds a prompt for regeneration, excluding the last assistant message
-func (oc *AIClient) buildPromptForRegenerate(
+func (oc *AIClient) buildContextForRegenerate(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	meta *PortalMetadata,
 	latestUserBody string,
 	latestUserID id.EventID,
-) ([]openai.ChatCompletionMessageParamUnion, error) {
-	var prompt []openai.ChatCompletionMessageParamUnion
+) (PromptContext, error) {
+	var promptContext PromptContext
 	isSimple := isSimpleMode(meta)
-	prompt = append(prompt, oc.buildSystemMessages(ctx, portal, meta)...)
+	appendChatMessagesToPromptContext(&promptContext, oc.buildSystemMessages(ctx, portal, meta))
 
 	historyLimit := oc.historyLimit(ctx, portal, meta)
 	resetAt := int64(0)
@@ -1358,7 +1358,7 @@ func (oc *AIClient) buildPromptForRegenerate(
 	if historyLimit > 0 {
 		history, err := oc.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portal.PortalKey, historyLimit+2)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load prompt history: %w", err)
+			return PromptContext{}, fmt.Errorf("failed to load prompt history: %w", err)
 		}
 
 		// Determine whether to inject images into history (requires vision-capable model).
@@ -1400,7 +1400,7 @@ func (oc *AIClient) buildPromptForRegenerate(
 		}
 
 		for i := len(historyBundles) - 1; i >= 0; i-- {
-			prompt = append(prompt, historyBundles[i]...)
+			appendChatMessagesToPromptContext(&promptContext, historyBundles[i])
 		}
 	}
 
@@ -1410,8 +1410,14 @@ func (oc *AIClient) buildPromptForRegenerate(
 	} else {
 		latest = airuntime.SanitizeChatMessageForDisplay(latest, true)
 	}
-	prompt = append(prompt, openai.UserMessage(latest))
-	return prompt, nil
+	promptContext.Messages = append(promptContext.Messages, PromptMessage{
+		Role: PromptRoleUser,
+		Blocks: []PromptBlock{{
+			Type: PromptBlockText,
+			Text: latest,
+		}},
+	})
+	return promptContext, nil
 }
 
 func (oc *AIClient) tryApprovalDecisionEvent(

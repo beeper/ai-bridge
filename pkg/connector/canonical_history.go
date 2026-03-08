@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/openai/openai-go/v3"
-	"maunium.net/go/mautrix/bridgev2/database"
 
 	airuntime "github.com/beeper/ai-bridge/pkg/runtime"
 )
@@ -27,17 +26,6 @@ type canonicalToolCall struct {
 type canonicalToolOutput struct {
 	callID     string
 	outputText string
-}
-
-func (oc *AIClient) appendHistoryMessageFromCanonical(
-	ctx context.Context,
-	prompt []openai.ChatCompletionMessageParamUnion,
-	_ *database.Message,
-	msgMeta *MessageMetadata,
-	_ bool,
-	injectImages bool,
-) []openai.ChatCompletionMessageParamUnion {
-	return append(prompt, oc.historyMessageBundle(ctx, msgMeta, injectImages)...)
 }
 
 func (oc *AIClient) historyMessageBundle(
