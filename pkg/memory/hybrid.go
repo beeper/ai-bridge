@@ -14,17 +14,9 @@ func BuildFtsQuery(raw string) string {
 	if len(tokens) == 0 {
 		return ""
 	}
-	parts := make([]string, 0, len(tokens))
-	for _, token := range tokens {
-		token = strings.TrimSpace(token)
-		if token == "" {
-			continue
-		}
-		clean := strings.ReplaceAll(token, `"`, "")
-		parts = append(parts, `"`+clean+`"`)
-	}
-	if len(parts) == 0 {
-		return ""
+	parts := make([]string, len(tokens))
+	for i, token := range tokens {
+		parts[i] = `"` + token + `"`
 	}
 	return strings.Join(parts, " AND ")
 }
