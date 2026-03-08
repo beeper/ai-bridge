@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/rs/zerolog"
 	"go.mau.fi/util/dbutil"
 )
 
