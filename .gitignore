@@ -3,6 +3,9 @@
 /ai
 /codex
 /opencode
+/openclaw
+/bridgectl
+/generate-models
 logs/
 *.db*
 *.yaml
