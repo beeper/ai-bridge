@@ -237,11 +237,7 @@ func (oc *AIClient) isBuiltinToolDenied(
 	resolution, _, ok := oc.waitToolApproval(ctx, approvalID)
 	decision := resolution.Decision
 	if !ok {
-		if oc.toolApprovalsAskFallback() == "allow" {
-			decision = airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalApproved, Reason: "fallback"}
-		} else {
-			decision = airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalTimedOut, Reason: "timeout"}
-		}
+		decision = airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalTimedOut, Reason: "timeout"}
 	}
 	streamui.RecordApprovalResponse(&state.ui, approvalID, tool.callID, approvalAllowed(decision), decision.Reason)
 	if !approvalAllowed(decision) {

@@ -9,12 +9,16 @@ const (
 	ModelAPIChatCompletions ModelAPI = "chat_completions"
 )
 
+func isDirectOpenAIModel(modelID string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelID)), "openai/")
+}
+
 func normalizeModelAPI(value string) ModelAPI {
 	normalized := strings.TrimSpace(strings.ToLower(value))
 	switch normalized {
-	case "responses", "openai-responses", "openai_responses":
+	case "responses":
 		return ModelAPIResponses
-	case "chat_completions", "chat-completions", "openai-completions", "openai_completions":
+	case "chat_completions":
 		return ModelAPIChatCompletions
 	default:
 		return ""

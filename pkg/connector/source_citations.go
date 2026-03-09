@@ -73,7 +73,7 @@ func extractDocumentCitation(annotation any) (citations.SourceDocument, bool) {
 }
 
 func extractWebSearchCitationsFromToolOutput(toolName, output string) []citations.SourceCitation {
-	if normalizeToolAlias(strings.TrimSpace(toolName)) != ToolNameWebSearch {
+	if strings.TrimSpace(toolName) != ToolNameWebSearch {
 		return nil
 	}
 	return citations.ExtractWebSearchCitations(output)

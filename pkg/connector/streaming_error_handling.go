@@ -7,6 +7,19 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 )
 
+// NonFallbackError marks an error as ineligible for fallback retries once output has been sent.
+type NonFallbackError struct {
+	Err error
+}
+
+func (e *NonFallbackError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *NonFallbackError) Unwrap() error {
+	return e.Err
+}
+
 func streamFailureError(state *streamingState, err error) error {
 	if state != nil && state.hasInitialMessageTarget() {
 		return &NonFallbackError{Err: err}

@@ -1936,7 +1936,7 @@ func (oc *AIClient) buildBaseContext(
 			}
 			injectImages := hasVision && i < maxHistoryImageMessages
 			historyBundle := oc.historyMessageBundle(ctx, msgMeta, injectImages)
-			appendChatMessagesToPromptContext(&promptContext, historyBundle)
+			promptContext.Messages = append(promptContext.Messages, historyBundle...)
 		}
 	}
 
@@ -2108,7 +2108,7 @@ func (oc *AIClient) buildLinkContext(ctx context.Context, message string, rawEve
 	return FormatPreviewsForContext(allPreviews, config.MaxContentChars)
 }
 
-// buildPromptWithMedia builds a prompt with media content (image, PDF, audio, or video)
+// buildPromptWithMedia builds a prompt with media content.
 func (oc *AIClient) buildContextWithMedia(
 	ctx context.Context,
 	portal *bridgev2.Portal,
@@ -2173,40 +2173,19 @@ func (oc *AIClient) buildContextWithMedia(
 		})
 
 	case pendingTypeAudio:
-		b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, mediaURL, encryptedFile, 25, mimeType) // 25MB limit
-		if err != nil {
-			return PromptContext{}, fmt.Errorf("failed to download audio: %w", err)
+		if strings.TrimSpace(captionWithID) == "" {
+			blocks = append(blocks, PromptBlock{
+				Type: PromptBlockText,
+				Text: fmt.Sprintf("Audio attachment: %s", mediaURL),
+			})
 		}
-		blocks = append(blocks, PromptBlock{
-			Type:        PromptBlockAudio,
-			AudioB64:    b64Data,
-			AudioFormat: getAudioFormat(actualMimeType),
-			MimeType:    actualMimeType,
-		})
 
 	case pendingTypeVideo:
-		b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, mediaURL, encryptedFile, 100, mimeType) // 100MB limit for video
-		if err != nil {
-			return PromptContext{}, fmt.Errorf("failed to download video: %w", err)
-		}
-		if oc.isOpenRouterProvider() {
+		if strings.TrimSpace(captionWithID) == "" {
 			blocks = append(blocks, PromptBlock{
-				Type:     PromptBlockVideo,
-				VideoB64: b64Data,
-				MimeType: actualMimeType,
+				Type: PromptBlockText,
+				Text: fmt.Sprintf("Video attachment: %s", mediaURL),
 			})
-			break
-		}
-		videoText := strings.TrimSpace(captionWithID)
-		dataURL := buildDataURL(actualMimeType, b64Data)
-		if videoText != "" {
-			videoText += "\n\n"
-		}
-		videoText += "Video data URL: " + dataURL
-		if len(blocks) > 0 && blocks[0].Type == PromptBlockText {
-			blocks[0].Text = videoText
-		} else {
-			blocks = append([]PromptBlock{{Type: PromptBlockText, Text: videoText}}, blocks...)
 		}
 
 	default:
@@ -2274,7 +2253,7 @@ func (oc *AIClient) buildContextUpToMessage(
 
 			// Only inject images for recent messages and vision-capable models.
 			injectImages := hasVision && i < maxHistoryImageMessages
-			appendChatMessagesToPromptContext(&promptContext, oc.historyMessageBundle(ctx, msgMeta, injectImages))
+			promptContext.Messages = append(promptContext.Messages, oc.historyMessageBundle(ctx, msgMeta, injectImages)...)
 		}
 	} else {
 		body := strings.TrimSpace(newBody)
@@ -2539,6 +2518,7 @@ func (oc *AIClient) handleDebouncedMessages(entries []DebounceEntry) {
 		},
 		Timestamp: time.Now(),
 	}
+	setCanonicalPromptMessages(userMessage.Metadata.(*MessageMetadata), canonicalPromptTail(promptContext, 1))
 	ensureCanonicalUserMessage(userMessage)
 
 	// Save user message to database - we must do this ourselves since we already

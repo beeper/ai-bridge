@@ -189,6 +189,69 @@ func projectAssistantOpenClawMessage(meta *MessageMetadata, msg *database.Messag
 }
 
 func parseCanonicalAssistantBlocks(meta *MessageMetadata) ([]map[string]any, []openClawToolCall) {
+	if messages := canonicalPromptMessages(meta); len(messages) > 0 {
+		content := make([]map[string]any, 0, len(messages))
+		calls := make([]openClawToolCall, 0, len(messages))
+		toolCallByID := make(map[string]ToolCallMetadata, len(meta.ToolCalls))
+		for _, tc := range meta.ToolCalls {
+			callID := strings.TrimSpace(tc.CallID)
+			if callID != "" {
+				toolCallByID[callID] = tc
+			}
+		}
+		for _, message := range messages {
+			if message.Role != PromptRoleAssistant {
+				continue
+			}
+			for idx, block := range message.Blocks {
+				switch block.Type {
+				case PromptBlockText, PromptBlockThinking:
+					if text := strings.TrimSpace(block.Text); text != "" {
+						content = append(content, map[string]any{
+							"type": "text",
+							"text": text,
+						})
+					}
+				case PromptBlockToolCall:
+					callID := strings.TrimSpace(block.ToolCallID)
+					if callID == "" {
+						callID = fmt.Sprintf("call_part_%d", idx)
+					}
+					toolName := strings.TrimSpace(block.ToolName)
+					if toolName == "" {
+						toolName = "unknown_tool"
+					}
+					arguments := jsonutil.ToMap(block.ToolCallArguments)
+					if arguments == nil {
+						arguments = map[string]any{}
+					}
+					content = append(content, map[string]any{
+						"type":      "toolCall",
+						"id":        callID,
+						"name":      toolName,
+						"arguments": arguments,
+					})
+					call := openClawToolCall{
+						ID:   callID,
+						Name: toolName,
+						Input: arguments,
+					}
+					if toolMeta, ok := toolCallByID[callID]; ok {
+						call.Output = toolMeta.Output
+						call.ResultStatus = toolMeta.ResultStatus
+						call.ErrorMessage = toolMeta.ErrorMessage
+						call.CallEventID = toolMeta.CallEventID
+						call.ResultEventID = toolMeta.ResultEventID
+					}
+					calls = append(calls, call)
+				}
+			}
+		}
+		if len(content) > 0 || len(calls) > 0 {
+			return content, calls
+		}
+	}
+
 	partsRaw, ok := meta.CanonicalUIMessage["parts"]
 	if !ok {
 		return nil, nil

@@ -11,8 +11,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/id"
-
-	airuntime "github.com/beeper/ai-bridge/pkg/runtime"
 )
 
 func formatDurationShort(valueMs int64) string {
@@ -146,41 +144,8 @@ func (oc *AIClient) runSubagentCompletion(
 	meta *PortalMetadata,
 	prompt []openai.ChatCompletionMessageParamUnion,
 ) (bool, error) {
-	modelChain := oc.modelFallbackChain(ctx, meta)
-	if len(modelChain) == 0 {
-		modelChain = []string{oc.effectiveModel(meta)}
-	}
-
-	for idx, modelID := range modelChain {
-		effectiveMeta := meta
-		if meta != nil {
-			effectiveMeta = oc.overrideModel(meta, modelID)
-		}
-		responseFn, logLabel := oc.selectResponseFn(effectiveMeta, prompt)
-		success, err := oc.responseWithRetryAndReasoningFallback(ctx, nil, portal, effectiveMeta, prompt, responseFn, logLabel)
-		if success {
-			return true, nil
-		}
-		if err == nil {
-			return false, nil
-		}
-		var nf *NonFallbackError
-		if errors.As(err, &nf) {
-			return false, err
-		}
-		decision := airuntime.DecideFallback(err)
-		if decision.Action == airuntime.FallbackActionNone || idx == len(modelChain)-1 {
-			return false, err
-		}
-		oc.loggerForContext(ctx).Warn().
-			Err(err).
-			Str("failed_model", modelID).
-			Str("next_model", modelChain[idx+1]).
-			Str("fallback_action", string(decision.Action)).
-			Str("fallback_class", string(decision.Class)).
-			Msg("Subagent model failed; falling back to next model")
-	}
-	return false, nil
+	responseFn, logLabel := oc.selectResponseFn(meta, ChatMessagesToPromptContext(prompt))
+	return oc.responseWithRetry(ctx, nil, portal, meta, prompt, responseFn, logLabel)
 }
 
 func (oc *AIClient) runSubagentAndAnnounce(

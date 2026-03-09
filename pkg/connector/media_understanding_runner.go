@@ -947,11 +947,15 @@ func (oc *AIClient) generateWithOpenRouter(
 	if err != nil {
 		return nil, err
 	}
-	return provider.Generate(ctx, GenerateParams{
+	params := GenerateParams{
 		Model:               modelID,
 		Context:             ToPromptContext("", nil, messages),
 		MaxCompletionTokens: defaultImageUnderstandingLimit,
-	})
+	}
+	if legacyUnifiedMessagesNeedChatAdapter(messages) {
+		return provider.generateChatCompletions(ctx, params)
+	}
+	return provider.Generate(ctx, params)
 }
 
 func resolveOpenRouterMediaBaseURL(oc *AIClient) string {

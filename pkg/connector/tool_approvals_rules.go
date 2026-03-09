@@ -30,16 +30,7 @@ func (oc *AIClient) toolApprovalsTTLSeconds() int {
 }
 
 func (oc *AIClient) toolApprovalsAskFallback() string {
-	if oc == nil || oc.connector == nil {
-		return "deny"
-	}
-	cfg := oc.connector.Config.ToolApprovals.WithDefaults()
-	switch strings.ToLower(strings.TrimSpace(cfg.AskFallback)) {
-	case "allow":
-		return "allow"
-	default:
-		return "deny"
-	}
+	return "deny"
 }
 
 func (oc *AIClient) toolApprovalsRequireForMCP() bool {

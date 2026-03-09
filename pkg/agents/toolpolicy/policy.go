@@ -163,21 +163,9 @@ func (c *ToolPolicyConfig) Clone() *ToolPolicyConfig {
 	return &out
 }
 
-var toolNameAliases = map[string]string{
-	"bash":        "exec",
-	"apply-patch": "apply_patch",
-}
-
-// NormalizeToolName converts to lowercase and resolves aliases.
+// NormalizeToolName converts to lowercase without accepting legacy aliases.
 func NormalizeToolName(name string) string {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	if normalized == "" {
-		return ""
-	}
-	if alias, ok := toolNameAliases[normalized]; ok {
-		return alias
-	}
-	return normalized
+	return strings.ToLower(strings.TrimSpace(name))
 }
 
 // IsOwnerOnlyToolName reports whether the tool is restricted to owners.

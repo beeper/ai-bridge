@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/openai/openai-go/v3"
-
 	airuntime "github.com/beeper/ai-bridge/pkg/runtime"
 )
 
@@ -32,25 +30,26 @@ func (oc *AIClient) historyMessageBundle(
 	ctx context.Context,
 	msgMeta *MessageMetadata,
 	injectImages bool,
-) []openai.ChatCompletionMessageParamUnion {
+) []PromptMessage {
 	if msgMeta == nil {
 		return nil
 	}
+	if canonical := filterPromptMessagesForHistory(canonicalPromptMessages(msgMeta), injectImages); len(canonical) > 0 {
+		if injectImages && len(msgMeta.GeneratedFiles) > 0 {
+			if generated := oc.generatedImagesHistoryMessage(ctx, msgMeta.GeneratedFiles); len(generated.Blocks) > 0 {
+				return append(canonical, generated)
+			}
+		}
+		return canonical
+	}
 
 	role := strings.TrimSpace(msgMeta.Role)
-	text := msgMeta.Body
+	text := strings.TrimSpace(msgMeta.Body)
 	files := legacyUIMessageFiles(msgMeta)
 	toolCalls := legacyToolCalls(msgMeta.ToolCalls)
 	toolOutputs := legacyToolOutputs(msgMeta.ToolCalls)
-	if len(msgMeta.CanonicalUIMessage) > 0 {
-		role = strings.TrimSpace(stringValue(msgMeta.CanonicalUIMessage["role"]))
-		text = canonicalUIMessageText(msgMeta.CanonicalUIMessage)
-		files = canonicalUIMessageFiles(msgMeta.CanonicalUIMessage)
-		toolCalls = canonicalUIToolCalls(msgMeta.CanonicalUIMessage)
-		toolOutputs = canonicalUIToolOutputs(msgMeta.CanonicalUIMessage)
-	}
 
-	bundle := make([]openai.ChatCompletionMessageParamUnion, 0, 2+len(toolOutputs))
+	bundle := make([]PromptMessage, 0, 2+len(toolOutputs))
 	switch role {
 	case "assistant":
 		body := airuntime.SanitizeChatMessageForDisplay(stripThinkTags(text), false)
@@ -61,11 +60,18 @@ func (oc *AIClient) historyMessageBundle(
 			if toolOutput.callID == "" || toolOutput.outputText == "" {
 				continue
 			}
-			bundle = append(bundle, openai.ToolMessage(toolOutput.outputText, toolOutput.callID))
+			bundle = append(bundle, PromptMessage{
+				Role:       PromptRoleToolResult,
+				ToolCallID: toolOutput.callID,
+				Blocks: []PromptBlock{{
+					Type: PromptBlockText,
+					Text: toolOutput.outputText,
+				}},
+			})
 		}
 		if injectImages && len(msgMeta.GeneratedFiles) > 0 {
-			if imgParts := oc.downloadGeneratedFileImages(ctx, msgMeta.GeneratedFiles); len(imgParts) > 0 {
-				bundle = append(bundle, buildSyntheticGeneratedImagesMessage(msgMeta.GeneratedFiles, imgParts))
+			if generated := oc.generatedImagesHistoryMessage(ctx, msgMeta.GeneratedFiles); len(generated.Blocks) > 0 {
+				bundle = append(bundle, generated)
 			}
 		}
 	case "user":
@@ -74,118 +80,16 @@ func (oc *AIClient) historyMessageBundle(
 			return append(bundle, userMsg)
 		}
 		if body != "" {
-			bundle = append(bundle, openai.UserMessage(body))
+			bundle = append(bundle, PromptMessage{
+				Role: PromptRoleUser,
+				Blocks: []PromptBlock{{
+					Type: PromptBlockText,
+					Text: body,
+				}},
+			})
 		}
 	}
 	return bundle
-}
-
-func canonicalUIParts(uiMessage map[string]any) []map[string]any {
-	switch parts := uiMessage["parts"].(type) {
-	case []map[string]any:
-		return parts
-	case []any:
-		out := make([]map[string]any, 0, len(parts))
-		for _, raw := range parts {
-			part, ok := raw.(map[string]any)
-			if ok {
-				out = append(out, part)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func canonicalUIMessageText(uiMessage map[string]any) string {
-	parts := canonicalUIParts(uiMessage)
-	texts := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if strings.TrimSpace(stringValue(part["type"])) != "text" {
-			continue
-		}
-		if text := stringValue(part["text"]); text != "" {
-			texts = append(texts, text)
-		}
-	}
-	return strings.Join(texts, "")
-}
-
-func canonicalUIMessageFiles(uiMessage map[string]any) []canonicalFilePart {
-	parts := canonicalUIParts(uiMessage)
-	files := make([]canonicalFilePart, 0, len(parts))
-	for _, part := range parts {
-		if strings.TrimSpace(stringValue(part["type"])) != "file" {
-			continue
-		}
-		url := strings.TrimSpace(stringValue(part["url"]))
-		if url == "" {
-			continue
-		}
-		files = append(files, canonicalFilePart{
-			URL:       url,
-			MediaType: strings.TrimSpace(stringValue(part["mediaType"])),
-			Filename:  strings.TrimSpace(stringValue(part["filename"])),
-		})
-	}
-	return files
-}
-
-func canonicalUIToolCalls(uiMessage map[string]any) []canonicalToolCall {
-	parts := canonicalUIParts(uiMessage)
-	toolCalls := make([]canonicalToolCall, 0, len(parts))
-	for _, part := range parts {
-		partType := strings.TrimSpace(stringValue(part["type"]))
-		if partType != "dynamic-tool" && !strings.HasPrefix(partType, "tool-") {
-			continue
-		}
-		callID := strings.TrimSpace(stringValue(part["toolCallId"]))
-		if callID == "" {
-			continue
-		}
-		toolName := strings.TrimSpace(stringValue(part["toolName"]))
-		if toolName == "" && strings.HasPrefix(partType, "tool-") {
-			toolName = strings.TrimPrefix(partType, "tool-")
-		}
-		if toolName == "" {
-			continue
-		}
-		toolCalls = append(toolCalls, canonicalToolCall{
-			callID:    callID,
-			toolName:  toolName,
-			arguments: canonicalToolArguments(part["input"]),
-		})
-	}
-	return toolCalls
-}
-
-func canonicalUIToolOutputs(uiMessage map[string]any) []canonicalToolOutput {
-	parts := canonicalUIParts(uiMessage)
-	outputs := make([]canonicalToolOutput, 0, len(parts))
-	for _, part := range parts {
-		if strings.TrimSpace(stringValue(part["type"])) != "dynamic-tool" {
-			continue
-		}
-		callID := strings.TrimSpace(stringValue(part["toolCallId"]))
-		if callID == "" {
-			continue
-		}
-		state := strings.TrimSpace(stringValue(part["state"]))
-		switch state {
-		case "output-available":
-			if text := formatCanonicalValue(part["output"]); text != "" {
-				outputs = append(outputs, canonicalToolOutput{callID: callID, outputText: text})
-			}
-		case "output-error":
-			if text := strings.TrimSpace(stringValue(part["errorText"])); text != "" {
-				outputs = append(outputs, canonicalToolOutput{callID: callID, outputText: text})
-			}
-		case "output-denied":
-			outputs = append(outputs, canonicalToolOutput{callID: callID, outputText: "Denied by user"})
-		}
-	}
-	return outputs
 }
 
 func legacyUIMessageFiles(msgMeta *MessageMetadata) []canonicalFilePart {
@@ -240,31 +144,30 @@ func legacyToolOutputs(toolCalls []ToolCallMetadata) []canonicalToolOutput {
 	return out
 }
 
-func canonicalAssistantHistoryMessage(text string, toolCalls []canonicalToolCall) (openai.ChatCompletionMessageParamUnion, bool) {
+func canonicalAssistantHistoryMessage(text string, toolCalls []canonicalToolCall) (PromptMessage, bool) {
 	if text == "" && len(toolCalls) == 0 {
-		return openai.ChatCompletionMessageParamUnion{}, false
+		return PromptMessage{}, false
 	}
 
-	assistant := openai.ChatCompletionAssistantMessageParam{}
+	assistant := PromptMessage{
+		Role:   PromptRoleAssistant,
+		Blocks: make([]PromptBlock, 0, 1+len(toolCalls)),
+	}
 	if text != "" {
-		assistant.Content.OfString = openai.String(text)
+		assistant.Blocks = append(assistant.Blocks, PromptBlock{
+			Type: PromptBlockText,
+			Text: text,
+		})
 	}
-	if len(toolCalls) > 0 {
-		assistant.ToolCalls = make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(toolCalls))
-		for _, toolCall := range toolCalls {
-			assistant.ToolCalls = append(assistant.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
-				OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-					ID: toolCall.callID,
-					Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-						Name:      toolCall.toolName,
-						Arguments: toolCall.arguments,
-					},
-					Type: "function",
-				},
-			})
-		}
+	for _, toolCall := range toolCalls {
+		assistant.Blocks = append(assistant.Blocks, PromptBlock{
+			Type:              PromptBlockToolCall,
+			ToolCallID:        toolCall.callID,
+			ToolName:          toolCall.toolName,
+			ToolCallArguments: toolCall.arguments,
+		})
 	}
-	return openai.ChatCompletionMessageParamUnion{OfAssistant: &assistant}, true
+	return assistant, true
 }
 
 func canonicalToolArguments(raw any) string {
@@ -279,8 +182,8 @@ func (oc *AIClient) canonicalUserHistoryMessage(
 	body string,
 	files []canonicalFilePart,
 	injectImages bool,
-) (openai.ChatCompletionMessageParamUnion, bool) {
-	parts := make([]openai.ChatCompletionContentPartUnionParam, 0, len(files)+1)
+) (PromptMessage, bool) {
+	parts := make([]PromptBlock, 0, len(files)+1)
 	textWithURLs := body
 
 	for _, file := range files {
@@ -289,7 +192,7 @@ func (oc *AIClient) canonicalUserHistoryMessage(
 		}
 		switch {
 		case injectImages && isImageMimeType(file.MediaType):
-			imgPart := oc.downloadHistoryImage(ctx, file.URL, file.MediaType)
+			imgPart := oc.downloadHistoryImageBlock(ctx, file.URL, file.MediaType)
 			if imgPart == nil {
 				continue
 			}
@@ -298,13 +201,13 @@ func (oc *AIClient) canonicalUserHistoryMessage(
 			}
 			textWithURLs += fmt.Sprintf("[media_url: %s]", file.URL)
 			parts = append(parts, *imgPart)
-		case strings.HasPrefix(file.MediaType, "audio/"):
-			audioPart := oc.downloadHistoryAudio(ctx, file.URL, file.MediaType)
-			if audioPart != nil {
-				parts = append(parts, *audioPart)
+		case strings.HasPrefix(file.MediaType, "audio/"), strings.HasPrefix(file.MediaType, "video/"):
+			if textWithURLs != "" {
+				textWithURLs += "\n"
 			}
+			textWithURLs += fmt.Sprintf("[media_url: %s]", file.URL)
 		default:
-			filePart := oc.downloadHistoryFile(ctx, file)
+			filePart := oc.downloadHistoryFileBlock(ctx, file)
 			if filePart != nil {
 				parts = append(parts, *filePart)
 			}
@@ -312,53 +215,74 @@ func (oc *AIClient) canonicalUserHistoryMessage(
 	}
 
 	if textWithURLs != "" {
-		parts = append([]openai.ChatCompletionContentPartUnionParam{{
-			OfText: &openai.ChatCompletionContentPartTextParam{Text: textWithURLs},
+		parts = append([]PromptBlock{{
+			Type: PromptBlockText,
+			Text: textWithURLs,
 		}}, parts...)
 	}
 	if len(parts) == 0 {
-		return openai.ChatCompletionMessageParamUnion{}, false
+		return PromptMessage{}, false
 	}
 
-	return openai.ChatCompletionMessageParamUnion{
-		OfUser: &openai.ChatCompletionUserMessageParam{
-			Content: openai.ChatCompletionUserMessageParamContentUnion{
-				OfArrayOfContentParts: parts,
-			},
-		},
+	return PromptMessage{
+		Role:   PromptRoleUser,
+		Blocks: parts,
 	}, true
 }
 
-func (oc *AIClient) downloadHistoryFile(ctx context.Context, file canonicalFilePart) *openai.ChatCompletionContentPartUnionParam {
+func (oc *AIClient) generatedImagesHistoryMessage(ctx context.Context, files []GeneratedFileRef) PromptMessage {
+	if len(files) == 0 {
+		return PromptMessage{}
+	}
+	blocks := make([]PromptBlock, 0, 1+len(files))
+	var sb strings.Builder
+	sb.WriteString("[Previously generated image(s) for reference]")
+	for _, f := range files {
+		if !isImageMimeType(f.MimeType) || strings.TrimSpace(f.URL) == "" {
+			continue
+		}
+		fmt.Fprintf(&sb, "\n[media_url: %s]", f.URL)
+		if imgPart := oc.downloadHistoryImageBlock(ctx, f.URL, f.MimeType); imgPart != nil {
+			blocks = append(blocks, *imgPart)
+		}
+	}
+	if len(blocks) == 0 {
+		return PromptMessage{}
+	}
+	blocks = append([]PromptBlock{{
+		Type: PromptBlockText,
+		Text: sb.String(),
+	}}, blocks...)
+	return PromptMessage{
+		Role:   PromptRoleUser,
+		Blocks: blocks,
+	}
+}
+
+func (oc *AIClient) downloadHistoryFileBlock(ctx context.Context, file canonicalFilePart) *PromptBlock {
 	b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, file.URL, nil, 50, file.MediaType)
 	if err != nil {
 		oc.log.Debug().Err(err).Str("url", file.URL).Msg("Failed to download history file, skipping")
 		return nil
 	}
-	fileParam := openai.ChatCompletionContentPartFileFileParam{
-		FileData: openai.String(buildDataURL(actualMimeType, b64Data)),
-	}
-	if file.Filename != "" {
-		fileParam.Filename = openai.String(file.Filename)
-	}
-	return &openai.ChatCompletionContentPartUnionParam{
-		OfFile: &openai.ChatCompletionContentPartFileParam{File: fileParam},
+	return &PromptBlock{
+		Type:     PromptBlockFile,
+		FileB64:  buildDataURL(actualMimeType, b64Data),
+		Filename: file.Filename,
+		MimeType: actualMimeType,
 	}
 }
 
-func (oc *AIClient) downloadHistoryAudio(ctx context.Context, mediaURL, mimeType string) *openai.ChatCompletionContentPartUnionParam {
+func (oc *AIClient) downloadHistoryImageBlock(ctx context.Context, mediaURL, mimeType string) *PromptBlock {
 	b64Data, actualMimeType, err := oc.downloadMediaBase64(ctx, mediaURL, nil, 25, mimeType)
 	if err != nil {
-		oc.log.Debug().Err(err).Str("url", mediaURL).Msg("Failed to download history audio, skipping")
+		oc.log.Debug().Err(err).Str("url", mediaURL).Msg("Failed to download history image, skipping")
 		return nil
 	}
-	return &openai.ChatCompletionContentPartUnionParam{
-		OfInputAudio: &openai.ChatCompletionContentPartInputAudioParam{
-			InputAudio: openai.ChatCompletionContentPartInputAudioInputAudioParam{
-				Data:   b64Data,
-				Format: getAudioFormat(actualMimeType),
-			},
-		},
+	return &PromptBlock{
+		Type:     PromptBlockImage,
+		ImageB64: b64Data,
+		MimeType: actualMimeType,
 	}
 }
 

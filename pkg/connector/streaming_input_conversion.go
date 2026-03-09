@@ -5,8 +5,12 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 )
 
+func convertPromptContextToResponsesInput(promptContext PromptContext) responses.ResponseInputParam {
+	return PromptContextToResponsesInput(promptContext)
+}
+
 func (oc *AIClient) convertToResponsesInput(messages []openai.ChatCompletionMessageParamUnion, _ *PortalMetadata) responses.ResponseInputParam {
-	return PromptContextToResponsesInput(ChatMessagesToPromptContext(messages))
+	return convertPromptContextToResponsesInput(ChatMessagesToPromptContext(messages))
 }
 
 // hasAudioContent checks if the prompt contains audio content

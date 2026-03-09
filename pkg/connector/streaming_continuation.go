@@ -105,10 +105,6 @@ func (oc *AIClient) buildContinuationParams(
 		}
 	}
 
-	if isOpenRouter {
-		params.Tools = renameWebSearchToolParams(params.Tools)
-	}
-
 	// Prevent duplicate tool names (Anthropic rejects duplicates)
 	logToolParamDuplicates(&oc.log, params.Tools)
 	params.Tools = dedupeToolParams(params.Tools)

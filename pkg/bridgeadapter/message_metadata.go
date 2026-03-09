@@ -11,6 +11,8 @@ type BaseMessageMetadata struct {
 	ReasoningTokens    int64              `json:"reasoning_tokens,omitempty"`
 	TurnID             string             `json:"turn_id,omitempty"`
 	AgentID            string             `json:"agent_id,omitempty"`
+	CanonicalPromptSchema   string             `json:"canonical_prompt_schema,omitempty"`
+	CanonicalPromptMessages []map[string]any   `json:"canonical_prompt_messages,omitempty"`
 	CanonicalSchema    string             `json:"canonical_schema,omitempty"`
 	CanonicalUIMessage map[string]any     `json:"canonical_ui_message,omitempty"`
 	StartedAtMs        int64              `json:"started_at_ms,omitempty"`
@@ -48,6 +50,15 @@ func (b *BaseMessageMetadata) CopyFromBase(src *BaseMessageMetadata) {
 	}
 	if src.AgentID != "" {
 		b.AgentID = src.AgentID
+	}
+	if src.CanonicalPromptSchema != "" {
+		b.CanonicalPromptSchema = src.CanonicalPromptSchema
+	}
+	if len(src.CanonicalPromptMessages) > 0 {
+		b.CanonicalPromptMessages = make([]map[string]any, len(src.CanonicalPromptMessages))
+		for i, msg := range src.CanonicalPromptMessages {
+			b.CanonicalPromptMessages[i] = cloneJSONMap(msg)
+		}
 	}
 	if src.CanonicalSchema != "" {
 		b.CanonicalSchema = src.CanonicalSchema

@@ -161,8 +161,51 @@ func summarizeToolsCatalog(resp gatewayToolsCatalogResponse) (int, string) {
 
 func cloneGatewayModelChoices(models []gatewayModelChoice) []gatewayModelChoice {
 	cloned := make([]gatewayModelChoice, len(models))
-	copy(cloned, models)
+	for i := range models {
+		cloned[i] = models[i]
+		if len(models[i].Input) > 0 {
+			cloned[i].Input = append([]string(nil), models[i].Input...)
+		}
+	}
 	return cloned
+}
+
+func (oc *OpenClawClient) effectiveModelChoice(ctx context.Context, meta *PortalMetadata) *gatewayModelChoice {
+	if oc == nil || meta == nil {
+		return nil
+	}
+	modelID := strings.TrimSpace(meta.Model)
+	if modelID == "" {
+		return nil
+	}
+	models, err := oc.loadModelCatalog(ctx, false)
+	if err != nil || len(models) == 0 {
+		return nil
+	}
+	provider := strings.TrimSpace(meta.ModelProvider)
+	var fallback *gatewayModelChoice
+	for i := range models {
+		if !gatewayModelMatches(models[i], modelID) {
+			continue
+		}
+		model := models[i]
+		if provider == "" || strings.EqualFold(strings.TrimSpace(model.Provider), provider) {
+			return &model
+		}
+		if fallback == nil {
+			fallback = &model
+		}
+	}
+	return fallback
+}
+
+func gatewayModelMatches(model gatewayModelChoice, query string) bool {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(model.ID), query) ||
+		strings.EqualFold(strings.TrimSpace(model.Name), query)
 }
 
 func cloneGatewayToolsCatalogResponse(resp gatewayToolsCatalogResponse) gatewayToolsCatalogResponse {

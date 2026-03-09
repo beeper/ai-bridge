@@ -56,6 +56,20 @@ func BuildConvertedEdit(content *event.MessageEventContent, topLevelExtra map[st
 	if content == nil {
 		return nil
 	}
+	if topLevelExtra == nil {
+		topLevelExtra = map[string]any{}
+	}
+	if _, ok := topLevelExtra["body"]; !ok {
+		topLevelExtra["body"] = content.Body
+	}
+	if content.Format != "" {
+		if _, ok := topLevelExtra["format"]; !ok {
+			topLevelExtra["format"] = content.Format
+		}
+		if _, ok := topLevelExtra["formatted_body"]; !ok {
+			topLevelExtra["formatted_body"] = content.FormattedBody
+		}
+	}
 	return &bridgev2.ConvertedEdit{
 		ModifiedParts: []*bridgev2.ConvertedEditPart{{
 			Type: event.EventMessage,

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,6 +32,37 @@ import (
 
 var _ bridgev2.NetworkAPI = (*OpenClawClient)(nil)
 var _ bridgev2.BackfillingNetworkAPI = (*OpenClawClient)(nil)
+
+const openClawCapabilityBaseID = "com.beeper.ai.capabilities.2026_03_09+openclaw"
+
+var openClawBaseCaps = &event.RoomFeatures{
+	ID: openClawCapabilityBaseID,
+	File: event.FileFeatureMap{
+		event.MsgImage:      openClawRejectedFileFeatures(),
+		event.MsgVideo:      openClawRejectedFileFeatures(),
+		event.MsgAudio:      openClawRejectedFileFeatures(),
+		event.MsgFile:       openClawRejectedFileFeatures(),
+		event.CapMsgVoice:   openClawRejectedFileFeatures(),
+		event.CapMsgGIF:     openClawRejectedFileFeatures(),
+		event.CapMsgSticker: openClawRejectedFileFeatures(),
+	},
+	MaxTextLength:       100000,
+	Reply:               event.CapLevelFullySupported,
+	Thread:              event.CapLevelFullySupported,
+	Edit:                event.CapLevelRejected,
+	Delete:              event.CapLevelRejected,
+	Reaction:            event.CapLevelRejected,
+	ReadReceipts:        true,
+	TypingNotifications: true,
+}
+
+type openClawCapabilityProfile struct {
+	SupportsVision    bool
+	SupportsAudio     bool
+	SupportsVideo     bool
+	SupportsReasoning bool
+	MediaKnown        bool
+}
 
 type OpenClawClient struct {
 	UserLogin *bridgev2.UserLogin
@@ -196,46 +228,112 @@ func (oc *OpenClawClient) FetchMessages(ctx context.Context, params bridgev2.Fet
 	return oc.manager.FetchMessages(ctx, params)
 }
 
-func (oc *OpenClawClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) *event.RoomFeatures {
-	return &event.RoomFeatures{
-		ID: "com.beeper.ai.capabilities.2026_03_08+openclaw",
-		File: event.FileFeatureMap{
-			event.MsgImage:      openClawFileFeatures,
-			event.MsgVideo:      openClawFileFeatures,
-			event.MsgAudio:      openClawFileFeatures,
-			event.MsgFile:       openClawFileFeatures,
-			event.CapMsgVoice:   openClawFileFeatures,
-			event.CapMsgGIF:     openClawFileFeatures,
-			event.CapMsgSticker: openClawFileFeatures,
-		},
-		MaxTextLength:       100000,
-		Reply:               event.CapLevelFullySupported,
-		Thread:              event.CapLevelFullySupported,
-		Edit:                event.CapLevelRejected,
-		Delete:              event.CapLevelRejected,
-		Reaction:            event.CapLevelRejected,
-		ReadReceipts:        true,
-		TypingNotifications: true,
+func (oc *OpenClawClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
+	caps := openClawBaseCaps.Clone()
+	profile := oc.openClawCapabilityProfile(ctx, portalMeta(portal))
+	caps.ID = openClawCapabilityID(profile)
+	if !profile.MediaKnown {
+		for _, msgType := range []event.MessageType{
+			event.MsgImage,
+			event.MsgVideo,
+			event.MsgAudio,
+			event.MsgFile,
+			event.CapMsgVoice,
+			event.CapMsgGIF,
+			event.CapMsgSticker,
+		} {
+			caps.File[msgType] = openClawFileFeatures.Clone()
+		}
+		return caps
 	}
+	caps.File[event.MsgFile] = openClawFileFeatures.Clone()
+	if profile.SupportsVision {
+		caps.File[event.MsgImage] = openClawFileFeatures.Clone()
+		caps.File[event.CapMsgGIF] = openClawFileFeatures.Clone()
+		caps.File[event.CapMsgSticker] = openClawFileFeatures.Clone()
+	}
+	if profile.SupportsAudio {
+		caps.File[event.MsgAudio] = openClawFileFeatures.Clone()
+		caps.File[event.CapMsgVoice] = openClawFileFeatures.Clone()
+	}
+	if profile.SupportsVideo {
+		caps.File[event.MsgVideo] = openClawFileFeatures.Clone()
+	}
+	return caps
 }
 
 func (oc *OpenClawClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 	meta := portalMeta(portal)
 	oc.enrichPortalMetadata(ctx, meta)
 	title := oc.displayNameForPortal(meta)
+	roomType := openClawRoomType(meta)
 	agentID := stringsTrimDefault(meta.OpenClawDMTargetAgentID, meta.OpenClawAgentID)
-	if agentID != "" {
+	if roomType == database.RoomTypeDM && agentID != "" {
 		info := oc.syntheticDMPortalInfo(agentID, title)
 		info.Topic = ptr.NonZero(oc.topicForPortal(meta))
-		if portal != nil && portal.RoomType == database.RoomTypeDM {
-			info.Type = ptr.Ptr(database.RoomTypeDM)
-		}
+		info.Type = ptr.Ptr(roomType)
 		return info, nil
 	}
 	return &bridgev2.ChatInfo{
 		Name:  ptr.Ptr(title),
 		Topic: ptr.NonZero(oc.topicForPortal(meta)),
+		Type:  ptr.Ptr(roomType),
 	}, nil
+}
+
+func openClawRejectedFileFeatures() *event.FileFeatures {
+	return &event.FileFeatures{
+		MimeTypes: map[string]event.CapabilitySupportLevel{
+			"*/*": event.CapLevelRejected,
+		},
+		Caption: event.CapLevelRejected,
+	}
+}
+
+func (oc *OpenClawClient) openClawCapabilityProfile(ctx context.Context, meta *PortalMetadata) openClawCapabilityProfile {
+	model := oc.effectiveModelChoice(ctx, meta)
+	if model == nil {
+		return openClawCapabilityProfile{}
+	}
+	profile := openClawCapabilityProfile{
+		SupportsReasoning: model.Reasoning,
+		MediaKnown:        len(model.Input) > 0,
+	}
+	for _, modality := range model.Input {
+		switch strings.ToLower(strings.TrimSpace(modality)) {
+		case "image":
+			profile.SupportsVision = true
+		case "audio":
+			profile.SupportsAudio = true
+		case "video":
+			profile.SupportsVideo = true
+		}
+	}
+	return profile
+}
+
+func openClawCapabilityID(profile openClawCapabilityProfile) string {
+	var suffixes []string
+	if profile.SupportsAudio {
+		suffixes = append(suffixes, "audio")
+	}
+	if !profile.MediaKnown {
+		suffixes = append(suffixes, "fallbackmedia")
+	}
+	if profile.SupportsReasoning {
+		suffixes = append(suffixes, "reasoning")
+	}
+	if profile.SupportsVideo {
+		suffixes = append(suffixes, "video")
+	}
+	if profile.SupportsVision {
+		suffixes = append(suffixes, "vision")
+	}
+	if len(suffixes) == 0 {
+		return openClawCapabilityBaseID
+	}
+	sort.Strings(suffixes)
+	return openClawCapabilityBaseID + "+" + strings.Join(suffixes, "+")
 }
 
 func (oc *OpenClawClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
@@ -293,6 +391,9 @@ func (oc *OpenClawClient) displayNameForSession(session gatewaySessionRow) strin
 	if strings.TrimSpace(session.Label) != "" {
 		return strings.TrimSpace(session.Label)
 	}
+	if sourceLabel := openClawSourceLabel(session.Space, session.GroupChannel, session.Subject); sourceLabel != "" {
+		return sourceLabel
+	}
 	if strings.TrimSpace(session.Subject) != "" {
 		return strings.TrimSpace(session.Subject)
 	}
@@ -315,6 +416,14 @@ func (oc *OpenClawClient) displayNameForPortal(meta *PortalMetadata) string {
 	if strings.TrimSpace(meta.OpenClawDMTargetAgentName) != "" {
 		return strings.TrimSpace(meta.OpenClawDMTargetAgentName)
 	}
+	if sourceLabel := openClawSourceLabel(meta.OpenClawSpace, meta.OpenClawGroupChannel, meta.OpenClawSubject); sourceLabel != "" {
+		for _, value := range []string{meta.OpenClawDerivedTitle, meta.OpenClawDisplayName, meta.OpenClawSessionLabel, sourceLabel, meta.OpenClawSubject, meta.LastTo, meta.OpenClawChannel, meta.OpenClawSessionKey} {
+			if strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		}
+		return "OpenClaw"
+	}
 	for _, value := range []string{meta.OpenClawDerivedTitle, meta.OpenClawDisplayName, meta.OpenClawSessionLabel, meta.OpenClawSubject, meta.LastTo, meta.OpenClawChannel, meta.OpenClawSessionKey} {
 		if strings.TrimSpace(value) != "" {
 			return strings.TrimSpace(value)
@@ -330,30 +439,108 @@ func (oc *OpenClawClient) topicForPortal(meta *PortalMetadata) string {
 	if strings.TrimSpace(meta.OpenClawDMTargetAgentID) != "" || isOpenClawSyntheticDMSessionKey(meta.OpenClawSessionKey) {
 		return "OpenClaw agent DM"
 	}
-	parts := make([]string, 0, 6)
-	for _, value := range []string{meta.OpenClawChannel, meta.OpenClawSubject, meta.ModelProvider, meta.Model} {
+	parts := make([]string, 0, 8)
+	appendPart := func(value string) {
 		value = strings.TrimSpace(value)
-		if value != "" {
-			parts = append(parts, value)
+		if value == "" {
+			return
 		}
+		for _, existing := range parts {
+			if strings.EqualFold(existing, value) {
+				return
+			}
+		}
+		parts = append(parts, value)
 	}
+	appendPart(normalizeOpenClawChatType(meta.OpenClawChatType))
+	appendPart(meta.OpenClawChannel)
+	appendPart(openClawSourceLabel(meta.OpenClawSpace, meta.OpenClawGroupChannel, meta.OpenClawSubject))
+	appendPart(compactOpenClawOrigin(meta.OpenClawOrigin))
+	appendPart(meta.ModelProvider)
+	appendPart(meta.Model)
 	if preview := stringsTrimDefault(meta.OpenClawPreviewSnippet, meta.OpenClawLastMessagePreview); strings.TrimSpace(preview) != "" {
-		parts = append(parts, "Recent: "+strings.TrimSpace(preview))
+		appendPart("Recent: " + strings.TrimSpace(preview))
 	}
 	if meta.HistoryMode != "" {
-		parts = append(parts, "History: "+meta.HistoryMode)
+		appendPart("History: " + meta.HistoryMode)
 	}
 	if meta.OpenClawToolCount > 0 {
 		toolSummary := "Tools: " + fmt.Sprintf("%d", meta.OpenClawToolCount)
 		if profile := strings.TrimSpace(meta.OpenClawToolProfile); profile != "" {
 			toolSummary += " (" + profile + ")"
 		}
-		parts = append(parts, toolSummary)
+		appendPart(toolSummary)
 	}
 	if meta.OpenClawKnownModelCount > 0 {
-		parts = append(parts, fmt.Sprintf("Models: %d", meta.OpenClawKnownModelCount))
+		appendPart(fmt.Sprintf("Models: %d", meta.OpenClawKnownModelCount))
 	}
 	return strings.Join(parts, " | ")
+}
+
+func normalizeOpenClawChatType(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "dm", "direct", "private", "one_to_one", "one-to-one":
+		return "direct"
+	case "group", "room":
+		return "group"
+	case "channel", "thread":
+		return "channel"
+	default:
+		return ""
+	}
+}
+
+func openClawRoomType(meta *PortalMetadata) database.RoomType {
+	if meta == nil {
+		return database.RoomTypeDM
+	}
+	switch normalizeOpenClawChatType(meta.OpenClawChatType) {
+	case "direct":
+		return database.RoomTypeDM
+	case "group", "channel":
+		return database.RoomTypeDefault
+	}
+	if strings.TrimSpace(meta.OpenClawSpace) != "" || strings.TrimSpace(meta.OpenClawGroupChannel) != "" {
+		return database.RoomTypeDefault
+	}
+	if strings.TrimSpace(meta.OpenClawDMTargetAgentID) != "" || isOpenClawSyntheticDMSessionKey(meta.OpenClawSessionKey) {
+		return database.RoomTypeDM
+	}
+	return database.RoomTypeDM
+}
+
+func openClawSourceLabel(space, groupChannel, subject string) string {
+	space = strings.TrimSpace(space)
+	groupChannel = strings.TrimSpace(groupChannel)
+	subject = strings.TrimSpace(subject)
+	if groupChannel != "" {
+		if !strings.HasPrefix(groupChannel, "#") {
+			groupChannel = "#" + groupChannel
+		}
+		if space != "" {
+			return space + groupChannel
+		}
+		return groupChannel
+	}
+	if space != "" {
+		return space
+	}
+	if subject != "" {
+		return subject
+	}
+	return ""
+}
+
+func compactOpenClawOrigin(origin string) string {
+	origin = strings.TrimSpace(strings.Join(strings.Fields(origin), " "))
+	if origin == "" {
+		return ""
+	}
+	const maxLen = 80
+	if len(origin) > maxLen {
+		return "Origin: " + origin[:maxLen-1] + "…"
+	}
+	return "Origin: " + origin
 }
 
 func (oc *OpenClawClient) displayNameForAgent(agentID string) string {

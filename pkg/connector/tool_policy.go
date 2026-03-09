@@ -162,7 +162,7 @@ func applyPatchModelAllowed(allow []string, modelID string, provider string) boo
 
 // isToolEnabled checks if a specific tool is enabled (policy + availability).
 func (oc *AIClient) isToolEnabled(meta *PortalMetadata, toolName string) bool {
-	toolName = normalizeToolAlias(toolName)
+	toolName = strings.TrimSpace(toolName)
 
 	if meta != nil && slices.Contains(meta.DisabledTools, toolName) {
 		return false

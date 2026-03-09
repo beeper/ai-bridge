@@ -41,15 +41,14 @@ func (o *OpenAIProvider) buildResponsesParams(params GenerateParams) responses.R
 			Effort: effort,
 		}
 	}
+	if strings.TrimSpace(params.PreviousResponseID) != "" {
+		responsesParams.PreviousResponseID = openai.String(strings.TrimSpace(params.PreviousResponseID))
+	}
 	if params.WebSearchEnabled {
 		responsesParams.Tools = append(responsesParams.Tools, responses.ToolUnionParam{
 			OfWebSearch: &responses.WebSearchToolParam{},
 		})
 	}
-	if isOpenRouterBaseURL(o.baseURL) {
-		responsesParams.Tools = renameWebSearchToolParams(responsesParams.Tools)
-	}
-
 	responsesParams.Tools = dedupeToolParams(responsesParams.Tools)
 	return responsesParams
 }
@@ -143,7 +142,7 @@ func (o *OpenAIProvider) GenerateStream(ctx context.Context, params GeneratePara
 // Generate performs a non-streaming generation using the Responses API.
 func (o *OpenAIProvider) Generate(ctx context.Context, params GenerateParams) (*GenerateResponse, error) {
 	if hasUnsupportedResponsesPromptContext(params.Context) {
-		return o.generateChatCompletions(ctx, params)
+		return nil, fmt.Errorf("responses API does not support prompt context block types required by this request")
 	}
 
 	responsesParams := o.buildResponsesParams(params)

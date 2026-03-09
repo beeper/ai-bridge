@@ -17,10 +17,9 @@ import (
 )
 
 const (
-	channelDesktopAPI            = "desktop-api"
-	desktopDefaultInstance       = "default"
-	desktopSessionKeyPrefix      = channelDesktopAPI + ":"
-	desktopSessionKeyAliasPrefix = "desktop:"
+	channelDesktopAPI       = "desktop-api"
+	desktopDefaultInstance  = "default"
+	desktopSessionKeyPrefix = channelDesktopAPI + ":"
 )
 
 type desktopSessionListOptions struct {
@@ -137,8 +136,6 @@ func parseDesktopSessionKey(sessionKey string) (string, string, bool) {
 	}
 	var raw string
 	if r, ok := strings.CutPrefix(trimmed, desktopSessionKeyPrefix); ok {
-		raw = r
-	} else if r, ok := strings.CutPrefix(trimmed, desktopSessionKeyAliasPrefix); ok {
 		raw = r
 	} else {
 		return "", "", false

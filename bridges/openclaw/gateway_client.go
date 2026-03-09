@@ -198,11 +198,12 @@ type gatewayAgentsListResponse struct {
 }
 
 type gatewayModelChoice struct {
-	ID            string `json:"id,omitempty"`
-	Name          string `json:"name,omitempty"`
-	Provider      string `json:"provider,omitempty"`
-	ContextWindow int64  `json:"contextWindow,omitempty"`
-	Reasoning     bool   `json:"reasoning,omitempty"`
+	ID            string   `json:"id,omitempty"`
+	Name          string   `json:"name,omitempty"`
+	Provider      string   `json:"provider,omitempty"`
+	ContextWindow int64    `json:"contextWindow,omitempty"`
+	Reasoning     bool     `json:"reasoning,omitempty"`
+	Input         []string `json:"input,omitempty"`
 }
 
 type gatewayModelsListResponse struct {
@@ -543,6 +544,14 @@ func (c *gatewayWSClient) ListModels(ctx context.Context) (*gatewayModelsListRes
 		resp.Models[i].ID = strings.TrimSpace(resp.Models[i].ID)
 		resp.Models[i].Name = strings.TrimSpace(resp.Models[i].Name)
 		resp.Models[i].Provider = strings.TrimSpace(resp.Models[i].Provider)
+		inputs := resp.Models[i].Input[:0]
+		for _, modality := range resp.Models[i].Input {
+			modality = strings.ToLower(strings.TrimSpace(modality))
+			if modality != "" {
+				inputs = append(inputs, modality)
+			}
+		}
+		resp.Models[i].Input = inputs
 	}
 	return &resp, nil
 }

@@ -357,23 +357,34 @@ func (oc *AIClient) streamingResponseWithRetry(
 	promptContext PromptContext,
 ) {
 	prompt := oc.promptContextToDispatchMessages(ctx, portal, meta, promptContext)
-	selector := func(meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (responseFunc, string) {
-		return oc.selectResponseFn(meta, prompt)
+	responseFn, logLabel := oc.selectResponseFn(meta, promptContext)
+	success, err := oc.responseWithRetry(ctx, evt, portal, meta, prompt, responseFn, logLabel)
+	if success || err == nil {
+		return
 	}
-	oc.responseWithModelFallbackDynamic(ctx, evt, portal, meta, prompt, selector)
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	oc.notifyMatrixSendFailure(ctx, portal, evt, err)
 }
 
-func (oc *AIClient) selectResponseFn(meta *PortalMetadata, prompt []openai.ChatCompletionMessageParamUnion) (responseFunc, string) {
-	// Use Chat Completions API for audio (native support)
-	// SDK v3.16.0 has ResponseInputAudioParam but it's not wired into the union
-	if hasAudioContent(prompt) {
+func (oc *AIClient) selectResponseFn(meta *PortalMetadata, promptContext PromptContext) (responseFunc, string) {
+	if hasUnsupportedResponsesPromptContext(promptContext) {
 		return oc.streamChatCompletions, "chat_completions"
+	}
+	modelID := ""
+	if oc != nil {
+		modelID = oc.effectiveModel(meta)
 	}
 	switch oc.resolveModelAPI(meta) {
 	case ModelAPIChatCompletions:
+		if isDirectOpenAIModel(modelID) {
+			return func(context.Context, *event.Event, *bridgev2.Portal, *PortalMetadata, []openai.ChatCompletionMessageParamUnion) (bool, *ContextLengthError, error) {
+				return false, nil, fmt.Errorf("invalid model configuration: direct OpenAI model %q cannot use chat_completions", modelID)
+			}, "invalid_model_api"
+		}
 		return oc.streamChatCompletions, "chat_completions"
 	default:
-		// Use Responses API for other content (images, files, text)
 		return oc.streamingResponse, "responses"
 	}
 }

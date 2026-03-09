@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"testing"
+	"strings"
 )
 
 func TestSelectedBuiltinToolsForTurn_SimpleModeEnablesOnlyWebSearch(t *testing.T) {
@@ -24,7 +25,7 @@ func TestSelectedBuiltinToolsForTurn_SimpleModeEnablesOnlyWebSearch(t *testing.T
 	if len(got) != 1 {
 		t.Fatalf("expected exactly 1 tool for simple mode, got %d", len(got))
 	}
-	if normalizeToolAlias(got[0].Name) != ToolNameWebSearch {
+	if strings.TrimSpace(got[0].Name) != ToolNameWebSearch {
 		t.Fatalf("expected simple mode tool %q, got %q", ToolNameWebSearch, got[0].Name)
 	}
 }

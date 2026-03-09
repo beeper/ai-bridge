@@ -69,7 +69,6 @@ type ToolApprovalsRuntimeConfig struct {
 	TTLSeconds      int      `yaml:"ttlSeconds"`
 	RequireForMCP   *bool    `yaml:"requireForMcp"`
 	RequireForTools []string `yaml:"requireForTools"`
-	AskFallback     string   `yaml:"askFallback"` // "deny" (default) | "allow"
 }
 
 func (c *ToolApprovalsRuntimeConfig) WithDefaults() *ToolApprovalsRuntimeConfig {
@@ -180,7 +179,7 @@ type ChannelHeartbeatVisibilityConfig struct {
 type MessagesConfig struct {
 	AckReaction      string                 `yaml:"ackReaction"`
 	AckReactionScope string                 `yaml:"ackReactionScope"` // group-mentions|group-all|direct|all|off|none
-	RemoveAckAfter   bool                   `yaml:"removeAckAfterReply"`
+	RemoveAckAfter   bool                   `yaml:"removeAckAfter"`
 	GroupChat        *GroupChatConfig       `yaml:"groupChat"`
 	DirectChat       *DirectChatConfig      `yaml:"directChat"`
 	Queue            *QueueConfig           `yaml:"queue"`

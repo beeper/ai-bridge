@@ -8,15 +8,15 @@ func TestNormalizeToolNameRemovesAnalyzeImageAlias(t *testing.T) {
 	}
 }
 
-func TestNormalizeToolNameKeepsApplyPatchAlias(t *testing.T) {
-	if got := NormalizeToolName("apply-patch"); got != "apply_patch" {
-		t.Fatalf("expected apply-patch alias to normalize to apply_patch, got %q", got)
+func TestNormalizeToolNameLeavesApplyPatchUnchanged(t *testing.T) {
+	if got := NormalizeToolName("apply-patch"); got != "apply-patch" {
+		t.Fatalf("expected apply-patch to stay unchanged, got %q", got)
 	}
 }
 
-func TestNormalizeToolNameBashAlias(t *testing.T) {
-	if got := NormalizeToolName("bash"); got != "exec" {
-		t.Fatalf("expected bash alias to normalize to exec, got %q", got)
+func TestNormalizeToolNameLeavesBashUnchanged(t *testing.T) {
+	if got := NormalizeToolName("bash"); got != "bash" {
+		t.Fatalf("expected bash to stay unchanged, got %q", got)
 	}
 }
 

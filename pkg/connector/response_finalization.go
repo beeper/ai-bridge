@@ -615,8 +615,11 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 	uiMessage := oc.buildFinalEditUIMessage(state, meta, linkPreviews)
 
 	topLevelExtra := map[string]any{
+		"body":                          rendered.Body,
 		"com.beeper.dont_render_edited": true,
 		"com.beeper.ai":                 uiMessage,
+		"format":                        rendered.Format,
+		"formatted_body":                rendered.FormattedBody,
 		"m.mentions":                    map[string]any{},
 	}
 	if len(linkPreviews) > 0 {
@@ -625,17 +628,6 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 	if relatesTo != nil {
 		topLevelExtra["m.relates_to"] = relatesTo
 	}
-	useFullFallback := estimateFinalEditEventSizeBytes(rendered, topLevelExtra, true) <= maxSafeEditPayloadBytes
-	if !useFullFallback {
-		// Keep top-level fallback text minimal to avoid duplicating full response
-		// outside m.new_content when close to Matrix event size limits.
-		topLevelExtra["body"] = "* AI response"
-		if rendered.Format != "" {
-			topLevelExtra["format"] = rendered.Format
-			topLevelExtra["formatted_body"] = "* AI response"
-		}
-	}
-
 	sender := oc.senderForPortal(ctx, portal)
 	editContent := &bridgev2.ConvertedEdit{
 		ModifiedParts: []*bridgev2.ConvertedEditPart{{

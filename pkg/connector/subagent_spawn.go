@@ -330,13 +330,14 @@ func (oc *AIClient) executeSessionsSpawn(ctx context.Context, portal *bridgev2.P
 	}
 
 	eventID := bridgeadapter.NewEventID("subagent")
-	promptMessages, err := oc.buildPrompt(ctx, childPortal, childMeta, task, eventID)
+	promptContext, err := oc.buildContextWithLinkContext(ctx, childPortal, childMeta, task, nil, eventID)
 	if err != nil {
 		return tools.JSONResult(map[string]any{
 			"status": "error",
 			"error":  err.Error(),
 		}), nil
 	}
+	promptMessages := oc.promptContextToDispatchMessages(ctx, childPortal, childMeta, promptContext)
 
 	userMessage := &database.Message{
 		ID:       bridgeadapter.MatrixMessageID(eventID),
@@ -348,6 +349,7 @@ func (oc *AIClient) executeSessionsSpawn(ctx context.Context, portal *bridgev2.P
 		},
 		Timestamp: time.Now(),
 	}
+	setCanonicalPromptMessages(userMessage.Metadata.(*MessageMetadata), canonicalPromptTail(promptContext, 1))
 	ensureCanonicalUserMessage(userMessage)
 	if _, err := oc.UserLogin.Bridge.GetGhostByID(ctx, userMessage.SenderID); err != nil {
 		oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to ensure user ghost before saving subagent task message")

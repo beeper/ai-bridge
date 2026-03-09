@@ -305,11 +305,17 @@ func (oc *AIClient) analyzeAudioWithModel(
 		},
 	}
 
-	resp, err := oc.provider.Generate(ctx, GenerateParams{
+	params := GenerateParams{
 		Model:               modelIDForAPI,
 		Context:             ToPromptContext("", nil, messages),
 		MaxCompletionTokens: defaultImageUnderstandingLimit,
-	})
+	}
+	var resp *GenerateResponse
+	if provider, ok := oc.provider.(*OpenAIProvider); ok && legacyUnifiedMessagesNeedChatAdapter(messages) {
+		resp, err = provider.generateChatCompletions(ctx, params)
+	} else {
+		resp, err = oc.provider.Generate(ctx, params)
+	}
 	if err != nil {
 		return "", fmt.Errorf("audio analysis failed for model %s (audio %s): %w", modelIDForAPI, audioRef, err)
 	}

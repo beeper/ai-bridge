@@ -23,6 +23,7 @@ type AIProvider interface {
 type GenerateParams struct {
 	Model               string
 	Context             PromptContext
+	PreviousResponseID  string
 	Temperature         float64
 	MaxCompletionTokens int
 	ReasoningEffort     string // none, low, medium, high (for reasoning models)

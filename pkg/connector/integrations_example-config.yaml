@@ -183,26 +183,6 @@ tools:
         - provider: "openrouter"
           model: "google/gemini-3-flash-preview"
 
-recall_search:
-  enabled: true
-  sources: ["memory"]
-  extra_paths: []
-  provider: "auto" # auto | openai | gemini
-  model: ""
-  fallback: "none"
-  remote:
-    base_url: ""
-    api_key: ""
-    headers: {}
-    batch:
-      enabled: true
-      wait: true
-      concurrency: 2
-      poll_interval_ms: 2000
-      timeout_minutes: 60
-  store:
-    driver: "sqlite"
-    path: ""
     vector:
       enabled: true
       extension_path: ""

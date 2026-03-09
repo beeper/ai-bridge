@@ -510,11 +510,7 @@ func (oc *AIClient) streamingResponse(
 			resolution, _, ok := oc.waitToolApproval(ctx, approval.approvalID)
 			decision := resolution.Decision
 			if !ok {
-				if oc.toolApprovalsAskFallback() == "allow" {
-					decision = airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalApproved, Reason: "fallback"}
-				} else {
-					decision = airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalTimedOut, Reason: "timeout"}
-				}
+				decision = airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalTimedOut, Reason: "timeout"}
 			}
 			approved := approvalAllowed(decision)
 			streamui.RecordApprovalResponse(&state.ui, approval.approvalID, approval.toolCallID, approved, decision.Reason)

@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openai/openai-go/v3"
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -322,6 +321,7 @@ func (oc *AIClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		},
 		Timestamp: bridgeadapter.MatrixEventTimestamp(msg.Event),
 	}
+	setCanonicalPromptMessages(userMessage.Metadata.(*MessageMetadata), canonicalPromptTail(promptContext, 1))
 	if msg.InputTransactionID != "" {
 		userMessage.SendTxnID = networkid.RawTransactionID(msg.InputTransactionID)
 	}
@@ -730,6 +730,7 @@ func (oc *AIClient) handleMediaMessage(
 			},
 			Timestamp: bridgeadapter.MatrixEventTimestamp(msg.Event),
 		}
+		setCanonicalPromptMessages(userMessage.Metadata.(*MessageMetadata), canonicalPromptTail(promptContext, 1))
 		if msg.InputTransactionID != "" {
 			userMessage.SendTxnID = networkid.RawTransactionID(msg.InputTransactionID)
 		}
@@ -773,6 +774,16 @@ func (oc *AIClient) handleMediaMessage(
 				caption = result.Body
 			}
 		}
+	}
+
+	if msgType == event.MsgAudio || msgType == event.MsgVideo {
+		if understanding != nil && strings.TrimSpace(understanding.Body) != "" {
+			return dispatchTextOnly(understanding.Body)
+		}
+		return nil, bridgeadapter.UnsupportedMessageStatus(fmt.Errorf(
+			"%s messages must be preprocessed into text before generation; configure media understanding or upload a transcript",
+			msgType,
+		))
 	}
 
 	if !supportsMedia {
@@ -856,6 +867,7 @@ func (oc *AIClient) handleMediaMessage(
 		userMeta.MediaUnderstandingDecisions = understanding.Decisions
 		userMeta.Transcript = understanding.Transcript
 	}
+	setCanonicalPromptMessages(userMeta, canonicalPromptTail(promptContext, 1))
 
 	userMessage := &database.Message{
 		ID:        bridgeadapter.MatrixMessageID(eventID),
@@ -1030,6 +1042,7 @@ func (oc *AIClient) handleTextFileMessage(
 		},
 		Timestamp: bridgeadapter.MatrixEventTimestamp(msg.Event),
 	}
+	setCanonicalPromptMessages(userMessage.Metadata.(*MessageMetadata), canonicalPromptTail(promptContext, 1))
 	if msg.InputTransactionID != "" {
 		userMessage.SendTxnID = networkid.RawTransactionID(msg.InputTransactionID)
 	}
@@ -1232,7 +1245,7 @@ func (oc *AIClient) buildContextForRegenerate(
 
 		// Determine whether to inject images into history (requires vision-capable model).
 		hasVision := oc.getModelCapabilitiesForMeta(meta).SupportsVision
-		historyBundles := make([][]openai.ChatCompletionMessageParamUnion, 0, len(history))
+		historyBundles := make([][]PromptMessage, 0, len(history))
 
 		// Skip the most recent messages (last user and assistant) and build from older history
 		skippedUser := false
@@ -1269,7 +1282,7 @@ func (oc *AIClient) buildContextForRegenerate(
 		}
 
 		for i := len(historyBundles) - 1; i >= 0; i-- {
-			appendChatMessagesToPromptContext(&promptContext, historyBundles[i])
+			promptContext.Messages = append(promptContext.Messages, historyBundles[i]...)
 		}
 	}
 

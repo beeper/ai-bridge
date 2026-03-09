@@ -3,6 +3,10 @@ package openclaw
 import (
 	"context"
 	"testing"
+
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/event"
 )
 
 func TestOpenClawAgentIDFromSessionKey(t *testing.T) {
@@ -223,14 +227,17 @@ func TestDownloadOpenClawAttachmentURLRejectsLocalFiles(t *testing.T) {
 func TestTopicForPortal(t *testing.T) {
 	oc := &OpenClawClient{}
 	topic := oc.topicForPortal(&PortalMetadata{
+		OpenClawChatType:           "channel",
 		OpenClawChannel:            "discord",
 		OpenClawSubject:            "Support",
+		OpenClawSpace:              "Acme",
+		OpenClawGroupChannel:       "support",
 		ModelProvider:              "openai",
 		Model:                      "gpt-5",
 		OpenClawLastMessagePreview: "hello there",
 		HistoryMode:                "recent_only",
 	})
-	want := "discord | Support | openai | gpt-5 | Recent: hello there | History: recent_only"
+	want := "channel | discord | Acme#support | openai | gpt-5 | Recent: hello there | History: recent_only"
 	if topic != want {
 		t.Fatalf("unexpected topic: %q", topic)
 	}
@@ -239,16 +246,174 @@ func TestTopicForPortal(t *testing.T) {
 func TestTopicForPortalWithPreviewAndCatalogCounts(t *testing.T) {
 	oc := &OpenClawClient{}
 	topic := oc.topicForPortal(&PortalMetadata{
+		OpenClawChatType:        "group",
 		OpenClawChannel:         "discord",
+		OpenClawOrigin:          "{\"provider\":\"discord\",\"channel\":\"123\"}",
 		OpenClawPreviewSnippet:  "preview text",
 		HistoryMode:             "recent_only",
 		OpenClawToolProfile:     "default",
 		OpenClawToolCount:       3,
 		OpenClawKnownModelCount: 7,
 	})
-	want := "discord | Recent: preview text | History: recent_only | Tools: 3 (default) | Models: 7"
+	want := "group | discord | Origin: {\"provider\":\"discord\",\"channel\":\"123\"} | Recent: preview text | History: recent_only | Tools: 3 (default) | Models: 7"
 	if topic != want {
 		t.Fatalf("unexpected topic: %q", topic)
+	}
+}
+
+func TestOpenClawRoomType(t *testing.T) {
+	tests := []struct {
+		name string
+		meta PortalMetadata
+		want database.RoomType
+	}{
+		{
+			name: "direct chat type stays dm",
+			meta: PortalMetadata{OpenClawChatType: "direct"},
+			want: database.RoomTypeDM,
+		},
+		{
+			name: "group chat type becomes default room",
+			meta: PortalMetadata{OpenClawChatType: "group"},
+			want: database.RoomTypeDefault,
+		},
+		{
+			name: "channel chat type becomes default room",
+			meta: PortalMetadata{OpenClawChatType: "channel"},
+			want: database.RoomTypeDefault,
+		},
+		{
+			name: "group channel metadata becomes default room",
+			meta: PortalMetadata{OpenClawGroupChannel: "alerts"},
+			want: database.RoomTypeDefault,
+		},
+		{
+			name: "synthetic dm stays dm",
+			meta: PortalMetadata{OpenClawSessionKey: openClawDMAgentSessionKey("main")},
+			want: database.RoomTypeDM,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := openClawRoomType(&tt.meta); got != tt.want {
+				t.Fatalf("unexpected room type: got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDisplayNameForSessionUsesSourceLabel(t *testing.T) {
+	oc := &OpenClawClient{}
+	got := oc.displayNameForSession(gatewaySessionRow{
+		Space:        "Acme",
+		GroupChannel: "support",
+		Channel:      "discord",
+	})
+	if got != "Acme#support" {
+		t.Fatalf("unexpected display name: %q", got)
+	}
+}
+
+func TestOpenClawGetCapabilitiesUsesSelectedModelModalities(t *testing.T) {
+	oc := &OpenClawClient{
+		modelCatalog: []gatewayModelChoice{
+			{
+				ID:        "gpt-5",
+				Provider:  "openai",
+				Reasoning: true,
+				Input:     []string{"text", "image"},
+			},
+		},
+	}
+	portal := &bridgev2.Portal{
+		Portal: &database.Portal{
+			Metadata: &PortalMetadata{
+				IsOpenClawRoom: true,
+				ModelProvider:  "openai",
+				Model:          "gpt-5",
+			},
+		},
+	}
+
+	caps := oc.GetCapabilities(context.Background(), portal)
+	if caps.ID != openClawCapabilityBaseID+"+reasoning+vision" {
+		t.Fatalf("unexpected capability id: %q", caps.ID)
+	}
+	if caps.File[event.MsgImage].MimeTypes["*/*"] != event.CapLevelFullySupported {
+		t.Fatalf("expected images to be supported, got %#v", caps.File[event.MsgImage])
+	}
+	if caps.File[event.CapMsgGIF].MimeTypes["*/*"] != event.CapLevelFullySupported {
+		t.Fatalf("expected GIFs to be supported, got %#v", caps.File[event.CapMsgGIF])
+	}
+	if caps.File[event.MsgAudio].MimeTypes["*/*"] != event.CapLevelRejected {
+		t.Fatalf("expected audio to stay rejected, got %#v", caps.File[event.MsgAudio])
+	}
+}
+
+func TestOpenClawGetCapabilitiesRejectsUnsupportedMediaWhenKnown(t *testing.T) {
+	oc := &OpenClawClient{
+		modelCatalog: []gatewayModelChoice{
+			{
+				ID:       "gpt-5-mini",
+				Provider: "openai",
+				Input:    []string{"text"},
+			},
+		},
+	}
+	portal := &bridgev2.Portal{
+		Portal: &database.Portal{
+			Metadata: &PortalMetadata{
+				IsOpenClawRoom: true,
+				ModelProvider:  "openai",
+				Model:          "gpt-5-mini",
+			},
+		},
+	}
+
+	caps := oc.GetCapabilities(context.Background(), portal)
+	if caps.ID != openClawCapabilityBaseID {
+		t.Fatalf("unexpected capability id: %q", caps.ID)
+	}
+	if caps.File[event.MsgFile].MimeTypes["*/*"] != event.CapLevelFullySupported {
+		t.Fatalf("expected generic files to stay supported, got %#v", caps.File[event.MsgFile])
+	}
+	if caps.File[event.MsgImage].MimeTypes["*/*"] != event.CapLevelRejected {
+		t.Fatalf("expected images to be rejected, got %#v", caps.File[event.MsgImage])
+	}
+	if caps.File[event.MsgVideo].MimeTypes["*/*"] != event.CapLevelRejected {
+		t.Fatalf("expected video to be rejected, got %#v", caps.File[event.MsgVideo])
+	}
+}
+
+func TestOpenClawGetCapabilitiesFallsBackWhenModelSupportUnknown(t *testing.T) {
+	oc := &OpenClawClient{}
+	portal := &bridgev2.Portal{
+		Portal: &database.Portal{
+			Metadata: &PortalMetadata{
+				IsOpenClawRoom: true,
+				ModelProvider:  "openai",
+				Model:          "unknown-model",
+			},
+		},
+	}
+
+	caps := oc.GetCapabilities(context.Background(), portal)
+	if caps.ID != openClawCapabilityBaseID+"+fallbackmedia" {
+		t.Fatalf("unexpected capability id: %q", caps.ID)
+	}
+	for _, msgType := range []event.MessageType{
+		event.MsgImage,
+		event.MsgVideo,
+		event.MsgAudio,
+		event.MsgFile,
+		event.CapMsgVoice,
+		event.CapMsgGIF,
+		event.CapMsgSticker,
+	} {
+		if caps.File[msgType].MimeTypes["*/*"] != event.CapLevelFullySupported {
+			t.Fatalf("expected %s to use fallback support, got %#v", msgType, caps.File[msgType])
+		}
 	}
 }
 

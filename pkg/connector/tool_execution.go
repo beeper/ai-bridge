@@ -50,7 +50,7 @@ func parseToolInputPayload(argsJSON string) map[string]any {
 }
 
 func toolDisplayTitle(toolName string) string {
-	toolName = normalizeToolAlias(toolName)
+	toolName = strings.TrimSpace(toolName)
 	if t := tools.GetTool(toolName); t != nil && t.Annotations != nil && t.Annotations.Title != "" {
 		return t.Annotations.Title
 	}
@@ -93,7 +93,7 @@ func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Por
 	if portal != nil {
 		meta = portalMeta(portal)
 	}
-	if handled, result, err := oc.executeIntegratedTool(ctx, portal, meta, normalizeToolAlias(toolName), args, argsJSON); handled {
+	if handled, result, err := oc.executeIntegratedTool(ctx, portal, meta, strings.TrimSpace(toolName), args, argsJSON); handled {
 		return result, err
 	}
 	return oc.executeBuiltinToolDirect(ctx, portal, toolName, argsJSON)
@@ -106,7 +106,7 @@ func (oc *AIClient) executeBuiltinToolDirect(ctx context.Context, portal *bridge
 		return "", fmt.Errorf("invalid tool arguments: %w", err)
 	}
 
-	toolName = normalizeToolAlias(toolName)
+	toolName = strings.TrimSpace(toolName)
 
 	if toolpolicy.IsOwnerOnlyToolName(toolName) {
 		senderID := ""

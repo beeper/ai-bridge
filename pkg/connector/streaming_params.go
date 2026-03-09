@@ -87,10 +87,6 @@ func (oc *AIClient) buildResponsesAPIParams(ctx context.Context, portal *bridgev
 		log.Debug().Int("count", len(enabledBoss)).Msg("Added boss agent tools")
 	}
 
-	if isOpenRouter {
-		params.Tools = renameWebSearchToolParams(params.Tools)
-	}
-
 	// Prevent duplicate tool names (Anthropic rejects duplicates)
 	logToolParamDuplicates(log, params.Tools)
 	params.Tools = dedupeToolParams(params.Tools)

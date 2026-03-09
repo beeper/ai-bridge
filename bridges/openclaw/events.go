@@ -133,8 +133,9 @@ func (evt *OpenClawSessionResyncEvent) GetChatInfo(ctx context.Context, portal *
 		EventSender: evt.client.senderForAgent(agentID, false),
 		UserInfo:    evt.client.userInfoForAgentProfile(profile),
 	}
+	roomType := openClawRoomType(meta)
 	return &bridgev2.ChatInfo{
-		Type:  ptr.Ptr(database.RoomTypeDM),
+		Type:  ptr.Ptr(roomType),
 		Name:  ptr.Ptr(title),
 		Topic: ptr.NonZero(evt.client.topicForPortal(meta)),
 		Members: &bridgev2.ChatMemberList{
