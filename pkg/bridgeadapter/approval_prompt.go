@@ -16,6 +16,12 @@ import (
 
 const ApprovalDecisionKey = "com.beeper.ai.approval_decision"
 
+const (
+	RejectReasonOwnerOnly     = "only_owner"
+	RejectReasonExpired       = "expired"
+	RejectReasonInvalidOption = "invalid_option"
+)
+
 type ApprovalOption struct {
 	ID          string `json:"id"`
 	Key         string `json:"key"`
@@ -328,8 +334,8 @@ func (s *ApprovalPromptStore) MatchReaction(targetEventID id.EventID, sender id.
 		return ApprovalPromptReactionMatch{}
 	}
 	promptCopy := *entry
-	promptCopy.Options = slices.Clone(entry.Options)
 	s.mu.RUnlock()
+	promptCopy.Options = slices.Clone(promptCopy.Options)
 
 	sender = id.UserID(strings.TrimSpace(sender.String()))
 
@@ -339,11 +345,11 @@ func (s *ApprovalPromptStore) MatchReaction(targetEventID id.EventID, sender id.
 		Prompt:      promptCopy,
 	}
 	if promptCopy.OwnerMXID != "" && sender != promptCopy.OwnerMXID {
-		match.RejectReason = "only_owner"
+		match.RejectReason = RejectReasonOwnerOnly
 		return match
 	}
 	if !promptCopy.ExpiresAt.IsZero() && !now.IsZero() && now.After(promptCopy.ExpiresAt) {
-		match.RejectReason = "expired"
+		match.RejectReason = RejectReasonExpired
 		s.Drop(approvalID)
 		return match
 	}
@@ -362,7 +368,7 @@ func (s *ApprovalPromptStore) MatchReaction(targetEventID id.EventID, sender id.
 			return match
 		}
 	}
-	match.RejectReason = "invalid_option"
+	match.RejectReason = RejectReasonInvalidOption
 	return match
 }
 
