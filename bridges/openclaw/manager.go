@@ -18,6 +18,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/agentremote/pkg/bridgeadapter"
 	"github.com/beeper/agentremote/pkg/connector/msgconv"
@@ -33,7 +34,7 @@ type openClawManager struct {
 	mu                 sync.RWMutex
 	gateway            *gatewayWSClient
 	sessions           map[string]gatewaySessionRow
-	approvals          *bridgeadapter.ApprovalManager[*openClawPendingApprovalData]
+	approvalFlow       *bridgeadapter.ApprovalFlow[*openClawPendingApprovalData]
 	waiting            map[string]struct{}
 	started            map[string]struct{}
 	resyncing          map[string]time.Time
@@ -54,15 +55,56 @@ type openClawPendingApprovalData struct {
 }
 
 func newOpenClawManager(client *OpenClawClient) *openClawManager {
-	return &openClawManager{
+	mgr := &openClawManager{
 		client:             client,
 		sessions:           make(map[string]gatewaySessionRow),
-		approvals:          bridgeadapter.NewApprovalManager[*openClawPendingApprovalData](),
 		waiting:            make(map[string]struct{}),
 		started:            make(map[string]struct{}),
 		resyncing:          make(map[string]time.Time),
 		lastEmittedUserMsg: make(map[string]networkid.MessageID),
 	}
+	mgr.approvalFlow = bridgeadapter.NewApprovalFlow(bridgeadapter.ApprovalFlowConfig[*openClawPendingApprovalData]{
+		Login:    func() *bridgev2.UserLogin { return client.UserLogin },
+		Sender:   func(_ *bridgev2.Portal) bridgev2.EventSender { return client.senderForAgent("gateway", false) },
+		IDPrefix: "openclaw",
+		LogKey:   "openclaw_msg_id",
+		RoomIDFromData: func(data *openClawPendingApprovalData) id.RoomID {
+			// OpenClaw validates by session key, not room ID directly.
+			return ""
+		},
+		DeliverDecision: func(ctx context.Context, portal *bridgev2.Portal, pending *bridgeadapter.Pending[*openClawPendingApprovalData], decision bridgeadapter.ApprovalDecisionPayload) error {
+			gateway, err := mgr.requireGateway()
+			if err != nil {
+				return err
+			}
+			data := pending.Data
+			if data != nil {
+				if strings.TrimSpace(data.SessionKey) != strings.TrimSpace(portalMeta(portal).OpenClawSessionKey) {
+					return bridgeadapter.ErrApprovalWrongRoom
+				}
+			}
+			upstreamDecision := "deny"
+			if decision.Approved {
+				upstreamDecision = "allow-once"
+				if decision.Always {
+					upstreamDecision = "allow-always"
+				}
+			}
+			return gateway.ResolveApproval(ctx, decision.ApprovalID, upstreamDecision)
+		},
+		SendNotice: func(ctx context.Context, portal *bridgev2.Portal, msg string) {
+			client.sendSystemNoticeViaPortal(ctx, portal, msg)
+		},
+		DBMetadata: func(prompt bridgeadapter.ApprovalPromptMessage) any {
+			return &MessageMetadata{
+				Role:               "assistant",
+				ExcludeFromHistory: true,
+				CanonicalSchema:    "ai-sdk-ui-message-v1",
+				CanonicalUIMessage: prompt.UIMessage,
+			}
+		},
+	})
+	return mgr
 }
 
 func (m *openClawManager) Start(ctx context.Context) (bool, error) {
@@ -462,33 +504,6 @@ func (m *openClawManager) handleControlCommand(ctx context.Context, msg *bridgev
 	return true, nil
 }
 
-func (m *openClawManager) ResolveApprovalDecision(ctx context.Context, portal *bridgev2.Portal, decision bridgeadapter.ApprovalDecisionPayload) error {
-	gateway, err := m.requireGateway()
-	if err != nil {
-		return err
-	}
-	pending := m.approvals.Get(strings.TrimSpace(decision.ApprovalID))
-	if pending == nil {
-		return bridgeadapter.ErrApprovalUnknown
-	}
-	data, _ := pending.Data.(*openClawPendingApprovalData)
-	if data != nil {
-		if strings.TrimSpace(data.SessionKey) != strings.TrimSpace(portalMeta(portal).OpenClawSessionKey) {
-			return bridgeadapter.ErrApprovalWrongRoom
-		}
-	}
-	upstreamDecision := "deny"
-	if decision.Approved {
-		upstreamDecision = "allow-once"
-		if decision.Always {
-			upstreamDecision = "allow-always"
-		}
-	}
-	if err := gateway.ResolveApproval(ctx, decision.ApprovalID, upstreamDecision); err != nil {
-		return err
-	}
-	return nil
-}
 
 func (m *openClawManager) FetchMessages(ctx context.Context, params bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
 	gateway, err := m.requireGateway()
@@ -953,7 +968,7 @@ func (m *openClawManager) handleApprovalRequest(ctx context.Context, payload gat
 	if command != "" {
 		body = "Tool approval required: " + command
 	}
-	m.approvals.Register(payload.ID, time.Until(time.UnixMilli(payload.ExpiresAtMs)), &openClawPendingApprovalData{
+	m.approvalFlow.Register(payload.ID, time.Until(time.UnixMilli(payload.ExpiresAtMs)), &openClawPendingApprovalData{
 		SessionKey:  sessionKey,
 		Command:     command,
 		CreatedAtMs: payload.CreatedAtMs,
@@ -962,8 +977,8 @@ func (m *openClawManager) handleApprovalRequest(ctx context.Context, payload gat
 	toolName := "exec"
 	toolCallID := strings.TrimSpace(payload.ID)
 	turnID := ""
-	if pending := m.approvals.Get(strings.TrimSpace(payload.ID)); pending != nil {
-		if data, _ := pending.Data.(*openClawPendingApprovalData); data != nil {
+	if pending := m.approvalFlow.Get(strings.TrimSpace(payload.ID)); pending != nil {
+		if data := pending.Data; data != nil {
 			if strings.TrimSpace(data.ToolCallID) != "" {
 				toolCallID = strings.TrimSpace(data.ToolCallID)
 			}
@@ -990,22 +1005,22 @@ func (m *openClawManager) handleApprovalResolved(ctx context.Context, payload ga
 	if approvalID == "" {
 		return
 	}
-	pending := m.approvals.Get(approvalID)
+	pending := m.approvalFlow.Get(approvalID)
 	var data *openClawPendingApprovalData
 	if pending != nil {
-		data, _ = pending.Data.(*openClawPendingApprovalData)
+		data = pending.Data
 	}
 	sessionKey := strings.TrimSpace(stringValue(payload.Request["sessionKey"]))
 	if sessionKey == "" && data != nil {
 		sessionKey = strings.TrimSpace(data.SessionKey)
 	}
 	if sessionKey == "" {
-		m.approvals.Drop(approvalID)
+		m.approvalFlow.Drop(approvalID)
 		return
 	}
 	portal := m.resolvePortal(ctx, sessionKey)
 	if portal == nil || portal.MXID == "" {
-		m.approvals.Drop(approvalID)
+		m.approvalFlow.Drop(approvalID)
 		return
 	}
 	if data != nil && strings.TrimSpace(data.TurnID) != "" && strings.TrimSpace(data.ToolCallID) != "" {
@@ -1020,10 +1035,7 @@ func (m *openClawManager) handleApprovalResolved(ctx context.Context, payload ga
 	} else {
 		m.client.sendSystemNoticeViaPortal(ctx, portal, openClawApprovalResolvedText(payload.Decision))
 	}
-	if m.client != nil {
-		m.client.approvalPrompts.Drop(approvalID)
-	}
-	m.approvals.Drop(approvalID)
+	m.approvalFlow.Drop(approvalID)
 }
 
 func (m *openClawManager) handleChatEvent(ctx context.Context, payload gatewayChatEvent) {
@@ -1398,8 +1410,7 @@ func (m *openClawManager) attachApprovalContext(approvalID, sessionKey, turnID, 
 	if approvalID == "" {
 		return
 	}
-	m.approvals.SetData(approvalID, func(data any) any {
-		pending, _ := data.(*openClawPendingApprovalData)
+	m.approvalFlow.SetData(approvalID, func(pending *openClawPendingApprovalData) *openClawPendingApprovalData {
 		if pending == nil {
 			pending = &openClawPendingApprovalData{}
 		}

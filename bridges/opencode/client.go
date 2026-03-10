@@ -131,11 +131,11 @@ func (oc *OpenCodeClient) IsLoggedIn() bool {
 
 func (oc *OpenCodeClient) GetUserLogin() *bridgev2.UserLogin { return oc.UserLogin }
 
-func (oc *OpenCodeClient) GetApprovalPrompts() *bridgeadapter.ApprovalPromptManager {
+func (oc *OpenCodeClient) GetApprovalHandler() bridgeadapter.ApprovalReactionHandler {
 	if oc.bridge == nil {
 		return nil
 	}
-	return oc.bridge.ApprovalPrompts()
+	return oc.bridge.ApprovalHandler()
 }
 
 func (oc *OpenCodeClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (*bridgev2.MatrixMessageResponse, error) {

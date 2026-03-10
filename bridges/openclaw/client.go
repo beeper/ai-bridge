@@ -99,7 +99,6 @@ type OpenClawClient struct {
 	streamSessions            map[string]*streamtransport.StreamSession
 	streamStates              map[string]*openClawStreamState
 	streamFallbackToDebounced atomic.Bool
-	approvalPrompts           *bridgeadapter.ApprovalPromptManager
 }
 
 type openClawStreamState struct {
@@ -145,30 +144,6 @@ func newOpenClawClient(login *bridgev2.UserLogin, connector *OpenClawConnector) 
 		toolCatalogFetchedAt: make(map[string]time.Time),
 	}
 	client.BaseReactionHandler.Target = client
-	client.approvalPrompts = bridgeadapter.NewApprovalPromptManager(bridgeadapter.ApprovalPromptManagerConfig{
-		Login:    func() *bridgev2.UserLogin { return client.UserLogin },
-		Sender:   func(_ *bridgev2.Portal) bridgev2.EventSender { return client.senderForAgent("gateway", false) },
-		IDPrefix: "openclaw",
-		LogKey:   "openclaw_msg_id",
-		Resolve: func(ctx context.Context, roomID id.RoomID, match bridgeadapter.ApprovalPromptReactionMatch) error {
-			portal, err := client.UserLogin.Bridge.GetPortalByMXID(ctx, roomID)
-			if err != nil || portal == nil {
-				return bridgeadapter.ErrApprovalWrongRoom
-			}
-			return client.manager.ResolveApprovalDecision(ctx, portal, match.Decision)
-		},
-		OnError: func(ctx context.Context, portal *bridgev2.Portal, _ string, err error) {
-			client.sendSystemNoticeViaPortal(ctx, portal, bridgeadapter.ApprovalErrorToastText(err))
-		},
-		DBMetadata: func(prompt bridgeadapter.ApprovalPromptMessage) any {
-			return &MessageMetadata{
-				Role:               "assistant",
-				ExcludeFromHistory: true,
-				CanonicalSchema:    "ai-sdk-ui-message-v1",
-				CanonicalUIMessage: prompt.UIMessage,
-			}
-		},
-	})
 	client.manager = newOpenClawManager(client)
 	return client, nil
 }
@@ -272,8 +247,11 @@ func (oc *OpenClawClient) IsLoggedIn() bool { return oc.loggedIn.Load() }
 
 func (oc *OpenClawClient) GetUserLogin() *bridgev2.UserLogin { return oc.UserLogin }
 
-func (oc *OpenClawClient) GetApprovalPrompts() *bridgeadapter.ApprovalPromptManager {
-	return oc.approvalPrompts
+func (oc *OpenClawClient) GetApprovalHandler() bridgeadapter.ApprovalReactionHandler {
+	if oc.manager == nil {
+		return nil
+	}
+	return oc.manager.approvalFlow
 }
 
 func (oc *OpenClawClient) LogoutRemote(_ context.Context) {}
