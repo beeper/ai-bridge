@@ -448,6 +448,9 @@ func presentationToRaw(p ApprovalPromptPresentation) map[string]any {
 }
 
 func normalizeApprovalPromptPresentation(presentation ApprovalPromptPresentation, fallbackToolName string) ApprovalPromptPresentation {
+	if !presentation.AllowAlways && strings.TrimSpace(presentation.Title) == "" && len(presentation.Details) == 0 {
+		presentation.AllowAlways = true
+	}
 	presentation.Title = strings.TrimSpace(presentation.Title)
 	if presentation.Title == "" {
 		fallbackToolName = strings.TrimSpace(fallbackToolName)
