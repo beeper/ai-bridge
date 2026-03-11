@@ -15,11 +15,17 @@ type UserLoginMetadata struct {
 	Provider          string `json:"provider,omitempty"`
 	CodexHome         string `json:"codex_home,omitempty"`
 	CodexHomeManaged  bool   `json:"codex_home_managed,omitempty"`
+	CodexAuthSource   string `json:"codex_auth_source,omitempty"`
 	CodexCommand      string `json:"codex_command,omitempty"`
 	CodexAuthMode     string `json:"codex_auth_mode,omitempty"`
 	CodexAccountEmail string `json:"codex_account_email,omitempty"`
 	ChatsSynced       bool   `json:"chats_synced,omitempty"`
 }
+
+const (
+	CodexAuthSourceManaged = "managed"
+	CodexAuthSourceHost    = "host"
+)
 
 type PortalMetadata struct {
 	Title            string `json:"title,omitempty"`
@@ -87,6 +93,21 @@ func loginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
 
 func portalMeta(portal *bridgev2.Portal) *PortalMetadata {
 	return bridgeadapter.EnsurePortalMetadata[PortalMetadata](portal)
+}
+
+func normalizedCodexAuthSource(meta *UserLoginMetadata) string {
+	if meta == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(meta.CodexAuthSource))
+}
+
+func isHostAuthLogin(meta *UserLoginMetadata) bool {
+	return normalizedCodexAuthSource(meta) == CodexAuthSourceHost
+}
+
+func isManagedAuthLogin(meta *UserLoginMetadata) bool {
+	return normalizedCodexAuthSource(meta) == CodexAuthSourceManaged
 }
 
 func NewTurnID() string {

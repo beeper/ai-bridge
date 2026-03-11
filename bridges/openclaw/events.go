@@ -12,6 +12,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+
+	"github.com/beeper/agentremote/pkg/shared/openclawconv"
 )
 
 type OpenClawSessionResyncEvent struct {
@@ -76,9 +78,9 @@ func (evt *OpenClawSessionResyncEvent) GetChatInfo(ctx context.Context, portal *
 	meta.OpenClawSpace = evt.session.Space
 	meta.OpenClawChatType = evt.session.ChatType
 	meta.OpenClawOrigin = evt.session.OriginString()
-	meta.OpenClawAgentID = stringsTrimDefault(meta.OpenClawAgentID, openClawAgentIDFromSessionKey(evt.session.Key))
+	meta.OpenClawAgentID = openclawconv.StringsTrimDefault(meta.OpenClawAgentID, openClawAgentIDFromSessionKey(evt.session.Key))
 	if isOpenClawSyntheticDMSessionKey(evt.session.Key) {
-		meta.OpenClawDMTargetAgentID = stringsTrimDefault(meta.OpenClawDMTargetAgentID, openClawAgentIDFromSessionKey(evt.session.Key))
+		meta.OpenClawDMTargetAgentID = openclawconv.StringsTrimDefault(meta.OpenClawDMTargetAgentID, openClawAgentIDFromSessionKey(evt.session.Key))
 	}
 	meta.OpenClawSystemSent = evt.session.SystemSent
 	meta.OpenClawAbortedLastRun = evt.session.AbortedLastRun
@@ -100,7 +102,7 @@ func (evt *OpenClawSessionResyncEvent) GetChatInfo(ctx context.Context, portal *
 	meta.LastTo = evt.session.LastTo
 	meta.LastAccountID = evt.session.LastAccountID
 	meta.SessionUpdatedAt = evt.session.UpdatedAt
-	meta.OpenClawPreviewSnippet = stringsTrimDefault(meta.OpenClawPreviewSnippet, evt.session.LastMessagePreview)
+	meta.OpenClawPreviewSnippet = openclawconv.StringsTrimDefault(meta.OpenClawPreviewSnippet, evt.session.LastMessagePreview)
 	if meta.OpenClawPreviewSnippet != "" && meta.OpenClawLastPreviewAt == 0 {
 		meta.OpenClawLastPreviewAt = time.Now().UnixMilli()
 	}
@@ -119,7 +121,7 @@ func (evt *OpenClawSessionResyncEvent) GetChatInfo(ctx context.Context, portal *
 			},
 		},
 	}
-	agentID := stringsTrimDefault(meta.OpenClawAgentID, "gateway")
+	agentID := openclawconv.StringsTrimDefault(meta.OpenClawAgentID, "gateway")
 	if strings.TrimSpace(meta.OpenClawDMTargetAgentID) != "" {
 		agentID = strings.TrimSpace(meta.OpenClawDMTargetAgentID)
 		meta.OpenClawAgentID = agentID
