@@ -35,6 +35,30 @@ type permissionApprovalRef struct {
 	MessageID    string
 	ToolCallID   string
 	PermissionID string
+	Presentation bridgeadapter.ApprovalPromptPresentation
+}
+
+func buildOpenCodeApprovalPresentation(req opencode.PermissionRequest) bridgeadapter.ApprovalPromptPresentation {
+	permission := strings.TrimSpace(req.Permission)
+	title := "OpenCode permission request"
+	if permission != "" {
+		title = "OpenCode permission request: " + permission
+	}
+	details := make([]bridgeadapter.ApprovalDetail, 0, 8)
+	if permission != "" {
+		details = append(details, bridgeadapter.ApprovalDetail{Label: "Permission", Value: permission})
+	}
+	if v := bridgeadapter.ValueSummary(req.Patterns); v != "" {
+		details = append(details, bridgeadapter.ApprovalDetail{Label: "Patterns", Value: v})
+	}
+	if len(req.Metadata) > 0 {
+		details = bridgeadapter.AppendDetailsFromMap(details, "Metadata", req.Metadata, 4)
+	}
+	return bridgeadapter.ApprovalPromptPresentation{
+		Title:       title,
+		Details:     details,
+		AllowAlways: req.Always,
+	}
 }
 
 func NewOpenCodeManager(bridge *Bridge) *OpenCodeManager {
@@ -73,13 +97,7 @@ func NewOpenCodeManager(bridge *Bridge) *OpenCodeManager {
 			if ref == nil {
 				return bridgeadapter.ErrApprovalUnknown
 			}
-			response := "reject"
-			if decision.Approved {
-				response = "once"
-				if decision.Always {
-					response = "always"
-				}
-			}
+			response := bridgeadapter.DecisionToString(decision, "once", "always", "reject")
 			inst, err := mgr.requireConnectedInstance(ref.InstanceID)
 			if err != nil {
 				return err
@@ -546,9 +564,16 @@ func (m *OpenCodeManager) UpdateSessionTitle(ctx context.Context, instanceID, se
 func (m *OpenCodeManager) syncSessions(ctx context.Context, inst *openCodeInstance, sessions []opencode.Session) (int, error) {
 	count := 0
 	for _, session := range sessions {
+		hadRoom := false
+		if portal := m.bridge.findOpenCodePortal(ctx, inst.cfg.ID, session.ID); portal != nil && portal.MXID != "" {
+			hadRoom = true
+		}
 		if err := m.bridge.ensureOpenCodeSessionPortal(ctx, inst, session); err != nil {
 			m.log().Warn().Err(err).Str("session", session.ID).Msg("Failed to sync OpenCode session")
 			continue
+		}
+		if hadRoom {
+			m.bridge.queueOpenCodeSessionResync(inst.cfg.ID, session)
 		}
 		count++
 	}
@@ -676,8 +701,16 @@ func (m *OpenCodeManager) handleSessionEvent(ctx context.Context, inst *openCode
 		m.log().Warn().Err(err).Msg("Failed to decode session event")
 		return
 	}
+	hadRoom := false
+	if portal := m.bridge.findOpenCodePortal(ctx, inst.cfg.ID, session.ID); portal != nil && portal.MXID != "" {
+		hadRoom = true
+	}
 	if err := m.bridge.ensureOpenCodeSessionPortal(ctx, inst, session); err != nil {
 		m.log().Warn().Err(err).Str("session", session.ID).Msg("Failed to ensure session portal")
+		return
+	}
+	if hadRoom {
+		m.bridge.queueOpenCodeSessionResync(inst.cfg.ID, session)
 	}
 }
 
@@ -816,6 +849,7 @@ func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *
 		return
 	}
 	approvalID := strings.TrimSpace(req.ID)
+	presentation := buildOpenCodeApprovalPresentation(req)
 	_, created := m.approvalFlow.Register(approvalID, 10*time.Minute, &permissionApprovalRef{
 		RoomID:       portal.MXID,
 		InstanceID:   inst.cfg.ID,
@@ -823,6 +857,7 @@ func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *
 		MessageID:    messageID,
 		ToolCallID:   toolCallID,
 		PermissionID: approvalID,
+		Presentation: presentation,
 	})
 	if !created {
 		return
@@ -847,11 +882,12 @@ func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *
 	}
 	m.approvalFlow.SendPrompt(ctx, portal, bridgeadapter.SendPromptParams{
 		ApprovalPromptMessageParams: bridgeadapter.ApprovalPromptMessageParams{
-			ApprovalID: approvalID,
-			ToolCallID: toolCallID,
-			ToolName:   toolName,
-			TurnID:     turnID,
-			ExpiresAt:  time.Now().Add(10 * time.Minute),
+			ApprovalID:   approvalID,
+			ToolCallID:   toolCallID,
+			ToolName:     toolName,
+			TurnID:       turnID,
+			Presentation: presentation,
+			ExpiresAt:    time.Now().Add(10 * time.Minute),
 		},
 		RoomID:    portal.MXID,
 		OwnerMXID: ownerMXID,
@@ -899,7 +935,12 @@ func (m *OpenCodeManager) handlePermissionRepliedEvent(ctx context.Context, inst
 			})
 		}
 	}
-	m.approvalFlow.Drop(payload.RequestID)
+	m.approvalFlow.ResolveExternal(ctx, strings.TrimSpace(payload.RequestID), bridgeadapter.ApprovalDecisionPayload{
+		ApprovalID: strings.TrimSpace(payload.RequestID),
+		Approved:   approved,
+		Always:     strings.EqualFold(strings.TrimSpace(payload.Reply), "always"),
+		Reason:     reply,
+	})
 }
 
 func (m *OpenCodeManager) handleQuestionAskedEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {

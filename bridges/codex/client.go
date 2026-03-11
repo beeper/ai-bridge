@@ -33,6 +33,7 @@ import (
 )
 
 var _ bridgev2.NetworkAPI = (*CodexClient)(nil)
+var _ bridgev2.BackfillingNetworkAPI = (*CodexClient)(nil)
 var _ bridgev2.DeleteChatHandlingNetworkAPI = (*CodexClient)(nil)
 var _ bridgev2.IdentifierResolvingNetworkAPI = (*CodexClient)(nil)
 var _ bridgev2.ContactListingNetworkAPI = (*CodexClient)(nil)
@@ -247,12 +248,15 @@ func (cc *CodexClient) GetApprovalHandler() bridgeadapter.ApprovalReactionHandle
 }
 
 func (cc *CodexClient) LogoutRemote(ctx context.Context) {
-	// Best-effort: ask Codex to forget the account (tokens are managed by Codex under CODEX_HOME).
-	if err := cc.ensureRPC(cc.backgroundContext(ctx)); err == nil && cc.rpc != nil {
-		callCtx, cancel := context.WithTimeout(cc.backgroundContext(ctx), 10*time.Second)
-		defer cancel()
-		var out map[string]any
-		_ = cc.rpc.Call(callCtx, "account/logout", nil, &out)
+	meta := loginMetadata(cc.UserLogin)
+	// Only managed per-login auth should trigger upstream account/logout.
+	if !isHostAuthLogin(meta) {
+		if err := cc.ensureRPC(cc.backgroundContext(ctx)); err == nil && cc.rpc != nil {
+			callCtx, cancel := context.WithTimeout(cc.backgroundContext(ctx), 10*time.Second)
+			defer cancel()
+			var out map[string]any
+			_ = cc.rpc.Call(callCtx, "account/logout", nil, &out)
+		}
 	}
 	// Best-effort: remove on-disk Codex state for this login.
 	cc.purgeCodexHomeBestEffort(ctx)
@@ -271,6 +275,7 @@ func (cc *CodexClient) LogoutRemote(ctx context.Context) {
 	})
 }
 
+
 func (cc *CodexClient) purgeCodexHomeBestEffort(ctx context.Context) {
 	if cc.UserLogin == nil {
 		return
@@ -280,7 +285,7 @@ func (cc *CodexClient) purgeCodexHomeBestEffort(ctx context.Context) {
 		return
 	}
 	// Don't delete unmanaged homes (e.g. the user's own ~/.codex).
-	if !meta.CodexHomeManaged {
+	if !isManagedAuthLogin(meta) {
 		return
 	}
 	codexHome := strings.TrimSpace(meta.CodexHome)
@@ -357,7 +362,15 @@ func (cc *CodexClient) IsThisUser(ctx context.Context, userID networkid.UserID) 
 
 func (cc *CodexClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 	meta := portalMeta(portal)
-	return bridgeadapter.BuildChatInfoWithFallback(meta.Title, portal.Name, "Codex", portal.Topic), nil
+	metaTitle := ""
+	if meta != nil {
+		metaTitle = meta.Title
+	}
+	if meta == nil || !meta.IsCodexRoom {
+		return bridgeadapter.BuildChatInfoWithFallback(metaTitle, portal.Name, "Codex", portal.Topic), nil
+	}
+	title := codexPortalTitle(portal)
+	return cc.composeCodexChatInfo(title, strings.TrimSpace(meta.CodexThreadID) != ""), nil
 }
 
 func (cc *CodexClient) GetUserInfo(_ context.Context, _ *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
@@ -389,7 +402,8 @@ func (cc *CodexClient) ResolveIdentifier(ctx context.Context, identifier string,
 		if portal == nil {
 			return nil, errors.New("codex chat unavailable")
 		}
-		chatInfo := cc.composeCodexChatInfo(codexPortalTitle(portal))
+		meta := portalMeta(portal)
+		chatInfo := cc.composeCodexChatInfo(codexPortalTitle(portal), strings.TrimSpace(meta.CodexThreadID) != "")
 		chat = &bridgev2.CreateChatResponse{
 			PortalKey:  portal.PortalKey,
 			PortalInfo: chatInfo,
@@ -1439,14 +1453,17 @@ func (cc *CodexClient) scheduleBootstrap() {
 
 func (cc *CodexClient) bootstrap(ctx context.Context) {
 	cc.waitForLoginPersisted(ctx)
-	meta := loginMetadata(cc.UserLogin)
-	if meta.ChatsSynced {
-		return
-	}
+	syncSucceeded := true
 	if err := cc.ensureDefaultCodexChat(cc.backgroundContext(ctx)); err != nil {
 		cc.log.Warn().Err(err).Msg("Failed to ensure default Codex chat during bootstrap")
+		syncSucceeded = false
 	}
-	meta.ChatsSynced = true
+	if err := cc.syncStoredCodexThreads(cc.backgroundContext(ctx)); err != nil {
+		cc.log.Warn().Err(err).Msg("Failed to sync Codex threads during bootstrap")
+		syncSucceeded = false
+	}
+	meta := loginMetadata(cc.UserLogin)
+	meta.ChatsSynced = syncSucceeded
 	_ = cc.UserLogin.Save(ctx)
 }
 
@@ -1499,7 +1516,7 @@ func (cc *CodexClient) ensureDefaultCodexChat(ctx context.Context) error {
 	}
 
 	if portal.MXID == "" {
-		info := cc.composeCodexChatInfo(meta.Title)
+		info := cc.composeCodexChatInfo(meta.Title, false)
 		if err := portal.CreateMatrixRoom(ctx, cc.UserLogin, info); err != nil {
 			return err
 		}
@@ -1520,7 +1537,7 @@ func (cc *CodexClient) ensureDefaultCodexChat(ctx context.Context) error {
 	return nil
 }
 
-func (cc *CodexClient) composeCodexChatInfo(title string) *bridgev2.ChatInfo {
+func (cc *CodexClient) composeCodexChatInfo(title string, canBackfill bool) *bridgev2.ChatInfo {
 	if title == "" {
 		title = "Codex"
 	}
@@ -1530,6 +1547,7 @@ func (cc *CodexClient) composeCodexChatInfo(title string) *bridgev2.ChatInfo {
 		LoginID:           cc.UserLogin.ID,
 		BotUserID:         codexGhostID,
 		BotDisplayName:    "Codex",
+		CanBackfill:       canBackfill,
 		CapabilitiesEvent: matrixevents.RoomCapabilitiesEventType,
 		SettingsEvent:     matrixevents.RoomSettingsEventType,
 	})
@@ -1720,32 +1738,6 @@ func (cc *CodexClient) sendSystemNotice(ctx context.Context, portal *bridgev2.Po
 	cc.sendViaPortal(sendCtx, portal, bridgeadapter.BuildSystemNotice(strings.TrimSpace(message)), "")
 }
 
-func (cc *CodexClient) sendApprovalRequestFallbackEvent(
-	ctx context.Context,
-	portal *bridgev2.Portal,
-	state *streamingState,
-	approvalID string,
-	toolCallID string,
-	toolName string,
-	ttlSeconds int,
-) {
-	if state == nil {
-		return
-	}
-	cc.approvalFlow.SendPrompt(ctx, portal, bridgeadapter.SendPromptParams{
-		ApprovalPromptMessageParams: bridgeadapter.ApprovalPromptMessageParams{
-			ApprovalID:     approvalID,
-			ToolCallID:     toolCallID,
-			ToolName:       toolName,
-			TurnID:         state.turnID,
-			ReplyToEventID: state.initialEventID,
-			ExpiresAt:      bridgeadapter.ComputeApprovalExpiry(ttlSeconds),
-		},
-		RoomID:    portal.MXID,
-		OwnerMXID: cc.UserLogin.UserMXID,
-	})
-}
-
 func (cc *CodexClient) sendPendingStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, message string) {
 	st := bridgev2.MessageStatus{
 		Status:    event.MessageStatusPending,
@@ -1920,16 +1912,31 @@ func (cc *CodexClient) ensureUIToolInputStart(ctx context.Context, portal *bridg
 		return
 	}
 	ui := cc.uiEmitter(state)
-	ui.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, false, streamui.ToolDisplayTitle(toolName), nil)
+	ui.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, streamui.ToolDisplayTitle(toolName), nil)
 	ui.EmitUIToolInputAvailable(ctx, portal, toolCallID, toolName, input, providerExecuted)
 }
 
 func (cc *CodexClient) emitUIToolApprovalRequest(
 	ctx context.Context, portal *bridgev2.Portal, state *streamingState,
-	approvalID, toolCallID, toolName string, ttlSeconds int,
+	approvalID, toolCallID, toolName string, presentation bridgeadapter.ApprovalPromptPresentation, ttlSeconds int,
 ) {
-	cc.uiEmitter(state).EmitUIToolApprovalRequest(ctx, portal, approvalID, toolCallID, toolName, ttlSeconds)
-	cc.sendApprovalRequestFallbackEvent(ctx, portal, state, approvalID, toolCallID, toolName, ttlSeconds)
+	cc.uiEmitter(state).EmitUIToolApprovalRequest(ctx, portal, approvalID, toolCallID)
+	if state == nil {
+		return
+	}
+	cc.approvalFlow.SendPrompt(ctx, portal, bridgeadapter.SendPromptParams{
+		ApprovalPromptMessageParams: bridgeadapter.ApprovalPromptMessageParams{
+			ApprovalID:     approvalID,
+			ToolCallID:     toolCallID,
+			ToolName:       toolName,
+			TurnID:         state.turnID,
+			Presentation:   presentation,
+			ReplyToEventID: state.initialEventID,
+			ExpiresAt:      bridgeadapter.ComputeApprovalExpiry(ttlSeconds),
+		},
+		RoomID:    portal.MXID,
+		OwnerMXID: cc.UserLogin.UserMXID,
+	})
 }
 
 func (cc *CodexClient) emitUIFinish(ctx context.Context, portal *bridgev2.Portal, state *streamingState, model string, finishReason string) {
@@ -2066,30 +2073,51 @@ func (cc *CodexClient) saveAssistantMessage(ctx context.Context, portal *bridgev
 // pendingToolApprovalDataCodex holds codex-specific metadata stored in
 // ApprovalFlow's Pending.Data field.
 type pendingToolApprovalDataCodex struct {
-	ApprovalID string
-	RoomID     id.RoomID
-	ToolCallID string
-	ToolName   string
+	ApprovalID   string
+	RoomID       id.RoomID
+	ToolCallID   string
+	ToolName     string
+	Presentation bridgeadapter.ApprovalPromptPresentation
 }
 
-func (cc *CodexClient) registerToolApproval(roomID id.RoomID, approvalID, toolCallID, toolName string, ttl time.Duration) (*bridgeadapter.Pending[*pendingToolApprovalDataCodex], bool) {
+func (cc *CodexClient) registerToolApproval(
+	roomID id.RoomID,
+	approvalID, toolCallID, toolName string,
+	presentation bridgeadapter.ApprovalPromptPresentation,
+	ttl time.Duration,
+) (*bridgeadapter.Pending[*pendingToolApprovalDataCodex], bool) {
 	data := &pendingToolApprovalDataCodex{
-		ApprovalID: strings.TrimSpace(approvalID),
-		RoomID:     roomID,
-		ToolCallID: strings.TrimSpace(toolCallID),
-		ToolName:   strings.TrimSpace(toolName),
+		ApprovalID:   strings.TrimSpace(approvalID),
+		RoomID:       roomID,
+		ToolCallID:   strings.TrimSpace(toolCallID),
+		ToolName:     strings.TrimSpace(toolName),
+		Presentation: presentation,
 	}
 	return cc.approvalFlow.Register(approvalID, ttl, data)
 }
 
 func (cc *CodexClient) waitToolApproval(ctx context.Context, approvalID string) (bridgeadapter.ApprovalDecisionPayload, bool) {
-	defer cc.approvalFlow.Drop(strings.TrimSpace(approvalID))
-	return cc.approvalFlow.Wait(ctx, approvalID)
+	approvalID = strings.TrimSpace(approvalID)
+	decision, ok := cc.approvalFlow.Wait(ctx, approvalID)
+	if !ok {
+		reason := bridgeadapter.ApprovalReasonTimeout
+		if ctx.Err() != nil {
+			reason = bridgeadapter.ApprovalReasonCancelled
+		}
+		cc.approvalFlow.FinishResolved(approvalID, bridgeadapter.ApprovalDecisionPayload{
+			ApprovalID: approvalID,
+			Reason:     reason,
+		})
+		return decision, false
+	}
+	cc.approvalFlow.FinishResolved(approvalID, decision)
+	return decision, true
 }
 
 func (cc *CodexClient) handleApprovalRequest(
 	ctx context.Context, req codexrpc.Request,
-	defaultToolName string, extractInput func(json.RawMessage) map[string]any,
+	defaultToolName string,
+	extractInput func(json.RawMessage) (map[string]any, bridgeadapter.ApprovalPromptPresentation),
 ) (any, *codexrpc.RPCError) {
 	approvalID := strings.Trim(string(req.ID), "\"")
 	var params struct {
@@ -2115,52 +2143,88 @@ func (cc *CodexClient) handleApprovalRequest(
 
 	cc.setApprovalStateTracking(active.state, approvalID, toolCallID, toolName)
 
-	inputMap := extractInput(req.Params)
+	inputMap, presentation := extractInput(req.Params)
 	cc.ensureUIToolInputStart(ctx, active.portal, active.state, toolCallID, toolName, true, inputMap)
 	approvalTTL := time.Duration(ttlSeconds) * time.Second
-	cc.registerToolApproval(active.portal.MXID, approvalID, toolCallID, toolName, approvalTTL)
+	_, isNew := cc.registerToolApproval(active.portal.MXID, approvalID, toolCallID, toolName, presentation, approvalTTL)
 
-	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID, toolName, ttlSeconds)
+	if !isNew {
+		// Duplicate approval request; the original handler is already waiting.
+		// Do not emit UI request or re-enter the wait flow.
+		decision, ok := cc.waitToolApproval(ctx, approvalID)
+		if !ok {
+			return emitOutcome(false, bridgeadapter.ApprovalReasonTimeout)
+		}
+		return emitOutcome(decision.Approved, decision.Reason)
+	}
+
+	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID, toolName, presentation, ttlSeconds)
+
+	emitOutcome := func(approved bool, reason string) (any, *codexrpc.RPCError) {
+		cc.uiEmitter(active.state).EmitUIToolApprovalResponse(ctx, active.portal, approvalID, toolCallID, approved, reason)
+		streamui.RecordApprovalResponse(&active.state.ui, approvalID, toolCallID, approved, reason)
+		if approved {
+			return map[string]any{"decision": "accept"}, nil
+		}
+		cc.uiEmitter(active.state).EmitUIToolOutputDenied(ctx, active.portal, toolCallID)
+		return map[string]any{"decision": "decline"}, nil
+	}
 
 	if active.meta != nil {
 		if lvl, _ := stringutil.NormalizeElevatedLevel(active.meta.ElevatedLevel); lvl == "full" {
-			streamui.RecordApprovalResponse(&active.state.ui, approvalID, toolCallID, true, "auto-approved")
-			return map[string]any{"decision": "accept"}, nil
+			cc.approvalFlow.FinishResolved(approvalID, bridgeadapter.ApprovalDecisionPayload{
+				ApprovalID: approvalID,
+				Approved:   true,
+				Reason:     "auto-approved",
+			})
+			return emitOutcome(true, "auto-approved")
 		}
 	}
 
 	decision, ok := cc.waitToolApproval(ctx, approvalID)
 	if !ok {
-		streamui.RecordApprovalResponse(&active.state.ui, approvalID, toolCallID, false, "timeout")
-		return map[string]any{"decision": "decline"}, nil
+		return emitOutcome(false, bridgeadapter.ApprovalReasonTimeout)
 	}
-	streamui.RecordApprovalResponse(&active.state.ui, approvalID, toolCallID, decision.Approved, decision.Reason)
-	if decision.Approved {
-		return map[string]any{"decision": "accept"}, nil
-	}
-	return map[string]any{"decision": "decline"}, nil
+	return emitOutcome(decision.Approved, decision.Reason)
 }
 
 func (cc *CodexClient) handleCommandApprovalRequest(ctx context.Context, req codexrpc.Request) (any, *codexrpc.RPCError) {
-	return cc.handleApprovalRequest(ctx, req, "commandExecution", func(raw json.RawMessage) map[string]any {
+	return cc.handleApprovalRequest(ctx, req, "commandExecution", func(raw json.RawMessage) (map[string]any, bridgeadapter.ApprovalPromptPresentation) {
 		var p struct {
 			Command *string `json:"command"`
 			Cwd     *string `json:"cwd"`
 			Reason  *string `json:"reason"`
 		}
 		_ = json.Unmarshal(raw, &p)
-		return map[string]any{"command": p.Command, "cwd": p.Cwd, "reason": p.Reason}
+		input := map[string]any{}
+		details := make([]bridgeadapter.ApprovalDetail, 0, 3)
+		input, details = bridgeadapter.AddOptionalDetail(input, details, "command", "Command", p.Command)
+		input, details = bridgeadapter.AddOptionalDetail(input, details, "cwd", "Working directory", p.Cwd)
+		input, details = bridgeadapter.AddOptionalDetail(input, details, "reason", "Reason", p.Reason)
+		return input, bridgeadapter.ApprovalPromptPresentation{
+			Title:       "Codex command execution",
+			Details:     details,
+			AllowAlways: false,
+		}
 	})
 }
 
 func (cc *CodexClient) handleFileChangeApprovalRequest(ctx context.Context, req codexrpc.Request) (any, *codexrpc.RPCError) {
-	return cc.handleApprovalRequest(ctx, req, "fileChange", func(raw json.RawMessage) map[string]any {
+	return cc.handleApprovalRequest(ctx, req, "fileChange", func(raw json.RawMessage) (map[string]any, bridgeadapter.ApprovalPromptPresentation) {
 		var p struct {
 			Reason    *string `json:"reason"`
 			GrantRoot *string `json:"grantRoot"`
 		}
 		_ = json.Unmarshal(raw, &p)
-		return map[string]any{"reason": p.Reason, "grantRoot": p.GrantRoot}
+		input := map[string]any{}
+		details := make([]bridgeadapter.ApprovalDetail, 0, 2)
+		input, details = bridgeadapter.AddOptionalDetail(input, details, "grantRoot", "Grant root", p.GrantRoot)
+		input, details = bridgeadapter.AddOptionalDetail(input, details, "reason", "Reason", p.Reason)
+		return input, bridgeadapter.ApprovalPromptPresentation{
+			Title:       "Codex file change",
+			Details:     details,
+			AllowAlways: false,
+		}
 	})
 }
 

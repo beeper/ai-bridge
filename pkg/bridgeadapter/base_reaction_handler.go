@@ -3,6 +3,7 @@ package bridgeadapter
 import (
 	"context"
 
+	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 )
@@ -33,6 +34,10 @@ func (h BaseReactionHandler) HandleMatrixReaction(ctx context.Context, msg *brid
 	login := h.Target.GetUserLogin()
 	if login != nil && IsMatrixBotUser(ctx, login.Bridge, msg.Event.Sender) {
 		return &database.Reaction{}, nil
+	}
+	// Best-effort persistence guard for reaction.sender_id -> ghost.id FK.
+	if err := EnsureSyntheticReactionSenderGhost(ctx, login, msg.Event.Sender); err != nil {
+		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to ensure synthetic reaction sender ghost")
 	}
 	rc := ExtractReactionContext(msg)
 	if handler := h.Target.GetApprovalHandler(); handler != nil {
