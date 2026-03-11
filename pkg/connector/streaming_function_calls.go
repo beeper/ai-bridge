@@ -189,7 +189,7 @@ func (oc *AIClient) handleFunctionCallArgumentsDone(
 	var inputMap any
 	if err := json.Unmarshal([]byte(argsJSON), &inputMap); err != nil {
 		inputMap = argsJSON
-		oc.uiEmitter(state).EmitUIToolInputError(ctx, portal, tool.callID, toolName, argsJSON, "Invalid JSON tool input", tool.toolType == ToolTypeProvider, false)
+		oc.uiEmitter(state).EmitUIToolInputError(ctx, portal, tool.callID, toolName, argsJSON, "Invalid JSON tool input", tool.toolType == ToolTypeProvider)
 	}
 	oc.uiEmitter(state).EmitUIToolInputAvailable(ctx, portal, tool.callID, toolName, inputMap, tool.toolType == ToolTypeProvider)
 

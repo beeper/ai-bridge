@@ -294,7 +294,6 @@ func (f *ApprovalFlow[D]) registerPromptLocked(reg ApprovalPromptRegistration) {
 	reg.ToolCallID = strings.TrimSpace(reg.ToolCallID)
 	reg.ToolName = strings.TrimSpace(reg.ToolName)
 	reg.TurnID = strings.TrimSpace(reg.TurnID)
-	reg.Presentation = normalizeApprovalPromptPresentation(reg.Presentation, reg.ToolName)
 	reg.Options = normalizeApprovalOptions(reg.Options)
 
 	if prev := f.promptsByApproval[reg.ApprovalID]; prev != nil && prev.PromptEventID != "" {

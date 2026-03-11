@@ -221,6 +221,12 @@ func (cc *CodexConnector) ensureHostAuthLoginForUserWithProbe(ctx context.Contex
 		return nil
 	}
 	loginID := cc.hostAuthLoginID(user.MXID)
+	if hasManagedCodexLogin(user.GetUserLogins(), loginID) {
+		cc.br.Log.Debug().
+			Stringer("mxid", user.MXID).
+			Msg("Host-auth reconcile: skipping host-auth login because a managed Codex login exists")
+		return nil
+	}
 	existing, err := cc.br.GetExistingUserLoginByID(ctx, loginID)
 	if err != nil {
 		return err
@@ -261,6 +267,22 @@ func (cc *CodexConnector) ensureHostAuthLoginForUserWithProbe(ctx context.Contex
 
 func (cc *CodexConnector) hostAuthLoginID(mxid id.UserID) networkid.UserLoginID {
 	return bridgeadapter.MakeUserLoginID(hostAuthLoginPrefix, mxid, 1)
+}
+
+func hasManagedCodexLogin(logins []*bridgev2.UserLogin, exceptID networkid.UserLoginID) bool {
+	for _, existing := range logins {
+		if existing == nil || existing.ID == exceptID || existing.Metadata == nil {
+			continue
+		}
+		meta, ok := existing.Metadata.(*UserLoginMetadata)
+		if !ok || meta == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderCodex) && isManagedAuthLogin(meta) {
+			return true
+		}
+	}
+	return false
 }
 
 func (cc *CodexConnector) resolveCodexCommand() string {

@@ -59,7 +59,7 @@ func (oc *AIClient) upsertActiveToolFromDescriptor(
 	if tool.eventID == "" && strings.TrimSpace(tool.toolName) != "" {
 		tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
 	}
-	oc.uiEmitter(state).EnsureUIToolInputStart(ctx, portal, tool.callID, tool.toolName, desc.providerExecuted, desc.dynamic, toolDisplayTitle(tool.toolName), nil)
+	oc.uiEmitter(state).EnsureUIToolInputStart(ctx, portal, tool.callID, tool.toolName, desc.providerExecuted, toolDisplayTitle(tool.toolName), nil)
 	return tool
 }
 

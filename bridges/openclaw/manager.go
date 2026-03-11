@@ -900,16 +900,16 @@ func openClawApprovalPresentation(request map[string]any, command string) bridge
 	if command != "" {
 		details = append(details, bridgeadapter.ApprovalDetail{Label: "Command", Value: command})
 	}
-	if cwd := strings.TrimSpace(stringValue(request["cwd"])); cwd != "" {
+	if cwd := bridgeadapter.ValueSummary(request["cwd"]); cwd != "" {
 		details = append(details, bridgeadapter.ApprovalDetail{Label: "Working directory", Value: cwd})
 	}
-	if reason := strings.TrimSpace(stringValue(request["reason"])); reason != "" {
+	if reason := bridgeadapter.ValueSummary(request["reason"]); reason != "" {
 		details = append(details, bridgeadapter.ApprovalDetail{Label: "Reason", Value: reason})
 	}
-	if sessionKey := strings.TrimSpace(stringValue(request["sessionKey"])); sessionKey != "" {
+	if sessionKey := bridgeadapter.ValueSummary(request["sessionKey"]); sessionKey != "" {
 		details = append(details, bridgeadapter.ApprovalDetail{Label: "Session", Value: sessionKey})
 	}
-	if agent := strings.TrimSpace(stringValue(request["agentId"])); agent != "" {
+	if agent := bridgeadapter.ValueSummary(request["agentId"]); agent != "" {
 		details = append(details, bridgeadapter.ApprovalDetail{Label: "Agent", Value: agent})
 	}
 	title := "OpenClaw execution request"

@@ -48,27 +48,8 @@ func buildOpenCodeApprovalPresentation(req opencode.PermissionRequest) bridgeada
 	if permission != "" {
 		details = append(details, bridgeadapter.ApprovalDetail{Label: "Permission", Value: permission})
 	}
-	if len(req.Patterns) > 0 {
-		patterns := make([]string, 0, len(req.Patterns))
-		for _, pattern := range req.Patterns {
-			pattern = strings.TrimSpace(pattern)
-			if pattern != "" {
-				patterns = append(patterns, pattern)
-			}
-		}
-		if len(patterns) > 0 {
-			if len(patterns) > 4 {
-				details = append(details, bridgeadapter.ApprovalDetail{
-					Label: "Patterns",
-					Value: strings.Join(patterns[:4], ", ") + fmt.Sprintf(" (+%d more)", len(patterns)-4),
-				})
-			} else {
-				details = append(details, bridgeadapter.ApprovalDetail{
-					Label: "Patterns",
-					Value: strings.Join(patterns, ", "),
-				})
-			}
-		}
+	if v := bridgeadapter.ValueSummary(req.Patterns); v != "" {
+		details = append(details, bridgeadapter.ApprovalDetail{Label: "Patterns", Value: v})
 	}
 	if len(req.Metadata) > 0 {
 		details = bridgeadapter.AppendDetailsFromMap(details, "Metadata", req.Metadata, 4)

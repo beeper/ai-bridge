@@ -16,14 +16,14 @@ func TestIsManagedAuthLogin_SourceManaged(t *testing.T) {
 	}
 }
 
-func TestShouldAttemptRemoteAccountLogout_HostAndManaged(t *testing.T) {
+func TestIsHostAuthLogin_SkipsRemoteLogout(t *testing.T) {
 	hostMeta := &UserLoginMetadata{CodexAuthSource: CodexAuthSourceHost}
-	if shouldAttemptRemoteAccountLogout(hostMeta) {
-		t.Fatal("expected host-auth login to skip remote account/logout")
+	if !isHostAuthLogin(hostMeta) {
+		t.Fatal("expected host-auth login to be recognized")
 	}
 
 	managedMeta := &UserLoginMetadata{CodexAuthSource: CodexAuthSourceManaged}
-	if !shouldAttemptRemoteAccountLogout(managedMeta) {
-		t.Fatal("expected managed login to call remote account/logout")
+	if isHostAuthLogin(managedMeta) {
+		t.Fatal("expected managed login to not be host-auth")
 	}
 }

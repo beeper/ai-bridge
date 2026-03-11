@@ -12,7 +12,7 @@ func (e *Emitter) EnsureUIToolInputStart(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	toolCallID, toolName string,
-	providerExecuted, dynamic bool,
+	providerExecuted bool,
 	title string,
 	providerMetadata map[string]any,
 ) {
@@ -20,7 +20,6 @@ func (e *Emitter) EnsureUIToolInputStart(
 	if toolCallID == "" {
 		return
 	}
-	_ = dynamic
 	if e.State == nil {
 		return
 	}
@@ -53,7 +52,7 @@ func (e *Emitter) EmitUIToolInputDelta(ctx context.Context, portal *bridgev2.Por
 	if toolCallID == "" {
 		return
 	}
-	e.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, false, ToolDisplayTitle(toolName), nil)
+	e.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, ToolDisplayTitle(toolName), nil)
 	if delta != "" {
 		e.Emit(ctx, portal, map[string]any{
 			"type":           "tool-input-delta",
@@ -69,7 +68,7 @@ func (e *Emitter) EmitUIToolInputAvailable(ctx context.Context, portal *bridgev2
 	if toolCallID == "" {
 		return
 	}
-	e.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, true, ToolDisplayTitle(toolName), nil)
+	e.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, ToolDisplayTitle(toolName), nil)
 	e.Emit(ctx, portal, map[string]any{
 		"type":             "tool-input-available",
 		"toolCallId":       toolCallID,
@@ -87,13 +86,13 @@ func (e *Emitter) EmitUIToolInputError(
 	toolCallID, toolName string,
 	input any,
 	errorText string,
-	providerExecuted, dynamic bool,
+	providerExecuted bool,
 ) {
 	toolCallID = strings.TrimSpace(toolCallID)
 	if toolCallID == "" {
 		return
 	}
-	e.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, true, ToolDisplayTitle(toolName), nil)
+	e.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, ToolDisplayTitle(toolName), nil)
 	part := map[string]any{
 		"type":             "tool-input-error",
 		"toolCallId":       toolCallID,
@@ -110,14 +109,11 @@ func (e *Emitter) EmitUIToolInputError(
 func (e *Emitter) EmitUIToolApprovalRequest(
 	ctx context.Context,
 	portal *bridgev2.Portal,
-	approvalID, toolCallID, toolName string,
-	ttlSeconds int,
+	approvalID, toolCallID string,
 ) {
 	if strings.TrimSpace(approvalID) == "" || strings.TrimSpace(toolCallID) == "" {
 		return
 	}
-	_ = toolName
-	_ = ttlSeconds
 	if e.State == nil {
 		return
 	}

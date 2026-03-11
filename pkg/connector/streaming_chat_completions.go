@@ -328,7 +328,7 @@ func (oc *AIClient) streamChatCompletions(
 				var inputMap any
 				if err := json.Unmarshal([]byte(argsJSON), &inputMap); err != nil {
 					inputMap = argsJSON
-					oc.uiEmitter(state).EmitUIToolInputError(ctx, portal, tool.callID, toolName, argsJSON, "Invalid JSON tool input", false, false)
+					oc.uiEmitter(state).EmitUIToolInputError(ctx, portal, tool.callID, toolName, argsJSON, "Invalid JSON tool input", false)
 				}
 				oc.uiEmitter(state).EmitUIToolInputAvailable(ctx, portal, tool.callID, toolName, inputMap, false)
 

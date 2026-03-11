@@ -184,15 +184,14 @@ func (cc *CodexClient) ensureCodexThreadPortal(ctx context.Context, existing *br
 
 	portal.RoomType = database.RoomTypeDM
 	portal.OtherUserID = codexGhostID
-	portal.Name = title
-	portal.NameSet = true
-
-	if err := portal.Save(ctx); err != nil {
-		return nil, false, err
-	}
 
 	info := cc.composeCodexChatInfo(title, true)
 	if portal.MXID == "" {
+		portal.Name = title
+		portal.NameSet = true
+		if err := portal.Save(ctx); err != nil {
+			return nil, false, err
+		}
 		if err := portal.CreateMatrixRoom(ctx, cc.UserLogin, info); err != nil {
 			return nil, false, err
 		}
@@ -201,11 +200,12 @@ func (cc *CodexClient) ensureCodexThreadPortal(ctx context.Context, existing *br
 			cc.sendSystemNotice(ctx, portal, "This imported conversation needs a working directory. Send an absolute path or `~/...`.")
 		}
 	} else {
-		if err := cc.UserLogin.Bridge.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, cc.UserLogin.ID); err != nil {
-			cc.log.Warn().Err(err).Str("thread_id", threadID).Msg("Failed to ensure Codex backfill task")
-		} else {
-			cc.UserLogin.Bridge.WakeupBackfillQueue()
+		if err := portal.Save(ctx); err != nil {
+			return nil, false, err
 		}
+		portal.UpdateInfo(ctx, info, cc.UserLogin, nil, time.Time{})
+		bridgeadapter.SendAIRoomInfo(ctx, portal, bridgeadapter.AIRoomKindAgent)
+		cc.UserLogin.Bridge.WakeupBackfillQueue()
 	}
 
 	return portal, created, nil
@@ -529,4 +529,3 @@ func findCodexAnchorIndex(entries []codexBackfillEntry, anchor *database.Message
 	}
 	return 0, false
 }
-

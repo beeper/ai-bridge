@@ -250,7 +250,7 @@ func (cc *CodexClient) GetApprovalHandler() bridgeadapter.ApprovalReactionHandle
 func (cc *CodexClient) LogoutRemote(ctx context.Context) {
 	meta := loginMetadata(cc.UserLogin)
 	// Only managed per-login auth should trigger upstream account/logout.
-	if shouldAttemptRemoteAccountLogout(meta) {
+	if !isHostAuthLogin(meta) {
 		if err := cc.ensureRPC(cc.backgroundContext(ctx)); err == nil && cc.rpc != nil {
 			callCtx, cancel := context.WithTimeout(cc.backgroundContext(ctx), 10*time.Second)
 			defer cancel()
@@ -275,12 +275,6 @@ func (cc *CodexClient) LogoutRemote(ctx context.Context) {
 	})
 }
 
-func shouldAttemptRemoteAccountLogout(meta *UserLoginMetadata) bool {
-	if isHostAuthLogin(meta) {
-		return false
-	}
-	return true
-}
 
 func (cc *CodexClient) purgeCodexHomeBestEffort(ctx context.Context) {
 	if cc.UserLogin == nil {
@@ -1946,7 +1940,7 @@ func (cc *CodexClient) ensureUIToolInputStart(ctx context.Context, portal *bridg
 		return
 	}
 	ui := cc.uiEmitter(state)
-	ui.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, false, streamui.ToolDisplayTitle(toolName), nil)
+	ui.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, streamui.ToolDisplayTitle(toolName), nil)
 	ui.EmitUIToolInputAvailable(ctx, portal, toolCallID, toolName, input, providerExecuted)
 }
 
@@ -1954,7 +1948,7 @@ func (cc *CodexClient) emitUIToolApprovalRequest(
 	ctx context.Context, portal *bridgev2.Portal, state *streamingState,
 	approvalID, toolCallID, toolName string, presentation bridgeadapter.ApprovalPromptPresentation, ttlSeconds int,
 ) {
-	cc.uiEmitter(state).EmitUIToolApprovalRequest(ctx, portal, approvalID, toolCallID, toolName, ttlSeconds)
+	cc.uiEmitter(state).EmitUIToolApprovalRequest(ctx, portal, approvalID, toolCallID)
 	cc.sendApprovalRequestFallbackEvent(ctx, portal, state, approvalID, toolCallID, toolName, presentation, ttlSeconds)
 }
 

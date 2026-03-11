@@ -177,6 +177,7 @@ func (oc *AIClient) isBuiltinToolDenied(
 	}
 	approvalID := NewCallID()
 	ttl := time.Duration(oc.toolApprovalsTTLSeconds()) * time.Second
+	presentation := buildBuiltinApprovalPresentation(toolName, action, argsObj)
 	if _, created := oc.registerToolApproval(ToolApprovalParams{
 		ApprovalID:   approvalID,
 		RoomID:       state.roomID,
@@ -186,7 +187,7 @@ func (oc *AIClient) isBuiltinToolDenied(
 		ToolKind:     ToolApprovalKindBuiltin,
 		RuleToolName: toolName,
 		Action:       action,
-		Presentation: buildBuiltinApprovalPresentation(toolName, action, argsObj),
+		Presentation: presentation,
 		TTL:          ttl,
 	}); !created {
 		oc.loggerForContext(ctx).Error().
@@ -194,7 +195,7 @@ func (oc *AIClient) isBuiltinToolDenied(
 			Msg("tool approval: failed to register builtin approval request")
 		return true
 	}
-	oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, buildBuiltinApprovalPresentation(toolName, action, argsObj), tool.eventID, oc.toolApprovalsTTLSeconds())
+	oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, presentation, tool.eventID, oc.toolApprovalsTTLSeconds())
 	resolution, _, ok := oc.waitToolApproval(ctx, approvalID)
 	decision := resolution.Decision
 	if !ok {

@@ -6,6 +6,7 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
@@ -50,4 +51,82 @@ func TestHostAuthLoginIDUsesDedicatedPrefix(t *testing.T) {
 	if !strings.HasPrefix(string(got), hostAuthLoginPrefix+":") {
 		t.Fatalf("expected host-auth login id to use %q prefix, got %q", hostAuthLoginPrefix, got)
 	}
+}
+
+func TestHasManagedCodexLoginIgnoresHostAuthLogin(t *testing.T) {
+	logins := []*bridgev2.UserLogin{
+		{
+			UserLogin: &database.UserLogin{
+				ID: hostAuthLoginIDForTest("@alice:example.com"),
+				Metadata: &UserLoginMetadata{
+					Provider:        ProviderCodex,
+					CodexAuthSource: CodexAuthSourceHost,
+				},
+			},
+		},
+		{
+			UserLogin: &database.UserLogin{
+				ID: "codex:alice:1",
+				Metadata: &UserLoginMetadata{
+					Provider:        ProviderCodex,
+					CodexAuthSource: CodexAuthSourceManaged,
+				},
+			},
+		},
+	}
+
+	if !hasManagedCodexLogin(logins, hostAuthLoginIDForTest("@alice:example.com")) {
+		t.Fatal("expected managed Codex login to be detected")
+	}
+}
+
+func TestHasManagedCodexLoginSkipsExceptID(t *testing.T) {
+	exceptID := networkid.UserLoginID("codex:alice:1")
+	logins := []*bridgev2.UserLogin{
+		{
+			UserLogin: &database.UserLogin{
+				ID: exceptID,
+				Metadata: &UserLoginMetadata{
+					Provider:        ProviderCodex,
+					CodexAuthSource: CodexAuthSourceManaged,
+				},
+			},
+		},
+		{
+			UserLogin: &database.UserLogin{
+				ID: "codex_host:alice:1",
+				Metadata: &UserLoginMetadata{
+					Provider:        ProviderCodex,
+					CodexAuthSource: CodexAuthSourceHost,
+				},
+			},
+		},
+	}
+
+	if hasManagedCodexLogin(logins, exceptID) {
+		t.Fatal("expected exceptID login to be ignored")
+	}
+}
+
+func TestHasManagedCodexLoginOnlyMatchesCodexManagedLogins(t *testing.T) {
+	logins := []*bridgev2.UserLogin{
+		{
+			UserLogin: &database.UserLogin{
+				ID: "other:1",
+				Metadata: &UserLoginMetadata{
+					Provider:        "other",
+					CodexAuthSource: CodexAuthSourceManaged,
+				},
+			},
+		},
+	}
+
+	if hasManagedCodexLogin(logins, "") {
+		t.Fatal("expected non-Codex login to be ignored")
+	}
+}
+
+func hostAuthLoginIDForTest(mxid string) networkid.UserLoginID {
+	conn := NewConnector()
+	return conn.hostAuthLoginID(id.UserID(mxid))
 }
