@@ -2119,7 +2119,14 @@ func (cc *CodexClient) waitToolApproval(ctx context.Context, approvalID string) 
 	approvalID = strings.TrimSpace(approvalID)
 	decision, ok := cc.approvalFlow.Wait(ctx, approvalID)
 	if !ok {
-		cc.approvalFlow.Drop(approvalID)
+		reason := "timeout"
+		if ctx.Err() != nil {
+			reason = "cancelled"
+		}
+		cc.approvalFlow.FinishResolved(approvalID, bridgeadapter.ApprovalDecisionPayload{
+			ApprovalID: approvalID,
+			Reason:     reason,
+		})
 		return decision, false
 	}
 	cc.approvalFlow.FinishResolved(approvalID, decision)

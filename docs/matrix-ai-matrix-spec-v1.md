@@ -88,7 +88,6 @@ Authoritative identifiers are defined in `pkg/matrixevents/matrixevents.go`.
 | Key | Where it appears | Purpose | Spec section |
 | --- | --- | --- | --- |
 | `com.beeper.ai` | `m.room.message` | Canonical assistant `UIMessage` | [Canonical](#canonical) |
-| `com.beeper.ai.approval_decision` | `m.room.message` | Owner approval response for pending tool requests | [Approvals](#approvals-decision) |
 | `com.beeper.ai.model_id` | `m.room.message` | Routing/display hint | [Other keys](#other-keys-routing) |
 | `com.beeper.ai.agent` | `m.room.message`, `m.room.member` | Routing hint or agent definition | [Other keys](#other-keys-agent) |
 | `com.beeper.ai.image_generation` | `m.room.message` (image) | Generated-image tag/metadata | [Other keys](#other-keys-media) |
@@ -304,9 +303,16 @@ When approval is needed, the bridge emits:
 1. An ephemeral stream chunk (`com.beeper.ai.stream_event`) where `part.type = "tool-approval-request"` containing:
    - `approvalId: string`
    - `toolCallId: string`
-2. A timeline-visible fallback notice (for clients that drop/ignore ephemeral events).
+2. A timeline-visible canonical approval notice.
    - The notice is an `m.room.message` with `msgtype = "m.notice"`, SHOULD reply to the originating assistant turn via `m.relates_to.m.in_reply_to`, and includes a complete `com.beeper.ai` `UIMessage` using the canonical shape defined above (`id`, `role`, optional `metadata`, `parts`).
-   - That fallback `UIMessage.metadata` contains `approvalId` and its `parts` contains a `dynamic-tool` part with:
+   - The notice body MUST list the canonical reaction keys for the available options.
+   - The bridge MUST send bridge-authored placeholder `m.reaction` / `m.annotation` events on the notice, one for each allowed option key.
+   - `UIMessage.metadata.approval` SHOULD include:
+     - `id: string`
+     - `options: [{ id, key, label, approved, always?, reason? }]`
+     - `presentation`
+     - `expiresAt` when known
+   - The `dynamic-tool` part contains:
      - `state = "approval-requested"`
      - `toolCallId: string`
      - `toolName: string`
@@ -318,42 +324,35 @@ Canonical approval data in persisted `dynamic-tool` parts follows the AI SDK:
 
 <a id="approvals-decision"></a>
 ### Approving / Denying
-Approvals are resolved through a canonical owner reply event:
+Approvals are resolved through reactions on the canonical approval notice:
 
-1. **Bridge sends** canonical tool state in `com.beeper.ai` and/or `com.beeper.ai.stream_event` with:
-   - `part.type = "tool-approval-request"` during streaming
-   - a persisted `dynamic-tool` part with approval metadata in the final `UIMessage`
-
-2. **Client sends** a standard `m.room.message` whose content includes `com.beeper.ai.approval_decision` and SHOULD reply to the originating assistant turn via `m.relates_to.m.in_reply_to`:
+1. **Bridge sends** the canonical approval notice and placeholder reactions for the allowed option keys.
+2. **Owner reacts** to that notice using one of the advertised option keys:
 
 ```json
 {
-  "type": "m.room.message",
+  "type": "m.reaction",
   "content": {
-    "msgtype": "m.text",
-    "body": "Approved",
     "m.relates_to": {
-      "m.in_reply_to": { "event_id": "$assistant_turn" }
-    },
-    "com.beeper.ai.approval_decision": {
-      "approvalId": "abc123",
-      "approved": true,
-      "always": false
+      "rel_type": "m.annotation",
+      "event_id": "$approval_notice",
+      "key": "approval.allow_once"
     }
   }
 }
 ```
 
 Rules:
-- `approvalId` is required.
-- `approved` is required and is the canonical allow/deny decision.
-- `always` is optional and, when `true`, persists an allow rule for future matching approvals.
-- `reason` is optional.
-- Approval decision events are control events. They MUST NOT create a user turn in canonical replay history.
-- Timeline fallback notices are UI affordances only. They MUST NOT be projected into provider replay history.
+- The approval notice is the canonical Matrix artifact. Rich clients MAY also observe mirrored `tool-approval-request` / `tool-approval-response` stream parts.
+- Only owner reactions with an advertised option key can resolve the approval.
+- Non-owner reactions and invalid keys MUST be rejected and SHOULD be redacted.
+- On terminal completion, the bridge MUST edit the approval notice into its final state and redact all bridge-authored placeholder reactions.
+- The resolving owner reaction MUST remain visible.
+- If the approval was resolved outside Matrix, the bridge SHOULD mirror the owner's chosen reaction into Matrix before terminal cleanup so the notice stays in sync.
+- Approval notices and their terminal edits remain excluded from provider replay history.
 
 Always-allow:
-- `always: true` persists an allow rule in login metadata, scoped to the current login/account for the current bridge implementation.
+- Reacting with the `allow always` option persists an allow rule in login metadata, scoped to the current login/account for the current bridge implementation.
 - A stored rule matches on the approval target identity emitted by the bridge for that login: at minimum `toolName`, plus any bridge-emitted qualifier needed to distinguish separate approval surfaces for that login (for example agent/model or room-scoped tool routing).
 - Rules are allow-only. If multiple stored rules match, the most specific rule for the current login wins; otherwise any matching allow rule MAY be applied.
 - Approval events themselves remain the audit record for the concrete `approvalId`; persisted allow rules are derived from those events and do not change canonical replay history.

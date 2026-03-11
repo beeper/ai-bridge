@@ -86,6 +86,8 @@ type ApprovalFlow[D any] struct {
 	testResolvePortal                 func(ctx context.Context, login *bridgev2.UserLogin, roomID id.RoomID) (*bridgev2.Portal, error)
 	testEditPromptToResolvedState     func(ctx context.Context, login *bridgev2.UserLogin, portal *bridgev2.Portal, sender bridgev2.EventSender, prompt ApprovalPromptRegistration, decision ApprovalDecisionPayload)
 	testRedactPromptPlaceholderReacts func(ctx context.Context, login *bridgev2.UserLogin, portal *bridgev2.Portal, sender bridgev2.EventSender, prompt ApprovalPromptRegistration) error
+	testMirrorRemoteDecisionReaction  func(ctx context.Context, login *bridgev2.UserLogin, portal *bridgev2.Portal, sender bridgev2.EventSender, prompt ApprovalPromptRegistration, reactionKey string)
+	testRedactSingleReaction          func(msg *bridgev2.MatrixReaction)
 }
 
 // NewApprovalFlow creates an ApprovalFlow from the given config.
@@ -171,8 +173,8 @@ func (f *ApprovalFlow[D]) Drop(approvalID string) {
 	f.finalize(approvalID, nil, false)
 }
 
-// FinishResolved finalizes a resolved approval by editing the approval prompt to
-// response state and cleaning up bridge-authored placeholder reactions.
+// FinishResolved finalizes a terminal approval by editing the approval prompt to
+// its final state and cleaning up bridge-authored placeholder reactions.
 func (f *ApprovalFlow[D]) FinishResolved(approvalID string, decision ApprovalDecisionPayload) {
 	if f == nil {
 		return
@@ -185,6 +187,25 @@ func (f *ApprovalFlow[D]) FinishResolved(approvalID string, decision ApprovalDec
 		decision.ApprovalID = approvalID
 	}
 	f.finalize(approvalID, &decision, true)
+}
+
+// ResolveExternal mirrors a concrete remote allow/deny decision into Matrix as
+// an owner-authored reaction when possible, then finalizes the approval.
+func (f *ApprovalFlow[D]) ResolveExternal(ctx context.Context, approvalID string, decision ApprovalDecisionPayload) {
+	if f == nil {
+		return
+	}
+	approvalID = strings.TrimSpace(approvalID)
+	if approvalID == "" {
+		return
+	}
+	if strings.TrimSpace(decision.ApprovalID) == "" {
+		decision.ApprovalID = approvalID
+	}
+	if prompt, ok := f.promptRegistration(approvalID); ok {
+		f.mirrorRemoteDecisionReaction(ctx, prompt, decision)
+	}
+	f.FinishResolved(approvalID, decision)
 }
 
 // FindByData iterates pending approvals and returns the id of the first one
@@ -217,7 +238,7 @@ func (f *ApprovalFlow[D]) Resolve(approvalID string, decision ApprovalDecisionPa
 		return ErrApprovalUnknown
 	}
 	if time.Now().After(p.ExpiresAt) {
-		f.Drop(approvalID)
+		f.finishTimedOutApproval(approvalID)
 		return ErrApprovalExpired
 	}
 	select {
@@ -244,7 +265,7 @@ func (f *ApprovalFlow[D]) Wait(ctx context.Context, approvalID string) (Approval
 	}
 	timeout := time.Until(p.ExpiresAt)
 	if timeout <= 0 {
-		f.Drop(approvalID)
+		f.finishTimedOutApproval(approvalID)
 		return zero, false
 	}
 	timer := time.NewTimer(timeout)
@@ -322,6 +343,20 @@ func (f *ApprovalFlow[D]) bindPromptIDsLocked(approvalID string, eventID id.Even
 	entry.PromptMessageID = messageID
 	f.promptsByEventID[eventID] = approvalID
 	return true
+}
+
+func (f *ApprovalFlow[D]) promptRegistration(approvalID string) (ApprovalPromptRegistration, bool) {
+	approvalID = strings.TrimSpace(approvalID)
+	if approvalID == "" {
+		return ApprovalPromptRegistration{}, false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	entry := f.promptsByApproval[approvalID]
+	if entry == nil {
+		return ApprovalPromptRegistration{}, false
+	}
+	return *entry, true
 }
 
 // dropPromptLocked removes a prompt registration.
@@ -469,6 +504,7 @@ func (f *ApprovalFlow[D]) SendPrompt(ctx context.Context, portal *bridgev2.Porta
 	f.mu.Unlock()
 
 	f.sendPrefillReactions(ctx, portal, login, msgID, prompt.Options)
+	f.schedulePromptTimeout(strings.TrimSpace(params.ApprovalID), params.ExpiresAt)
 }
 
 // ---------------------------------------------------------------------------
@@ -516,6 +552,7 @@ func (f *ApprovalFlow[D]) HandleReaction(ctx context.Context, msg *bridgev2.Matr
 			if f.sendNotice != nil {
 				f.sendNotice(ctx, msg.Portal, ApprovalErrorToastText(err))
 			}
+			f.redactSingleReaction(msg)
 		} else {
 			resolved = true
 		}
@@ -536,8 +573,6 @@ func (f *ApprovalFlow[D]) HandleReaction(ctx context.Context, msg *bridgev2.Matr
 	if f.deliverDecision != nil {
 		if resolved {
 			f.FinishResolved(approvalID, match.Decision)
-		} else {
-			f.Drop(approvalID)
 		}
 	}
 	return true
@@ -560,6 +595,10 @@ func (f *ApprovalFlow[D]) handleRejectedReaction(ctx context.Context, msg *bridg
 }
 
 func (f *ApprovalFlow[D]) redactSingleReaction(msg *bridgev2.MatrixReaction) {
+	if f.testRedactSingleReaction != nil {
+		f.testRedactSingleReaction(msg)
+		return
+	}
 	login := f.login()
 	sender := f.senderOrEmpty(msg.Portal)
 	triggerID := msg.Event.ID
@@ -622,6 +661,108 @@ func (f *ApprovalFlow[D]) sendPrefillReactions(_ context.Context, portal *bridge
 			})
 		}
 	}
+}
+
+func (f *ApprovalFlow[D]) schedulePromptTimeout(approvalID string, expiresAt time.Time) {
+	approvalID = strings.TrimSpace(approvalID)
+	if approvalID == "" || expiresAt.IsZero() {
+		return
+	}
+	delay := time.Until(expiresAt)
+	if delay <= 0 {
+		f.finishTimedOutApproval(approvalID)
+		return
+	}
+	go func() {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		<-timer.C
+		f.finishTimedOutApproval(approvalID)
+	}()
+}
+
+func (f *ApprovalFlow[D]) finishTimedOutApproval(approvalID string) {
+	if _, ok := f.promptRegistration(approvalID); !ok {
+		return
+	}
+	f.FinishResolved(approvalID, ApprovalDecisionPayload{
+		ApprovalID: approvalID,
+		Reason:     "timeout",
+	})
+}
+
+func approvalOptionKeyForDecision(options []ApprovalOption, decision ApprovalDecisionPayload) string {
+	options = normalizeApprovalOptions(options)
+	if decision.Approved {
+		if decision.Always {
+			for _, option := range options {
+				if option.Approved && option.Always {
+					return option.Key
+				}
+			}
+		}
+		for _, option := range options {
+			if option.Approved && !option.Always {
+				return option.Key
+			}
+		}
+		return ""
+	}
+	switch strings.TrimSpace(decision.Reason) {
+	case "timeout", "expired", "delivery_error", "cancelled":
+		return ""
+	}
+	for _, option := range options {
+		if !option.Approved {
+			return option.Key
+		}
+	}
+	return ""
+}
+
+func (f *ApprovalFlow[D]) mirrorRemoteDecisionReaction(ctx context.Context, prompt ApprovalPromptRegistration, decision ApprovalDecisionPayload) {
+	reactionKey := approvalOptionKeyForDecision(prompt.Options, decision)
+	if reactionKey == "" {
+		return
+	}
+	login := f.login()
+	if login == nil || login.Bridge == nil {
+		return
+	}
+	portal, err := f.resolvePortalByRoomID(ctx, login, prompt.RoomID)
+	if err != nil || portal == nil || portal.MXID == "" {
+		return
+	}
+	sender := bridgev2.EventSender{Sender: MatrixSenderID(prompt.OwnerMXID), SenderLogin: login.ID}
+	if f.testMirrorRemoteDecisionReaction != nil {
+		f.testMirrorRemoteDecisionReaction(ctx, login, portal, sender, prompt, reactionKey)
+		return
+	}
+	if prompt.OwnerMXID != "" {
+		_ = EnsureSyntheticReactionSenderGhost(ctx, login, prompt.OwnerMXID)
+	}
+	targetMessage := prompt.PromptMessageID
+	if targetMessage == "" {
+		receiver := portal.Receiver
+		if receiver == "" {
+			receiver = login.ID
+		}
+		target := resolveApprovalPromptMessage(ctx, login, receiver, prompt)
+		if target == nil {
+			return
+		}
+		targetMessage = target.ID
+	}
+	result := login.QueueRemoteEvent(&RemoteReaction{
+		Portal:        portal.PortalKey,
+		Sender:        sender,
+		TargetMessage: targetMessage,
+		Emoji:         reactionKey,
+		EmojiID:       networkid.EmojiID(reactionKey),
+		Timestamp:     time.Now(),
+		LogKey:        f.logKey,
+	})
+	_ = result
 }
 
 func (f *ApprovalFlow[D]) finalize(approvalID string, decision *ApprovalDecisionPayload, resolved bool) {
@@ -697,6 +838,7 @@ func (f *ApprovalFlow[D]) editPromptToResolvedState(
 		ToolName:     prompt.ToolName,
 		TurnID:       prompt.TurnID,
 		Presentation: prompt.Presentation,
+		Options:      prompt.Options,
 		Decision:     decision,
 		ExpiresAt:    prompt.ExpiresAt,
 	})

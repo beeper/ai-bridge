@@ -15,11 +15,13 @@ import (
 	"github.com/beeper/agentremote/pkg/matrixevents"
 )
 
-const ApprovalDecisionKey = "com.beeper.ai.approval_decision"
-
 const (
 	ApprovalPromptStateRequested = "approval-requested"
 	ApprovalPromptStateResponded = "approval-responded"
+
+	ApprovalReactionKeyAllowOnce   = "approval.allow_once"
+	ApprovalReactionKeyAllowAlways = "approval.allow_always"
+	ApprovalReactionKeyDeny        = "approval.deny"
 
 	RejectReasonOwnerOnly     = "only_owner"
 	RejectReasonExpired       = "expired"
@@ -174,14 +176,14 @@ func ApprovalPromptOptions(allowAlways bool) []ApprovalOption {
 	options := []ApprovalOption{
 		{
 			ID:       "allow_once",
-			Key:      "✅",
+			Key:      ApprovalReactionKeyAllowOnce,
 			Label:    "Approve once",
 			Approved: true,
 			Reason:   "allow_once",
 		},
 		{
 			ID:       "deny",
-			Key:      "❌",
+			Key:      ApprovalReactionKeyDeny,
 			Label:    "Deny",
 			Approved: false,
 			Reason:   "deny",
@@ -194,7 +196,7 @@ func ApprovalPromptOptions(allowAlways bool) []ApprovalOption {
 		options[0],
 		{
 			ID:       "allow_always",
-			Key:      "🔁",
+			Key:      ApprovalReactionKeyAllowAlways,
 			Label:    "Always allow",
 			Approved: true,
 			Always:   true,
@@ -219,7 +221,7 @@ func renderApprovalOptionHints(options []ApprovalOption) []string {
 		if key == "" || label == "" {
 			continue
 		}
-		hints = append(hints, fmt.Sprintf("%s %s", key, label))
+		hints = append(hints, fmt.Sprintf("%s = %s", key, label))
 	}
 	return hints
 }
@@ -267,19 +269,12 @@ func BuildApprovalResponseBody(presentation ApprovalPromptPresentation, decision
 		}
 		lines = append(lines, fmt.Sprintf("%s: %s", label, value))
 	}
-	outcome := "denied"
-	if decision.Approved {
-		outcome = "approved"
+	outcome, reason := approvalDecisionOutcome(decision)
+	line := "Decision: " + outcome
+	if reason != "" {
+		line += " (reason: " + reason + ")"
 	}
-	if decision.Always && decision.Approved {
-		outcome = "approved (always allow)"
-	}
-	reason := strings.TrimSpace(decision.Reason)
-	if reason == "" {
-		lines = append(lines, "Decision: "+outcome)
-	} else {
-		lines = append(lines, fmt.Sprintf("Decision: %s (reason: %s)", outcome, reason))
-	}
+	lines = append(lines, line)
 	return strings.Join(lines, "\n")
 }
 
@@ -300,6 +295,7 @@ type ApprovalResponsePromptMessageParams struct {
 	ToolName     string
 	TurnID       string
 	Presentation ApprovalPromptPresentation
+	Options      []ApprovalOption
 	Decision     ApprovalDecisionPayload
 	ExpiresAt    time.Time
 }
@@ -331,12 +327,7 @@ func BuildApprovalPromptMessage(params ApprovalPromptMessageParams) ApprovalProm
 		options = normalizeApprovalOptions(ApprovalPromptOptions(presentation.AllowAlways))
 	}
 	body := BuildApprovalPromptBody(presentation, options)
-	metadata := map[string]any{
-		"approvalId": approvalID,
-	}
-	if turnID != "" {
-		metadata["turn_id"] = turnID
-	}
+	metadata := approvalMessageMetadata(approvalID, turnID, presentation, options, nil, params.ExpiresAt)
 	uiMessage := map[string]any{
 		"id":       approvalID,
 		"role":     "assistant",
@@ -351,27 +342,11 @@ func BuildApprovalPromptMessage(params ApprovalPromptMessageParams) ApprovalProm
 			},
 		}},
 	}
-	approvalMeta := map[string]any{
-		"kind":            "request",
-		"approvalId":      approvalID,
-		"toolCallId":      toolCallID,
-		"toolName":        toolName,
-		"options":         optionsToRaw(options),
-		"renderedOptions": renderApprovalOptionHints(options),
-		"presentation":    presentationToRaw(presentation),
-	}
-	if turnID != "" {
-		approvalMeta["turnId"] = turnID
-	}
-	if !params.ExpiresAt.IsZero() {
-		approvalMeta["expiresAt"] = params.ExpiresAt.UnixMilli()
-	}
 	raw := map[string]any{
 		"msgtype":                event.MsgNotice,
 		"body":                   body,
 		"m.mentions":             map[string]any{},
 		matrixevents.BeeperAIKey: uiMessage,
-		ApprovalDecisionKey:      approvalMeta,
 	}
 	if params.ReplyToEventID != "" {
 		raw["m.relates_to"] = map[string]any{
@@ -417,12 +392,13 @@ func BuildApprovalResponsePromptMessage(params ApprovalResponsePromptMessagePara
 	if strings.TrimSpace(decision.Reason) != "" {
 		approvalPayload["reason"] = strings.TrimSpace(decision.Reason)
 	}
-	metadata := map[string]any{
-		"approvalId": approvalID,
+	options := params.Options
+	if len(options) > 0 {
+		options = normalizeApprovalOptions(options)
+	} else {
+		options = normalizeApprovalOptions(ApprovalPromptOptions(presentation.AllowAlways))
 	}
-	if turnID != "" {
-		metadata["turn_id"] = turnID
-	}
+	metadata := approvalMessageMetadata(approvalID, turnID, presentation, options, &decision, params.ExpiresAt)
 	uiMessage := map[string]any{
 		"id":       approvalID,
 		"role":     "assistant",
@@ -435,36 +411,74 @@ func BuildApprovalResponsePromptMessage(params ApprovalResponsePromptMessagePara
 			"approval":   approvalPayload,
 		}},
 	}
-	approvalMeta := map[string]any{
-		"kind":         "response",
-		"approvalId":   approvalID,
-		"toolCallId":   toolCallID,
-		"toolName":     toolName,
-		"presentation": presentationToRaw(presentation),
-		"approved":     decision.Approved,
-		"always":       decision.Always,
-	}
-	if strings.TrimSpace(decision.Reason) != "" {
-		approvalMeta["reason"] = strings.TrimSpace(decision.Reason)
-	}
-	if turnID != "" {
-		approvalMeta["turnId"] = turnID
-	}
-	if !params.ExpiresAt.IsZero() {
-		approvalMeta["expiresAt"] = params.ExpiresAt.UnixMilli()
-	}
 	raw := map[string]any{
 		"msgtype":                event.MsgNotice,
 		"body":                   body,
 		"m.mentions":             map[string]any{},
 		matrixevents.BeeperAIKey: uiMessage,
-		ApprovalDecisionKey:      approvalMeta,
 	}
 	return ApprovalPromptMessage{
 		Body:         body,
 		UIMessage:    uiMessage,
 		Raw:          raw,
 		Presentation: presentation,
+	}
+}
+
+func approvalMessageMetadata(
+	approvalID, turnID string,
+	presentation ApprovalPromptPresentation,
+	options []ApprovalOption,
+	decision *ApprovalDecisionPayload,
+	expiresAt time.Time,
+) map[string]any {
+	metadata := map[string]any{
+		"approvalId": approvalID,
+	}
+	if turnID != "" {
+		metadata["turn_id"] = turnID
+	}
+	approval := map[string]any{
+		"id":           approvalID,
+		"options":      optionsToRaw(options),
+		"renderedKeys": renderApprovalOptionHints(options),
+		"presentation": presentationToRaw(presentation),
+	}
+	if !expiresAt.IsZero() {
+		approval["expiresAt"] = expiresAt.UnixMilli()
+	}
+	if decision != nil {
+		approval["approved"] = decision.Approved
+		if decision.Always {
+			approval["always"] = true
+		}
+		if strings.TrimSpace(decision.Reason) != "" {
+			approval["reason"] = strings.TrimSpace(decision.Reason)
+		}
+	}
+	metadata["approval"] = approval
+	return metadata
+}
+
+func approvalDecisionOutcome(decision ApprovalDecisionPayload) (string, string) {
+	reason := strings.TrimSpace(decision.Reason)
+	switch {
+	case decision.Approved && decision.Always:
+		return "approved (always allow)", ""
+	case decision.Approved:
+		return "approved", ""
+	case reason == "timeout":
+		return "timed out", ""
+	case reason == "expired":
+		return "expired", ""
+	case reason == "delivery_error":
+		return "delivery error", ""
+	case reason == "cancelled":
+		return "cancelled", ""
+	case reason == "":
+		return "denied", ""
+	default:
+		return "denied", reason
 	}
 }
 

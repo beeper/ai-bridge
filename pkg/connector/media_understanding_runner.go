@@ -952,10 +952,22 @@ func (oc *AIClient) generateWithOpenRouter(
 		Context:             ToPromptContext("", nil, messages),
 		MaxCompletionTokens: defaultImageUnderstandingLimit,
 	}
-	if legacyUnifiedMessagesNeedChatAdapter(messages) {
+	if unifiedMessagesContainAudioOrVideo(messages) {
 		return provider.generateChatCompletions(ctx, params)
 	}
 	return provider.Generate(ctx, params)
+}
+
+func unifiedMessagesContainAudioOrVideo(messages []UnifiedMessage) bool {
+	for _, msg := range messages {
+		for _, part := range msg.Content {
+			switch part.Type {
+			case ContentTypeAudio, ContentTypeVideo:
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func resolveOpenRouterMediaBaseURL(oc *AIClient) string {

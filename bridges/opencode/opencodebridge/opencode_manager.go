@@ -939,7 +939,7 @@ func (m *OpenCodeManager) handlePermissionRepliedEvent(ctx context.Context, inst
 			})
 		}
 	}
-	m.approvalFlow.FinishResolved(strings.TrimSpace(payload.RequestID), bridgeadapter.ApprovalDecisionPayload{
+	m.approvalFlow.ResolveExternal(ctx, strings.TrimSpace(payload.RequestID), bridgeadapter.ApprovalDecisionPayload{
 		ApprovalID: strings.TrimSpace(payload.RequestID),
 		Approved:   approved,
 		Always:     strings.EqualFold(strings.TrimSpace(payload.Reply), "always"),

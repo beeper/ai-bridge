@@ -15,6 +15,7 @@ import (
 	"github.com/beeper/agentremote/pkg/connector/msgconv"
 	"github.com/beeper/agentremote/pkg/matrixevents"
 	"github.com/beeper/agentremote/pkg/shared/maputil"
+	"github.com/beeper/agentremote/pkg/shared/openclawconv"
 	"github.com/beeper/agentremote/pkg/shared/streamtransport"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 )
@@ -87,7 +88,7 @@ func (oc *OpenClawClient) EmitStreamPart(ctx context.Context, portal *bridgev2.P
 	}
 
 	turnID = strings.TrimSpace(turnID)
-	agentID = stringsTrimDefault(agentID, "gateway")
+	agentID = openclawconv.StringsTrimDefault(agentID, "gateway")
 	sessionKey = strings.TrimSpace(sessionKey)
 
 	oc.StreamMu.Lock()
@@ -122,7 +123,7 @@ func (oc *OpenClawClient) EmitStreamPart(ctx context.Context, portal *bridgev2.P
 			state.errorText = errText
 		}
 	case "abort":
-		state.finishReason = stringsTrimDefault(stringValue(part["reason"]), "aborted")
+		state.finishReason = openclawconv.StringsTrimDefault(stringValue(part["reason"]), "aborted")
 	case "finish":
 		if state.completedAtMs == 0 {
 			state.completedAtMs = time.Now().UnixMilli()
@@ -450,7 +451,7 @@ func (oc *OpenClawClient) currentCanonicalUIMessage(state *openClawStreamState) 
 	if len(uiMessage) == 0 {
 		return msgconv.BuildUIMessage(msgconv.UIMessageParams{
 			TurnID:   state.turnID,
-			Role:     stringsTrimDefault(state.role, "assistant"),
+			Role:     openclawconv.StringsTrimDefault(state.role, "assistant"),
 			Metadata: update,
 		})
 	}
@@ -472,7 +473,7 @@ func (oc *OpenClawClient) buildStreamDBMetadata(state *openClawStreamState) *Mes
 	}
 	uiMessage := oc.currentCanonicalUIMessage(state)
 	return &MessageMetadata{
-		Role:               stringsTrimDefault(state.role, "assistant"),
+		Role:               openclawconv.StringsTrimDefault(state.role, "assistant"),
 		Body:               body,
 		SessionID:          state.sessionID,
 		SessionKey:         state.sessionKey,

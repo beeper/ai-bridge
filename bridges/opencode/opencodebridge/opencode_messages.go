@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/pkg/shared/media"
 	"github.com/beeper/agentremote/pkg/shared/stringutil"
 )
 
@@ -204,7 +204,7 @@ func (b *Bridge) buildMediaParts(ctx context.Context, msg *bridgev2.MatrixMessag
 		caption = ""
 	}
 	if filename == "" {
-		filename = fallbackFilenameForMIME(mimeType)
+		filename = media.FallbackFilenameForMIME(mimeType)
 	}
 
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, b64Data)
@@ -224,13 +224,6 @@ func (b *Bridge) buildMediaParts(ctx context.Context, msg *bridgev2.MatrixMessag
 	return parts, titleCandidate, nil
 }
 
-func fallbackFilenameForMIME(mimeType string) string {
-	extensions, _ := mime.ExtensionsByType(mimeType)
-	if len(extensions) > 0 {
-		return "file" + extensions[0]
-	}
-	return "file"
-}
 
 func (b *Bridge) maybeFinalizeOpenCodeTitle(ctx context.Context, portal *bridgev2.Portal, meta *PortalMeta, title string) {
 	if b == nil || portal == nil || meta == nil {

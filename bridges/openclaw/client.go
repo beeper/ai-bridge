@@ -25,6 +25,7 @@ import (
 
 	"github.com/beeper/agentremote/pkg/bridgeadapter"
 	"github.com/beeper/agentremote/pkg/shared/cachedvalue"
+	"github.com/beeper/agentremote/pkg/shared/openclawconv"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 )
 
@@ -347,7 +348,7 @@ func (oc *OpenClawClient) GetChatInfo(ctx context.Context, portal *bridgev2.Port
 	oc.enrichPortalMetadata(ctx, meta)
 	title := oc.displayNameForPortal(meta)
 	roomType := openClawRoomType(meta)
-	agentID := stringsTrimDefault(meta.OpenClawDMTargetAgentID, meta.OpenClawAgentID)
+	agentID := openclawconv.StringsTrimDefault(meta.OpenClawDMTargetAgentID, meta.OpenClawAgentID)
 	if roomType == database.RoomTypeDM && agentID != "" {
 		info := oc.syntheticDMPortalInfo(agentID, title)
 		info.Topic = ptr.NonZero(oc.topicForPortal(meta))
@@ -540,7 +541,7 @@ func (oc *OpenClawClient) topicForPortal(meta *PortalMetadata) string {
 	appendPart(summarizeOpenClawOrigin(meta.OpenClawOrigin, meta.OpenClawChannel))
 	appendPart(meta.ModelProvider)
 	appendPart(meta.Model)
-	if preview := stringsTrimDefault(meta.OpenClawPreviewSnippet, meta.OpenClawLastMessagePreview); strings.TrimSpace(preview) != "" {
+	if preview := openclawconv.StringsTrimDefault(meta.OpenClawPreviewSnippet, meta.OpenClawLastMessagePreview); strings.TrimSpace(preview) != "" {
 		appendPart("Recent: " + strings.TrimSpace(preview))
 	}
 	if meta.HistoryMode != "" {
@@ -655,25 +656,25 @@ func summarizeOpenClawOrigin(origin, channel string) string {
 		}
 		parts = append(parts, value)
 	}
-	provider := strings.TrimSpace(stringsTrimDefault(stringValue(structured["provider"]), stringValue(structured["source"])))
+	provider := strings.TrimSpace(openclawconv.StringsTrimDefault(stringValue(structured["provider"]), stringValue(structured["source"])))
 	if provider != "" && !strings.EqualFold(provider, strings.TrimSpace(channel)) {
 		appendPart(provider)
 	}
-	appendPart(stringsTrimDefault(stringValue(structured["label"]), stringValue(structured["name"])))
-	appendPart(stringsTrimDefault(
-		stringsTrimDefault(stringValue(structured["workspace"]), stringValue(structured["space"])),
+	appendPart(openclawconv.StringsTrimDefault(stringValue(structured["label"]), stringValue(structured["name"])))
+	appendPart(openclawconv.StringsTrimDefault(
+		openclawconv.StringsTrimDefault(stringValue(structured["workspace"]), stringValue(structured["space"])),
 		stringValue(structured["team"]),
 	))
-	if value := stringsTrimDefault(
-		stringsTrimDefault(stringValue(structured["channel"]), stringValue(structured["channelId"])),
+	if value := openclawconv.StringsTrimDefault(
+		openclawconv.StringsTrimDefault(stringValue(structured["channel"]), stringValue(structured["channelId"])),
 		stringValue(structured["groupChannel"]),
 	); value != "" {
 		appendPart("Channel " + value)
 	}
-	if value := stringsTrimDefault(stringValue(structured["threadId"]), stringValue(structured["threadID"])); value != "" {
+	if value := openclawconv.StringsTrimDefault(stringValue(structured["threadId"]), stringValue(structured["threadID"])); value != "" {
 		appendPart("Thread " + value)
 	}
-	if value := stringsTrimDefault(stringValue(structured["account"]), stringValue(structured["accountId"])); value != "" {
+	if value := openclawconv.StringsTrimDefault(stringValue(structured["account"]), stringValue(structured["accountId"])); value != "" {
 		appendPart("Account " + value)
 	}
 	if len(parts) == 0 {
@@ -734,7 +735,7 @@ func (oc *OpenClawClient) agentAvatar(meta *GhostMetadata, agentID string) *brid
 		return nil
 	}
 	return &bridgev2.Avatar{
-		ID: networkid.AvatarID("openclaw:" + stringsTrimDefault(meta.OpenClawAgentID, agentID) + ":" + avatarURL),
+		ID: networkid.AvatarID("openclaw:" + openclawconv.StringsTrimDefault(meta.OpenClawAgentID, agentID) + ":" + avatarURL),
 		Get: func(ctx context.Context) ([]byte, error) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, avatarURL, nil)
 			if err != nil {
@@ -854,12 +855,4 @@ func (oc *OpenClawClient) sendApprovalRequestFallbackEvent(
 
 func (oc *OpenClawClient) DownloadAndEncodeMedia(ctx context.Context, mediaURL string, file *event.EncryptedFileInfo, maxMB int) (string, string, error) {
 	return bridgeadapter.DownloadAndEncodeMedia(ctx, oc.UserLogin, mediaURL, file, maxMB)
-}
-
-func stringsTrimDefault(value, fallback string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-	return value
 }

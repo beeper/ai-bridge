@@ -105,11 +105,14 @@ func (oc *AIClient) waitToolApproval(ctx context.Context, approvalID string) (to
 
 	decision, ok := oc.approvalFlow.Wait(ctx, approvalID)
 	if !ok {
-		oc.approvalFlow.Drop(approvalID)
 		reason := "timeout"
 		if ctx.Err() != nil {
 			reason = "cancelled"
 		}
+		oc.approvalFlow.FinishResolved(approvalID, bridgeadapter.ApprovalDecisionPayload{
+			ApprovalID: approvalID,
+			Reason:     reason,
+		})
 		oc.Log().Debug().Str("approval_id", approvalID).Str("tool", d.ToolName).Str("reason", reason).Msg("tool approval wait ended without decision")
 		return toolApprovalResolution{}, d, false
 	}

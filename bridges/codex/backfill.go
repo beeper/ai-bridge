@@ -295,23 +295,10 @@ func (cc *CodexClient) readCodexThread(ctx context.Context, threadID string, inc
 		"includeTurns": includeTurns,
 	}, &resp)
 	cancel()
-	if err != nil && includeTurns && shouldRetryThreadReadWithoutTurns(err) {
-		return cc.readCodexThread(ctx, threadID, false)
-	}
 	if err != nil {
 		return nil, err
 	}
 	return &resp.Thread, nil
-}
-
-func shouldRetryThreadReadWithoutTurns(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, "includeturns is unavailable") ||
-		strings.Contains(msg, "before first user message") ||
-		strings.Contains(msg, "ephemeral threads do not support includeturns")
 }
 
 func (cc *CodexClient) FetchMessages(ctx context.Context, params bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {

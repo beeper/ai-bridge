@@ -44,7 +44,7 @@ func (b *Bridge) buildOpenCodeFileContent(ctx context.Context, portal *bridgev2.
 		filename = filenameFromOpenCodeURL(fileURL)
 	}
 	if filename == "" {
-		filename = fallbackFilenameForMIME(mimeType)
+		filename = media.FallbackFilenameForMIME(mimeType)
 	}
 
 	uri, file, err := intent.UploadMedia(ctx, portal.MXID, data, filename, mimeType)
