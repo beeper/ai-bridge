@@ -25,6 +25,7 @@ func (oc *AIClient) sendApprovalRequestFallbackEvent(
 	approvalID string,
 	toolCallID string,
 	toolName string,
+	presentation bridgeadapter.ApprovalPromptPresentation,
 	replyToEventID id.EventID,
 	ttlSeconds int,
 ) {
@@ -38,6 +39,7 @@ func (oc *AIClient) sendApprovalRequestFallbackEvent(
 			ToolCallID:     toolCallID,
 			ToolName:       toolName,
 			TurnID:         turnID,
+			Presentation:   presentation,
 			ReplyToEventID: replyToEventID,
 			ExpiresAt:      bridgeadapter.ComputeApprovalExpiry(ttlSeconds),
 		},

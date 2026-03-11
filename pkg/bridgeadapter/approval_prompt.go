@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.mau.fi/util/variationselector"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
@@ -28,6 +29,17 @@ type ApprovalOption struct {
 	Approved    bool   `json:"approved"`
 	Always      bool   `json:"always,omitempty"`
 	Reason      string `json:"reason,omitempty"`
+}
+
+type ApprovalDetail struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+type ApprovalPromptPresentation struct {
+	Title       string           `json:"title"`
+	Details     []ApprovalDetail `json:"details,omitempty"`
+	AllowAlways bool             `json:"allowAlways,omitempty"`
 }
 
 func (o ApprovalOption) decisionReason() string {
@@ -60,22 +72,14 @@ func (o ApprovalOption) prefillKeys() []string {
 	return keys
 }
 
-func DefaultApprovalOptions() []ApprovalOption {
-	return []ApprovalOption{
+func ApprovalPromptOptions(allowAlways bool) []ApprovalOption {
+	options := []ApprovalOption{
 		{
 			ID:       "allow_once",
 			Key:      "✅",
 			Label:    "Approve once",
 			Approved: true,
 			Reason:   "allow_once",
-		},
-		{
-			ID:       "allow_always",
-			Key:      "🔁",
-			Label:    "Always allow",
-			Approved: true,
-			Always:   true,
-			Reason:   "allow_always",
 		},
 		{
 			ID:       "deny",
@@ -85,14 +89,29 @@ func DefaultApprovalOptions() []ApprovalOption {
 			Reason:   "deny",
 		},
 	}
+	if !allowAlways {
+		return options
+	}
+	return []ApprovalOption{
+		options[0],
+		{
+			ID:       "allow_always",
+			Key:      "🔁",
+			Label:    "Always allow",
+			Approved: true,
+			Always:   true,
+			Reason:   "allow_always",
+		},
+		options[1],
+	}
 }
 
-func BuildApprovalPromptBody(toolName string, options []ApprovalOption) string {
-	toolName = strings.TrimSpace(toolName)
-	if toolName == "" {
-		toolName = "tool"
-	}
-	actionHints := make([]string, 0, len(options))
+func DefaultApprovalOptions() []ApprovalOption {
+	return ApprovalPromptOptions(true)
+}
+
+func renderApprovalOptionHints(options []ApprovalOption) []string {
+	hints := make([]string, 0, len(options))
 	for _, opt := range options {
 		key := strings.TrimSpace(opt.Key)
 		if key == "" {
@@ -102,12 +121,68 @@ func BuildApprovalPromptBody(toolName string, options []ApprovalOption) string {
 		if key == "" || label == "" {
 			continue
 		}
-		actionHints = append(actionHints, fmt.Sprintf("%s %s", key, label))
+		hints = append(hints, fmt.Sprintf("%s %s", key, label))
 	}
-	if len(actionHints) == 0 {
-		return fmt.Sprintf("Approval required for %s.", toolName)
+	return hints
+}
+
+func approvalPromptTitle(presentation ApprovalPromptPresentation, fallbackToolName string) string {
+	title := strings.TrimSpace(presentation.Title)
+	if title != "" {
+		return title
 	}
-	return fmt.Sprintf("Approval required for %s. React with: %s.", toolName, strings.Join(actionHints, ", "))
+	fallbackToolName = strings.TrimSpace(fallbackToolName)
+	if fallbackToolName == "" {
+		return "tool"
+	}
+	return fallbackToolName
+}
+
+func BuildApprovalPromptBody(presentation ApprovalPromptPresentation, options []ApprovalOption) string {
+	title := approvalPromptTitle(presentation, "")
+	lines := []string{fmt.Sprintf("Approval required: %s", title)}
+	for _, detail := range presentation.Details {
+		label := strings.TrimSpace(detail.Label)
+		value := strings.TrimSpace(detail.Value)
+		if label == "" || value == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s: %s", label, value))
+	}
+	hints := renderApprovalOptionHints(options)
+	if len(hints) == 0 {
+		lines = append(lines, "React to approve or deny.")
+		return strings.Join(lines, "\n")
+	}
+	lines = append(lines, "React with: "+strings.Join(hints, ", "))
+	return strings.Join(lines, "\n")
+}
+
+func BuildApprovalResponseBody(presentation ApprovalPromptPresentation, decision ApprovalDecisionPayload) string {
+	title := approvalPromptTitle(presentation, "")
+	lines := []string{fmt.Sprintf("Approval required: %s", title)}
+	for _, detail := range presentation.Details {
+		label := strings.TrimSpace(detail.Label)
+		value := strings.TrimSpace(detail.Value)
+		if label == "" || value == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s: %s", label, value))
+	}
+	outcome := "denied"
+	if decision.Approved {
+		outcome = "approved"
+	}
+	if decision.Always && decision.Approved {
+		outcome = "approved (always allow)"
+	}
+	reason := strings.TrimSpace(decision.Reason)
+	if reason == "" {
+		lines = append(lines, "Decision: "+outcome)
+	} else {
+		lines = append(lines, fmt.Sprintf("Decision: %s (reason: %s)", outcome, reason))
+	}
+	return strings.Join(lines, "\n")
 }
 
 type ApprovalPromptMessageParams struct {
@@ -115,17 +190,28 @@ type ApprovalPromptMessageParams struct {
 	ToolCallID     string
 	ToolName       string
 	TurnID         string
-	Body           string
+	Presentation   ApprovalPromptPresentation
 	ReplyToEventID id.EventID
 	ExpiresAt      time.Time
 	Options        []ApprovalOption
 }
 
+type ApprovalResponsePromptMessageParams struct {
+	ApprovalID   string
+	ToolCallID   string
+	ToolName     string
+	TurnID       string
+	Presentation ApprovalPromptPresentation
+	Decision     ApprovalDecisionPayload
+	ExpiresAt    time.Time
+}
+
 type ApprovalPromptMessage struct {
-	Body      string
-	UIMessage map[string]any
-	Raw       map[string]any
-	Options   []ApprovalOption
+	Body         string
+	UIMessage    map[string]any
+	Raw          map[string]any
+	Presentation ApprovalPromptPresentation
+	Options      []ApprovalOption
 }
 
 func BuildApprovalPromptMessage(params ApprovalPromptMessageParams) ApprovalPromptMessage {
@@ -133,17 +219,20 @@ func BuildApprovalPromptMessage(params ApprovalPromptMessageParams) ApprovalProm
 	toolCallID := strings.TrimSpace(params.ToolCallID)
 	toolName := strings.TrimSpace(params.ToolName)
 	turnID := strings.TrimSpace(params.TurnID)
-	options := normalizeApprovalOptions(params.Options)
 	if toolCallID == "" {
 		toolCallID = approvalID
 	}
 	if toolName == "" {
 		toolName = "tool"
 	}
-	body := strings.TrimSpace(params.Body)
-	if body == "" {
-		body = BuildApprovalPromptBody(toolName, options)
+	presentation := normalizeApprovalPromptPresentation(params.Presentation, toolName)
+	var options []ApprovalOption
+	if len(params.Options) > 0 {
+		options = normalizeApprovalOptions(params.Options)
+	} else {
+		options = normalizeApprovalOptions(ApprovalPromptOptions(presentation.AllowAlways))
 	}
+	body := BuildApprovalPromptBody(presentation, options)
 	metadata := map[string]any{
 		"approvalId": approvalID,
 	}
@@ -165,11 +254,13 @@ func BuildApprovalPromptMessage(params ApprovalPromptMessageParams) ApprovalProm
 		}},
 	}
 	approvalMeta := map[string]any{
-		"kind":       "request",
-		"approvalId": approvalID,
-		"toolCallId": toolCallID,
-		"toolName":   toolName,
-		"options":    optionsToRaw(options),
+		"kind":            "request",
+		"approvalId":      approvalID,
+		"toolCallId":      toolCallID,
+		"toolName":        toolName,
+		"options":         optionsToRaw(options),
+		"renderedOptions": renderApprovalOptionHints(options),
+		"presentation":    presentationToRaw(presentation),
 	}
 	if turnID != "" {
 		approvalMeta["turnId"] = turnID
@@ -192,23 +283,106 @@ func BuildApprovalPromptMessage(params ApprovalPromptMessageParams) ApprovalProm
 		}
 	}
 	return ApprovalPromptMessage{
-		Body:      body,
-		UIMessage: uiMessage,
-		Raw:       raw,
-		Options:   options,
+		Body:         body,
+		UIMessage:    uiMessage,
+		Raw:          raw,
+		Presentation: presentation,
+		Options:      options,
+	}
+}
+
+func BuildApprovalResponsePromptMessage(params ApprovalResponsePromptMessageParams) ApprovalPromptMessage {
+	approvalID := strings.TrimSpace(params.ApprovalID)
+	toolCallID := strings.TrimSpace(params.ToolCallID)
+	toolName := strings.TrimSpace(params.ToolName)
+	turnID := strings.TrimSpace(params.TurnID)
+	if toolCallID == "" {
+		toolCallID = approvalID
+	}
+	if toolName == "" {
+		toolName = "tool"
+	}
+	presentation := normalizeApprovalPromptPresentation(params.Presentation, toolName)
+	decision := params.Decision
+	decision.ApprovalID = strings.TrimSpace(decision.ApprovalID)
+	if decision.ApprovalID == "" {
+		decision.ApprovalID = approvalID
+	}
+	body := BuildApprovalResponseBody(presentation, decision)
+	approvalPayload := map[string]any{
+		"id":       approvalID,
+		"approved": decision.Approved,
+	}
+	if decision.Always {
+		approvalPayload["always"] = true
+	}
+	if strings.TrimSpace(decision.Reason) != "" {
+		approvalPayload["reason"] = strings.TrimSpace(decision.Reason)
+	}
+	metadata := map[string]any{
+		"approvalId": approvalID,
+	}
+	if turnID != "" {
+		metadata["turn_id"] = turnID
+	}
+	uiMessage := map[string]any{
+		"id":       approvalID,
+		"role":     "assistant",
+		"metadata": metadata,
+		"parts": []map[string]any{{
+			"type":       "dynamic-tool",
+			"toolName":   toolName,
+			"toolCallId": toolCallID,
+			"state":      "approval-response",
+			"approval":   approvalPayload,
+		}},
+	}
+	approvalMeta := map[string]any{
+		"kind":         "response",
+		"approvalId":   approvalID,
+		"toolCallId":   toolCallID,
+		"toolName":     toolName,
+		"presentation": presentationToRaw(presentation),
+		"approved":     decision.Approved,
+		"always":       decision.Always,
+	}
+	if strings.TrimSpace(decision.Reason) != "" {
+		approvalMeta["reason"] = strings.TrimSpace(decision.Reason)
+	}
+	if turnID != "" {
+		approvalMeta["turnId"] = turnID
+	}
+	if !params.ExpiresAt.IsZero() {
+		approvalMeta["expiresAt"] = params.ExpiresAt.UnixMilli()
+	}
+	raw := map[string]any{
+		"msgtype":                event.MsgNotice,
+		"body":                   body,
+		"m.mentions":             map[string]any{},
+		matrixevents.BeeperAIKey: uiMessage,
+		ApprovalDecisionKey:      approvalMeta,
+	}
+	return ApprovalPromptMessage{
+		Body:         body,
+		UIMessage:    uiMessage,
+		Raw:          raw,
+		Presentation: presentation,
 	}
 }
 
 type ApprovalPromptRegistration struct {
-	ApprovalID    string
-	RoomID        id.RoomID
-	OwnerMXID     id.UserID
-	ToolCallID    string
-	ToolName      string
-	TurnID        string
-	ExpiresAt     time.Time
-	Options       []ApprovalOption
-	PromptEventID id.EventID
+	ApprovalID      string
+	RoomID          id.RoomID
+	OwnerMXID       id.UserID
+	ToolCallID      string
+	ToolName        string
+	TurnID          string
+	Presentation    ApprovalPromptPresentation
+	ExpiresAt       time.Time
+	Options         []ApprovalOption
+	PromptEventID   id.EventID
+	PromptMessageID networkid.MessageID
+	PromptSenderID  networkid.UserID
 }
 
 type ApprovalPromptReactionMatch struct {
@@ -246,6 +420,56 @@ func optionsToRaw(options []ApprovalOption) []map[string]any {
 		out = append(out, entry)
 	}
 	return out
+}
+
+func presentationToRaw(p ApprovalPromptPresentation) map[string]any {
+	out := map[string]any{
+		"title": p.Title,
+	}
+	if p.AllowAlways {
+		out["allowAlways"] = true
+	}
+	if len(p.Details) > 0 {
+		details := make([]map[string]any, 0, len(p.Details))
+		for _, detail := range p.Details {
+			if strings.TrimSpace(detail.Label) == "" || strings.TrimSpace(detail.Value) == "" {
+				continue
+			}
+			details = append(details, map[string]any{
+				"label": detail.Label,
+				"value": detail.Value,
+			})
+		}
+		if len(details) > 0 {
+			out["details"] = details
+		}
+	}
+	return out
+}
+
+func normalizeApprovalPromptPresentation(presentation ApprovalPromptPresentation, fallbackToolName string) ApprovalPromptPresentation {
+	presentation.Title = strings.TrimSpace(presentation.Title)
+	if presentation.Title == "" {
+		fallbackToolName = strings.TrimSpace(fallbackToolName)
+		if fallbackToolName == "" {
+			fallbackToolName = "tool"
+		}
+		presentation.Title = fallbackToolName
+	}
+	if len(presentation.Details) == 0 {
+		return presentation
+	}
+	normalized := make([]ApprovalDetail, 0, len(presentation.Details))
+	for _, detail := range presentation.Details {
+		detail.Label = strings.TrimSpace(detail.Label)
+		detail.Value = strings.TrimSpace(detail.Value)
+		if detail.Label == "" || detail.Value == "" {
+			continue
+		}
+		normalized = append(normalized, detail)
+	}
+	presentation.Details = normalized
+	return presentation
 }
 
 func normalizeApprovalOptions(options []ApprovalOption) []ApprovalOption {

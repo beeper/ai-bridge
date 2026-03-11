@@ -44,14 +44,15 @@ type openClawManager struct {
 }
 
 type openClawPendingApprovalData struct {
-	SessionKey  string
-	TurnID      string
-	ToolCallID  string
-	ToolName    string
-	Command     string
-	Recovered   bool
-	CreatedAtMs int64
-	ExpiresAtMs int64
+	SessionKey   string
+	TurnID       string
+	ToolCallID   string
+	ToolName     string
+	Command      string
+	Presentation bridgeadapter.ApprovalPromptPresentation
+	Recovered    bool
+	CreatedAtMs  int64
+	ExpiresAtMs  int64
 }
 
 func newOpenClawManager(client *OpenClawClient) *openClawManager {
@@ -899,6 +900,35 @@ func openClawApprovalDecisionStatus(decision string) (bool, string) {
 	}
 }
 
+func openClawApprovalPresentation(request map[string]any, command string) bridgeadapter.ApprovalPromptPresentation {
+	command = strings.TrimSpace(command)
+	details := make([]bridgeadapter.ApprovalDetail, 0, 5)
+	if command != "" {
+		details = append(details, bridgeadapter.ApprovalDetail{Label: "Command", Value: command})
+	}
+	if cwd := strings.TrimSpace(stringValue(request["cwd"])); cwd != "" {
+		details = append(details, bridgeadapter.ApprovalDetail{Label: "Working directory", Value: cwd})
+	}
+	if reason := strings.TrimSpace(stringValue(request["reason"])); reason != "" {
+		details = append(details, bridgeadapter.ApprovalDetail{Label: "Reason", Value: reason})
+	}
+	if sessionKey := strings.TrimSpace(stringValue(request["sessionKey"])); sessionKey != "" {
+		details = append(details, bridgeadapter.ApprovalDetail{Label: "Session", Value: sessionKey})
+	}
+	if agent := strings.TrimSpace(stringValue(request["agentId"])); agent != "" {
+		details = append(details, bridgeadapter.ApprovalDetail{Label: "Agent", Value: agent})
+	}
+	title := "OpenClaw execution request"
+	if command != "" {
+		title = "OpenClaw execution request: " + command
+	}
+	return bridgeadapter.ApprovalPromptPresentation{
+		Title:       title,
+		Details:     details,
+		AllowAlways: true,
+	}
+}
+
 func openClawApprovalResolvedText(decision string) string {
 	switch strings.ToLower(strings.TrimSpace(decision)) {
 	case "allow-always":
@@ -962,16 +992,14 @@ func (m *openClawManager) handleApprovalRequest(ctx context.Context, payload gat
 	if portal == nil || portal.MXID == "" {
 		return
 	}
-	body := "Tool approval required"
 	command := strings.TrimSpace(stringValue(payload.Request["command"]))
-	if command != "" {
-		body = "Tool approval required: " + command
-	}
+	presentation := openClawApprovalPresentation(payload.Request, command)
 	pending, created := m.approvalFlow.Register(payload.ID, time.Until(time.UnixMilli(payload.ExpiresAtMs)), &openClawPendingApprovalData{
-		SessionKey:  sessionKey,
-		Command:     command,
-		CreatedAtMs: payload.CreatedAtMs,
-		ExpiresAtMs: payload.ExpiresAtMs,
+		SessionKey:   sessionKey,
+		Command:      command,
+		Presentation: presentation,
+		CreatedAtMs:  payload.CreatedAtMs,
+		ExpiresAtMs:  payload.ExpiresAtMs,
 	})
 	if !created {
 		return
@@ -987,6 +1015,9 @@ func (m *openClawManager) handleApprovalRequest(ctx context.Context, payload gat
 		if strings.TrimSpace(data.ToolName) != "" {
 			toolName = strings.TrimSpace(data.ToolName)
 		}
+		if strings.TrimSpace(data.Presentation.Title) != "" {
+			presentation = data.Presentation
+		}
 		turnID = strings.TrimSpace(data.TurnID)
 	}
 	m.client.sendApprovalRequestFallbackEvent(
@@ -996,7 +1027,7 @@ func (m *openClawManager) handleApprovalRequest(ctx context.Context, payload gat
 		toolCallID,
 		toolName,
 		turnID,
-		body,
+		presentation,
 		time.UnixMilli(payload.ExpiresAtMs),
 	)
 }
@@ -1036,7 +1067,13 @@ func (m *openClawManager) handleApprovalResolved(ctx context.Context, payload ga
 	} else {
 		m.client.sendSystemNoticeViaPortal(ctx, portal, openClawApprovalResolvedText(payload.Decision))
 	}
-	m.approvalFlow.Drop(approvalID)
+	approved, reason := openClawApprovalDecisionStatus(payload.Decision)
+	m.approvalFlow.FinishResolved(approvalID, bridgeadapter.ApprovalDecisionPayload{
+		ApprovalID: approvalID,
+		Approved:   approved,
+		Always:     strings.EqualFold(strings.TrimSpace(payload.Decision), "allow-always"),
+		Reason:     reason,
+	})
 }
 
 func (m *openClawManager) handleChatEvent(ctx context.Context, payload gatewayChatEvent) {
@@ -1174,12 +1211,12 @@ func (m *openClawManager) emitLatestUserMessageFromHistory(ctx context.Context, 
 	}
 	for idx := len(history.Messages) - 1; idx >= 0; idx-- {
 		message := normalizeOpenClawLiveMessage(payload.TS, history.Messages[idx])
-		if openClawMessageRole(message) != "user" {
+		if !shouldMirrorLatestUserMessageFromHistory(payload, message) {
 			continue
 		}
 		converted, sender, messageID := m.convertHistoryMessage(ctx, portal, meta, message)
 		if converted == nil || messageID == "" {
-			return
+			continue
 		}
 		m.mu.Lock()
 		if m.lastEmittedUserMsg[payload.SessionKey] == messageID {
@@ -1207,6 +1244,48 @@ func (m *openClawManager) emitLatestUserMessageFromHistory(ctx context.Context, 
 		}
 		return
 	}
+}
+
+const openClawHistoryMirrorFallbackWindow = 15 * time.Minute
+
+func shouldMirrorLatestUserMessageFromHistory(payload gatewayChatEvent, message map[string]any) bool {
+	if openClawMessageRole(message) != "user" {
+		return false
+	}
+
+	idempotencyKey := openClawMessageIdempotencyKey(message)
+	if isLikelyMatrixEventID(idempotencyKey) {
+		return false
+	}
+
+	runID := strings.TrimSpace(payload.RunID)
+	if runID == "" {
+		return true
+	}
+
+	for _, candidate := range []string{
+		openClawMessageTurnMarker(message),
+		openClawMessageRunMarker(message),
+		idempotencyKey,
+	} {
+		if candidate != "" && strings.EqualFold(candidate, runID) {
+			return true
+		}
+	}
+
+	if openClawMessageTurnMarker(message) != "" || openClawMessageRunMarker(message) != "" || idempotencyKey != "" {
+		return false
+	}
+
+	messageTS := extractMessageTimestamp(message)
+	if messageTS.IsZero() || messageTS.Equal(openClawMissingMessageTimestamp) {
+		return false
+	}
+	eventTS := extractOpenClawEventTimestamp(payload.TS, payload.Message)
+	if eventTS.IsZero() || messageTS.After(eventTS.Add(5*time.Second)) {
+		return false
+	}
+	return eventTS.Sub(messageTS) <= openClawHistoryMirrorFallbackWindow
 }
 
 func (m *openClawManager) ensureStreamStart(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, turnID, runID, agentID string, eventTS time.Time, messageMetadata map[string]any) {
@@ -1650,6 +1729,23 @@ func openClawMessageStringField(message map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func openClawMessageIdempotencyKey(message map[string]any) string {
+	return openClawMessageStringField(message, "idempotencyKey", "idempotency_key")
+}
+
+func openClawMessageTurnMarker(message map[string]any) string {
+	return openClawMessageStringField(message, "turnId", "turn_id")
+}
+
+func openClawMessageRunMarker(message map[string]any) string {
+	return openClawMessageStringField(message, "runId", "run_id")
+}
+
+func isLikelyMatrixEventID(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "$") && strings.Contains(value, ":")
 }
 
 func openClawMessageRole(message map[string]any) string {

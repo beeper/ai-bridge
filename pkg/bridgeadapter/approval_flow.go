@@ -11,6 +11,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
+
+	"github.com/beeper/agentremote/pkg/shared/streamtransport"
 )
 
 // ApprovalReactionHandler is the interface used by BaseReactionHandler to
@@ -158,14 +160,26 @@ func (f *ApprovalFlow[D]) SetData(approvalID string, updater func(D) D) bool {
 
 // Drop removes a pending approval and its associated prompt from both stores.
 func (f *ApprovalFlow[D]) Drop(approvalID string) {
+	if f == nil {
+		return
+	}
+	f.finalize(approvalID, nil, false)
+}
+
+// FinishResolved finalizes a resolved approval by editing the approval prompt to
+// response state and cleaning up bridge-authored placeholder reactions.
+func (f *ApprovalFlow[D]) FinishResolved(approvalID string, decision ApprovalDecisionPayload) {
+	if f == nil {
+		return
+	}
 	approvalID = strings.TrimSpace(approvalID)
 	if approvalID == "" {
 		return
 	}
-	f.mu.Lock()
-	delete(f.pending, approvalID)
-	f.dropPromptLocked(approvalID)
-	f.mu.Unlock()
+	if strings.TrimSpace(decision.ApprovalID) == "" {
+		decision.ApprovalID = approvalID
+	}
+	f.finalize(approvalID, &decision, true)
 }
 
 // FindByData iterates pending approvals and returns the id of the first one
@@ -254,6 +268,7 @@ func (f *ApprovalFlow[D]) registerPromptLocked(reg ApprovalPromptRegistration) {
 	reg.ToolCallID = strings.TrimSpace(reg.ToolCallID)
 	reg.ToolName = strings.TrimSpace(reg.ToolName)
 	reg.TurnID = strings.TrimSpace(reg.TurnID)
+	reg.Presentation = normalizeApprovalPromptPresentation(reg.Presentation, reg.ToolName)
 	reg.Options = normalizeApprovalOptions(reg.Options)
 
 	if prev := f.promptsByApproval[reg.ApprovalID]; prev != nil && prev.PromptEventID != "" {
@@ -284,9 +299,10 @@ func (f *ApprovalFlow[D]) registerPromptLocked(reg ApprovalPromptRegistration) {
 
 // bindPromptEventLocked associates an event ID with a prompt registration.
 // Must be called with f.mu held.
-func (f *ApprovalFlow[D]) bindPromptEventLocked(approvalID string, eventID id.EventID) bool {
+func (f *ApprovalFlow[D]) bindPromptIDsLocked(approvalID string, eventID id.EventID, messageID networkid.MessageID) bool {
 	approvalID = strings.TrimSpace(approvalID)
 	eventID = id.EventID(strings.TrimSpace(eventID.String()))
+	messageID = networkid.MessageID(strings.TrimSpace(string(messageID)))
 	if approvalID == "" || eventID == "" {
 		return false
 	}
@@ -298,6 +314,7 @@ func (f *ApprovalFlow[D]) bindPromptEventLocked(approvalID string, eventID id.Ev
 		delete(f.promptsByEventID, entry.PromptEventID)
 	}
 	entry.PromptEventID = eventID
+	entry.PromptMessageID = messageID
 	f.promptsByEventID[eventID] = approvalID
 	return true
 }
@@ -398,17 +415,20 @@ func (f *ApprovalFlow[D]) SendPrompt(ctx context.Context, portal *bridgev2.Porta
 	}
 
 	prompt := BuildApprovalPromptMessage(params.ApprovalPromptMessageParams)
+	sender := f.senderOrEmpty(portal)
 
 	f.mu.Lock()
 	f.registerPromptLocked(ApprovalPromptRegistration{
-		ApprovalID: strings.TrimSpace(params.ApprovalID),
-		RoomID:     params.RoomID,
-		OwnerMXID:  params.OwnerMXID,
-		ToolCallID: strings.TrimSpace(params.ToolCallID),
-		ToolName:   strings.TrimSpace(params.ToolName),
-		TurnID:     strings.TrimSpace(params.TurnID),
-		ExpiresAt:  params.ExpiresAt,
-		Options:    prompt.Options,
+		ApprovalID:     strings.TrimSpace(params.ApprovalID),
+		RoomID:         params.RoomID,
+		OwnerMXID:      params.OwnerMXID,
+		ToolCallID:     strings.TrimSpace(params.ToolCallID),
+		ToolName:       strings.TrimSpace(params.ToolName),
+		TurnID:         strings.TrimSpace(params.TurnID),
+		Presentation:   prompt.Presentation,
+		ExpiresAt:      params.ExpiresAt,
+		Options:        prompt.Options,
+		PromptSenderID: sender.Sender,
 	})
 	f.mu.Unlock()
 
@@ -440,7 +460,7 @@ func (f *ApprovalFlow[D]) SendPrompt(ctx context.Context, portal *bridgev2.Porta
 	}
 
 	f.mu.Lock()
-	f.bindPromptEventLocked(strings.TrimSpace(params.ApprovalID), eventID)
+	f.bindPromptIDsLocked(strings.TrimSpace(params.ApprovalID), eventID, msgID)
 	f.mu.Unlock()
 
 	f.sendPrefillReactions(ctx, portal, login, msgID, prompt.Options)
@@ -484,7 +504,7 @@ func (f *ApprovalFlow[D]) HandleReaction(ctx context.Context, msg *bridgev2.Matr
 		}
 	}
 
-	keepEventID := id.EventID("")
+	resolved := false
 	if f.deliverDecision != nil {
 		// Callback-based flow (OpenCode/OpenClaw).
 		if err := f.deliverDecision(ctx, msg.Portal, p, match.Decision); err != nil {
@@ -492,14 +512,14 @@ func (f *ApprovalFlow[D]) HandleReaction(ctx context.Context, msg *bridgev2.Matr
 				f.sendNotice(ctx, msg.Portal, ApprovalErrorToastText(err))
 			}
 		} else {
-			keepEventID = msg.Event.ID
+			resolved = true
 		}
 	} else {
 		// Channel-based flow (Codex).
 		if p != nil {
 			select {
 			case p.ch <- match.Decision:
-				keepEventID = msg.Event.ID
+				resolved = true
 			default:
 				if f.sendNotice != nil {
 					f.sendNotice(ctx, msg.Portal, ApprovalErrorToastText(ErrApprovalAlreadyHandled))
@@ -508,11 +528,13 @@ func (f *ApprovalFlow[D]) HandleReaction(ctx context.Context, msg *bridgev2.Matr
 		}
 	}
 
-	// Clean up both stores.
-	f.Drop(approvalID)
-
-	// Redact prompt reactions in background.
-	f.redactPromptReactions(msg, keepEventID)
+	if f.deliverDecision != nil {
+		if resolved {
+			f.FinishResolved(approvalID, match.Decision)
+		} else {
+			f.Drop(approvalID)
+		}
+	}
 	return true
 }
 
@@ -543,21 +565,6 @@ func (f *ApprovalFlow[D]) redactSingleReaction(msg *bridgev2.MatrixReaction) {
 			ctx = f.backgroundCtx(ctx)
 		}
 		_ = RedactEventAsSender(ctx, login, portal, sender, triggerID)
-	}()
-}
-
-func (f *ApprovalFlow[D]) redactPromptReactions(msg *bridgev2.MatrixReaction, keepEventID id.EventID) {
-	login := f.login()
-	sender := f.senderOrEmpty(msg.Portal)
-	portal := msg.Portal
-	target := msg.TargetMessage
-	triggerID := msg.Event.ID
-	go func() {
-		ctx := context.Background()
-		if f.backgroundCtx != nil {
-			ctx = f.backgroundCtx(ctx)
-		}
-		_ = RedactApprovalPromptReactions(ctx, login, portal, sender, target, triggerID, keepEventID)
 	}()
 }
 
@@ -610,4 +617,92 @@ func (f *ApprovalFlow[D]) sendPrefillReactions(_ context.Context, portal *bridge
 			})
 		}
 	}
+}
+
+func (f *ApprovalFlow[D]) finalize(approvalID string, decision *ApprovalDecisionPayload, resolved bool) {
+	approvalID = strings.TrimSpace(approvalID)
+	if approvalID == "" {
+		return
+	}
+	var prompt *ApprovalPromptRegistration
+	f.mu.Lock()
+	delete(f.pending, approvalID)
+	if entry := f.promptsByApproval[approvalID]; entry != nil {
+		copyEntry := *entry
+		prompt = &copyEntry
+	}
+	f.dropPromptLocked(approvalID)
+	f.mu.Unlock()
+	if prompt == nil {
+		return
+	}
+	login := f.login()
+	if login == nil || login.Bridge == nil {
+		return
+	}
+	go func(prompt ApprovalPromptRegistration, decision *ApprovalDecisionPayload, resolved bool) {
+		ctx := context.Background()
+		if f.backgroundCtx != nil {
+			ctx = f.backgroundCtx(ctx)
+		}
+		portal, err := login.Bridge.GetPortalByMXID(ctx, prompt.RoomID)
+		if err != nil || portal == nil || portal.MXID == "" {
+			return
+		}
+		sender := f.senderOrEmpty(portal)
+		if prompt.PromptSenderID != "" {
+			sender.Sender = prompt.PromptSenderID
+		}
+		if resolved && decision != nil {
+			f.editPromptToResolvedState(ctx, login, portal, sender, prompt, *decision)
+		}
+		_ = RedactApprovalPromptPlaceholderReactions(ctx, login, portal, sender, prompt)
+	}(*prompt, decision, resolved)
+}
+
+func (f *ApprovalFlow[D]) editPromptToResolvedState(
+	ctx context.Context,
+	login *bridgev2.UserLogin,
+	portal *bridgev2.Portal,
+	sender bridgev2.EventSender,
+	prompt ApprovalPromptRegistration,
+	decision ApprovalDecisionPayload,
+) {
+	if login == nil || portal == nil || portal.MXID == "" || prompt.PromptMessageID == "" {
+		return
+	}
+	response := BuildApprovalResponsePromptMessage(ApprovalResponsePromptMessageParams{
+		ApprovalID:   prompt.ApprovalID,
+		ToolCallID:   prompt.ToolCallID,
+		ToolName:     prompt.ToolName,
+		TurnID:       prompt.TurnID,
+		Presentation: prompt.Presentation,
+		Decision:     decision,
+		ExpiresAt:    prompt.ExpiresAt,
+	})
+	topLevelExtra := map[string]any{}
+	for key, value := range response.Raw {
+		switch key {
+		case "msgtype", "body", "m.relates_to":
+			continue
+		default:
+			topLevelExtra[key] = value
+		}
+	}
+	edit := streamtransport.BuildConvertedEdit(&event.MessageEventContent{
+		MsgType: event.MsgNotice,
+		Body:    response.Body,
+	}, topLevelExtra)
+	if edit == nil {
+		return
+	}
+	result := login.QueueRemoteEvent(&RemoteEdit{
+		Portal:        portal.PortalKey,
+		Sender:        sender,
+		TargetMessage: prompt.PromptMessageID,
+		Timestamp:     time.Now(),
+		PreBuilt:      edit,
+		LogKey:        f.logKey,
+	})
+	_ = result
 }

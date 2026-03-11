@@ -52,3 +52,12 @@ func (cc *CodexClient) senderForPortal() bridgev2.EventSender {
 	}
 	return sender
 }
+
+func (cc *CodexClient) senderForHuman() bridgev2.EventSender {
+	sender := bridgev2.EventSender{IsFromMe: true}
+	if cc != nil && cc.UserLogin != nil {
+		sender.Sender = humanUserID(cc.UserLogin.ID)
+		sender.SenderLogin = cc.UserLogin.ID
+	}
+	return sender
+}

@@ -1,20 +1,38 @@
 package bridgeadapter
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"maunium.net/go/mautrix/id"
 )
 
-func TestBuildApprovalPromptMessage_UsesApprovalDecisionMetadata(t *testing.T) {
+func TestBuildApprovalPromptMessage_UsesStructuredPresentationAndMetadata(t *testing.T) {
 	msg := BuildApprovalPromptMessage(ApprovalPromptMessageParams{
 		ApprovalID: "approval-1",
 		ToolCallID: "tool-1",
 		ToolName:   "message",
 		TurnID:     "turn-1",
-		ExpiresAt:  time.UnixMilli(12345),
+		Presentation: ApprovalPromptPresentation{
+			Title:       "Send message",
+			AllowAlways: false,
+			Details: []ApprovalDetail{
+				{Label: "Tool", Value: "message"},
+				{Label: "Action", Value: "send"},
+			},
+		},
+		ExpiresAt: time.UnixMilli(12345),
 	})
+	if !strings.Contains(msg.Body, "Approval required: Send message") {
+		t.Fatalf("expected title in body, got %q", msg.Body)
+	}
+	if !strings.Contains(msg.Body, "Tool: message") || !strings.Contains(msg.Body, "Action: send") {
+		t.Fatalf("expected details in body, got %q", msg.Body)
+	}
+	if strings.Contains(msg.Body, "Always allow") {
+		t.Fatalf("did not expect always allow in body when AllowAlways=false, got %q", msg.Body)
+	}
 	raw := msg.Raw
 	approvalRaw, ok := raw[ApprovalDecisionKey].(map[string]any)
 	if !ok {
@@ -25,6 +43,55 @@ func TestBuildApprovalPromptMessage_UsesApprovalDecisionMetadata(t *testing.T) {
 	}
 	if approvalRaw["approvalId"] != "approval-1" {
 		t.Fatalf("expected approvalId=approval-1, got %#v", approvalRaw["approvalId"])
+	}
+	if rendered, ok := approvalRaw["renderedOptions"].([]string); !ok || len(rendered) != 2 {
+		t.Fatalf("expected two rendered options, got %#v", approvalRaw["renderedOptions"])
+	}
+	presentationRaw, ok := approvalRaw["presentation"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected presentation metadata, got %#v", approvalRaw["presentation"])
+	}
+	if presentationRaw["title"] != "Send message" {
+		t.Fatalf("expected presentation title, got %#v", presentationRaw["title"])
+	}
+}
+
+func TestApprovalPromptOptions_AllowAlwaysSwitch(t *testing.T) {
+	if got := ApprovalPromptOptions(false); len(got) != 2 {
+		t.Fatalf("expected 2 options when AllowAlways=false, got %d", len(got))
+	}
+	if got := ApprovalPromptOptions(true); len(got) != 3 {
+		t.Fatalf("expected 3 options when AllowAlways=true, got %d", len(got))
+	}
+}
+
+func TestBuildApprovalResponsePromptMessage_ContainsDecision(t *testing.T) {
+	msg := BuildApprovalResponsePromptMessage(ApprovalResponsePromptMessageParams{
+		ApprovalID: "approval-1",
+		ToolCallID: "tool-1",
+		ToolName:   "message",
+		TurnID:     "turn-1",
+		Presentation: ApprovalPromptPresentation{
+			Title: "Send message",
+		},
+		Decision: ApprovalDecisionPayload{
+			ApprovalID: "approval-1",
+			Approved:   false,
+			Reason:     "deny",
+		},
+	})
+	approvalRaw, ok := msg.Raw[ApprovalDecisionKey].(map[string]any)
+	if !ok {
+		t.Fatalf("expected approval metadata map")
+	}
+	if approvalRaw["kind"] != "response" {
+		t.Fatalf("expected response kind, got %#v", approvalRaw["kind"])
+	}
+	if approvalRaw["approved"] != false {
+		t.Fatalf("expected approved=false, got %#v", approvalRaw["approved"])
+	}
+	if approvalRaw["reason"] != "deny" {
+		t.Fatalf("expected reason=deny, got %#v", approvalRaw["reason"])
 	}
 }
 

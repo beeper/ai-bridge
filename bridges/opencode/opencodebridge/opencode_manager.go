@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,73 @@ type permissionApprovalRef struct {
 	MessageID    string
 	ToolCallID   string
 	PermissionID string
+	Presentation bridgeadapter.ApprovalPromptPresentation
+}
+
+func buildOpenCodeApprovalPresentation(req opencode.PermissionRequest) bridgeadapter.ApprovalPromptPresentation {
+	permission := strings.TrimSpace(req.Permission)
+	title := "OpenCode permission request"
+	if permission != "" {
+		title = "OpenCode permission request: " + permission
+	}
+	details := make([]bridgeadapter.ApprovalDetail, 0, 8)
+	if permission != "" {
+		details = append(details, bridgeadapter.ApprovalDetail{Label: "Permission", Value: permission})
+	}
+	if len(req.Patterns) > 0 {
+		patterns := make([]string, 0, len(req.Patterns))
+		for _, pattern := range req.Patterns {
+			pattern = strings.TrimSpace(pattern)
+			if pattern != "" {
+				patterns = append(patterns, pattern)
+			}
+		}
+		if len(patterns) > 0 {
+			if len(patterns) > 4 {
+				details = append(details, bridgeadapter.ApprovalDetail{
+					Label: "Patterns",
+					Value: strings.Join(patterns[:4], ", ") + fmt.Sprintf(" (+%d more)", len(patterns)-4),
+				})
+			} else {
+				details = append(details, bridgeadapter.ApprovalDetail{
+					Label: "Patterns",
+					Value: strings.Join(patterns, ", "),
+				})
+			}
+		}
+	}
+	if len(req.Metadata) > 0 {
+		keys := make([]string, 0, len(req.Metadata))
+		for key := range req.Metadata {
+			key = strings.TrimSpace(key)
+			if key != "" {
+				keys = append(keys, key)
+			}
+		}
+		sort.Strings(keys)
+		for idx, key := range keys {
+			if idx >= 4 {
+				details = append(details, bridgeadapter.ApprovalDetail{
+					Label: "Metadata",
+					Value: fmt.Sprintf("%d additional field(s)", len(keys)-idx),
+				})
+				break
+			}
+			value := strings.TrimSpace(fmt.Sprintf("%v", req.Metadata[key]))
+			if value == "" {
+				continue
+			}
+			details = append(details, bridgeadapter.ApprovalDetail{
+				Label: "Metadata " + key,
+				Value: value,
+			})
+		}
+	}
+	return bridgeadapter.ApprovalPromptPresentation{
+		Title:       title,
+		Details:     details,
+		AllowAlways: true,
+	}
 }
 
 func NewOpenCodeManager(bridge *Bridge) *OpenCodeManager {
@@ -816,6 +884,7 @@ func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *
 		return
 	}
 	approvalID := strings.TrimSpace(req.ID)
+	presentation := buildOpenCodeApprovalPresentation(req)
 	_, created := m.approvalFlow.Register(approvalID, 10*time.Minute, &permissionApprovalRef{
 		RoomID:       portal.MXID,
 		InstanceID:   inst.cfg.ID,
@@ -823,6 +892,7 @@ func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *
 		MessageID:    messageID,
 		ToolCallID:   toolCallID,
 		PermissionID: approvalID,
+		Presentation: presentation,
 	})
 	if !created {
 		return
@@ -847,11 +917,12 @@ func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *
 	}
 	m.approvalFlow.SendPrompt(ctx, portal, bridgeadapter.SendPromptParams{
 		ApprovalPromptMessageParams: bridgeadapter.ApprovalPromptMessageParams{
-			ApprovalID: approvalID,
-			ToolCallID: toolCallID,
-			ToolName:   toolName,
-			TurnID:     turnID,
-			ExpiresAt:  time.Now().Add(10 * time.Minute),
+			ApprovalID:   approvalID,
+			ToolCallID:   toolCallID,
+			ToolName:     toolName,
+			TurnID:       turnID,
+			Presentation: presentation,
+			ExpiresAt:    time.Now().Add(10 * time.Minute),
 		},
 		RoomID:    portal.MXID,
 		OwnerMXID: ownerMXID,
@@ -899,7 +970,12 @@ func (m *OpenCodeManager) handlePermissionRepliedEvent(ctx context.Context, inst
 			})
 		}
 	}
-	m.approvalFlow.Drop(payload.RequestID)
+	m.approvalFlow.FinishResolved(strings.TrimSpace(payload.RequestID), bridgeadapter.ApprovalDecisionPayload{
+		ApprovalID: strings.TrimSpace(payload.RequestID),
+		Approved:   approved,
+		Always:     strings.EqualFold(strings.TrimSpace(payload.Reply), "always"),
+		Reason:     reply,
+	})
 }
 
 func (m *OpenCodeManager) handleQuestionAskedEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {

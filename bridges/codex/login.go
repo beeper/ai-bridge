@@ -620,7 +620,9 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 		if !ok || meta == nil {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderCodex) && existing.ID != loginID {
+		if strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderCodex) &&
+			isManagedAuthLogin(meta) &&
+			existing.ID != loginID {
 			dupCount++
 		}
 	}
@@ -646,6 +648,7 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 		Provider:          ProviderCodex,
 		CodexHome:         cl.codexHome,
 		CodexHomeManaged:  true,
+		CodexAuthSource:   CodexAuthSourceManaged,
 		CodexAuthMode:     cl.getAuthMode(),
 		CodexAccountEmail: accountEmail,
 	}

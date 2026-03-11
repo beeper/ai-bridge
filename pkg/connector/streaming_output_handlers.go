@@ -201,6 +201,7 @@ func (oc *AIClient) gateMcpToolApproval(
 	parsed := item.AsMcpApprovalRequest()
 	serverLabel := strings.TrimSpace(parsed.ServerLabel)
 	mcpToolName := strings.TrimSpace(parsed.Name)
+	presentation := buildMCPApprovalPresentation(serverLabel, mcpToolName, desc.input)
 	state.pendingMcpApprovals = append(state.pendingMcpApprovals, mcpApprovalRequest{
 		approvalID:  approvalID,
 		toolCallID:  tool.callID,
@@ -217,6 +218,7 @@ func (oc *AIClient) gateMcpToolApproval(
 		ToolKind:     ToolApprovalKindMCP,
 		RuleToolName: mcpToolName,
 		ServerLabel:  serverLabel,
+		Presentation: presentation,
 		TTL:          ttl,
 	})
 
@@ -235,7 +237,7 @@ func (oc *AIClient) gateMcpToolApproval(
 	if needsApproval {
 		if !state.ui.UIToolApprovalRequested[approvalID] {
 			state.ui.UIToolApprovalRequested[approvalID] = true
-			oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, tool.toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
+			oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, tool.toolName, presentation, tool.eventID, oc.toolApprovalsTTLSeconds())
 		}
 	} else {
 		if err := oc.approvalFlow.Resolve(approvalID, bridgeadapter.ApprovalDecisionPayload{

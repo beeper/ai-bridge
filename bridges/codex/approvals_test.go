@@ -88,6 +88,16 @@ func TestCodex_CommandApproval_RequestBlocksUntilApproved(t *testing.T) {
 
 	// Give the handler a moment to register and start waiting.
 	time.Sleep(50 * time.Millisecond)
+	pending := cc.approvalFlow.Get("123")
+	if pending == nil || pending.Data == nil {
+		t.Fatalf("expected pending approval")
+	}
+	if pending.Data.Presentation.AllowAlways {
+		t.Fatalf("expected codex approvals to disable always-allow")
+	}
+	if pending.Data.Presentation.Title == "" {
+		t.Fatalf("expected structured presentation title")
+	}
 
 	if err := cc.approvalFlow.Resolve("123", bridgeadapter.ApprovalDecisionPayload{
 		ApprovalID: "123",
@@ -161,7 +171,10 @@ func TestCodex_CommandApproval_RejectCrossRoom(t *testing.T) {
 	otherRoom := id.RoomID("!room2:example.com")
 
 	cc := newTestCodexClient(owner)
-	cc.registerToolApproval(roomID, "approval-1", "item-1", "commandExecution", 2*time.Second)
+	cc.registerToolApproval(roomID, "approval-1", "item-1", "commandExecution", bridgeadapter.ApprovalPromptPresentation{
+		Title:       "Codex command execution",
+		AllowAlways: false,
+	}, 2*time.Second)
 
 	// Register the approval in a second room to test cross-room rejection.
 	// The flow's HandleReaction checks room via RoomIDFromData, so we test

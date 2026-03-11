@@ -3,6 +3,7 @@ package bridgeadapter
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -80,24 +81,57 @@ func ExtractReactionContext(msg *bridgev2.MatrixReaction) ReactionContext {
 	return ReactionContext{Emoji: emoji, TargetEventID: targetEventID}
 }
 
-// RedactApprovalPromptReactions redacts all reactions on targetMessage except keepEventID.
-// If targetMessage is nil and keepEventID is empty, triggerEventID is redacted directly.
-func RedactApprovalPromptReactions(
+func approvalPromptPlaceholderSenderID(prompt ApprovalPromptRegistration, sender bridgev2.EventSender) networkid.UserID {
+	if prompt.PromptSenderID != "" {
+		return prompt.PromptSenderID
+	}
+	return sender.Sender
+}
+
+func isApprovalPlaceholderReaction(reaction *database.Reaction, prompt ApprovalPromptRegistration, sender bridgev2.EventSender) bool {
+	if reaction == nil {
+		return false
+	}
+	placeholderSenderID := strings.TrimSpace(string(approvalPromptPlaceholderSenderID(prompt, sender)))
+	if placeholderSenderID == "" {
+		return false
+	}
+	return strings.TrimSpace(string(reaction.SenderID)) == placeholderSenderID
+}
+
+func resolveApprovalPromptMessage(
+	ctx context.Context,
+	login *bridgev2.UserLogin,
+	receiver networkid.UserLoginID,
+	prompt ApprovalPromptRegistration,
+) *database.Message {
+	if login == nil || login.Bridge == nil {
+		return nil
+	}
+	msgDB := login.Bridge.DB.Message
+	if prompt.PromptMessageID != "" {
+		if msg, err := msgDB.GetFirstPartByID(ctx, receiver, prompt.PromptMessageID); err == nil && msg != nil {
+			return msg
+		}
+	}
+	if prompt.PromptEventID != "" {
+		if msg, err := msgDB.GetPartByMXID(ctx, prompt.PromptEventID); err == nil && msg != nil {
+			return msg
+		}
+	}
+	return nil
+}
+
+// RedactApprovalPromptPlaceholderReactions redacts only bridge-authored placeholder
+// reactions on a known approval prompt message. User reactions are preserved.
+func RedactApprovalPromptPlaceholderReactions(
 	ctx context.Context,
 	login *bridgev2.UserLogin,
 	portal *bridgev2.Portal,
 	sender bridgev2.EventSender,
-	targetMessage *database.Message,
-	triggerEventID id.EventID,
-	keepEventID id.EventID,
+	prompt ApprovalPromptRegistration,
 ) error {
 	if login == nil || portal == nil || portal.MXID == "" {
-		return nil
-	}
-	if targetMessage == nil {
-		if keepEventID == "" && triggerEventID != "" {
-			return RedactEventAsSender(ctx, login, portal, sender, triggerEventID)
-		}
 		return nil
 	}
 	receiver := portal.Receiver
@@ -107,28 +141,20 @@ func RedactApprovalPromptReactions(
 	if receiver == "" {
 		return nil
 	}
+	targetMessage := resolveApprovalPromptMessage(ctx, login, receiver, prompt)
+	if targetMessage == nil {
+		return nil
+	}
 	reactions, err := login.Bridge.DB.Reaction.GetAllToMessagePart(ctx, receiver, targetMessage.ID, targetMessage.PartID)
 	if err != nil {
 		return err
 	}
 	var firstErr error
-	seenCurrent := false
 	for _, reaction := range reactions {
-		if reaction == nil || reaction.MXID == "" {
-			continue
-		}
-		if reaction.MXID == triggerEventID {
-			seenCurrent = true
-		}
-		if keepEventID != "" && reaction.MXID == keepEventID {
+		if reaction == nil || reaction.MXID == "" || !isApprovalPlaceholderReaction(reaction, prompt, sender) {
 			continue
 		}
 		if redactErr := RedactEventAsSender(ctx, login, portal, sender, reaction.MXID); redactErr != nil && firstErr == nil {
-			firstErr = redactErr
-		}
-	}
-	if !seenCurrent && keepEventID == "" && triggerEventID != "" {
-		if redactErr := RedactEventAsSender(ctx, login, portal, sender, triggerEventID); redactErr != nil && firstErr == nil {
 			firstErr = redactErr
 		}
 	}

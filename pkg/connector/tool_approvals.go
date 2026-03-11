@@ -39,6 +39,7 @@ type pendingToolApprovalData struct {
 	RuleToolName string // normalized for matching/persistence (e.g. "message" or raw MCP tool name without "mcp.")
 	ServerLabel  string // MCP only
 	Action       string // builtin only (optional)
+	Presentation bridgeadapter.ApprovalPromptPresentation
 
 	RequestedAt time.Time
 }
@@ -56,6 +57,7 @@ type ToolApprovalParams struct {
 	RuleToolName string
 	ServerLabel  string
 	Action       string
+	Presentation bridgeadapter.ApprovalPromptPresentation
 
 	TTL time.Duration
 }
@@ -74,6 +76,7 @@ func (oc *AIClient) registerToolApproval(params ToolApprovalParams) (*bridgeadap
 		RuleToolName: strings.TrimSpace(params.RuleToolName),
 		ServerLabel:  strings.TrimSpace(params.ServerLabel),
 		Action:       strings.TrimSpace(params.Action),
+		Presentation: params.Presentation,
 		RequestedAt:  time.Now(),
 	}
 	p, created := oc.approvalFlow.Register(params.ApprovalID, params.TTL, data)
@@ -91,9 +94,6 @@ func (oc *AIClient) waitToolApproval(ctx context.Context, approvalID string) (to
 	if approvalID == "" {
 		return toolApprovalResolution{}, nil, false
 	}
-	defer func() {
-		oc.approvalFlow.Drop(approvalID)
-	}()
 
 	p := oc.approvalFlow.Get(approvalID)
 	if p == nil {
@@ -105,6 +105,7 @@ func (oc *AIClient) waitToolApproval(ctx context.Context, approvalID string) (to
 
 	decision, ok := oc.approvalFlow.Wait(ctx, approvalID)
 	if !ok {
+		oc.approvalFlow.Drop(approvalID)
 		reason := "timeout"
 		if ctx.Err() != nil {
 			reason = "cancelled"
@@ -129,6 +130,7 @@ func (oc *AIClient) waitToolApproval(ctx context.Context, approvalID string) (to
 			oc.Log().Warn().Err(err).Str("approval_id", approvalID).Msg("Failed to persist always-allow rule")
 		}
 	}
+	oc.approvalFlow.FinishResolved(approvalID, decision)
 	return resolution, d, true
 }
 
@@ -181,6 +183,7 @@ func (oc *AIClient) isBuiltinToolDenied(
 		ToolKind:     ToolApprovalKindBuiltin,
 		RuleToolName: toolName,
 		Action:       action,
+		Presentation: buildBuiltinApprovalPresentation(toolName, action, argsObj),
 		TTL:          ttl,
 	}); !created {
 		oc.loggerForContext(ctx).Error().
@@ -188,7 +191,7 @@ func (oc *AIClient) isBuiltinToolDenied(
 			Msg("tool approval: failed to register builtin approval request")
 		return true
 	}
-	oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, tool.eventID, oc.toolApprovalsTTLSeconds())
+	oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, buildBuiltinApprovalPresentation(toolName, action, argsObj), tool.eventID, oc.toolApprovalsTTLSeconds())
 	resolution, _, ok := oc.waitToolApproval(ctx, approvalID)
 	decision := resolution.Decision
 	if !ok {

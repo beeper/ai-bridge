@@ -831,7 +831,8 @@ func (oc *OpenClawClient) sendSystemNoticeViaPortal(ctx context.Context, portal 
 func (oc *OpenClawClient) sendApprovalRequestFallbackEvent(
 	ctx context.Context,
 	portal *bridgev2.Portal,
-	approvalID, toolCallID, toolName, turnID, body string,
+	approvalID, toolCallID, toolName, turnID string,
+	presentation bridgeadapter.ApprovalPromptPresentation,
 	expiresAt time.Time,
 ) {
 	if oc.manager == nil || oc.manager.approvalFlow == nil {
@@ -839,12 +840,12 @@ func (oc *OpenClawClient) sendApprovalRequestFallbackEvent(
 	}
 	oc.manager.approvalFlow.SendPrompt(ctx, portal, bridgeadapter.SendPromptParams{
 		ApprovalPromptMessageParams: bridgeadapter.ApprovalPromptMessageParams{
-			ApprovalID: approvalID,
-			ToolCallID: toolCallID,
-			ToolName:   toolName,
-			TurnID:     turnID,
-			Body:       body,
-			ExpiresAt:  expiresAt,
+			ApprovalID:   approvalID,
+			ToolCallID:   toolCallID,
+			ToolName:     toolName,
+			TurnID:       turnID,
+			Presentation: presentation,
+			ExpiresAt:    expiresAt,
 		},
 		RoomID:    portal.MXID,
 		OwnerMXID: oc.UserLogin.UserMXID,
