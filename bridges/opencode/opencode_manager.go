@@ -57,7 +57,7 @@ func buildOpenCodeApprovalPresentation(req api.PermissionRequest) agentremote.Ap
 	return agentremote.ApprovalPromptPresentation{
 		Title:       title,
 		Details:     details,
-		AllowAlways: true,
+		AllowAlways: len(req.Always) > 0,
 	}
 }
 

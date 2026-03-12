@@ -195,5 +195,6 @@ func truncateOpenCodeText(text string, max int) string {
 	return text[:max] + "..."
 }
 
-// toolDisplayTitle is an alias for streamui.ToolDisplayTitle.
-var toolDisplayTitle = streamui.ToolDisplayTitle
+func toolDisplayTitle(toolName string) string {
+	return streamui.ToolDisplayTitle(toolName)
+}

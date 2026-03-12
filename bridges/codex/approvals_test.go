@@ -37,6 +37,20 @@ func newTestCodexClient(owner id.UserID) *CodexClient {
 	return cc
 }
 
+func waitForPendingApproval(t *testing.T, ctx context.Context, cc *CodexClient, approvalID string) *agentremote.Pending[*pendingToolApprovalDataCodex] {
+	t.Helper()
+	for {
+		pending := cc.approvalFlow.Get(approvalID)
+		if pending != nil && pending.Data != nil {
+			return pending
+		}
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("timed out waiting for approval %s: %v", approvalID, err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func TestCodex_CommandApproval_RequestBlocksUntilApproved(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	t.Cleanup(cancel)
@@ -93,12 +107,7 @@ func TestCodex_CommandApproval_RequestBlocksUntilApproved(t *testing.T) {
 		resCh <- res.(map[string]any)
 	}()
 
-	// Give the handler a moment to register and start waiting.
-	time.Sleep(50 * time.Millisecond)
-	pending := cc.approvalFlow.Get("123")
-	if pending == nil || pending.Data == nil {
-		t.Fatalf("expected pending approval")
-	}
+	pending := waitForPendingApproval(t, ctx, cc, "123")
 	if pending.Data.Presentation.AllowAlways {
 		t.Fatalf("expected codex approvals to disable always-allow")
 	}
@@ -202,7 +211,7 @@ func TestCodex_CommandApproval_DenyEmitsResponseThenOutputDenied(t *testing.T) {
 		resCh <- res.(map[string]any)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForPendingApproval(t, ctx, cc, "456")
 	if err := cc.approvalFlow.Resolve("456", agentremote.ApprovalDecisionPayload{
 		ApprovalID: "456",
 		Approved:   false,

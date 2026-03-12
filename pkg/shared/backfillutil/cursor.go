@@ -11,7 +11,7 @@ func ParseCursor(cursor networkid.PaginationCursor) (int, bool) {
 		return 0, false
 	}
 	idx, err := strconv.Atoi(string(cursor))
-	if err != nil {
+	if err != nil || idx < 0 {
 		return 0, false
 	}
 	return idx, true

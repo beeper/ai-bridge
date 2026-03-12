@@ -88,7 +88,11 @@ func (oc *AIClient) resolveStreamTargetEventID(
 	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || portal == nil {
 		return "", nil
 	}
-	eventID, err := turns.ResolveTargetEventIDFromDB(ctx, oc.UserLogin.Bridge, portal.Receiver, target)
+	receiver := portal.Receiver
+	if receiver == "" {
+		receiver = oc.UserLogin.ID
+	}
+	eventID, err := turns.ResolveTargetEventIDFromDB(ctx, oc.UserLogin.Bridge, receiver, target)
 	if err == nil && eventID != "" && state != nil {
 		state.initialEventID = eventID
 	}

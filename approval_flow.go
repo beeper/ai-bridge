@@ -245,6 +245,7 @@ func (f *ApprovalFlow[D]) Resolve(approvalID string, decision ApprovalDecisionPa
 	}
 	select {
 	case p.ch <- decision:
+		f.cancelPendingTimeout(approvalID)
 		return nil
 	default:
 		return ErrApprovalAlreadyHandled
@@ -689,17 +690,30 @@ func (f *ApprovalFlow[D]) schedulePromptTimeout(approvalID string, expiresAt tim
 }
 
 func (f *ApprovalFlow[D]) finishTimedOutApproval(approvalID string) {
-	if _, ok := f.promptRegistration(approvalID); !ok {
-		return
-	}
 	f.FinishResolved(approvalID, ApprovalDecisionPayload{
 		ApprovalID: approvalID,
 		Reason:     ApprovalReasonTimeout,
 	})
 }
 
+func (f *ApprovalFlow[D]) cancelPendingTimeout(approvalID string) {
+	approvalID = strings.TrimSpace(approvalID)
+	if approvalID == "" {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if p := f.pending[approvalID]; p != nil {
+		select {
+		case <-p.done:
+		default:
+			close(p.done)
+		}
+	}
+}
+
 func approvalOptionKeyForDecision(options []ApprovalOption, decision ApprovalDecisionPayload) string {
-	options = normalizeApprovalOptions(options)
+	options = normalizeApprovalOptions(options, DefaultApprovalOptions())
 	if decision.Approved {
 		if decision.Always {
 			for _, option := range options {

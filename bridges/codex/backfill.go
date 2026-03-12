@@ -183,7 +183,11 @@ func (cc *CodexClient) ensureCodexThreadPortal(ctx context.Context, existing *br
 	portal := existing
 	var err error
 	if portal == nil {
-		portal, err = cc.UserLogin.Bridge.GetPortalByKey(ctx, codexThreadPortalKey(cc.UserLogin.ID, threadID))
+		portalKey, keyErr := codexThreadPortalKey(cc.UserLogin.ID, threadID)
+		if keyErr != nil {
+			return nil, false, keyErr
+		}
+		portal, err = cc.UserLogin.Bridge.GetPortalByKey(ctx, portalKey)
 		if err != nil {
 			return nil, false, err
 		}

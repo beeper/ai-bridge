@@ -81,19 +81,19 @@ type StreamSession struct {
 	ensureWorker  func() // lazily starts the debounce worker goroutine
 	workerStarted atomic.Bool
 
-	targetMu           sync.Mutex
-	resolvedTargetID   id.EventID
-	targetResolutionOK bool
+	targetMu          sync.Mutex
+	resolvedTargetIDs map[StreamTarget]id.EventID
 }
 
 func NewStreamSession(params StreamSessionParams) *StreamSession {
 	sendCtx, sendCancel := context.WithCancel(context.Background())
 	s := &StreamSession{
-		params:       params,
-		sendCtx:      sendCtx,
-		sendCancel:   sendCancel,
-		workerStopCh: make(chan struct{}),
-		workerDoneCh: make(chan struct{}),
+		params:            params,
+		sendCtx:           sendCtx,
+		sendCancel:        sendCancel,
+		workerStopCh:      make(chan struct{}),
+		workerDoneCh:      make(chan struct{}),
+		resolvedTargetIDs: make(map[StreamTarget]id.EventID),
 	}
 	s.endWorker = sync.OnceFunc(func() {
 		close(s.workerStopCh)
@@ -276,10 +276,10 @@ func (s *StreamSession) resolveTargetEventID(ctx context.Context, target StreamT
 		return "", nil
 	}
 	s.targetMu.Lock()
-	if s.targetResolutionOK {
-		resolved := s.resolvedTargetID.String()
+	if resolved, ok := s.resolvedTargetIDs[target]; ok {
+		resolvedStr := resolved.String()
 		s.targetMu.Unlock()
-		return resolved, nil
+		return resolvedStr, nil
 	}
 	s.targetMu.Unlock()
 
@@ -292,10 +292,7 @@ func (s *StreamSession) resolveTargetEventID(ctx context.Context, target StreamT
 	}
 
 	s.targetMu.Lock()
-	if !s.targetResolutionOK {
-		s.resolvedTargetID = resolved
-		s.targetResolutionOK = true
-	}
+	s.resolvedTargetIDs[target] = resolved
 	s.targetMu.Unlock()
 	return resolved.String(), nil
 }

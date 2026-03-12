@@ -43,3 +43,17 @@ func TestIndexAtOrAfterExact(t *testing.T) {
 		t.Fatalf("expected 1, got %d", idx)
 	}
 }
+
+func TestIndexAtOrAfterNoMatch(t *testing.T) {
+	times := []time.Time{
+		time.Unix(10, 0),
+		time.Unix(20, 0),
+		time.Unix(30, 0),
+	}
+	idx := IndexAtOrAfter(len(times), func(i int) time.Time {
+		return times[i]
+	}, time.Unix(40, 0))
+	if idx != len(times) {
+		t.Fatalf("expected %d, got %d", len(times), idx)
+	}
+}

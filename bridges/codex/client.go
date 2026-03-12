@@ -2112,10 +2112,11 @@ func (cc *CodexClient) waitToolApproval(ctx context.Context, approvalID string) 
 		if ctx.Err() != nil {
 			reason = agentremote.ApprovalReasonCancelled
 		}
-		cc.approvalFlow.FinishResolved(approvalID, agentremote.ApprovalDecisionPayload{
+		decision = agentremote.ApprovalDecisionPayload{
 			ApprovalID: approvalID,
 			Reason:     reason,
-		})
+		}
+		cc.approvalFlow.FinishResolved(approvalID, decision)
 		return decision, false
 	}
 	cc.approvalFlow.FinishResolved(approvalID, decision)
@@ -2154,10 +2155,6 @@ func (cc *CodexClient) handleApprovalRequest(
 	inputMap, presentation := extractInput(req.Params)
 	cc.ensureUIToolInputStart(ctx, active.portal, active.state, toolCallID, toolName, true, inputMap)
 	approvalTTL := time.Duration(ttlSeconds) * time.Second
-	cc.registerToolApproval(active.portal.MXID, approvalID, toolCallID, toolName, presentation, approvalTTL)
-
-	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID, toolName, presentation, ttlSeconds)
-
 	emitOutcome := func(approved bool, reason string) (any, *codexrpc.RPCError) {
 		cc.uiEmitter(active.state).EmitUIToolApprovalResponse(ctx, active.portal, approvalID, toolCallID, approved, reason)
 		streamui.RecordApprovalResponse(&active.state.ui, approvalID, toolCallID, approved, reason)
@@ -2167,6 +2164,20 @@ func (cc *CodexClient) handleApprovalRequest(
 		cc.uiEmitter(active.state).EmitUIToolOutputDenied(ctx, active.portal, toolCallID)
 		return map[string]any{"decision": "decline"}, nil
 	}
+	pending, created := cc.registerToolApproval(active.portal.MXID, approvalID, toolCallID, toolName, presentation, approvalTTL)
+	if !created {
+		decision, ok := cc.waitToolApproval(ctx, approvalID)
+		if !ok {
+			return map[string]any{"decision": "decline"}, nil
+		}
+		if decision.Approved {
+			return map[string]any{"decision": "accept"}, nil
+		}
+		return map[string]any{"decision": "decline"}, nil
+	}
+	_ = pending
+
+	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID, toolName, presentation, ttlSeconds)
 
 	if active.meta != nil {
 		if lvl, _ := stringutil.NormalizeElevatedLevel(active.meta.ElevatedLevel); lvl == "full" {
@@ -2181,7 +2192,11 @@ func (cc *CodexClient) handleApprovalRequest(
 
 	decision, ok := cc.waitToolApproval(ctx, approvalID)
 	if !ok {
-		return emitOutcome(false, agentremote.ApprovalReasonTimeout)
+		reason := strings.TrimSpace(decision.Reason)
+		if reason == "" {
+			reason = agentremote.ApprovalReasonTimeout
+		}
+		return emitOutcome(false, reason)
 	}
 	return emitOutcome(decision.Approved, decision.Reason)
 }

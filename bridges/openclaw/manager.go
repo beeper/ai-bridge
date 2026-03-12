@@ -974,12 +974,14 @@ func isOpenClawDirectChatEvent(state string, message map[string]any) bool {
 
 func openClawApprovalDecisionStatus(decision string) (bool, string) {
 	switch strings.ToLower(strings.TrimSpace(decision)) {
+	case "allow-once":
+		return true, "allow-once"
 	case "allow-always":
 		return true, "allow-always"
 	case "deny":
 		return false, "deny"
 	default:
-		return true, ""
+		return false, strings.TrimSpace(decision)
 	}
 }
 
@@ -1342,10 +1344,6 @@ func shouldMirrorLatestUserMessageFromHistory(payload gatewayChatEvent, message 
 	}
 
 	runID := strings.TrimSpace(payload.RunID)
-	if runID == "" {
-		return true
-	}
-
 	for _, candidate := range []string{
 		openClawMessageTurnMarker(message),
 		openClawMessageRunMarker(message),

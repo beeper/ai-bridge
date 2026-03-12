@@ -80,7 +80,7 @@ type streamingState struct {
 }
 
 func (s *streamingState) hasInitialMessageTarget() bool {
-	return s.hasEditTarget()
+	return s != nil && (s.hasEditTarget() || s.hasEphemeralTarget())
 }
 
 func (s *streamingState) streamTarget() turns.StreamTarget {

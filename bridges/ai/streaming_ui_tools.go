@@ -20,15 +20,27 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 	presentation agentremote.ApprovalPromptPresentation,
 	targetEventID id.EventID,
 	ttlSeconds int,
-) {
+) bool {
 	approvalID = strings.TrimSpace(approvalID)
 	toolCallID = strings.TrimSpace(toolCallID)
 	toolName = strings.TrimSpace(toolName)
 	if approvalID == "" || toolCallID == "" {
-		return
+		return false
 	}
 	if toolName == "" {
 		toolName = "tool"
+	}
+	if portal == nil || portal.MXID == "" || oc == nil || oc.UserLogin == nil || oc.UserLogin.UserMXID == "" {
+		if oc != nil {
+			log := oc.loggerForContext(ctx).Warn().
+				Str("approval_id", approvalID).
+				Str("tool_call_id", toolCallID)
+			if portal != nil {
+				log = log.Stringer("room_id", portal.MXID)
+			}
+			log.Msg("Skipping tool approval prompt: missing portal or owner context")
+		}
+		return false
 	}
 
 	// Emit stream event for real-time UI
@@ -51,4 +63,5 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 		RoomID:    portal.MXID,
 		OwnerMXID: oc.UserLogin.UserMXID,
 	})
+	return true
 }

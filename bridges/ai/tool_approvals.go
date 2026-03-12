@@ -113,8 +113,15 @@ func (oc *AIClient) waitToolApproval(ctx context.Context, approvalID string) (to
 			ApprovalID: approvalID,
 			Reason:     reason,
 		})
+		state := airuntime.ToolApprovalDenied
+		if reason == agentremote.ApprovalReasonTimeout {
+			state = airuntime.ToolApprovalTimedOut
+		}
+		resolution := toolApprovalResolution{
+			Decision: airuntime.ToolApprovalDecision{State: state, Reason: reason},
+		}
 		oc.Log().Debug().Str("approval_id", approvalID).Str("tool", d.ToolName).Str("reason", reason).Msg("tool approval wait ended without decision")
-		return toolApprovalResolution{}, d, false
+		return resolution, d, false
 	}
 
 	// Convert ApprovalDecisionPayload to toolApprovalResolution.
@@ -195,11 +202,23 @@ func (oc *AIClient) isBuiltinToolDenied(
 			Msg("tool approval: failed to register builtin approval request")
 		return true
 	}
-	oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, presentation, tool.eventID, oc.toolApprovalsTTLSeconds())
+	if !oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, presentation, tool.eventID, oc.toolApprovalsTTLSeconds()) {
+		decision := airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalDenied, Reason: agentremote.ApprovalReasonDeliveryError}
+		oc.approvalFlow.FinishResolved(approvalID, agentremote.ApprovalDecisionPayload{
+			ApprovalID: approvalID,
+			Reason:     agentremote.ApprovalReasonDeliveryError,
+		})
+		oc.uiEmitter(state).EmitUIToolApprovalResponse(ctx, portal, approvalID, tool.callID, false, decision.Reason)
+		streamui.RecordApprovalResponse(&state.ui, approvalID, tool.callID, false, decision.Reason)
+		oc.uiEmitter(state).EmitUIToolOutputDenied(ctx, portal, tool.callID)
+		return true
+	}
 	resolution, _, ok := oc.waitToolApproval(ctx, approvalID)
 	decision := resolution.Decision
 	if !ok {
-		decision = airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalTimedOut, Reason: agentremote.ApprovalReasonTimeout}
+		if decision.Reason == "" {
+			decision = airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalTimedOut, Reason: agentremote.ApprovalReasonTimeout}
+		}
 	}
 	oc.uiEmitter(state).EmitUIToolApprovalResponse(ctx, portal, approvalID, tool.callID, approvalAllowed(decision), decision.Reason)
 	streamui.RecordApprovalResponse(&state.ui, approvalID, tool.callID, approvalAllowed(decision), decision.Reason)

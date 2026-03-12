@@ -3,6 +3,7 @@ package agentremote
 import (
 	"context"
 
+	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 )
@@ -35,7 +36,21 @@ func (h BaseReactionHandler) HandleMatrixReaction(ctx context.Context, msg *brid
 		return &database.Reaction{}, nil
 	}
 	// Best-effort persistence guard for reaction.sender_id -> ghost.id FK.
-	_ = EnsureSyntheticReactionSenderGhost(ctx, login, msg.Event.Sender)
+	if err := EnsureSyntheticReactionSenderGhost(ctx, login, msg.Event.Sender); err != nil {
+		logger := LoggerFromContext(ctx, nil)
+		if login != nil && login.Bridge != nil {
+			logger = LoggerFromContext(ctx, &login.Bridge.Log)
+		}
+		if logger == nil {
+			nop := zerolog.Nop()
+			logger = &nop
+		}
+		logEvt := logger.Warn().Err(err).Stringer("sender_mxid", msg.Event.Sender)
+		if login != nil {
+			logEvt = logEvt.Str("user_login_id", string(login.ID))
+		}
+		logEvt.Msg("Failed to ensure synthetic Matrix reaction sender ghost")
+	}
 	rc := ExtractReactionContext(msg)
 	if handler := h.Target.GetApprovalHandler(); handler != nil {
 		handler.HandleReaction(ctx, msg, rc.TargetEventID, rc.Emoji)

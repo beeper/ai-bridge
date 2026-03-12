@@ -20,23 +20,10 @@ import (
 	"github.com/beeper/agentremote/turns"
 )
 
-// sendContinuationMessage sends overflow text as a new (non-edit) message from the bot.
-func (oc *AIClient) sendContinuationMessage(ctx context.Context, portal *bridgev2.Portal, body string) {
-	if portal == nil || portal.MXID == "" {
-		return
-	}
-	msg := agentremote.BuildContinuationMessage(portal.PortalKey, body, oc.senderForPortal(ctx, portal), "ai", "ai_msg_id")
-	oc.UserLogin.QueueRemoteEvent(msg)
-	oc.loggerForContext(ctx).Debug().Int("body_len", len(body)).Msg("Queued continuation message for oversized response")
-}
-
-// sendInitialStreamMessage sends the first message in a streaming session via bridgev2's pipeline.
-// Returns the event ID and stores the network message ID in state for later edits.
-func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, state *streamingState, content string, turnID string, replyTarget ReplyTarget) id.EventID {
-	var relatesTo map[string]any
+func buildReplyRelatesTo(replyTarget ReplyTarget) map[string]any {
 	if replyTarget.ThreadRoot != "" {
 		replyTo := replyTarget.EffectiveReplyTo()
-		relatesTo = map[string]any{
+		return map[string]any{
 			"rel_type":        RelThread,
 			"event_id":        replyTarget.ThreadRoot.String(),
 			"is_falling_back": true,
@@ -44,13 +31,37 @@ func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridge
 				"event_id": replyTo.String(),
 			},
 		}
-	} else if replyTarget.ReplyTo != "" {
-		relatesTo = map[string]any{
+	}
+	if replyTarget.ReplyTo != "" {
+		return map[string]any{
 			"m.in_reply_to": map[string]any{
 				"event_id": replyTarget.ReplyTo.String(),
 			},
 		}
 	}
+	return nil
+}
+
+// sendContinuationMessage sends overflow text as a new (non-edit) message from the bot.
+func (oc *AIClient) sendContinuationMessage(ctx context.Context, portal *bridgev2.Portal, body string, replyTarget ReplyTarget) {
+	if portal == nil || portal.MXID == "" {
+		return
+	}
+	msg := agentremote.BuildContinuationMessage(portal.PortalKey, body, oc.senderForPortal(ctx, portal), "ai", "ai_msg_id")
+	if relatesTo := buildReplyRelatesTo(replyTarget); relatesTo != nil && msg != nil && msg.PreBuilt != nil && len(msg.PreBuilt.Parts) > 0 {
+		if msg.PreBuilt.Parts[0].Extra == nil {
+			msg.PreBuilt.Parts[0].Extra = map[string]any{}
+		}
+		msg.PreBuilt.Parts[0].Extra["m.relates_to"] = relatesTo
+	}
+	oc.UserLogin.QueueRemoteEvent(msg)
+	oc.loggerForContext(ctx).Debug().Int("body_len", len(body)).Msg("Queued continuation message for oversized response")
+}
+
+// sendInitialStreamMessage sends the first message in a streaming session via bridgev2's pipeline.
+// Returns the event ID and stores the network message ID in state for later edits.
+func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, state *streamingState, content string, turnID string, replyTarget ReplyTarget) id.EventID {
+	relatesTo := buildReplyRelatesTo(replyTarget)
 
 	uiMessage := map[string]any{
 		"id":   turnID,
@@ -137,7 +148,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 			cleanedRaw = finalRenderedBodyFallback(state)
 		}
 		rendered := format.RenderMarkdown(cleanedRaw, true, true)
-		oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, rendered, nil, "simple")
+		oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, cleanedRaw, rendered, nil, "simple")
 		return
 	}
 
@@ -164,9 +175,9 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	rendered := format.RenderMarkdown(cleanedContent, true, true)
 	if finalReplyTarget.ReplyTo != "" {
 		replyTo := finalReplyTarget.ReplyTo
-		oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, rendered, &replyTo, "natural")
+		oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, cleanedContent, rendered, &replyTo, "natural")
 	} else {
-		oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, rendered, nil, "natural")
+		oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, cleanedContent, rendered, nil, "natural")
 	}
 }
 
@@ -384,7 +395,7 @@ func (oc *AIClient) sendFinalHeartbeatTurn(ctx context.Context, portal *bridgev2
 			oc.sendPlainAssistantMessage(ctx, portal, cleaned)
 		} else {
 			rendered := format.RenderMarkdown(cleaned, true, true)
-			oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, rendered, nil, "heartbeat")
+			oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, cleaned, rendered, nil, "heartbeat")
 		}
 	}
 
@@ -596,11 +607,11 @@ func (oc *AIClient) persistTerminalAssistantTurn(ctx context.Context, log zerolo
 }
 
 // sendFinalAssistantTurnContent is a helper for simple mode that sends content without directive processing.
-func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata, rendered event.MessageEventContent, replyToEventID *id.EventID, mode string) {
+func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata, markdown string, rendered event.MessageEventContent, replyToEventID *id.EventID, mode string) {
 	// Safety-split oversized responses into multiple Matrix events
 	var continuationBody string
 	if len(rendered.Body) > turns.MaxMatrixEventBodyBytes {
-		firstBody, rest := turns.SplitAtMarkdownBoundary(rendered.Body, turns.MaxMatrixEventBodyBytes)
+		firstBody, rest := turns.SplitAtMarkdownBoundary(markdown, turns.MaxMatrixEventBodyBytes)
 		continuationBody = rest
 		rendered = format.RenderMarkdown(firstBody, true, true)
 	}
@@ -668,7 +679,7 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 	for continuationBody != "" {
 		var chunk string
 		chunk, continuationBody = turns.SplitAtMarkdownBoundary(continuationBody, turns.MaxMatrixEventBodyBytes)
-		oc.sendContinuationMessage(ctx, portal, chunk)
+		oc.sendContinuationMessage(ctx, portal, chunk, state.replyTarget)
 	}
 }
 

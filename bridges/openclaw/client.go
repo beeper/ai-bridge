@@ -543,8 +543,8 @@ func (oc *OpenClawClient) topicForPortal(meta *PortalMetadata) string {
 	appendPart(summarizeOpenClawOrigin(meta.OpenClawOrigin, meta.OpenClawChannel))
 	appendPart(meta.ModelProvider)
 	appendPart(meta.Model)
-	if preview := openclawconv.StringsTrimDefault(meta.OpenClawPreviewSnippet, meta.OpenClawLastMessagePreview); strings.TrimSpace(preview) != "" {
-		appendPart("Recent: " + strings.TrimSpace(preview))
+	if preview := openclawconv.StringsTrimDefault(meta.OpenClawPreviewSnippet, meta.OpenClawLastMessagePreview); preview != "" {
+		appendPart("Recent: " + preview)
 	}
 	if meta.HistoryMode != "" {
 		appendPart("History: " + meta.HistoryMode)
@@ -658,7 +658,7 @@ func summarizeOpenClawOrigin(origin, channel string) string {
 		}
 		parts = append(parts, value)
 	}
-	provider := strings.TrimSpace(openclawconv.StringsTrimDefault(stringValue(structured["provider"]), stringValue(structured["source"])))
+	provider := openclawconv.StringsTrimDefault(stringValue(structured["provider"]), stringValue(structured["source"]))
 	if provider != "" && !strings.EqualFold(provider, strings.TrimSpace(channel)) {
 		appendPart(provider)
 	}

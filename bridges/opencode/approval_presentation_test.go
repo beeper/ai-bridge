@@ -10,6 +10,7 @@ func TestBuildOpenCodeApprovalPresentation(t *testing.T) {
 	p := buildOpenCodeApprovalPresentation(api.PermissionRequest{
 		Permission: "filesystem.write",
 		Patterns:   []string{"src/**", "pkg/**"},
+		Always:     []string{"workspace"},
 		Metadata: map[string]any{
 			"cwd": "/repo",
 		},

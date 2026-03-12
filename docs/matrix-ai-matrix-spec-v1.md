@@ -176,6 +176,7 @@ Producers MAY emit any valid AI SDK `UIMessageChunk` type:
 - `tool-input-available`
 - `tool-input-error`
 - `tool-approval-request`
+- `tool-approval-response`
 - `tool-output-available`
 - `tool-output-error`
 - `tool-output-denied`
@@ -210,7 +211,7 @@ Per turn:
 - Duplicate/stale events (`seq <= last_applied_seq`) MUST be ignored.
 - Out-of-order events SHOULD be buffered briefly and applied in `seq` order.
 - Producers MUST NOT emit ephemeral stream events until the canonical assistant timeline message has a concrete Matrix event ID.
-- If the Matrix event ID is unavailable but the bridge-side `networkid.MessageID` exists, producers MAY continue with debounced/final timeline edits only.
+- Producers MUST buffer debounced/final timeline edits until the placeholder's Matrix event ID is resolved, because `m.replace` requires `m.relates_to.event_id`.
 - If neither a bridge-side message ID nor a Matrix event ID exists, producers MUST buffer or fail the turn and MUST NOT emit stream events or edits.
 
 Required lifecycle:
@@ -307,7 +308,7 @@ When approval is needed, the bridge emits:
 2. A timeline-visible canonical approval notice.
    - The notice is an `m.room.message` with `msgtype = "m.notice"`, SHOULD reply to the originating assistant turn via `m.relates_to.m.in_reply_to`, and includes a complete `com.beeper.ai` `UIMessage` using the canonical shape defined above (`id`, `role`, optional `metadata`, `parts`).
    - The notice body MUST list the canonical reaction keys for the available options.
-   - The bridge MUST send bridge-authored placeholder `m.reaction` / `m.annotation` events on the notice, one for each allowed option key.
+   - The bridge MUST send bridge-authored placeholder `m.reaction` events on the notice, one for each allowed option key, using `m.annotation` as the relation type.
    - `UIMessage.metadata.approval` SHOULD include:
      - `id: string`
      - `options: [{ id, key, label, approved, always?, reason? }]`
@@ -344,7 +345,7 @@ Approvals are resolved through reactions on the canonical approval notice:
 ```
 
 Rules:
-- The approval notice is the canonical Matrix artifact. Rich clients MAY also observe mirrored `tool-approval-request` / `tool-approval-response` stream parts.
+- The approval notice is the canonical Matrix artifact. Rich clients MAY also observe mirrored `tool-approval-request` and `tool-approval-response` stream parts. A `tool-approval-response` chunk carries `approvalId`, `toolCallId`, `approved`, and optional `reason`.
 - Only owner reactions with an advertised option key can resolve the approval.
 - Non-owner reactions and invalid keys MUST be rejected and SHOULD be redacted.
 - On terminal completion, the bridge MUST edit the approval notice into its final state and redact all bridge-authored placeholder reactions.

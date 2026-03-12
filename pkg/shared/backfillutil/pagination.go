@@ -6,6 +6,7 @@ import (
 )
 
 // PaginateParams controls how a slice of backfill entries is paginated.
+// Cursor is only used for backward pagination (Forward == false).
 type PaginateParams struct {
 	Count              int
 	Forward            bool
@@ -37,6 +38,7 @@ func Paginate(
 	}
 
 	if params.Forward {
+		params.Cursor = ""
 		return paginateForward(totalLen, count, params, findAnchor, indexAtOrAfter)
 	}
 	return paginateBackward(totalLen, count, params, findAnchor, indexAtOrAfter)

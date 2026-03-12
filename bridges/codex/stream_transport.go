@@ -105,7 +105,11 @@ func (cc *CodexClient) resolveStreamTargetEventID(
 	if cc == nil || cc.UserLogin == nil || cc.UserLogin.Bridge == nil || portal == nil {
 		return "", nil
 	}
-	eventID, err := turns.ResolveTargetEventIDFromDB(ctx, cc.UserLogin.Bridge, portal.Receiver, target)
+	receiver := portal.Receiver
+	if receiver == "" {
+		receiver = cc.UserLogin.ID
+	}
+	eventID, err := turns.ResolveTargetEventIDFromDB(ctx, cc.UserLogin.Bridge, receiver, target)
 	if err == nil && eventID != "" && state != nil {
 		state.initialEventID = eventID
 	}

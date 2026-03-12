@@ -15,15 +15,19 @@ func defaultCodexChatPortalKey(loginID networkid.UserLoginID) networkid.PortalKe
 	}
 }
 
-func codexThreadPortalKey(loginID networkid.UserLoginID, threadID string) networkid.PortalKey {
+func codexThreadPortalKey(loginID networkid.UserLoginID, threadID string) (networkid.PortalKey, error) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return networkid.PortalKey{}, fmt.Errorf("empty threadID")
+	}
 	return networkid.PortalKey{
 		ID: networkid.PortalID(
 			fmt.Sprintf(
 				"codex:%s:thread:%s",
 				loginID,
-				url.PathEscape(strings.TrimSpace(threadID)),
+				url.PathEscape(threadID),
 			),
 		),
 		Receiver: loginID,
-	}
+	}, nil
 }

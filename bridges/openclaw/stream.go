@@ -391,6 +391,9 @@ func (oc *OpenClawClient) resolveStreamTargetEventID(
 	if portal != nil {
 		receiver = portal.Receiver
 	}
+	if receiver == "" && oc.UserLogin != nil {
+		receiver = oc.UserLogin.ID
+	}
 	var bridge *bridgev2.Bridge
 	if oc.UserLogin != nil {
 		bridge = oc.UserLogin.Bridge

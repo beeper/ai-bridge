@@ -16,6 +16,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
 
+	"github.com/beeper/agentremote"
 	airuntime "github.com/beeper/agentremote/pkg/runtime"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 )
@@ -512,7 +513,9 @@ func (oc *AIClient) streamingResponse(
 			resolution, _, ok := oc.waitToolApproval(ctx, approval.approvalID)
 			decision := resolution.Decision
 			if !ok {
-				decision = airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalTimedOut, Reason: "timeout"}
+				if decision.Reason == "" {
+					decision = airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalTimedOut, Reason: agentremote.ApprovalReasonTimeout}
+				}
 			}
 			approved := approvalAllowed(decision)
 			oc.uiEmitter(state).EmitUIToolApprovalResponse(ctx, portal, approval.approvalID, approval.toolCallID, approved, decision.Reason)

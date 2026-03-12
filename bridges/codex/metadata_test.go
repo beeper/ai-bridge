@@ -16,7 +16,14 @@ func TestIsManagedAuthLogin_SourceManaged(t *testing.T) {
 	}
 }
 
-func TestIsHostAuthLogin_SkipsRemoteLogout(t *testing.T) {
+func TestIsManagedAuthLogin_LegacyManagedFlag(t *testing.T) {
+	meta := &UserLoginMetadata{CodexHomeManaged: true}
+	if !isManagedAuthLogin(meta) {
+		t.Fatal("expected legacy managed flag to be treated as managed login")
+	}
+}
+
+func TestIsHostAuthLogin_DistinguishesManagedFromHost(t *testing.T) {
 	hostMeta := &UserLoginMetadata{CodexAuthSource: CodexAuthSourceHost}
 	if !isHostAuthLogin(hostMeta) {
 		t.Fatal("expected host-auth login to be recognized")

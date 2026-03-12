@@ -55,23 +55,29 @@ func AppendDetailsFromMap(details []ApprovalDetail, labelPrefix string, values m
 	if len(values) == 0 || max <= 0 {
 		return details
 	}
-	keys := make([]string, 0, len(values))
+	type detailKey struct {
+		original string
+		trimmed  string
+	}
+	keys := make([]detailKey, 0, len(values))
 	for key := range values {
-		key = strings.TrimSpace(key)
-		if key == "" {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
 			continue
 		}
-		keys = append(keys, key)
+		keys = append(keys, detailKey{original: key, trimmed: trimmed})
 	}
-	sort.Strings(keys)
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i].trimmed < keys[j].trimmed
+	})
 	count := 0
 	for _, key := range keys {
 		if count >= max {
 			break
 		}
-		if value := ValueSummary(values[key]); value != "" {
+		if value := ValueSummary(values[key.original]); value != "" {
 			details = append(details, ApprovalDetail{
-				Label: fmt.Sprintf("%s %s", labelPrefix, key),
+				Label: fmt.Sprintf("%s %s", labelPrefix, key.trimmed),
 				Value: value,
 			})
 			count++
@@ -318,9 +324,9 @@ func BuildApprovalPromptMessage(params ApprovalPromptMessageParams) ApprovalProm
 	presentation := normalizeApprovalPromptPresentation(params.Presentation, toolName)
 	var options []ApprovalOption
 	if len(params.Options) > 0 {
-		options = normalizeApprovalOptions(params.Options)
+		options = normalizeApprovalOptions(params.Options, ApprovalPromptOptions(presentation.AllowAlways))
 	} else {
-		options = normalizeApprovalOptions(ApprovalPromptOptions(presentation.AllowAlways))
+		options = normalizeApprovalOptions(nil, ApprovalPromptOptions(presentation.AllowAlways))
 	}
 	body := BuildApprovalPromptBody(presentation, options)
 	metadata := approvalMessageMetadata(approvalID, turnID, presentation, options, nil, params.ExpiresAt)
@@ -390,9 +396,9 @@ func BuildApprovalResponsePromptMessage(params ApprovalResponsePromptMessagePara
 	}
 	options := params.Options
 	if len(options) > 0 {
-		options = normalizeApprovalOptions(options)
+		options = normalizeApprovalOptions(options, ApprovalPromptOptions(presentation.AllowAlways))
 	} else {
-		options = normalizeApprovalOptions(ApprovalPromptOptions(presentation.AllowAlways))
+		options = normalizeApprovalOptions(nil, ApprovalPromptOptions(presentation.AllowAlways))
 	}
 	metadata := approvalMessageMetadata(approvalID, turnID, presentation, options, &decision, params.ExpiresAt)
 	uiMessage := map[string]any{
@@ -418,6 +424,7 @@ func BuildApprovalResponsePromptMessage(params ApprovalResponsePromptMessagePara
 		UIMessage:    uiMessage,
 		Raw:          raw,
 		Presentation: presentation,
+		Options:      options,
 	}
 }
 
@@ -580,7 +587,10 @@ func normalizeApprovalPromptPresentation(presentation ApprovalPromptPresentation
 	return presentation
 }
 
-func normalizeApprovalOptions(options []ApprovalOption) []ApprovalOption {
+func normalizeApprovalOptions(options []ApprovalOption, fallback []ApprovalOption) []ApprovalOption {
+	if len(options) == 0 {
+		options = fallback
+	}
 	if len(options) == 0 {
 		options = DefaultApprovalOptions()
 	}
@@ -603,6 +613,9 @@ func normalizeApprovalOptions(options []ApprovalOption) []ApprovalOption {
 		out = append(out, option)
 	}
 	if len(out) == 0 {
+		if len(fallback) > 0 {
+			return normalizeApprovalOptions(fallback, nil)
+		}
 		return DefaultApprovalOptions()
 	}
 	return out
@@ -612,6 +625,9 @@ func normalizeApprovalOptions(options []ApprovalOption) []ApprovalOption {
 // If the pointer is nil or empty, input and details are returned unchanged.
 func AddOptionalDetail(input map[string]any, details []ApprovalDetail, key, label string, ptr *string) (map[string]any, []ApprovalDetail) {
 	if v := ValueSummary(ptr); v != "" {
+		if input == nil {
+			input = make(map[string]any)
+		}
 		input[key] = v
 		details = append(details, ApprovalDetail{Label: label, Value: v})
 	}

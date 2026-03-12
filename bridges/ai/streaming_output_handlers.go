@@ -237,7 +237,16 @@ func (oc *AIClient) gateMcpToolApproval(
 	if needsApproval {
 		if !state.ui.UIToolApprovalRequested[approvalID] {
 			state.ui.UIToolApprovalRequested[approvalID] = true
-			oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, tool.toolName, presentation, tool.eventID, oc.toolApprovalsTTLSeconds())
+			if !oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, tool.toolName, presentation, tool.eventID, oc.toolApprovalsTTLSeconds()) {
+				if err := oc.approvalFlow.Resolve(approvalID, agentremote.ApprovalDecisionPayload{
+					ApprovalID: approvalID,
+					Reason:     agentremote.ApprovalReasonDeliveryError,
+				}); err != nil {
+					delete(state.pendingMcpApprovalsSeen, approvalID)
+					oc.uiEmitter(state).EmitUIToolOutputError(ctx, portal, tool.callID, "failed to deliver MCP approval prompt", true)
+					oc.loggerForContext(ctx).Warn().Err(err).Str("approval_id", approvalID).Msg("Failed to resolve undeliverable MCP approval prompt")
+				}
+			}
 		}
 	} else {
 		if err := oc.approvalFlow.Resolve(approvalID, agentremote.ApprovalDecisionPayload{
