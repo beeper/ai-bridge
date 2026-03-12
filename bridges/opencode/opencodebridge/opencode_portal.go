@@ -11,7 +11,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 
 	"github.com/beeper/agentremote/bridges/opencode/opencode"
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 func (b *Bridge) ensureOpenCodeSessionPortal(ctx context.Context, inst *openCodeInstance, session opencode.Session) error {
@@ -83,7 +83,7 @@ func (b *Bridge) ensureOpenCodeSessionPortalWithRoom(ctx context.Context, inst *
 			b.host.CleanupPortal(ctx, portal, "failed to create OpenCode room")
 			return err
 		}
-		bridgeadapter.SendAIRoomInfo(ctx, portal, bridgeadapter.AIRoomKindAgent)
+		agentremote.SendAIRoomInfo(ctx, portal, agentremote.AIRoomKindAgent)
 		return nil
 	}
 
@@ -134,7 +134,7 @@ func (b *Bridge) composeOpenCodeChatInfo(title, instanceID string) *bridgev2.Cha
 	if login == nil {
 		return nil
 	}
-	return bridgeadapter.BuildDMChatInfo(bridgeadapter.DMChatInfoParams{
+	return agentremote.BuildDMChatInfo(agentremote.DMChatInfoParams{
 		Title:             title,
 		HumanUserID:       b.host.HumanUserID(login.ID),
 		LoginID:           login.ID,
@@ -238,7 +238,7 @@ func (b *Bridge) createManagedLauncherChat(ctx context.Context, login *bridgev2.
 		b.host.CleanupPortal(ctx, portal, "failed to create OpenCode room")
 		return nil, err
 	}
-	bridgeadapter.SendAIRoomInfo(ctx, portal, bridgeadapter.AIRoomKindAgent)
+	agentremote.SendAIRoomInfo(ctx, portal, agentremote.AIRoomKindAgent)
 
 	b.host.SendSystemNotice(ctx, portal, "AI Chats can make mistakes.")
 	b.host.SendSystemNotice(ctx, portal, "What directory should OpenCode work in? Send an absolute path or `~/...`, or send an empty message to use the managed default path.")

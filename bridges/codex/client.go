@@ -23,11 +23,11 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/agentremote/bridges/codex/codexrpc"
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
-	"github.com/beeper/agentremote/pkg/connector/msgconv"
+	"github.com/beeper/agentremote"
+	"github.com/beeper/agentremote/bridges/ai/msgconv"
 	"github.com/beeper/agentremote/pkg/matrixevents"
 	"github.com/beeper/agentremote/pkg/shared/citations"
-	"github.com/beeper/agentremote/pkg/shared/streamtransport"
+	"github.com/beeper/agentremote/turns"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 	"github.com/beeper/agentremote/pkg/shared/stringutil"
 )
@@ -69,7 +69,7 @@ type codexPendingMessage struct {
 type codexPendingQueue []*codexPendingMessage
 
 type CodexClient struct {
-	bridgeadapter.BaseReactionHandler
+	agentremote.BaseReactionHandler
 	UserLogin *bridgev2.UserLogin
 	connector *CodexConnector
 	log       zerolog.Logger
@@ -97,7 +97,7 @@ type CodexClient struct {
 	loadedMu      sync.Mutex
 	loadedThreads map[string]bool // threadId -> loaded via thread/start|thread/resume
 
-	approvalFlow *bridgeadapter.ApprovalFlow[*pendingToolApprovalDataCodex]
+	approvalFlow *agentremote.ApprovalFlow[*pendingToolApprovalDataCodex]
 
 	scheduleBootstrapOnce func() // starts bootstrap goroutine exactly once
 
@@ -133,7 +133,7 @@ func newCodexClient(login *bridgev2.UserLogin, connector *CodexConnector) (*Code
 		pendingMessages: make(map[id.RoomID]codexPendingQueue),
 	}
 	cc.BaseReactionHandler.Target = cc
-	cc.approvalFlow = bridgeadapter.NewApprovalFlow(bridgeadapter.ApprovalFlowConfig[*pendingToolApprovalDataCodex]{
+	cc.approvalFlow = agentremote.NewApprovalFlow(agentremote.ApprovalFlowConfig[*pendingToolApprovalDataCodex]{
 		Login:             func() *bridgev2.UserLogin { return cc.UserLogin },
 		Sender:            func(_ *bridgev2.Portal) bridgev2.EventSender { return cc.senderForPortal() },
 		BackgroundContext: cc.backgroundContext,
@@ -159,7 +159,7 @@ func newCodexClient(login *bridgev2.UserLogin, connector *CodexConnector) (*Code
 }
 
 func (cc *CodexClient) loggerForContext(ctx context.Context) *zerolog.Logger {
-	return bridgeadapter.LoggerFromContext(ctx, &cc.log)
+	return agentremote.LoggerFromContext(ctx, &cc.log)
 }
 
 func (cc *CodexClient) Connect(ctx context.Context) {
@@ -243,7 +243,7 @@ func (cc *CodexClient) IsLoggedIn() bool {
 
 func (cc *CodexClient) GetUserLogin() *bridgev2.UserLogin { return cc.UserLogin }
 
-func (cc *CodexClient) GetApprovalHandler() bridgeadapter.ApprovalReactionHandler {
+func (cc *CodexClient) GetApprovalHandler() agentremote.ApprovalReactionHandler {
 	return cc.approvalFlow
 }
 
@@ -266,7 +266,7 @@ func (cc *CodexClient) LogoutRemote(ctx context.Context) {
 	cc.Disconnect()
 
 	if cc.connector != nil {
-		bridgeadapter.RemoveClientFromCache(&cc.connector.clientsMu, cc.connector.clients, cc.UserLogin.ID)
+		agentremote.RemoveClientFromCache(&cc.connector.clientsMu, cc.connector.clients, cc.UserLogin.ID)
 	}
 
 	cc.UserLogin.BridgeState.Send(status.BridgeState{
@@ -366,14 +366,14 @@ func (cc *CodexClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal)
 		metaTitle = meta.Title
 	}
 	if meta == nil || !meta.IsCodexRoom {
-		return bridgeadapter.BuildChatInfoWithFallback(metaTitle, portal.Name, "Codex", portal.Topic), nil
+		return agentremote.BuildChatInfoWithFallback(metaTitle, portal.Name, "Codex", portal.Topic), nil
 	}
 	title := codexPortalTitle(portal)
 	return cc.composeCodexChatInfo(title, strings.TrimSpace(meta.CodexThreadID) != ""), nil
 }
 
 func (cc *CodexClient) GetUserInfo(_ context.Context, _ *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
-	return bridgeadapter.BuildBotUserInfo("Codex", "codex"), nil
+	return agentremote.BuildBotUserInfo("Codex", "codex"), nil
 }
 
 func (cc *CodexClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
@@ -412,7 +412,7 @@ func (cc *CodexClient) ResolveIdentifier(ctx context.Context, identifier string,
 
 	return &bridgev2.ResolveIdentifierResponse{
 		UserID:   codexGhostID,
-		UserInfo: bridgeadapter.BuildBotUserInfo("Codex", "codex"),
+		UserInfo: agentremote.BuildBotUserInfo("Codex", "codex"),
 		Ghost:    ghost,
 		Chat:     chat,
 	}, nil
@@ -451,9 +451,9 @@ func (cc *CodexClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Ma
 	portal := msg.Portal
 	meta := portalMeta(portal)
 	if meta == nil || !meta.IsCodexRoom {
-		return nil, bridgeadapter.UnsupportedMessageStatus(errors.New("not a Codex room"))
+		return nil, agentremote.UnsupportedMessageStatus(errors.New("not a Codex room"))
 	}
-	if bridgeadapter.IsMatrixBotUser(ctx, cc.UserLogin.Bridge, msg.Event.Sender) {
+	if agentremote.IsMatrixBotUser(ctx, cc.UserLogin.Bridge, msg.Event.Sender) {
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
 	}
 
@@ -461,7 +461,7 @@ func (cc *CodexClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Ma
 	switch msg.Content.MsgType {
 	case event.MsgText, event.MsgNotice, event.MsgEmote:
 	default:
-		return nil, bridgeadapter.UnsupportedMessageStatus(fmt.Errorf("%s messages are not supported", msg.Content.MsgType))
+		return nil, agentremote.UnsupportedMessageStatus(fmt.Errorf("%s messages are not supported", msg.Content.MsgType))
 	}
 	if msg.Content.RelatesTo != nil && msg.Content.RelatesTo.GetReplaceID() != "" {
 		return &bridgev2.MatrixMessageResponse{Pending: false}, nil
@@ -516,13 +516,13 @@ func (cc *CodexClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Ma
 
 	// Save user message immediately; we return Pending=true.
 	userMsg := &database.Message{
-		ID:        bridgeadapter.MatrixMessageID(msg.Event.ID),
+		ID:        agentremote.MatrixMessageID(msg.Event.ID),
 		MXID:      msg.Event.ID,
 		Room:      portal.PortalKey,
 		SenderID:  humanUserID(cc.UserLogin.ID),
-		Timestamp: bridgeadapter.MatrixEventTimestamp(msg.Event),
+		Timestamp: agentremote.MatrixEventTimestamp(msg.Event),
 		Metadata: &MessageMetadata{
-			BaseMessageMetadata: bridgeadapter.BaseMessageMetadata{Role: "user", Body: body},
+			BaseMessageMetadata: agentremote.BaseMessageMetadata{Role: "user", Body: body},
 		},
 	}
 	if msg.InputTransactionID != "" {
@@ -1519,7 +1519,7 @@ func (cc *CodexClient) ensureDefaultCodexChat(ctx context.Context) error {
 		if err := portal.CreateMatrixRoom(ctx, cc.UserLogin, info); err != nil {
 			return err
 		}
-		bridgeadapter.SendAIRoomInfo(ctx, portal, bridgeadapter.AIRoomKindAgent)
+		agentremote.SendAIRoomInfo(ctx, portal, agentremote.AIRoomKindAgent)
 		cc.sendSystemNotice(ctx, portal, "AI Chats can make mistakes.")
 		cc.sendSystemNotice(ctx, portal, "What directory should Codex work in? Send an absolute path or `~/...`.")
 		meta.AwaitingCwdSetup = true
@@ -1540,7 +1540,7 @@ func (cc *CodexClient) composeCodexChatInfo(title string, canBackfill bool) *bri
 	if title == "" {
 		title = "Codex"
 	}
-	return bridgeadapter.BuildDMChatInfo(bridgeadapter.DMChatInfoParams{
+	return agentremote.BuildDMChatInfo(agentremote.DMChatInfoParams{
 		Title:             title,
 		HumanUserID:       humanUserID(cc.UserLogin.ID),
 		LoginID:           cc.UserLogin.ID,
@@ -1734,7 +1734,7 @@ func (cc *CodexClient) sendSystemNotice(ctx context.Context, portal *bridgev2.Po
 	bg := cc.backgroundContext(ctx)
 	sendCtx, cancel := context.WithTimeout(bg, 10*time.Second)
 	defer cancel()
-	cc.sendViaPortal(sendCtx, portal, bridgeadapter.BuildSystemNotice(strings.TrimSpace(message)), "")
+	cc.sendViaPortal(sendCtx, portal, agentremote.BuildSystemNotice(strings.TrimSpace(message)), "")
 }
 
 func (cc *CodexClient) sendPendingStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, message string) {
@@ -1743,7 +1743,7 @@ func (cc *CodexClient) sendPendingStatus(ctx context.Context, portal *bridgev2.P
 		Message:   message,
 		IsCertain: true,
 	}
-	bridgeadapter.SendMatrixMessageStatus(ctx, portal, evt, st)
+	agentremote.SendMatrixMessageStatus(ctx, portal, evt, st)
 }
 
 func (cc *CodexClient) markMessageSendSuccess(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, state *streamingState) {
@@ -1751,7 +1751,7 @@ func (cc *CodexClient) markMessageSendSuccess(ctx context.Context, portal *bridg
 		return
 	}
 	st := bridgev2.MessageStatus{Status: event.MessageStatusSuccess, IsCertain: true}
-	bridgeadapter.SendMatrixMessageStatus(ctx, portal, evt, st)
+	agentremote.SendMatrixMessageStatus(ctx, portal, evt, st)
 }
 
 func (cc *CodexClient) acquireRoomIfQueueEmpty(roomID id.RoomID) bool {
@@ -1862,14 +1862,14 @@ func (cc *CodexClient) sendInitialStreamMessage(ctx context.Context, portal *bri
 		"m.mentions":             map[string]any{},
 	}
 
-	msgID := bridgeadapter.NewMessageID("codex")
+	msgID := agentremote.NewMessageID("codex")
 	converted := &bridgev2.ConvertedMessage{
 		Parts: []*bridgev2.ConvertedMessagePart{{
 			ID:         networkid.PartID("0"),
 			Type:       event.EventMessage,
 			Content:    &event.MessageEventContent{MsgType: event.MsgText, Body: content},
 			Extra:      eventRaw,
-			DBMetadata: &MessageMetadata{BaseMessageMetadata: bridgeadapter.BaseMessageMetadata{Role: "assistant", TurnID: turnID}},
+			DBMetadata: &MessageMetadata{BaseMessageMetadata: agentremote.BaseMessageMetadata{Role: "assistant", TurnID: turnID}},
 		}},
 	}
 
@@ -1919,21 +1919,21 @@ func (cc *CodexClient) ensureUIToolInputStart(ctx context.Context, portal *bridg
 
 func (cc *CodexClient) emitUIToolApprovalRequest(
 	ctx context.Context, portal *bridgev2.Portal, state *streamingState,
-	approvalID, toolCallID, toolName string, presentation bridgeadapter.ApprovalPromptPresentation, ttlSeconds int,
+	approvalID, toolCallID, toolName string, presentation agentremote.ApprovalPromptPresentation, ttlSeconds int,
 ) {
 	cc.uiEmitter(state).EmitUIToolApprovalRequest(ctx, portal, approvalID, toolCallID)
 	if state == nil {
 		return
 	}
-	cc.approvalFlow.SendPrompt(ctx, portal, bridgeadapter.SendPromptParams{
-		ApprovalPromptMessageParams: bridgeadapter.ApprovalPromptMessageParams{
+	cc.approvalFlow.SendPrompt(ctx, portal, agentremote.SendPromptParams{
+		ApprovalPromptMessageParams: agentremote.ApprovalPromptMessageParams{
 			ApprovalID:     approvalID,
 			ToolCallID:     toolCallID,
 			ToolName:       toolName,
 			TurnID:         state.turnID,
 			Presentation:   presentation,
 			ReplyToEventID: state.initialEventID,
-			ExpiresAt:      bridgeadapter.ComputeApprovalExpiry(ttlSeconds),
+			ExpiresAt:      agentremote.ComputeApprovalExpiry(ttlSeconds),
 		},
 		RoomID:    portal.MXID,
 		OwnerMXID: cc.UserLogin.UserMXID,
@@ -1943,7 +1943,7 @@ func (cc *CodexClient) emitUIToolApprovalRequest(
 func (cc *CodexClient) emitUIFinish(ctx context.Context, portal *bridgev2.Portal, state *streamingState, model string, finishReason string) {
 	cc.uiEmitter(state).EmitUIFinish(ctx, portal, finishReason, cc.buildUIMessageMetadata(state, model, true, finishReason))
 	if state != nil && state.session != nil {
-		state.session.End(ctx, streamtransport.EndReason(finishReason))
+		state.session.End(ctx, turns.EndReason(finishReason))
 		state.session = nil
 	}
 }
@@ -1978,8 +1978,8 @@ func (cc *CodexClient) sendFinalAssistantTurn(ctx context.Context, portal *bridg
 
 	// Safety-split oversized responses into multiple Matrix events
 	var continuationBody string
-	if len(rendered.Body) > streamtransport.MaxMatrixEventBodyBytes {
-		firstBody, rest := streamtransport.SplitAtMarkdownBoundary(rendered.Body, streamtransport.MaxMatrixEventBodyBytes)
+	if len(rendered.Body) > turns.MaxMatrixEventBodyBytes {
+		firstBody, rest := turns.SplitAtMarkdownBoundary(rendered.Body, turns.MaxMatrixEventBodyBytes)
 		continuationBody = rest
 		rendered = format.RenderMarkdown(firstBody, true, true)
 	}
@@ -2000,7 +2000,7 @@ func (cc *CodexClient) sendFinalAssistantTurn(ctx context.Context, portal *bridg
 		Timestamp:     editTS,
 		StreamOrder:   codexNextLiveStreamOrder(state, editTS),
 		LogKey:        "codex_edit_target",
-		PreBuilt: streamtransport.BuildRenderedConvertedEdit(streamtransport.RenderedMarkdownContent{
+		PreBuilt: turns.BuildRenderedConvertedEdit(turns.RenderedMarkdownContent{
 			Body:          rendered.Body,
 			Format:        rendered.Format,
 			FormattedBody: rendered.FormattedBody,
@@ -2016,7 +2016,7 @@ func (cc *CodexClient) sendFinalAssistantTurn(ctx context.Context, portal *bridg
 	// Send continuation messages for overflow
 	for continuationBody != "" {
 		var chunk string
-		chunk, continuationBody = streamtransport.SplitAtMarkdownBoundary(continuationBody, streamtransport.MaxMatrixEventBodyBytes)
+		chunk, continuationBody = turns.SplitAtMarkdownBoundary(continuationBody, turns.MaxMatrixEventBodyBytes)
 		cc.sendContinuationMessage(ctx, portal, chunk)
 	}
 }
@@ -2026,7 +2026,7 @@ func (cc *CodexClient) sendContinuationMessage(ctx context.Context, portal *brid
 	if portal == nil || portal.MXID == "" {
 		return
 	}
-	msg := bridgeadapter.BuildContinuationMessage(portal.PortalKey, body, cc.senderForPortal(), "codex", "codex_msg_id")
+	msg := agentremote.BuildContinuationMessage(portal.PortalKey, body, cc.senderForPortal(), "codex", "codex_msg_id")
 	cc.UserLogin.QueueRemoteEvent(msg)
 	cc.loggerForContext(ctx).Debug().Int("body_len", len(body)).Msg("Queued continuation message for oversized response")
 }
@@ -2038,7 +2038,7 @@ func (cc *CodexClient) saveAssistantMessage(ctx context.Context, portal *bridgev
 	log := cc.loggerForContext(ctx)
 
 	fullMeta := &MessageMetadata{
-		BaseMessageMetadata: bridgeadapter.BuildAssistantBaseMetadata(bridgeadapter.AssistantMetadataParams{
+		BaseMessageMetadata: agentremote.BuildAssistantBaseMetadata(agentremote.AssistantMetadataParams{
 			Body:               state.accumulated.String(),
 			FinishReason:       finishReason,
 			TurnID:             state.turnID,
@@ -2048,7 +2048,7 @@ func (cc *CodexClient) saveAssistantMessage(ctx context.Context, portal *bridgev
 			CompletedAtMs:      state.completedAtMs,
 			CanonicalSchema:    "ai-sdk-ui-message-v1",
 			CanonicalUIMessage: cc.buildCanonicalUIMessage(state, model, finishReason),
-			GeneratedFiles:     bridgeadapter.GeneratedFileRefsFromParts(state.generatedFiles),
+			GeneratedFiles:     agentremote.GeneratedFileRefsFromParts(state.generatedFiles),
 			ThinkingContent:    state.reasoning.String(),
 			PromptTokens:       state.promptTokens,
 			CompletionTokens:   state.completionTokens,
@@ -2060,7 +2060,7 @@ func (cc *CodexClient) saveAssistantMessage(ctx context.Context, portal *bridgev
 		ThinkingTokenCount: len(strings.Fields(state.reasoning.String())),
 	}
 
-	bridgeadapter.UpsertAssistantMessage(ctx, bridgeadapter.UpsertAssistantMessageParams{
+	agentremote.UpsertAssistantMessage(ctx, agentremote.UpsertAssistantMessageParams{
 		Login:            cc.UserLogin,
 		Portal:           portal,
 		SenderID:         codexGhostID,
@@ -2080,15 +2080,15 @@ type pendingToolApprovalDataCodex struct {
 	RoomID       id.RoomID
 	ToolCallID   string
 	ToolName     string
-	Presentation bridgeadapter.ApprovalPromptPresentation
+	Presentation agentremote.ApprovalPromptPresentation
 }
 
 func (cc *CodexClient) registerToolApproval(
 	roomID id.RoomID,
 	approvalID, toolCallID, toolName string,
-	presentation bridgeadapter.ApprovalPromptPresentation,
+	presentation agentremote.ApprovalPromptPresentation,
 	ttl time.Duration,
-) (*bridgeadapter.Pending[*pendingToolApprovalDataCodex], bool) {
+) (*agentremote.Pending[*pendingToolApprovalDataCodex], bool) {
 	data := &pendingToolApprovalDataCodex{
 		ApprovalID:   strings.TrimSpace(approvalID),
 		RoomID:       roomID,
@@ -2099,15 +2099,15 @@ func (cc *CodexClient) registerToolApproval(
 	return cc.approvalFlow.Register(approvalID, ttl, data)
 }
 
-func (cc *CodexClient) waitToolApproval(ctx context.Context, approvalID string) (bridgeadapter.ApprovalDecisionPayload, bool) {
+func (cc *CodexClient) waitToolApproval(ctx context.Context, approvalID string) (agentremote.ApprovalDecisionPayload, bool) {
 	approvalID = strings.TrimSpace(approvalID)
 	decision, ok := cc.approvalFlow.Wait(ctx, approvalID)
 	if !ok {
-		reason := bridgeadapter.ApprovalReasonTimeout
+		reason := agentremote.ApprovalReasonTimeout
 		if ctx.Err() != nil {
-			reason = bridgeadapter.ApprovalReasonCancelled
+			reason = agentremote.ApprovalReasonCancelled
 		}
-		cc.approvalFlow.FinishResolved(approvalID, bridgeadapter.ApprovalDecisionPayload{
+		cc.approvalFlow.FinishResolved(approvalID, agentremote.ApprovalDecisionPayload{
 			ApprovalID: approvalID,
 			Reason:     reason,
 		})
@@ -2120,7 +2120,7 @@ func (cc *CodexClient) waitToolApproval(ctx context.Context, approvalID string) 
 func (cc *CodexClient) handleApprovalRequest(
 	ctx context.Context, req codexrpc.Request,
 	defaultToolName string,
-	extractInput func(json.RawMessage) (map[string]any, bridgeadapter.ApprovalPromptPresentation),
+	extractInput func(json.RawMessage) (map[string]any, agentremote.ApprovalPromptPresentation),
 ) (any, *codexrpc.RPCError) {
 	approvalID := strings.Trim(string(req.ID), "\"")
 	var params struct {
@@ -2165,7 +2165,7 @@ func (cc *CodexClient) handleApprovalRequest(
 
 	if active.meta != nil {
 		if lvl, _ := stringutil.NormalizeElevatedLevel(active.meta.ElevatedLevel); lvl == "full" {
-			cc.approvalFlow.FinishResolved(approvalID, bridgeadapter.ApprovalDecisionPayload{
+			cc.approvalFlow.FinishResolved(approvalID, agentremote.ApprovalDecisionPayload{
 				ApprovalID: approvalID,
 				Approved:   true,
 				Reason:     "auto-approved",
@@ -2176,13 +2176,13 @@ func (cc *CodexClient) handleApprovalRequest(
 
 	decision, ok := cc.waitToolApproval(ctx, approvalID)
 	if !ok {
-		return emitOutcome(false, bridgeadapter.ApprovalReasonTimeout)
+		return emitOutcome(false, agentremote.ApprovalReasonTimeout)
 	}
 	return emitOutcome(decision.Approved, decision.Reason)
 }
 
 func (cc *CodexClient) handleCommandApprovalRequest(ctx context.Context, req codexrpc.Request) (any, *codexrpc.RPCError) {
-	return cc.handleApprovalRequest(ctx, req, "commandExecution", func(raw json.RawMessage) (map[string]any, bridgeadapter.ApprovalPromptPresentation) {
+	return cc.handleApprovalRequest(ctx, req, "commandExecution", func(raw json.RawMessage) (map[string]any, agentremote.ApprovalPromptPresentation) {
 		var p struct {
 			Command *string `json:"command"`
 			Cwd     *string `json:"cwd"`
@@ -2190,11 +2190,11 @@ func (cc *CodexClient) handleCommandApprovalRequest(ctx context.Context, req cod
 		}
 		_ = json.Unmarshal(raw, &p)
 		input := map[string]any{}
-		details := make([]bridgeadapter.ApprovalDetail, 0, 3)
-		input, details = bridgeadapter.AddOptionalDetail(input, details, "command", "Command", p.Command)
-		input, details = bridgeadapter.AddOptionalDetail(input, details, "cwd", "Working directory", p.Cwd)
-		input, details = bridgeadapter.AddOptionalDetail(input, details, "reason", "Reason", p.Reason)
-		return input, bridgeadapter.ApprovalPromptPresentation{
+		details := make([]agentremote.ApprovalDetail, 0, 3)
+		input, details = agentremote.AddOptionalDetail(input, details, "command", "Command", p.Command)
+		input, details = agentremote.AddOptionalDetail(input, details, "cwd", "Working directory", p.Cwd)
+		input, details = agentremote.AddOptionalDetail(input, details, "reason", "Reason", p.Reason)
+		return input, agentremote.ApprovalPromptPresentation{
 			Title:       "Codex command execution",
 			Details:     details,
 			AllowAlways: false,
@@ -2203,17 +2203,17 @@ func (cc *CodexClient) handleCommandApprovalRequest(ctx context.Context, req cod
 }
 
 func (cc *CodexClient) handleFileChangeApprovalRequest(ctx context.Context, req codexrpc.Request) (any, *codexrpc.RPCError) {
-	return cc.handleApprovalRequest(ctx, req, "fileChange", func(raw json.RawMessage) (map[string]any, bridgeadapter.ApprovalPromptPresentation) {
+	return cc.handleApprovalRequest(ctx, req, "fileChange", func(raw json.RawMessage) (map[string]any, agentremote.ApprovalPromptPresentation) {
 		var p struct {
 			Reason    *string `json:"reason"`
 			GrantRoot *string `json:"grantRoot"`
 		}
 		_ = json.Unmarshal(raw, &p)
 		input := map[string]any{}
-		details := make([]bridgeadapter.ApprovalDetail, 0, 2)
-		input, details = bridgeadapter.AddOptionalDetail(input, details, "grantRoot", "Grant root", p.GrantRoot)
-		input, details = bridgeadapter.AddOptionalDetail(input, details, "reason", "Reason", p.Reason)
-		return input, bridgeadapter.ApprovalPromptPresentation{
+		details := make([]agentremote.ApprovalDetail, 0, 2)
+		input, details = agentremote.AddOptionalDetail(input, details, "grantRoot", "Grant root", p.GrantRoot)
+		input, details = agentremote.AddOptionalDetail(input, details, "reason", "Reason", p.Reason)
+		return input, agentremote.ApprovalPromptPresentation{
 			Title:       "Codex file change",
 			Details:     details,
 			AllowAlways: false,

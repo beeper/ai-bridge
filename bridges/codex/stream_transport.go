@@ -6,15 +6,15 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
-	"github.com/beeper/agentremote/pkg/shared/streamtransport"
+	"github.com/beeper/agentremote"
+	"github.com/beeper/agentremote/turns"
 )
 
 func (cc *CodexClient) sendDebouncedStreamEdit(ctx context.Context, portal *bridgev2.Portal, state *streamingState, force bool) error {
 	if cc == nil || state == nil || portal == nil {
 		return nil
 	}
-	return bridgeadapter.SendDebouncedStreamEdit(bridgeadapter.SendDebouncedStreamEditParams{
+	return agentremote.SendDebouncedStreamEdit(agentremote.SendDebouncedStreamEditParams{
 		Login:            cc.UserLogin,
 		Portal:           portal,
 		Sender:           cc.senderForPortal(),
@@ -27,20 +27,20 @@ func (cc *CodexClient) sendDebouncedStreamEdit(ctx context.Context, portal *brid
 	})
 }
 
-func (cc *CodexClient) ensureStreamSession(ctx context.Context, portal *bridgev2.Portal, state *streamingState) *streamtransport.StreamSession {
+func (cc *CodexClient) ensureStreamSession(ctx context.Context, portal *bridgev2.Portal, state *streamingState) *turns.StreamSession {
 	if cc == nil || portal == nil || state == nil {
 		return nil
 	}
 	if state.session != nil {
 		return state.session
 	}
-	state.session = streamtransport.NewStreamSession(streamtransport.StreamSessionParams{
+	state.session = turns.NewStreamSession(turns.StreamSessionParams{
 		TurnID:  state.turnID,
 		AgentID: state.agentID,
-		GetStreamTarget: func() streamtransport.StreamTarget {
+		GetStreamTarget: func() turns.StreamTarget {
 			return state.streamTarget()
 		},
-		ResolveTargetEventID: func(callCtx context.Context, target streamtransport.StreamTarget) (id.EventID, error) {
+		ResolveTargetEventID: func(callCtx context.Context, target turns.StreamTarget) (id.EventID, error) {
 			return cc.resolveStreamTargetEventID(callCtx, portal, state, target)
 		},
 		GetRoomID: func() id.RoomID {
@@ -81,14 +81,14 @@ func (cc *CodexClient) emitStreamEvent(ctx context.Context, portal *bridgev2.Por
 	if state == nil {
 		return
 	}
-	streamtransport.EmitStreamEventWithSession(
+	turns.EmitStreamEventWithSession(
 		ctx,
 		portal,
 		state.turnID,
 		state.suppressSend,
 		&state.loggedStreamStart,
 		cc.loggerForContext(ctx),
-		func() *streamtransport.StreamSession { return cc.ensureStreamSession(ctx, portal, state) },
+		func() *turns.StreamSession { return cc.ensureStreamSession(ctx, portal, state) },
 		part,
 	)
 }
@@ -97,7 +97,7 @@ func (cc *CodexClient) resolveStreamTargetEventID(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	state *streamingState,
-	target streamtransport.StreamTarget,
+	target turns.StreamTarget,
 ) (id.EventID, error) {
 	if state != nil && state.initialEventID != "" {
 		return state.initialEventID, nil
@@ -105,7 +105,7 @@ func (cc *CodexClient) resolveStreamTargetEventID(
 	if cc == nil || cc.UserLogin == nil || cc.UserLogin.Bridge == nil || portal == nil {
 		return "", nil
 	}
-	eventID, err := streamtransport.ResolveTargetEventIDFromDB(ctx, cc.UserLogin.Bridge, portal.Receiver, target)
+	eventID, err := turns.ResolveTargetEventIDFromDB(ctx, cc.UserLogin.Bridge, portal.Receiver, target)
 	if err == nil && eventID != "" && state != nil {
 		state.initialEventID = eventID
 	}

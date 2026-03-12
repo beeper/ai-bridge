@@ -46,13 +46,13 @@ Upstream reference (AI SDK):
 
 Reference implementation in this repo (ai-bridge):
 - Event type identifiers: `pkg/matrixevents/matrixevents.go`
-- Event payload structs (where defined): `pkg/connector/events.go`
-- Streaming envelope and emission: `pkg/matrixevents/matrixevents.go`, `pkg/connector/stream_events.go`
-- Tool call/result projections: `pkg/connector/tool_execution.go`
-- Compaction status emission: `pkg/connector/response_retry.go`
-- State broadcast: `pkg/connector/chat.go`
-- Approvals: `pkg/connector/tool_approvals*.go`, `pkg/connector/handlematrix.go`, `pkg/connector/handler_interfaces.go`, `pkg/connector/streaming_ui_tools.go`
-- Shared approval manager + approval-decision parser: `pkg/bridgeadapter/approval_manager.go`, `pkg/bridgeadapter/approval_decision.go`
+- Event payload structs (where defined): `bridges/ai/events.go`
+- Streaming envelope and emission: `pkg/matrixevents/matrixevents.go`, `bridges/ai/stream_events.go`
+- Tool call/result projections: `bridges/ai/tool_execution.go`
+- Compaction status emission: `bridges/ai/response_retry.go`
+- State broadcast: `bridges/ai/chat.go`
+- Approvals: `bridges/ai/tool_approvals*.go`, `bridges/ai/handlematrix.go`, `bridges/ai/handler_interfaces.go`, `bridges/ai/streaming_ui_tools.go`
+- Shared approval manager + approval-decision parser: `approval_manager.go`, `approval_decision.go`
 
 <a id="compatibility"></a>
 ## Compatibility
@@ -293,7 +293,7 @@ Approvals are an owner-only gate for:
 - MCP approvals (OpenAI Responses `mcp_approval_request` items).
 - Selected builtin tool actions, configured via `network.tool_approvals.requireForTools`.
 
-Config (see `pkg/connector/example-config.yaml`):
+Config (see `config.example.yaml` and `bridges/ai/integrations_config.go`):
 - `network.tool_approvals.enabled` (default true)
 - `network.tool_approvals.ttlSeconds` (default 600)
 - `network.tool_approvals.requireForMcp` (default true)
@@ -372,7 +372,7 @@ The bridge may set:
 
 <a id="other-keys-agent"></a>
 ### Agent Definitions in `m.room.member` (Builder room)
-Agent definitions can be stored in member state (see `AgentMemberContent` in `pkg/connector/events.go`):
+Agent definitions can be stored in member state (see `AgentMemberContent` in `bridges/ai/events.go`):
 - `com.beeper.ai.agent: AgentDefinitionContent`
 
 Example:

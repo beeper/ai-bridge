@@ -19,7 +19,7 @@ import (
 
 	"github.com/beeper/agentremote/bridges/codex/codexrpc"
 	"github.com/beeper/agentremote/pkg/aidb"
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 var (
@@ -29,7 +29,7 @@ var (
 
 // CodexConnector runs the dedicated Codex bridge surface.
 type CodexConnector struct {
-	bridgeadapter.BaseConnectorMethods
+	agentremote.BaseConnectorMethods
 	br     *bridgev2.Bridge
 	Config Config
 	db     *dbutil.Database
@@ -63,11 +63,11 @@ func (cc *CodexConnector) Init(bridge *bridgev2.Bridge) {
 			dbutil.ZeroLogger(bridge.Log.With().Str("db_section", "codex_bridge").Logger()),
 		)
 	}
-	bridgeadapter.EnsureClientMap(&cc.clientsMu, &cc.clients)
+	agentremote.EnsureClientMap(&cc.clientsMu, &cc.clients)
 }
 
 func (cc *CodexConnector) Stop(ctx context.Context) {
-	bridgeadapter.StopClients(&cc.clientsMu, &cc.clients)
+	agentremote.StopClients(&cc.clientsMu, &cc.clients)
 }
 
 func (cc *CodexConnector) Start(ctx context.Context) error {
@@ -77,7 +77,7 @@ func (cc *CodexConnector) Start(ctx context.Context) error {
 	}
 
 	cc.applyRuntimeDefaults()
-	bridgeadapter.PrimeUserLoginCache(ctx, cc.br)
+	agentremote.PrimeUserLoginCache(ctx, cc.br)
 	cc.reconcileHostAuthLogins(ctx)
 
 	return nil
@@ -266,7 +266,7 @@ func (cc *CodexConnector) ensureHostAuthLoginForUserWithProbe(ctx context.Contex
 }
 
 func (cc *CodexConnector) hostAuthLoginID(mxid id.UserID) networkid.UserLoginID {
-	return bridgeadapter.MakeUserLoginID(hostAuthLoginPrefix, mxid, 1)
+	return agentremote.MakeUserLoginID(hostAuthLoginPrefix, mxid, 1)
 }
 
 func hasManagedCodexLogin(logins []*bridgev2.UserLogin, exceptID networkid.UserLoginID) bool {
@@ -348,7 +348,7 @@ func (cc *CodexConnector) GetConfig() (example string, data any, upgrader config
 }
 
 func (cc *CodexConnector) GetDBMetaTypes() database.MetaTypes {
-	return bridgeadapter.BuildMetaTypes(
+	return agentremote.BuildMetaTypes(
 		func() any { return &PortalMetadata{} },
 		func() any { return &MessageMetadata{} },
 		func() any { return &UserLoginMetadata{} },
@@ -366,9 +366,9 @@ func (cc *CodexConnector) LoadUserLogin(_ context.Context, login *bridgev2.UserL
 		login.Client = newBrokenLoginClient(login, cc, "Codex integration is disabled in the configuration.")
 		return nil
 	}
-	return bridgeadapter.LoadUserLogin(login, bridgeadapter.LoadUserLoginConfig[*CodexClient]{
+	return agentremote.LoadUserLogin(login, agentremote.LoadUserLoginConfig[*CodexClient]{
 		Mu: &cc.clientsMu, Clients: cc.clients, BridgeName: "Codex",
-		MakeBroken: func(l *bridgev2.UserLogin, reason string) *bridgeadapter.BrokenLoginClient {
+		MakeBroken: func(l *bridgev2.UserLogin, reason string) *agentremote.BrokenLoginClient {
 			return newBrokenLoginClient(l, cc, reason)
 		},
 		Update:    func(e *CodexClient, l *bridgev2.UserLogin) { e.UserLogin = l },

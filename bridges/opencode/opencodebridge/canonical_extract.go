@@ -3,7 +3,7 @@ package opencodebridge
 import (
 	"strings"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/pkg/shared/maputil"
 	"github.com/beeper/agentremote/pkg/shared/stringutil"
 )
@@ -30,9 +30,9 @@ func CanonicalReasoningText(uiMessage map[string]any) string {
 }
 
 // CanonicalGeneratedFiles extracts file references from a canonical UI message.
-func CanonicalGeneratedFiles(uiMessage map[string]any) []bridgeadapter.GeneratedFileRef {
+func CanonicalGeneratedFiles(uiMessage map[string]any) []agentremote.GeneratedFileRef {
 	parts, _ := uiMessage["parts"].([]any)
-	var refs []bridgeadapter.GeneratedFileRef
+	var refs []agentremote.GeneratedFileRef
 	for _, raw := range parts {
 		part, ok := raw.(map[string]any)
 		if !ok || maputil.StringArg(part, "type") != "file" {
@@ -42,7 +42,7 @@ func CanonicalGeneratedFiles(uiMessage map[string]any) []bridgeadapter.Generated
 		if url == "" {
 			continue
 		}
-		refs = append(refs, bridgeadapter.GeneratedFileRef{
+		refs = append(refs, agentremote.GeneratedFileRef{
 			URL:      url,
 			MimeType: stringutil.FirstNonEmpty(maputil.StringArg(part, "mediaType"), "application/octet-stream"),
 		})
@@ -51,15 +51,15 @@ func CanonicalGeneratedFiles(uiMessage map[string]any) []bridgeadapter.Generated
 }
 
 // CanonicalToolCalls extracts tool call metadata from a canonical UI message.
-func CanonicalToolCalls(uiMessage map[string]any) []bridgeadapter.ToolCallMetadata {
+func CanonicalToolCalls(uiMessage map[string]any) []agentremote.ToolCallMetadata {
 	parts, _ := uiMessage["parts"].([]any)
-	var calls []bridgeadapter.ToolCallMetadata
+	var calls []agentremote.ToolCallMetadata
 	for _, raw := range parts {
 		part, ok := raw.(map[string]any)
 		if !ok || maputil.StringArg(part, "type") != "dynamic-tool" {
 			continue
 		}
-		call := bridgeadapter.ToolCallMetadata{
+		call := agentremote.ToolCallMetadata{
 			CallID:   maputil.StringArg(part, "toolCallId"),
 			ToolName: maputil.StringArg(part, "toolName"),
 			ToolType: "opencode",

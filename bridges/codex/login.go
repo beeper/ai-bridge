@@ -17,7 +17,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 
 	"github.com/beeper/agentremote/bridges/codex/codexrpc"
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 var (
@@ -68,7 +68,7 @@ func (cl *CodexLogin) logger(ctx context.Context) *zerolog.Logger {
 		l := zerolog.Nop()
 		fallback = &l
 	}
-	return bridgeadapter.LoggerFromContext(ctx, fallback)
+	return agentremote.LoggerFromContext(ctx, fallback)
 }
 
 func (cl *CodexLogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
@@ -609,7 +609,7 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 	persistCtx := cl.backgroundProcessContext()
 	log := cl.logger(persistCtx)
 
-	loginID := bridgeadapter.NextUserLoginID(cl.User, "codex")
+	loginID := agentremote.NextUserLoginID(cl.User, "codex")
 	remoteName := "Codex"
 	dupCount := 0
 	for _, existing := range cl.User.GetUserLogins() {

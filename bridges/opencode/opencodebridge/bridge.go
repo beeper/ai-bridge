@@ -12,7 +12,7 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	"github.com/beeper/agentremote/bridges/opencode/opencode"
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 // Host provides the minimal surface area the OpenCode bridge needs
@@ -93,7 +93,7 @@ func (b *Bridge) AbortSession(ctx context.Context, instanceID, sessionID string)
 }
 
 // ApprovalHandler returns the manager's ApprovalFlow as an ApprovalReactionHandler, or nil if unavailable.
-func (b *Bridge) ApprovalHandler() bridgeadapter.ApprovalReactionHandler {
+func (b *Bridge) ApprovalHandler() agentremote.ApprovalReactionHandler {
 	if b == nil || b.manager == nil {
 		return nil
 	}

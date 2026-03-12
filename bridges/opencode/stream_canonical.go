@@ -11,11 +11,11 @@ import (
 	"maunium.net/go/mautrix/format"
 
 	"github.com/beeper/agentremote/bridges/opencode/opencodebridge"
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
-	"github.com/beeper/agentremote/pkg/connector/msgconv"
+	"github.com/beeper/agentremote"
+	"github.com/beeper/agentremote/bridges/ai/msgconv"
 	"github.com/beeper/agentremote/pkg/matrixevents"
 	"github.com/beeper/agentremote/pkg/shared/maputil"
-	"github.com/beeper/agentremote/pkg/shared/streamtransport"
+	"github.com/beeper/agentremote/turns"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 	"github.com/beeper/agentremote/pkg/shared/stringutil"
 )
@@ -149,7 +149,7 @@ func (oc *OpenCodeClient) buildStreamDBMetadata(state *openCodeStreamState) *Mes
 	uiMessage := oc.currentCanonicalUIMessage(state)
 	thinking := opencodebridge.CanonicalReasoningText(uiMessage)
 	return &MessageMetadata{
-		BaseMessageMetadata: bridgeadapter.BaseMessageMetadata{
+		BaseMessageMetadata: agentremote.BaseMessageMetadata{
 			Role:               stringutil.FirstNonEmpty(state.role, "assistant"),
 			Body:               stringutil.FirstNonEmpty(state.visible.String(), state.accumulated.String()),
 			FinishReason:       state.finishReason,
@@ -251,7 +251,7 @@ func (oc *OpenCodeClient) queueFinalStreamEdit(ctx context.Context, portal *brid
 		Timestamp:     eventTS,
 		StreamOrder:   openCodeNextStreamOrder(state, eventTS),
 		LogKey:        "opencode_edit_target",
-		PreBuilt: streamtransport.BuildRenderedConvertedEdit(streamtransport.RenderedMarkdownContent{
+		PreBuilt: turns.BuildRenderedConvertedEdit(turns.RenderedMarkdownContent{
 			Body:          rendered.Body,
 			Format:        rendered.Format,
 			FormattedBody: rendered.FormattedBody,

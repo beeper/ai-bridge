@@ -12,7 +12,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 var (
@@ -58,7 +58,7 @@ type openClawPendingLogin struct {
 }
 
 type OpenClawLogin struct {
-	bridgeadapter.BaseLoginProcess
+	agentremote.BaseLoginProcess
 	User      *bridgev2.User
 	Connector *OpenClawConnector
 

@@ -15,7 +15,7 @@ import (
 
 	openCodeAPI "github.com/beeper/agentremote/bridges/opencode/opencode"
 	"github.com/beeper/agentremote/bridges/opencode/opencodebridge"
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 var (
@@ -33,7 +33,7 @@ const (
 )
 
 type OpenCodeLogin struct {
-	bridgeadapter.BaseLoginProcess
+	agentremote.BaseLoginProcess
 	User      *bridgev2.User
 	Connector *OpenCodeConnector
 	FlowID    string
@@ -163,7 +163,7 @@ func (ol *OpenCodeLogin) SubmitUserInput(ctx context.Context, input map[string]s
 		return openCodeCompleteStep(existing), nil
 	}
 
-	loginID := bridgeadapter.NextUserLoginID(ol.User, "opencode")
+	loginID := agentremote.NextUserLoginID(ol.User, "opencode")
 
 	login, err := ol.User.NewLogin(ctx, &database.UserLogin{
 		ID:         loginID,

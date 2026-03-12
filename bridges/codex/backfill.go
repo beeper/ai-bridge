@@ -19,7 +19,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/pkg/shared/backfillutil"
 )
 
@@ -223,7 +223,7 @@ func (cc *CodexClient) ensureCodexThreadPortal(ctx context.Context, existing *br
 		if err := portal.CreateMatrixRoom(ctx, cc.UserLogin, info); err != nil {
 			return nil, false, err
 		}
-		bridgeadapter.SendAIRoomInfo(ctx, portal, bridgeadapter.AIRoomKindAgent)
+		agentremote.SendAIRoomInfo(ctx, portal, agentremote.AIRoomKindAgent)
 		if meta.AwaitingCwdSetup {
 			cc.sendSystemNotice(ctx, portal, "This imported conversation needs a working directory. Send an absolute path or `~/...`.")
 		}
@@ -232,7 +232,7 @@ func (cc *CodexClient) ensureCodexThreadPortal(ctx context.Context, existing *br
 			return nil, false, err
 		}
 		portal.UpdateInfo(ctx, info, cc.UserLogin, nil, time.Time{})
-		bridgeadapter.SendAIRoomInfo(ctx, portal, bridgeadapter.AIRoomKindAgent)
+		agentremote.SendAIRoomInfo(ctx, portal, agentremote.AIRoomKindAgent)
 		cc.UserLogin.Bridge.WakeupBackfillQueue()
 	}
 
@@ -405,7 +405,7 @@ func codexBackfillConvertedMessage(role, text, turnID string) *bridgev2.Converte
 				"m.mentions": map[string]any{},
 			},
 			DBMetadata: &MessageMetadata{
-				BaseMessageMetadata: bridgeadapter.BaseMessageMetadata{
+				BaseMessageMetadata: agentremote.BaseMessageMetadata{
 					Role:   role,
 					Body:   text,
 					TurnID: turnID,

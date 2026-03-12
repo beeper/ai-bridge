@@ -39,7 +39,7 @@ encryption:
   delete_keys:
     ratchet_on_decrypt: false
 
-# Connector-specific options (identical to pkg/connector/example-config.yaml)
+# AI bridge-specific options (shared with the embedded example in bridges/ai/integrations_config.go)
 network:
   # Beeper Cloud credentials for automatic login (optional)
   beeper:

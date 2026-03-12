@@ -11,7 +11,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 var (
@@ -20,7 +20,7 @@ var (
 )
 
 type OpenClawConnector struct {
-	bridgeadapter.BaseConnectorMethods
+	agentremote.BaseConnectorMethods
 	br     *bridgev2.Bridge
 	Config Config
 
@@ -30,13 +30,13 @@ type OpenClawConnector struct {
 
 func NewConnector() *OpenClawConnector {
 	return &OpenClawConnector{
-		BaseConnectorMethods: bridgeadapter.BaseConnectorMethods{ProtocolID: "ai-openclaw"},
+		BaseConnectorMethods: agentremote.BaseConnectorMethods{ProtocolID: "ai-openclaw"},
 	}
 }
 
 func (oc *OpenClawConnector) Init(bridge *bridgev2.Bridge) {
 	oc.br = bridge
-	bridgeadapter.EnsureClientMap(&oc.clientsMu, &oc.clients)
+	agentremote.EnsureClientMap(&oc.clientsMu, &oc.clients)
 }
 
 func (oc *OpenClawConnector) Start(_ context.Context) error {
@@ -50,11 +50,11 @@ func (oc *OpenClawConnector) Start(_ context.Context) error {
 }
 
 func (oc *OpenClawConnector) Stop(_ context.Context) {
-	bridgeadapter.StopClients(&oc.clientsMu, &oc.clients)
+	agentremote.StopClients(&oc.clientsMu, &oc.clients)
 }
 
 func (oc *OpenClawConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
-	caps := bridgeadapter.DefaultNetworkCapabilities()
+	caps := agentremote.DefaultNetworkCapabilities()
 	// OpenClaw supports session reset/delete, but not timer-backed disappearing messages.
 	caps.DisappearingMessages = false
 	return caps
@@ -87,10 +87,10 @@ func (oc *OpenClawConnector) GetDBMetaTypes() database.MetaTypes {
 func (oc *OpenClawConnector) LoadUserLogin(_ context.Context, login *bridgev2.UserLogin) error {
 	meta := loginMetadata(login)
 	if !strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderOpenClaw) {
-		login.Client = &bridgeadapter.BrokenLoginClient{UserLogin: login, Reason: "This bridge only supports OpenClaw logins."}
+		login.Client = &agentremote.BrokenLoginClient{UserLogin: login, Reason: "This bridge only supports OpenClaw logins."}
 		return nil
 	}
-	return bridgeadapter.LoadUserLogin(login, bridgeadapter.LoadUserLoginConfig[*OpenClawClient]{
+	return agentremote.LoadUserLogin(login, agentremote.LoadUserLoginConfig[*OpenClawClient]{
 		Mu: &oc.clientsMu, Clients: oc.clients, BridgeName: "OpenClaw",
 		Update: func(e *OpenClawClient, l *bridgev2.UserLogin) { e.UserLogin = l },
 		Create: func(l *bridgev2.UserLogin) (*OpenClawClient, error) { return newOpenClawClient(l, oc) },
@@ -98,7 +98,7 @@ func (oc *OpenClawConnector) LoadUserLogin(_ context.Context, login *bridgev2.Us
 }
 
 func (oc *OpenClawConnector) GetLoginFlows() []bridgev2.LoginFlow {
-	return bridgeadapter.SingleLoginFlow(oc.openClawEnabled(), bridgev2.LoginFlow{
+	return agentremote.SingleLoginFlow(oc.openClawEnabled(), bridgev2.LoginFlow{
 		ID:          ProviderOpenClaw,
 		Name:        "OpenClaw",
 		Description: "Create a login for an OpenClaw gateway.",
@@ -106,7 +106,7 @@ func (oc *OpenClawConnector) GetLoginFlows() []bridgev2.LoginFlow {
 }
 
 func (oc *OpenClawConnector) CreateLogin(_ context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
-	if err := bridgeadapter.ValidateSingleLoginFlow(flowID, ProviderOpenClaw, oc.openClawEnabled()); err != nil {
+	if err := agentremote.ValidateSingleLoginFlow(flowID, ProviderOpenClaw, oc.openClawEnabled()); err != nil {
 		return nil, err
 	}
 	return &OpenClawLogin{User: user, Connector: oc}, nil

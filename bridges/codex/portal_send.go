@@ -9,7 +9,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 // sendViaPortal sends a pre-built message through bridgev2's QueueRemoteEvent pipeline.
@@ -29,7 +29,7 @@ func (cc *CodexClient) sendViaPortalWithOrdering(
 	timestamp time.Time,
 	streamOrder int64,
 ) (id.EventID, networkid.MessageID, error) {
-	return bridgeadapter.SendViaPortal(bridgeadapter.SendViaPortalParams{
+	return agentremote.SendViaPortal(agentremote.SendViaPortalParams{
 		Login:       cc.UserLogin,
 		Portal:      portal,
 		Sender:      cc.senderForPortal(),

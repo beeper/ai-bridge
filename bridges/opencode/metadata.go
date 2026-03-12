@@ -4,7 +4,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 
 	"github.com/beeper/agentremote/bridges/opencode/opencodebridge"
 )
@@ -32,13 +32,13 @@ type MessageMetadata = opencodebridge.MessageMetadata
 type GhostMetadata struct{}
 
 func loginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
-	return bridgeadapter.EnsureLoginMetadata[UserLoginMetadata](login)
+	return agentremote.EnsureLoginMetadata[UserLoginMetadata](login)
 }
 
 func portalMeta(portal *bridgev2.Portal) *PortalMetadata {
-	return bridgeadapter.EnsurePortalMetadata[PortalMetadata](portal)
+	return agentremote.EnsurePortalMetadata[PortalMetadata](portal)
 }
 
 func humanUserID(loginID networkid.UserLoginID) networkid.UserID {
-	return bridgeadapter.HumanUserID("opencode-user", loginID)
+	return agentremote.HumanUserID("opencode-user", loginID)
 }

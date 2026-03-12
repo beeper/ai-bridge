@@ -1,9 +1,9 @@
 package codex
 
-import "github.com/beeper/agentremote/pkg/bridgeadapter"
+import "github.com/beeper/agentremote"
 
 func NewConnector() *CodexConnector {
 	return &CodexConnector{
-		BaseConnectorMethods: bridgeadapter.BaseConnectorMethods{ProtocolID: "ai-codex"},
+		BaseConnectorMethods: agentremote.BaseConnectorMethods{ProtocolID: "ai-codex"},
 	}
 }

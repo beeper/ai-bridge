@@ -16,7 +16,7 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/agentremote/bridges/opencode/opencode"
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 // OpenCodeManager coordinates connections to OpenCode server instances,
@@ -25,7 +25,7 @@ type OpenCodeManager struct {
 	bridge       *Bridge
 	mu           sync.RWMutex
 	instances    map[string]*openCodeInstance
-	approvalFlow *bridgeadapter.ApprovalFlow[*permissionApprovalRef]
+	approvalFlow *agentremote.ApprovalFlow[*permissionApprovalRef]
 }
 
 type permissionApprovalRef struct {
@@ -35,26 +35,26 @@ type permissionApprovalRef struct {
 	MessageID    string
 	ToolCallID   string
 	PermissionID string
-	Presentation bridgeadapter.ApprovalPromptPresentation
+	Presentation agentremote.ApprovalPromptPresentation
 }
 
-func buildOpenCodeApprovalPresentation(req opencode.PermissionRequest) bridgeadapter.ApprovalPromptPresentation {
+func buildOpenCodeApprovalPresentation(req opencode.PermissionRequest) agentremote.ApprovalPromptPresentation {
 	permission := strings.TrimSpace(req.Permission)
 	title := "OpenCode permission request"
 	if permission != "" {
 		title = "OpenCode permission request: " + permission
 	}
-	details := make([]bridgeadapter.ApprovalDetail, 0, 8)
+	details := make([]agentremote.ApprovalDetail, 0, 8)
 	if permission != "" {
-		details = append(details, bridgeadapter.ApprovalDetail{Label: "Permission", Value: permission})
+		details = append(details, agentremote.ApprovalDetail{Label: "Permission", Value: permission})
 	}
-	if v := bridgeadapter.ValueSummary(req.Patterns); v != "" {
-		details = append(details, bridgeadapter.ApprovalDetail{Label: "Patterns", Value: v})
+	if v := agentremote.ValueSummary(req.Patterns); v != "" {
+		details = append(details, agentremote.ApprovalDetail{Label: "Patterns", Value: v})
 	}
 	if len(req.Metadata) > 0 {
-		details = bridgeadapter.AppendDetailsFromMap(details, "Metadata", req.Metadata, 4)
+		details = agentremote.AppendDetailsFromMap(details, "Metadata", req.Metadata, 4)
 	}
-	return bridgeadapter.ApprovalPromptPresentation{
+	return agentremote.ApprovalPromptPresentation{
 		Title:       title,
 		Details:     details,
 		AllowAlways: true,
@@ -66,7 +66,7 @@ func NewOpenCodeManager(bridge *Bridge) *OpenCodeManager {
 		bridge:    bridge,
 		instances: make(map[string]*openCodeInstance),
 	}
-	mgr.approvalFlow = bridgeadapter.NewApprovalFlow(bridgeadapter.ApprovalFlowConfig[*permissionApprovalRef]{
+	mgr.approvalFlow = agentremote.NewApprovalFlow(agentremote.ApprovalFlowConfig[*permissionApprovalRef]{
 		Login: func() *bridgev2.UserLogin {
 			if bridge != nil && bridge.host != nil {
 				return bridge.host.Login()
@@ -92,12 +92,12 @@ func NewOpenCodeManager(bridge *Bridge) *OpenCodeManager {
 			}
 			return data.RoomID
 		},
-		DeliverDecision: func(ctx context.Context, portal *bridgev2.Portal, pending *bridgeadapter.Pending[*permissionApprovalRef], decision bridgeadapter.ApprovalDecisionPayload) error {
+		DeliverDecision: func(ctx context.Context, portal *bridgev2.Portal, pending *agentremote.Pending[*permissionApprovalRef], decision agentremote.ApprovalDecisionPayload) error {
 			ref := pending.Data
 			if ref == nil {
-				return bridgeadapter.ErrApprovalUnknown
+				return agentremote.ErrApprovalUnknown
 			}
-			response := bridgeadapter.DecisionToString(decision, "once", "always", "reject")
+			response := agentremote.DecisionToString(decision, "once", "always", "reject")
 			inst, err := mgr.requireConnectedInstance(ref.InstanceID)
 			if err != nil {
 				return err
@@ -880,8 +880,8 @@ func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *
 			ownerMXID = login.UserMXID
 		}
 	}
-	m.approvalFlow.SendPrompt(ctx, portal, bridgeadapter.SendPromptParams{
-		ApprovalPromptMessageParams: bridgeadapter.ApprovalPromptMessageParams{
+	m.approvalFlow.SendPrompt(ctx, portal, agentremote.SendPromptParams{
+		ApprovalPromptMessageParams: agentremote.ApprovalPromptMessageParams{
 			ApprovalID:   approvalID,
 			ToolCallID:   toolCallID,
 			ToolName:     toolName,
@@ -935,7 +935,7 @@ func (m *OpenCodeManager) handlePermissionRepliedEvent(ctx context.Context, inst
 			})
 		}
 	}
-	m.approvalFlow.ResolveExternal(ctx, strings.TrimSpace(payload.RequestID), bridgeadapter.ApprovalDecisionPayload{
+	m.approvalFlow.ResolveExternal(ctx, strings.TrimSpace(payload.RequestID), agentremote.ApprovalDecisionPayload{
 		ApprovalID: strings.TrimSpace(payload.RequestID),
 		Approved:   approved,
 		Always:     strings.EqualFold(strings.TrimSpace(payload.Reply), "always"),

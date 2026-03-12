@@ -12,11 +12,11 @@ import (
 	"maunium.net/go/mautrix/format"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/agentremote/pkg/connector/msgconv"
+	"github.com/beeper/agentremote/bridges/ai/msgconv"
 	"github.com/beeper/agentremote/pkg/matrixevents"
 	"github.com/beeper/agentremote/pkg/shared/maputil"
 	"github.com/beeper/agentremote/pkg/shared/openclawconv"
-	"github.com/beeper/agentremote/pkg/shared/streamtransport"
+	"github.com/beeper/agentremote/turns"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 )
 
@@ -151,18 +151,18 @@ func (oc *OpenClawClient) EmitStreamPart(ctx context.Context, portal *bridgev2.P
 	state = oc.ensureStreamStateLocked(portal, turnID, agentID, sessionKey)
 	session := oc.StreamSessions[turnID]
 	if session == nil {
-		session = streamtransport.NewStreamSession(streamtransport.StreamSessionParams{
+		session = turns.NewStreamSession(turns.StreamSessionParams{
 			TurnID:  turnID,
 			AgentID: state.agentID,
-			GetStreamTarget: func() streamtransport.StreamTarget {
+			GetStreamTarget: func() turns.StreamTarget {
 				oc.StreamMu.Lock()
 				defer oc.StreamMu.Unlock()
 				if current := oc.streamStates[turnID]; current != nil {
-					return streamtransport.StreamTarget{NetworkMessageID: current.networkMessageID}
+					return turns.StreamTarget{NetworkMessageID: current.networkMessageID}
 				}
-				return streamtransport.StreamTarget{}
+				return turns.StreamTarget{}
 			},
-			ResolveTargetEventID: func(callCtx context.Context, target streamtransport.StreamTarget) (id.EventID, error) {
+			ResolveTargetEventID: func(callCtx context.Context, target turns.StreamTarget) (id.EventID, error) {
 				return oc.resolveStreamTargetEventID(callCtx, portal, turnID, target)
 			},
 			GetRoomID: func() id.RoomID {
@@ -228,7 +228,7 @@ func (oc *OpenClawClient) FinishStream(turnID, finishReason string) {
 	oc.StreamMu.Unlock()
 
 	if session != nil {
-		session.End(oc.BackgroundContext(context.Background()), streamtransport.EndReasonFinish)
+		session.End(oc.BackgroundContext(context.Background()), turns.EndReasonFinish)
 	}
 }
 
@@ -382,7 +382,7 @@ func (oc *OpenClawClient) resolveStreamTargetEventID(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	turnID string,
-	target streamtransport.StreamTarget,
+	target turns.StreamTarget,
 ) (id.EventID, error) {
 	oc.StreamMu.Lock()
 	state := oc.streamStates[turnID]
@@ -396,7 +396,7 @@ func (oc *OpenClawClient) resolveStreamTargetEventID(
 	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || portal == nil {
 		return "", nil
 	}
-	eventID, err := streamtransport.ResolveTargetEventIDFromDB(ctx, oc.UserLogin.Bridge, portal.Receiver, target)
+	eventID, err := turns.ResolveTargetEventIDFromDB(ctx, oc.UserLogin.Bridge, portal.Receiver, target)
 	if err == nil && eventID != "" {
 		oc.StreamMu.Lock()
 		if state := oc.streamStates[turnID]; state != nil && state.initialEventID == "" {
@@ -576,7 +576,7 @@ func (oc *OpenClawClient) queueDebouncedStreamEdit(ctx context.Context, portal *
 		visibleBody = strings.TrimSpace(state.visible.String())
 	}
 	fallbackBody := strings.TrimSpace(state.accumulated.String())
-	content := streamtransport.BuildDebouncedEditContent(streamtransport.DebouncedEditParams{
+	content := turns.BuildDebouncedEditContent(turns.DebouncedEditParams{
 		PortalMXID:   portal.MXID.String(),
 		Force:        force,
 		SuppressSend: false,

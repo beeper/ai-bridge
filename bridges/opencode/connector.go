@@ -12,7 +12,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 var (
@@ -21,7 +21,7 @@ var (
 )
 
 type OpenCodeConnector struct {
-	bridgeadapter.BaseConnectorMethods
+	agentremote.BaseConnectorMethods
 	br     *bridgev2.Bridge
 	Config Config
 
@@ -31,13 +31,13 @@ type OpenCodeConnector struct {
 
 func NewConnector() *OpenCodeConnector {
 	return &OpenCodeConnector{
-		BaseConnectorMethods: bridgeadapter.BaseConnectorMethods{ProtocolID: "ai-opencode"},
+		BaseConnectorMethods: agentremote.BaseConnectorMethods{ProtocolID: "ai-opencode"},
 	}
 }
 
 func (oc *OpenCodeConnector) Init(bridge *bridgev2.Bridge) {
 	oc.br = bridge
-	bridgeadapter.EnsureClientMap(&oc.clientsMu, &oc.clients)
+	agentremote.EnsureClientMap(&oc.clientsMu, &oc.clients)
 }
 
 func (oc *OpenCodeConnector) Start(_ context.Context) error {
@@ -51,7 +51,7 @@ func (oc *OpenCodeConnector) Start(_ context.Context) error {
 }
 
 func (oc *OpenCodeConnector) Stop(_ context.Context) {
-	bridgeadapter.StopClients(&oc.clientsMu, &oc.clients)
+	agentremote.StopClients(&oc.clientsMu, &oc.clients)
 }
 
 func (oc *OpenCodeConnector) GetName() bridgev2.BridgeName {
@@ -70,7 +70,7 @@ func (oc *OpenCodeConnector) GetConfig() (example string, data any, upgrader con
 }
 
 func (oc *OpenCodeConnector) GetDBMetaTypes() database.MetaTypes {
-	return bridgeadapter.BuildMetaTypes(
+	return agentremote.BuildMetaTypes(
 		func() any { return &PortalMetadata{} },
 		func() any { return &MessageMetadata{} },
 		func() any { return &UserLoginMetadata{} },
@@ -81,10 +81,10 @@ func (oc *OpenCodeConnector) GetDBMetaTypes() database.MetaTypes {
 func (oc *OpenCodeConnector) LoadUserLogin(_ context.Context, login *bridgev2.UserLogin) error {
 	meta := loginMetadata(login)
 	if !strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderOpenCode) {
-		login.Client = &bridgeadapter.BrokenLoginClient{UserLogin: login, Reason: "This bridge only supports OpenCode logins."}
+		login.Client = &agentremote.BrokenLoginClient{UserLogin: login, Reason: "This bridge only supports OpenCode logins."}
 		return nil
 	}
-	return bridgeadapter.LoadUserLogin(login, bridgeadapter.LoadUserLoginConfig[*OpenCodeClient]{
+	return agentremote.LoadUserLogin(login, agentremote.LoadUserLoginConfig[*OpenCodeClient]{
 		Mu: &oc.clientsMu, Clients: oc.clients, BridgeName: "OpenCode",
 		Update: func(e *OpenCodeClient, l *bridgev2.UserLogin) { e.UserLogin = l },
 		Create: func(l *bridgev2.UserLogin) (*OpenCodeClient, error) { return newOpenCodeClient(l, oc) },

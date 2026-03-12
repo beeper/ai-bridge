@@ -11,7 +11,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/agentremote/pkg/connector/msgconv"
+	"github.com/beeper/agentremote/bridges/ai/msgconv"
 	"github.com/beeper/agentremote/pkg/shared/cachedvalue"
 )
 

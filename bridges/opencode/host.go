@@ -13,10 +13,10 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/agentremote/bridges/opencode/opencodebridge"
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
-	"github.com/beeper/agentremote/pkg/connector/msgconv"
+	"github.com/beeper/agentremote"
+	"github.com/beeper/agentremote/bridges/ai/msgconv"
 	"github.com/beeper/agentremote/pkg/matrixevents"
-	"github.com/beeper/agentremote/pkg/shared/streamtransport"
+	"github.com/beeper/agentremote/turns"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 )
 
@@ -119,7 +119,7 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 			instanceID = pmeta.InstanceID
 		}
 		sender := oc.SenderForOpenCode(instanceID, false)
-		msgID := bridgeadapter.NewMessageID("opencode")
+		msgID := agentremote.NewMessageID("opencode")
 		uiMessage := msgconv.BuildUIMessage(msgconv.UIMessageParams{
 			TurnID: turnID,
 			Role:   "assistant",
@@ -142,7 +142,7 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 				Content: &event.MessageEventContent{MsgType: event.MsgText, Body: "..."},
 				Extra:   extra,
 				DBMetadata: &MessageMetadata{
-					BaseMessageMetadata: bridgeadapter.BaseMessageMetadata{
+					BaseMessageMetadata: agentremote.BaseMessageMetadata{
 						Role:               "assistant",
 						TurnID:             turnID,
 						AgentID:            strings.TrimSpace(agentID),
@@ -190,19 +190,19 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 	}
 	session := oc.StreamSessions[turnID]
 	if session == nil {
-		session = streamtransport.NewStreamSession(streamtransport.StreamSessionParams{
+		session = turns.NewStreamSession(turns.StreamSessionParams{
 			TurnID:  turnID,
 			AgentID: state.agentID,
-			GetStreamTarget: func() streamtransport.StreamTarget {
+			GetStreamTarget: func() turns.StreamTarget {
 				oc.StreamMu.Lock()
 				defer oc.StreamMu.Unlock()
 				st := oc.streamStates[turnID]
 				if st == nil {
-					return streamtransport.StreamTarget{}
+					return turns.StreamTarget{}
 				}
-				return streamtransport.StreamTarget{NetworkMessageID: st.networkMessageID}
+				return turns.StreamTarget{NetworkMessageID: st.networkMessageID}
 			},
-			ResolveTargetEventID: func(callCtx context.Context, target streamtransport.StreamTarget) (id.EventID, error) {
+			ResolveTargetEventID: func(callCtx context.Context, target turns.StreamTarget) (id.EventID, error) {
 				return oc.resolveStreamTargetEventID(callCtx, portal, turnID, target)
 			},
 			GetRoomID: func() id.RoomID {
@@ -241,7 +241,7 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 					streamOrder = openCodeNextStreamOrder(st, eventTS)
 				}
 				oc.StreamMu.Unlock()
-				content := streamtransport.BuildDebouncedEditContent(streamtransport.DebouncedEditParams{
+				content := turns.BuildDebouncedEditContent(turns.DebouncedEditParams{
 					PortalMXID:   portal.MXID.String(),
 					Force:        force,
 					SuppressSend: false,
@@ -296,7 +296,7 @@ func (oc *OpenCodeClient) resolveStreamTargetEventID(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	turnID string,
-	target streamtransport.StreamTarget,
+	target turns.StreamTarget,
 ) (id.EventID, error) {
 	oc.StreamMu.Lock()
 	state := oc.streamStates[turnID]
@@ -310,7 +310,7 @@ func (oc *OpenCodeClient) resolveStreamTargetEventID(
 	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || portal == nil {
 		return "", nil
 	}
-	eventID, err := streamtransport.ResolveTargetEventIDFromDB(ctx, oc.UserLogin.Bridge, portal.Receiver, target)
+	eventID, err := turns.ResolveTargetEventIDFromDB(ctx, oc.UserLogin.Bridge, portal.Receiver, target)
 	if err == nil && eventID != "" {
 		oc.StreamMu.Lock()
 		if state := oc.streamStates[turnID]; state != nil && state.initialEventID == "" {
@@ -341,12 +341,12 @@ func (oc *OpenCodeClient) FinishOpenCodeStream(turnID string) {
 	delete(oc.streamStates, turnID)
 	oc.StreamMu.Unlock()
 	if session != nil {
-		session.End(oc.BackgroundContext(context.Background()), streamtransport.EndReasonFinish)
+		session.End(oc.BackgroundContext(context.Background()), turns.EndReasonFinish)
 	}
 }
 
 func (oc *OpenCodeClient) DownloadAndEncodeMedia(ctx context.Context, mediaURL string, file *event.EncryptedFileInfo, maxMB int) (string, string, error) {
-	return bridgeadapter.DownloadAndEncodeMedia(ctx, oc.UserLogin, mediaURL, file, maxMB)
+	return agentremote.DownloadAndEncodeMedia(ctx, oc.UserLogin, mediaURL, file, maxMB)
 }
 
 func (oc *OpenCodeClient) SetRoomName(_ context.Context, _ *bridgev2.Portal, _ string) error {

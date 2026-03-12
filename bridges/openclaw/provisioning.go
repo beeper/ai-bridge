@@ -14,7 +14,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/pkg/shared/openclawconv"
 )
 
@@ -329,7 +329,7 @@ func (oc *OpenClawClient) createConfiguredAgentDM(ctx context.Context, agent gat
 		if err := portal.CreateMatrixRoom(ctx, oc.UserLogin, chatInfo); err != nil {
 			return nil, fmt.Errorf("failed to create openclaw dm portal room: %w", err)
 		}
-		bridgeadapter.SendAIRoomInfo(ctx, portal, bridgeadapter.AIRoomKindAgent)
+		agentremote.SendAIRoomInfo(ctx, portal, agentremote.AIRoomKindAgent)
 	}
 	return &bridgev2.CreateChatResponse{
 		PortalKey:  portal.PortalKey,

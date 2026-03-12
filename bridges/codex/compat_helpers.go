@@ -4,11 +4,11 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 func humanUserID(loginID networkid.UserLoginID) networkid.UserID {
-	return bridgeadapter.HumanUserID("codex-user", loginID)
+	return agentremote.HumanUserID("codex-user", loginID)
 }
 
 // Minimal room capabilities for codex bridge rooms.

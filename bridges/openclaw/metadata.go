@@ -7,7 +7,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 type UserLoginMetadata struct {
@@ -101,8 +101,8 @@ type MessageMetadata struct {
 	CanonicalSchema    string                           `json:"canonical_schema,omitempty"`
 	CanonicalUIMessage map[string]any                   `json:"canonical_ui_message,omitempty"`
 	ThinkingContent    string                           `json:"thinking_content,omitempty"`
-	ToolCalls          []bridgeadapter.ToolCallMetadata `json:"tool_calls,omitempty"`
-	GeneratedFiles     []bridgeadapter.GeneratedFileRef `json:"generated_files,omitempty"`
+	ToolCalls          []agentremote.ToolCallMetadata `json:"tool_calls,omitempty"`
+	GeneratedFiles     []agentremote.GeneratedFileRef `json:"generated_files,omitempty"`
 	Attachments        []map[string]any                 `json:"attachments,omitempty"`
 	StartedAtMs        int64                            `json:"started_at_ms,omitempty"`
 	FirstTokenAtMs     int64                            `json:"first_token_at_ms,omitempty"`
@@ -187,11 +187,11 @@ func (mm *MessageMetadata) CopyFrom(other any) {
 }
 
 func loginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
-	return bridgeadapter.EnsureLoginMetadata[UserLoginMetadata](login)
+	return agentremote.EnsureLoginMetadata[UserLoginMetadata](login)
 }
 
 func portalMeta(portal *bridgev2.Portal) *PortalMetadata {
-	return bridgeadapter.EnsurePortalMetadata[PortalMetadata](portal)
+	return agentremote.EnsurePortalMetadata[PortalMetadata](portal)
 }
 
 func ghostMeta(ghost *bridgev2.Ghost) *GhostMetadata {
@@ -228,7 +228,7 @@ func ghostMeta(ghost *bridgev2.Ghost) *GhostMetadata {
 }
 
 func humanUserID(loginID networkid.UserLoginID) networkid.UserID {
-	return bridgeadapter.HumanUserID("openclaw-user", loginID)
+	return agentremote.HumanUserID("openclaw-user", loginID)
 }
 
 var openClawFileFeatures = &event.FileFeatures{

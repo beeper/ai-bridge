@@ -1,0 +1,55 @@
+package ai
+
+import (
+	"errors"
+	"testing"
+
+	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/id"
+)
+
+func TestStreamingStateHasTargets(t *testing.T) {
+	t.Run("event-id", func(t *testing.T) {
+		state := &streamingState{initialEventID: id.EventID("$evt")}
+		if !state.hasEphemeralTarget() {
+			t.Fatalf("expected event-id target to be a valid ephemeral target")
+		}
+	})
+
+	t.Run("network-message-id", func(t *testing.T) {
+		state := &streamingState{networkMessageID: networkid.MessageID("msg-1")}
+		if !state.hasEditTarget() {
+			t.Fatalf("expected network-message-id target to be a valid edit target")
+		}
+		if state.hasEphemeralTarget() {
+			t.Fatalf("did not expect network-message-id alone to be a valid ephemeral target")
+		}
+	})
+
+	t.Run("none", func(t *testing.T) {
+		state := &streamingState{}
+		if state.hasEditTarget() || state.hasEphemeralTarget() {
+			t.Fatalf("expected empty state to have no targets")
+		}
+	})
+}
+
+func TestStreamFailureErrorUsesAnyMessageTarget(t *testing.T) {
+	testErr := errors.New("boom")
+
+	t.Run("with-network-message-id", func(t *testing.T) {
+		err := streamFailureError(&streamingState{networkMessageID: networkid.MessageID("msg-1")}, testErr)
+		var nf *NonFallbackError
+		if !errors.As(err, &nf) {
+			t.Fatalf("expected NonFallbackError, got %T", err)
+		}
+	})
+
+	t.Run("without-target", func(t *testing.T) {
+		err := streamFailureError(&streamingState{}, testErr)
+		var pf *PreDeltaError
+		if !errors.As(err, &pf) {
+			t.Fatalf("expected PreDeltaError, got %T", err)
+		}
+	})
+}

@@ -3,7 +3,7 @@ package openclaw
 import (
 	"strings"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/pkg/shared/maputil"
 	"github.com/beeper/agentremote/pkg/shared/stringutil"
 )
@@ -27,14 +27,14 @@ func openClawCanonicalReasoningText(uiMessage map[string]any) string {
 	return sb.String()
 }
 
-func openClawCanonicalToolCalls(uiMessage map[string]any) []bridgeadapter.ToolCallMetadata {
+func openClawCanonicalToolCalls(uiMessage map[string]any) []agentremote.ToolCallMetadata {
 	parts := normalizeOpenClawUIParts(uiMessage["parts"])
-	var calls []bridgeadapter.ToolCallMetadata
+	var calls []agentremote.ToolCallMetadata
 	for _, raw := range parts {
 		if maputil.StringArg(raw, "type") != "dynamic-tool" {
 			continue
 		}
-		call := bridgeadapter.ToolCallMetadata{
+		call := agentremote.ToolCallMetadata{
 			CallID:   maputil.StringArg(raw, "toolCallId"),
 			ToolName: maputil.StringArg(raw, "toolName"),
 			ToolType: "openclaw",
@@ -68,9 +68,9 @@ func openClawCanonicalToolCalls(uiMessage map[string]any) []bridgeadapter.ToolCa
 	return calls
 }
 
-func openClawCanonicalGeneratedFiles(uiMessage map[string]any) []bridgeadapter.GeneratedFileRef {
+func openClawCanonicalGeneratedFiles(uiMessage map[string]any) []agentremote.GeneratedFileRef {
 	parts := normalizeOpenClawUIParts(uiMessage["parts"])
-	var refs []bridgeadapter.GeneratedFileRef
+	var refs []agentremote.GeneratedFileRef
 	for _, part := range parts {
 		if maputil.StringArg(part, "type") != "file" {
 			continue
@@ -79,7 +79,7 @@ func openClawCanonicalGeneratedFiles(uiMessage map[string]any) []bridgeadapter.G
 		if url == "" {
 			continue
 		}
-		refs = append(refs, bridgeadapter.GeneratedFileRef{
+		refs = append(refs, agentremote.GeneratedFileRef{
 			URL:      url,
 			MimeType: stringutil.FirstNonEmpty(maputil.StringArg(part, "mediaType"), "application/octet-stream"),
 		})

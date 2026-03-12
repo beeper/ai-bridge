@@ -13,7 +13,7 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/agentremote/bridges/codex/codexrpc"
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 func newTestCodexClient(owner id.UserID) *CodexClient {
@@ -25,7 +25,7 @@ func newTestCodexClient(owner id.UserID) *CodexClient {
 		UserLogin:   ul,
 		activeRooms: make(map[id.RoomID]bool),
 	}
-	cc.approvalFlow = bridgeadapter.NewApprovalFlow(bridgeadapter.ApprovalFlowConfig[*pendingToolApprovalDataCodex]{
+	cc.approvalFlow = agentremote.NewApprovalFlow(agentremote.ApprovalFlowConfig[*pendingToolApprovalDataCodex]{
 		Login: func() *bridgev2.UserLogin { return cc.UserLogin },
 		RoomIDFromData: func(data *pendingToolApprovalDataCodex) id.RoomID {
 			if data == nil {
@@ -106,7 +106,7 @@ func TestCodex_CommandApproval_RequestBlocksUntilApproved(t *testing.T) {
 		t.Fatalf("expected structured presentation title")
 	}
 
-	if err := cc.approvalFlow.Resolve("123", bridgeadapter.ApprovalDecisionPayload{
+	if err := cc.approvalFlow.Resolve("123", agentremote.ApprovalDecisionPayload{
 		ApprovalID: "123",
 		Approved:   true,
 		Reason:     "allow_once",
@@ -203,7 +203,7 @@ func TestCodex_CommandApproval_DenyEmitsResponseThenOutputDenied(t *testing.T) {
 	}()
 
 	time.Sleep(50 * time.Millisecond)
-	if err := cc.approvalFlow.Resolve("456", bridgeadapter.ApprovalDecisionPayload{
+	if err := cc.approvalFlow.Resolve("456", agentremote.ApprovalDecisionPayload{
 		ApprovalID: "456",
 		Approved:   false,
 		Reason:     "deny",
@@ -286,7 +286,7 @@ func TestCodex_CommandApproval_RejectCrossRoom(t *testing.T) {
 	otherRoom := id.RoomID("!room2:example.com")
 
 	cc := newTestCodexClient(owner)
-	cc.registerToolApproval(roomID, "approval-1", "item-1", "commandExecution", bridgeadapter.ApprovalPromptPresentation{
+	cc.registerToolApproval(roomID, "approval-1", "item-1", "commandExecution", agentremote.ApprovalPromptPresentation{
 		Title:       "Codex command execution",
 		AllowAlways: false,
 	}, 2*time.Second)

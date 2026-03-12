@@ -3,11 +3,11 @@ package opencodebridge
 import (
 	"maunium.net/go/mautrix/bridgev2/database"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 type MessageMetadata struct {
-	bridgeadapter.BaseMessageMetadata
+	agentremote.BaseMessageMetadata
 	SessionID       string  `json:"session_id,omitempty"`
 	MessageID       string  `json:"message_id,omitempty"`
 	ParentMessageID string  `json:"parent_message_id,omitempty"`
@@ -20,9 +20,9 @@ type MessageMetadata struct {
 	TotalTokens     int64   `json:"total_tokens,omitempty"`
 }
 
-type ToolCallMetadata = bridgeadapter.ToolCallMetadata
+type ToolCallMetadata = agentremote.ToolCallMetadata
 
-type GeneratedFileRef = bridgeadapter.GeneratedFileRef
+type GeneratedFileRef = agentremote.GeneratedFileRef
 
 var _ database.MetaMerger = (*MessageMetadata)(nil)
 

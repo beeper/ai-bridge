@@ -13,7 +13,7 @@ import (
 
 	"github.com/beeper/agentremote/bridges/opencode/opencode"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
-	"github.com/beeper/agentremote/pkg/shared/streamtransport"
+	"github.com/beeper/agentremote/turns"
 )
 
 type openCodePartEvent struct {
@@ -81,7 +81,7 @@ func (b *Bridge) convertOpenCodePartEdit(ctx context.Context, portal *bridgev2.P
 	edit := &bridgev2.ConvertedEdit{
 		ModifiedParts: []*bridgev2.ConvertedEditPart{cmp.ToEditPart(existing[0])},
 	}
-	streamtransport.EnsureDontRenderEdited(edit)
+	turns.EnsureDontRenderEdited(edit)
 	return edit, nil
 }
 

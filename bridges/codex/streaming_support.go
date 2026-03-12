@@ -10,7 +10,7 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/agentremote/pkg/shared/citations"
-	"github.com/beeper/agentremote/pkg/shared/streamtransport"
+	"github.com/beeper/agentremote/turns"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 )
 
@@ -39,7 +39,7 @@ type streamingState struct {
 	suppressSend         bool
 
 	ui      streamui.UIState
-	session *streamtransport.StreamSession
+	session *turns.StreamSession
 
 	codexToolOutputBuffers    map[string]*strings.Builder
 	codexLatestDiff           string
@@ -52,11 +52,11 @@ func (s *streamingState) hasInitialMessageTarget() bool {
 	return s.hasEditTarget()
 }
 
-func (s *streamingState) streamTarget() streamtransport.StreamTarget {
+func (s *streamingState) streamTarget() turns.StreamTarget {
 	if s == nil {
-		return streamtransport.StreamTarget{}
+		return turns.StreamTarget{}
 	}
-	return streamtransport.StreamTarget{NetworkMessageID: s.networkMessageID}
+	return turns.StreamTarget{NetworkMessageID: s.networkMessageID}
 }
 
 func (s *streamingState) hasEditTarget() bool {

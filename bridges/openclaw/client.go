@@ -23,7 +23,7 @@ import (
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/pkg/shared/cachedvalue"
 	"github.com/beeper/agentremote/pkg/shared/openclawconv"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
@@ -67,7 +67,7 @@ type openClawCapabilityProfile struct {
 }
 
 type OpenClawClient struct {
-	bridgeadapter.BaseReactionHandler
+	agentremote.BaseReactionHandler
 	UserLogin *bridgev2.UserLogin
 	connector *OpenClawConnector
 
@@ -85,7 +85,7 @@ type OpenClawClient struct {
 	toolCacheMu sync.Mutex
 	toolCaches  map[string]*cachedvalue.CachedValue[gatewayToolsCatalogResponse]
 
-	bridgeadapter.BaseStreamState
+	agentremote.BaseStreamState
 	streamStates map[string]*openClawStreamState
 }
 
@@ -228,7 +228,7 @@ func (oc *OpenClawClient) IsLoggedIn() bool { return oc.loggedIn.Load() }
 
 func (oc *OpenClawClient) GetUserLogin() *bridgev2.UserLogin { return oc.UserLogin }
 
-func (oc *OpenClawClient) GetApprovalHandler() bridgeadapter.ApprovalReactionHandler {
+func (oc *OpenClawClient) GetApprovalHandler() agentremote.ApprovalReactionHandler {
 	if oc.manager == nil {
 		return nil
 	}
@@ -420,11 +420,11 @@ func openClawCapabilityID(profile openClawCapabilityProfile) string {
 
 func (oc *OpenClawClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	if ghost == nil {
-		return bridgeadapter.BuildBotUserInfo("OpenClaw"), nil
+		return agentremote.BuildBotUserInfo("OpenClaw"), nil
 	}
 	agentID, ok := parseOpenClawGhostID(string(ghost.ID))
 	if !ok {
-		return bridgeadapter.BuildBotUserInfo("OpenClaw"), nil
+		return agentremote.BuildBotUserInfo("OpenClaw"), nil
 	}
 	current := ghostMeta(ghost)
 	configured, err := oc.agentCatalogEntryByID(ctx, agentID)
@@ -829,5 +829,5 @@ func (oc *OpenClawClient) sendSystemNoticeViaPortal(ctx context.Context, portal 
 }
 
 func (oc *OpenClawClient) DownloadAndEncodeMedia(ctx context.Context, mediaURL string, file *event.EncryptedFileInfo, maxMB int) (string, string, error) {
-	return bridgeadapter.DownloadAndEncodeMedia(ctx, oc.UserLogin, mediaURL, file, maxMB)
+	return agentremote.DownloadAndEncodeMedia(ctx, oc.UserLogin, mediaURL, file, maxMB)
 }

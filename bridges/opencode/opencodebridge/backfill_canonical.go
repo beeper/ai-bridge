@@ -6,7 +6,7 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	"github.com/beeper/agentremote/bridges/opencode/opencode"
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/pkg/matrixevents"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 	"github.com/beeper/agentremote/pkg/shared/stringutil"
@@ -62,7 +62,7 @@ func buildCanonicalAssistantBackfill(msg opencode.MessageWithParts, agentID stri
 		body: body,
 		ui:   uiMessage,
 		meta: &MessageMetadata{
-			BaseMessageMetadata: bridgeadapter.BaseMessageMetadata{
+			BaseMessageMetadata: agentremote.BaseMessageMetadata{
 				Role:               stringutil.FirstNonEmpty(strings.TrimSpace(msg.Info.Role), "assistant"),
 				Body:               body,
 				FinishReason:       stringutil.FirstNonEmpty(strings.TrimSpace(msg.Info.Finish), finishReason),

@@ -8,7 +8,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 type UserLoginMetadata struct {
@@ -37,7 +37,7 @@ type PortalMetadata struct {
 }
 
 type MessageMetadata struct {
-	bridgeadapter.BaseMessageMetadata
+	agentremote.BaseMessageMetadata
 	ExcludeFromHistory bool   `json:"exclude_from_history,omitempty"`
 	CompletionID       string `json:"completion_id,omitempty"`
 	Model              string `json:"model,omitempty"`
@@ -47,9 +47,9 @@ type MessageMetadata struct {
 	ThinkingTokenCount int    `json:"thinking_token_count,omitempty"`
 }
 
-type ToolCallMetadata = bridgeadapter.ToolCallMetadata
+type ToolCallMetadata = agentremote.ToolCallMetadata
 
-type GeneratedFileRef = bridgeadapter.GeneratedFileRef
+type GeneratedFileRef = agentremote.GeneratedFileRef
 
 type GhostMetadata struct {
 	LastSync jsontime.Unix `json:"last_sync,omitempty"`
@@ -87,11 +87,11 @@ func (mm *MessageMetadata) CopyFrom(other any) {
 }
 
 func loginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
-	return bridgeadapter.EnsureLoginMetadata[UserLoginMetadata](login)
+	return agentremote.EnsureLoginMetadata[UserLoginMetadata](login)
 }
 
 func portalMeta(portal *bridgev2.Portal) *PortalMetadata {
-	return bridgeadapter.EnsurePortalMetadata[PortalMetadata](portal)
+	return agentremote.EnsurePortalMetadata[PortalMetadata](portal)
 }
 
 func normalizedCodexAuthSource(meta *UserLoginMetadata) string {
