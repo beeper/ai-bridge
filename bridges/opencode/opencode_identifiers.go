@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"crypto/sha256"

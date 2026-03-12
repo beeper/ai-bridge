@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"bufio"
@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 )
 
 type managedOpenCodeProcess struct {
@@ -56,7 +56,7 @@ func (m *OpenCodeManager) spawnManagedProcess(ctx context.Context, cfg *OpenCode
 	if err != nil {
 		return nil, err
 	}
-	client, err := opencode.NewClient(baseURL, "", "")
+	client, err := api.NewClient(baseURL, "", "")
 	if err != nil {
 		return nil, err
 	}

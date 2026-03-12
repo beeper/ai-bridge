@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 	"github.com/beeper/agentremote/pkg/shared/media"
 	"github.com/beeper/agentremote/pkg/shared/stringutil"
 )
@@ -147,7 +147,7 @@ func resolveManagedWorkingDirectory(raw, defaultDir string) (string, error) {
 	return filepath.Clean(path), nil
 }
 
-func openCodeSessionUsesDirectory(requested string, session *opencode.Session) bool {
+func openCodeSessionUsesDirectory(requested string, session *api.Session) bool {
 	if session == nil {
 		return false
 	}
@@ -159,14 +159,14 @@ func openCodeSessionUsesDirectory(requested string, session *opencode.Session) b
 	return filepath.Clean(actual) == filepath.Clean(requested)
 }
 
-func (b *Bridge) buildInboundParts(ctx context.Context, msg *bridgev2.MatrixMessage, msgType event.MessageType) ([]opencode.PartInput, string, error) {
+func (b *Bridge) buildInboundParts(ctx context.Context, msg *bridgev2.MatrixMessage, msgType event.MessageType) ([]api.PartInput, string, error) {
 	switch msgType {
 	case event.MsgText, event.MsgNotice, event.MsgEmote:
 		body := strings.TrimSpace(msg.Content.Body)
 		if body == "" {
 			return nil, "", errEmptyMessage
 		}
-		return []opencode.PartInput{{Type: "text", Text: body}}, body, nil
+		return []api.PartInput{{Type: "text", Text: body}}, body, nil
 
 	case event.MsgImage, event.MsgVideo, event.MsgAudio, event.MsgFile:
 		return b.buildMediaParts(ctx, msg)
@@ -176,7 +176,7 @@ func (b *Bridge) buildInboundParts(ctx context.Context, msg *bridgev2.MatrixMess
 	}
 }
 
-func (b *Bridge) buildMediaParts(ctx context.Context, msg *bridgev2.MatrixMessage) ([]opencode.PartInput, string, error) {
+func (b *Bridge) buildMediaParts(ctx context.Context, msg *bridgev2.MatrixMessage) ([]api.PartInput, string, error) {
 	mediaURL := string(msg.Content.URL)
 	if mediaURL == "" && msg.Content.File != nil {
 		mediaURL = string(msg.Content.File.URL)
@@ -208,14 +208,14 @@ func (b *Bridge) buildMediaParts(ctx context.Context, msg *bridgev2.MatrixMessag
 	}
 
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, b64Data)
-	parts := []opencode.PartInput{{
+	parts := []api.PartInput{{
 		Type:     "file",
 		Mime:     mimeType,
 		Filename: filename,
 		URL:      dataURL,
 	}}
 	if caption != "" {
-		parts = append(parts, opencode.PartInput{Type: "text", Text: caption})
+		parts = append(parts, api.PartInput{Type: "text", Text: caption})
 	}
 	titleCandidate := caption
 	if titleCandidate == "" {

@@ -1,19 +1,19 @@
-package opencodebridge
+package opencode
 
 import (
 	"testing"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 )
 
 func TestBackfillTotalTokensIncludesPartCacheTokens(t *testing.T) {
-	msg := opencode.MessageWithParts{
-		Parts: []opencode.Part{{
+	msg := api.MessageWithParts{
+		Parts: []api.Part{{
 			Type: "step-finish",
-			Tokens: &opencode.TokenUsage{
+			Tokens: &api.TokenUsage{
 				Input:  5,
 				Output: 7,
-				Cache: &opencode.TokenCache{
+				Cache: &api.TokenCache{
 					Read:  11,
 					Write: 13,
 				},

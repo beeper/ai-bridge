@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 	"github.com/beeper/agentremote"
 )
 
@@ -168,7 +168,7 @@ func (b *Bridge) portalAgentID(portal *bridgev2.Portal) string {
 	return ""
 }
 
-func openCodeSessionTimestamp(session opencode.Session) time.Time {
+func openCodeSessionTimestamp(session api.Session) time.Time {
 	if session.Time.Updated > 0 {
 		return time.UnixMilli(int64(session.Time.Updated))
 	}
@@ -178,7 +178,7 @@ func openCodeSessionTimestamp(session opencode.Session) time.Time {
 	return time.Time{}
 }
 
-func buildOpenCodeSessionResync(loginID networkid.UserLoginID, instanceID string, session opencode.Session) *simplevent.ChatResync {
+func buildOpenCodeSessionResync(loginID networkid.UserLoginID, instanceID string, session api.Session) *simplevent.ChatResync {
 	return &simplevent.ChatResync{
 		EventMeta: simplevent.EventMeta{
 			Type:      bridgev2.RemoteEventChatResync,
@@ -189,7 +189,7 @@ func buildOpenCodeSessionResync(loginID networkid.UserLoginID, instanceID string
 	}
 }
 
-func (b *Bridge) queueOpenCodeSessionResync(instanceID string, session opencode.Session) {
+func (b *Bridge) queueOpenCodeSessionResync(instanceID string, session api.Session) {
 	if b == nil || b.host == nil || strings.TrimSpace(session.ID) == "" {
 		return
 	}

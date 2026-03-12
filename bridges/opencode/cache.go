@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"cmp"
@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 )
 
 const (
@@ -16,7 +16,7 @@ const (
 )
 
 type messageCacheEntry struct {
-	msg opencode.MessageWithParts
+	msg api.MessageWithParts
 	ts  time.Time
 }
 
@@ -50,7 +50,7 @@ func (inst *openCodeInstance) cacheSnapshot(sessionID string) (bool, time.Time, 
 	return cache.complete, cache.lastRefresh, len(cache.messages)
 }
 
-func (inst *openCodeInstance) listMessagesForBackfill(ctx context.Context, sessionID string, forward bool, count int) ([]opencode.MessageWithParts, error) {
+func (inst *openCodeInstance) listMessagesForBackfill(ctx context.Context, sessionID string, forward bool, count int) ([]api.MessageWithParts, error) {
 	complete, lastRefresh, size := inst.cacheSnapshot(sessionID)
 	requireFull := !forward && !complete
 	refreshLimit := 0
@@ -73,7 +73,7 @@ func (inst *openCodeInstance) listMessagesForBackfill(ctx context.Context, sessi
 	return inst.listCachedMessages(sessionID), nil
 }
 
-func (inst *openCodeInstance) refreshMessages(ctx context.Context, sessionID string, limit int, full bool) ([]opencode.MessageWithParts, error) {
+func (inst *openCodeInstance) refreshMessages(ctx context.Context, sessionID string, limit int, full bool) ([]api.MessageWithParts, error) {
 	msgs, err := inst.client.ListMessages(ctx, sessionID, limit)
 	if err != nil {
 		return nil, err
@@ -89,13 +89,13 @@ func (inst *openCodeInstance) refreshMessages(ctx context.Context, sessionID str
 	return inst.listCachedMessages(sessionID), nil
 }
 
-func (inst *openCodeInstance) upsertMessages(sessionID string, msgs []opencode.MessageWithParts) {
+func (inst *openCodeInstance) upsertMessages(sessionID string, msgs []api.MessageWithParts) {
 	for _, msg := range msgs {
 		inst.upsertMessage(sessionID, msg)
 	}
 }
 
-func (inst *openCodeInstance) upsertMessage(sessionID string, msg opencode.MessageWithParts) {
+func (inst *openCodeInstance) upsertMessage(sessionID string, msg api.MessageWithParts) {
 	if sessionID == "" {
 		sessionID = msg.Info.SessionID
 	}
@@ -118,7 +118,7 @@ func (inst *openCodeInstance) upsertMessage(sessionID string, msg opencode.Messa
 	cache.mu.Unlock()
 }
 
-func (inst *openCodeInstance) upsertPart(sessionID, messageID string, part opencode.Part) {
+func (inst *openCodeInstance) upsertPart(sessionID, messageID string, part api.Part) {
 	if sessionID == "" || messageID == "" || part.ID == "" {
 		return
 	}
@@ -178,7 +178,7 @@ func (inst *openCodeInstance) removeCachedPart(sessionID, messageID, partID stri
 	cache.mu.Unlock()
 }
 
-func (inst *openCodeInstance) listCachedMessages(sessionID string) []opencode.MessageWithParts {
+func (inst *openCodeInstance) listCachedMessages(sessionID string) []api.MessageWithParts {
 	cache := inst.ensureMessageCache(sessionID)
 	cache.mu.Lock()
 	if cache.dirty {
@@ -196,7 +196,7 @@ func (inst *openCodeInstance) listCachedMessages(sessionID string) []opencode.Me
 		})
 		cache.dirty = false
 	}
-	out := make([]opencode.MessageWithParts, 0, len(cache.order))
+	out := make([]api.MessageWithParts, 0, len(cache.order))
 	for _, id := range cache.order {
 		entry, ok := cache.messages[id]
 		if !ok {

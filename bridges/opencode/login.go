@@ -13,7 +13,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 
-	openCodeAPI "github.com/beeper/agentremote/bridges/opencode/opencode"
+	openCodeAPI "github.com/beeper/agentremote/bridges/opencode/api"
 	"github.com/beeper/agentremote/bridges/opencode/opencodebridge"
 	"github.com/beeper/agentremote"
 )
@@ -27,8 +27,8 @@ const (
 	FlowOpenCodeRemote  = "opencode_remote"
 	FlowOpenCodeManaged = "opencode_managed"
 
-	openCodeLoginStepRemoteCredentials  = "io.ai-bridge.opencode.enter_remote_credentials"
-	openCodeLoginStepManagedCredentials = "io.ai-bridge.opencode.enter_managed_credentials"
+	openCodeLoginStepRemoteCredentials  = "io.ai-bridge.api.enter_remote_credentials"
+	openCodeLoginStepManagedCredentials = "io.ai-bridge.api.enter_managed_credentials"
 	defaultOpenCodeUsername             = "opencode"
 )
 
@@ -231,7 +231,7 @@ func (ol *OpenCodeLogin) buildManagedInstances(input map[string]string) (map[str
 func openCodeCompleteStep(login *bridgev2.UserLogin) *bridgev2.LoginStep {
 	return &bridgev2.LoginStep{
 		Type:   bridgev2.LoginStepTypeComplete,
-		StepID: "io.ai-bridge.opencode.complete",
+		StepID: "io.ai-bridge.api.complete",
 		CompleteParams: &bridgev2.LoginCompleteParams{
 			UserLoginID: login.ID,
 			UserLogin:   login,

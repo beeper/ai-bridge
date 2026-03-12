@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"context"
@@ -10,15 +10,15 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 	"github.com/beeper/agentremote"
 )
 
-func (b *Bridge) ensureOpenCodeSessionPortal(ctx context.Context, inst *openCodeInstance, session opencode.Session) error {
+func (b *Bridge) ensureOpenCodeSessionPortal(ctx context.Context, inst *openCodeInstance, session api.Session) error {
 	return b.ensureOpenCodeSessionPortalWithRoom(ctx, inst, session, true)
 }
 
-func (b *Bridge) ensureOpenCodeSessionPortalWithRoom(ctx context.Context, inst *openCodeInstance, session opencode.Session, createRoom bool) error {
+func (b *Bridge) ensureOpenCodeSessionPortalWithRoom(ctx context.Context, inst *openCodeInstance, session api.Session, createRoom bool) error {
 	if b == nil || b.host == nil || inst == nil {
 		return nil
 	}

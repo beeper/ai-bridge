@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"context"
@@ -6,10 +6,10 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 )
 
-func opencodeToolCallID(part opencode.Part) string {
+func opencodeToolCallID(part api.Part) string {
 	callID := strings.TrimSpace(part.CallID)
 	if callID == "" {
 		callID = part.ID
@@ -17,7 +17,7 @@ func opencodeToolCallID(part opencode.Part) string {
 	return callID
 }
 
-func opencodeToolName(part opencode.Part) string {
+func opencodeToolName(part api.Part) string {
 	toolName := strings.TrimSpace(part.Tool)
 	if toolName == "" {
 		toolName = "tool"
@@ -25,7 +25,7 @@ func opencodeToolName(part opencode.Part) string {
 	return toolName
 }
 
-func (m *OpenCodeManager) emitToolStreamDelta(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part opencode.Part, delta string) {
+func (m *OpenCodeManager) emitToolStreamDelta(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part api.Part, delta string) {
 	if m == nil || m.bridge == nil || portal == nil {
 		return
 	}
@@ -58,7 +58,7 @@ func (m *OpenCodeManager) emitToolStreamDelta(ctx context.Context, inst *openCod
 	})
 }
 
-func (m *OpenCodeManager) emitToolStreamState(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part opencode.Part, _ string) {
+func (m *OpenCodeManager) emitToolStreamState(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part api.Part, _ string) {
 	if m == nil || m.bridge == nil || portal == nil || part.State == nil {
 		return
 	}
@@ -114,7 +114,7 @@ func (m *OpenCodeManager) emitToolStreamState(ctx context.Context, inst *openCod
 	}
 }
 
-func (m *OpenCodeManager) emitArtifactStream(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part opencode.Part) {
+func (m *OpenCodeManager) emitArtifactStream(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part api.Part) {
 	if m == nil || m.bridge == nil || portal == nil || inst == nil {
 		return
 	}

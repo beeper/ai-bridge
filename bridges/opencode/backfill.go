@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"cmp"
@@ -13,12 +13,12 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 	"github.com/beeper/agentremote/pkg/shared/backfillutil"
 )
 
 type backfillMessageEntry struct {
-	msg  opencode.MessageWithParts
+	msg  api.MessageWithParts
 	when time.Time
 }
 
@@ -42,7 +42,7 @@ func (b *Bridge) FetchMessages(ctx context.Context, params bridgev2.FetchMessage
 	}
 	messages, err := inst.listMessagesForBackfill(ctx, meta.SessionID, params.Forward, params.Count)
 	if err != nil {
-		if opencode.IsAuthError(err) {
+		if api.IsAuthError(err) {
 			b.manager.setConnected(inst, false)
 		}
 		return nil, err
@@ -146,7 +146,7 @@ func findAnchorIndex(msgIndex, partIndex map[string]int, anchor *database.Messag
 	return 0, false
 }
 
-func openCodeMessageTime(msg opencode.MessageWithParts) time.Time {
+func openCodeMessageTime(msg api.MessageWithParts) time.Time {
 	if msg.Info.Time.Created > 0 {
 		return time.UnixMilli(int64(msg.Info.Time.Created))
 	}
@@ -250,7 +250,7 @@ func (b *Bridge) buildOpenCodeUserBackfillMessages(
 	portal *bridgev2.Portal,
 	intent bridgev2.MatrixAPI,
 	sender bridgev2.EventSender,
-	msg opencode.MessageWithParts,
+	msg api.MessageWithParts,
 	msgTime time.Time,
 	nextOrder func() int64,
 ) ([]*bridgev2.BackfillMessage, error) {

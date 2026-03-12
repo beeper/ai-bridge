@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"context"
@@ -9,18 +9,18 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 )
 
 func TestBuildOpenCodeUserBackfillMessages(t *testing.T) {
 	bridge := &Bridge{}
-	msg := opencode.MessageWithParts{
-		Info: opencode.Message{
+	msg := api.MessageWithParts{
+		Info: api.Message{
 			ID:        "msg-1",
 			SessionID: "sess-1",
 			Role:      "user",
 		},
-		Parts: []opencode.Part{
+		Parts: []api.Part{
 			{ID: "part-1", Type: "text", Text: "hello"},
 			{ID: "part-2", Type: "reasoning", Text: "thinking"},
 			{ID: "part-3", Type: "text", Text: ""},
@@ -62,11 +62,11 @@ func TestBuildOpenCodeUserBackfillMessages(t *testing.T) {
 }
 
 func TestBuildOpenCodeSessionResync(t *testing.T) {
-	session := opencode.Session{
+	session := api.Session{
 		ID: "sess-1",
-		Time: opencode.SessionTime{
-			Updated: opencode.Timestamp(1_700_000_123_000),
-			Created: opencode.Timestamp(1_700_000_000_000),
+		Time: api.SessionTime{
+			Updated: api.Timestamp(1_700_000_123_000),
+			Created: api.Timestamp(1_700_000_000_000),
 		},
 	}
 

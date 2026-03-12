@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 )
 
 func opencodeMessageStreamTurnID(sessionID, messageID string) string {
@@ -21,7 +21,7 @@ func opencodeMessageStreamTurnID(sessionID, messageID string) string {
 	return ""
 }
 
-func opencodePartStreamID(part opencode.Part, kind string) string {
+func opencodePartStreamID(part api.Part, kind string) string {
 	if part.ID == "" {
 		return ""
 	}
@@ -32,7 +32,7 @@ func opencodePartStreamID(part opencode.Part, kind string) string {
 }
 
 // partTurnID returns the stream turn ID for a part, falling back to the part ID.
-func partTurnID(part opencode.Part) string {
+func partTurnID(part api.Part) string {
 	turnID := opencodeMessageStreamTurnID(part.SessionID, part.MessageID)
 	if turnID == "" {
 		return "opencode-part-" + part.ID
@@ -40,15 +40,15 @@ func partTurnID(part opencode.Part) string {
 	return turnID
 }
 
-func (m *OpenCodeManager) emitTextStreamDelta(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part opencode.Part, delta string) {
+func (m *OpenCodeManager) emitTextStreamDelta(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part api.Part, delta string) {
 	m.emitTextStreamDeltaForKind(ctx, inst, portal, part, delta, "text")
 }
 
-func (m *OpenCodeManager) emitReasoningStreamDelta(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part opencode.Part, delta string) {
+func (m *OpenCodeManager) emitReasoningStreamDelta(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part api.Part, delta string) {
 	m.emitTextStreamDeltaForKind(ctx, inst, portal, part, delta, "reasoning")
 }
 
-func (m *OpenCodeManager) emitTextStreamDeltaForKind(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part opencode.Part, delta, kind string) {
+func (m *OpenCodeManager) emitTextStreamDeltaForKind(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part api.Part, delta, kind string) {
 	if m == nil || m.bridge == nil || portal == nil || inst == nil || delta == "" {
 		return
 	}
@@ -81,7 +81,7 @@ func (m *OpenCodeManager) emitTextStreamDeltaForKind(ctx context.Context, inst *
 	inst.appendPartTextContent(part.SessionID, part.ID, kind, delta)
 }
 
-func (m *OpenCodeManager) emitTextStreamEnd(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part opencode.Part) {
+func (m *OpenCodeManager) emitTextStreamEnd(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part api.Part) {
 	if m == nil || m.bridge == nil || portal == nil || inst == nil {
 		return
 	}

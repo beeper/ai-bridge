@@ -1,13 +1,13 @@
-package opencodebridge
+package opencode
 
 import (
 	"testing"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 )
 
 func TestBuildOpenCodeApprovalPresentation(t *testing.T) {
-	p := buildOpenCodeApprovalPresentation(opencode.PermissionRequest{
+	p := buildOpenCodeApprovalPresentation(api.PermissionRequest{
 		Permission: "filesystem.write",
 		Patterns:   []string{"src/**", "pkg/**"},
 		Metadata: map[string]any{

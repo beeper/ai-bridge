@@ -1,33 +1,33 @@
-package opencodebridge
+package opencode
 
 import (
 	"path/filepath"
 	"testing"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 )
 
 func TestOpenCodeSessionUsesDirectory(t *testing.T) {
 	t.Run("matches exact path", func(t *testing.T) {
-		if !openCodeSessionUsesDirectory("/tmp/work", &opencode.Session{Directory: "/tmp/work"}) {
+		if !openCodeSessionUsesDirectory("/tmp/work", &api.Session{Directory: "/tmp/work"}) {
 			t.Fatal("expected directory match")
 		}
 	})
 
 	t.Run("matches cleaned path", func(t *testing.T) {
-		if !openCodeSessionUsesDirectory("/tmp/work/../work", &opencode.Session{Directory: "/tmp/work"}) {
+		if !openCodeSessionUsesDirectory("/tmp/work/../work", &api.Session{Directory: "/tmp/work"}) {
 			t.Fatal("expected cleaned directory match")
 		}
 	})
 
 	t.Run("rejects mismatched path", func(t *testing.T) {
-		if openCodeSessionUsesDirectory("/tmp/work", &opencode.Session{Directory: "/tmp/else"}) {
+		if openCodeSessionUsesDirectory("/tmp/work", &api.Session{Directory: "/tmp/else"}) {
 			t.Fatal("expected mismatched directory to be rejected")
 		}
 	})
 
 	t.Run("rejects missing reported directory", func(t *testing.T) {
-		if openCodeSessionUsesDirectory("/tmp/work", &opencode.Session{}) {
+		if openCodeSessionUsesDirectory("/tmp/work", &api.Session{}) {
 			t.Fatal("expected missing directory to be rejected")
 		}
 	})

@@ -1,12 +1,12 @@
-package opencodebridge
+package opencode
 
 import (
 	"strings"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 )
 
-func buildTurnStartMetadata(msg *opencode.MessageWithParts, agentID string) map[string]any {
+func buildTurnStartMetadata(msg *api.MessageWithParts, agentID string) map[string]any {
 	if msg == nil {
 		return nil
 	}
@@ -37,7 +37,7 @@ func buildTurnStartMetadata(msg *opencode.MessageWithParts, agentID string) map[
 	return metadata
 }
 
-func buildTurnFinishMetadata(msg *opencode.MessageWithParts, agentID, finishReason string) map[string]any {
+func buildTurnFinishMetadata(msg *api.MessageWithParts, agentID, finishReason string) map[string]any {
 	metadata := buildTurnStartMetadata(msg, agentID)
 	if metadata == nil {
 		metadata = map[string]any{"agent_id": strings.TrimSpace(agentID)}

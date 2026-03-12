@@ -1,11 +1,11 @@
-package opencodebridge
+package opencode
 
 import (
 	"strings"
 
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/pkg/matrixevents"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
@@ -18,7 +18,7 @@ type canonicalBackfillSnapshot struct {
 	meta *MessageMetadata
 }
 
-func buildCanonicalAssistantBackfill(msg opencode.MessageWithParts, agentID string) canonicalBackfillSnapshot {
+func buildCanonicalAssistantBackfill(msg api.MessageWithParts, agentID string) canonicalBackfillSnapshot {
 	turnID := opencodeMessageStreamTurnID(msg.Info.SessionID, msg.Info.ID)
 	if turnID == "" {
 		turnID = "opencode-msg-" + strings.TrimSpace(msg.Info.ID)
@@ -92,7 +92,7 @@ func buildCanonicalAssistantBackfill(msg opencode.MessageWithParts, agentID stri
 	}
 }
 
-func appendCanonicalAssistantPart(state *streamui.UIState, visible *strings.Builder, part opencode.Part) {
+func appendCanonicalAssistantPart(state *streamui.UIState, visible *strings.Builder, part api.Part) {
 	switch part.Type {
 	case "text":
 		if part.ID == "" || part.Text == "" {
@@ -140,7 +140,7 @@ func appendCanonicalAssistantPart(state *streamui.UIState, visible *strings.Buil
 	}
 }
 
-func appendCanonicalToolPart(state *streamui.UIState, part opencode.Part) {
+func appendCanonicalToolPart(state *streamui.UIState, part api.Part) {
 	toolCallID := opencodeToolCallID(part)
 	if toolCallID == "" {
 		return
@@ -195,7 +195,7 @@ func appendCanonicalToolPart(state *streamui.UIState, part opencode.Part) {
 	}
 }
 
-func appendCanonicalArtifactParts(state *streamui.UIState, part opencode.Part) {
+func appendCanonicalArtifactParts(state *streamui.UIState, part api.Part) {
 	sourceURL := strings.TrimSpace(part.URL)
 	title := strings.TrimSpace(part.Filename)
 	if title == "" {
@@ -234,7 +234,7 @@ func appendCanonicalArtifactParts(state *streamui.UIState, part opencode.Part) {
 	}
 }
 
-func canonicalDataPart(part opencode.Part) map[string]any {
+func canonicalDataPart(part api.Part) map[string]any {
 	if strings.TrimSpace(part.ID) == "" {
 		return nil
 	}
@@ -245,7 +245,7 @@ func canonicalDataPart(part opencode.Part) map[string]any {
 	return data
 }
 
-func backfillCost(msg opencode.MessageWithParts) float64 {
+func backfillCost(msg api.MessageWithParts) float64 {
 	if msg.Info.Cost != 0 {
 		return msg.Info.Cost
 	}
@@ -257,25 +257,25 @@ func backfillCost(msg opencode.MessageWithParts) float64 {
 	return 0
 }
 
-func backfillPromptTokens(msg opencode.MessageWithParts) int64 {
-	return backfillTokenValue(msg, func(tokens opencode.TokenUsage) int64 {
+func backfillPromptTokens(msg api.MessageWithParts) int64 {
+	return backfillTokenValue(msg, func(tokens api.TokenUsage) int64 {
 		return int64(tokens.Input)
 	})
 }
 
-func backfillCompletionTokens(msg opencode.MessageWithParts) int64 {
-	return backfillTokenValue(msg, func(tokens opencode.TokenUsage) int64 {
+func backfillCompletionTokens(msg api.MessageWithParts) int64 {
+	return backfillTokenValue(msg, func(tokens api.TokenUsage) int64 {
 		return int64(tokens.Output)
 	})
 }
 
-func backfillReasoningTokens(msg opencode.MessageWithParts) int64 {
-	return backfillTokenValue(msg, func(tokens opencode.TokenUsage) int64 {
+func backfillReasoningTokens(msg api.MessageWithParts) int64 {
+	return backfillTokenValue(msg, func(tokens api.TokenUsage) int64 {
 		return int64(tokens.Reasoning)
 	})
 }
 
-func backfillTokenValue(msg opencode.MessageWithParts, pick func(opencode.TokenUsage) int64) int64 {
+func backfillTokenValue(msg api.MessageWithParts, pick func(api.TokenUsage) int64) int64 {
 	if msg.Info.Tokens != nil {
 		return pick(*msg.Info.Tokens)
 	}
@@ -287,7 +287,7 @@ func backfillTokenValue(msg opencode.MessageWithParts, pick func(opencode.TokenU
 	return 0
 }
 
-func backfillTotalTokens(msg opencode.MessageWithParts) int64 {
+func backfillTotalTokens(msg api.MessageWithParts) int64 {
 	total := backfillPromptTokens(msg) + backfillCompletionTokens(msg) + backfillReasoningTokens(msg)
 	if msg.Info.Tokens != nil && msg.Info.Tokens.Cache != nil {
 		total += int64(msg.Info.Tokens.Cache.Read + msg.Info.Tokens.Cache.Write)

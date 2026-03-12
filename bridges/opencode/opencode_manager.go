@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 	"github.com/beeper/agentremote"
 )
 
@@ -38,7 +38,7 @@ type permissionApprovalRef struct {
 	Presentation agentremote.ApprovalPromptPresentation
 }
 
-func buildOpenCodeApprovalPresentation(req opencode.PermissionRequest) agentremote.ApprovalPromptPresentation {
+func buildOpenCodeApprovalPresentation(req api.PermissionRequest) agentremote.ApprovalPromptPresentation {
 	permission := strings.TrimSpace(req.Permission)
 	title := "OpenCode permission request"
 	if permission != "" {
@@ -103,7 +103,7 @@ func NewOpenCodeManager(bridge *Bridge) *OpenCodeManager {
 				return err
 			}
 			if err := inst.client.RespondPermission(ctx, ref.SessionID, ref.PermissionID, response); err != nil {
-				if opencode.IsAuthError(err) {
+				if api.IsAuthError(err) {
 					mgr.setConnected(inst, false)
 				}
 				return fmt.Errorf("respond to permission: %w", err)
@@ -237,7 +237,7 @@ func (m *OpenCodeManager) connectConfiguredInstance(ctx context.Context, cfg *Op
 		user = "opencode"
 	}
 
-	normalized, err := opencode.NormalizeBaseURL(cfgCopy.URL)
+	normalized, err := api.NormalizeBaseURL(cfgCopy.URL)
 	if err != nil {
 		return nil, 0, fmt.Errorf("normalize url: %w", err)
 	}
@@ -254,7 +254,7 @@ func (m *OpenCodeManager) connectConfiguredInstance(ctx context.Context, cfg *Op
 }
 
 func (m *OpenCodeManager) connectInstanceClient(ctx context.Context, cfg *OpenCodeInstance, proc *managedOpenCodeProcess) (*openCodeInstance, int, error) {
-	client, err := opencode.NewClient(cfg.URL, cfg.Username, cfg.Password)
+	client, err := api.NewClient(cfg.URL, cfg.Username, cfg.Password)
 	if err != nil {
 		return nil, 0, fmt.Errorf("create client: %w", err)
 	}
@@ -438,7 +438,7 @@ func (m *OpenCodeManager) requireConnectedInstance(instanceID string) (*openCode
 	return inst, nil
 }
 
-func (m *OpenCodeManager) SendMessage(ctx context.Context, instanceID, sessionID string, parts []opencode.PartInput, eventID id.EventID) error {
+func (m *OpenCodeManager) SendMessage(ctx context.Context, instanceID, sessionID string, parts []api.PartInput, eventID id.EventID) error {
 	inst, err := m.requireConnectedInstance(instanceID)
 	if err != nil {
 		return err
@@ -476,7 +476,7 @@ func (m *OpenCodeManager) sendQueuedMessage(ctx context.Context, inst *openCodeI
 	if err := inst.client.SendMessageAsync(ctx, item.sessionID, msgID, item.parts); err != nil {
 		inst.requeueMessageFront(item.sessionID, item)
 		inst.releaseActiveSession(item.sessionID)
-		if opencode.IsAuthError(err) {
+		if api.IsAuthError(err) {
 			m.setConnected(inst, false)
 		}
 		return fmt.Errorf("send message: %w", err)
@@ -521,7 +521,7 @@ func (m *OpenCodeManager) AbortSession(ctx context.Context, instanceID, sessionI
 		return err
 	}
 	if err := inst.client.AbortSession(ctx, sessionID); err != nil {
-		if opencode.IsAuthError(err) {
+		if api.IsAuthError(err) {
 			m.setConnected(inst, false)
 		}
 		return fmt.Errorf("abort session: %w", err)
@@ -533,15 +533,15 @@ func (m *OpenCodeManager) runSessionMutation(
 	ctx context.Context,
 	instanceID string,
 	action string,
-	run func(*openCodeInstance) (*opencode.Session, error),
-) (*opencode.Session, error) {
+	run func(*openCodeInstance) (*api.Session, error),
+) (*api.Session, error) {
 	inst, err := m.requireConnectedInstance(instanceID)
 	if err != nil {
 		return nil, err
 	}
 	session, err := run(inst)
 	if err != nil {
-		if opencode.IsAuthError(err) {
+		if api.IsAuthError(err) {
 			m.setConnected(inst, false)
 		}
 		return nil, fmt.Errorf("%s: %w", action, err)
@@ -549,19 +549,19 @@ func (m *OpenCodeManager) runSessionMutation(
 	return session, nil
 }
 
-func (m *OpenCodeManager) CreateSession(ctx context.Context, instanceID, title, directory string) (*opencode.Session, error) {
-	return m.runSessionMutation(ctx, instanceID, "create session", func(inst *openCodeInstance) (*opencode.Session, error) {
+func (m *OpenCodeManager) CreateSession(ctx context.Context, instanceID, title, directory string) (*api.Session, error) {
+	return m.runSessionMutation(ctx, instanceID, "create session", func(inst *openCodeInstance) (*api.Session, error) {
 		return inst.client.CreateSession(ctx, title, directory)
 	})
 }
 
-func (m *OpenCodeManager) UpdateSessionTitle(ctx context.Context, instanceID, sessionID, title string) (*opencode.Session, error) {
-	return m.runSessionMutation(ctx, instanceID, "update session title", func(inst *openCodeInstance) (*opencode.Session, error) {
+func (m *OpenCodeManager) UpdateSessionTitle(ctx context.Context, instanceID, sessionID, title string) (*api.Session, error) {
+	return m.runSessionMutation(ctx, instanceID, "update session title", func(inst *openCodeInstance) (*api.Session, error) {
 		return inst.client.UpdateSessionTitle(ctx, sessionID, title)
 	})
 }
 
-func (m *OpenCodeManager) syncSessions(ctx context.Context, inst *openCodeInstance, sessions []opencode.Session) (int, error) {
+func (m *OpenCodeManager) syncSessions(ctx context.Context, inst *openCodeInstance, sessions []api.Session) (int, error) {
 	count := 0
 	for _, session := range sessions {
 		hadRoom := false
@@ -643,7 +643,7 @@ func (m *OpenCodeManager) runEventLoop(ctx context.Context, inst *openCodeInstan
 
 // consumeEventStream reads from the event/error channels until the stream ends
 // or the context is cancelled. Returns true if context was cancelled.
-func (m *OpenCodeManager) consumeEventStream(ctx context.Context, inst *openCodeInstance, events <-chan opencode.Event, errs <-chan error) bool {
+func (m *OpenCodeManager) consumeEventStream(ctx context.Context, inst *openCodeInstance, events <-chan api.Event, errs <-chan error) bool {
 	for {
 		select {
 		case evt, ok := <-events:
@@ -664,7 +664,7 @@ func (m *OpenCodeManager) consumeEventStream(ctx context.Context, inst *openCode
 
 // ---------- event dispatch ----------
 
-func (m *OpenCodeManager) handleEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
+func (m *OpenCodeManager) handleEvent(ctx context.Context, inst *openCodeInstance, evt api.Event) {
 	switch evt.Type {
 	case "session.created", "session.updated":
 		m.handleSessionEvent(ctx, inst, evt)
@@ -695,8 +695,8 @@ func (m *OpenCodeManager) handleEvent(ctx context.Context, inst *openCodeInstanc
 	}
 }
 
-func (m *OpenCodeManager) handleSessionEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
-	var session opencode.Session
+func (m *OpenCodeManager) handleSessionEvent(ctx context.Context, inst *openCodeInstance, evt api.Event) {
+	var session api.Session
 	if err := evt.DecodeInfo(&session); err != nil {
 		m.log().Warn().Err(err).Msg("Failed to decode session event")
 		return
@@ -714,8 +714,8 @@ func (m *OpenCodeManager) handleSessionEvent(ctx context.Context, inst *openCode
 	}
 }
 
-func (m *OpenCodeManager) handleSessionDeleted(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
-	var session opencode.Session
+func (m *OpenCodeManager) handleSessionDeleted(ctx context.Context, inst *openCodeInstance, evt api.Event) {
+	var session api.Session
 	if err := evt.DecodeInfo(&session); err != nil {
 		m.log().Warn().Err(err).Msg("Failed to decode session delete event")
 		return
@@ -723,7 +723,7 @@ func (m *OpenCodeManager) handleSessionDeleted(ctx context.Context, inst *openCo
 	m.bridge.removeOpenCodeSessionPortal(ctx, inst.cfg.ID, session.ID, "opencode session deleted")
 }
 
-func (m *OpenCodeManager) handleSessionStatusEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
+func (m *OpenCodeManager) handleSessionStatusEvent(ctx context.Context, inst *openCodeInstance, evt api.Event) {
 	var payload struct {
 		SessionID string `json:"sessionID"`
 		Status    struct {
@@ -739,7 +739,7 @@ func (m *OpenCodeManager) handleSessionStatusEvent(ctx context.Context, inst *op
 	}
 }
 
-func (m *OpenCodeManager) handleSessionIdleEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
+func (m *OpenCodeManager) handleSessionIdleEvent(ctx context.Context, inst *openCodeInstance, evt api.Event) {
 	var payload struct {
 		SessionID string `json:"sessionID"`
 	}
@@ -750,8 +750,8 @@ func (m *OpenCodeManager) handleSessionIdleEvent(ctx context.Context, inst *open
 	m.processNextQueued(ctx, inst, payload.SessionID)
 }
 
-func (m *OpenCodeManager) handleMessageUpdated(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
-	var msg opencode.Message
+func (m *OpenCodeManager) handleMessageUpdated(ctx context.Context, inst *openCodeInstance, evt api.Event) {
+	var msg api.Message
 	if err := evt.DecodeInfo(&msg); err != nil {
 		m.log().Warn().Err(err).Msg("Failed to decode message event")
 		return
@@ -759,7 +759,7 @@ func (m *OpenCodeManager) handleMessageUpdated(ctx context.Context, inst *openCo
 	m.handleMessageEvent(ctx, inst, msg)
 }
 
-func (m *OpenCodeManager) handleMessageRemovedEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
+func (m *OpenCodeManager) handleMessageRemovedEvent(ctx context.Context, inst *openCodeInstance, evt api.Event) {
 	var payload struct {
 		SessionID string `json:"sessionID"`
 		MessageID string `json:"messageID"`
@@ -771,9 +771,9 @@ func (m *OpenCodeManager) handleMessageRemovedEvent(ctx context.Context, inst *o
 	m.handleMessageRemoved(ctx, inst, payload.SessionID, payload.MessageID)
 }
 
-func (m *OpenCodeManager) handlePartUpdatedEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
+func (m *OpenCodeManager) handlePartUpdatedEvent(ctx context.Context, inst *openCodeInstance, evt api.Event) {
 	var payload struct {
-		Part  opencode.Part `json:"part"`
+		Part  api.Part `json:"part"`
 		Delta string        `json:"delta"`
 	}
 	if err := json.Unmarshal(evt.Properties, &payload); err != nil {
@@ -791,7 +791,7 @@ func (m *OpenCodeManager) handlePartUpdatedEvent(ctx context.Context, inst *open
 	m.handlePartUpdated(ctx, inst, part, payload.Delta)
 }
 
-func (m *OpenCodeManager) handlePartDeltaEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
+func (m *OpenCodeManager) handlePartDeltaEvent(ctx context.Context, inst *openCodeInstance, evt api.Event) {
 	var payload struct {
 		SessionID string `json:"sessionID"`
 		MessageID string `json:"messageID"`
@@ -806,7 +806,7 @@ func (m *OpenCodeManager) handlePartDeltaEvent(ctx context.Context, inst *openCo
 	m.handlePartDelta(ctx, inst, payload.SessionID, payload.MessageID, payload.PartID, payload.Field, payload.Delta)
 }
 
-func (m *OpenCodeManager) handlePartRemovedEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
+func (m *OpenCodeManager) handlePartRemovedEvent(ctx context.Context, inst *openCodeInstance, evt api.Event) {
 	var payload struct {
 		SessionID string `json:"sessionID"`
 		MessageID string `json:"messageID"`
@@ -819,8 +819,8 @@ func (m *OpenCodeManager) handlePartRemovedEvent(ctx context.Context, inst *open
 	m.handlePartRemoved(ctx, inst, payload.SessionID, payload.MessageID, payload.PartID)
 }
 
-func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
-	var req opencode.PermissionRequest
+func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *openCodeInstance, evt api.Event) {
+	var req api.PermissionRequest
 	if err := json.Unmarshal(evt.Properties, &req); err != nil {
 		m.log().Warn().Err(err).Msg("Failed to decode permission request event")
 		return
@@ -894,7 +894,7 @@ func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *
 	})
 }
 
-func (m *OpenCodeManager) handlePermissionRepliedEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
+func (m *OpenCodeManager) handlePermissionRepliedEvent(ctx context.Context, inst *openCodeInstance, evt api.Event) {
 	var payload struct {
 		SessionID string `json:"sessionID"`
 		RequestID string `json:"requestID"`
@@ -943,8 +943,8 @@ func (m *OpenCodeManager) handlePermissionRepliedEvent(ctx context.Context, inst
 	})
 }
 
-func (m *OpenCodeManager) handleQuestionAskedEvent(ctx context.Context, inst *openCodeInstance, evt opencode.Event) {
-	var req opencode.QuestionRequest
+func (m *OpenCodeManager) handleQuestionAskedEvent(ctx context.Context, inst *openCodeInstance, evt api.Event) {
+	var req api.QuestionRequest
 	if err := json.Unmarshal(evt.Properties, &req); err != nil {
 		m.log().Warn().Err(err).Msg("Failed to decode question request event")
 		return
@@ -976,7 +976,7 @@ func (m *OpenCodeManager) handleQuestionAskedEvent(ctx context.Context, inst *op
 
 // ---------- message/part processing ----------
 
-func (m *OpenCodeManager) handleMessageEvent(ctx context.Context, inst *openCodeInstance, msg opencode.Message) {
+func (m *OpenCodeManager) handleMessageEvent(ctx context.Context, inst *openCodeInstance, msg api.Message) {
 	if msg.ID == "" || msg.SessionID == "" {
 		return
 	}
@@ -1016,7 +1016,7 @@ func (m *OpenCodeManager) handleMessageEvent(ctx context.Context, inst *openCode
 	}
 }
 
-func (m *OpenCodeManager) handleMessageParts(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, role string, msg *opencode.MessageWithParts) {
+func (m *OpenCodeManager) handleMessageParts(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, role string, msg *api.MessageWithParts) {
 	if msg == nil || portal == nil {
 		return
 	}
@@ -1039,7 +1039,7 @@ func (m *OpenCodeManager) handleMessageParts(ctx context.Context, inst *openCode
 	}
 }
 
-func (m *OpenCodeManager) handlePartUpdated(ctx context.Context, inst *openCodeInstance, part opencode.Part, delta string) {
+func (m *OpenCodeManager) handlePartUpdated(ctx context.Context, inst *openCodeInstance, part api.Part, delta string) {
 	if part.ID == "" || part.SessionID == "" {
 		return
 	}
@@ -1066,7 +1066,7 @@ func (m *OpenCodeManager) handlePartUpdated(ctx context.Context, inst *openCodeI
 }
 
 // resolvePartRole determines the role for a part, fetching the full message if needed.
-func (m *OpenCodeManager) resolvePartRole(ctx context.Context, inst *openCodeInstance, part opencode.Part) string {
+func (m *OpenCodeManager) resolvePartRole(ctx context.Context, inst *openCodeInstance, part api.Part) string {
 	role := inst.seenRole(part.SessionID, part.MessageID)
 	if role == "user" && inst.isSeen(part.SessionID, part.MessageID) {
 		return "user"
@@ -1104,7 +1104,7 @@ func (m *OpenCodeManager) handlePartDelta(ctx context.Context, inst *openCodeIns
 		role = "assistant"
 	}
 
-	part := opencode.Part{
+	part := api.Part{
 		ID:        partID,
 		SessionID: sessionID,
 		MessageID: messageID,
@@ -1143,7 +1143,7 @@ func (m *OpenCodeManager) handlePartRemoved(ctx context.Context, inst *openCodeI
 	inst.removePart(sessionID, messageID, partID)
 }
 
-func (m *OpenCodeManager) handlePart(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, role string, part opencode.Part, allowEdit bool) {
+func (m *OpenCodeManager) handlePart(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, role string, part api.Part, allowEdit bool) {
 	if part.ID == "" || part.SessionID == "" {
 		return
 	}
@@ -1189,7 +1189,7 @@ func (m *OpenCodeManager) handlePart(ctx context.Context, inst *openCodeInstance
 	}
 }
 
-func (m *OpenCodeManager) handleToolPart(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, role string, part opencode.Part) {
+func (m *OpenCodeManager) handleToolPart(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, role string, part api.Part) {
 	state := inst.ensurePartState(part.SessionID, part.MessageID, part.ID, role, part.Type)
 	if state == nil {
 		return
@@ -1337,11 +1337,11 @@ func opencodeMessageIDForEvent(eventID id.EventID) string {
 	return "msg_mx_" + hex.EncodeToString(hash[:8])
 }
 
-func findOpenCodePart(parts []opencode.Part, partID string) (opencode.Part, bool) {
+func findOpenCodePart(parts []api.Part, partID string) (api.Part, bool) {
 	for _, part := range parts {
 		if part.ID == partID {
 			return part, true
 		}
 	}
-	return opencode.Part{}, false
+	return api.Part{}, false
 }

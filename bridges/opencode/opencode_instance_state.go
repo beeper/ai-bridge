@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"sync"
@@ -6,7 +6,7 @@ import (
 
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 )
 
 // openCodePartState tracks the bridge-side delivery state of a single OpenCode
@@ -43,7 +43,7 @@ type openCodeTurnState struct {
 type queuedUserMessage struct {
 	sessionID string
 	eventID   id.EventID
-	parts     []opencode.PartInput
+	parts     []api.PartInput
 }
 
 type openCodeSessionQueue struct {
@@ -55,7 +55,7 @@ type openCodeSessionQueue struct {
 type openCodeInstance struct {
 	cfg       OpenCodeInstance
 	password  string
-	client    *opencode.Client
+	client    *api.Client
 	process   *managedOpenCodeProcess
 	connected bool
 	cancel    func()

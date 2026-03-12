@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"maunium.net/go/mautrix/bridgev2/database"

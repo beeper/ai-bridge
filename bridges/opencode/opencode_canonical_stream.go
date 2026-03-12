@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"context"
@@ -7,10 +7,10 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 )
 
-func (m *OpenCodeManager) syncAssistantMessagePart(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, msg *opencode.MessageWithParts, part opencode.Part) {
+func (m *OpenCodeManager) syncAssistantMessagePart(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, msg *api.MessageWithParts, part api.Part) {
 	if m == nil || inst == nil || portal == nil || msg == nil {
 		return
 	}
@@ -34,7 +34,7 @@ func (m *OpenCodeManager) syncAssistantMessagePart(ctx context.Context, inst *op
 	}
 }
 
-func (m *OpenCodeManager) syncAssistantTextPart(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part opencode.Part, completed bool) {
+func (m *OpenCodeManager) syncAssistantTextPart(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part api.Part, completed bool) {
 	if m == nil || inst == nil || portal == nil {
 		return
 	}
@@ -93,7 +93,7 @@ func (m *OpenCodeManager) syncAssistantTextPart(ctx context.Context, inst *openC
 	}
 }
 
-func (m *OpenCodeManager) emitDataPartStream(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part opencode.Part) {
+func (m *OpenCodeManager) emitDataPartStream(ctx context.Context, inst *openCodeInstance, portal *bridgev2.Portal, part api.Part) {
 	if m == nil || inst == nil || portal == nil || part.ID == "" {
 		return
 	}
@@ -111,7 +111,7 @@ func (m *OpenCodeManager) emitDataPartStream(ctx context.Context, inst *openCode
 
 // BuildDataPartMap builds a map representation of an opencode data part for streaming or backfill.
 // Returns nil for unknown part types.
-func BuildDataPartMap(part opencode.Part) map[string]any {
+func BuildDataPartMap(part api.Part) map[string]any {
 	data := map[string]any{
 		"type": "data-opencode-" + strings.TrimSpace(part.Type),
 		"id":   part.ID,

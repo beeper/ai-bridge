@@ -1,4 +1,4 @@
-package opencodebridge
+package opencode
 
 import (
 	"context"
@@ -11,25 +11,25 @@ import (
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/agentremote/bridges/opencode/opencode"
+	"github.com/beeper/agentremote/bridges/opencode/api"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 	"github.com/beeper/agentremote/turns"
 )
 
 type openCodePartEvent struct {
 	InstanceID string
-	Part       opencode.Part
+	Part       api.Part
 }
 
-func (b *Bridge) emitOpenCodePart(ctx context.Context, portal *bridgev2.Portal, instanceID string, part opencode.Part, fromMe bool) {
+func (b *Bridge) emitOpenCodePart(ctx context.Context, portal *bridgev2.Portal, instanceID string, part api.Part, fromMe bool) {
 	b.emitOpenCodePartEvent(portal, instanceID, part, fromMe, bridgev2.RemoteEventMessage)
 }
 
-func (b *Bridge) emitOpenCodePartEdit(ctx context.Context, portal *bridgev2.Portal, instanceID string, part opencode.Part, fromMe bool) {
+func (b *Bridge) emitOpenCodePartEdit(ctx context.Context, portal *bridgev2.Portal, instanceID string, part api.Part, fromMe bool) {
 	b.emitOpenCodePartEvent(portal, instanceID, part, fromMe, bridgev2.RemoteEventEdit)
 }
 
-func (b *Bridge) emitOpenCodePartEvent(portal *bridgev2.Portal, instanceID string, part opencode.Part, fromMe bool, eventType bridgev2.RemoteEventType) {
+func (b *Bridge) emitOpenCodePartEvent(portal *bridgev2.Portal, instanceID string, part api.Part, fromMe bool, eventType bridgev2.RemoteEventType) {
 	if portal == nil || part.ID == "" {
 		return
 	}
@@ -85,7 +85,7 @@ func (b *Bridge) convertOpenCodePartEdit(ctx context.Context, portal *bridgev2.P
 	return edit, nil
 }
 
-func (b *Bridge) buildOpenCodeConvertedPart(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, part opencode.Part) (*bridgev2.ConvertedMessagePart, error) {
+func (b *Bridge) buildOpenCodeConvertedPart(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, part api.Part) (*bridgev2.ConvertedMessagePart, error) {
 	content, extra, err := b.buildOpenCodePartContent(ctx, portal, intent, part)
 	if err != nil {
 		return nil, err
@@ -101,7 +101,7 @@ func (b *Bridge) buildOpenCodeConvertedPart(ctx context.Context, portal *bridgev
 	}, nil
 }
 
-func (b *Bridge) buildOpenCodePartContent(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, part opencode.Part) (*event.MessageEventContent, map[string]any, error) {
+func (b *Bridge) buildOpenCodePartContent(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, part api.Part) (*event.MessageEventContent, map[string]any, error) {
 	switch part.Type {
 	case "text":
 		body := strings.TrimSpace(part.Text)

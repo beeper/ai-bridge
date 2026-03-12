@@ -57,7 +57,7 @@ func (oc *OpenCodeConnector) Stop(_ context.Context) {
 func (oc *OpenCodeConnector) GetName() bridgev2.BridgeName {
 	return bridgev2.BridgeName{
 		DisplayName:          "OpenCode Bridge",
-		NetworkURL:           "https://opencode.ai",
+		NetworkURL:           "https://api.ai",
 		NetworkID:            "opencode",
 		BeeperBridgeType:     "opencode",
 		DefaultPort:          29347,

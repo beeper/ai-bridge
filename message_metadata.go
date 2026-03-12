@@ -194,7 +194,7 @@ type AssistantMetadataParams struct {
 	ToolCalls        []ToolCallMetadata
 	GeneratedFiles   []GeneratedFileRef
 
-	// Canonical prompt schema (used by pkg/connector).
+	// Canonical prompt schema (used by the main AI bridge).
 	CanonicalPromptSchema   string
 	CanonicalPromptMessages []map[string]any
 
