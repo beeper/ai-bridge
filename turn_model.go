@@ -1,6 +1,7 @@
 package agentremote
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"time"
@@ -169,7 +170,7 @@ func (m *TurnManager) End(turnID string, reason turns.EndReason) {
 		return
 	}
 	if turn.Session != nil {
-		turn.Session.End(nil, reason)
+		turn.Session.End(context.TODO(), reason)
 	}
 	turn.mu.Lock()
 	if turn.Snapshot.CompletedAtMs == 0 {

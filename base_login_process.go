@@ -14,6 +14,8 @@ type BaseLoginProcess struct {
 	bgCancel context.CancelFunc
 }
 
+type LoginBase = BaseLoginProcess
+
 // BackgroundProcessContext returns a long-lived context for background operations.
 // The context is lazily initialized on first call and reused for subsequent calls.
 func (p *BaseLoginProcess) BackgroundProcessContext() context.Context {

@@ -26,8 +26,7 @@ var _ bridgev2.ContactListingNetworkAPI = (*OpenCodeClient)(nil)
 var _ bridgev2.ReactionHandlingNetworkAPI = (*OpenCodeClient)(nil)
 
 type OpenCodeClient struct {
-	agentremote.BaseReactionHandler
-	agentremote.BaseStreamState
+	agentremote.ClientBase
 	UserLogin *bridgev2.UserLogin
 	connector *OpenCodeConnector
 	bridge    *Bridge
@@ -79,10 +78,14 @@ func newOpenCodeClient(login *bridgev2.UserLogin, connector *OpenCodeConnector) 
 		connector:    connector,
 		streamStates: make(map[string]*openCodeStreamState),
 	}
-	client.InitStreamState()
-	client.BaseReactionHandler.Target = client
+	client.InitClientBase(login, client)
 	client.bridge = NewBridge(client)
 	return client, nil
+}
+
+func (oc *OpenCodeClient) SetUserLogin(login *bridgev2.UserLogin) {
+	oc.UserLogin = login
+	oc.ClientBase.SetUserLogin(login)
 }
 
 func (oc *OpenCodeClient) Connect(ctx context.Context) {

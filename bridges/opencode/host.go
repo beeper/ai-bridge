@@ -297,27 +297,37 @@ func (oc *OpenCodeClient) resolveStreamTargetEventID(
 	turnID string,
 	target turns.StreamTarget,
 ) (id.EventID, error) {
-	oc.StreamMu.Lock()
-	state := oc.streamStates[turnID]
-	if state != nil && state.initialEventID != "" {
-		eventID := state.initialEventID
-		oc.StreamMu.Unlock()
-		return eventID, nil
-	}
-	oc.StreamMu.Unlock()
-
-	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || portal == nil {
+	if oc == nil {
 		return "", nil
 	}
-	eventID, err := turns.ResolveTargetEventIDFromDB(ctx, oc.UserLogin.Bridge, portal.Receiver, target)
-	if err == nil && eventID != "" {
-		oc.StreamMu.Lock()
-		if state := oc.streamStates[turnID]; state != nil && state.initialEventID == "" {
-			state.initialEventID = eventID
-		}
-		oc.StreamMu.Unlock()
+	receiver := networkid.UserLoginID("")
+	if portal != nil {
+		receiver = portal.Receiver
 	}
-	return eventID, err
+	var bridge *bridgev2.Bridge
+	if oc.UserLogin != nil {
+		bridge = oc.UserLogin.Bridge
+	}
+	return agentremote.ResolveStreamTargetEventID(ctx, bridge, receiver, target, oc.streamInitialEventID(turnID), func(eventID id.EventID) {
+		oc.setStreamInitialEventID(turnID, eventID)
+	})
+}
+
+func (oc *OpenCodeClient) streamInitialEventID(turnID string) id.EventID {
+	oc.StreamMu.Lock()
+	defer oc.StreamMu.Unlock()
+	if state := oc.streamStates[turnID]; state != nil {
+		return state.initialEventID
+	}
+	return ""
+}
+
+func (oc *OpenCodeClient) setStreamInitialEventID(turnID string, eventID id.EventID) {
+	oc.StreamMu.Lock()
+	defer oc.StreamMu.Unlock()
+	if state := oc.streamStates[turnID]; state != nil && state.initialEventID == "" {
+		state.initialEventID = eventID
+	}
 }
 
 func (oc *OpenCodeClient) FinishOpenCodeStream(turnID string) {

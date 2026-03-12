@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/format"
 	"maunium.net/go/mautrix/id"
 
+	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/bridges/ai/msgconv"
 	"github.com/beeper/agentremote/pkg/matrixevents"
 	"github.com/beeper/agentremote/pkg/shared/maputil"
@@ -384,27 +384,37 @@ func (oc *OpenClawClient) resolveStreamTargetEventID(
 	turnID string,
 	target turns.StreamTarget,
 ) (id.EventID, error) {
-	oc.StreamMu.Lock()
-	state := oc.streamStates[turnID]
-	if state != nil && state.initialEventID != "" {
-		eventID := state.initialEventID
-		oc.StreamMu.Unlock()
-		return eventID, nil
-	}
-	oc.StreamMu.Unlock()
-
-	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || portal == nil {
+	if oc == nil {
 		return "", nil
 	}
-	eventID, err := turns.ResolveTargetEventIDFromDB(ctx, oc.UserLogin.Bridge, portal.Receiver, target)
-	if err == nil && eventID != "" {
-		oc.StreamMu.Lock()
-		if state := oc.streamStates[turnID]; state != nil && state.initialEventID == "" {
-			state.initialEventID = eventID
-		}
-		oc.StreamMu.Unlock()
+	receiver := networkid.UserLoginID("")
+	if portal != nil {
+		receiver = portal.Receiver
 	}
-	return eventID, err
+	var bridge *bridgev2.Bridge
+	if oc.UserLogin != nil {
+		bridge = oc.UserLogin.Bridge
+	}
+	return agentremote.ResolveStreamTargetEventID(ctx, bridge, receiver, target, oc.streamInitialEventID(turnID), func(eventID id.EventID) {
+		oc.setStreamInitialEventID(turnID, eventID)
+	})
+}
+
+func (oc *OpenClawClient) streamInitialEventID(turnID string) id.EventID {
+	oc.StreamMu.Lock()
+	defer oc.StreamMu.Unlock()
+	if state := oc.streamStates[turnID]; state != nil {
+		return state.initialEventID
+	}
+	return ""
+}
+
+func (oc *OpenClawClient) setStreamInitialEventID(turnID string, eventID id.EventID) {
+	oc.StreamMu.Lock()
+	defer oc.StreamMu.Unlock()
+	if state := oc.streamStates[turnID]; state != nil && state.initialEventID == "" {
+		state.initialEventID = eventID
+	}
 }
 
 func (oc *OpenClawClient) applyStreamMessageMetadata(state *openClawStreamState, metadata map[string]any) {
@@ -529,42 +539,20 @@ func (oc *OpenClawClient) buildStreamDBMetadata(state *openClawStreamState) *Mes
 }
 
 func (oc *OpenClawClient) persistStreamDBMetadata(ctx context.Context, portal *bridgev2.Portal, state *openClawStreamState, meta *MessageMetadata) {
-	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || portal == nil || state == nil || meta == nil {
+	if oc == nil || portal == nil || state == nil || meta == nil {
 		return
 	}
-	receiver := portal.Receiver
-	if receiver == "" {
-		receiver = oc.UserLogin.ID
-	}
-	var existing *database.Message
-	var err error
-	if state.networkMessageID != "" {
-		existing, err = oc.UserLogin.Bridge.DB.Message.GetPartByID(ctx, receiver, state.networkMessageID, networkid.PartID("0"))
-	}
-	if existing == nil && state.initialEventID != "" {
-		existing, err = oc.UserLogin.Bridge.DB.Message.GetPartByMXID(ctx, state.initialEventID)
-	}
-	if err != nil {
-		oc.Log().Warn().
-			Err(err).
-			Str("receiver", string(receiver)).
-			Str("network_message_id", string(state.networkMessageID)).
-			Stringer("initial_event_id", state.initialEventID).
-			Msg("Failed to load OpenClaw stream message for metadata update")
-		return
-	}
-	if existing == nil {
-		return
-	}
-	existing.Metadata = meta
-	if err := oc.UserLogin.Bridge.DB.Message.Update(ctx, existing); err != nil {
-		oc.Log().Warn().
-			Err(err).
-			Str("receiver", string(receiver)).
-			Str("network_message_id", string(state.networkMessageID)).
-			Stringer("initial_event_id", state.initialEventID).
-			Msg("Failed to persist OpenClaw stream metadata")
-	}
+	agentremote.UpdateExistingMessageMetadata(
+		ctx,
+		oc.UserLogin,
+		portal,
+		state.networkMessageID,
+		state.initialEventID,
+		meta,
+		oc.Log(),
+		"Failed to load OpenClaw stream message for metadata update",
+		"Failed to persist OpenClaw stream metadata",
+	)
 }
 
 func (oc *OpenClawClient) queueDebouncedStreamEdit(ctx context.Context, portal *bridgev2.Portal, state *openClawStreamState, force bool) error {

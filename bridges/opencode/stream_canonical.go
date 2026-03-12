@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/database"
-	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/format"
 
 	"github.com/beeper/agentremote"
@@ -179,42 +177,20 @@ func (oc *OpenCodeClient) buildStreamDBMetadata(state *openCodeStreamState) *Mes
 }
 
 func (oc *OpenCodeClient) persistStreamDBMetadata(ctx context.Context, portal *bridgev2.Portal, state *openCodeStreamState, meta *MessageMetadata) {
-	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil || portal == nil || state == nil || meta == nil {
+	if oc == nil || portal == nil || state == nil || meta == nil {
 		return
 	}
-	receiver := portal.Receiver
-	if receiver == "" {
-		receiver = oc.UserLogin.ID
-	}
-	var existing *database.Message
-	var err error
-	if state.networkMessageID != "" {
-		existing, err = oc.UserLogin.Bridge.DB.Message.GetPartByID(ctx, receiver, state.networkMessageID, networkid.PartID("0"))
-	}
-	if existing == nil && state.initialEventID != "" {
-		existing, err = oc.UserLogin.Bridge.DB.Message.GetPartByMXID(ctx, state.initialEventID)
-	}
-	if err != nil {
-		oc.Log().Warn().
-			Err(err).
-			Str("receiver", string(receiver)).
-			Str("network_message_id", string(state.networkMessageID)).
-			Stringer("initial_event_id", state.initialEventID).
-			Msg("Failed to load OpenCode stream message for metadata update")
-		return
-	}
-	if existing == nil {
-		return
-	}
-	existing.Metadata = meta
-	if err := oc.UserLogin.Bridge.DB.Message.Update(ctx, existing); err != nil {
-		oc.Log().Warn().
-			Err(err).
-			Str("receiver", string(receiver)).
-			Str("network_message_id", string(state.networkMessageID)).
-			Stringer("initial_event_id", state.initialEventID).
-			Msg("Failed to persist OpenCode stream metadata")
-	}
+	agentremote.UpdateExistingMessageMetadata(
+		ctx,
+		oc.UserLogin,
+		portal,
+		state.networkMessageID,
+		state.initialEventID,
+		meta,
+		oc.Log(),
+		"Failed to load OpenCode stream message for metadata update",
+		"Failed to persist OpenCode stream metadata",
+	)
 }
 
 func (oc *OpenCodeClient) queueFinalStreamEdit(ctx context.Context, portal *bridgev2.Portal, state *openCodeStreamState) {

@@ -2,14 +2,11 @@ package codex
 
 import (
 	"context"
-	"fmt"
 	"os/exec"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"go.mau.fi/util/configupgrade"
 	"go.mau.fi/util/dbutil"
 
 	"maunium.net/go/mautrix/bridgev2"
@@ -29,7 +26,7 @@ var (
 
 // CodexConnector runs the dedicated Codex bridge surface.
 type CodexConnector struct {
-	agentremote.BaseConnectorMethods
+	*agentremote.ConnectorBase
 	br     *bridgev2.Bridge
 	Config Config
 	db     *dbutil.Database
@@ -53,34 +50,6 @@ type codexAuthStatusResponse struct {
 type hostAuthProbe struct {
 	AuthMode     string
 	AccountEmail string
-}
-
-func (cc *CodexConnector) Init(bridge *bridgev2.Bridge) {
-	cc.br = bridge
-	if bridge != nil && bridge.DB != nil && bridge.DB.Database != nil {
-		cc.db = aidb.NewChild(
-			bridge.DB.Database,
-			dbutil.ZeroLogger(bridge.Log.With().Str("db_section", "codex_bridge").Logger()),
-		)
-	}
-	agentremote.EnsureClientMap(&cc.clientsMu, &cc.clients)
-}
-
-func (cc *CodexConnector) Stop(ctx context.Context) {
-	agentremote.StopClients(&cc.clientsMu, &cc.clients)
-}
-
-func (cc *CodexConnector) Start(ctx context.Context) error {
-	db := cc.bridgeDB()
-	if err := aidb.Upgrade(ctx, db, "codex_bridge", "codex bridge database not initialized"); err != nil {
-		return err
-	}
-
-	cc.applyRuntimeDefaults()
-	agentremote.PrimeUserLoginCache(ctx, cc.br)
-	cc.reconcileHostAuthLogins(ctx)
-
-	return nil
 }
 
 func (cc *CodexConnector) bridgeDB() *dbutil.Database {
@@ -330,87 +299,6 @@ func (cc *CodexConnector) applyRuntimeDefaults() {
 	if strings.TrimSpace(cc.Config.Codex.ClientInfo.Version) == "" {
 		cc.Config.Codex.ClientInfo.Version = "0.1.0"
 	}
-}
-
-func (cc *CodexConnector) GetName() bridgev2.BridgeName {
-	return bridgev2.BridgeName{
-		DisplayName:          "Codex Bridge",
-		NetworkURL:           "https://github.com/openai/codex",
-		NetworkID:            "codex",
-		BeeperBridgeType:     "codex",
-		DefaultPort:          29346,
-		DefaultCommandPrefix: cc.Config.Bridge.CommandPrefix,
-	}
-}
-
-func (cc *CodexConnector) GetConfig() (example string, data any, upgrader configupgrade.Upgrader) {
-	return exampleNetworkConfig, &cc.Config, configupgrade.SimpleUpgrader(upgradeConfig)
-}
-
-func (cc *CodexConnector) GetDBMetaTypes() database.MetaTypes {
-	return agentremote.BuildMetaTypes(
-		func() any { return &PortalMetadata{} },
-		func() any { return &MessageMetadata{} },
-		func() any { return &UserLoginMetadata{} },
-		func() any { return &GhostMetadata{} },
-	)
-}
-
-func (cc *CodexConnector) LoadUserLogin(_ context.Context, login *bridgev2.UserLogin) error {
-	meta := loginMetadata(login)
-	if !strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderCodex) {
-		login.Client = newBrokenLoginClient(login, cc, "This bridge only supports Codex logins.")
-		return nil
-	}
-	if !cc.codexEnabled() {
-		login.Client = newBrokenLoginClient(login, cc, "Codex integration is disabled in the configuration.")
-		return nil
-	}
-	return agentremote.LoadUserLogin(login, agentremote.LoadUserLoginConfig[*CodexClient]{
-		Mu: &cc.clientsMu, Clients: cc.clients, BridgeName: "Codex",
-		MakeBroken: func(l *bridgev2.UserLogin, reason string) *agentremote.BrokenLoginClient {
-			return newBrokenLoginClient(l, cc, reason)
-		},
-		Update:    func(e *CodexClient, l *bridgev2.UserLogin) { e.UserLogin = l },
-		Create:    func(l *bridgev2.UserLogin) (*CodexClient, error) { return newCodexClient(l, cc) },
-		AfterLoad: func(c *CodexClient) { c.scheduleBootstrap() },
-	})
-}
-
-func (cc *CodexConnector) GetLoginFlows() []bridgev2.LoginFlow {
-	if !cc.codexEnabled() {
-		return nil
-	}
-	return []bridgev2.LoginFlow{
-		{
-			ID:          FlowCodexAPIKey,
-			Name:        "API Key",
-			Description: "Sign in with an OpenAI API key using codex app-server.",
-		},
-		{
-			ID:          FlowCodexChatGPT,
-			Name:        "ChatGPT",
-			Description: "Open browser login and authenticate with your ChatGPT account.",
-		},
-		{
-			ID:          FlowCodexChatGPTExternalTokens,
-			Name:        "ChatGPT external tokens",
-			Description: "Provide externally managed ChatGPT id/access tokens.",
-		},
-	}
-}
-
-func (cc *CodexConnector) CreateLogin(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
-	if !cc.codexEnabled() {
-		return nil, fmt.Errorf("login flow %s is not available", flowID)
-	}
-	if !slices.ContainsFunc(cc.GetLoginFlows(), func(f bridgev2.LoginFlow) bool { return f.ID == flowID }) {
-		return nil, fmt.Errorf("login flow %s is not available", flowID)
-	}
-	if err := cc.ensureHostAuthLoginForUser(ctx, user); err != nil && cc.br != nil {
-		cc.br.Log.Debug().Err(err).Stringer("mxid", user.MXID).Msg("Host-auth reconcile: create-login reconcile failed")
-	}
-	return &CodexLogin{User: user, Connector: cc, FlowID: flowID}, nil
 }
 
 func (cc *CodexConnector) codexEnabled() bool {

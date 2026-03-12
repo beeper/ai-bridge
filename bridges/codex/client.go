@@ -69,7 +69,7 @@ type codexPendingMessage struct {
 type codexPendingQueue []*codexPendingMessage
 
 type CodexClient struct {
-	agentremote.BaseReactionHandler
+	agentremote.ClientBase
 	UserLogin *bridgev2.UserLogin
 	connector *CodexConnector
 	log       zerolog.Logger
@@ -132,7 +132,7 @@ func newCodexClient(login *bridgev2.UserLogin, connector *CodexConnector) (*Code
 		activeRooms:     make(map[id.RoomID]bool),
 		pendingMessages: make(map[id.RoomID]codexPendingQueue),
 	}
-	cc.BaseReactionHandler.Target = cc
+	cc.InitClientBase(login, cc)
 	cc.approvalFlow = agentremote.NewApprovalFlow(agentremote.ApprovalFlowConfig[*pendingToolApprovalDataCodex]{
 		Login:             func() *bridgev2.UserLogin { return cc.UserLogin },
 		Sender:            func(_ *bridgev2.Portal) bridgev2.EventSender { return cc.senderForPortal() },
@@ -156,6 +156,11 @@ func newCodexClient(login *bridgev2.UserLogin, connector *CodexConnector) (*Code
 		go cc.bootstrap(cc.UserLogin.Bridge.BackgroundCtx)
 	})
 	return cc, nil
+}
+
+func (cc *CodexClient) SetUserLogin(login *bridgev2.UserLogin) {
+	cc.UserLogin = login
+	cc.ClientBase.SetUserLogin(login)
 }
 
 func (cc *CodexClient) loggerForContext(ctx context.Context) *zerolog.Logger {

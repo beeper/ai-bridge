@@ -67,7 +67,7 @@ type openClawCapabilityProfile struct {
 }
 
 type OpenClawClient struct {
-	agentremote.BaseReactionHandler
+	agentremote.ClientBase
 	UserLogin *bridgev2.UserLogin
 	connector *OpenClawConnector
 
@@ -85,7 +85,6 @@ type OpenClawClient struct {
 	toolCacheMu sync.Mutex
 	toolCaches  map[string]*cachedvalue.CachedValue[gatewayToolsCatalogResponse]
 
-	agentremote.BaseStreamState
 	streamStates map[string]*openClawStreamState
 }
 
@@ -130,10 +129,14 @@ func newOpenClawClient(login *bridgev2.UserLogin, connector *OpenClawConnector) 
 		modelCache:   cachedvalue.New[[]gatewayModelChoice](openClawMetadataCatalogTTL),
 		toolCaches:   make(map[string]*cachedvalue.CachedValue[gatewayToolsCatalogResponse]),
 	}
-	client.InitStreamState()
-	client.BaseReactionHandler.Target = client
+	client.InitClientBase(login, client)
 	client.manager = newOpenClawManager(client)
 	return client, nil
+}
+
+func (oc *OpenClawClient) SetUserLogin(login *bridgev2.UserLogin) {
+	oc.UserLogin = login
+	oc.ClientBase.SetUserLogin(login)
 }
 
 func (oc *OpenClawClient) Connect(ctx context.Context) {

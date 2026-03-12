@@ -63,10 +63,6 @@ func (s *streamingState) hasEditTarget() bool {
 	return s != nil && s.streamTarget().HasEditTarget()
 }
 
-func (s *streamingState) hasEphemeralTarget() bool {
-	return s != nil && s.initialEventID != ""
-}
-
 func (cc *CodexClient) uiEmitter(state *streamingState) *streamui.Emitter {
 	state.ui.TurnID = state.turnID
 	state.ui.InitMaps()
