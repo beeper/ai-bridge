@@ -143,12 +143,10 @@ func (ts *TypingSignaler) SignalTextDelta(text string) {
 	if trimmed == "" {
 		return
 	}
-	renderable := !runtimeparse.IsSilentReplyText(trimmed, runtimeparse.SilentReplyToken)
-	if renderable {
-		ts.hasRenderableText = true
-	} else {
+	if runtimeparse.IsSilentReplyText(trimmed, runtimeparse.SilentReplyToken) {
 		return
 	}
+	ts.hasRenderableText = true
 	if ts.shouldStartOnText {
 		ts.typing.Start()
 		ts.typing.RefreshTTL()
@@ -179,8 +177,6 @@ func (ts *TypingSignaler) SignalToolStart() {
 	}
 	if !ts.typing.IsActive() {
 		ts.typing.Start()
-		ts.typing.RefreshTTL()
-		return
 	}
 	ts.typing.RefreshTTL()
 }
