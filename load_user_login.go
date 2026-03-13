@@ -28,16 +28,22 @@ type LoadUserLoginConfig[C bridgev2.NetworkAPI] struct {
 	AfterLoad func(client C)
 }
 
+// resolveMakeBroken returns the provided makeBroken func if non-nil,
+// otherwise returns a default that creates a plain BrokenLoginClient.
+func resolveMakeBroken(makeBroken func(*bridgev2.UserLogin, string) *BrokenLoginClient) func(*bridgev2.UserLogin, string) *BrokenLoginClient {
+	if makeBroken != nil {
+		return makeBroken
+	}
+	return func(l *bridgev2.UserLogin, reason string) *BrokenLoginClient {
+		return NewBrokenLoginClient(l, reason)
+	}
+}
+
 // LoadUserLogin loads or creates a typed client using LoadOrCreateTypedClient.
 // On failure it assigns a BrokenLoginClient and returns nil error, matching the
 // convention used by all bridge connectors.
 func LoadUserLogin[C bridgev2.NetworkAPI](login *bridgev2.UserLogin, cfg LoadUserLoginConfig[C]) error {
-	makeBroken := cfg.MakeBroken
-	if makeBroken == nil {
-		makeBroken = func(l *bridgev2.UserLogin, reason string) *BrokenLoginClient {
-			return &BrokenLoginClient{UserLogin: l, Reason: reason}
-		}
-	}
+	makeBroken := resolveMakeBroken(cfg.MakeBroken)
 
 	client, err := LoadOrCreateTypedClient(
 		cfg.Mu, cfg.Clients, login, cfg.Update,

@@ -224,20 +224,11 @@ func renderApprovalOptionHints(options []ApprovalOption) []string {
 	return hints
 }
 
-func approvalPromptTitle(presentation ApprovalPromptPresentation, fallbackToolName string) string {
-	title := strings.TrimSpace(presentation.Title)
-	if title != "" {
-		return title
-	}
-	fallbackToolName = strings.TrimSpace(fallbackToolName)
-	if fallbackToolName == "" {
-		return "tool"
-	}
-	return fallbackToolName
-}
-
 func buildApprovalBodyHeader(presentation ApprovalPromptPresentation) []string {
-	title := approvalPromptTitle(presentation, "")
+	title := strings.TrimSpace(presentation.Title)
+	if title == "" {
+		title = "tool"
+	}
 	lines := []string{fmt.Sprintf("Approval required: %s", title)}
 	for _, detail := range presentation.Details {
 		label := strings.TrimSpace(detail.Label)
@@ -588,10 +579,11 @@ func normalizeApprovalPromptPresentation(presentation ApprovalPromptPresentation
 
 func normalizeApprovalOptions(options []ApprovalOption, fallback []ApprovalOption) []ApprovalOption {
 	if len(options) == 0 {
-		options = fallback
-	}
-	if len(options) == 0 {
-		options = DefaultApprovalOptions()
+		if len(fallback) > 0 {
+			options = fallback
+		} else {
+			return DefaultApprovalOptions()
+		}
 	}
 	out := make([]ApprovalOption, 0, len(options))
 	for _, option := range options {
@@ -612,9 +604,6 @@ func normalizeApprovalOptions(options []ApprovalOption, fallback []ApprovalOptio
 		out = append(out, option)
 	}
 	if len(out) == 0 {
-		if len(fallback) > 0 {
-			return normalizeApprovalOptions(fallback, nil)
-		}
 		return DefaultApprovalOptions()
 	}
 	return out

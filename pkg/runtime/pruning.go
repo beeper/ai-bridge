@@ -148,7 +148,7 @@ func compilePattern(pattern string) compiledPattern {
 	return compiledPattern{kind: "regex", regex: re}
 }
 
-func matchesPattern(toolName string, p compiledPattern) bool {
+func (p compiledPattern) matches(toolName string) bool {
 	switch p.kind {
 	case "all":
 		return true
@@ -162,7 +162,7 @@ func matchesPattern(toolName string, p compiledPattern) bool {
 
 func matchesAnyPattern(toolName string, patterns []compiledPattern) bool {
 	for _, p := range patterns {
-		if matchesPattern(toolName, p) {
+		if p.matches(toolName) {
 			return true
 		}
 	}
@@ -229,23 +229,6 @@ func findAssistantCutoffIndex(messages []pruningMessageInfo, keepLastAssistants 
 		}
 	}
 	return len(messages)
-}
-
-func findFirstUserIndex(messages []pruningMessageInfo) int {
-	for i, m := range messages {
-		if m.role == "user" {
-			return i
-		}
-	}
-	return len(messages)
-}
-
-func estimateTotalChars(messages []pruningMessageInfo) int {
-	total := 0
-	for _, m := range messages {
-		total += m.charCount
-	}
-	return total
 }
 
 // ApplyPruningDefaults fills in missing pruning config values.
@@ -402,8 +385,20 @@ func PruneContext(
 	}
 
 	cutoffIndex := findAssistantCutoffIndex(messages, cfg.KeepLastAssistants)
-	pruneStartIndex := findFirstUserIndex(messages)
-	totalChars := estimateTotalChars(messages)
+
+	pruneStartIndex := len(messages)
+	for i, m := range messages {
+		if m.role == "user" {
+			pruneStartIndex = i
+			break
+		}
+	}
+
+	totalChars := 0
+	for _, m := range messages {
+		totalChars += m.charCount
+	}
+
 	ratio := float64(totalChars) / float64(charWindow)
 	if ratio < cfg.SoftTrimRatio {
 		return prompt

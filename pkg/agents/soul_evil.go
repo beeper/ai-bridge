@@ -53,10 +53,7 @@ func clampChance(value float64) float64 {
 
 func resolveTimezone(raw string) *time.Location {
 	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return time.UTC
-	}
-	if strings.EqualFold(trimmed, "utc") {
+	if trimmed == "" || strings.EqualFold(trimmed, "utc") {
 		return time.UTC
 	}
 	loc, err := time.LoadLocation(trimmed)

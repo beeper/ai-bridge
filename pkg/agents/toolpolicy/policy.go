@@ -299,8 +299,16 @@ func ResolveEffectiveToolPolicy(params struct {
 		profile = globalTools.Profile
 	}
 
-	providerPolicy := resolveProviderToolPolicy(globalTools, params.ModelProvider, params.ModelID)
-	agentProviderPolicy := resolveProviderToolPolicy(agentTools, params.ModelProvider, params.ModelID)
+	var globalByProvider map[string]ToolPolicyConfig
+	if globalTools != nil {
+		globalByProvider = globalTools.ByProvider
+	}
+	var agentByProvider map[string]ToolPolicyConfig
+	if agentTools != nil {
+		agentByProvider = agentTools.ByProvider
+	}
+	providerPolicy := resolveProviderToolPolicy(globalByProvider, params.ModelProvider, params.ModelID)
+	agentProviderPolicy := resolveProviderToolPolicy(agentByProvider, params.ModelProvider, params.ModelID)
 
 	return EffectiveToolPolicy{
 		GlobalPolicy:         PickToolPolicy(globalPolicy),
@@ -342,29 +350,11 @@ func globalAsToolPolicy(global *GlobalToolPolicyConfig) *ToolPolicyConfig {
 }
 
 func normalizeProviderKey(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
+	return NormalizeToolName(value)
 }
 
-func byProviderMap(base any) map[string]ToolPolicyConfig {
-	switch cfg := base.(type) {
-	case *GlobalToolPolicyConfig:
-		if cfg != nil {
-			return cfg.ByProvider
-		}
-	case *ToolPolicyConfig:
-		if cfg != nil {
-			return cfg.ByProvider
-		}
-	}
-	return nil
-}
-
-func resolveProviderToolPolicy(base any, provider string, modelID string) *ToolPolicyConfig {
-	if provider == "" || base == nil {
-		return nil
-	}
-	byProvider := byProviderMap(base)
-	if len(byProvider) == 0 {
+func resolveProviderToolPolicy(byProvider map[string]ToolPolicyConfig, provider string, modelID string) *ToolPolicyConfig {
+	if provider == "" || len(byProvider) == 0 {
 		return nil
 	}
 	lookup := make(map[string]ToolPolicyConfig, len(byProvider))

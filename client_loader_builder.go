@@ -20,13 +20,7 @@ func TypedClientLoader[C bridgev2.NetworkAPI](spec TypedClientLoaderSpec[C]) fun
 				if strings.TrimSpace(reason) == "" {
 					reason = "This login is not supported."
 				}
-				makeBroken := spec.MakeBroken
-				if makeBroken == nil {
-					makeBroken = func(l *bridgev2.UserLogin, msg string) *BrokenLoginClient {
-						return NewBrokenLoginClient(l, msg)
-					}
-				}
-				login.Client = makeBroken(login, reason)
+				login.Client = resolveMakeBroken(spec.MakeBroken)(login, reason)
 				return nil
 			}
 		}

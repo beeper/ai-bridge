@@ -111,20 +111,12 @@ func applyLoginTokensToSearchConfig(cfg *search.Config, meta *UserLoginMetadata,
 		return cfg
 	}
 
-	services := connector.resolveServiceConfig(meta)
-	if cfg.Exa.APIKey == "" {
-		cfg.Exa.APIKey = services[serviceExa].APIKey
-	}
-	if cfg.Exa.BaseURL == "" {
-		cfg.Exa.BaseURL = services[serviceExa].BaseURL
-	}
-
+	applyResolvedExaConfig(&cfg.Exa.BaseURL, &cfg.Exa.APIKey, meta, connector)
 	if shouldApplyExaProxyDefaults(meta) {
 		applyExaProxyDefaults(cfg, meta, connector)
 	}
 	if shouldForceExaProvider(cfg.Exa.APIKey, cfg.Exa.BaseURL, meta) {
-		forceSearchProviderExa(cfg)
-		cfg.Fallbacks = []string{search.ProviderExa}
+		applyProviderOverride(&cfg.Provider, &cfg.Fallbacks, search.ProviderExa)
 	}
 
 	return cfg
@@ -138,23 +130,28 @@ func applyLoginTokensToFetchConfig(cfg *fetch.Config, meta *UserLoginMetadata, c
 		return cfg
 	}
 
-	services := connector.resolveServiceConfig(meta)
-	if cfg.Exa.APIKey == "" {
-		cfg.Exa.APIKey = services[serviceExa].APIKey
-	}
-	if cfg.Exa.BaseURL == "" {
-		cfg.Exa.BaseURL = services[serviceExa].BaseURL
-	}
-
+	applyResolvedExaConfig(&cfg.Exa.BaseURL, &cfg.Exa.APIKey, meta, connector)
 	if shouldApplyExaProxyDefaults(meta) {
 		applyFetchExaProxyDefaults(cfg, meta, connector)
 	}
 	if shouldForceExaProvider(cfg.Exa.APIKey, cfg.Exa.BaseURL, meta) {
-		cfg.Provider = fetch.ProviderExa
-		cfg.Fallbacks = []string{fetch.ProviderExa}
+		applyProviderOverride(&cfg.Provider, &cfg.Fallbacks, fetch.ProviderExa)
 	}
 
 	return cfg
+}
+
+func applyResolvedExaConfig(baseURL *string, apiKey *string, meta *UserLoginMetadata, connector *OpenAIConnector) {
+	if meta == nil || connector == nil {
+		return
+	}
+	services := connector.resolveServiceConfig(meta)
+	if apiKey != nil && *apiKey == "" {
+		*apiKey = services[serviceExa].APIKey
+	}
+	if baseURL != nil && *baseURL == "" {
+		*baseURL = services[serviceExa].BaseURL
+	}
 }
 
 func shouldApplyExaProxyDefaults(meta *UserLoginMetadata) bool {
@@ -195,11 +192,13 @@ func isCustomExaEndpoint(baseURL string) bool {
 	return !strings.EqualFold(trimmed, "https://api.exa.ai")
 }
 
-func forceSearchProviderExa(cfg *search.Config) {
-	if cfg == nil {
-		return
+func applyProviderOverride(provider *string, fallbacks *[]string, providerName string) {
+	if provider != nil {
+		*provider = providerName
 	}
-	cfg.Provider = search.ProviderExa
+	if fallbacks != nil {
+		*fallbacks = []string{providerName}
+	}
 }
 
 func applyExaProxyDefaultsTo(baseURL *string, apiKey *string, meta *UserLoginMetadata, connector *OpenAIConnector) {

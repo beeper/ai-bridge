@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"unicode"
 
@@ -186,8 +185,8 @@ func TrimBootstrapContent(content, fileName string, maxChars int) TrimBootstrapR
 		}
 	}
 
-	headChars := int(math.Floor(float64(maxChars) * bootstrapHeadRatio))
-	tailChars := int(math.Floor(float64(maxChars) * bootstrapTailRatio))
+	headChars := int(float64(maxChars) * bootstrapHeadRatio)
+	tailChars := int(float64(maxChars) * bootstrapTailRatio)
 	head := trimmed[:headChars]
 	tail := trimmed[len(trimmed)-tailChars:]
 

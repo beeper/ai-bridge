@@ -75,8 +75,8 @@ func ParseInlineDirectives(text string, options InlineDirectiveParseOptions) Inl
 		return InlineDirectiveParseResult{}
 	}
 
-	// Default to stripping tags unless the caller explicitly configured options.
-	hasExplicitOptions := options.StripAudioTag || options.StripReplyTags || options.NormalizeWhitespace || options.SilentToken != "" || options.CurrentMessageID != ""
+	hasExplicitOptions := options.StripAudioTag || options.StripReplyTags || options.NormalizeWhitespace ||
+		options.SilentToken != "" || options.CurrentMessageID != ""
 	stripAudio := !hasExplicitOptions || options.StripAudioTag
 	stripReply := !hasExplicitOptions || options.StripReplyTags
 
@@ -124,8 +124,6 @@ func ParseInlineDirectives(text string, options InlineDirectiveParseOptions) Inl
 	return result
 }
 
-var nonUpperUnderscoreRE = regexp.MustCompile(`[^A-Z_]`)
-
 // IsSilentReplyText checks whether text is exactly the silent reply token (modulo whitespace).
 func IsSilentReplyText(text, token string) bool {
 	if text == "" {
@@ -150,10 +148,19 @@ func IsSilentReplyPrefixText(text, token string) bool {
 	if normalized == "" || !strings.Contains(normalized, "_") {
 		return false
 	}
-	if nonUpperUnderscoreRE.MatchString(normalized) {
+	if !isUpperUnderscoreOnly(normalized) {
 		return false
 	}
 	return strings.HasPrefix(strings.ToUpper(token), normalized)
+}
+
+func isUpperUnderscoreOnly(s string) bool {
+	for _, c := range s {
+		if !((c >= 'A' && c <= 'Z') || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeDirectiveWhitespace(text string) string {

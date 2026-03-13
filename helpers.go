@@ -217,14 +217,7 @@ func RedactEventAsSender(
 }
 
 func BuildChatInfoWithFallback(metaTitle, portalName, fallbackTitle, portalTopic string) *bridgev2.ChatInfo {
-	title := metaTitle
-	if title == "" {
-		if portalName != "" {
-			title = portalName
-		} else {
-			title = fallbackTitle
-		}
-	}
+	title := coalesceStrings(metaTitle, portalName, fallbackTitle)
 	return &bridgev2.ChatInfo{
 		Name:  ptr.Ptr(title),
 		Topic: ptr.NonZero(portalTopic),

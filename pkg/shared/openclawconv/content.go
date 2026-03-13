@@ -61,14 +61,14 @@ func ExtractMessageText(message map[string]any) string {
 	if message == nil {
 		return ""
 	}
-	if text := strings.TrimSpace(StringValue(message["text"])); text != "" {
+	if text := strings.TrimSpace(stringValue(message["text"])); text != "" {
 		return text
 	}
 	var parts []string
 	for _, block := range ContentBlocks(message) {
-		switch strings.ToLower(strings.TrimSpace(StringValue(block["type"]))) {
+		switch strings.ToLower(strings.TrimSpace(stringValue(block["type"]))) {
 		case "text", "input_text", "output_text":
-			if text := strings.TrimSpace(StringsTrimDefault(StringValue(block["text"]), StringValue(block["content"]))); text != "" {
+			if text := strings.TrimSpace(StringsTrimDefault(stringValue(block["text"]), stringValue(block["content"]))); text != "" {
 				parts = append(parts, text)
 			}
 		}
@@ -87,7 +87,7 @@ func ExtractAttachmentBlocks(message map[string]any) []map[string]any {
 }
 
 func IsAttachmentBlock(block map[string]any) bool {
-	str := func(key string) string { return strings.TrimSpace(StringValue(block[key])) }
+	str := func(key string) string { return strings.TrimSpace(stringValue(block[key])) }
 
 	blockType := strings.ToLower(str("type"))
 	switch blockType {
@@ -118,7 +118,7 @@ func IsAttachmentBlock(block map[string]any) bool {
 	return false
 }
 
-func StringValue(v any) string {
+func stringValue(v any) string {
 	switch typed := v.(type) {
 	case string:
 		return typed
