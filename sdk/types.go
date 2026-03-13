@@ -134,18 +134,29 @@ type Config struct {
 	Name        string
 	Description string
 
+	// Agent identity (optional, used for ghost sender)
+	Agent *AgentMember
+
 	// Message handling (required)
-	OnMessage func(conv *Conversation, msg *Message) error
+	// session is the value returned by OnConnect; conv is the conversation;
+	// msg is the incoming message; turn is the pre-created Turn for streaming responses.
+	OnMessage func(session any, conv *Conversation, msg *Message, turn *Turn) error
 
 	// Event hooks (optional)
-	OnConnect    func(login *LoginInfo)
-	OnDisconnect func()
-	OnReaction   func(conv *Conversation, reaction *Reaction) error
-	OnTyping     func(conv *Conversation, typing bool)
-	OnEdit       func(conv *Conversation, edit *MessageEdit) error
-	OnDelete     func(conv *Conversation, msgID string) error
-	OnRoomName   func(conv *Conversation, name string) (bool, error)
-	OnRoomTopic  func(conv *Conversation, topic string) (bool, error)
+	OnConnect    func(ctx context.Context, login *LoginInfo) (any, error) // returns session state
+	OnDisconnect func(session any)
+	OnReaction   func(session any, conv *Conversation, reaction *Reaction) error
+	OnTyping     func(session any, conv *Conversation, typing bool)
+	OnEdit       func(session any, conv *Conversation, edit *MessageEdit) error
+	OnDelete     func(session any, conv *Conversation, msgID string) error
+	OnRoomName   func(session any, conv *Conversation, name string) (bool, error)
+	OnRoomTopic  func(session any, conv *Conversation, topic string) (bool, error)
+
+	// Turn management (optional)
+	TurnManagement *TurnConfig
+
+	// Capabilities (optional, dynamic per-conversation)
+	GetCapabilities func(session any, conv *Conversation) *RoomFeatures
 
 	// Search & chat ops (optional)
 	SearchUsers       func(query string) ([]*UserInfo, error)
@@ -160,7 +171,7 @@ type Config struct {
 	// Commands
 	Commands []Command
 
-	// Room features
+	// Room features (static default; overridden by GetCapabilities if set)
 	RoomFeatures *RoomFeatures // nil = AI agent defaults
 
 	// Login — use bridgev2 types directly.
@@ -169,6 +180,9 @@ type Config struct {
 
 	// Backfill — use bridgev2 types directly.
 	FetchMessages func(ctx context.Context, params bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) // nil = no backfill
+
+	// Import turns for backfill (optional, session-aware)
+	ImportTurns func(session any, conv *Conversation, params BackfillParams) ([]*ImportedTurn, error)
 
 	// Advanced
 	ProtocolID     string                     // default: "sdk-<Name>"

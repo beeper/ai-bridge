@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -43,6 +44,10 @@ type sdkClient struct {
 	userLogin    *bridgev2.UserLogin
 	loggedIn     atomic.Bool
 	approvalFlow *agentremote.ApprovalFlow[*pendingSDKApprovalData]
+	turnManager  *TurnManager
+
+	sessionMu sync.RWMutex
+	session   any
 }
 
 func newSDKClient(login *bridgev2.UserLogin, conn *sdkConnector) *sdkClient {
@@ -54,6 +59,9 @@ func newSDKClient(login *bridgev2.UserLogin, conn *sdkConnector) *sdkClient {
 	c.approvalFlow = agentremote.NewApprovalFlow(agentremote.ApprovalFlowConfig[*pendingSDKApprovalData]{
 		Login: func() *bridgev2.UserLogin { return c.userLogin },
 		Sender: func(portal *bridgev2.Portal) bridgev2.EventSender {
+			if conn.cfg.Agent != nil {
+				return conn.cfg.Agent.EventSender(login.ID)
+			}
 			return bridgev2.EventSender{}
 		},
 		IDPrefix: "sdk",
@@ -73,6 +81,9 @@ func newSDKClient(login *bridgev2.UserLogin, conn *sdkConnector) *sdkClient {
 			}
 		},
 	})
+	if conn.cfg.TurnManagement != nil {
+		c.turnManager = NewTurnManager(conn.cfg.TurnManagement)
+	}
 	return c
 }
 
@@ -82,6 +93,18 @@ func (c *sdkClient) GetApprovalHandler() agentremote.ApprovalReactionHandler {
 
 func (c *sdkClient) cfg() *Config {
 	return c.connector.cfg
+}
+
+func (c *sdkClient) getSession() any {
+	c.sessionMu.RLock()
+	defer c.sessionMu.RUnlock()
+	return c.session
+}
+
+func (c *sdkClient) setSession(s any) {
+	c.sessionMu.Lock()
+	c.session = s
+	c.sessionMu.Unlock()
 }
 
 // Connect implements bridgev2.NetworkAPI.
@@ -95,7 +118,10 @@ func (c *sdkClient) Connect(ctx context.Context) {
 		if c.userLogin.UserMXID != "" {
 			info.UserID = string(c.userLogin.UserMXID)
 		}
-		c.cfg().OnConnect(info)
+		session, err := c.cfg().OnConnect(ctx, info)
+		if err == nil {
+			c.setSession(session)
+		}
 	}
 }
 
@@ -106,8 +132,9 @@ func (c *sdkClient) Disconnect() {
 	}
 	c.CloseAllSessions()
 	if c.cfg().OnDisconnect != nil {
-		c.cfg().OnDisconnect()
+		c.cfg().OnDisconnect(c.getSession())
 	}
+	c.setSession(nil)
 }
 
 func (c *sdkClient) IsLoggedIn() bool {
@@ -139,7 +166,14 @@ func (c *sdkClient) GetUserInfo(_ context.Context, ghost *bridgev2.Ghost) (*brid
 	return nil, nil
 }
 
-func (c *sdkClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) *event.RoomFeatures {
+func (c *sdkClient) GetCapabilities(_ context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
+	if c.cfg().GetCapabilities != nil {
+		conv := c.conv(context.Background(), portal)
+		rf := c.cfg().GetCapabilities(c.getSession(), conv)
+		if rf != nil {
+			return convertRoomFeatures(rf)
+		}
+	}
 	if c.cfg().RoomFeatures != nil {
 		return convertRoomFeatures(c.cfg().RoomFeatures)
 	}
@@ -157,9 +191,21 @@ func (c *sdkClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 	}
 	sdkMsg := convertMatrixMessage(msg)
 	conv := c.conv(ctx, msg.Portal)
+	turn := newTurn(ctx, conv, c.cfg().Agent)
+	session := c.getSession()
+
+	roomID := string(msg.Portal.ID)
+	if c.turnManager != nil {
+		c.turnManager.Acquire(roomID)
+	}
 
 	go func() {
-		_ = c.cfg().OnMessage(conv, sdkMsg)
+		defer func() {
+			if c.turnManager != nil {
+				c.turnManager.Release(roomID)
+			}
+		}()
+		_ = c.cfg().OnMessage(session, conv, sdkMsg, turn)
 	}()
 
 	return &bridgev2.MatrixMessageResponse{}, nil
@@ -226,7 +272,7 @@ func (c *sdkClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixE
 		me.NewText = edit.Content.Body
 		me.NewHTML = edit.Content.FormattedBody
 	}
-	return c.cfg().OnEdit(c.conv(ctx, edit.Portal), me)
+	return c.cfg().OnEdit(c.getSession(), c.conv(ctx, edit.Portal), me)
 }
 
 // HandleMatrixMessageRemove implements bridgev2.RedactionHandlingNetworkAPI.
@@ -238,7 +284,7 @@ func (c *sdkClient) HandleMatrixMessageRemove(ctx context.Context, msg *bridgev2
 	if msg.TargetMessage != nil {
 		msgID = string(msg.TargetMessage.ID)
 	}
-	return c.cfg().OnDelete(c.conv(ctx, msg.Portal), msgID)
+	return c.cfg().OnDelete(c.getSession(), c.conv(ctx, msg.Portal), msgID)
 }
 
 // PreHandleMatrixReaction implements bridgev2.ReactionHandlingNetworkAPI.
@@ -259,7 +305,7 @@ func (c *sdkClient) HandleMatrixReactionRemove(ctx context.Context, msg *bridgev
 // HandleMatrixTyping implements bridgev2.TypingHandlingNetworkAPI.
 func (c *sdkClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.MatrixTyping) error {
 	if c.cfg().OnTyping != nil {
-		c.cfg().OnTyping(c.conv(ctx, msg.Portal), msg.IsTyping)
+		c.cfg().OnTyping(c.getSession(), c.conv(ctx, msg.Portal), msg.IsTyping)
 	}
 	return nil
 }
@@ -267,7 +313,7 @@ func (c *sdkClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.Matrix
 // HandleMatrixRoomName implements bridgev2.RoomNameHandlingNetworkAPI.
 func (c *sdkClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2.MatrixRoomName) (bool, error) {
 	if c.cfg().OnRoomName != nil {
-		return c.cfg().OnRoomName(c.conv(ctx, msg.Portal), msg.Content.Name)
+		return c.cfg().OnRoomName(c.getSession(), c.conv(ctx, msg.Portal), msg.Content.Name)
 	}
 	return false, nil
 }
@@ -275,7 +321,7 @@ func (c *sdkClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2.Matr
 // HandleMatrixRoomTopic implements bridgev2.RoomTopicHandlingNetworkAPI.
 func (c *sdkClient) HandleMatrixRoomTopic(ctx context.Context, msg *bridgev2.MatrixRoomTopic) (bool, error) {
 	if c.cfg().OnRoomTopic != nil {
-		return c.cfg().OnRoomTopic(c.conv(ctx, msg.Portal), msg.Content.Topic)
+		return c.cfg().OnRoomTopic(c.getSession(), c.conv(ctx, msg.Portal), msg.Content.Topic)
 	}
 	return false, nil
 }

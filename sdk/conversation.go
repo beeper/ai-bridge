@@ -128,6 +128,29 @@ func (c *Conversation) Stream(ctx context.Context) *Stream {
 	return newStream(ctx, c)
 }
 
+// StartTurn creates a new Turn for this conversation with the default agent.
+func (c *Conversation) StartTurn(ctx context.Context) *Turn {
+	return newTurn(ctx, c, nil)
+}
+
+// StartTurnWithAgent creates a new Turn for this conversation with a specific agent.
+func (c *Conversation) StartTurnWithAgent(ctx context.Context, agent *AgentMember) *Turn {
+	return newTurn(ctx, c, agent)
+}
+
+// Session returns the session state from the client, if available.
+func (c *Conversation) Session() any {
+	if c.client == nil {
+		return nil
+	}
+	return c.client.getSession()
+}
+
+// Context returns the conversation's context.
+func (c *Conversation) Context() context.Context {
+	return c.ctx
+}
+
 // SetTyping sets the typing indicator for this conversation.
 func (c *Conversation) SetTyping(ctx context.Context, typing bool) error {
 	intent, err := c.getIntent(ctx)
