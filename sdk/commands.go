@@ -42,7 +42,14 @@ func registerCommands(br *bridgev2.Bridge, cfg *Config) {
 					ce.Reply("Not logged in.")
 					return
 				}
-				conv := newConversation(ce.Ctx, ce.Portal, login, bridgev2.EventSender{}, nil)
+				// Resolve the conversationRuntime from the login's NetworkAPI
+				// so that command handlers get a fully-configured Conversation
+				// with Session(), agent resolution, and Spec() available.
+				var runtime conversationRuntime
+				if client, ok := login.Client.(conversationRuntime); ok {
+					runtime = client
+				}
+				conv := newConversation(ce.Ctx, ce.Portal, login, bridgev2.EventSender{}, runtime)
 				if err := cmd.Handler(conv, ce.RawArgs); err != nil {
 					if ce.MessageStatus != nil {
 						ce.MessageStatus.Status = event.MessageStatusFail

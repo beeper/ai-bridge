@@ -556,10 +556,10 @@ func shouldRetryServerOverloaded(rpcErr *RPCError) bool {
 
 func waitRetryBackoff(ctx context.Context, attempt int) error {
 	base := 100 * time.Millisecond
-	max := 3 * time.Second
+	maxBackoff := 3 * time.Second
 	backoff := base << attempt
-	if backoff > max {
-		backoff = max
+	if backoff > maxBackoff {
+		backoff = maxBackoff
 	}
 	jitter := time.Duration(rand.Int63n(int64(250 * time.Millisecond)))
 	timer := time.NewTimer(backoff + jitter)

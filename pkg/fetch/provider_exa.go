@@ -145,45 +145,41 @@ func formatExaStatusError(targetURL string, statuses []exaContentStatus) string 
 	}
 
 	targetURL = strings.TrimSpace(targetURL)
+
+	// First, try to match the target URL specifically.
+	// If matched but not an error, return empty (success).
+	// If no URL match, fall back to the first error status.
 	var matched *exaContentStatus
+	var firstError *exaContentStatus
 	for i := range statuses {
-		status := statuses[i]
-		if strings.EqualFold(strings.TrimSpace(status.ID), targetURL) {
-			if !strings.EqualFold(strings.TrimSpace(status.Status), "error") {
+		s := &statuses[i]
+		isError := strings.EqualFold(strings.TrimSpace(s.Status), "error")
+		if strings.EqualFold(strings.TrimSpace(s.ID), targetURL) {
+			if !isError {
 				return ""
 			}
-			matched = &status
+			matched = s
 			break
+		}
+		if isError && firstError == nil {
+			firstError = s
 		}
 	}
 	if matched == nil {
-		for i := range statuses {
-			status := statuses[i]
-			if strings.EqualFold(strings.TrimSpace(status.Status), "error") {
-				matched = &status
-				break
-			}
-		}
+		matched = firstError
 	}
 	if matched == nil {
 		return ""
 	}
-	if matched.Error == nil {
-		if matched.ID == "" {
-			return "unknown error"
+	tag := "unknown error"
+	if matched.Error != nil {
+		tag = strings.TrimSpace(matched.Error.Tag)
+		if tag == "" {
+			tag = "unknown_error"
 		}
-		return fmt.Sprintf("%s: unknown error", matched.ID)
-	}
-
-	tag := strings.TrimSpace(matched.Error.Tag)
-	if tag == "" {
-		tag = "unknown_error"
-	}
-	if matched.Error.HTTPStatusCode != nil {
-		if matched.ID == "" {
-			return fmt.Sprintf("%s (http %d)", tag, *matched.Error.HTTPStatusCode)
+		if matched.Error.HTTPStatusCode != nil {
+			tag = fmt.Sprintf("%s (http %d)", tag, *matched.Error.HTTPStatusCode)
 		}
-		return fmt.Sprintf("%s: %s (http %d)", matched.ID, tag, *matched.Error.HTTPStatusCode)
 	}
 	if matched.ID == "" {
 		return tag
