@@ -578,15 +578,28 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 	model := cc.connector.Config.Codex.DefaultModel
 	threadID := strings.TrimSpace(meta.CodexThreadID)
 	cwd := strings.TrimSpace(meta.CodexCwd)
-
-	// Post placeholder timeline message immediately to get an event id for streaming.
-	state.initialEventID = cc.sendInitialStreamMessage(ctx, portal, state, "...", state.turnID)
-	if !state.hasInitialMessageTarget() {
-		log.Warn().Msg("Failed to send initial streaming message")
-		return
-	}
-	cc.emitUIStart(ctx, portal, state, model)
-	cc.uiEmitter(state).EmitUIStepStart(ctx, portal)
+	conv := bridgesdk.NewConversation(ctx, cc.UserLogin, portal, cc.senderForPortal(), cc.connector.sdkConfig, cc)
+	source := bridgesdk.UserMessageSource(sourceEvent.ID.String())
+	turn := conv.StartTurn(ctx, codexSDKAgent(), source)
+	turn.SetStreamHook(func(turnID string, seq int, content map[string]any, txnID string) bool {
+		if cc.streamEventHook == nil {
+			return false
+		}
+		cc.streamEventHook(turnID, seq, content, txnID)
+		return true
+	})
+	turn.SetApprovalRequester(func(callCtx context.Context, sdkTurn *bridgesdk.Turn, req bridgesdk.ApprovalRequest) bridgesdk.ApprovalHandle {
+		return cc.requestSDKApproval(callCtx, portal, state, sdkTurn, req)
+	})
+	turn.SetFinalMetadataBuilder(func(sdkTurn *bridgesdk.Turn, finishReason string) any {
+		return cc.buildSDKFinalMetadata(sdkTurn, state, model, finishReason)
+	})
+	state.turn = turn
+	state.turnID = turn.ID()
+	state.agentID = string(codexGhostID)
+	state.initialEventID = sourceEvent.ID
+	turn.SetMetadata(cc.buildUIMessageMetadata(state, model, false, ""))
+	turn.StepStart()
 
 	approvalPolicy := "untrusted"
 	if lvl, _ := stringutil.NormalizeElevatedLevel(meta.ElevatedLevel); lvl == "full" {
@@ -612,10 +625,7 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 		"sandboxPolicy":  cc.buildSandboxPolicy(cwd),
 	}, &turnStart)
 	if err != nil {
-		cc.uiEmitter(state).EmitUIError(ctx, portal, err.Error())
-		cc.emitUIFinish(ctx, portal, state, model, "failed")
-		cc.sendFinalAssistantTurn(ctx, portal, state, model, "failed")
-		cc.saveAssistantMessage(ctx, portal, state, model, "failed")
+		turn.EndWithError(err.Error())
 		return
 	}
 	turnID := strings.TrimSpace(turnStart.Turn.ID)
@@ -687,11 +697,12 @@ done:
 		})
 	}
 	if completedErr != "" {
-		cc.uiEmitter(state).EmitUIError(ctx, portal, completedErr)
+		turn.SetMetadata(cc.buildUIMessageMetadata(state, model, true, finishStatus))
+		turn.EndWithError(completedErr)
+		return
 	}
-	cc.emitUIFinish(ctx, portal, state, model, finishStatus)
-	cc.sendFinalAssistantTurn(ctx, portal, state, model, finishStatus)
-	cc.saveAssistantMessage(ctx, portal, state, model, finishStatus)
+	turn.SetMetadata(cc.buildUIMessageMetadata(state, model, true, finishStatus))
+	turn.End(finishStatus)
 }
 
 func (cc *CodexClient) appendCodexToolOutput(state *streamingState, toolCallID, delta string) string {
@@ -2076,6 +2087,34 @@ func (cc *CodexClient) saveAssistantMessage(ctx context.Context, portal *bridgev
 	})
 }
 
+func (cc *CodexClient) buildSDKFinalMetadata(turn *bridgesdk.Turn, state *streamingState, model string, finishReason string) any {
+	if turn == nil || state == nil {
+		return &MessageMetadata{}
+	}
+	return &MessageMetadata{
+		BaseMessageMetadata: agentremote.BuildAssistantBaseMetadata(agentremote.AssistantMetadataParams{
+			Body:               state.accumulated.String(),
+			FinishReason:       finishReason,
+			TurnID:             turn.ID(),
+			AgentID:            state.agentID,
+			ToolCalls:          state.toolCalls,
+			StartedAtMs:        state.startedAtMs,
+			CompletedAtMs:      state.completedAtMs,
+			CanonicalSchema:    "ai-sdk-ui-message-v1",
+			CanonicalUIMessage: streamui.SnapshotCanonicalUIMessage(turn.UIState()),
+			GeneratedFiles:     agentremote.GeneratedFileRefsFromParts(state.generatedFiles),
+			ThinkingContent:    state.reasoning.String(),
+			PromptTokens:       state.promptTokens,
+			CompletionTokens:   state.completionTokens,
+			ReasoningTokens:    state.reasoningTokens,
+		}),
+		Model:              model,
+		FirstTokenAtMs:     state.firstTokenAtMs,
+		HasToolCalls:       len(state.toolCalls) > 0,
+		ThinkingTokenCount: len(strings.Fields(state.reasoning.String())),
+	}
+}
+
 // --- Approvals ---
 
 // pendingToolApprovalDataCodex holds codex-specific metadata stored in
@@ -2086,6 +2125,91 @@ type pendingToolApprovalDataCodex struct {
 	ToolCallID   string
 	ToolName     string
 	Presentation agentremote.ApprovalPromptPresentation
+}
+
+type codexSDKApprovalHandle struct {
+	approvalID string
+	toolCallID string
+	waitFn     func(context.Context) (bridgesdk.ToolApprovalResponse, error)
+}
+
+func (h *codexSDKApprovalHandle) ID() string {
+	if h == nil {
+		return ""
+	}
+	return h.approvalID
+}
+
+func (h *codexSDKApprovalHandle) ToolCallID() string {
+	if h == nil {
+		return ""
+	}
+	return h.toolCallID
+}
+
+func (h *codexSDKApprovalHandle) Wait(ctx context.Context) (bridgesdk.ToolApprovalResponse, error) {
+	if h == nil || h.waitFn == nil {
+		return bridgesdk.ToolApprovalResponse{}, nil
+	}
+	return h.waitFn(ctx)
+}
+
+func (cc *CodexClient) requestSDKApproval(
+	_ context.Context,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	turn *bridgesdk.Turn,
+	req bridgesdk.ApprovalRequest,
+) bridgesdk.ApprovalHandle {
+	if cc == nil || portal == nil || state == nil || turn == nil {
+		return &codexSDKApprovalHandle{toolCallID: req.ToolCallID}
+	}
+	approvalID := fmt.Sprintf("codex-%d", time.Now().UnixNano())
+	ttl := req.TTL
+	if ttl <= 0 {
+		ttl = agentremote.DefaultApprovalExpiry
+	}
+	presentation := agentremote.ApprovalPromptPresentation{
+		Title:       req.ToolName,
+		AllowAlways: false,
+	}
+	if req.Presentation != nil {
+		presentation = *req.Presentation
+	}
+	cc.registerToolApproval(portal.MXID, approvalID, req.ToolCallID, req.ToolName, presentation, ttl)
+	turn.Emitter().EmitUIToolApprovalRequest(turn.Context(), portal, approvalID, req.ToolCallID)
+	cc.approvalFlow.SendPrompt(turn.Context(), portal, agentremote.SendPromptParams{
+		ApprovalPromptMessageParams: agentremote.ApprovalPromptMessageParams{
+			ApprovalID:   approvalID,
+			ToolCallID:   req.ToolCallID,
+			ToolName:     req.ToolName,
+			TurnID:       turn.ID(),
+			Presentation: presentation,
+			ExpiresAt:    time.Now().Add(ttl),
+		},
+		RoomID:    portal.MXID,
+		OwnerMXID: cc.UserLogin.UserMXID,
+	})
+	return &codexSDKApprovalHandle{
+		approvalID: approvalID,
+		toolCallID: req.ToolCallID,
+		waitFn: func(waitCtx context.Context) (bridgesdk.ToolApprovalResponse, error) {
+			decision, ok := cc.waitToolApproval(waitCtx, approvalID)
+			reason := strings.TrimSpace(decision.Reason)
+			if reason == "" && !ok {
+				reason = agentremote.ApprovalReasonTimeout
+			}
+			turn.Emitter().EmitUIToolApprovalResponse(turn.Context(), portal, approvalID, req.ToolCallID, decision.Approved, reason)
+			if !decision.Approved {
+				turn.Emitter().EmitUIToolOutputDenied(turn.Context(), portal, req.ToolCallID)
+			}
+			return bridgesdk.ToolApprovalResponse{
+				Approved: decision.Approved,
+				Always:   decision.Always,
+				Reason:   reason,
+			}, nil
+		},
+	}
 }
 
 func (cc *CodexClient) registerToolApproval(
@@ -2128,7 +2252,6 @@ func (cc *CodexClient) handleApprovalRequest(
 	defaultToolName string,
 	extractInput func(json.RawMessage) (map[string]any, agentremote.ApprovalPromptPresentation),
 ) (any, *codexrpc.RPCError) {
-	approvalID := strings.Trim(string(req.ID), "\"")
 	var params struct {
 		ThreadID string `json:"threadId"`
 		TurnID   string `json:"turnId"`
@@ -2148,57 +2271,38 @@ func (cc *CodexClient) handleApprovalRequest(
 		toolCallID = defaultToolName
 	}
 	toolName := defaultToolName
-	ttlSeconds := 600
-
-	cc.setApprovalStateTracking(active.state, approvalID, toolCallID, toolName)
 
 	inputMap, presentation := extractInput(req.Params)
 	cc.ensureUIToolInputStart(ctx, active.portal, active.state, toolCallID, toolName, true, inputMap)
-	approvalTTL := time.Duration(ttlSeconds) * time.Second
-	emitOutcome := func(approved bool, reason string) (any, *codexrpc.RPCError) {
-		cc.uiEmitter(active.state).EmitUIToolApprovalResponse(ctx, active.portal, approvalID, toolCallID, approved, reason)
-		streamui.RecordApprovalResponse(&active.state.ui, approvalID, toolCallID, approved, reason)
-		if approved {
-			return map[string]any{"decision": "accept"}, nil
-		}
-		cc.uiEmitter(active.state).EmitUIToolOutputDenied(ctx, active.portal, toolCallID)
+	if active.state.turn == nil {
 		return map[string]any{"decision": "decline"}, nil
 	}
-	pending, created := cc.registerToolApproval(active.portal.MXID, approvalID, toolCallID, toolName, presentation, approvalTTL)
-	if !created {
-		decision, ok := cc.waitToolApproval(ctx, approvalID)
-		if !ok {
-			return map[string]any{"decision": "decline"}, nil
-		}
-		if decision.Approved {
-			return map[string]any{"decision": "accept"}, nil
-		}
-		return map[string]any{"decision": "decline"}, nil
-	}
-	_ = pending
-
-	cc.emitUIToolApprovalRequest(ctx, active.portal, active.state, approvalID, toolCallID, toolName, presentation, ttlSeconds)
+	handle := active.state.turn.RequestApproval(bridgesdk.ApprovalRequest{
+		ToolCallID:   toolCallID,
+		ToolName:     toolName,
+		TTL:          10 * time.Minute,
+		Blocking:     true,
+		Presentation: &presentation,
+	})
 
 	if active.meta != nil {
 		if lvl, _ := stringutil.NormalizeElevatedLevel(active.meta.ElevatedLevel); lvl == "full" {
-			cc.approvalFlow.FinishResolved(approvalID, agentremote.ApprovalDecisionPayload{
-				ApprovalID: approvalID,
+			_ = cc.approvalFlow.Resolve(handle.ID(), agentremote.ApprovalDecisionPayload{
+				ApprovalID: handle.ID(),
 				Approved:   true,
 				Reason:     "auto-approved",
 			})
-			return emitOutcome(true, "auto-approved")
 		}
 	}
 
-	decision, ok := cc.waitToolApproval(ctx, approvalID)
-	if !ok {
-		reason := strings.TrimSpace(decision.Reason)
-		if reason == "" {
-			reason = agentremote.ApprovalReasonTimeout
-		}
-		return emitOutcome(false, reason)
+	decision, err := handle.Wait(ctx)
+	if err != nil {
+		return map[string]any{"decision": "decline"}, nil
 	}
-	return emitOutcome(decision.Approved, decision.Reason)
+	if decision.Approved {
+		return map[string]any{"decision": "accept"}, nil
+	}
+	return map[string]any{"decision": "decline"}, nil
 }
 
 func (cc *CodexClient) handleCommandApprovalRequest(ctx context.Context, req codexrpc.Request) (any, *codexrpc.RPCError) {

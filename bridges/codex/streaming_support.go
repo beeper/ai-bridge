@@ -12,6 +12,7 @@ import (
 	"github.com/beeper/agentremote/pkg/shared/backfillutil"
 	"github.com/beeper/agentremote/pkg/shared/citations"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
+	bridgesdk "github.com/beeper/agentremote/sdk"
 	"github.com/beeper/agentremote/turns"
 )
 
@@ -41,6 +42,7 @@ type streamingState struct {
 
 	ui      streamui.UIState
 	session *turns.StreamSession
+	turn    *bridgesdk.Turn
 
 	codexToolOutputBuffers    map[string]*strings.Builder
 	codexLatestDiff           string
@@ -65,6 +67,9 @@ func (s *streamingState) hasEditTarget() bool {
 }
 
 func (cc *CodexClient) uiEmitter(state *streamingState) *streamui.Emitter {
+	if state != nil && state.turn != nil {
+		return state.turn.Emitter()
+	}
 	state.ui.TurnID = state.turnID
 	state.ui.InitMaps()
 	return &streamui.Emitter{

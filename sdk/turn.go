@@ -637,6 +637,9 @@ func (t *Turn) Abort(reason string) {
 // ID returns the turn's unique identifier.
 func (t *Turn) ID() string { return t.turnID }
 
+// Context returns the turn-scoped context.
+func (t *Turn) Context() context.Context { return t.turnCtx }
+
 // Source returns the turn's structured source reference.
 func (t *Turn) Source() *SourceRef { return t.source }
 

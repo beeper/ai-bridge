@@ -3,7 +3,6 @@ package codex
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
 	"go.mau.fi/util/configupgrade"
@@ -18,6 +17,23 @@ import (
 
 func NewConnector() *CodexConnector {
 	cc := &CodexConnector{}
+	loginFlows := []bridgev2.LoginFlow{
+		{
+			ID:          FlowCodexAPIKey,
+			Name:        "API Key",
+			Description: "Sign in with an OpenAI API key using codex app-server.",
+		},
+		{
+			ID:          FlowCodexChatGPT,
+			Name:        "ChatGPT",
+			Description: "Open browser login and authenticate with your ChatGPT account.",
+		},
+		{
+			ID:          FlowCodexChatGPTExternalTokens,
+			Name:        "ChatGPT external tokens",
+			Description: "Provide externally managed ChatGPT id/access tokens.",
+		},
+	}
 	cc.sdkConfig = &bridgesdk.Config{
 		Name:             "codex",
 		Description:      "A Matrix↔Codex bridge built on mautrix-go bridgev2.",
@@ -92,33 +108,12 @@ func NewConnector() *CodexConnector {
 				c.scheduleBootstrap()
 			}
 		},
-		LoginFlows: func() []bridgev2.LoginFlow {
-			if !cc.codexEnabled() {
-				return nil
-			}
-			return []bridgev2.LoginFlow{
-				{
-					ID:          FlowCodexAPIKey,
-					Name:        "API Key",
-					Description: "Sign in with an OpenAI API key using codex app-server.",
-				},
-				{
-					ID:          FlowCodexChatGPT,
-					Name:        "ChatGPT",
-					Description: "Open browser login and authenticate with your ChatGPT account.",
-				},
-				{
-					ID:          FlowCodexChatGPTExternalTokens,
-					Name:        "ChatGPT external tokens",
-					Description: "Provide externally managed ChatGPT id/access tokens.",
-				},
-			}
-		},
+		LoginFlows: loginFlows,
 		CreateLogin: func(ctx context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
 			if !cc.codexEnabled() {
 				return nil, fmt.Errorf("login flow %s is not available", flowID)
 			}
-			if !slices.ContainsFunc(cc.GetLoginFlows(), func(f bridgev2.LoginFlow) bool { return f.ID == flowID }) {
+			if !containsLoginFlow(loginFlows, flowID) {
 				return nil, fmt.Errorf("login flow %s is not available", flowID)
 			}
 			if err := cc.ensureHostAuthLoginForUser(ctx, user); err != nil && cc.br != nil {
@@ -129,4 +124,13 @@ func NewConnector() *CodexConnector {
 	}
 	cc.ConnectorBase = bridgesdk.NewConnectorBase(cc.sdkConfig)
 	return cc
+}
+
+func containsLoginFlow(flows []bridgev2.LoginFlow, flowID string) bool {
+	for _, flow := range flows {
+		if flow.ID == flowID {
+			return true
+		}
+	}
+	return false
 }
