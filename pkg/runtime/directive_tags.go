@@ -71,7 +71,6 @@ func ParseInlineDirectives(text string, options InlineDirectiveParseOptions) Inl
 		return match
 	})
 
-	// OpenClaw normalizes whitespace after inline tag stripping.
 	cleaned = normalizeDirectiveWhitespace(cleaned)
 
 	if explicit != "" {

@@ -55,8 +55,6 @@ func New(host iruntime.Host) iruntime.ModuleHooks {
 
 func (i *Integration) Name() string { return moduleName }
 
-// ---- ToolIntegration ----
-
 func (i *Integration) ToolDefinitions(_ context.Context, _ iruntime.ToolScope) []iruntime.ToolDefinition {
 	return []iruntime.ToolDefinition{
 		{
@@ -97,8 +95,6 @@ func (i *Integration) ToolAvailability(_ context.Context, scope iruntime.ToolSco
 	return true, true, iruntime.SourceGlobalDefault, ""
 }
 
-// ---- PromptIntegration ----
-
 func (i *Integration) AdditionalSystemMessages(_ context.Context, _ iruntime.PromptScope) []openai.ChatCompletionMessageParamUnion {
 	return nil
 }
@@ -114,8 +110,6 @@ func (i *Integration) AugmentPrompt(ctx context.Context, scope iruntime.PromptSc
 		ReadSection:      i.readMemoryPromptSection,
 	})
 }
-
-// ---- CommandIntegration ----
 
 func (i *Integration) CommandDefinitions(_ context.Context, _ iruntime.CommandScope) []iruntime.CommandDefinition {
 	return []iruntime.CommandDefinition{{
@@ -134,8 +128,6 @@ func (i *Integration) ExecuteCommand(ctx context.Context, call iruntime.CommandC
 	}
 	return ExecuteCommand(ctx, call, i.buildCommandExecDeps())
 }
-
-// ---- EventIntegration ----
 
 func (i *Integration) OnSessionMutation(ctx context.Context, evt iruntime.SessionMutationEvent) {
 	agentID := i.agentIDFromEventMeta(evt.Meta)
@@ -193,13 +185,9 @@ func (i *Integration) OnCompactionLifecycle(ctx context.Context, evt iruntime.Co
 	}
 }
 
-// ---- LoginLifecycleIntegration ----
-
 func (i *Integration) StopForLogin(bridgeID, loginID string) {
 	StopManagersForLogin(bridgeID, loginID)
 }
-
-// ---- LoginPurgeIntegration ----
 
 func (i *Integration) PurgeForLogin(ctx context.Context, scope iruntime.LoginScope) error {
 	db := i.resolveBridgeDB()

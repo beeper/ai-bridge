@@ -17,13 +17,15 @@ import (
 	bridgesdk "github.com/beeper/agentremote/sdk"
 )
 
-var _ bridgev2.NetworkAPI = (*OpenCodeClient)(nil)
-var _ bridgev2.BackfillingNetworkAPI = (*OpenCodeClient)(nil)
-var _ bridgev2.DeleteChatHandlingNetworkAPI = (*OpenCodeClient)(nil)
-var _ bridgev2.IdentifierResolvingNetworkAPI = (*OpenCodeClient)(nil)
-var _ bridgev2.ContactListingNetworkAPI = (*OpenCodeClient)(nil)
-var _ bridgev2.UserSearchingNetworkAPI = (*OpenCodeClient)(nil)
-var _ bridgev2.ReactionHandlingNetworkAPI = (*OpenCodeClient)(nil)
+var (
+	_ bridgev2.NetworkAPI                    = (*OpenCodeClient)(nil)
+	_ bridgev2.BackfillingNetworkAPI         = (*OpenCodeClient)(nil)
+	_ bridgev2.DeleteChatHandlingNetworkAPI  = (*OpenCodeClient)(nil)
+	_ bridgev2.IdentifierResolvingNetworkAPI = (*OpenCodeClient)(nil)
+	_ bridgev2.ContactListingNetworkAPI      = (*OpenCodeClient)(nil)
+	_ bridgev2.UserSearchingNetworkAPI       = (*OpenCodeClient)(nil)
+	_ bridgev2.ReactionHandlingNetworkAPI    = (*OpenCodeClient)(nil)
+)
 
 type OpenCodeClient struct {
 	agentremote.ClientBase

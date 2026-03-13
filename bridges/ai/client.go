@@ -1545,10 +1545,9 @@ func (oc *AIClient) defaultThinkLevel(meta *PortalMetadata) string {
 	switch effort := strings.ToLower(strings.TrimSpace(oc.effectiveReasoningEffort(meta))); effort {
 	case "off", "none":
 		return "off"
-	case "low", "medium", "high", "xhigh", "minimal":
-		if effort == "minimal" {
-			return "low"
-		}
+	case "minimal":
+		return "low"
+	case "low", "medium", "high", "xhigh":
 		return effort
 	}
 	if caps := oc.getModelCapabilitiesForMeta(meta); caps.SupportsReasoning {
