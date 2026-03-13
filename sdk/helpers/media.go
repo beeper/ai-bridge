@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -32,7 +33,8 @@ func DownloadMedia(ctx context.Context, url string, login *bridgev2.UserLogin) (
 	if err != nil {
 		return nil, "", err
 	}
-	return data, "application/octet-stream", nil
+	mimeType := http.DetectContentType(data)
+	return data, mimeType, nil
 }
 
 // UploadMedia uploads media data to Matrix and returns the content URI.

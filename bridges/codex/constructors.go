@@ -9,6 +9,7 @@ import (
 	"go.mau.fi/util/dbutil"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/event"
 
 	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/pkg/aidb"
@@ -70,6 +71,12 @@ func NewConnector() *CodexConnector {
 				DefaultPort:          29346,
 				DefaultCommandPrefix: cc.Config.Bridge.CommandPrefix,
 			}
+		},
+		FillBridgeInfo: func(portal *bridgev2.Portal, content *event.BridgeEventContent) {
+			if portal == nil {
+				return
+			}
+			agentremote.ApplyAIBridgeInfo(content, "ai-codex", portal.RoomType, agentremote.AIRoomKindAgent)
 		},
 		ExampleConfig:  exampleNetworkConfig,
 		ConfigData:     &cc.Config,

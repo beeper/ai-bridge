@@ -9,10 +9,7 @@ import (
 )
 
 // BroadcastRoomCapabilities sends room capability state events for the given conversation.
-func BroadcastRoomCapabilities(ctx context.Context, conv *sdk.Conversation, features *sdk.RoomFeatures) error {
-	if features != nil {
-		return conv.BroadcastCapabilities(ctx)
-	}
+func BroadcastRoomCapabilities(ctx context.Context, conv *sdk.Conversation) error {
 	return conv.BroadcastCapabilities(ctx)
 }
 
@@ -33,8 +30,8 @@ func BroadcastCommandDescriptions(ctx context.Context, conv *sdk.Conversation, c
 }
 
 // BroadcastRoomState sends both room capabilities and command descriptions.
-func BroadcastRoomState(ctx context.Context, conv *sdk.Conversation, features *sdk.RoomFeatures, commands []sdk.Command) error {
-	if err := BroadcastRoomCapabilities(ctx, conv, features); err != nil {
+func BroadcastRoomState(ctx context.Context, conv *sdk.Conversation, commands []sdk.Command) error {
+	if err := BroadcastRoomCapabilities(ctx, conv); err != nil {
 		return err
 	}
 	return BroadcastCommandDescriptions(ctx, conv, commands)

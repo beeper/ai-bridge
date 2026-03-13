@@ -21,8 +21,7 @@ func NewMessageQueue() *MessageQueue {
 // Enqueue runs handler for the given room, waiting for any in-progress handler
 // to finish first. Multiple Enqueue calls for the same room are serialized.
 func (q *MessageQueue) Enqueue(roomID string, handler func()) {
-	q.waitForRoom(roomID)
-	q.acquireRoom(roomID)
+	q.acquireOrWait(roomID)
 	defer q.ReleaseRoom(roomID)
 	handler()
 }
@@ -60,20 +59,20 @@ func (q *MessageQueue) HasActiveRoom(roomID string) bool {
 	return ok
 }
 
-func (q *MessageQueue) waitForRoom(roomID string) {
+// acquireOrWait atomically acquires the room or waits for it to become free.
+// This avoids the TOCTOU race between checking and acquiring.
+func (q *MessageQueue) acquireOrWait(roomID string) {
 	for {
 		q.mu.Lock()
 		ch, ok := q.active[roomID]
-		q.mu.Unlock()
 		if !ok {
+			// Room is free — acquire it atomically within the same lock.
+			q.active[roomID] = make(chan struct{})
+			q.mu.Unlock()
 			return
 		}
+		q.mu.Unlock()
+		// Room is active — wait for it to be released, then retry.
 		<-ch
 	}
-}
-
-func (q *MessageQueue) acquireRoom(roomID string) {
-	q.mu.Lock()
-	q.active[roomID] = make(chan struct{})
-	q.mu.Unlock()
 }

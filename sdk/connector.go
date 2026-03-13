@@ -121,7 +121,12 @@ func NewConnectorBase(cfg *Config) *agentremote.ConnectorBase {
 		FillBridgeInfo: func(portal *bridgev2.Portal, content *event.BridgeEventContent) {
 			if cfg.FillBridgeInfo != nil {
 				cfg.FillBridgeInfo(portal, content)
+				return
 			}
+			if portal == nil || content == nil || protocolID == "" {
+				return
+			}
+			agentremote.ApplyAIBridgeInfo(content, protocolID, portal.RoomType, agentremote.AIRoomKindAgent)
 		},
 		LoadLogin: func(_ context.Context, login *bridgev2.UserLogin) error {
 			if cfg.AcceptLogin != nil {

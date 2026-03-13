@@ -590,7 +590,7 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 		return true
 	})
 	turn.SetApprovalRequester(func(callCtx context.Context, sdkTurn *bridgesdk.Turn, req bridgesdk.ApprovalRequest) bridgesdk.ApprovalHandle {
-		return cc.requestSDKApproval(callCtx, portal, state, sdkTurn, req)
+		return cc.requestSDKApproval(callCtx, portal, state, sdkTurn, "", req)
 	})
 	turn.SetFinalMetadataBuilder(func(sdkTurn *bridgesdk.Turn, finishReason string) any {
 		return cc.buildSDKFinalMetadata(sdkTurn, state, model, finishReason)
@@ -2116,6 +2116,18 @@ func (cc *CodexClient) buildSDKFinalMetadata(turn *bridgesdk.Turn, state *stream
 	}
 }
 
+// --- Approvals ---
+
+// pendingToolApprovalDataCodex holds codex-specific metadata stored in
+// ApprovalFlow's Pending.Data field.
+type pendingToolApprovalDataCodex struct {
+	ApprovalID   string
+	RoomID       id.RoomID
+	ToolCallID   string
+	ToolName     string
+	Presentation agentremote.ApprovalPromptPresentation
+}
+
 type codexSDKApprovalHandle struct {
 	client     *CodexClient
 	portal     *bridgev2.Portal
@@ -2152,9 +2164,6 @@ func (h *codexSDKApprovalHandle) Wait(ctx context.Context) (bridgesdk.ToolApprov
 	}
 	if h.portal != nil {
 		h.client.uiEmitter(h.state).EmitUIToolApprovalResponse(ctx, h.portal, h.approvalID, h.toolCallID, ok && decision.Approved, reason)
-		if h.state != nil {
-			streamui.RecordApprovalResponse(&h.state.ui, h.approvalID, h.toolCallID, ok && decision.Approved, reason)
-		}
 		if !(ok && decision.Approved) {
 			h.client.uiEmitter(h.state).EmitUIToolOutputDenied(ctx, h.portal, h.toolCallID)
 		}
@@ -2170,99 +2179,16 @@ func (cc *CodexClient) requestSDKApproval(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	state *streamingState,
-	_ *bridgesdk.Turn,
+	turn *bridgesdk.Turn,
+	approvalID string,
 	req bridgesdk.ApprovalRequest,
 ) bridgesdk.ApprovalHandle {
 	if cc == nil || portal == nil {
 		return &codexSDKApprovalHandle{toolCallID: req.ToolCallID}
 	}
-	approvalID := strings.TrimSpace(req.ToolCallID)
-	if approvalID == "" {
-		approvalID = fmt.Sprintf("sdk-approval-%d", time.Now().UnixNano())
-	} else {
-		approvalID = fmt.Sprintf("sdk-%s-%d", approvalID, time.Now().UnixNano())
+	if strings.TrimSpace(approvalID) == "" {
+		approvalID = fmt.Sprintf("codex-%d", time.Now().UnixNano())
 	}
-	toolCallID := strings.TrimSpace(req.ToolCallID)
-	if toolCallID == "" {
-		toolCallID = approvalID
-	}
-	toolName := strings.TrimSpace(req.ToolName)
-	if toolName == "" {
-		toolName = "tool"
-	}
-	presentation := agentremote.ApprovalPromptPresentation{
-		Title:       toolName,
-		AllowAlways: true,
-	}
-	if req.Presentation != nil {
-		presentation = *req.Presentation
-	}
-	ttl := req.TTL
-	if ttl <= 0 {
-		ttl = agentremote.DefaultApprovalExpiry
-	}
-	cc.setApprovalStateTracking(state, approvalID, toolCallID, toolName)
-	cc.registerToolApproval(portal.MXID, approvalID, toolCallID, toolName, presentation, ttl)
-	cc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, toolCallID, toolName, presentation, int(ttl/time.Second))
-	return &codexSDKApprovalHandle{
-		client:     cc,
-		portal:     portal,
-		state:      state,
-		approvalID: approvalID,
-		toolCallID: toolCallID,
-	}
-}
-
-// --- Approvals ---
-
-// pendingToolApprovalDataCodex holds codex-specific metadata stored in
-// ApprovalFlow's Pending.Data field.
-type pendingToolApprovalDataCodex struct {
-	ApprovalID   string
-	RoomID       id.RoomID
-	ToolCallID   string
-	ToolName     string
-	Presentation agentremote.ApprovalPromptPresentation
-}
-
-type codexSDKApprovalHandle struct {
-	approvalID string
-	toolCallID string
-	waitFn     func(context.Context) (bridgesdk.ToolApprovalResponse, error)
-}
-
-func (h *codexSDKApprovalHandle) ID() string {
-	if h == nil {
-		return ""
-	}
-	return h.approvalID
-}
-
-func (h *codexSDKApprovalHandle) ToolCallID() string {
-	if h == nil {
-		return ""
-	}
-	return h.toolCallID
-}
-
-func (h *codexSDKApprovalHandle) Wait(ctx context.Context) (bridgesdk.ToolApprovalResponse, error) {
-	if h == nil || h.waitFn == nil {
-		return bridgesdk.ToolApprovalResponse{}, nil
-	}
-	return h.waitFn(ctx)
-}
-
-func (cc *CodexClient) requestSDKApproval(
-	_ context.Context,
-	portal *bridgev2.Portal,
-	state *streamingState,
-	turn *bridgesdk.Turn,
-	req bridgesdk.ApprovalRequest,
-) bridgesdk.ApprovalHandle {
-	if cc == nil || portal == nil || state == nil || turn == nil {
-		return &codexSDKApprovalHandle{toolCallID: req.ToolCallID}
-	}
-	approvalID := fmt.Sprintf("codex-%d", time.Now().UnixNano())
 	ttl := req.TTL
 	if ttl <= 0 {
 		ttl = agentremote.DefaultApprovalExpiry
@@ -2274,39 +2200,31 @@ func (cc *CodexClient) requestSDKApproval(
 	if req.Presentation != nil {
 		presentation = *req.Presentation
 	}
+	cc.setApprovalStateTracking(state, approvalID, req.ToolCallID, req.ToolName)
 	cc.registerToolApproval(portal.MXID, approvalID, req.ToolCallID, req.ToolName, presentation, ttl)
-	turn.Emitter().EmitUIToolApprovalRequest(turn.Context(), portal, approvalID, req.ToolCallID)
-	cc.approvalFlow.SendPrompt(turn.Context(), portal, agentremote.SendPromptParams{
-		ApprovalPromptMessageParams: agentremote.ApprovalPromptMessageParams{
-			ApprovalID:   approvalID,
-			ToolCallID:   req.ToolCallID,
-			ToolName:     req.ToolName,
-			TurnID:       turn.ID(),
-			Presentation: presentation,
-			ExpiresAt:    time.Now().Add(ttl),
-		},
-		RoomID:    portal.MXID,
-		OwnerMXID: cc.UserLogin.UserMXID,
-	})
+	if turn != nil {
+		turn.Emitter().EmitUIToolApprovalRequest(turn.Context(), portal, approvalID, req.ToolCallID)
+		cc.approvalFlow.SendPrompt(turn.Context(), portal, agentremote.SendPromptParams{
+			ApprovalPromptMessageParams: agentremote.ApprovalPromptMessageParams{
+				ApprovalID:   approvalID,
+				ToolCallID:   req.ToolCallID,
+				ToolName:     req.ToolName,
+				TurnID:       turn.ID(),
+				Presentation: presentation,
+				ExpiresAt:    time.Now().Add(ttl),
+			},
+			RoomID:    portal.MXID,
+			OwnerMXID: cc.UserLogin.UserMXID,
+		})
+	} else {
+		cc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, req.ToolCallID, req.ToolName, presentation, int(ttl/time.Second))
+	}
 	return &codexSDKApprovalHandle{
+		client:     cc,
+		portal:     portal,
+		state:      state,
 		approvalID: approvalID,
 		toolCallID: req.ToolCallID,
-		waitFn: func(waitCtx context.Context) (bridgesdk.ToolApprovalResponse, error) {
-			decision, ok := cc.waitToolApproval(waitCtx, approvalID)
-			reason := strings.TrimSpace(decision.Reason)
-			if reason == "" && !ok {
-				reason = agentremote.ApprovalReasonTimeout
-			}
-			turn.Emitter().EmitUIToolApprovalResponse(turn.Context(), portal, approvalID, req.ToolCallID, decision.Approved, reason)
-			if !decision.Approved {
-				turn.Emitter().EmitUIToolOutputDenied(turn.Context(), portal, req.ToolCallID)
-			}
-			return bridgesdk.ToolApprovalResponse{
-				Approved: decision.Approved,
-				Always:   decision.Always,
-				Reason:   reason,
-			}, nil
-		},
 	}
 }
 
@@ -2369,17 +2287,14 @@ func (cc *CodexClient) handleApprovalRequest(
 		toolCallID = defaultToolName
 	}
 	toolName := defaultToolName
+	approvalID := strings.Trim(strings.TrimSpace(string(req.ID)), "\"")
 
 	inputMap, presentation := extractInput(req.Params)
 	cc.ensureUIToolInputStart(ctx, active.portal, active.state, toolCallID, toolName, true, inputMap)
-	if active.state.turn == nil {
-		return map[string]any{"decision": "decline"}, nil
-	}
-	handle := active.state.turn.RequestApproval(bridgesdk.ApprovalRequest{
+	handle := cc.requestSDKApproval(ctx, active.portal, active.state, active.state.turn, approvalID, bridgesdk.ApprovalRequest{
 		ToolCallID:   toolCallID,
 		ToolName:     toolName,
 		TTL:          10 * time.Minute,
-		Blocking:     true,
 		Presentation: &presentation,
 	})
 

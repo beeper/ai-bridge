@@ -646,6 +646,10 @@ func (t *Turn) Source() *SourceRef { return t.source }
 // Agent returns the turn's selected agent.
 func (t *Turn) Agent() *Agent { return t.agent }
 
+// SetSender overrides the bridge sender used for turn output. Call before the
+// turn produces visible output.
+func (t *Turn) SetSender(sender bridgev2.EventSender) { t.sender = sender }
+
 // Emitter returns the underlying streamui.Emitter for escape hatch access.
 func (t *Turn) Emitter() *streamui.Emitter { return t.emitter }
 

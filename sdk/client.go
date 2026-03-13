@@ -132,8 +132,6 @@ func (c *sdkClient) setSession(s any) {
 
 // Connect implements bridgev2.NetworkAPI.
 func (c *sdkClient) Connect(ctx context.Context) {
-	c.loggedIn.Store(true)
-	c.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
 	if c.config().OnConnect != nil {
 		info := &LoginInfo{
 			Login: c.userLogin,
@@ -142,10 +140,17 @@ func (c *sdkClient) Connect(ctx context.Context) {
 			info.UserID = string(c.userLogin.UserMXID)
 		}
 		session, err := c.config().OnConnect(ctx, info)
-		if err == nil {
-			c.setSession(session)
+		if err != nil {
+			c.userLogin.BridgeState.Send(status.BridgeState{
+				StateEvent: status.StateUnknownError,
+				Error:      status.BridgeStateErrorCode(err.Error()),
+			})
+			return
 		}
+		c.setSession(session)
 	}
+	c.loggedIn.Store(true)
+	c.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
 }
 
 func (c *sdkClient) Disconnect() {
