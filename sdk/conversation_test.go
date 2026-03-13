@@ -89,9 +89,9 @@ func TestConversationCurrentRoomFeaturesIgnoresUnresolvedAgentsWhenOneResolves(t
 				"found": {
 					ID: "found",
 					Capabilities: AgentCapabilities{
-						SupportsStreaming: true,
+						SupportsStreaming:  true,
 						SupportsAudioInput: true,
-						MaxTextLength:     48000,
+						MaxTextLength:      48000,
 					},
 				},
 			},

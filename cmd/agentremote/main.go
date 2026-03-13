@@ -576,11 +576,11 @@ func cmdRestart(args []string) error {
 }
 
 type bridgeStatus struct {
-	Name        string        `json:"name"`
-	State       string        `json:"state,omitempty"`
-	SelfHosted  bool          `json:"self_hosted,omitempty"`
-	Local       *localStatus  `json:"local,omitempty"`
-	Logins      []loginStatus `json:"logins,omitempty"`
+	Name       string        `json:"name"`
+	State      string        `json:"state,omitempty"`
+	SelfHosted bool          `json:"self_hosted,omitempty"`
+	Local      *localStatus  `json:"local,omitempty"`
+	Logins     []loginStatus `json:"logins,omitempty"`
 }
 
 type localStatus struct {

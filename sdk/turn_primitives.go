@@ -4,9 +4,10 @@ import (
 	"context"
 	"strings"
 
+	"maunium.net/go/mautrix/bridgev2"
+
 	"github.com/beeper/agentremote/pkg/shared/citations"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
-	"maunium.net/go/mautrix/bridgev2"
 )
 
 // StreamTransport handles SDK turn stream events for custom transports or tests.

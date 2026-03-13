@@ -168,7 +168,7 @@ func (m *MemorySearchManager) updateMeta(ctx context.Context, generation string)
 			m.status.Provider, m.status.Model, lexicalProviderKey,
 			m.cfg.Chunking.Tokens, m.cfg.Chunking.Overlap,
 			generation, time.Now().UnixMilli(),
-		)...
+		)...,
 	)
 	return err
 }

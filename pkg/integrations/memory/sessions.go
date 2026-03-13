@@ -185,7 +185,7 @@ func (m *MemorySearchManager) saveSessionState(ctx context.Context, sessionKey s
            pending_messages=excluded.pending_messages, updated_at=excluded.updated_at`,
 		m.baseArgs(sessionKey,
 			state.lastRowID, state.pendingBytes, state.pendingMessages, time.Now().UnixMilli(),
-		)...
+		)...,
 	)
 	return err
 }
@@ -320,7 +320,7 @@ func (m *MemorySearchManager) upsertSessionFile(ctx context.Context, sessionKey,
          ON CONFLICT (bridge_id, login_id, agent_id, session_key)
          DO UPDATE SET path=excluded.path, content=excluded.content, hash=excluded.hash,
            size=excluded.size, updated_at=excluded.updated_at`,
-		m.baseArgs(sessionKey, path, content, hash, len(content), time.Now().UnixMilli())...
+		m.baseArgs(sessionKey, path, content, hash, len(content), time.Now().UnixMilli())...,
 	)
 	return err
 }

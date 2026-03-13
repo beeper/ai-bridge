@@ -5,11 +5,12 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/beeper/agentremote"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+
+	"github.com/beeper/agentremote"
 )
 
 type testSDKClient struct {

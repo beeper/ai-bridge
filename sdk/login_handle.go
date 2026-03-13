@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/beeper/agentremote"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+
+	"github.com/beeper/agentremote"
 )
 
 // LoginHandle wraps a UserLogin and provides convenience methods for creating
