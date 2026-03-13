@@ -15,7 +15,7 @@ type Bridge struct {
 
 // New creates a new SDK bridge instance.
 func New(cfg Config) *Bridge {
-	conn := newSDKConnector(&cfg)
+	conn := NewConnectorBase(&cfg)
 	desc := cfg.Description
 	if desc == "" {
 		desc = "A Matrix↔" + cfg.Name + " bridge for Beeper built on agentremote SDK."

@@ -14,10 +14,6 @@ import (
 	"github.com/beeper/agentremote"
 )
 
-func newSDKConnector(cfg *Config) *agentremote.ConnectorBase {
-	return NewConnectorBase(cfg)
-}
-
 // NewConnectorBase builds an SDK-backed connector base that can be embedded by custom bridges.
 func NewConnectorBase(cfg *Config) *agentremote.ConnectorBase {
 	var localMu sync.Mutex

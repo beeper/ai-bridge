@@ -3,15 +3,8 @@ package helpers
 import (
 	"context"
 
-	"maunium.net/go/mautrix/bridgev2"
-
 	"github.com/beeper/agentremote/sdk"
 )
-
-// BroadcastRoomCapabilities sends room capability state events for the given conversation.
-func BroadcastRoomCapabilities(ctx context.Context, conv *sdk.Conversation) error {
-	return conv.BroadcastCapabilities(ctx)
-}
 
 // BroadcastCommandDescriptions sends MSC4391 command-description state events
 // for all SDK commands into the given room.
@@ -27,19 +20,4 @@ func BroadcastCommandDescriptions(ctx context.Context, conv *sdk.Conversation, c
 	bot := login.Bridge.Bot
 	sdk.BroadcastCommandDescriptions(ctx, portal, bot, commands)
 	return nil
-}
-
-// BroadcastRoomState sends both room capabilities and command descriptions.
-func BroadcastRoomState(ctx context.Context, conv *sdk.Conversation, commands []sdk.Command) error {
-	if err := BroadcastRoomCapabilities(ctx, conv); err != nil {
-		return err
-	}
-	return BroadcastCommandDescriptions(ctx, conv, commands)
-}
-
-// UpdatePortalCapabilities refreshes the Matrix room capabilities for a portal.
-func UpdatePortalCapabilities(ctx context.Context, portal *bridgev2.Portal, login *bridgev2.UserLogin) {
-	if portal != nil {
-		portal.UpdateCapabilities(ctx, login, false)
-	}
 }
