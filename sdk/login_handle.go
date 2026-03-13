@@ -29,10 +29,8 @@ func (l *LoginHandle) Conversation(ctx context.Context, portalID string) *Conver
 		return newConversation(ctx, nil, l.login, bridgev2.EventSender{}, l.runtime)
 	}
 	portalKey := networkid.PortalKey{
-		ID: networkid.PortalID(portalID),
-	}
-	if l.login != nil {
-		portalKey.Receiver = l.login.ID
+		ID:       networkid.PortalID(portalID),
+		Receiver: l.login.ID,
 	}
 	portal, err := l.login.Bridge.GetExistingPortalByKey(ctx, portalKey)
 	if err != nil || portal == nil {

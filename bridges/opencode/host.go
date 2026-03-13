@@ -64,7 +64,6 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 		return
 	}
 
-	turnID = strings.TrimSpace(turnID)
 	agentID = strings.TrimSpace(agentID)
 	ctx = oc.BackgroundContext(ctx)
 
@@ -121,13 +120,7 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 		return
 	}
 	switch strings.TrimSpace(partType) {
-	case "start":
-		if metadata, _ := part["messageMetadata"].(map[string]any); len(metadata) > 0 {
-			turn.SetMetadata(metadata)
-		} else {
-			turn.SetMetadata(nil)
-		}
-	case "message-metadata":
+	case "start", "message-metadata":
 		if metadata, _ := part["messageMetadata"].(map[string]any); len(metadata) > 0 {
 			turn.SetMetadata(metadata)
 		} else {

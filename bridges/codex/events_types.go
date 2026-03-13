@@ -5,9 +5,7 @@ import (
 	"maunium.net/go/mautrix/event"
 )
 
-const (
-	AIAuthFailed status.BridgeStateErrorCode = "ai-auth-failed"
-)
+const AIAuthFailed status.BridgeStateErrorCode = "ai-auth-failed"
 
 func messageStatusForError(_ error) event.MessageStatus {
 	return event.MessageStatusRetriable

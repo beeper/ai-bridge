@@ -170,7 +170,6 @@ func (o ApprovalOption) allKeys() []string {
 	}
 }
 
-
 func ApprovalPromptOptions(allowAlways bool) []ApprovalOption {
 	options := []ApprovalOption{
 		{

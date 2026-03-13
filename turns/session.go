@@ -130,7 +130,6 @@ func EmitStreamEvent(ctx context.Context, portal *bridgev2.Portal, state StreamE
 	session.EmitPart(ctx, part)
 }
 
-
 func (s *StreamSession) IsClosed() bool {
 	return s == nil || s.closed.Load()
 }
@@ -421,11 +420,9 @@ func (s *StreamSession) sendDebounced(ctx context.Context, force bool) error {
 
 func debouncedPartMode(partType string) (eligible bool, force bool) {
 	switch partType {
-	case "text-delta", "reasoning-delta", "tool-input-delta":
-		return true, false
-	case "text-end", "reasoning-end":
-		return true, false
-	case "start", "start-step", "finish-step", "message-metadata",
+	case "text-delta", "reasoning-delta", "tool-input-delta",
+		"text-end", "reasoning-end",
+		"start", "start-step", "finish-step", "message-metadata",
 		"source-url", "source-document", "file":
 		return true, false
 	case "tool-input-start", "tool-input-available", "tool-input-error",

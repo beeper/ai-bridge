@@ -31,31 +31,19 @@ func TestApprovalFlow_FinishResolvedQueuesEditAndPlaceholderCleanup(t *testing.T
 	flow := NewApprovalFlow(ApprovalFlowConfig[*testApprovalFlowData]{
 		Login: func() *bridgev2.UserLogin { return login },
 	})
-	flow.testResolvePortal = func(ctx context.Context, login *bridgev2.UserLogin, roomID id.RoomID) (*bridgev2.Portal, error) {
-		_ = ctx
-		_ = login
-		_ = roomID
+	flow.testResolvePortal = func(_ context.Context, _ *bridgev2.UserLogin, _ id.RoomID) (*bridgev2.Portal, error) {
 		return portal, nil
 	}
 
 	editCh := make(chan ApprovalDecisionPayload, 1)
 	cleanupCh := make(chan struct{}, 1)
-	flow.testEditPromptToResolvedState = func(ctx context.Context, login *bridgev2.UserLogin, portal *bridgev2.Portal, sender bridgev2.EventSender, prompt ApprovalPromptRegistration, decision ApprovalDecisionPayload) {
-		_ = ctx
-		_ = login
-		_ = portal
-		_ = sender
+	flow.testEditPromptToResolvedState = func(_ context.Context, _ *bridgev2.UserLogin, _ *bridgev2.Portal, _ bridgev2.EventSender, prompt ApprovalPromptRegistration, decision ApprovalDecisionPayload) {
 		if prompt.PromptMessageID == "" {
 			t.Errorf("expected prompt message id to be set")
 		}
 		editCh <- decision
 	}
-	flow.testRedactPromptPlaceholderReacts = func(ctx context.Context, login *bridgev2.UserLogin, portal *bridgev2.Portal, sender bridgev2.EventSender, prompt ApprovalPromptRegistration) error {
-		_ = ctx
-		_ = login
-		_ = portal
-		_ = sender
-		_ = prompt
+	flow.testRedactPromptPlaceholderReacts = func(_ context.Context, _ *bridgev2.UserLogin, _ *bridgev2.Portal, _ bridgev2.EventSender, _ ApprovalPromptRegistration) error {
 		cleanupCh <- struct{}{}
 		return nil
 	}
@@ -140,16 +128,11 @@ func TestApprovalFlow_HandleReaction_DeliveryErrorKeepsPending(t *testing.T) {
 	var redacted bool
 	flow := NewApprovalFlow(ApprovalFlowConfig[*testApprovalFlowData]{
 		Login: func() *bridgev2.UserLogin { return login },
-		DeliverDecision: func(ctx context.Context, portal *bridgev2.Portal, pending *Pending[*testApprovalFlowData], decision ApprovalDecisionPayload) error {
-			_ = ctx
-			_ = portal
-			_ = pending
-			_ = decision
+		DeliverDecision: func(_ context.Context, _ *bridgev2.Portal, _ *Pending[*testApprovalFlowData], _ ApprovalDecisionPayload) error {
 			return errors.New("boom")
 		},
 	})
-	flow.testRedactSingleReaction = func(msg *bridgev2.MatrixReaction) {
-		_ = msg
+	flow.testRedactSingleReaction = func(_ *bridgev2.MatrixReaction) {
 		redacted = true
 	}
 	if _, created := flow.Register("approval-1", time.Minute, &testApprovalFlowData{}); !created {
@@ -198,18 +181,12 @@ func TestApprovalFlow_ResolveExternalMirrorsRemoteDecision(t *testing.T) {
 	flow := NewApprovalFlow(ApprovalFlowConfig[*testApprovalFlowData]{
 		Login: func() *bridgev2.UserLogin { return login },
 	})
-	flow.testResolvePortal = func(ctx context.Context, login *bridgev2.UserLogin, roomID id.RoomID) (*bridgev2.Portal, error) {
-		_ = ctx
-		_ = login
-		_ = roomID
+	flow.testResolvePortal = func(_ context.Context, _ *bridgev2.UserLogin, _ id.RoomID) (*bridgev2.Portal, error) {
 		return portal, nil
 	}
 
 	mirrorCh := make(chan string, 1)
-	flow.testMirrorRemoteDecisionReaction = func(ctx context.Context, login *bridgev2.UserLogin, portal *bridgev2.Portal, sender bridgev2.EventSender, prompt ApprovalPromptRegistration, reactionKey string) {
-		_ = ctx
-		_ = login
-		_ = portal
+	flow.testMirrorRemoteDecisionReaction = func(_ context.Context, _ *bridgev2.UserLogin, _ *bridgev2.Portal, sender bridgev2.EventSender, prompt ApprovalPromptRegistration, reactionKey string) {
 		if sender.Sender != MatrixSenderID(owner) {
 			t.Errorf("expected mirrored reaction sender to be owner, got %q", sender.Sender)
 		}
@@ -218,9 +195,9 @@ func TestApprovalFlow_ResolveExternalMirrorsRemoteDecision(t *testing.T) {
 		}
 		mirrorCh <- reactionKey
 	}
-	flow.testEditPromptToResolvedState = func(ctx context.Context, login *bridgev2.UserLogin, portal *bridgev2.Portal, sender bridgev2.EventSender, prompt ApprovalPromptRegistration, decision ApprovalDecisionPayload) {
+	flow.testEditPromptToResolvedState = func(_ context.Context, _ *bridgev2.UserLogin, _ *bridgev2.Portal, _ bridgev2.EventSender, _ ApprovalPromptRegistration, _ ApprovalDecisionPayload) {
 	}
-	flow.testRedactPromptPlaceholderReacts = func(ctx context.Context, login *bridgev2.UserLogin, portal *bridgev2.Portal, sender bridgev2.EventSender, prompt ApprovalPromptRegistration) error {
+	flow.testRedactPromptPlaceholderReacts = func(_ context.Context, _ *bridgev2.UserLogin, _ *bridgev2.Portal, _ bridgev2.EventSender, _ ApprovalPromptRegistration) error {
 		return nil
 	}
 

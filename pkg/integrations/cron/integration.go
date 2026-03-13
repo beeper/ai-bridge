@@ -74,7 +74,7 @@ func (i *Integration) CommandDefinitions(_ context.Context, _ iruntime.CommandSc
 }
 
 func (i *Integration) ExecuteCommand(ctx context.Context, call iruntime.CommandCall) (bool, error) {
-	if strings.ToLower(strings.TrimSpace(call.Name)) != moduleName {
+	if !strings.EqualFold(strings.TrimSpace(call.Name), moduleName) {
 		return false, nil
 	}
 	return true, i.executeCronCommand(ctx, call)
@@ -132,11 +132,7 @@ func (i *Integration) executeCronCommand(ctx context.Context, call iruntime.Comm
 			reply("Cron add failed: %s", err.Error())
 			return nil
 		}
-		deps := i.buildToolExecDeps(ctx, iruntime.ToolScope{
-			Client: call.Scope.Client,
-			Portal: call.Scope.Portal,
-			Meta:   call.Scope.Meta,
-		})
+		deps := i.buildToolExecDeps(ctx, commandScopeToToolScope(call.Scope))
 		injectToolContext(&input, deps.ResolveCreateContext)
 		if input.Delivery != nil && strings.EqualFold(strings.TrimSpace(string(input.Delivery.Mode)), "announce") && deps.ValidateDeliveryTo != nil {
 			if err := deps.ValidateDeliveryTo(input.Delivery.To); err != nil {
@@ -167,11 +163,7 @@ func (i *Integration) executeCronCommand(ctx context.Context, call iruntime.Comm
 			reply("Cron update failed: %s", err.Error())
 			return nil
 		}
-		deps := i.buildToolExecDeps(ctx, iruntime.ToolScope{
-			Client: call.Scope.Client,
-			Portal: call.Scope.Portal,
-			Meta:   call.Scope.Meta,
-		})
+		deps := i.buildToolExecDeps(ctx, commandScopeToToolScope(call.Scope))
 		if patch.Delivery != nil && patch.Delivery.To != nil && deps.ValidateDeliveryTo != nil {
 			if err := deps.ValidateDeliveryTo(*patch.Delivery.To); err != nil {
 				reply("Cron update failed: %s", err.Error())
@@ -285,6 +277,14 @@ func (i *Integration) buildToolExecDeps(ctx context.Context, scope iruntime.Tool
 		return scheduler.CronRun(ctx, jobID)
 	}
 	return deps
+}
+
+func commandScopeToToolScope(scope iruntime.CommandScope) iruntime.ToolScope {
+	return iruntime.ToolScope{
+		Client: scope.Client,
+		Portal: scope.Portal,
+		Meta:   scope.Meta,
+	}
 }
 
 var _ iruntime.ToolIntegration = (*Integration)(nil)

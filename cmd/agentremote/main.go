@@ -411,7 +411,7 @@ func cmdStart(args []string) error {
 	if err != nil {
 		return err
 	}
-	meta, err := ensureInitialized(*profile, instName, bridgeType, beeperName, sp)
+	meta, err := ensureInitialized(instName, bridgeType, beeperName, sp)
 	if err != nil {
 		return err
 	}
@@ -477,7 +477,7 @@ func cmdRun(args []string) error {
 	if err != nil {
 		return err
 	}
-	meta, err := ensureInitialized(*profile, instName, bridgeType, beeperName, sp)
+	meta, err := ensureInitialized(instName, bridgeType, beeperName, sp)
 	if err != nil {
 		return err
 	}
@@ -845,7 +845,7 @@ func cmdCompletion(args []string) error {
 
 // ── Instance management helpers ──
 
-func ensureInitialized(_, instName, bridgeType, beeperName string, sp *instancePaths) (*metadata, error) {
+func ensureInitialized(instName, bridgeType, beeperName string, sp *instancePaths) (*metadata, error) {
 	meta, err := readOrSynthesizeMetadata(instName, bridgeType, beeperName, sp)
 	if err != nil {
 		return nil, err

@@ -1,8 +1,6 @@
 package turns
 
-import (
-	"maunium.net/go/mautrix/bridgev2"
-)
+import "maunium.net/go/mautrix/bridgev2"
 
 // EnsureDontRenderEdited marks every edit part so clients can suppress "edited" UI chrome.
 func EnsureDontRenderEdited(edit *bridgev2.ConvertedEdit) {

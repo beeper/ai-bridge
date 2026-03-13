@@ -38,14 +38,10 @@ func ParseInlineDirectives(text string, options InlineDirectiveParseOptions) Inl
 		return InlineDirectiveParseResult{}
 	}
 
-	stripAudio := true
-	stripReply := true
-	// Keep a compatibility guard for zero-value options while preserving
-	// OpenClaw defaults (strip audio/reply tags by default).
-	if options.StripAudioTag || options.StripReplyTags || options.NormalizeWhitespace || options.SilentToken != "" || options.CurrentMessageID != "" {
-		stripAudio = options.StripAudioTag
-		stripReply = options.StripReplyTags
-	}
+	// Default to stripping tags unless the caller explicitly configured options.
+	hasExplicitOptions := options.StripAudioTag || options.StripReplyTags || options.NormalizeWhitespace || options.SilentToken != "" || options.CurrentMessageID != ""
+	stripAudio := !hasExplicitOptions || options.StripAudioTag
+	stripReply := !hasExplicitOptions || options.StripReplyTags
 
 	cleaned := text
 	result := InlineDirectiveParseResult{}

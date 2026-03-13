@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strings"
 	"time"
 )
@@ -79,10 +81,10 @@ func (s *ApprovalStore) Get(ctx context.Context, approvalID string) (ApprovalRec
 		&record.ToolCallID, &record.ToolName, &record.RequestJSON, &record.Status,
 		&record.Reason, &record.ExpiresAtMs, &record.CreatedAtMs, &record.UpdatedAtMs,
 	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ApprovalRecord{}, false, nil
+	}
 	if err != nil {
-		if strings.Contains(err.Error(), "no rows") {
-			return ApprovalRecord{}, false, nil
-		}
 		return ApprovalRecord{}, false, err
 	}
 	return record, true, nil

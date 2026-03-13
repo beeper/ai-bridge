@@ -238,11 +238,7 @@ func canonicalDataPart(part api.Part) map[string]any {
 	if strings.TrimSpace(part.ID) == "" {
 		return nil
 	}
-	data := BuildDataPartMap(part)
-	if data == nil {
-		return nil
-	}
-	return data
+	return BuildDataPartMap(part)
 }
 
 func backfillCost(msg api.MessageWithParts) float64 {

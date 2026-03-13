@@ -55,6 +55,7 @@ func formatCronJobListText(jobs []Job) string {
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
+
 func formatCronSchedule(s Schedule) string {
 	switch strings.ToLower(strings.TrimSpace(s.Kind)) {
 	case "every":

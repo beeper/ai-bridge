@@ -70,10 +70,7 @@ func StripEnvelope(text string) string {
 }
 
 func stripInboundMetadata(text string) string {
-	if strings.TrimSpace(text) == "" {
-		return text
-	}
-	if !inboundMetaFastRE.MatchString(text) {
+	if strings.TrimSpace(text) == "" || !inboundMetaFastRE.MatchString(text) {
 		return text
 	}
 
@@ -82,8 +79,7 @@ func stripInboundMetadata(text string) string {
 	inMetaBlock := false
 	inFence := false
 
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
+	for i, line := range lines {
 		if !inMetaBlock && shouldStripTrailingUntrustedContext(lines, i) {
 			break
 		}

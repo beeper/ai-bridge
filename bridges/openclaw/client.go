@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,10 +28,12 @@ import (
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 )
 
-var _ bridgev2.NetworkAPI = (*OpenClawClient)(nil)
-var _ bridgev2.BackfillingNetworkAPI = (*OpenClawClient)(nil)
-var _ bridgev2.DeleteChatHandlingNetworkAPI = (*OpenClawClient)(nil)
-var _ bridgev2.ReactionHandlingNetworkAPI = (*OpenClawClient)(nil)
+var (
+	_ bridgev2.NetworkAPI                  = (*OpenClawClient)(nil)
+	_ bridgev2.BackfillingNetworkAPI       = (*OpenClawClient)(nil)
+	_ bridgev2.DeleteChatHandlingNetworkAPI = (*OpenClawClient)(nil)
+	_ bridgev2.ReactionHandlingNetworkAPI  = (*OpenClawClient)(nil)
+)
 
 const openClawCapabilityBaseID = "com.beeper.ai.capabilities.2026_03_09+openclaw"
 
@@ -398,6 +399,7 @@ func (oc *OpenClawClient) openClawCapabilityProfile(ctx context.Context, meta *P
 }
 
 func openClawCapabilityID(profile openClawCapabilityProfile) string {
+	// Suffixes are appended in alphabetical order so no sorting is needed.
 	var suffixes []string
 	if profile.SupportsAudio {
 		suffixes = append(suffixes, "audio")
@@ -417,7 +419,6 @@ func openClawCapabilityID(profile openClawCapabilityProfile) string {
 	if len(suffixes) == 0 {
 		return openClawCapabilityBaseID
 	}
-	sort.Strings(suffixes)
 	return openClawCapabilityBaseID + "+" + strings.Join(suffixes, "+")
 }
 
@@ -467,29 +468,20 @@ func (oc *OpenClawClient) portalKeyForSession(sessionKey string) networkid.Porta
 }
 
 func (oc *OpenClawClient) displayNameForSession(session gatewaySessionRow) string {
-	if strings.TrimSpace(session.DerivedTitle) != "" {
-		return strings.TrimSpace(session.DerivedTitle)
-	}
-	if strings.TrimSpace(session.DisplayName) != "" {
-		return strings.TrimSpace(session.DisplayName)
-	}
-	if strings.TrimSpace(session.Label) != "" {
-		return strings.TrimSpace(session.Label)
-	}
-	if sourceLabel := openClawSourceLabel(session.Space, session.GroupChannel, session.Subject); sourceLabel != "" {
-		return sourceLabel
-	}
-	if strings.TrimSpace(session.Subject) != "" {
-		return strings.TrimSpace(session.Subject)
-	}
-	if strings.TrimSpace(session.LastTo) != "" {
-		return strings.TrimSpace(session.LastTo)
-	}
-	if strings.TrimSpace(session.Channel) != "" {
-		return strings.TrimSpace(session.Channel)
-	}
-	if strings.TrimSpace(session.Key) != "" {
-		return strings.TrimSpace(session.Key)
+	sourceLabel := openClawSourceLabel(session.Space, session.GroupChannel, session.Subject)
+	for _, value := range []string{
+		session.DerivedTitle,
+		session.DisplayName,
+		session.Label,
+		sourceLabel,
+		session.Subject,
+		session.LastTo,
+		session.Channel,
+		session.Key,
+	} {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
 	}
 	return "OpenClaw"
 }
