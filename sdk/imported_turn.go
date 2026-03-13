@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"encoding/json"
 	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
@@ -111,11 +112,28 @@ func convertImportedTurn(turn *ImportedTurn, idPrefix string) *bridgev2.Backfill
 	if len(turn.ToolCalls) > 0 {
 		meta.ToolCalls = make([]agentremote.ToolCallMetadata, len(turn.ToolCalls))
 		for i, tc := range turn.ToolCalls {
-			meta.ToolCalls[i] = agentremote.ToolCallMetadata{
+			tcMeta := agentremote.ToolCallMetadata{
 				CallID:   tc.ID,
 				ToolName: tc.Name,
 				Status:   "completed",
 			}
+			if tc.Input != "" {
+				var inputMap map[string]any
+				if err := json.Unmarshal([]byte(tc.Input), &inputMap); err == nil {
+					tcMeta.Input = inputMap
+				} else {
+					tcMeta.Input = map[string]any{"raw": tc.Input}
+				}
+			}
+			if tc.Output != "" {
+				var outputMap map[string]any
+				if err := json.Unmarshal([]byte(tc.Output), &outputMap); err == nil {
+					tcMeta.Output = outputMap
+				} else {
+					tcMeta.Output = map[string]any{"raw": tc.Output}
+				}
+			}
+			meta.ToolCalls[i] = tcMeta
 		}
 	}
 

@@ -69,7 +69,6 @@ func (acc *StreamingDirectiveAccumulator) Consume(raw string, final bool) *Strea
 		return nil
 	}
 
-	// Keep reply directive context sticky across the full streamed assistant message.
 	acc.activeReply = streamingPendingReplyState{
 		explicitID: explicitID,
 		sawCurrent: sawCurrent,

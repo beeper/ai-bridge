@@ -188,18 +188,14 @@ func CompactPromptOnOverflow(input OverflowCompactionInput) OverflowCompactionRe
 	if protectedTail <= 0 {
 		protectedTail = 3
 	}
-	reserve := input.ReserveTokens
-	if reserve < 0 {
-		reserve = 0
-	}
+	reserve := max(input.ReserveTokens, 0)
+	keepRecent := max(input.KeepRecentTokens, 0)
+
 	mode := strings.ToLower(strings.TrimSpace(input.CompactionMode))
 	if mode == "" {
 		mode = "safeguard"
 	}
-	keepRecent := input.KeepRecentTokens
-	if keepRecent < 0 {
-		keepRecent = 0
-	}
+
 	maxHistoryShare := input.MaxHistoryShare
 	if maxHistoryShare <= 0 || maxHistoryShare >= 1 {
 		maxHistoryShare = 0.5
@@ -252,7 +248,6 @@ func CompactPromptOnOverflow(input OverflowCompactionInput) OverflowCompactionRe
 			if derivedTail > protectedTail {
 				protectedTail = derivedTail
 			}
-			// Safeguard mode avoids collapsing recent context too aggressively.
 			if maxChars > 0 && maxChars < keepRecentChars {
 				maxChars = keepRecentChars
 			}
@@ -328,11 +323,7 @@ func CompactPromptOnOverflow(input OverflowCompactionInput) OverflowCompactionRe
 		}
 	}
 	if input.Summarization {
-		maxSummaryTokens := input.MaxSummaryTokens
-		if maxSummaryTokens <= 0 {
-			maxSummaryTokens = 500
-		}
-		compacted = injectCompactionSummary(compacted, input.Prompt, decision.DroppedCount, maxSummaryTokens)
+		compacted = injectCompactionSummary(compacted, input.Prompt, decision.DroppedCount, max(input.MaxSummaryTokens, 500))
 	}
 	if strings.TrimSpace(input.RefreshPrompt) != "" {
 		compacted = injectCompactionRefreshPrompt(compacted, input.RefreshPrompt)

@@ -290,6 +290,18 @@ func (oc *AIClient) resolveOutputItemTool(
 	return tool, desc, true
 }
 
+// emitToolInputIfAvailable records the tool's input text and emits a UI input-available
+// event when the descriptor carries a non-nil input payload.
+func (oc *AIClient) emitToolInputIfAvailable(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall, desc responseToolDescriptor) {
+	if desc.input == nil {
+		return
+	}
+	if tool.input.Len() == 0 {
+		tool.input.WriteString(stringifyJSONValue(desc.input))
+	}
+	oc.uiEmitter(state).EmitUIToolInputAvailable(ctx, portal, tool.callID, tool.toolName, desc.input, desc.providerExecuted)
+}
+
 func (oc *AIClient) handleResponseOutputItemAdded(
 	ctx context.Context,
 	portal *bridgev2.Portal,
@@ -301,13 +313,7 @@ func (oc *AIClient) handleResponseOutputItemAdded(
 	if !ok {
 		return
 	}
-
-	if desc.input != nil {
-		if tool.input.Len() == 0 {
-			tool.input.WriteString(stringifyJSONValue(desc.input))
-		}
-		oc.uiEmitter(state).EmitUIToolInputAvailable(ctx, portal, tool.callID, tool.toolName, desc.input, desc.providerExecuted)
-	}
+	oc.emitToolInputIfAvailable(ctx, portal, state, tool, desc)
 }
 
 func (oc *AIClient) handleResponseOutputItemDone(
@@ -321,13 +327,7 @@ func (oc *AIClient) handleResponseOutputItemDone(
 	if !ok {
 		return
 	}
-
-	if desc.input != nil {
-		if tool.input.Len() == 0 {
-			tool.input.WriteString(stringifyJSONValue(desc.input))
-		}
-		oc.uiEmitter(state).EmitUIToolInputAvailable(ctx, portal, tool.callID, tool.toolName, desc.input, desc.providerExecuted)
-	}
+	oc.emitToolInputIfAvailable(ctx, portal, state, tool, desc)
 
 	if files := codeInterpreterFileParts(item); len(files) > 0 {
 		for _, file := range files {

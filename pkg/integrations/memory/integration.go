@@ -195,7 +195,6 @@ func (i *Integration) PurgeForLogin(ctx context.Context, scope iruntime.LoginSco
 		return nil
 	}
 	StopManagersForLogin(scope.BridgeID, scope.LoginID)
-	// Resolve vector extension path from config for vector row purge.
 	cfg := i.resolveMemorySearchConfig("")
 	if cfg != nil && cfg.Store.Vector.Enabled {
 		extPath := strings.TrimSpace(cfg.Store.Vector.ExtensionPath)
@@ -206,8 +205,6 @@ func (i *Integration) PurgeForLogin(ctx context.Context, scope iruntime.LoginSco
 	PurgeTablesBestEffort(ctx, db, scope.BridgeID, scope.LoginID)
 	return nil
 }
-
-// ---- private: tool deps wiring ----
 
 func (i *Integration) managerForScope(scope iruntime.ToolScope) (Manager, string) {
 	agentID := i.agentIDFromEventMeta(scope.Meta)
@@ -361,8 +358,6 @@ func (i *Integration) buildOverflowDeps() OverflowDeps {
 	}
 }
 
-// ---- private: prompt context ----
-
 func (i *Integration) shouldInjectMemoryPromptContext(scope iruntime.PromptScope) bool {
 	ma, ok := i.host.(iruntime.MetadataAccess)
 	if !ok {
@@ -456,8 +451,6 @@ func (i *Integration) readMemoryPromptSection(ctx context.Context, scope iruntim
 	}
 	return fmt.Sprintf("## %s\n%s", path, text)
 }
-
-// ---- private: memory manager access ----
 
 func (i *Integration) resolveMemorySearchConfig(agentID string) *ResolvedConfig {
 	cl := i.host.ConfigLookup()
@@ -584,8 +577,6 @@ func (i *Integration) resolveOverflowFlushSettings() *FlushSettings {
 	)
 }
 
-// ---- private: citations ----
-
 func (i *Integration) resolveMemoryCitationsMode() string {
 	cl := i.host.ConfigLookup()
 	if cl == nil {
@@ -620,8 +611,6 @@ func (i *Integration) shouldIncludeMemoryCitations(ctx context.Context, scope ir
 	return !ma.IsGroupChat(ctx, scope.Portal)
 }
 
-// ---- private: memory command file write ----
-
 func (i *Integration) writeMemoryCommandFile(
 	ctx context.Context,
 	scope iruntime.CommandScope,
@@ -640,8 +629,6 @@ func (i *Integration) writeMemoryCommandFile(
 	}
 	return tfh.WriteTextFile(ctx, scope.Portal, scope.Meta, agentID, mode, path, content, maxBytes)
 }
-
-// ---- private: helpers ----
 
 func (i *Integration) agentIDFromEventMeta(meta any) string {
 	var rawAgentID string
@@ -695,8 +682,6 @@ func splitQuotedArgs(input string) ([]string, error) {
 	}
 	return args, nil
 }
-
-// ---- hostRuntimeAdapter: bridges iruntime.Host → memory.Runtime ----
 
 type hostRuntimeAdapter struct {
 	host iruntime.Host
@@ -762,8 +747,6 @@ func (a *hostRuntimeAdapter) LoginID() string {
 func (a *hostRuntimeAdapter) Logger() zerolog.Logger {
 	return iruntime.ZerologFromHost(a.host)
 }
-
-// ---- private: config resolution ----
 
 // resolveMemorySearchConfigFromMaps converts generic map[string]any config
 // (from ConfigLookup) to agents.MemorySearchConfig and merges defaults with

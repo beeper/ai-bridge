@@ -147,6 +147,13 @@ func newTurn(ctx context.Context, conv *Conversation, agent *Agent, source *Sour
 	return t
 }
 
+func (t *Turn) providerIdentity() ProviderIdentity {
+	if t.conv != nil && t.conv.runtime != nil {
+		return t.conv.runtime.providerIdentity()
+	}
+	return defaultProviderIdentity()
+}
+
 func (t *Turn) resolveAgent(ctx context.Context) *Agent {
 	if t.agent != nil {
 		return t.agent
@@ -234,10 +241,7 @@ func (t *Turn) ensureSession() {
 			logger = t.conv.login.Log.With().Str("component", "sdk_turn").Logger()
 		}
 		sender := t.resolveSender(t.turnCtx)
-		identity := defaultProviderIdentity()
-		if t.conv != nil && t.conv.runtime != nil {
-			identity = t.conv.runtime.providerIdentity()
-		}
+		identity := t.providerIdentity()
 		t.session = turns.NewStreamSession(turns.StreamSessionParams{
 			TurnID:  t.turnID,
 			AgentID: strings.TrimSpace(string(sender.Sender)),

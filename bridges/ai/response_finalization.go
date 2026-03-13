@@ -173,12 +173,11 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 
 	finalReplyTarget := oc.resolveFinalReplyTarget(meta, state, &directives)
 	rendered := format.RenderMarkdown(cleanedContent, true, true)
+	var replyToPtr *id.EventID
 	if finalReplyTarget.ReplyTo != "" {
-		replyTo := finalReplyTarget.ReplyTo
-		oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, cleanedContent, rendered, &replyTo, "natural")
-	} else {
-		oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, cleanedContent, rendered, nil, "natural")
+		replyToPtr = &finalReplyTarget.ReplyTo
 	}
+	oc.sendFinalAssistantTurnContent(ctx, portal, state, meta, cleanedContent, rendered, replyToPtr, "natural")
 }
 
 // heartbeatSkipParams captures the per-branch differences for the common

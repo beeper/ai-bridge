@@ -832,11 +832,12 @@ func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *
 	if portal == nil {
 		return
 	}
-	toolCallID := strings.TrimSpace(req.ID)
+	approvalID := strings.TrimSpace(req.ID)
+	toolCallID := approvalID
 	messageID := ""
 	if req.Tool != nil {
-		if strings.TrimSpace(req.Tool.CallID) != "" {
-			toolCallID = strings.TrimSpace(req.Tool.CallID)
+		if callID := strings.TrimSpace(req.Tool.CallID); callID != "" {
+			toolCallID = callID
 		}
 		messageID = strings.TrimSpace(req.Tool.MessageID)
 	}
@@ -848,7 +849,6 @@ func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *
 			Msg("Skipping permission request without message id")
 		return
 	}
-	approvalID := strings.TrimSpace(req.ID)
 	presentation := buildOpenCodeApprovalPresentation(req)
 	_, created := m.approvalFlow.Register(approvalID, 10*time.Minute, &permissionApprovalRef{
 		RoomID:       portal.MXID,
@@ -904,13 +904,14 @@ func (m *OpenCodeManager) handlePermissionRepliedEvent(ctx context.Context, inst
 		m.log().Warn().Err(err).Msg("Failed to decode permission reply event")
 		return
 	}
-	pending := m.approvalFlow.Get(strings.TrimSpace(payload.RequestID))
+	requestID := strings.TrimSpace(payload.RequestID)
+	pending := m.approvalFlow.Get(requestID)
 	if pending == nil {
 		return
 	}
 	ref := pending.Data
 	if ref == nil {
-		m.approvalFlow.Drop(payload.RequestID)
+		m.approvalFlow.Drop(requestID)
 		return
 	}
 	reply := strings.ToLower(strings.TrimSpace(payload.Reply))
@@ -921,24 +922,22 @@ func (m *OpenCodeManager) handlePermissionRepliedEvent(ctx context.Context, inst
 		m.ensureStepStarted(ctx, inst, portal, ref.SessionID, ref.MessageID)
 		m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, m.bridge.portalAgentID(portal), map[string]any{
 			"type":       "tool-approval-response",
-			"approvalId": strings.TrimSpace(payload.RequestID),
+			"approvalId": requestID,
 			"toolCallId": ref.ToolCallID,
 			"approved":   approved,
 			"reason":     reply,
 		})
-	}
-	if strings.EqualFold(strings.TrimSpace(payload.Reply), "reject") {
-		if portal != nil {
+		if !approved {
 			m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, m.bridge.portalAgentID(portal), map[string]any{
 				"type":       "tool-output-denied",
 				"toolCallId": ref.ToolCallID,
 			})
 		}
 	}
-	m.approvalFlow.ResolveExternal(ctx, strings.TrimSpace(payload.RequestID), agentremote.ApprovalDecisionPayload{
-		ApprovalID: strings.TrimSpace(payload.RequestID),
+	m.approvalFlow.ResolveExternal(ctx, requestID, agentremote.ApprovalDecisionPayload{
+		ApprovalID: requestID,
 		Approved:   approved,
-		Always:     strings.EqualFold(strings.TrimSpace(payload.Reply), "always"),
+		Always:     reply == "always",
 		Reason:     reply,
 	})
 }

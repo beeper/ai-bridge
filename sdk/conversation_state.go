@@ -122,34 +122,30 @@ func loadConversationState(portal *bridgev2.Portal, store *conversationStateStor
 	if portal.Metadata == nil {
 		portal.Metadata = &SDKPortalMetadata{}
 	}
-	if meta, ok := portal.Metadata.(*SDKPortalMetadata); ok && meta != nil {
-		state := meta.Conversation.clone()
-		state.ensureDefaults()
-		if store != nil {
-			store.set(portal, state)
-		}
-		return state
+	state := loadConversationStateFromMetadata(portal.Metadata)
+	if state == nil {
+		state = store.get(portal)
 	}
-	if carrier, ok := portal.Metadata.(ConversationStateCarrier); ok && carrier != nil {
-		if meta := carrier.GetSDKPortalMetadata(); meta != nil {
-			state := meta.Conversation.clone()
-			state.ensureDefaults()
-			if store != nil {
-				store.set(portal, state)
-			}
-			return state
-		}
-	}
-	if state, ok := loadConversationStateFromGenericMetadata(portal.Metadata); ok {
-		state.ensureDefaults()
-		if store != nil {
-			store.set(portal, state)
-		}
-		return state
-	}
-	state := store.get(portal)
 	state.ensureDefaults()
+	if store != nil {
+		store.set(portal, state)
+	}
 	return state
+}
+
+func loadConversationStateFromMetadata(metadata any) *sdkConversationState {
+	if meta, ok := metadata.(*SDKPortalMetadata); ok && meta != nil {
+		return meta.Conversation.clone()
+	}
+	if carrier, ok := metadata.(ConversationStateCarrier); ok && carrier != nil {
+		if meta := carrier.GetSDKPortalMetadata(); meta != nil {
+			return meta.Conversation.clone()
+		}
+	}
+	if state, ok := loadConversationStateFromGenericMetadata(metadata); ok {
+		return state
+	}
+	return nil
 }
 
 func saveConversationState(ctx context.Context, portal *bridgev2.Portal, store *conversationStateStore, state *sdkConversationState) error {
@@ -157,40 +153,37 @@ func saveConversationState(ctx context.Context, portal *bridgev2.Portal, store *
 		return nil
 	}
 	state.ensureDefaults()
+	// Always update the in-memory cache, regardless of persistence outcome.
+	defer func() {
+		if store != nil {
+			store.set(portal, state)
+		}
+	}()
 	if portal.Metadata == nil {
 		portal.Metadata = &SDKPortalMetadata{}
 	}
-	if meta, ok := portal.Metadata.(*SDKPortalMetadata); ok && meta != nil {
-		meta.Conversation = *state.clone()
-		if err := portal.Save(ctx); err != nil {
-			if store != nil {
-				store.set(portal, state)
+	needsSave := false
+	switch meta := portal.Metadata.(type) {
+	case *SDKPortalMetadata:
+		if meta != nil {
+			meta.Conversation = *state.clone()
+			needsSave = true
+		}
+	case ConversationStateCarrier:
+		if meta != nil {
+			sdkMeta := meta.GetSDKPortalMetadata()
+			if sdkMeta == nil {
+				sdkMeta = &SDKPortalMetadata{}
 			}
-			return err
+			sdkMeta.Conversation = *state.clone()
+			meta.SetSDKPortalMetadata(sdkMeta)
+			needsSave = true
 		}
-	} else if carrier, ok := portal.Metadata.(ConversationStateCarrier); ok && carrier != nil {
-		meta := carrier.GetSDKPortalMetadata()
-		if meta == nil {
-			meta = &SDKPortalMetadata{}
-		}
-		meta.Conversation = *state.clone()
-		carrier.SetSDKPortalMetadata(meta)
-		if err := portal.Save(ctx); err != nil {
-			if store != nil {
-				store.set(portal, state)
-			}
-			return err
-		}
-	} else if saveConversationStateToGenericMetadata(&portal.Metadata, state) {
-		if err := portal.Save(ctx); err != nil {
-			if store != nil {
-				store.set(portal, state)
-			}
-			return err
-		}
+	default:
+		needsSave = saveConversationStateToGenericMetadata(&portal.Metadata, state)
 	}
-	if store != nil {
-		store.set(portal, state)
+	if needsSave {
+		return portal.Save(ctx)
 	}
 	return nil
 }

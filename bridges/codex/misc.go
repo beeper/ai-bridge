@@ -1,8 +1,6 @@
 package codex
 
-import (
-	"strings"
-)
+import "strings"
 
 const aiCapabilityID = "com.beeper.ai.v1"
 

@@ -355,23 +355,25 @@ func normalizeProviderKey(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
+func byProviderMap(base any) map[string]ToolPolicyConfig {
+	switch cfg := base.(type) {
+	case *GlobalToolPolicyConfig:
+		if cfg != nil {
+			return cfg.ByProvider
+		}
+	case *ToolPolicyConfig:
+		if cfg != nil {
+			return cfg.ByProvider
+		}
+	}
+	return nil
+}
+
 func resolveProviderToolPolicy(base any, provider string, modelID string) *ToolPolicyConfig {
 	if provider == "" || base == nil {
 		return nil
 	}
-	var byProvider map[string]ToolPolicyConfig
-	switch cfg := base.(type) {
-	case *GlobalToolPolicyConfig:
-		if cfg == nil {
-			return nil
-		}
-		byProvider = cfg.ByProvider
-	case *ToolPolicyConfig:
-		if cfg == nil {
-			return nil
-		}
-		byProvider = cfg.ByProvider
-	}
+	byProvider := byProviderMap(base)
 	if len(byProvider) == 0 {
 		return nil
 	}

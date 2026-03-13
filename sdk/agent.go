@@ -7,6 +7,7 @@ import (
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/id"
 )
 
 // AgentCapabilities contains the SDK-relevant capability truth for an agent.
@@ -83,9 +84,16 @@ func (a *Agent) UserInfo() *bridgev2.UserInfo {
 	if a == nil {
 		return nil
 	}
-	return &bridgev2.UserInfo{
+	info := &bridgev2.UserInfo{
 		Name:        ptr.NonZero(a.Name),
 		IsBot:       ptr.Ptr(true),
 		Identifiers: a.Identifiers,
 	}
+	if a.AvatarURL != "" {
+		info.Avatar = &bridgev2.Avatar{
+			ID:  networkid.AvatarID(a.AvatarURL),
+			MXC: id.ContentURIString(a.AvatarURL),
+		}
+	}
+	return info
 }

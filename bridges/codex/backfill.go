@@ -251,15 +251,14 @@ func codexThreadTitle(thread codexThread) string {
 	if preview == "" {
 		return "Codex"
 	}
+	// Use only the first line, truncated to 120 characters.
 	preview = strings.ReplaceAll(preview, "\r", "")
-	if line, _, ok := strings.Cut(preview, "\n"); ok {
-		preview = line
+	line, _, _ := strings.Cut(preview, "\n")
+	const maxLen = 120
+	if len(line) > maxLen {
+		line = line[:maxLen]
 	}
-	const max = 120
-	if len(preview) > max {
-		preview = preview[:max]
-	}
-	return strings.TrimSpace(preview)
+	return strings.TrimSpace(line)
 }
 
 func codexThreadSlug(threadID string) string {

@@ -1554,20 +1554,13 @@ func (cc *CodexClient) composeCodexChatInfo(title string, canBackfill bool) *bri
 
 func resolveCodexWorkingDirectory(raw string) (string, error) {
 	path := strings.TrimSpace(raw)
-	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+	if path == "~" || strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		path = filepath.Join(home, rest)
-	} else if path == "~" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		path = home
+		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
 	}
-
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("path must be absolute")
 	}
@@ -1800,10 +1793,9 @@ func (cc *CodexClient) popPendingCodex(roomID id.RoomID) *codexPendingMessage {
 		return nil
 	}
 	pm := queue[0]
+	cc.pendingMessages[roomID] = queue[1:]
 	if len(queue) == 1 {
 		delete(cc.pendingMessages, roomID)
-	} else {
-		cc.pendingMessages[roomID] = queue[1:]
 	}
 	return pm
 }

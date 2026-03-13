@@ -452,8 +452,10 @@ func (oc *OpenClawClient) BackgroundContext(ctx context.Context) context.Context
 	if ctx != nil {
 		return ctx
 	}
-	if oc != nil && oc.UserLogin != nil && oc.UserLogin.Bridge != nil && oc.UserLogin.Bridge.BackgroundCtx != nil {
-		return oc.UserLogin.Bridge.BackgroundCtx
+	if oc != nil && oc.UserLogin != nil && oc.UserLogin.Bridge != nil {
+		if bgCtx := oc.UserLogin.Bridge.BackgroundCtx; bgCtx != nil {
+			return bgCtx
+		}
 	}
 	return context.Background()
 }
@@ -575,16 +577,11 @@ func openClawRoomType(meta *PortalMetadata) database.RoomType {
 		return database.RoomTypeDM
 	}
 	switch normalizeOpenClawChatType(meta.OpenClawChatType) {
-	case "direct":
-		return database.RoomTypeDM
 	case "group", "channel":
 		return database.RoomTypeDefault
 	}
 	if strings.TrimSpace(meta.OpenClawSpace) != "" || strings.TrimSpace(meta.OpenClawGroupChannel) != "" {
 		return database.RoomTypeDefault
-	}
-	if strings.TrimSpace(meta.OpenClawDMTargetAgentID) != "" || isOpenClawSyntheticDMSessionKey(meta.OpenClawSessionKey) {
-		return database.RoomTypeDM
 	}
 	return database.RoomTypeDM
 }
@@ -681,14 +678,14 @@ func summarizeOpenClawOrigin(origin, channel string) string {
 }
 
 func (oc *OpenClawClient) displayNameForAgent(agentID string) string {
-	if strings.TrimSpace(agentID) == "" || strings.EqualFold(strings.TrimSpace(agentID), "gateway") {
-		meta := loginMetadata(oc.UserLogin)
-		if label := strings.TrimSpace(meta.GatewayLabel); label != "" {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" || strings.EqualFold(agentID, "gateway") {
+		if label := strings.TrimSpace(loginMetadata(oc.UserLogin).GatewayLabel); label != "" {
 			return label
 		}
 		return "OpenClaw"
 	}
-	return strings.TrimSpace(agentID)
+	return agentID
 }
 
 func (oc *OpenClawClient) formatAgentDisplayName(meta *GhostMetadata, agentID string) string {

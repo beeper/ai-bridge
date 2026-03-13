@@ -168,10 +168,9 @@ func modelMatchesQuery(query string, model *ModelInfo) bool {
 }
 
 func agentContactIdentifiers(agentID, modelID string, info *ModelInfo) []string {
-	identifiers := []string{}
-	agentID = strings.TrimSpace(agentID)
-	if agentID != "" {
-		identifiers = append(identifiers, agentID)
+	var identifiers []string
+	if id := strings.TrimSpace(agentID); id != "" {
+		identifiers = append(identifiers, id)
 	}
 	identifiers = append(identifiers, modelContactIdentifiers(modelID, info)...)
 	return stringutil.DedupeStrings(identifiers)

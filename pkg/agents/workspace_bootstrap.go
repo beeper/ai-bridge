@@ -191,13 +191,11 @@ func TrimBootstrapContent(content, fileName string, maxChars int) TrimBootstrapR
 	head := trimmed[:headChars]
 	tail := trimmed[len(trimmed)-tailChars:]
 
-	marker := strings.Join([]string{
-		"",
-		fmt.Sprintf("[...truncated, read %s for full content...]", fileName),
-		fmt.Sprintf("…(truncated %s: kept %d+%d chars of %d)…", fileName, headChars, tailChars, len(trimmed)),
-		"",
-	}, "\n")
-	contentWithMarker := strings.Join([]string{head, marker, tail}, "\n")
+	marker := fmt.Sprintf(
+		"\n[...truncated, read %s for full content...]\n…(truncated %s: kept %d+%d chars of %d)…\n",
+		fileName, fileName, headChars, tailChars, len(trimmed),
+	)
+	contentWithMarker := head + "\n" + marker + "\n" + tail
 	return TrimBootstrapResult{
 		Content:        contentWithMarker,
 		Truncated:      true,
