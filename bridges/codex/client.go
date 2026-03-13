@@ -29,6 +29,7 @@ import (
 	"github.com/beeper/agentremote/pkg/shared/citations"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 	"github.com/beeper/agentremote/pkg/shared/stringutil"
+	bridgesdk "github.com/beeper/agentremote/sdk"
 	"github.com/beeper/agentremote/turns"
 )
 
@@ -2112,6 +2113,103 @@ func (cc *CodexClient) buildSDKFinalMetadata(turn *bridgesdk.Turn, state *stream
 		FirstTokenAtMs:     state.firstTokenAtMs,
 		HasToolCalls:       len(state.toolCalls) > 0,
 		ThinkingTokenCount: len(strings.Fields(state.reasoning.String())),
+	}
+}
+
+type codexSDKApprovalHandle struct {
+	client     *CodexClient
+	portal     *bridgev2.Portal
+	state      *streamingState
+	approvalID string
+	toolCallID string
+}
+
+func (h *codexSDKApprovalHandle) ID() string {
+	if h == nil {
+		return ""
+	}
+	return h.approvalID
+}
+
+func (h *codexSDKApprovalHandle) ToolCallID() string {
+	if h == nil {
+		return ""
+	}
+	return h.toolCallID
+}
+
+func (h *codexSDKApprovalHandle) Wait(ctx context.Context) (bridgesdk.ToolApprovalResponse, error) {
+	if h == nil || h.client == nil {
+		return bridgesdk.ToolApprovalResponse{}, nil
+	}
+	decision, ok := h.client.waitToolApproval(ctx, h.approvalID)
+	reason := strings.TrimSpace(decision.Reason)
+	if reason == "" {
+		reason = agentremote.ApprovalReasonTimeout
+		if ctx != nil && ctx.Err() != nil {
+			reason = agentremote.ApprovalReasonCancelled
+		}
+	}
+	if h.portal != nil {
+		h.client.uiEmitter(h.state).EmitUIToolApprovalResponse(ctx, h.portal, h.approvalID, h.toolCallID, ok && decision.Approved, reason)
+		if h.state != nil {
+			streamui.RecordApprovalResponse(&h.state.ui, h.approvalID, h.toolCallID, ok && decision.Approved, reason)
+		}
+		if !(ok && decision.Approved) {
+			h.client.uiEmitter(h.state).EmitUIToolOutputDenied(ctx, h.portal, h.toolCallID)
+		}
+	}
+	return bridgesdk.ToolApprovalResponse{
+		Approved: ok && decision.Approved,
+		Always:   decision.Always,
+		Reason:   reason,
+	}, nil
+}
+
+func (cc *CodexClient) requestSDKApproval(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	_ *bridgesdk.Turn,
+	req bridgesdk.ApprovalRequest,
+) bridgesdk.ApprovalHandle {
+	if cc == nil || portal == nil {
+		return &codexSDKApprovalHandle{toolCallID: req.ToolCallID}
+	}
+	approvalID := strings.TrimSpace(req.ToolCallID)
+	if approvalID == "" {
+		approvalID = fmt.Sprintf("sdk-approval-%d", time.Now().UnixNano())
+	} else {
+		approvalID = fmt.Sprintf("sdk-%s-%d", approvalID, time.Now().UnixNano())
+	}
+	toolCallID := strings.TrimSpace(req.ToolCallID)
+	if toolCallID == "" {
+		toolCallID = approvalID
+	}
+	toolName := strings.TrimSpace(req.ToolName)
+	if toolName == "" {
+		toolName = "tool"
+	}
+	presentation := agentremote.ApprovalPromptPresentation{
+		Title:       toolName,
+		AllowAlways: true,
+	}
+	if req.Presentation != nil {
+		presentation = *req.Presentation
+	}
+	ttl := req.TTL
+	if ttl <= 0 {
+		ttl = agentremote.DefaultApprovalExpiry
+	}
+	cc.setApprovalStateTracking(state, approvalID, toolCallID, toolName)
+	cc.registerToolApproval(portal.MXID, approvalID, toolCallID, toolName, presentation, ttl)
+	cc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, toolCallID, toolName, presentation, int(ttl/time.Second))
+	return &codexSDKApprovalHandle{
+		client:     cc,
+		portal:     portal,
+		state:      state,
+		approvalID: approvalID,
+		toolCallID: toolCallID,
 	}
 }
 

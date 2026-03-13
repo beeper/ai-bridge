@@ -20,10 +20,10 @@ type Conversation struct {
 	ID    string
 	Title string
 
-	ctx    context.Context
-	portal *bridgev2.Portal
-	login  *bridgev2.UserLogin
-	sender bridgev2.EventSender
+	ctx     context.Context
+	portal  *bridgev2.Portal
+	login   *bridgev2.UserLogin
+	sender  bridgev2.EventSender
 	runtime conversationRuntime
 }
 
@@ -35,12 +35,12 @@ func newConversation(ctx context.Context, portal *bridgev2.Portal, login *bridge
 		title = portal.Name
 	}
 	return &Conversation{
-		ID:     id,
-		Title:  title,
-		ctx:    ctx,
-		portal: portal,
-		login:  login,
-		sender: sender,
+		ID:      id,
+		Title:   title,
+		ctx:     ctx,
+		portal:  portal,
+		login:   login,
+		sender:  sender,
 		runtime: runtime,
 	}
 }

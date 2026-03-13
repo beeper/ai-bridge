@@ -291,7 +291,7 @@ func (t *Turn) ensureSession() {
 				})
 			},
 			SendHook: t.streamHook,
-			Logger: &logger,
+			Logger:   &logger,
 		})
 	})
 }

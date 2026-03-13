@@ -11,8 +11,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 
 	"github.com/beeper/agentremote"
-	bridgesdk "github.com/beeper/agentremote/sdk"
 	"github.com/beeper/agentremote/pkg/aidb"
+	bridgesdk "github.com/beeper/agentremote/sdk"
 )
 
 func NewConnector() *CodexConnector {
@@ -71,8 +71,8 @@ func NewConnector() *CodexConnector {
 				DefaultCommandPrefix: cc.Config.Bridge.CommandPrefix,
 			}
 		},
-		ExampleConfig: exampleNetworkConfig,
-		ConfigData:   &cc.Config,
+		ExampleConfig:  exampleNetworkConfig,
+		ConfigData:     &cc.Config,
 		ConfigUpgrader: configupgrade.SimpleUpgrader(upgradeConfig),
 		DBMeta: func() database.MetaTypes {
 			return agentremote.BuildMetaTypes(

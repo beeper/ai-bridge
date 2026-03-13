@@ -8,8 +8,8 @@ import (
 	"go.mau.fi/util/configupgrade"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
-	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/event"
 
 	"github.com/beeper/agentremote"
 )
@@ -233,8 +233,8 @@ type ModelInfo struct {
 
 // ProviderIdentity controls provider-specific IDs and status naming used by the SDK runtime.
 type ProviderIdentity struct {
-	IDPrefix     string
-	LogKey       string
+	IDPrefix      string
+	LogKey        string
 	StatusNetwork string
 }
 
@@ -292,20 +292,20 @@ type Config struct {
 	AcceptLogin func(login *bridgev2.UserLogin) (bool, string)
 
 	// Connector lifecycle and overrides.
-	InitConnector         func(br *bridgev2.Bridge)
-	StartConnector        func(ctx context.Context, br *bridgev2.Bridge) error
-	StopConnector         func(ctx context.Context, br *bridgev2.Bridge)
-	BridgeName            func() bridgev2.BridgeName
-	NetworkCapabilities   func() *bridgev2.NetworkGeneralCapabilities
-	BridgeInfoVersion     func() (info, capabilities int)
-	FillBridgeInfo        func(portal *bridgev2.Portal, content *event.BridgeEventContent)
-	MakeBrokenLogin       func(login *bridgev2.UserLogin, reason string) *agentremote.BrokenLoginClient
-	CreateClient          func(login *bridgev2.UserLogin) (bridgev2.NetworkAPI, error)
-	UpdateClient          func(client bridgev2.NetworkAPI, login *bridgev2.UserLogin)
-	AfterLoadClient       func(client bridgev2.NetworkAPI)
-	ProviderIdentity      ProviderIdentity
-	ClientCacheMu         *sync.Mutex
-	ClientCache           *map[networkid.UserLoginID]bridgev2.NetworkAPI
+	InitConnector       func(br *bridgev2.Bridge)
+	StartConnector      func(ctx context.Context, br *bridgev2.Bridge) error
+	StopConnector       func(ctx context.Context, br *bridgev2.Bridge)
+	BridgeName          func() bridgev2.BridgeName
+	NetworkCapabilities func() *bridgev2.NetworkGeneralCapabilities
+	BridgeInfoVersion   func() (info, capabilities int)
+	FillBridgeInfo      func(portal *bridgev2.Portal, content *event.BridgeEventContent)
+	MakeBrokenLogin     func(login *bridgev2.UserLogin, reason string) *agentremote.BrokenLoginClient
+	CreateClient        func(login *bridgev2.UserLogin) (bridgev2.NetworkAPI, error)
+	UpdateClient        func(client bridgev2.NetworkAPI, login *bridgev2.UserLogin)
+	AfterLoadClient     func(client bridgev2.NetworkAPI)
+	ProviderIdentity    ProviderIdentity
+	ClientCacheMu       *sync.Mutex
+	ClientCache         *map[networkid.UserLoginID]bridgev2.NetworkAPI
 
 	// Backfill — use bridgev2 types directly.
 	FetchMessages func(ctx context.Context, params bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) // nil = no backfill

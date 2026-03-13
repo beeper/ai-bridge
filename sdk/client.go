@@ -141,7 +141,7 @@ func (c *sdkClient) Connect(ctx context.Context) {
 		if c.userLogin.UserMXID != "" {
 			info.UserID = string(c.userLogin.UserMXID)
 		}
-			session, err := c.config().OnConnect(ctx, info)
+		session, err := c.config().OnConnect(ctx, info)
 		if err == nil {
 			c.setSession(session)
 		}

@@ -12,7 +12,7 @@ import (
 // LoginHandle wraps a UserLogin and provides convenience methods for creating
 // conversations and accessing login state.
 type LoginHandle struct {
-	login  *bridgev2.UserLogin
+	login   *bridgev2.UserLogin
 	runtime conversationRuntime
 }
 

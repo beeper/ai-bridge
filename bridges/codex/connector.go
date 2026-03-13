@@ -28,10 +28,10 @@ var (
 // CodexConnector runs the dedicated Codex bridge surface.
 type CodexConnector struct {
 	*agentremote.ConnectorBase
-	br     *bridgev2.Bridge
-	Config Config
+	br        *bridgev2.Bridge
+	Config    Config
 	sdkConfig *bridgesdk.Config
-	db     *dbutil.Database
+	db        *dbutil.Database
 
 	clientsMu sync.Mutex
 	clients   map[networkid.UserLoginID]bridgev2.NetworkAPI
