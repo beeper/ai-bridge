@@ -576,7 +576,7 @@ func (cc *CodexClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Ma
 
 func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, sourceEvent *event.Event, body string) {
 	log := cc.loggerForContext(ctx)
-	state := newStreamingState(ctx, meta, sourceEvent.ID, sourceEvent.Sender.String(), portal.MXID)
+	state := newStreamingState(sourceEvent.ID)
 	state.startedAtMs = time.Now().UnixMilli()
 
 	model := cc.connector.Config.Codex.DefaultModel
@@ -1833,7 +1833,6 @@ func (cc *CodexClient) processPendingCodex(roomID id.RoomID) {
 }
 
 // Streaming helpers (Codex -> Matrix AI SDK chunk mapping)
-
 
 func (cc *CodexClient) buildUIMessageMetadata(state *streamingState, model string, includeUsage bool, finishReason string) map[string]any {
 	return msgconv.BuildUIMessageMetadata(msgconv.UIMessageMetadataParams{

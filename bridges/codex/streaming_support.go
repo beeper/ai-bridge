@@ -77,7 +77,7 @@ func (cc *CodexClient) uiEmitter(state *streamingState) *streamui.Emitter {
 	}
 }
 
-func newStreamingState(_ context.Context, _ *PortalMetadata, sourceEventID id.EventID, _ string, _ id.RoomID) *streamingState {
+func newStreamingState(sourceEventID id.EventID) *streamingState {
 	turnID := NewTurnID()
 	ui := streamui.UIState{TurnID: turnID}
 	ui.InitMaps()

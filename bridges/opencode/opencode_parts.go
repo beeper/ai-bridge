@@ -193,4 +193,3 @@ func truncateOpenCodeText(text string, max int) string {
 	}
 	return text[:max] + "..."
 }
-

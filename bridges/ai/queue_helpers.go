@@ -90,4 +90,3 @@ func buildCollectPrompt(title string, items []pendingQueueItem, summary string) 
 	}
 	return strings.Join(blocks, "\n\n")
 }
-
