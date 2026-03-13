@@ -14,7 +14,7 @@ import (
 )
 
 func executeWebSearchWithProviders(ctx context.Context, args map[string]any) (string, error) {
-	req, err := searchRequestFromArgs(args)
+	req, err := websearch.RequestFromArgs(args)
 	if err != nil {
 		return "", err
 	}
@@ -29,7 +29,7 @@ func executeWebSearchWithProviders(ctx context.Context, args map[string]any) (st
 		return "", err
 	}
 
-	payload := buildSearchPayload(resp)
+	payload := websearch.PayloadFromResponse(resp)
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("failed to encode web_search response: %w", err)
@@ -101,78 +101,6 @@ func executeWebFetchWithProviders(ctx context.Context, args map[string]any) (str
 		return "", fmt.Errorf("failed to encode web_fetch response: %w", err)
 	}
 	return string(raw), nil
-}
-
-func searchRequestFromArgs(args map[string]any) (search.Request, error) {
-	query, ok := args["query"].(string)
-	if !ok {
-		return search.Request{}, errors.New("missing or invalid 'query' argument")
-	}
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return search.Request{}, errors.New("missing or invalid 'query' argument")
-	}
-	count, _ := websearch.ParseCountAndIgnoredOptions(args)
-	country, _ := args["country"].(string)
-	searchLang, _ := args["search_lang"].(string)
-	uiLang, _ := args["ui_lang"].(string)
-	freshness, _ := args["freshness"].(string)
-
-	return search.Request{
-		Query:      query,
-		Count:      count,
-		Country:    strings.TrimSpace(country),
-		SearchLang: strings.TrimSpace(searchLang),
-		UILang:     strings.TrimSpace(uiLang),
-		Freshness:  strings.TrimSpace(freshness),
-	}, nil
-}
-
-func buildSearchPayload(resp *search.Response) map[string]any {
-	payload := map[string]any{
-		"query":      resp.Query,
-		"provider":   resp.Provider,
-		"count":      resp.Count,
-		"tookMs":     resp.TookMs,
-		"answer":     resp.Answer,
-		"summary":    resp.Summary,
-		"definition": resp.Definition,
-		"warning":    resp.Warning,
-		"noResults":  resp.NoResults,
-		"cached":     resp.Cached,
-	}
-
-	if len(resp.Results) > 0 {
-		results := make([]map[string]any, 0, len(resp.Results))
-		for _, r := range resp.Results {
-			entry := map[string]any{
-				"title":       r.Title,
-				"url":         r.URL,
-				"description": r.Description,
-				"published":   r.Published,
-				"siteName":    r.SiteName,
-			}
-			if r.ID != "" {
-				entry["id"] = r.ID
-			}
-			if r.Author != "" {
-				entry["author"] = r.Author
-			}
-			if r.Image != "" {
-				entry["image"] = r.Image
-			}
-			if r.Favicon != "" {
-				entry["favicon"] = r.Favicon
-			}
-			results = append(results, entry)
-		}
-		payload["results"] = results
-	}
-
-	if resp.Extras != nil {
-		payload["extras"] = resp.Extras
-	}
-	return payload
 }
 
 func applyLoginTokensToSearchConfig(cfg *search.Config, meta *UserLoginMetadata, connector *OpenAIConnector) *search.Config {
