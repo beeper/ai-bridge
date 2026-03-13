@@ -53,9 +53,12 @@ func DownloadAndEncodeMedia(ctx context.Context, login *bridgev2.UserLogin, medi
 	if maxMB > 0 {
 		maxBytes = int64(maxMB) * 1024 * 1024
 	}
-	data, _, err := DownloadMediaBytes(ctx, login, mediaURL, encFile, maxBytes)
+	data, mimeType, err := DownloadMediaBytes(ctx, login, mediaURL, encFile, maxBytes)
 	if err != nil {
 		return "", "", err
 	}
-	return base64.StdEncoding.EncodeToString(data), "application/octet-stream", nil
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	return base64.StdEncoding.EncodeToString(data), mimeType, nil
 }

@@ -22,9 +22,6 @@ import (
 	"github.com/beeper/agentremote/turns"
 )
 
-// Stream is a type alias for Turn, preserved for backward compatibility.
-type Stream = Turn
-
 type sdkApprovalHandle struct {
 	approvalID string
 	toolCallID string

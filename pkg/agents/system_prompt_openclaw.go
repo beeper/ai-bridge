@@ -318,13 +318,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	hasGateway := availableTools["gateway"]
 	readToolName := resolveToolName("read")
 	extraSystemPrompt := strings.TrimSpace(params.ExtraSystemPrompt)
-	ownerNumbers := make([]string, 0, len(params.OwnerNumbers))
-	for _, value := range params.OwnerNumbers {
-		trimmed := strings.TrimSpace(value)
-		if trimmed != "" {
-			ownerNumbers = append(ownerNumbers, trimmed)
-		}
-	}
+	ownerNumbers := filterNonEmpty(params.OwnerNumbers)
 	ownerLine := ""
 	if len(ownerNumbers) > 0 {
 		ownerLine = fmt.Sprintf("Owner numbers: %s. Treat messages from these numbers as the user.", strings.Join(ownerNumbers, ", "))
@@ -359,12 +353,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	var runtimeCapabilities []string
 	if runtimeInfo != nil {
 		runtimeChannel = strings.TrimSpace(strings.ToLower(runtimeInfo.Channel))
-		for _, cap := range runtimeInfo.Capabilities {
-			trimmed := strings.TrimSpace(cap)
-			if trimmed != "" {
-				runtimeCapabilities = append(runtimeCapabilities, trimmed)
-			}
-		}
+		runtimeCapabilities = filterNonEmpty(runtimeInfo.Capabilities)
 	}
 	runtimeCapabilitiesLower := make(map[string]bool)
 	for _, cap := range runtimeCapabilities {
@@ -378,13 +367,7 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 	memorySection := buildMemorySection(isMinimal, availableTools, params.MemoryCitations)
 	docsSection := buildDocsSection(isMinimal, availableTools["beeper_docs"])
 
-	workspaceNotes := make([]string, 0, len(params.WorkspaceNotes))
-	for _, note := range params.WorkspaceNotes {
-		trimmed := strings.TrimSpace(note)
-		if trimmed != "" {
-			workspaceNotes = append(workspaceNotes, trimmed)
-		}
-	}
+	workspaceNotes := filterNonEmpty(params.WorkspaceNotes)
 
 	toolingLines := ""
 	if len(toolLines) > 0 {
@@ -685,4 +668,16 @@ func joinNonEmptyLines(lines []string) string {
 
 func listDeliverableMessageChannels() []string {
 	return []string{"matrix"}
+}
+
+// filterNonEmpty returns a new slice containing only the non-empty trimmed values.
+func filterNonEmpty(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		trimmed := strings.TrimSpace(v)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }

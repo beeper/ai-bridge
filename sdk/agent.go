@@ -42,9 +42,6 @@ type Agent struct {
 	Metadata     map[string]any
 }
 
-// AgentMember is kept as a compatibility alias while the SDK surface migrates.
-type AgentMember = Agent
-
 // AgentCatalog resolves agents for contacts, identifier lookup, and default selection.
 type AgentCatalog interface {
 	DefaultAgent(ctx context.Context, login *bridgev2.UserLogin) (*Agent, error)

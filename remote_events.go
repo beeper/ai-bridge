@@ -16,10 +16,6 @@ import (
 	"github.com/beeper/agentremote/turns"
 )
 
-// -----------------------------------------------------------------------
-// RemoteMessage — generic pre-built message for QueueRemoteEvent
-// -----------------------------------------------------------------------
-
 var (
 	_ bridgev2.RemoteMessage              = (*RemoteMessage)(nil)
 	_ bridgev2.RemoteEventWithTimestamp   = (*RemoteMessage)(nil)
@@ -77,10 +73,6 @@ func (m *RemoteMessage) GetStreamOrder() int64 {
 func (m *RemoteMessage) ConvertMessage(_ context.Context, _ *bridgev2.Portal, _ bridgev2.MatrixAPI) (*bridgev2.ConvertedMessage, error) {
 	return m.PreBuilt, nil
 }
-
-// -----------------------------------------------------------------------
-// RemoteEdit — generic pre-built edit for QueueRemoteEvent
-// -----------------------------------------------------------------------
 
 var (
 	_ bridgev2.RemoteEdit                 = (*RemoteEdit)(nil)
@@ -148,10 +140,6 @@ func (e *RemoteEdit) ConvertEdit(_ context.Context, _ *bridgev2.Portal, _ bridge
 	return e.PreBuilt, nil
 }
 
-// -----------------------------------------------------------------------
-// RemoteReaction — generic reaction for QueueRemoteEvent
-// -----------------------------------------------------------------------
-
 var (
 	_ bridgev2.RemoteReaction                 = (*RemoteReaction)(nil)
 	_ bridgev2.RemoteEventWithTimestamp       = (*RemoteReaction)(nil)
@@ -212,10 +200,6 @@ func (r *RemoteReaction) GetReactionDBMetadata() any {
 func (r *RemoteReaction) GetReactionExtraContent() map[string]any {
 	return r.ExtraContent
 }
-
-// -----------------------------------------------------------------------
-// RemoteReactionRemove — generic reaction remove for QueueRemoteEvent
-// -----------------------------------------------------------------------
 
 var _ bridgev2.RemoteReactionRemove = (*RemoteReactionRemove)(nil)
 

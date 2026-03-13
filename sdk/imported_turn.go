@@ -22,7 +22,7 @@ type ImportedTurn struct {
 	ToolCalls    []ImportedToolCall
 	Citations    []ImportedCitation
 	Files        []ImportedFile
-	Agent        *AgentMember
+	Agent        *Agent
 	Sender       bridgev2.EventSender
 	Timestamp    time.Time
 	Metadata     map[string]any

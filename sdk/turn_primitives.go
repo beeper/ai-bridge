@@ -68,18 +68,23 @@ type ToolOutputOptions struct {
 	Streaming        bool
 }
 
-// TurnStream is the provider-facing streaming surface for a turn.
-type TurnStream struct {
+// turnAccessor provides shared valid/portal checks for turn-scoped controllers.
+type turnAccessor struct {
 	turn *Turn
 }
 
-func (s *TurnStream) valid() bool { return s != nil && s.turn != nil }
+func (a *turnAccessor) valid() bool { return a != nil && a.turn != nil }
 
-func (s *TurnStream) portal() *bridgev2.Portal {
-	if !s.valid() || s.turn.conv == nil {
+func (a *turnAccessor) portal() *bridgev2.Portal {
+	if !a.valid() || a.turn.conv == nil {
 		return nil
 	}
-	return s.turn.conv.portal
+	return a.turn.conv.portal
+}
+
+// TurnStream is the provider-facing streaming surface for a turn.
+type TurnStream struct {
+	turnAccessor
 }
 
 // Stream returns the turn's provider-facing streaming surface.
@@ -87,7 +92,7 @@ func (t *Turn) Stream() *TurnStream {
 	if t == nil {
 		return nil
 	}
-	return &TurnStream{turn: t}
+	return &TurnStream{turnAccessor{turn: t}}
 }
 
 // Emitter returns the underlying stream emitter as an escape hatch.
@@ -278,16 +283,7 @@ func (s *TurnStream) Metadata(metadata map[string]any) {
 
 // ApprovalController is the turn-owned approval surface.
 type ApprovalController struct {
-	turn *Turn
-}
-
-func (a *ApprovalController) valid() bool { return a != nil && a.turn != nil }
-
-func (a *ApprovalController) portal() *bridgev2.Portal {
-	if !a.valid() || a.turn.conv == nil {
-		return nil
-	}
-	return a.turn.conv.portal
+	turnAccessor
 }
 
 // Approvals returns the turn's approval controller.
@@ -295,7 +291,7 @@ func (t *Turn) Approvals() *ApprovalController {
 	if t == nil {
 		return nil
 	}
-	return &ApprovalController{turn: t}
+	return &ApprovalController{turnAccessor{turn: t}}
 }
 
 // SetHandler configures a provider-specific approval handler for this turn.

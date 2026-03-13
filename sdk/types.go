@@ -90,12 +90,6 @@ type CreateChatParams struct {
 	Metadata map[string]any
 }
 
-// IdentifierResult describes a full identifier/contact resolution result.
-type IdentifierResult = bridgev2.ResolveIdentifierResponse
-
-// CreateChatResult describes a bridge-compatible chat creation result.
-type CreateChatResult = bridgev2.CreateChatResponse
-
 // ToolApprovalResponse is the user's decision on a tool approval request.
 type ToolApprovalResponse struct {
 	Approved bool
@@ -272,10 +266,10 @@ type Config struct {
 	GetCapabilities func(session any, conv *Conversation) *RoomFeatures
 
 	// Search & chat ops (optional)
-	SearchUsers       func(ctx context.Context, session any, query string) ([]*IdentifierResult, error)
-	GetContactList    func(ctx context.Context, session any) ([]*IdentifierResult, error)
-	ResolveIdentifier func(ctx context.Context, session any, id string, createChat bool) (*IdentifierResult, error)
-	CreateChat        func(ctx context.Context, session any, params *CreateChatParams) (*CreateChatResult, error)
+	SearchUsers       func(ctx context.Context, session any, query string) ([]*bridgev2.ResolveIdentifierResponse, error)
+	GetContactList    func(ctx context.Context, session any) ([]*bridgev2.ResolveIdentifierResponse, error)
+	ResolveIdentifier func(ctx context.Context, session any, id string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error)
+	CreateChat        func(ctx context.Context, session any, params *CreateChatParams) (*bridgev2.CreateChatResponse, error)
 	DeleteChat        func(conv *Conversation) error
 	GetChatInfo       func(conv *Conversation) (*bridgev2.ChatInfo, error)
 	GetUserInfo       func(ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error)

@@ -258,7 +258,7 @@ func (c *Conversation) SendNotice(ctx context.Context, text string) error {
 }
 
 // Stream starts a new streaming response in this conversation.
-func (c *Conversation) Stream(ctx context.Context) *Stream {
+func (c *Conversation) Stream(ctx context.Context) *Turn {
 	return newTurn(ctx, c, nil, nil)
 }
 
