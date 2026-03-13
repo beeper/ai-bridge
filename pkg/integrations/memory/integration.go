@@ -191,13 +191,6 @@ func (i *Integration) PurgeForLogin(ctx context.Context, scope iruntime.LoginSco
 		return nil
 	}
 	StopManagersForLogin(scope.BridgeID, scope.LoginID)
-	cfg := i.resolveMemorySearchConfig("")
-	if cfg != nil && cfg.Store.Vector.Enabled {
-		extPath := strings.TrimSpace(cfg.Store.Vector.ExtensionPath)
-		if extPath != "" {
-			PurgeVectorRowsBestEffort(ctx, db, scope.BridgeID, scope.LoginID, extPath)
-		}
-	}
 	PurgeTablesBestEffort(ctx, db, scope.BridgeID, scope.LoginID)
 	return nil
 }

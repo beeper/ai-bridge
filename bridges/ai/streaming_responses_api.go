@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -310,16 +309,13 @@ func (oc *AIClient) handleProviderToolCompleted(
 
 	if failureText != "" {
 		oc.uiEmitter(state).EmitUIToolOutputError(ctx, portal, tool.callID, failureText, true)
-		resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, failureText, ResultStatusError)
-		recordToolCallResult(state, tool, ToolStatusFailed, ResultStatusError, failureText, map[string]any{"error": failureText}, nil, string(resultEventID))
+		recordToolCallResult(state, tool, ToolStatusFailed, ResultStatusError, failureText, map[string]any{"error": failureText}, nil)
 		return
 	}
 
 	output := map[string]any{"status": "completed"}
 	oc.uiEmitter(state).EmitUIToolOutputAvailable(ctx, portal, tool.callID, output, true, false)
-	resultJSON, _ := json.Marshal(output)
-	resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, string(resultJSON), ResultStatusSuccess)
-	recordToolCallResult(state, tool, ToolStatusCompleted, ResultStatusSuccess, "", output, nil, string(resultEventID))
+	recordToolCallResult(state, tool, ToolStatusCompleted, ResultStatusSuccess, "", output, nil)
 }
 
 // streamingResponse handles streaming using the Responses API

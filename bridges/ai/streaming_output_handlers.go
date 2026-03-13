@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -56,9 +55,6 @@ func (oc *AIClient) upsertActiveToolFromDescriptor(
 	state.ui.UIToolNameByToolCallID[tool.callID] = tool.toolName
 	state.ui.UIToolTypeByToolCallID[tool.callID] = tool.toolType
 
-	if tool.eventID == "" && strings.TrimSpace(tool.toolName) != "" {
-		tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
-	}
 	oc.uiEmitter(state).EnsureUIToolInputStart(ctx, portal, tool.callID, tool.toolName, desc.providerExecuted, toolDisplayTitle(tool.toolName), nil)
 	return tool
 }
@@ -156,8 +152,7 @@ func (oc *AIClient) handleMCPCallFailedFromOutputItem(
 	if denied && resultPayload == "" {
 		resultPayload = "Denied"
 	}
-	resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, resultPayload, ResultStatusError)
-	recordToolCallResult(state, tool, ToolStatusFailed, ResultStatusError, errorText, output, nil, string(resultEventID))
+	recordToolCallResult(state, tool, ToolStatusFailed, ResultStatusError, errorText, output, nil)
 }
 
 // gateMcpToolApproval handles an MCP approval request item: registers the
@@ -225,7 +220,7 @@ func (oc *AIClient) gateMcpToolApproval(
 	if needsApproval {
 		if !state.ui.UIToolApprovalRequested[approvalID] {
 			state.ui.UIToolApprovalRequested[approvalID] = true
-			if !oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, tool.toolName, presentation, tool.eventID, oc.toolApprovalsTTLSeconds()) {
+			if !oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, tool.toolName, presentation, "", oc.toolApprovalsTTLSeconds()) {
 				if err := oc.approvalFlow.Resolve(approvalID, agentremote.ApprovalDecisionPayload{
 					ApprovalID: approvalID,
 					Reason:     agentremote.ApprovalReasonDeliveryError,
@@ -342,8 +337,6 @@ func (oc *AIClient) handleResponseOutputItemDone(
 		oc.uiEmitter(state).EmitUIToolOutputAvailable(ctx, portal, tool.callID, result, true, false)
 	}
 
-	resultJSON, _ := json.Marshal(result)
-	resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, string(resultJSON), resultStatus)
 	outputMap := map[string]any{}
 	if converted := jsonutil.ToMap(result); len(converted) > 0 {
 		outputMap = converted
@@ -351,7 +344,7 @@ func (oc *AIClient) handleResponseOutputItemDone(
 		outputMap = map[string]any{"result": result}
 	}
 
-	recordToolCallResult(state, tool, ToolStatusCompleted, resultStatus, errorText, outputMap, parseToolInputPayload(tool.input.String()), string(resultEventID))
+	recordToolCallResult(state, tool, ToolStatusCompleted, resultStatus, errorText, outputMap, parseToolInputPayload(tool.input.String()))
 }
 
 // Response stream output helpers.

@@ -28,7 +28,6 @@ func normalizeTypingMode(raw string) (TypingMode, bool) {
 		return TypingModeThinking, true
 	case "message":
 		return TypingModeMessage, true
-	default:
 	}
 	return "", false
 }

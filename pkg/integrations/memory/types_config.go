@@ -5,9 +5,7 @@ import (
 )
 
 type RemoteConfig = memorycore.RemoteConfig
-type BatchConfig = memorycore.BatchConfig
 type StoreConfig = memorycore.StoreConfig
-type VectorConfig = memorycore.VectorConfig
 type ChunkingConfig = memorycore.ChunkingConfig
 type SyncConfig = memorycore.SyncConfig
 type SessionSyncConfig = memorycore.SessionSyncConfig
@@ -24,13 +22,7 @@ const (
 	DefaultSessionDeltaMessages    = memorycore.DefaultSessionDeltaMessages
 	DefaultMaxResults              = memorycore.DefaultMaxResults
 	DefaultMinScore                = memorycore.DefaultMinScore
-	DefaultHybridEnabled           = memorycore.DefaultHybridEnabled
-	DefaultHybridVectorWeight      = memorycore.DefaultHybridVectorWeight
-	DefaultHybridTextWeight        = memorycore.DefaultHybridTextWeight
 	DefaultHybridCandidateMultiple = memorycore.DefaultHybridCandidateMultiple
 	DefaultCacheEnabled            = memorycore.DefaultCacheEnabled
 	DefaultMemorySource            = memorycore.DefaultMemorySource
-
-	DefaultOpenAIEmbeddingModel = memorycore.DefaultOpenAIEmbeddingModel
-	DefaultGeminiEmbeddingModel = memorycore.DefaultGeminiEmbeddingModel
 )

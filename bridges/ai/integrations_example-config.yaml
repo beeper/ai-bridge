@@ -182,10 +182,6 @@ tools:
       models:
         - provider: "openrouter"
           model: "google/gemini-3-flash-preview"
-
-    vector:
-      enabled: true
-      extension_path: ""
   chunking:
     tokens: 400
     overlap: 80
@@ -202,9 +198,6 @@ tools:
     max_results: 6
     min_score: 0.35
     hybrid:
-      enabled: true
-      vector_weight: 0.7
-      text_weight: 0.3
       candidate_multiplier: 4
   cache:
     enabled: true

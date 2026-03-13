@@ -16,29 +16,29 @@ func (oc *AIClient) handleResponseLifecycleEvent(
 	eventType string,
 	response responses.Response,
 ) {
+	if strings.TrimSpace(response.ID) != "" {
+		state.responseID = response.ID
+	}
+
 	switch eventType {
 	case "response.created", "response.queued", "response.in_progress":
-		if strings.TrimSpace(response.ID) != "" {
-			state.responseID = response.ID
-		}
-		oc.emitUIRuntimeMetadata(ctx, portal, state, meta, responseMetadataDeltaFromResponse(response))
+		// No additional state changes needed.
 	case "response.failed":
 		state.finishReason = "error"
-		if strings.TrimSpace(response.ID) != "" {
-			state.responseID = response.ID
+	case "response.incomplete":
+		state.finishReason = strings.TrimSpace(string(response.IncompleteDetails.Reason))
+		if state.finishReason == "" {
+			state.finishReason = "other"
 		}
-		oc.emitUIRuntimeMetadata(ctx, portal, state, meta, responseMetadataDeltaFromResponse(response))
+	default:
+		return
+	}
+
+	oc.emitUIRuntimeMetadata(ctx, portal, state, meta, responseMetadataDeltaFromResponse(response))
+
+	if eventType == "response.failed" {
 		if msg := strings.TrimSpace(response.Error.Message); msg != "" {
 			oc.uiEmitter(state).EmitUIError(ctx, portal, msg)
 		}
-	case "response.incomplete":
-		state.finishReason = strings.TrimSpace(string(response.IncompleteDetails.Reason))
-		if strings.TrimSpace(state.finishReason) == "" {
-			state.finishReason = "other"
-		}
-		if strings.TrimSpace(response.ID) != "" {
-			state.responseID = response.ID
-		}
-		oc.emitUIRuntimeMetadata(ctx, portal, state, meta, responseMetadataDeltaFromResponse(response))
 	}
 }

@@ -64,9 +64,6 @@ func toAgentStoreSessionKey(agentID string, requestKey string, mainKey string) s
 	if strings.HasPrefix(lowered, "agent:") {
 		return lowered
 	}
-	if strings.HasPrefix(lowered, "subagent:") {
-		return "agent:" + normalizeAgentID(agentID) + ":" + lowered
-	}
 	return "agent:" + normalizeAgentID(agentID) + ":" + lowered
 }
 

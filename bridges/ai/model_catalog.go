@@ -22,26 +22,16 @@ type ModelCatalogEntry struct {
 
 func mergeCatalogEntries(existing []ModelCatalogEntry, implicit []ModelCatalogEntry, explicit []ModelCatalogEntry) []ModelCatalogEntry {
 	merged := map[string]ModelCatalogEntry{}
-	for _, entry := range existing {
-		if key := modelCatalogKey(entry.Provider, entry.ID); key != "" {
-			merged[key] = entry
-		}
-	}
-	for _, entry := range implicit {
-		if key := modelCatalogKey(entry.Provider, entry.ID); key != "" {
-			merged[key] = entry
-		}
-	}
-	for _, entry := range explicit {
-		if key := modelCatalogKey(entry.Provider, entry.ID); key != "" {
-			merged[key] = entry
+	// Later slices override earlier ones (explicit > implicit > existing).
+	for _, entries := range [][]ModelCatalogEntry{existing, implicit, explicit} {
+		for _, entry := range entries {
+			if key := modelCatalogKey(entry.Provider, entry.ID); key != "" {
+				merged[key] = entry
+			}
 		}
 	}
 
-	out := make([]ModelCatalogEntry, 0, len(merged))
-	for _, entry := range merged {
-		out = append(out, entry)
-	}
+	out := slices.Collect(maps.Values(merged))
 	slices.SortFunc(out, func(a, b ModelCatalogEntry) int {
 		if c := cmp.Compare(a.Provider, b.Provider); c != 0 {
 			return c
@@ -64,34 +54,30 @@ func (oc *AIClient) implicitModelCatalogEntries(meta *UserLoginMetadata) []Model
 	if meta == nil {
 		return nil
 	}
+
+	// Resolve the relevant API key for the provider.
+	var apiKey string
 	switch meta.Provider {
-	case ProviderMagicProxy:
-		// Magic Proxy is OpenRouter-compatible. It should expose the same model catalog
-		// as OpenRouter when an API key is present.
-		if strings.TrimSpace(oc.connector.resolveOpenRouterAPIKey(meta)) == "" {
-			return nil
-		}
-		return modelCatalogEntriesFromManifest(nil)
-	case ProviderOpenRouter:
-		if strings.TrimSpace(oc.connector.resolveOpenRouterAPIKey(meta)) == "" {
-			return nil
-		}
-		return modelCatalogEntriesFromManifest(nil)
+	case ProviderMagicProxy, ProviderOpenRouter:
+		apiKey = oc.connector.resolveOpenRouterAPIKey(meta)
 	case ProviderBeeper:
-		if strings.TrimSpace(oc.connector.resolveBeeperToken(meta)) == "" {
-			return nil
-		}
-		return modelCatalogEntriesFromManifest(nil)
+		apiKey = oc.connector.resolveBeeperToken(meta)
 	case ProviderOpenAI:
-		if strings.TrimSpace(oc.connector.resolveOpenAIAPIKey(meta)) == "" {
-			return nil
-		}
-		return modelCatalogEntriesFromManifest(func(provider string) bool {
-			return provider == ProviderOpenAI
-		})
+		apiKey = oc.connector.resolveOpenAIAPIKey(meta)
 	default:
 		return nil
 	}
+	if strings.TrimSpace(apiKey) == "" {
+		return nil
+	}
+
+	// OpenAI-only logins see a filtered manifest; multi-provider logins see all models.
+	if meta.Provider == ProviderOpenAI {
+		return modelCatalogEntriesFromManifest(func(provider string) bool {
+			return provider == ProviderOpenAI
+		})
+	}
+	return modelCatalogEntriesFromManifest(nil)
 }
 
 func modelCatalogEntriesFromManifest(filter func(provider string) bool) []ModelCatalogEntry {

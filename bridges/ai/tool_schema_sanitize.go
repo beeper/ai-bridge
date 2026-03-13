@@ -378,13 +378,8 @@ func isStrictSchemaCompatible(schema map[string]any) bool {
 	if schema == nil {
 		return false
 	}
-	if typ, ok := schema["type"].(string); !ok || typ != "object" {
-		return false
-	}
-	if hasUnsupportedKeywords(schema) {
-		return false
-	}
-	return true
+	typ, ok := schema["type"].(string)
+	return ok && typ == "object" && !hasUnsupportedKeywords(schema)
 }
 
 func hasUnsupportedKeywords(schema any) bool {
@@ -435,15 +430,11 @@ func cleanSchemaForProviderWithReport(schema any, report *schemaSanitizeReport) 
 
 func extendSchemaDefs(defs schemaDefs, schema map[string]any) schemaDefs {
 	next := defs
-	if rawDefs, ok := schema["$defs"].(map[string]any); ok {
-		if next == nil {
-			next = make(schemaDefs)
+	for _, key := range []string{"$defs", "definitions"} {
+		rawDefs, ok := schema[key].(map[string]any)
+		if !ok {
+			continue
 		}
-		for k, v := range rawDefs {
-			next[k] = v
-		}
-	}
-	if rawDefs, ok := schema["definitions"].(map[string]any); ok {
 		if next == nil {
 			next = make(schemaDefs)
 		}

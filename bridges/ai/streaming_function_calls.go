@@ -150,9 +150,6 @@ func (oc *AIClient) ensureActiveToolCall(
 		if meta != nil && !state.hasInitialMessageTarget() && !state.suppressSend {
 			oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
 		}
-		if strings.TrimSpace(tool.toolName) != "" {
-			tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
-		}
 	}
 	return tool
 }
@@ -194,9 +191,6 @@ func (oc *AIClient) handleFunctionCallArgumentsDone(
 		toolName = strings.TrimSpace(name)
 	}
 	tool.toolName = toolName
-	if tool.eventID == "" {
-		tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
-	}
 	argsJSON := strings.TrimSpace(tool.input.String())
 	if argsJSON == "" {
 		argsJSON = strings.TrimSpace(arguments)
@@ -283,7 +277,6 @@ func recordCompletedToolCall(
 	resultStatus ResultStatus,
 ) {
 	completedAt := time.Now().UnixMilli()
-	resultEventID := oc.sendToolResultEvent(ctx, portal, state, tool, result, resultStatus)
 	state.toolCalls = append(state.toolCalls, ToolCallMetadata{
 		CallID:        tool.callID,
 		ToolName:      toolName,
@@ -294,8 +287,6 @@ func recordCompletedToolCall(
 		ResultStatus:  string(resultStatus),
 		StartedAtMs:   tool.startedAtMs,
 		CompletedAtMs: completedAt,
-		CallEventID:   string(tool.eventID),
-		ResultEventID: string(resultEventID),
 	})
 }
 
@@ -310,7 +301,6 @@ func recordToolCallResult(
 	errorText string,
 	output map[string]any,
 	input map[string]any,
-	resultEventID string,
 ) {
 	state.toolCalls = append(state.toolCalls, ToolCallMetadata{
 		CallID:        tool.callID,
@@ -323,7 +313,5 @@ func recordToolCallResult(
 		ErrorMessage:  errorText,
 		StartedAtMs:   tool.startedAtMs,
 		CompletedAtMs: time.Now().UnixMilli(),
-		CallEventID:   string(tool.eventID),
-		ResultEventID: resultEventID,
 	})
 }

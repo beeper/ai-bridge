@@ -16,13 +16,6 @@ func withModelOverride(ctx context.Context, model string) context.Context {
 }
 
 func modelOverrideFromContext(ctx context.Context) (string, bool) {
-	if ctx == nil {
-		return "", false
-	}
-	if value := ctx.Value(contextKeyModelOverride{}); value != nil {
-		if model, ok := value.(string); ok && strings.TrimSpace(model) != "" {
-			return strings.TrimSpace(model), true
-		}
-	}
-	return "", false
+	model := strings.TrimSpace(contextValue[string](ctx, contextKeyModelOverride{}))
+	return model, model != ""
 }

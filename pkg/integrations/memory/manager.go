@@ -817,27 +817,9 @@ func memoryManagerCacheKey(bridgeID, loginID, agentID string, cfg *memorycore.Re
 	slices.Sort(sources)
 	slices.Sort(extra)
 	payload := map[string]any{
-		"sources":       sources,
-		"extraPaths":    extra,
-		"provider":      cfg.Provider,
-		"model":         cfg.Model,
-		"fallback":      cfg.Fallback,
-		"remoteBase":    cfg.Remote.BaseURL,
-		"remoteHeaders": sortedHeaderNames(cfg.Remote.Headers),
-		"remoteBatch": map[string]any{
-			"enabled":        cfg.Remote.Batch.Enabled,
-			"wait":           cfg.Remote.Batch.Wait,
-			"concurrency":    cfg.Remote.Batch.Concurrency,
-			"poll":           cfg.Remote.Batch.PollIntervalMs,
-			"timeoutMinutes": cfg.Remote.Batch.TimeoutMinutes,
-		},
-		"remoteKey": hashString(cfg.Remote.APIKey),
-		"store": map[string]any{
-			"driver":        cfg.Store.Driver,
-			"path":          cfg.Store.Path,
-			"vectorEnabled": cfg.Store.Vector.Enabled,
-			"vectorExt":     cfg.Store.Vector.ExtensionPath,
-		},
+		"sources":      sources,
+		"extraPaths":   extra,
+		"store":        map[string]any{"driver": cfg.Store.Driver, "path": cfg.Store.Path},
 		"chunking":     cfg.Chunking,
 		"sync":         cfg.Sync,
 		"query":        cfg.Query,
@@ -847,31 +829,6 @@ func memoryManagerCacheKey(bridgeID, loginID, agentID string, cfg *memorycore.Re
 	raw, _ := json.Marshal(payload)
 	sum := sha256.Sum256(raw)
 	return fmt.Sprintf("%s:%s:%s:%s", bridgeID, loginID, agentID, hex.EncodeToString(sum[:]))
-}
-
-func sortedHeaderNames(headers map[string]string) []string {
-	if len(headers) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(headers))
-	for key := range headers {
-		trimmed := strings.ToLower(strings.TrimSpace(key))
-		if trimmed == "" {
-			continue
-		}
-		keys = append(keys, trimmed)
-	}
-	slices.Sort(keys)
-	return keys
-}
-
-func hashString(value string) string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(trimmed))
-	return hex.EncodeToString(sum[:])
 }
 
 func clampOverfetch(limit, multiplier int) int {

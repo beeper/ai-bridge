@@ -202,7 +202,7 @@ func (oc *AIClient) isBuiltinToolDenied(
 			Msg("tool approval: failed to register builtin approval request")
 		return true
 	}
-	if !oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, presentation, tool.eventID, oc.toolApprovalsTTLSeconds()) {
+	if !oc.emitUIToolApprovalRequest(ctx, portal, state, approvalID, tool.callID, toolName, presentation, "", oc.toolApprovalsTTLSeconds()) {
 		decision := airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalDenied, Reason: agentremote.ApprovalReasonDeliveryError}
 		oc.approvalFlow.FinishResolved(approvalID, agentremote.ApprovalDecisionPayload{
 			ApprovalID: approvalID,

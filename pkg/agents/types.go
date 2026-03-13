@@ -93,10 +93,6 @@ type MemorySearchConfig struct {
 	Enabled      *bool                           `json:"enabled,omitempty"`
 	Sources      []string                        `json:"sources,omitempty"`
 	ExtraPaths   []string                        `json:"extra_paths,omitempty"`
-	Provider     string                          `json:"provider,omitempty"`
-	Model        string                          `json:"model,omitempty"`
-	Remote       *MemorySearchRemoteConfig       `json:"remote,omitempty"`
-	Fallback     string                          `json:"fallback,omitempty"`
 	Store        *MemorySearchStoreConfig        `json:"store,omitempty"`
 	Chunking     *MemorySearchChunkingConfig     `json:"chunking,omitempty"`
 	Sync         *MemorySearchSyncConfig         `json:"sync,omitempty"`
@@ -105,30 +101,9 @@ type MemorySearchConfig struct {
 	Experimental *MemorySearchExperimentalConfig `json:"experimental,omitempty"`
 }
 
-type MemorySearchRemoteConfig struct {
-	BaseURL string                   `json:"base_url,omitempty"`
-	APIKey  string                   `json:"api_key,omitempty"`
-	Headers map[string]string        `json:"headers,omitempty"`
-	Batch   *MemorySearchBatchConfig `json:"batch,omitempty"`
-}
-
-type MemorySearchBatchConfig struct {
-	Enabled        *bool `json:"enabled,omitempty"`
-	Wait           *bool `json:"wait,omitempty"`
-	Concurrency    int   `json:"concurrency,omitempty"`
-	PollIntervalMs int   `json:"poll_interval_ms,omitempty"`
-	TimeoutMinutes int   `json:"timeout_minutes,omitempty"`
-}
-
 type MemorySearchStoreConfig struct {
-	Driver string                    `json:"driver,omitempty"`
-	Path   string                    `json:"path,omitempty"`
-	Vector *MemorySearchVectorConfig `json:"vector,omitempty"`
-}
-
-type MemorySearchVectorConfig struct {
-	Enabled       *bool  `json:"enabled,omitempty"`
-	ExtensionPath string `json:"extension_path,omitempty"`
+	Driver string `json:"driver,omitempty"`
+	Path   string `json:"path,omitempty"`
 }
 
 type MemorySearchChunkingConfig struct {
@@ -159,10 +134,7 @@ type MemorySearchQueryConfig struct {
 }
 
 type MemorySearchHybridConfig struct {
-	Enabled             *bool   `json:"enabled,omitempty"`
-	VectorWeight        float64 `json:"vector_weight,omitempty"`
-	TextWeight          float64 `json:"text_weight,omitempty"`
-	CandidateMultiplier int     `json:"candidate_multiplier,omitempty"`
+	CandidateMultiplier int `json:"candidate_multiplier,omitempty"`
 }
 
 type MemorySearchCacheConfig struct {

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/agentremote/pkg/agents/toolpolicy"
 	"github.com/beeper/agentremote/pkg/agents/tools"
@@ -22,9 +21,8 @@ type activeToolCall struct {
 	toolType    ToolType
 	input       strings.Builder
 	startedAtMs int64
-	eventID     id.EventID // Event ID of the tool call timeline event
-	result      string     // Result from tool execution (for continuation)
-	itemID      string     // Item ID from the stream event (used as call_id for continuation)
+	result      string // Result from tool execution (for continuation)
+	itemID      string // Item ID from the stream event (used as call_id for continuation)
 }
 
 func normalizeToolArgsJSON(argsJSON string) string {
@@ -52,30 +50,6 @@ func parseToolInputPayload(argsJSON string) map[string]any {
 
 // toolDisplayTitle is an alias for streamui.ToolDisplayTitle.
 var toolDisplayTitle = streamui.ToolDisplayTitle
-
-// sendToolCallEvent intentionally does not emit a separate timeline projection.
-// The canonical transport is UIMessage plus stream events; callers still expect an
-// event ID return value, so this remains as a no-op compatibility stub.
-func (oc *AIClient) sendToolCallEvent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall) id.EventID {
-	_ = ctx
-	_ = portal
-	_ = state
-	_ = tool
-	return ""
-}
-
-// sendToolResultEvent intentionally does not emit a separate timeline projection.
-// The canonical transport is UIMessage plus stream events; callers still expect an
-// event ID return value, so this remains as a no-op compatibility stub.
-func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Portal, state *streamingState, tool *activeToolCall, result string, resultStatus ResultStatus) id.EventID {
-	_ = ctx
-	_ = portal
-	_ = state
-	_ = tool
-	_ = result
-	_ = resultStatus
-	return ""
-}
 
 // parseToolArgs normalizes and parses tool arguments JSON into a map.
 func parseToolArgs(argsJSON string) (string, map[string]any, error) {

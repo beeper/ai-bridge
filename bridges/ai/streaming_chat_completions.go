@@ -189,9 +189,6 @@ func (oc *AIClient) streamChatCompletions(
 					// Update tool name if provided in this delta
 					if toolDelta.Function.Name != "" {
 						tool.toolName = toolDelta.Function.Name
-						if tool.eventID == "" {
-							tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
-						}
 					}
 
 					// Accumulate arguments
@@ -257,10 +254,7 @@ func (oc *AIClient) streamChatCompletions(
 				if toolName == "" {
 					toolName = "unknown_tool"
 				}
-				if tool.eventID == "" {
-					tool.toolName = toolName
-					tool.eventID = oc.sendToolCallEvent(ctx, portal, state, tool)
-				}
+				tool.toolName = toolName
 
 				argsJSON := normalizeToolArgsJSON(tool.input.String())
 				toolCallParams = append(toolCallParams, openai.ChatCompletionMessageToolCallUnionParam{
