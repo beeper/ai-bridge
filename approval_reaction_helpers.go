@@ -96,20 +96,19 @@ type ReactionContext struct {
 // ExtractReactionContext pulls the emoji and target event ID from a MatrixReaction.
 func ExtractReactionContext(msg *bridgev2.MatrixReaction) ReactionContext {
 	content := EnsureReactionContent(msg)
-	emoji := ""
+	var rc ReactionContext
 	if msg != nil && msg.PreHandleResp != nil {
-		emoji = msg.PreHandleResp.Emoji
+		rc.Emoji = msg.PreHandleResp.Emoji
 	}
-	if emoji == "" && content != nil {
-		emoji = normalizeReactionKey(content.RelatesTo.Key)
+	if rc.Emoji == "" && content != nil {
+		rc.Emoji = normalizeReactionKey(content.RelatesTo.Key)
 	}
-	targetEventID := id.EventID("")
 	if msg != nil && msg.TargetMessage != nil && msg.TargetMessage.MXID != "" {
-		targetEventID = msg.TargetMessage.MXID
+		rc.TargetEventID = msg.TargetMessage.MXID
 	} else if content != nil && content.RelatesTo.EventID != "" {
-		targetEventID = content.RelatesTo.EventID
+		rc.TargetEventID = content.RelatesTo.EventID
 	}
-	return ReactionContext{Emoji: emoji, TargetEventID: targetEventID}
+	return rc
 }
 
 func approvalPromptPlaceholderSenderID(prompt ApprovalPromptRegistration, sender bridgev2.EventSender) networkid.UserID {

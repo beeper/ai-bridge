@@ -53,7 +53,7 @@ func (b *Bridge) buildOpenCodeFileContent(ctx context.Context, portal *bridgev2.
 	}
 
 	content := &event.MessageEventContent{
-		MsgType:  messageTypeForMIME(mimeType),
+		MsgType:  media.MessageTypeForMIME(mimeType),
 		Body:     filename,
 		FileName: filename,
 		Info: &event.FileInfo{

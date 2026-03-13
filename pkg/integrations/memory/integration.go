@@ -101,13 +101,11 @@ func (i *Integration) AdditionalSystemMessages(_ context.Context, _ iruntime.Pro
 
 func (i *Integration) AugmentPrompt(ctx context.Context, scope iruntime.PromptScope, prompt []openai.ChatCompletionMessageParamUnion) []openai.ChatCompletionMessageParamUnion {
 	return AugmentPrompt(ctx, scope, prompt, PromptAugmentDeps{
-		ShouldInjectContext: i.shouldInjectMemoryPromptContext,
-		ShouldBootstrap:     i.shouldBootstrapMemoryPromptContext,
-		ResolveBootstrapPaths: func(scope iruntime.PromptScope) []string {
-			return i.resolveMemoryBootstrapPaths(scope)
-		},
-		MarkBootstrapped: i.markMemoryPromptBootstrapped,
-		ReadSection:      i.readMemoryPromptSection,
+		ShouldInjectContext:   i.shouldInjectMemoryPromptContext,
+		ShouldBootstrap:       i.shouldBootstrapMemoryPromptContext,
+		ResolveBootstrapPaths: i.resolveMemoryBootstrapPaths,
+		MarkBootstrapped:      i.markMemoryPromptBootstrapped,
+		ReadSection:           i.readMemoryPromptSection,
 	})
 }
 
@@ -226,9 +224,7 @@ func (i *Integration) buildToolExecDeps() ToolExecDeps {
 		ResolveCitationsMode: func(_ iruntime.ToolScope) string {
 			return i.resolveMemoryCitationsMode()
 		},
-		ShouldIncludeCitations: func(ctx context.Context, scope iruntime.ToolScope, mode string) bool {
-			return i.shouldIncludeMemoryCitations(ctx, scope, mode)
-		},
+		ShouldIncludeCitations: i.shouldIncludeMemoryCitations,
 	}
 }
 
@@ -587,13 +583,7 @@ func (i *Integration) resolveMemoryCitationsMode() string {
 		return "auto"
 	}
 	raw, _ := cfg["citations"].(string)
-	mode := strings.ToLower(strings.TrimSpace(raw))
-	switch mode {
-	case "on", "off", "auto":
-		return mode
-	default:
-		return "auto"
-	}
+	return normalizeCitationsMode(raw)
 }
 
 func (i *Integration) shouldIncludeMemoryCitations(ctx context.Context, scope iruntime.ToolScope, mode string) bool {

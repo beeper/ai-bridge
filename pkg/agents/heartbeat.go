@@ -85,7 +85,7 @@ func stripTokenAtEdges(raw string, token string) (string, bool) {
 			changed = true
 		}
 	}
-	collapsed := strings.TrimSpace(strings.Join(strings.Fields(text), " "))
+	collapsed := strings.Join(strings.Fields(text), " ")
 	return collapsed, didStrip
 }
 
@@ -125,9 +125,8 @@ func StripHeartbeatTokenWithMode(text string, mode StripHeartbeatMode, maxAckCha
 	if pickedText == "" {
 		return true, "", true
 	}
-	rest := strings.TrimSpace(pickedText)
-	if mode == StripHeartbeatModeHeartbeat && len(rest) <= maxAckChars {
+	if mode == StripHeartbeatModeHeartbeat && len(pickedText) <= maxAckChars {
 		return true, "", true
 	}
-	return false, rest, true
+	return false, pickedText, true
 }

@@ -65,7 +65,7 @@ func splitPromptByTokenShare(prompt []openai.ChatCompletionMessageParamUnion, pa
 	current := make([]openai.ChatCompletionMessageParamUnion, 0, len(prompt)/parts+1)
 	currentTokens := 0
 	for _, msg := range prompt {
-		msgTokens := estimatePromptTokensForCompaction([]openai.ChatCompletionMessageParamUnion{msg})
+		msgTokens := max(EstimateMessageChars(msg)/CharsPerTokenEstimate, 3)
 		if len(chunks) < parts-1 && len(current) > 0 && float64(currentTokens+msgTokens) > targetTokens {
 			chunks = append(chunks, current)
 			current = make([]openai.ChatCompletionMessageParamUnion, 0, len(prompt)/parts+1)

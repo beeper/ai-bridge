@@ -1143,8 +1143,8 @@ func (m *openClawManager) handleApprovalResolved(ctx context.Context, payload ga
 		m.approvalFlow.Drop(approvalID)
 		return
 	}
+	approved, reason := openClawApprovalDecisionStatus(payload.Decision)
 	if data != nil && strings.TrimSpace(data.TurnID) != "" && strings.TrimSpace(data.ToolCallID) != "" {
-		approved, reason := openClawApprovalDecisionStatus(payload.Decision)
 		m.client.EmitStreamPart(ctx, portal, data.TurnID, resolveOpenClawAgentID(portalMeta(portal), sessionKey, payload.Request), sessionKey, map[string]any{
 			"type":       "tool-approval-response",
 			"approvalId": approvalID,
@@ -1155,7 +1155,6 @@ func (m *openClawManager) handleApprovalResolved(ctx context.Context, payload ga
 	} else {
 		m.client.sendSystemNoticeViaPortal(ctx, portal, openClawApprovalResolvedText(payload.Decision))
 	}
-	approved, reason := openClawApprovalDecisionStatus(payload.Decision)
 	m.approvalFlow.ResolveExternal(ctx, approvalID, agentremote.ApprovalDecisionPayload{
 		ApprovalID: approvalID,
 		Approved:   approved,
@@ -1646,20 +1645,11 @@ func (m *openClawManager) waitForRunCompletion(ctx context.Context, portal *brid
 	if strings.TrimSpace(waitResp.Error) != "" {
 		metadata["error_text"] = strings.TrimSpace(waitResp.Error)
 	}
-	switch status {
-	case "error":
+	if status == "error" {
 		m.client.EmitStreamPart(ctx, portal, turnID, agentID, meta.OpenClawSessionKey, map[string]any{
 			"type":      "error",
 			"errorText": openclawconv.StringsTrimDefault(waitResp.Error, "OpenClaw run failed"),
 		})
-	default:
-		m.client.EmitStreamPart(ctx, portal, turnID, agentID, meta.OpenClawSessionKey, map[string]any{
-			"type":            "finish",
-			"messageMetadata": metadata,
-		})
-		m.client.FinishStream(turnID, status)
-		m.clearStartedTurn(turnID)
-		return
 	}
 	m.client.EmitStreamPart(ctx, portal, turnID, agentID, meta.OpenClawSessionKey, map[string]any{
 		"type":            "finish",
@@ -1880,10 +1870,6 @@ func extractMessageText(message map[string]any) string {
 	return openclawconv.ExtractMessageText(message)
 }
 
-func contentBlocks(message map[string]any) []map[string]any {
-	return openclawconv.ContentBlocks(message)
-}
-
 func stringValue(v any) string {
 	switch typed := v.(type) {
 	case string:
@@ -1955,7 +1941,7 @@ func openClawApplyHistoryChunks(state *streamui.UIState, message map[string]any,
 		openClawApplyHistoryToolResult(state, message)
 		return
 	}
-	blocks := contentBlocks(message)
+	blocks := openclawconv.ContentBlocks(message)
 	for idx, block := range blocks {
 		blockType := strings.ToLower(strings.TrimSpace(stringValue(block["type"])))
 		switch blockType {

@@ -65,15 +65,15 @@ func ExecuteTool(ctx context.Context, args map[string]any, deps ToolExecDeps) (s
 		if err != nil {
 			return errorJSON(err.Error()), nil
 		}
-		out := map[string]any{
-			"enabled": enabled,
-			"backend": backend,
-			"jobs":    jobCount,
-		}
+		var nextRunAtMs any
 		if nextRun != nil {
-			out["nextRunAtMs"] = *nextRun
-		} else {
-			out["nextRunAtMs"] = nil
+			nextRunAtMs = *nextRun
+		}
+		out := map[string]any{
+			"enabled":     enabled,
+			"backend":     backend,
+			"jobs":        jobCount,
+			"nextRunAtMs": nextRunAtMs,
 		}
 		return agenttools.JSONResult(out).Text(), nil
 	case "list":
@@ -286,13 +286,10 @@ func stripExistingReminderContext(text string) string {
 }
 
 func buildReminderContextLines(lines []ReminderContextLine, count int) []string {
-	maxMessages := count
-	if maxMessages <= 0 {
+	if count <= 0 {
 		return nil
 	}
-	if maxMessages > reminderContextMessagesMax {
-		maxMessages = reminderContextMessagesMax
-	}
+	maxMessages := min(count, reminderContextMessagesMax)
 	if len(lines) == 0 {
 		return nil
 	}

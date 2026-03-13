@@ -548,7 +548,7 @@ func (oc *OpenClawClient) topicForPortal(meta *PortalMetadata) string {
 		parts = appendDedupedPart(parts, "History: "+meta.HistoryMode)
 	}
 	if meta.OpenClawToolCount > 0 {
-		toolSummary := "Tools: " + fmt.Sprintf("%d", meta.OpenClawToolCount)
+		toolSummary := fmt.Sprintf("Tools: %d", meta.OpenClawToolCount)
 		if profile := strings.TrimSpace(meta.OpenClawToolProfile); profile != "" {
 			toolSummary += " (" + profile + ")"
 		}

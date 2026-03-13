@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 )
 
@@ -61,7 +62,7 @@ func (s *SessionStore) Get(ctx context.Context, sessionKey string) (SessionRecor
 		&queueCapRaw,
 		&record.QueueDrop,
 	)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return SessionRecord{}, false, nil
 	}
 	if err != nil {

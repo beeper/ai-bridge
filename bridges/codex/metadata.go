@@ -50,8 +50,6 @@ type MessageMetadata struct {
 
 type ToolCallMetadata = agentremote.ToolCallMetadata
 
-type GeneratedFileRef = agentremote.GeneratedFileRef
-
 type GhostMetadata struct {
 	LastSync jsontime.Unix `json:"last_sync,omitempty"`
 }

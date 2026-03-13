@@ -302,19 +302,41 @@ type ApprovalPromptMessage struct {
 	Options      []ApprovalOption
 }
 
-func BuildApprovalPromptMessage(params ApprovalPromptMessageParams) ApprovalPromptMessage {
-	approvalID := strings.TrimSpace(params.ApprovalID)
-	toolCallID := strings.TrimSpace(params.ToolCallID)
-	toolName := strings.TrimSpace(params.ToolName)
-	turnID := strings.TrimSpace(params.TurnID)
+type normalizedPromptFields struct {
+	approvalID   string
+	toolCallID   string
+	toolName     string
+	turnID       string
+	presentation ApprovalPromptPresentation
+	options      []ApprovalOption
+}
+
+func normalizePromptFields(approvalID, toolCallID, toolName, turnID string, presentation ApprovalPromptPresentation, options []ApprovalOption) normalizedPromptFields {
+	approvalID = strings.TrimSpace(approvalID)
+	toolCallID = strings.TrimSpace(toolCallID)
+	toolName = strings.TrimSpace(toolName)
+	turnID = strings.TrimSpace(turnID)
 	if toolCallID == "" {
 		toolCallID = approvalID
 	}
 	if toolName == "" {
 		toolName = "tool"
 	}
-	presentation := normalizeApprovalPromptPresentation(params.Presentation, toolName)
-	options := normalizeApprovalOptions(params.Options, ApprovalPromptOptions(presentation.AllowAlways))
+	p := normalizeApprovalPromptPresentation(presentation, toolName)
+	return normalizedPromptFields{
+		approvalID:   approvalID,
+		toolCallID:   toolCallID,
+		toolName:     toolName,
+		turnID:       turnID,
+		presentation: p,
+		options:      normalizeApprovalOptions(options, ApprovalPromptOptions(p.AllowAlways)),
+	}
+}
+
+func BuildApprovalPromptMessage(params ApprovalPromptMessageParams) ApprovalPromptMessage {
+	f := normalizePromptFields(params.ApprovalID, params.ToolCallID, params.ToolName, params.TurnID, params.Presentation, params.Options)
+	approvalID, toolCallID, toolName, turnID := f.approvalID, f.toolCallID, f.toolName, f.turnID
+	presentation, options := f.presentation, f.options
 	body := BuildApprovalPromptBody(presentation, options)
 	metadata := approvalMessageMetadata(approvalID, turnID, presentation, options, nil, params.ExpiresAt)
 	uiMessage := map[string]any{
@@ -354,17 +376,9 @@ func BuildApprovalPromptMessage(params ApprovalPromptMessageParams) ApprovalProm
 }
 
 func BuildApprovalResponsePromptMessage(params ApprovalResponsePromptMessageParams) ApprovalPromptMessage {
-	approvalID := strings.TrimSpace(params.ApprovalID)
-	toolCallID := strings.TrimSpace(params.ToolCallID)
-	toolName := strings.TrimSpace(params.ToolName)
-	turnID := strings.TrimSpace(params.TurnID)
-	if toolCallID == "" {
-		toolCallID = approvalID
-	}
-	if toolName == "" {
-		toolName = "tool"
-	}
-	presentation := normalizeApprovalPromptPresentation(params.Presentation, toolName)
+	f := normalizePromptFields(params.ApprovalID, params.ToolCallID, params.ToolName, params.TurnID, params.Presentation, params.Options)
+	approvalID, toolCallID, toolName, turnID := f.approvalID, f.toolCallID, f.toolName, f.turnID
+	presentation := f.presentation
 	decision := params.Decision
 	decision.ApprovalID = strings.TrimSpace(decision.ApprovalID)
 	if decision.ApprovalID == "" {
@@ -381,7 +395,7 @@ func BuildApprovalResponsePromptMessage(params ApprovalResponsePromptMessagePara
 	if strings.TrimSpace(decision.Reason) != "" {
 		approvalPayload["reason"] = strings.TrimSpace(decision.Reason)
 	}
-	options := normalizeApprovalOptions(params.Options, ApprovalPromptOptions(presentation.AllowAlways))
+	options := f.options
 	metadata := approvalMessageMetadata(approvalID, turnID, presentation, options, &decision, params.ExpiresAt)
 	uiMessage := map[string]any{
 		"id":       approvalID,
@@ -446,21 +460,23 @@ func approvalMessageMetadata(
 }
 
 func approvalDecisionOutcome(decision ApprovalDecisionPayload) (string, string) {
-	reason := strings.TrimSpace(decision.Reason)
-	switch {
-	case decision.Approved && decision.Always:
-		return "approved (always allow)", ""
-	case decision.Approved:
+	if decision.Approved {
+		if decision.Always {
+			return "approved (always allow)", ""
+		}
 		return "approved", ""
-	case reason == ApprovalReasonTimeout:
+	}
+	reason := strings.TrimSpace(decision.Reason)
+	switch reason {
+	case ApprovalReasonTimeout:
 		return "timed out", ""
-	case reason == ApprovalReasonExpired:
+	case ApprovalReasonExpired:
 		return "expired", ""
-	case reason == ApprovalReasonDeliveryError:
+	case ApprovalReasonDeliveryError:
 		return "delivery error", ""
-	case reason == ApprovalReasonCancelled:
+	case ApprovalReasonCancelled:
 		return "cancelled", ""
-	case reason == "":
+	case "":
 		return "denied", ""
 	default:
 		return "denied", reason

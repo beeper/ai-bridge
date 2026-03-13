@@ -223,7 +223,7 @@ func removeHTMLElement(html, tag string) string {
 		}
 		end += start + len(closeTag)
 		html = html[:start] + html[end:]
-		lower = strings.ToLower(html)
+		lower = lower[:start] + lower[end:]
 	}
 	return html
 }

@@ -79,17 +79,11 @@ func applyReplacements(lines []string, replacements []replacement) []string {
 	result := slices.Clone(lines)
 	for i := len(replacements) - 1; i >= 0; i-- {
 		rep := replacements[i]
-		start := rep.start
-		for j := 0; j < rep.oldLen; j++ {
-			if start < len(result) {
-				result = append(result[:start], result[start+1:]...)
-			}
+		end := rep.start + rep.oldLen
+		if end > len(result) {
+			end = len(result)
 		}
-		if len(rep.newLines) > 0 {
-			before := slices.Clone(result[:start])
-			after := slices.Clone(result[start:])
-			result = append(before, append(rep.newLines, after...)...)
-		}
+		result = slices.Concat(result[:rep.start], rep.newLines, result[end:])
 	}
 	return result
 }

@@ -606,10 +606,6 @@ func BuildSystemPrompt(params SystemPromptParams) string {
 			fmt.Sprintf("❌ Wrong: \"%s\"", SilentReplyToken),
 			fmt.Sprintf("✅ Right: %s", SilentReplyToken),
 			"",
-		)
-	}
-	if !isMinimal {
-		lines = append(lines,
 			"## Heartbeats",
 			heartbeatPromptLine,
 			"If you receive a heartbeat poll (a user message matching the heartbeat prompt above), and there is nothing that needs attention, reply exactly:",

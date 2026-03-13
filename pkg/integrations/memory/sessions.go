@@ -313,7 +313,6 @@ func (m *MemorySearchManager) upsertSessionFile(ctx context.Context, sessionKey,
 	default:
 		return err
 	}
-	size := len([]byte(content))
 	_, err := m.db.Exec(ctx,
 		`INSERT INTO ai_memory_session_files
            (bridge_id, login_id, agent_id, session_key, path, content, hash, size, updated_at)
@@ -321,7 +320,7 @@ func (m *MemorySearchManager) upsertSessionFile(ctx context.Context, sessionKey,
          ON CONFLICT (bridge_id, login_id, agent_id, session_key)
          DO UPDATE SET path=excluded.path, content=excluded.content, hash=excluded.hash,
            size=excluded.size, updated_at=excluded.updated_at`,
-		m.baseArgs(sessionKey, path, content, hash, size, time.Now().UnixMilli())...
+		m.baseArgs(sessionKey, path, content, hash, len(content), time.Now().UnixMilli())...
 	)
 	return err
 }
@@ -383,14 +382,10 @@ func (m *MemorySearchManager) removeStaleSessions(ctx context.Context, active ma
 // from a raw message metadata blob. Returns "" if the row should be skipped.
 func (m *MemorySearchManager) parseSessionMessageRow(rawMeta []byte) string {
 	meta := parseSessionMetadata(rawMeta)
-	if meta == nil || !shouldIncludeSessionInHistory(meta) {
+	if !shouldIncludeSessionInHistory(meta) {
 		return ""
 	}
-	role := strings.ToLower(strings.TrimSpace(meta.Role))
-	if role != "user" && role != "assistant" {
-		return ""
-	}
-	if role == "assistant" && meta.AgentID != "" && meta.AgentID != m.agentID {
+	if meta.Role == "assistant" && meta.AgentID != "" && meta.AgentID != m.agentID {
 		return ""
 	}
 	text := normalizeSessionText(meta.Body)
@@ -398,7 +393,7 @@ func (m *MemorySearchManager) parseSessionMessageRow(rawMeta []byte) string {
 		return ""
 	}
 	label := "User"
-	if role == "assistant" {
+	if meta.Role == "assistant" {
 		label = "Assistant"
 	}
 	return label + ": " + text
@@ -423,21 +418,14 @@ func parseSessionMetadata(raw []byte) *sessionMessageMetadata {
 }
 
 func shouldIncludeSessionInHistory(meta *sessionMessageMetadata) bool {
-	if meta == nil || meta.Body == "" {
-		return false
-	}
-	if meta.ExcludeFromHistory {
-		return false
-	}
-	if meta.Role != "user" && meta.Role != "assistant" {
-		return false
-	}
-	return true
+	return meta != nil &&
+		meta.Body != "" &&
+		!meta.ExcludeFromHistory &&
+		(meta.Role == "user" || meta.Role == "assistant")
 }
 
 func normalizeSessionText(text string) string {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
+	text = normalizeNewlines(text)
 	var b strings.Builder
 	prevSpace := false
 	for _, r := range text {

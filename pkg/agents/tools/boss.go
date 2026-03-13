@@ -668,9 +668,9 @@ func (e *BossToolExecutor) ExecuteRunInternalCommand(ctx context.Context, input 
 		return ErrorResult("run_internal_command", err.Error()), nil
 	}
 
-	roomID := ReadStringDefault(input, "room_id", "")
-	if roomID == "" {
-		return ErrorResult("run_internal_command", "room_id is required"), nil
+	roomID, err := ReadString(input, "room_id", true)
+	if err != nil {
+		return ErrorResult("run_internal_command", err.Error()), nil
 	}
 
 	message, err := e.store.RunInternalCommand(ctx, roomID, command)

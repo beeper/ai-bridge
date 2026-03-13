@@ -99,7 +99,7 @@ func paginateBackward(
 	}
 	start := max(end-count, 0)
 	hasMore := start > 0
-	cursor := networkid.PaginationCursor("")
+	var cursor networkid.PaginationCursor
 	if hasMore {
 		cursor = FormatCursor(start)
 	}

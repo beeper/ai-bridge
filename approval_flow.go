@@ -279,18 +279,28 @@ func (f *ApprovalFlow[D]) Drop(approvalID string) {
 	f.finalize(approvalID, nil, false)
 }
 
+// normalizeDecisionID trims the approvalID and ensures decision.ApprovalID is set.
+// Returns the trimmed approvalID and false if it is empty.
+func normalizeDecisionID(approvalID string, decision *ApprovalDecisionPayload) (string, bool) {
+	approvalID = strings.TrimSpace(approvalID)
+	if approvalID == "" {
+		return "", false
+	}
+	if strings.TrimSpace(decision.ApprovalID) == "" {
+		decision.ApprovalID = approvalID
+	}
+	return approvalID, true
+}
+
 // FinishResolved finalizes a terminal approval by editing the approval prompt to
 // its final state and cleaning up bridge-authored placeholder reactions.
 func (f *ApprovalFlow[D]) FinishResolved(approvalID string, decision ApprovalDecisionPayload) {
 	if f == nil {
 		return
 	}
-	approvalID = strings.TrimSpace(approvalID)
-	if approvalID == "" {
+	approvalID, ok := normalizeDecisionID(approvalID, &decision)
+	if !ok {
 		return
-	}
-	if strings.TrimSpace(decision.ApprovalID) == "" {
-		decision.ApprovalID = approvalID
 	}
 	f.finalize(approvalID, &decision, true)
 }
@@ -302,12 +312,9 @@ func (f *ApprovalFlow[D]) ResolveExternal(ctx context.Context, approvalID string
 	if f == nil {
 		return
 	}
-	approvalID = strings.TrimSpace(approvalID)
-	if approvalID == "" {
+	approvalID, ok := normalizeDecisionID(approvalID, &decision)
+	if !ok {
 		return
-	}
-	if strings.TrimSpace(decision.ApprovalID) == "" {
-		decision.ApprovalID = approvalID
 	}
 	if prompt, ok := f.promptRegistration(approvalID); ok {
 		f.mirrorRemoteDecisionReaction(ctx, prompt, decision)

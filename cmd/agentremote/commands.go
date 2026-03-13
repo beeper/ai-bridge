@@ -34,7 +34,7 @@ func initCommands() {
 	commands = []cmdDef{
 		{
 			Name: "__bridge", Group: "", Hidden: true,
-			Run: func(args []string) error { return cmdInternalBridge(args) },
+			Run: cmdInternalBridge,
 		},
 		{
 			Name: "login", Group: "Auth",
@@ -82,7 +82,7 @@ func initCommands() {
 			Flags: []flagDef{
 				{Name: "output", Help: "Output format", Default: "text", Values: []string{"text", "json"}},
 			},
-			Run: func(args []string) error { return cmdProfiles(args) },
+			Run: cmdProfiles,
 		},
 		{
 			Name: "start", Group: "Bridges",

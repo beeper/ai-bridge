@@ -1834,47 +1834,6 @@ func (cc *CodexClient) processPendingCodex(roomID id.RoomID) {
 
 // Streaming helpers (Codex -> Matrix AI SDK chunk mapping)
 
-func (cc *CodexClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, state *streamingState, content string, turnID string) id.EventID {
-	uiMessage := map[string]any{
-		"id":   turnID,
-		"role": "assistant",
-		"metadata": map[string]any{
-			"turn_id": turnID,
-		},
-		"parts": []any{},
-	}
-
-	eventRaw := map[string]any{
-		"msgtype":                event.MsgText,
-		"body":                   content,
-		matrixevents.BeeperAIKey: uiMessage,
-		"m.mentions":             map[string]any{},
-	}
-
-	msgID := agentremote.NewMessageID("codex")
-	converted := &bridgev2.ConvertedMessage{
-		Parts: []*bridgev2.ConvertedMessagePart{{
-			ID:         networkid.PartID("0"),
-			Type:       event.EventMessage,
-			Content:    &event.MessageEventContent{MsgType: event.MsgText, Body: content},
-			Extra:      eventRaw,
-			DBMetadata: &MessageMetadata{BaseMessageMetadata: agentremote.BaseMessageMetadata{Role: "assistant", TurnID: turnID}},
-		}},
-	}
-
-	eventTS := codexStreamEventTimestamp(state, false)
-	streamOrder := codexNextLiveStreamOrder(state, eventTS)
-	eventID, _, err := cc.sendViaPortalWithOrdering(portal, converted, msgID, eventTS, streamOrder)
-	if err != nil {
-		cc.loggerForContext(ctx).Error().Err(err).Msg("Failed to send initial streaming message")
-		return ""
-	}
-	if state != nil {
-		state.networkMessageID = msgID
-	}
-	cc.loggerForContext(ctx).Info().Stringer("event_id", eventID).Str("turn_id", turnID).Msg("Initial streaming message sent")
-	return eventID
-}
 
 func (cc *CodexClient) buildUIMessageMetadata(state *streamingState, model string, includeUsage bool, finishReason string) map[string]any {
 	return msgconv.BuildUIMessageMetadata(msgconv.UIMessageMetadataParams{

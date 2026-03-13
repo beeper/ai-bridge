@@ -17,52 +17,42 @@ func computeRoomFeaturesForAgents(agents []*Agent) *RoomFeatures {
 	if len(agents) == 0 {
 		return defaultSDKFeatureConfig()
 	}
-	maxText := 0
-	anyStreaming := false
-	anyReasoning := false
-	anyTools := false
-	anyTextInput := false
-	anyImageInput := false
-	anyAudioInput := false
-	anyVideoInput := false
-	anyFileInput := false
-	anyPDFInput := false
-	anyImageOutput := false
-	anyAudioOutput := false
-	anyFilesOutput := false
+
+	// Merge capabilities across all agents: any agent supporting a feature enables it.
+	var merged AgentCapabilities
 	for _, agent := range agents {
 		if agent == nil {
 			continue
 		}
 		caps := agent.Capabilities
-		if caps.MaxTextLength > maxText {
-			maxText = caps.MaxTextLength
+		if caps.MaxTextLength > merged.MaxTextLength {
+			merged.MaxTextLength = caps.MaxTextLength
 		}
-		anyStreaming = anyStreaming || caps.SupportsStreaming
-		anyReasoning = anyReasoning || caps.SupportsReasoning
-		anyTools = anyTools || caps.SupportsToolCalling
-		anyTextInput = anyTextInput || caps.SupportsTextInput
-		anyImageInput = anyImageInput || caps.SupportsImageInput
-		anyAudioInput = anyAudioInput || caps.SupportsAudioInput
-		anyVideoInput = anyVideoInput || caps.SupportsVideoInput
-		anyFileInput = anyFileInput || caps.SupportsFileInput
-		anyPDFInput = anyPDFInput || caps.SupportsPDFInput
-		anyImageOutput = anyImageOutput || caps.SupportsImageOutput
-		anyAudioOutput = anyAudioOutput || caps.SupportsAudioOutput
-		anyFilesOutput = anyFilesOutput || caps.SupportsFilesOutput
+		merged.SupportsStreaming = merged.SupportsStreaming || caps.SupportsStreaming
+		merged.SupportsReasoning = merged.SupportsReasoning || caps.SupportsReasoning
+		merged.SupportsToolCalling = merged.SupportsToolCalling || caps.SupportsToolCalling
+		merged.SupportsTextInput = merged.SupportsTextInput || caps.SupportsTextInput
+		merged.SupportsImageInput = merged.SupportsImageInput || caps.SupportsImageInput
+		merged.SupportsAudioInput = merged.SupportsAudioInput || caps.SupportsAudioInput
+		merged.SupportsVideoInput = merged.SupportsVideoInput || caps.SupportsVideoInput
+		merged.SupportsFileInput = merged.SupportsFileInput || caps.SupportsFileInput
+		merged.SupportsPDFInput = merged.SupportsPDFInput || caps.SupportsPDFInput
+		merged.SupportsImageOutput = merged.SupportsImageOutput || caps.SupportsImageOutput
+		merged.SupportsAudioOutput = merged.SupportsAudioOutput || caps.SupportsAudioOutput
+		merged.SupportsFilesOutput = merged.SupportsFilesOutput || caps.SupportsFilesOutput
 	}
 
 	base := defaultSDKFeatureConfig()
-	if maxText > 0 {
-		base.MaxTextLength = maxText
+	if merged.MaxTextLength > 0 {
+		base.MaxTextLength = merged.MaxTextLength
 	}
-	base.SupportsImages = anyImageInput || anyImageOutput
-	base.SupportsAudio = anyAudioInput || anyAudioOutput
-	base.SupportsVideo = anyVideoInput
-	base.SupportsFiles = anyFileInput || anyPDFInput || anyFilesOutput
-	base.SupportsReply = anyTextInput
-	base.SupportsTyping = anyStreaming
-	base.SupportsReactions = anyTools || anyReasoning || anyTextInput
+	base.SupportsImages = merged.SupportsImageInput || merged.SupportsImageOutput
+	base.SupportsAudio = merged.SupportsAudioInput || merged.SupportsAudioOutput
+	base.SupportsVideo = merged.SupportsVideoInput
+	base.SupportsFiles = merged.SupportsFileInput || merged.SupportsPDFInput || merged.SupportsFilesOutput
+	base.SupportsReply = merged.SupportsTextInput
+	base.SupportsTyping = merged.SupportsStreaming
+	base.SupportsReactions = merged.SupportsToolCalling || merged.SupportsReasoning || merged.SupportsTextInput
 	base.SupportsReadReceipts = true
 	base.SupportsDeleteChat = true
 	return base

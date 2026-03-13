@@ -21,11 +21,10 @@ type sdkConnector struct {
 }
 
 func newSDKConnector(cfg *Config) *sdkConnector {
-	sc := &sdkConnector{
+	return &sdkConnector{
 		cfg:           cfg,
 		ConnectorBase: NewConnectorBase(cfg),
 	}
-	return sc
 }
 
 // NewConnectorBase builds an SDK-backed connector base that can be embedded by custom bridges.

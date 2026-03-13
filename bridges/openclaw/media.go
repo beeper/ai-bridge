@@ -51,7 +51,7 @@ func (oc *OpenClawClient) buildOpenClawAttachmentContent(ctx context.Context, po
 	}
 
 	content := &event.MessageEventContent{
-		MsgType:  messageTypeForMIME(mimeType),
+		MsgType:  media.MessageTypeForMIME(mimeType),
 		Body:     filename,
 		FileName: filename,
 		Info: &event.FileInfo{
@@ -320,10 +320,6 @@ func downloadOpenClawAttachmentURL(ctx context.Context, rawURL, fallbackMime str
 		return nil, "", errors.New("local file access is not permitted")
 	}
 	return media.DownloadURL(ctx, rawURL, fallbackMime, maxBytes)
-}
-
-func messageTypeForMIME(mimeType string) event.MessageType {
-	return media.MessageTypeForMIME(mimeType)
 }
 
 func openClawMessageExtra(content *event.MessageEventContent) map[string]any {

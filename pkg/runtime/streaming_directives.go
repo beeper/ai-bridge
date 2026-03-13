@@ -1,15 +1,10 @@
 package runtime
 
-import "strings"
+import (
+	"strings"
 
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
+	"github.com/beeper/agentremote/pkg/shared/stringutil"
+)
 
 type streamingPendingReplyState struct {
 	explicitID string
@@ -47,7 +42,7 @@ func (acc *StreamingDirectiveAccumulator) Consume(raw string, final bool) *Strea
 	parsed := ParseStreamingChunk(combined)
 	hasTag := acc.activeReply.hasTag || acc.pendingReply.hasTag || parsed.HasReplyTag
 	sawCurrent := acc.activeReply.sawCurrent || acc.pendingReply.sawCurrent || parsed.ReplyToCurrent
-	explicitID := firstNonEmpty(parsed.ReplyToExplicitID, acc.pendingReply.explicitID, acc.activeReply.explicitID)
+	explicitID := stringutil.FirstNonEmpty(parsed.ReplyToExplicitID, acc.pendingReply.explicitID, acc.activeReply.explicitID)
 
 	result := &StreamingDirectiveResult{
 		Text:              parsed.Text,

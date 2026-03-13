@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,21 +30,18 @@ type Conversation struct {
 }
 
 func newConversation(ctx context.Context, portal *bridgev2.Portal, login *bridgev2.UserLogin, sender bridgev2.EventSender, runtime conversationRuntime) *Conversation {
-	id := ""
-	title := ""
-	if portal != nil {
-		id = string(portal.ID)
-		title = portal.Name
-	}
-	return &Conversation{
-		ID:      id,
-		Title:   title,
+	conv := &Conversation{
 		ctx:     ctx,
 		portal:  portal,
 		login:   login,
 		sender:  sender,
 		runtime: runtime,
 	}
+	if portal != nil {
+		conv.ID = string(portal.ID)
+		conv.Title = portal.Name
+	}
+	return conv
 }
 
 func (c *Conversation) getIntent(ctx context.Context) (bridgev2.MatrixAPI, error) {
@@ -160,7 +158,7 @@ func (c *Conversation) currentRoomFeatures(ctx context.Context) *RoomFeatures {
 
 func (c *Conversation) conversationStateSpec() ConversationSpec {
 	state := c.state()
-	spec := ConversationSpec{
+	return ConversationSpec{
 		PortalID:             c.ID,
 		Kind:                 state.Kind,
 		Visibility:           state.Visibility,
@@ -170,7 +168,6 @@ func (c *Conversation) conversationStateSpec() ConversationSpec {
 		ArchiveOnCompletion:  state.ArchiveOnCompletion,
 		Metadata:             maps.Clone(state.Metadata),
 	}
-	return spec
 }
 
 func (c *Conversation) aiRoomKind() string {
@@ -335,7 +332,7 @@ func (c *Conversation) RoomAgents(ctx context.Context) (*RoomAgentSet, error) {
 		}
 	}
 	result := state.RoomAgents
-	result.AgentIDs = append([]string(nil), result.AgentIDs...)
+	result.AgentIDs = slices.Clone(result.AgentIDs)
 	return &result, nil
 }
 
