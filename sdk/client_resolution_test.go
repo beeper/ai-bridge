@@ -14,7 +14,7 @@ func TestSDKClientResolveIdentifierPreservesFullResponse(t *testing.T) {
 	chat := &bridgev2.CreateChatResponse{
 		PortalKey: networkid.PortalKey{ID: "portal-1", Receiver: "login-1"},
 	}
-	conn := newSDKConnector(&Config{
+	cfg := &Config{
 		ResolveIdentifier: func(_ context.Context, _ any, id string, createChat bool) (*IdentifierResult, error) {
 			if id != "agent:test" {
 				t.Fatalf("unexpected identifier %q", id)
@@ -31,8 +31,8 @@ func TestSDKClientResolveIdentifierPreservesFullResponse(t *testing.T) {
 				Chat: chat,
 			}, nil
 		},
-	})
-	client := newSDKClient(&bridgev2.UserLogin{UserLogin: &database.UserLogin{ID: "login-1"}}, conn)
+	}
+	client := newSDKClient(&bridgev2.UserLogin{UserLogin: &database.UserLogin{ID: "login-1"}}, cfg)
 	resp, err := client.ResolveIdentifier(context.Background(), "agent:test", true)
 	if err != nil {
 		t.Fatalf("ResolveIdentifier returned error: %v", err)
@@ -50,7 +50,7 @@ func TestSDKClientResolveIdentifierPreservesFullResponse(t *testing.T) {
 
 func TestSDKClientContactListingAndSearch(t *testing.T) {
 	contact := &bridgev2.ResolveIdentifierResponse{UserID: "agent-user"}
-	conn := newSDKConnector(&Config{
+	cfg := &Config{
 		GetContactList: func(_ context.Context, _ any) ([]*IdentifierResult, error) {
 			return []*IdentifierResult{contact}, nil
 		},
@@ -60,8 +60,8 @@ func TestSDKClientContactListingAndSearch(t *testing.T) {
 			}
 			return []*IdentifierResult{contact}, nil
 		},
-	})
-	client := newSDKClient(&bridgev2.UserLogin{}, conn)
+	}
+	client := newSDKClient(&bridgev2.UserLogin{}, cfg)
 
 	contacts, err := client.GetContactList(context.Background())
 	if err != nil {

@@ -30,9 +30,17 @@ func newSDKConnector(cfg *Config) *sdkConnector {
 
 // NewConnectorBase builds an SDK-backed connector base that can be embedded by custom bridges.
 func NewConnectorBase(cfg *Config) *agentremote.ConnectorBase {
-	var mu sync.Mutex
-	var clients map[networkid.UserLoginID]bridgev2.NetworkAPI
+	var localMu sync.Mutex
+	var localClients map[networkid.UserLoginID]bridgev2.NetworkAPI
 	var br *bridgev2.Bridge
+	mu := &localMu
+	clientsRef := &localClients
+	if cfg.ClientCacheMu != nil {
+		mu = cfg.ClientCacheMu
+	}
+	if cfg.ClientCache != nil {
+		clientsRef = cfg.ClientCache
+	}
 
 	protocolID := cfg.ProtocolID
 	if protocolID == "" {
@@ -42,7 +50,7 @@ func NewConnectorBase(cfg *Config) *agentremote.ConnectorBase {
 		ProtocolID: protocolID,
 		Init: func(bridge *bridgev2.Bridge) {
 			br = bridge
-			agentremote.EnsureClientMap(&mu, &clients)
+			agentremote.EnsureClientMap(mu, clientsRef)
 			if cfg.InitConnector != nil {
 				cfg.InitConnector(bridge)
 			}
@@ -55,7 +63,7 @@ func NewConnectorBase(cfg *Config) *agentremote.ConnectorBase {
 			return nil
 		},
 		Stop: func(ctx context.Context) {
-			agentremote.StopClients(&mu, &clients)
+			agentremote.StopClients(mu, clientsRef)
 			if cfg.StopConnector != nil {
 				cfg.StopConnector(ctx, br)
 			}
@@ -133,8 +141,8 @@ func NewConnectorBase(cfg *Config) *agentremote.ConnectorBase {
 				}
 			}
 			return agentremote.LoadUserLogin(login, agentremote.LoadUserLoginConfig[bridgev2.NetworkAPI]{
-				Mu:         &mu,
-				Clients:    clients,
+				Mu:         mu,
+				Clients:    *clientsRef,
 				BridgeName: cfg.Name,
 				MakeBroken: cfg.MakeBrokenLogin,
 				Update: func(client bridgev2.NetworkAPI, login *bridgev2.UserLogin) {
@@ -150,7 +158,7 @@ func NewConnectorBase(cfg *Config) *agentremote.ConnectorBase {
 					if cfg.CreateClient != nil {
 						return cfg.CreateClient(login)
 					}
-					return newSDKClient(login, &sdkConnector{cfg: cfg}), nil
+					return newSDKClient(login, cfg), nil
 				},
 				AfterLoad: func(client bridgev2.NetworkAPI) {
 					if cfg.AfterLoadClient != nil {

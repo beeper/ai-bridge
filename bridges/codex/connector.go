@@ -17,6 +17,7 @@ import (
 	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/bridges/codex/codexrpc"
 	"github.com/beeper/agentremote/pkg/aidb"
+	bridgesdk "github.com/beeper/agentremote/sdk"
 )
 
 var (
@@ -29,6 +30,7 @@ type CodexConnector struct {
 	*agentremote.ConnectorBase
 	br     *bridgev2.Bridge
 	Config Config
+	sdkConfig *bridgesdk.Config
 	db     *dbutil.Database
 
 	clientsMu sync.Mutex

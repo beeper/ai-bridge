@@ -11,6 +11,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 
+	"github.com/beeper/agentremote"
 	bridgesdk "github.com/beeper/agentremote/sdk"
 	"github.com/beeper/agentremote/pkg/aidb"
 )
@@ -23,6 +24,8 @@ func NewConnector() *CodexConnector {
 		ProtocolID:       "ai-codex",
 		Agent:            codexSDKAgent(),
 		ProviderIdentity: bridgesdk.ProviderIdentity{IDPrefix: "codex", LogKey: "codex_msg_id", StatusNetwork: "codex"},
+		ClientCacheMu:    &cc.clientsMu,
+		ClientCache:      &cc.clients,
 		InitConnector: func(bridge *bridgev2.Bridge) {
 			cc.br = bridge
 			if bridge != nil && bridge.DB != nil && bridge.DB.Database != nil {
@@ -53,12 +56,14 @@ func NewConnector() *CodexConnector {
 			}
 		},
 		ExampleConfig: exampleNetworkConfig,
-		ConfigData:    &cc.Config,
+		ConfigData:   &cc.Config,
 		ConfigUpgrader: configupgrade.SimpleUpgrader(upgradeConfig),
 		DBMeta: func() database.MetaTypes {
-			return bridgev2.MergeWrapperMetaTypes(
-				database.MetaTypes{},
-				database.MetaTypes{},
+			return agentremote.BuildMetaTypes(
+				func() any { return &PortalMetadata{} },
+				func() any { return &MessageMetadata{} },
+				func() any { return &UserLoginMetadata{} },
+				func() any { return &GhostMetadata{} },
 			)
 		},
 		AcceptLogin: func(login *bridgev2.UserLogin) (bool, string) {
@@ -92,10 +97,6 @@ func NewConnector() *CodexConnector {
 				return nil
 			}
 			return []bridgev2.LoginFlow{
-				func() any { return &PortalMetadata{} },
-				func() any { return &MessageMetadata{} },
-				func() any { return &UserLoginMetadata{} },
-				func() any { return &GhostMetadata{} },
 				{
 					ID:          FlowCodexAPIKey,
 					Name:        "API Key",
@@ -125,20 +126,6 @@ func NewConnector() *CodexConnector {
 			}
 			return &CodexLogin{User: user, Connector: cc, FlowID: flowID}, nil
 		},
-	}
-	cc.sdkConfig.DBMeta = func() database.MetaTypes {
-		return bridgev2.MergeWrapperMetaTypes(
-			database.MetaTypes{},
-			database.MetaTypes{},
-		)
-	}
-	cc.sdkConfig.DBMeta = func() database.MetaTypes {
-		return agentremote.BuildMetaTypes(
-			func() any { return &PortalMetadata{} },
-			func() any { return &MessageMetadata{} },
-			func() any { return &UserLoginMetadata{} },
-			func() any { return &GhostMetadata{} },
-		)
 	}
 	cc.ConnectorBase = bridgesdk.NewConnectorBase(cc.sdkConfig)
 	return cc
