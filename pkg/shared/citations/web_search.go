@@ -15,31 +15,28 @@ func ExtractWebSearchCitations(output string) []SourceCitation {
 		return nil
 	}
 
-	result := make([]SourceCitation, 0, len(results))
-	for _, entry := range results {
-		urlStr := entry.URL
-		if urlStr == "" {
+	citations := make([]SourceCitation, 0, len(results))
+	for _, r := range results {
+		if r.URL == "" {
 			continue
 		}
-		parsed, err := url.Parse(urlStr)
+		parsed, err := url.Parse(r.URL)
 		if err != nil {
 			continue
 		}
-		switch parsed.Scheme {
-		case "http", "https":
-		default:
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
 			continue
 		}
-		result = append(result, SourceCitation{
-			URL:         urlStr,
-			Title:       entry.Title,
-			Description: entry.Description,
-			Published:   entry.Published,
-			SiteName:    entry.SiteName,
-			Author:      entry.Author,
-			Image:       entry.Image,
-			Favicon:     entry.Favicon,
+		citations = append(citations, SourceCitation{
+			URL:         r.URL,
+			Title:       r.Title,
+			Description: r.Description,
+			Published:   r.Published,
+			SiteName:    r.SiteName,
+			Author:      r.Author,
+			Image:       r.Image,
+			Favicon:     r.Favicon,
 		})
 	}
-	return result
+	return citations
 }

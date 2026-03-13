@@ -525,17 +525,17 @@ func (t *Turn) SetThread(rootEventID id.EventID) {
 
 // SetStreamHook captures stream envelopes instead of sending ephemeral Matrix events when provided.
 func (t *Turn) SetStreamHook(hook func(turnID string, seq int, content map[string]any, txnID string) bool) {
-	t.SetStreamTransport(StreamTransportFunc(hook))
+	t.streamHook = hook
 }
 
 // SetApprovalRequester overrides the default SDK approval flow for this turn.
 func (t *Turn) SetApprovalRequester(requester func(ctx context.Context, turn *Turn, req ApprovalRequest) ApprovalHandle) {
-	t.SetApprovalHandler(ApprovalHandlerFunc(requester))
+	t.approvalRequester = requester
 }
 
 // SetFinalMetadataBuilder overrides the final DB metadata object persisted for the assistant message.
 func (t *Turn) SetFinalMetadataBuilder(builder func(turn *Turn, finishReason string) any) {
-	t.SetFinalMetadataProvider(FinalMetadataProviderFunc(builder))
+	t.finalMetadataBuilder = builder
 }
 
 // SendStatus emits a bridge-level status update for the source event when possible.

@@ -2,6 +2,7 @@ package openclaw
 
 import (
 	"encoding/json"
+	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -136,23 +137,13 @@ func ghostMeta(ghost *bridgev2.Ghost) *GhostMetadata {
 	if ghost == nil {
 		return &GhostMetadata{}
 	}
-	switch typed := ghost.Metadata.(type) {
-	case *GhostMetadata:
-		if typed != nil {
-			return typed
-		}
-	case map[string]any:
-		data, err := json.Marshal(typed)
-		if err == nil {
-			var meta GhostMetadata
-			if err = json.Unmarshal(data, &meta); err == nil {
-				ghost.Metadata = &meta
-				return &meta
-			}
-		}
-	case map[string]string:
-		data, err := json.Marshal(typed)
-		if err == nil {
+	if typed, ok := ghost.Metadata.(*GhostMetadata); ok && typed != nil {
+		return typed
+	}
+	// Handle untyped metadata (map[string]any, map[string]string, etc.)
+	// by round-tripping through JSON.
+	if ghost.Metadata != nil {
+		if data, err := json.Marshal(ghost.Metadata); err == nil {
 			var meta GhostMetadata
 			if err = json.Unmarshal(data, &meta); err == nil {
 				ghost.Metadata = &meta
@@ -167,6 +158,36 @@ func ghostMeta(ghost *bridgev2.Ghost) *GhostMetadata {
 
 func humanUserID(loginID networkid.UserLoginID) networkid.UserID {
 	return agentremote.HumanUserID("openclaw-user", loginID)
+}
+
+// applyGhostMetadataUpdates applies non-empty fields from desired onto current,
+// returning true if any field changed.
+func applyGhostMetadataUpdates(current, desired *GhostMetadata) bool {
+	changed := false
+	changed = setIfChanged(&current.OpenClawAgentID, desired.OpenClawAgentID) || changed
+	changed = setIfChanged(&current.OpenClawAgentName, desired.OpenClawAgentName) || changed
+	changed = setIfChanged(&current.OpenClawAgentAvatarURL, desired.OpenClawAgentAvatarURL) || changed
+	changed = setIfChanged(&current.OpenClawAgentEmoji, desired.OpenClawAgentEmoji) || changed
+	if current.OpenClawAgentRole != desired.OpenClawAgentRole && desired.OpenClawAgentRole != "" {
+		current.OpenClawAgentRole = desired.OpenClawAgentRole
+		changed = true
+	}
+	if current.LastSeenAt != desired.LastSeenAt {
+		current.LastSeenAt = desired.LastSeenAt
+		changed = true
+	}
+	return changed
+}
+
+// setIfChanged updates dst to value (trimmed) when value is non-empty and
+// differs from the current dst. Returns true when a change was made.
+func setIfChanged(dst *string, value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || *dst == value {
+		return false
+	}
+	*dst = value
+	return true
 }
 
 var openClawFileFeatures = &event.FileFeatures{

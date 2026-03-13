@@ -6,43 +6,24 @@ import (
 	"strings"
 
 	"github.com/beeper/agentremote/pkg/search"
+	"github.com/beeper/agentremote/pkg/shared/maputil"
 )
-
-type PayloadResult struct {
-	ID          string
-	Title       string
-	URL         string
-	Description string
-	Published   string
-	SiteName    string
-	Author      string
-	Image       string
-	Favicon     string
-}
 
 // RequestFromArgs converts tool arguments into a normalized search request.
 func RequestFromArgs(args map[string]any) (search.Request, error) {
-	query, ok := args["query"].(string)
-	if !ok {
-		return search.Request{}, errors.New("missing or invalid 'query' argument")
-	}
-	query = strings.TrimSpace(query)
+	query := maputil.StringArg(args, "query")
 	if query == "" {
 		return search.Request{}, errors.New("missing or invalid 'query' argument")
 	}
 	count, _ := ParseCountAndIgnoredOptions(args)
-	country, _ := args["country"].(string)
-	searchLang, _ := args["search_lang"].(string)
-	uiLang, _ := args["ui_lang"].(string)
-	freshness, _ := args["freshness"].(string)
 
 	return search.Request{
 		Query:      query,
 		Count:      count,
-		Country:    strings.TrimSpace(country),
-		SearchLang: strings.TrimSpace(searchLang),
-		UILang:     strings.TrimSpace(uiLang),
-		Freshness:  strings.TrimSpace(freshness),
+		Country:    maputil.StringArg(args, "country"),
+		SearchLang: maputil.StringArg(args, "search_lang"),
+		UILang:     maputil.StringArg(args, "ui_lang"),
+		Freshness:  maputil.StringArg(args, "freshness"),
 	}, nil
 }
 
@@ -95,42 +76,40 @@ func PayloadFromResponse(resp *search.Response) map[string]any {
 }
 
 // ResultsFromPayload extracts search results from the common payload map.
-func ResultsFromPayload(payload map[string]any) []PayloadResult {
-	switch rawResults := payload["results"].(type) {
-	case []any:
-		if len(rawResults) == 0 {
-			return nil
-		}
-		results := make([]PayloadResult, 0, len(rawResults))
-		for _, rawResult := range rawResults {
-			entry, ok := rawResult.(map[string]any)
-			if !ok {
-				continue
-			}
-			results = append(results, payloadResultFromMap(entry))
-		}
-		return results
-	case []map[string]any:
-		if len(rawResults) == 0 {
-			return nil
-		}
-		results := make([]PayloadResult, 0, len(rawResults))
-		for _, entry := range rawResults {
-			results = append(results, payloadResultFromMap(entry))
-		}
-		return results
-	default:
+func ResultsFromPayload(payload map[string]any) []search.Result {
+	raw, ok := payload["results"]
+	if !ok {
 		return nil
 	}
+	// After JSON round-tripping, results arrive as []any; when called
+	// directly with PayloadFromResponse output, they are []map[string]any.
+	var entries []map[string]any
+	switch v := raw.(type) {
+	case []any:
+		for _, item := range v {
+			if entry, ok := item.(map[string]any); ok {
+				entries = append(entries, entry)
+			}
+		}
+	case []map[string]any:
+		entries = v
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	results := make([]search.Result, 0, len(entries))
+	for _, entry := range entries {
+		results = append(results, resultFromMap(entry))
+	}
+	return results
 }
 
 // ResultsFromJSON extracts search results from a JSON-encoded payload.
-func ResultsFromJSON(output string) []PayloadResult {
+func ResultsFromJSON(output string) []search.Result {
 	output = strings.TrimSpace(output)
 	if output == "" || !strings.HasPrefix(output, "{") {
 		return nil
 	}
-
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(output), &payload); err != nil {
 		return nil
@@ -138,21 +117,16 @@ func ResultsFromJSON(output string) []PayloadResult {
 	return ResultsFromPayload(payload)
 }
 
-func stringArg(payload map[string]any, key string) string {
-	value, _ := payload[key].(string)
-	return strings.TrimSpace(value)
-}
-
-func payloadResultFromMap(entry map[string]any) PayloadResult {
-	return PayloadResult{
-		ID:          stringArg(entry, "id"),
-		Title:       stringArg(entry, "title"),
-		URL:         stringArg(entry, "url"),
-		Description: stringArg(entry, "description"),
-		Published:   stringArg(entry, "published"),
-		SiteName:    stringArg(entry, "siteName"),
-		Author:      stringArg(entry, "author"),
-		Image:       stringArg(entry, "image"),
-		Favicon:     stringArg(entry, "favicon"),
+func resultFromMap(entry map[string]any) search.Result {
+	return search.Result{
+		ID:          maputil.StringArg(entry, "id"),
+		Title:       maputil.StringArg(entry, "title"),
+		URL:         maputil.StringArg(entry, "url"),
+		Description: maputil.StringArg(entry, "description"),
+		Published:   maputil.StringArg(entry, "published"),
+		SiteName:    maputil.StringArg(entry, "siteName"),
+		Author:      maputil.StringArg(entry, "author"),
+		Image:       maputil.StringArg(entry, "image"),
+		Favicon:     maputil.StringArg(entry, "favicon"),
 	}
 }

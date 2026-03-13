@@ -61,12 +61,12 @@ func ExtractMessageText(message map[string]any) string {
 	if message == nil {
 		return ""
 	}
-	if text := strings.TrimSpace(stringValue(message["text"])); text != "" {
+	if text := trimString(message["text"]); text != "" {
 		return text
 	}
 	var parts []string
 	for _, block := range ContentBlocks(message) {
-		switch strings.ToLower(strings.TrimSpace(stringValue(block["type"]))) {
+		switch strings.ToLower(trimString(block["type"])) {
 		case "text", "input_text", "output_text":
 			if text := strings.TrimSpace(StringsTrimDefault(stringValue(block["text"]), stringValue(block["content"]))); text != "" {
 				parts = append(parts, text)
@@ -87,7 +87,7 @@ func ExtractAttachmentBlocks(message map[string]any) []map[string]any {
 }
 
 func IsAttachmentBlock(block map[string]any) bool {
-	str := func(key string) string { return strings.TrimSpace(stringValue(block[key])) }
+	str := func(key string) string { return trimString(block[key]) }
 
 	blockType := strings.ToLower(str("type"))
 	switch blockType {
@@ -127,6 +127,10 @@ func stringValue(v any) string {
 	default:
 		return ""
 	}
+}
+
+func trimString(v any) string {
+	return strings.TrimSpace(stringValue(v))
 }
 
 func StringsTrimDefault(value, fallback string) string {

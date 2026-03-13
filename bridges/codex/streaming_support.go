@@ -51,6 +51,14 @@ type streamingState struct {
 	loggedStreamStart         bool
 }
 
+func (s *streamingState) recordFirstToken() {
+	if s == nil || !s.firstToken {
+		return
+	}
+	s.firstToken = false
+	s.firstTokenAtMs = time.Now().UnixMilli()
+}
+
 func (s *streamingState) streamTarget() turns.StreamTarget {
 	if s == nil {
 		return turns.StreamTarget{}

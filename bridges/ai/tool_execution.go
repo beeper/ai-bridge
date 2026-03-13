@@ -77,31 +77,34 @@ func (oc *AIClient) sendToolResultEvent(ctx context.Context, portal *bridgev2.Po
 	return ""
 }
 
-// executeBuiltinTool finds and executes a builtin tool by name.
-// For Builder rooms, this also handles boss agent tools. Session tools are handled for all rooms.
-func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Portal, toolName string, argsJSON string) (string, error) {
+// parseToolArgs normalizes and parses tool arguments JSON into a map.
+func parseToolArgs(argsJSON string) (string, map[string]any, error) {
 	argsJSON = normalizeToolArgsJSON(argsJSON)
 	var args map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid tool arguments: %w", err)
+		return "", nil, fmt.Errorf("invalid tool arguments: %w", err)
 	}
-	meta := (*PortalMetadata)(nil)
+	return argsJSON, args, nil
+}
+
+// executeBuiltinTool finds and executes a builtin tool by name.
+// For Builder rooms, this also handles boss agent tools. Session tools are handled for all rooms.
+func (oc *AIClient) executeBuiltinTool(ctx context.Context, portal *bridgev2.Portal, toolName string, argsJSON string) (string, error) {
+	argsJSON, args, err := parseToolArgs(argsJSON)
+	if err != nil {
+		return "", err
+	}
+	var meta *PortalMetadata
 	if portal != nil {
 		meta = portalMeta(portal)
 	}
 	if handled, result, err := oc.executeIntegratedTool(ctx, portal, meta, strings.TrimSpace(toolName), args, argsJSON); handled {
 		return result, err
 	}
-	return oc.executeBuiltinToolDirect(ctx, portal, toolName, argsJSON)
+	return oc.executeBuiltinToolDirect(ctx, portal, toolName, args)
 }
 
-func (oc *AIClient) executeBuiltinToolDirect(ctx context.Context, portal *bridgev2.Portal, toolName string, argsJSON string) (string, error) {
-	argsJSON = normalizeToolArgsJSON(argsJSON)
-	var args map[string]any
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid tool arguments: %w", err)
-	}
-
+func (oc *AIClient) executeBuiltinToolDirect(ctx context.Context, portal *bridgev2.Portal, toolName string, args map[string]any) (string, error) {
 	toolName = strings.TrimSpace(toolName)
 
 	if toolpolicy.IsOwnerOnlyToolName(toolName) {
@@ -146,20 +149,7 @@ type bossToolResult struct {
 // executeBossTool attempts to execute a boss agent tool.
 // Returns nil if the tool is not a boss tool.
 func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal, toolName string, args map[string]any) *bossToolResult {
-	// Create boss tool executor with store adapter
-	store := NewBossStoreAdapter(oc)
-	executor := tools.NewBossToolExecutor(store)
-
-	var result *tools.Result
-	var err error
-
-	if toolName == "run_internal_command" {
-		if roomID, ok := args["room_id"].(string); !ok || strings.TrimSpace(roomID) == "" {
-			if portal != nil && portal.MXID != "" {
-				args["room_id"] = portal.MXID.String()
-			}
-		}
-	}
+	// Session tools are handled by the client directly.
 	type sessionToolFunc func(context.Context, *bridgev2.Portal, map[string]any) (*tools.Result, error)
 	sessionTools := map[string]sessionToolFunc{
 		"sessions_spawn":   oc.executeSessionsSpawn,
@@ -169,31 +159,39 @@ func (oc *AIClient) executeBossTool(ctx context.Context, portal *bridgev2.Portal
 		"agents_list":      oc.executeAgentsList,
 	}
 	if fn, ok := sessionTools[toolName]; ok {
-		result, err = fn(ctx, portal, args)
+		result, err := fn(ctx, portal, args)
 		return bossToolResultFromToolsResult(result, err)
 	}
 
-	switch toolName {
-	case "create_agent":
-		result, err = executor.ExecuteCreateAgent(ctx, args)
-	case "fork_agent":
-		result, err = executor.ExecuteForkAgent(ctx, args)
-	case "edit_agent":
-		result, err = executor.ExecuteEditAgent(ctx, args)
-	case "delete_agent":
-		result, err = executor.ExecuteDeleteAgent(ctx, args)
-	case "list_agents":
-		result, err = executor.ExecuteListAgents(ctx, args)
-	case "list_models":
-		result, err = executor.ExecuteListModels(ctx, args)
-	case "run_internal_command":
-		result, err = executor.ExecuteRunInternalCommand(ctx, args)
-	case "modify_room":
-		result, err = executor.ExecuteModifyRoom(ctx, args)
-	default:
-		return nil // Not a boss tool
+	// Boss executor tools share a common pattern.
+	store := NewBossStoreAdapter(oc)
+	executor := tools.NewBossToolExecutor(store)
+
+	// Default room_id for run_internal_command if not provided.
+	if toolName == "run_internal_command" {
+		if roomID, ok := args["room_id"].(string); !ok || strings.TrimSpace(roomID) == "" {
+			if portal != nil && portal.MXID != "" {
+				args["room_id"] = portal.MXID.String()
+			}
+		}
 	}
 
+	type executorFunc func(context.Context, map[string]any) (*tools.Result, error)
+	executorTools := map[string]executorFunc{
+		"create_agent":         executor.ExecuteCreateAgent,
+		"fork_agent":           executor.ExecuteForkAgent,
+		"edit_agent":           executor.ExecuteEditAgent,
+		"delete_agent":         executor.ExecuteDeleteAgent,
+		"list_agents":          executor.ExecuteListAgents,
+		"list_models":          executor.ExecuteListModels,
+		"run_internal_command": executor.ExecuteRunInternalCommand,
+		"modify_room":          executor.ExecuteModifyRoom,
+	}
+	fn, ok := executorTools[toolName]
+	if !ok {
+		return nil // Not a boss tool
+	}
+	result, err := fn(ctx, args)
 	return bossToolResultFromToolsResult(result, err)
 }
 

@@ -727,25 +727,35 @@ func (cc *CodexClient) appendCodexToolOutput(state *streamingState, toolCallID, 
 	return b.String()
 }
 
+// codexNotifFields holds the common fields present in most Codex notifications.
+type codexNotifFields struct {
+	Delta  string `json:"delta"`
+	ItemID string `json:"itemId"`
+	Thread string `json:"threadId"`
+	Turn   string `json:"turnId"`
+}
+
+// parseNotifFields unmarshals common fields and returns false if the notification
+// does not belong to the given thread/turn pair.
+func parseNotifFields(params json.RawMessage, threadID, turnID string) (codexNotifFields, bool) {
+	var f codexNotifFields
+	_ = json.Unmarshal(params, &f)
+	return f, f.Thread == threadID && f.Turn == turnID
+}
+
 func (cc *CodexClient) handleSimpleOutputDelta(
 	ctx context.Context, portal *bridgev2.Portal, state *streamingState,
 	params json.RawMessage, threadID, turnID, defaultToolName string,
 ) {
-	var p struct {
-		Delta  string `json:"delta"`
-		ItemID string `json:"itemId"`
-		Thread string `json:"threadId"`
-		Turn   string `json:"turnId"`
-	}
-	_ = json.Unmarshal(params, &p)
-	if p.Thread != threadID || p.Turn != turnID {
+	f, ok := parseNotifFields(params, threadID, turnID)
+	if !ok {
 		return
 	}
-	toolCallID := strings.TrimSpace(p.ItemID)
+	toolCallID := strings.TrimSpace(f.ItemID)
 	if toolCallID == "" {
 		toolCallID = defaultToolName
 	}
-	buf := cc.appendCodexToolOutput(state, toolCallID, p.Delta)
+	buf := cc.appendCodexToolOutput(state, toolCallID, f.Delta)
 	cc.emitUIToolOutputAvailable(ctx, portal, state, toolCallID, buf, true, true)
 }
 
@@ -764,49 +774,27 @@ func (cc *CodexClient) handleNotif(ctx context.Context, portal *bridgev2.Portal,
 		}
 
 	case "item/agentMessage/delta":
-		var p struct {
-			Delta  string `json:"delta"`
-			ItemID string `json:"itemId"`
-			Thread string `json:"threadId"`
-			Turn   string `json:"turnId"`
-		}
-		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
+		f, ok := parseNotifFields(evt.Params, threadID, turnID)
+		if !ok {
 			return
 		}
-		if state.firstToken {
-			state.firstToken = false
-			state.firstTokenAtMs = time.Now().UnixMilli()
-		}
-		state.accumulated.WriteString(p.Delta)
-		state.visibleAccumulated.WriteString(p.Delta)
-		cc.emitUITextDelta(ctx, portal, state, p.Delta)
+		state.recordFirstToken()
+		state.accumulated.WriteString(f.Delta)
+		state.visibleAccumulated.WriteString(f.Delta)
+		cc.emitUITextDelta(ctx, portal, state, f.Delta)
 
 	case "item/reasoning/summaryTextDelta":
-		var p struct {
-			Delta  string `json:"delta"`
-			Thread string `json:"threadId"`
-			Turn   string `json:"turnId"`
-		}
-		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
+		f, ok := parseNotifFields(evt.Params, threadID, turnID)
+		if !ok {
 			return
 		}
 		state.codexReasoningSummarySeen = true
-		if state.firstToken {
-			state.firstToken = false
-			state.firstTokenAtMs = time.Now().UnixMilli()
-		}
-		state.reasoning.WriteString(p.Delta)
-		cc.emitUIReasoningDelta(ctx, portal, state, p.Delta)
+		state.recordFirstToken()
+		state.reasoning.WriteString(f.Delta)
+		cc.emitUIReasoningDelta(ctx, portal, state, f.Delta)
 
 	case "item/reasoning/summaryPartAdded":
-		var p struct {
-			Thread string `json:"threadId"`
-			Turn   string `json:"turnId"`
-		}
-		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
+		if _, ok := parseNotifFields(evt.Params, threadID, turnID); !ok {
 			return
 		}
 		state.codexReasoningSummarySeen = true
@@ -816,25 +804,17 @@ func (cc *CodexClient) handleNotif(ctx context.Context, portal *bridgev2.Portal,
 		}
 
 	case "item/reasoning/textDelta":
-		var p struct {
-			Delta  string `json:"delta"`
-			Thread string `json:"threadId"`
-			Turn   string `json:"turnId"`
-		}
-		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
+		f, ok := parseNotifFields(evt.Params, threadID, turnID)
+		if !ok {
 			return
 		}
 		// Prefer summary deltas when present to avoid duplicate reasoning output.
 		if state.codexReasoningSummarySeen {
 			return
 		}
-		if state.firstToken {
-			state.firstToken = false
-			state.firstTokenAtMs = time.Now().UnixMilli()
-		}
-		state.reasoning.WriteString(p.Delta)
-		cc.emitUIReasoningDelta(ctx, portal, state, p.Delta)
+		state.recordFirstToken()
+		state.reasoning.WriteString(f.Delta)
+		cc.emitUIReasoningDelta(ctx, portal, state, f.Delta)
 
 	case "item/commandExecution/outputDelta":
 		cc.handleSimpleOutputDelta(ctx, portal, state, evt.Params, threadID, turnID, "commandExecution")
@@ -843,60 +823,53 @@ func (cc *CodexClient) handleNotif(ctx context.Context, portal *bridgev2.Portal,
 		cc.handleSimpleOutputDelta(ctx, portal, state, evt.Params, threadID, turnID, "fileChange")
 
 	case "item/mcpToolCall/outputDelta":
-		var p struct {
-			Delta  string `json:"delta"`
-			ItemID string `json:"itemId"`
-			Tool   string `json:"tool"`
-			Thread string `json:"threadId"`
-			Turn   string `json:"turnId"`
-		}
-		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
+		f, ok := parseNotifFields(evt.Params, threadID, turnID)
+		if !ok {
 			return
 		}
-		toolCallID := strings.TrimSpace(p.ItemID)
-		toolName := strings.TrimSpace(p.Tool)
+		var extra struct {
+			Tool string `json:"tool"`
+		}
+		_ = json.Unmarshal(evt.Params, &extra)
+		toolCallID := strings.TrimSpace(f.ItemID)
+		toolName := strings.TrimSpace(extra.Tool)
 		if toolName == "" {
 			toolName = "mcpToolCall"
 		}
 		if toolCallID == "" {
 			toolCallID = toolName
 		}
-		buf := cc.appendCodexToolOutput(state, toolCallID, p.Delta)
+		buf := cc.appendCodexToolOutput(state, toolCallID, f.Delta)
 		cc.emitUIToolOutputAvailable(ctx, portal, state, toolCallID, buf, true, true)
 
 	case "item/collabToolCall/outputDelta":
 		cc.handleSimpleOutputDelta(ctx, portal, state, evt.Params, threadID, turnID, "collabToolCall")
 
 	case "turn/diff/updated":
-		var p struct {
-			Thread string `json:"threadId"`
-			Turn   string `json:"turnId"`
-			Diff   string `json:"diff"`
-		}
-		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
+		if _, ok := parseNotifFields(evt.Params, threadID, turnID); !ok {
 			return
 		}
-		state.codexLatestDiff = p.Diff
+		var diffPayload struct {
+			Diff string `json:"diff"`
+		}
+		_ = json.Unmarshal(evt.Params, &diffPayload)
+		state.codexLatestDiff = diffPayload.Diff
 		diffToolID := fmt.Sprintf("diff-%s", turnID)
 		cc.ensureUIToolInputStart(ctx, portal, state, diffToolID, "diff", true, map[string]any{"turnId": turnID})
-		cc.emitUIToolOutputAvailable(ctx, portal, state, diffToolID, p.Diff, true, true)
+		cc.emitUIToolOutputAvailable(ctx, portal, state, diffToolID, diffPayload.Diff, true, true)
 
 	case "item/plan/delta":
 		cc.handleSimpleOutputDelta(ctx, portal, state, evt.Params, threadID, turnID, "plan")
 
 	case "turn/plan/updated":
+		if _, ok := parseNotifFields(evt.Params, threadID, turnID); !ok {
+			return
+		}
 		var p struct {
-			Thread      string           `json:"threadId"`
-			Turn        string           `json:"turnId"`
 			Explanation *string          `json:"explanation"`
 			Plan        []map[string]any `json:"plan"`
 		}
 		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
-			return
-		}
 		toolCallID := fmt.Sprintf("turn-plan-%s", turnID)
 		input := map[string]any{}
 		if p.Explanation != nil && strings.TrimSpace(*p.Explanation) != "" {
@@ -910,9 +883,10 @@ func (cc *CodexClient) handleNotif(ctx context.Context, portal *bridgev2.Portal,
 		cc.sendSystemNoticeOnce(ctx, portal, state, "turn:plan_updated", "Codex updated the plan.")
 
 	case "thread/tokenUsage/updated":
+		if _, ok := parseNotifFields(evt.Params, threadID, turnID); !ok {
+			return
+		}
 		var p struct {
-			Thread     string `json:"threadId"`
-			Turn       string `json:"turnId"`
 			TokenUsage struct {
 				Total struct {
 					InputTokens           int64 `json:"inputTokens"`
@@ -924,38 +898,25 @@ func (cc *CodexClient) handleNotif(ctx context.Context, portal *bridgev2.Portal,
 			} `json:"tokenUsage"`
 		}
 		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
-			return
-		}
 		state.promptTokens = p.TokenUsage.Total.InputTokens + p.TokenUsage.Total.CachedInputTokens
 		state.completionTokens = p.TokenUsage.Total.OutputTokens
 		state.reasoningTokens = p.TokenUsage.Total.ReasoningOutputTokens
 		state.totalTokens = p.TokenUsage.Total.TotalTokens
 		cc.emitUIMessageMetadata(ctx, portal, state, cc.buildUIMessageMetadata(state, model, true, ""))
 
-	case "item/started":
-		var p struct {
-			Thread string          `json:"threadId"`
-			Turn   string          `json:"turnId"`
-			Item   json.RawMessage `json:"item"`
-		}
-		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
+	case "item/started", "item/completed":
+		if _, ok := parseNotifFields(evt.Params, threadID, turnID); !ok {
 			return
 		}
-		cc.handleItemStarted(ctx, portal, state, p.Item)
-
-	case "item/completed":
 		var p struct {
-			Thread string          `json:"threadId"`
-			Turn   string          `json:"turnId"`
-			Item   json.RawMessage `json:"item"`
+			Item json.RawMessage `json:"item"`
 		}
 		_ = json.Unmarshal(evt.Params, &p)
-		if p.Thread != threadID || p.Turn != turnID {
-			return
+		if evt.Method == "item/started" {
+			cc.handleItemStarted(ctx, portal, state, p.Item)
+		} else {
+			cc.handleItemCompleted(ctx, portal, state, p.Item)
 		}
-		cc.handleItemCompleted(ctx, portal, state, p.Item)
 	}
 }
 

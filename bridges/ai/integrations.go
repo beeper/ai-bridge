@@ -688,8 +688,12 @@ func (c *coreToolIntegration) ExecuteTool(ctx context.Context, call integrationr
 	if c == nil || c.client == nil {
 		return false, "", nil
 	}
+	_, args, err := parseToolArgs(call.RawArgsJSON)
+	if err != nil {
+		return true, "", err
+	}
 	portal, _ := call.Scope.Portal.(*bridgev2.Portal)
-	result, err := c.client.executeBuiltinToolDirect(ctx, portal, call.Name, call.RawArgsJSON)
+	result, err := c.client.executeBuiltinToolDirect(ctx, portal, call.Name, args)
 	if err != nil {
 		return true, "", err
 	}

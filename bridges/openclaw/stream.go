@@ -562,6 +562,38 @@ func (oc *OpenClawClient) persistStreamDBMetadata(ctx context.Context, portal *b
 	)
 }
 
+func (oc *OpenClawClient) queueStreamEdit(portal *bridgev2.Portal, state *openClawStreamState, body, formattedBody string, htmlFormat event.Format) {
+	if oc == nil || portal == nil || portal.MXID == "" || state == nil || state.networkMessageID == "" {
+		return
+	}
+	oc.UserLogin.QueueRemoteEvent(&OpenClawRemoteEdit{
+		portal:        portal.PortalKey,
+		sender:        oc.senderForAgent(state.agentID, false),
+		targetMessage: state.networkMessageID,
+		timestamp:     openClawStreamMessageTimestamp(state),
+		preBuilt: &bridgev2.ConvertedEdit{
+			ModifiedParts: []*bridgev2.ConvertedEditPart{{
+				Type: event.EventMessage,
+				Content: &event.MessageEventContent{
+					MsgType:       event.MsgText,
+					Body:          body,
+					Format:        htmlFormat,
+					FormattedBody: formattedBody,
+				},
+				Extra: map[string]any{"m.mentions": map[string]any{}},
+				TopLevelExtra: map[string]any{
+					"body":                          body,
+					matrixevents.BeeperAIKey:        oc.currentCanonicalUIMessage(state),
+					"com.beeper.dont_render_edited": true,
+					"format":                        htmlFormat,
+					"formatted_body":                formattedBody,
+					"m.mentions":                    map[string]any{},
+				},
+			}},
+		},
+	})
+}
+
 func (oc *OpenClawClient) queueDebouncedStreamEdit(ctx context.Context, portal *bridgev2.Portal, state *openClawStreamState, force bool) error {
 	if oc == nil || portal == nil || portal.MXID == "" || state == nil || state.networkMessageID == "" {
 		return nil
@@ -581,32 +613,7 @@ func (oc *OpenClawClient) queueDebouncedStreamEdit(ctx context.Context, portal *
 	if content == nil {
 		return nil
 	}
-	oc.UserLogin.QueueRemoteEvent(&OpenClawRemoteEdit{
-		portal:        portal.PortalKey,
-		sender:        oc.senderForAgent(state.agentID, false),
-		targetMessage: state.networkMessageID,
-		timestamp:     openClawStreamMessageTimestamp(state),
-		preBuilt: &bridgev2.ConvertedEdit{
-			ModifiedParts: []*bridgev2.ConvertedEditPart{{
-				Type: event.EventMessage,
-				Content: &event.MessageEventContent{
-					MsgType:       event.MsgText,
-					Body:          content.Body,
-					Format:        content.Format,
-					FormattedBody: content.FormattedBody,
-				},
-				Extra: map[string]any{"m.mentions": map[string]any{}},
-				TopLevelExtra: map[string]any{
-					"body":                          content.Body,
-					matrixevents.BeeperAIKey:        oc.currentCanonicalUIMessage(state),
-					"com.beeper.dont_render_edited": true,
-					"format":                        content.Format,
-					"formatted_body":                content.FormattedBody,
-					"m.mentions":                    map[string]any{},
-				},
-			}},
-		},
-	})
+	oc.queueStreamEdit(portal, state, content.Body, content.FormattedBody, content.Format)
 	return nil
 }
 
@@ -625,30 +632,5 @@ func (oc *OpenClawClient) queueFinalStreamEdit(ctx context.Context, portal *brid
 		body = "..."
 	}
 	rendered := format.RenderMarkdown(body, true, true)
-	oc.UserLogin.QueueRemoteEvent(&OpenClawRemoteEdit{
-		portal:        portal.PortalKey,
-		sender:        oc.senderForAgent(state.agentID, false),
-		targetMessage: state.networkMessageID,
-		timestamp:     openClawStreamMessageTimestamp(state),
-		preBuilt: &bridgev2.ConvertedEdit{
-			ModifiedParts: []*bridgev2.ConvertedEditPart{{
-				Type: event.EventMessage,
-				Content: &event.MessageEventContent{
-					MsgType:       event.MsgText,
-					Body:          body,
-					Format:        rendered.Format,
-					FormattedBody: rendered.FormattedBody,
-				},
-				Extra: map[string]any{"m.mentions": map[string]any{}},
-				TopLevelExtra: map[string]any{
-					"body":                          body,
-					matrixevents.BeeperAIKey:        oc.currentCanonicalUIMessage(state),
-					"com.beeper.dont_render_edited": true,
-					"format":                        rendered.Format,
-					"formatted_body":                rendered.FormattedBody,
-					"m.mentions":                    map[string]any{},
-				},
-			}},
-		},
-	})
+	oc.queueStreamEdit(portal, state, body, rendered.FormattedBody, rendered.Format)
 }

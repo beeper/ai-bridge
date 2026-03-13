@@ -157,29 +157,41 @@ func (oc *OpenClawClient) configuredAgentUserInfo(ctx context.Context, agent gat
 	return oc.userInfoForAgentProfile(profile)
 }
 
+func (oc *OpenClawClient) agentToResolveResponse(ctx context.Context, agent gatewayAgentSummary) (*bridgev2.ResolveIdentifierResponse, error) {
+	agentID := strings.TrimSpace(agent.ID)
+	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, openClawGhostUserID(agentID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ghost for agent %s: %w", agentID, err)
+	}
+	return &bridgev2.ResolveIdentifierResponse{
+		UserID:   openClawGhostUserID(agentID),
+		UserInfo: oc.configuredAgentUserInfo(ctx, agent, ghost),
+		Ghost:    ghost,
+	}, nil
+}
+
+func (oc *OpenClawClient) agentsToResolveResponses(ctx context.Context, agents []gatewayAgentSummary) ([]*bridgev2.ResolveIdentifierResponse, error) {
+	out := make([]*bridgev2.ResolveIdentifierResponse, 0, len(agents))
+	for i := range agents {
+		agentID := strings.TrimSpace(agents[i].ID)
+		if agentID == "" || strings.EqualFold(agentID, "gateway") {
+			continue
+		}
+		resp, err := oc.agentToResolveResponse(ctx, agents[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, resp)
+	}
+	return out, nil
+}
+
 func (oc *OpenClawClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
 	agents, err := oc.loadAgentCatalog(ctx, false)
 	if err != nil {
 		return nil, err
 	}
-	sorted := sortConfiguredAgents(agents, oc.agentDefaultID(), "")
-	out := make([]*bridgev2.ResolveIdentifierResponse, 0, len(sorted))
-	for i := range sorted {
-		agentID := strings.TrimSpace(sorted[i].ID)
-		if agentID == "" || strings.EqualFold(agentID, "gateway") {
-			continue
-		}
-		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, openClawGhostUserID(agentID))
-		if err != nil {
-			return nil, fmt.Errorf("failed to get ghost for agent %s: %w", agentID, err)
-		}
-		out = append(out, &bridgev2.ResolveIdentifierResponse{
-			UserID:   openClawGhostUserID(agentID),
-			UserInfo: oc.configuredAgentUserInfo(ctx, sorted[i], ghost),
-			Ghost:    ghost,
-		})
-	}
-	return out, nil
+	return oc.agentsToResolveResponses(ctx, sortConfiguredAgents(agents, oc.agentDefaultID(), ""))
 }
 
 func (oc *OpenClawClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.ResolveIdentifierResponse, error) {
@@ -188,21 +200,9 @@ func (oc *OpenClawClient) SearchUsers(ctx context.Context, query string) ([]*bri
 		return nil, err
 	}
 	matches := sortConfiguredAgents(agents, oc.agentDefaultID(), query)
-	out := make([]*bridgev2.ResolveIdentifierResponse, 0, len(matches))
-	for i := range matches {
-		agentID := strings.TrimSpace(matches[i].ID)
-		if agentID == "" || strings.EqualFold(agentID, "gateway") {
-			continue
-		}
-		ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, openClawGhostUserID(agentID))
-		if err != nil {
-			return nil, fmt.Errorf("failed to get ghost for agent %s: %w", agentID, err)
-		}
-		out = append(out, &bridgev2.ResolveIdentifierResponse{
-			UserID:   openClawGhostUserID(agentID),
-			UserInfo: oc.configuredAgentUserInfo(ctx, matches[i], ghost),
-			Ghost:    ghost,
-		})
+	out, err := oc.agentsToResolveResponses(ctx, matches)
+	if err != nil {
+		return nil, err
 	}
 	if exactID, ok := parseOpenClawResolvableIdentifier(query); ok {
 		exactID = canonicalOpenClawAgentID(exactID)
@@ -214,18 +214,16 @@ func (oc *OpenClawClient) SearchUsers(ctx context.Context, query string) ([]*bri
 			}
 		}
 		if !alreadyIncluded {
-			if agent, err := oc.agentSummaryOrVirtual(ctx, exactID); err != nil {
+			agent, err := oc.agentSummaryOrVirtual(ctx, exactID)
+			if err != nil {
 				return nil, err
-			} else if agent != nil {
-				ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, openClawGhostUserID(agent.ID))
+			}
+			if agent != nil {
+				resp, err := oc.agentToResolveResponse(ctx, *agent)
 				if err != nil {
-					return nil, fmt.Errorf("failed to get ghost for agent %s: %w", agent.ID, err)
+					return nil, err
 				}
-				out = append(out, &bridgev2.ResolveIdentifierResponse{
-					UserID:   openClawGhostUserID(agent.ID),
-					UserInfo: oc.configuredAgentUserInfo(ctx, *agent, ghost),
-					Ghost:    ghost,
-				})
+				out = append(out, resp)
 			}
 		}
 	}
@@ -244,17 +242,12 @@ func (oc *OpenClawClient) ResolveIdentifier(ctx context.Context, identifier stri
 	if agent == nil {
 		return nil, bridgev2.WrapRespErr(fmt.Errorf("identifier %q not found", identifier), mautrix.MNotFound)
 	}
-	ghost, err := oc.UserLogin.Bridge.GetGhostByID(ctx, openClawGhostUserID(agent.ID))
+	resp, err := oc.agentToResolveResponse(ctx, *agent)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get ghost for agent %s: %w", agent.ID, err)
-	}
-	resp := &bridgev2.ResolveIdentifierResponse{
-		UserID:   openClawGhostUserID(agent.ID),
-		UserInfo: oc.configuredAgentUserInfo(ctx, *agent, ghost),
-		Ghost:    ghost,
+		return nil, err
 	}
 	if createChat {
-		chat, err := oc.createConfiguredAgentDM(ctx, *agent, ghost)
+		chat, err := oc.createConfiguredAgentDM(ctx, *agent, resp.Ghost)
 		if err != nil {
 			return nil, err
 		}
@@ -398,7 +391,7 @@ func (oc *OpenClawClient) resolveAgentProfile(ctx context.Context, agentID, sess
 
 func (oc *OpenClawClient) userInfoForAgentProfile(profile openClawAgentProfile) *bridgev2.UserInfo {
 	info := oc.sdkAgentForProfile(profile).UserInfo()
-	meta := &GhostMetadata{
+	desired := &GhostMetadata{
 		OpenClawAgentID:        profile.AgentID,
 		OpenClawAgentName:      profile.Name,
 		OpenClawAgentAvatarURL: profile.AvatarURL,
@@ -411,46 +404,23 @@ func (oc *OpenClawClient) userInfoForAgentProfile(profile openClawAgentProfile) 
 			return false
 		}
 		current := ghostMeta(ghost)
-		changed := false
-		if value := strings.TrimSpace(meta.OpenClawAgentID); value != "" && current.OpenClawAgentID != value {
-			current.OpenClawAgentID = value
-			changed = true
-		}
-		if value := strings.TrimSpace(meta.OpenClawAgentName); value != "" && current.OpenClawAgentName != value {
-			current.OpenClawAgentName = value
-			changed = true
-		}
-		if value := strings.TrimSpace(meta.OpenClawAgentAvatarURL); value != "" && current.OpenClawAgentAvatarURL != value {
-			current.OpenClawAgentAvatarURL = value
-			changed = true
-		}
-		if value := strings.TrimSpace(meta.OpenClawAgentEmoji); value != "" && current.OpenClawAgentEmoji != value {
-			current.OpenClawAgentEmoji = value
-			changed = true
-		}
-		if current.OpenClawAgentRole != "assistant" {
-			current.OpenClawAgentRole = "assistant"
-			changed = true
-		}
-		if current.LastSeenAt != meta.LastSeenAt {
-			current.LastSeenAt = meta.LastSeenAt
-			changed = true
-		}
-		return changed
+		return applyGhostMetadataUpdates(current, desired)
 	}
-	if avatar := oc.agentAvatar(meta, profile.AgentID); avatar != nil {
+	if avatar := oc.agentAvatar(desired, profile.AgentID); avatar != nil {
 		info.Avatar = avatar
 	}
 	return info
 }
 
 func (oc *OpenClawClient) displayNameFromAgentProfile(profile openClawAgentProfile) string {
-	meta := &GhostMetadata{
-		OpenClawAgentID:    profile.AgentID,
-		OpenClawAgentName:  profile.Name,
-		OpenClawAgentEmoji: profile.Emoji,
+	name := strings.TrimSpace(profile.Name)
+	if name == "" {
+		name = oc.displayNameForAgent(profile.AgentID)
 	}
-	return oc.formatAgentDisplayName(meta, profile.AgentID)
+	if emoji := strings.TrimSpace(profile.Emoji); emoji != "" && !strings.HasPrefix(name, emoji) {
+		return emoji + " " + name
+	}
+	return name
 }
 
 func openClawAgentProfileFromSummary(agent *gatewayAgentSummary) openClawAgentProfile {

@@ -325,7 +325,7 @@ func TestApprovalFlow_SchedulePromptTimeoutIgnoresReplacedPrompt(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected initial prompt bind to succeed")
 	}
-	flow.schedulePromptTimeout("approval-1", firstExpiresAt, firstVersion)
+	flow.schedulePromptTimeout("approval-1", firstExpiresAt)
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -343,7 +343,7 @@ func TestApprovalFlow_SchedulePromptTimeoutIgnoresReplacedPrompt(t *testing.T) {
 	if secondVersion <= firstVersion {
 		t.Fatalf("expected replacement prompt version to advance: first=%d second=%d", firstVersion, secondVersion)
 	}
-	flow.schedulePromptTimeout("approval-1", secondExpiresAt, secondVersion)
+	flow.schedulePromptTimeout("approval-1", secondExpiresAt)
 
 	time.Sleep(70 * time.Millisecond)
 

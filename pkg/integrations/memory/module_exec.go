@@ -441,7 +441,7 @@ func errMsgOrDefault(raw string) string {
 	return trimmed
 }
 
-func formatStatusLines(status *StatusDetails) []string {
+func formatStatusLines(status *MemorySearchStatus) []string {
 	if status == nil {
 		return []string{"Memory status unavailable."}
 	}

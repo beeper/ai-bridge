@@ -11,7 +11,7 @@ import (
 
 type mockManager struct {
 	status        ProviderStatus
-	statusDetails *StatusDetails
+	statusDetails *MemorySearchStatus
 }
 
 func (m mockManager) Status() ProviderStatus {
@@ -26,7 +26,7 @@ func (m mockManager) ReadFile(context.Context, string, *int, *int) (map[string]a
 	return nil, nil
 }
 
-func (m mockManager) StatusDetails(context.Context) (*StatusDetails, error) {
+func (m mockManager) StatusDetails(context.Context) (*MemorySearchStatus, error) {
 	return m.statusDetails, nil
 }
 
@@ -35,7 +35,7 @@ func (m mockManager) SyncWithProgress(context.Context, func(int, int, string)) e
 }
 
 func TestFormatStatusLines_LexicalModeOutput(t *testing.T) {
-	lines := formatStatusLines(&StatusDetails{
+	lines := formatStatusLines(&MemorySearchStatus{
 		Provider:     "builtin",
 		Model:        "lexical",
 		WorkspaceDir: "/workspace",
@@ -95,7 +95,7 @@ func TestFormatStatusLines_LexicalModeOutput(t *testing.T) {
 
 func TestExecuteCommand_StatusDeepAliasUsesLexicalStatusOutput(t *testing.T) {
 	manager := mockManager{
-		statusDetails: &StatusDetails{
+		statusDetails: &MemorySearchStatus{
 			Provider:     "builtin",
 			Model:        "lexical",
 			WorkspaceDir: "/workspace",

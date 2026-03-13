@@ -10,51 +10,6 @@ import (
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 )
 
-// StreamTransport handles SDK turn stream events for custom transports or tests.
-type StreamTransport interface {
-	HandleTurnEvent(turnID string, seq int, content map[string]any, txnID string) bool
-}
-
-// StreamTransportFunc adapts a function to StreamTransport.
-type StreamTransportFunc func(turnID string, seq int, content map[string]any, txnID string) bool
-
-func (f StreamTransportFunc) HandleTurnEvent(turnID string, seq int, content map[string]any, txnID string) bool {
-	if f == nil {
-		return false
-	}
-	return f(turnID, seq, content, txnID)
-}
-
-// ApprovalHandler handles turn approval requests for provider-driven bridges.
-type ApprovalHandler interface {
-	Request(ctx context.Context, turn *Turn, req ApprovalRequest) ApprovalHandle
-}
-
-// ApprovalHandlerFunc adapts a function to ApprovalHandler.
-type ApprovalHandlerFunc func(ctx context.Context, turn *Turn, req ApprovalRequest) ApprovalHandle
-
-func (f ApprovalHandlerFunc) Request(ctx context.Context, turn *Turn, req ApprovalRequest) ApprovalHandle {
-	if f == nil {
-		return nil
-	}
-	return f(ctx, turn, req)
-}
-
-// FinalMetadataProvider builds the final DB metadata object for a completed turn.
-type FinalMetadataProvider interface {
-	BuildFinalMetadata(turn *Turn, finishReason string) any
-}
-
-// FinalMetadataProviderFunc adapts a function to FinalMetadataProvider.
-type FinalMetadataProviderFunc func(turn *Turn, finishReason string) any
-
-func (f FinalMetadataProviderFunc) BuildFinalMetadata(turn *Turn, finishReason string) any {
-	if f == nil {
-		return nil
-	}
-	return f(turn, finishReason)
-}
-
 // ToolInputOptions controls how a tool input start is represented in the SDK UI stream.
 type ToolInputOptions struct {
 	ToolName         string
@@ -104,15 +59,11 @@ func (s *TurnStream) Emitter() *streamui.Emitter {
 }
 
 // SetTransport configures a custom transport for streamed turn events.
-func (s *TurnStream) SetTransport(transport StreamTransport) {
+func (s *TurnStream) SetTransport(hook func(turnID string, seq int, content map[string]any, txnID string) bool) {
 	if !s.valid() {
 		return
 	}
-	if transport == nil {
-		s.turn.streamHook = nil
-		return
-	}
-	s.turn.streamHook = transport.HandleTurnEvent
+	s.turn.streamHook = hook
 }
 
 // TextDelta emits a text delta.
@@ -295,15 +246,11 @@ func (t *Turn) Approvals() *ApprovalController {
 }
 
 // SetHandler configures a provider-specific approval handler for this turn.
-func (a *ApprovalController) SetHandler(handler ApprovalHandler) {
+func (a *ApprovalController) SetHandler(handler func(ctx context.Context, turn *Turn, req ApprovalRequest) ApprovalHandle) {
 	if !a.valid() {
 		return
 	}
-	if handler == nil {
-		a.turn.approvalRequester = nil
-		return
-	}
-	a.turn.approvalRequester = handler.Request
+	a.turn.approvalRequester = handler
 }
 
 // Request creates a new approval request.
@@ -330,26 +277,4 @@ func (a *ApprovalController) Respond(approvalID, toolCallID string, approved boo
 	}
 	a.turn.ensureStarted()
 	a.turn.emitter.EmitUIToolApprovalResponse(a.turn.turnCtx, a.portal(), approvalID, toolCallID, approved, reason)
-}
-
-// SetStreamTransport configures a custom turn stream transport.
-func (t *Turn) SetStreamTransport(transport StreamTransport) {
-	t.Stream().SetTransport(transport)
-}
-
-// SetApprovalHandler configures a provider-specific approval handler for this turn.
-func (t *Turn) SetApprovalHandler(handler ApprovalHandler) {
-	t.Approvals().SetHandler(handler)
-}
-
-// SetFinalMetadataProvider overrides the final DB metadata object persisted for the assistant message.
-func (t *Turn) SetFinalMetadataProvider(provider FinalMetadataProvider) {
-	if t == nil {
-		return
-	}
-	if provider == nil {
-		t.finalMetadataBuilder = nil
-		return
-	}
-	t.finalMetadataBuilder = provider.BuildFinalMetadata
 }

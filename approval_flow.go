@@ -159,6 +159,17 @@ func (f *ApprovalFlow[D]) runReaper() {
 	}
 }
 
+// earliestExpiry returns the earlier of a and b, ignoring zero values.
+func earliestExpiry(a, b time.Time) time.Time {
+	if a.IsZero() {
+		return b
+	}
+	if b.IsZero() || a.Before(b) {
+		return a
+	}
+	return b
+}
+
 // nextReaperDelay returns the duration until the earliest pending/prompt expiry,
 // capped at reaperMaxInterval.
 func (f *ApprovalFlow[D]) nextReaperDelay() time.Duration {
@@ -166,14 +177,10 @@ func (f *ApprovalFlow[D]) nextReaperDelay() time.Duration {
 	defer f.mu.Unlock()
 	earliest := time.Time{}
 	for _, p := range f.pending {
-		if !p.ExpiresAt.IsZero() && (earliest.IsZero() || p.ExpiresAt.Before(earliest)) {
-			earliest = p.ExpiresAt
-		}
+		earliest = earliestExpiry(earliest, p.ExpiresAt)
 	}
 	for _, entry := range f.promptsByApproval {
-		if !entry.ExpiresAt.IsZero() && (earliest.IsZero() || entry.ExpiresAt.Before(earliest)) {
-			earliest = entry.ExpiresAt
-		}
+		earliest = earliestExpiry(earliest, entry.ExpiresAt)
 	}
 	if earliest.IsZero() {
 		return reaperMaxInterval
@@ -214,7 +221,7 @@ func (f *ApprovalFlow[D]) reapExpired() {
 	}
 	f.mu.Unlock()
 	for _, aid := range expired {
-		f.finishTimedOutApproval(aid, 0)
+		f.finishTimedOutApproval(aid)
 	}
 }
 
@@ -355,7 +362,7 @@ func (f *ApprovalFlow[D]) Resolve(approvalID string, decision ApprovalDecisionPa
 		return ErrApprovalUnknown
 	}
 	if time.Now().After(p.ExpiresAt) {
-		f.finishTimedOutApproval(approvalID, 0)
+		f.finishTimedOutApproval(approvalID)
 		return ErrApprovalExpired
 	}
 	select {
@@ -383,7 +390,7 @@ func (f *ApprovalFlow[D]) Wait(ctx context.Context, approvalID string) (Approval
 	}
 	timeout := time.Until(p.ExpiresAt)
 	if timeout <= 0 {
-		f.finishTimedOutApproval(approvalID, 0)
+		f.finishTimedOutApproval(approvalID)
 		return zero, false
 	}
 	timer := time.NewTimer(timeout)
@@ -616,14 +623,14 @@ func (f *ApprovalFlow[D]) SendPrompt(ctx context.Context, portal *bridgev2.Porta
 	}
 
 	f.mu.Lock()
-	promptVersion, bound := f.bindPromptIDsLocked(approvalID, eventID, msgID)
+	_, bound := f.bindPromptIDsLocked(approvalID, eventID, msgID)
 	f.mu.Unlock()
 	if !bound {
 		return
 	}
 
 	f.sendPrefillReactions(ctx, portal, login, msgID, prompt.Options)
-	f.schedulePromptTimeout(approvalID, params.ExpiresAt, promptVersion)
+	f.schedulePromptTimeout(approvalID, params.ExpiresAt)
 }
 
 // ---------------------------------------------------------------------------
@@ -780,13 +787,13 @@ func (f *ApprovalFlow[D]) sendPrefillReactions(_ context.Context, portal *bridge
 	}
 }
 
-func (f *ApprovalFlow[D]) schedulePromptTimeout(approvalID string, expiresAt time.Time, _ uint64) {
+func (f *ApprovalFlow[D]) schedulePromptTimeout(approvalID string, expiresAt time.Time) {
 	approvalID = strings.TrimSpace(approvalID)
 	if approvalID == "" || expiresAt.IsZero() {
 		return
 	}
 	if time.Until(expiresAt) <= 0 {
-		f.finishTimedOutApproval(approvalID, 0)
+		f.finishTimedOutApproval(approvalID)
 		return
 	}
 	// Wake the reaper so it picks up the new expiry promptly.
@@ -796,11 +803,11 @@ func (f *ApprovalFlow[D]) schedulePromptTimeout(approvalID string, expiresAt tim
 	}
 }
 
-func (f *ApprovalFlow[D]) finishTimedOutApproval(approvalID string, promptVersion uint64) {
+func (f *ApprovalFlow[D]) finishTimedOutApproval(approvalID string) {
 	f.finalizeWithPromptVersion(approvalID, &ApprovalDecisionPayload{
 		ApprovalID: approvalID,
 		Reason:     ApprovalReasonTimeout,
-	}, true, promptVersion)
+	}, true, 0)
 }
 
 func (f *ApprovalFlow[D]) cancelPendingTimeout(approvalID string) {

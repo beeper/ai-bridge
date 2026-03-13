@@ -773,19 +773,7 @@ func buildOpenClawHistoryMessageMetadata(message map[string]any, meta *PortalMet
 	if value := strings.TrimSpace(stringValue(uiMetadata["error_text"])); value != "" {
 		metadata.ErrorText = value
 	}
-	usage := jsonutil.ToMap(uiMetadata["usage"])
-	if value, ok := openClawUsageInt64(usage, "prompt_tokens"); ok {
-		metadata.PromptTokens = value
-	}
-	if value, ok := openClawUsageInt64(usage, "completion_tokens"); ok {
-		metadata.CompletionTokens = value
-	}
-	if value, ok := openClawUsageInt64(usage, "reasoning_tokens"); ok {
-		metadata.ReasoningTokens = value
-	}
-	if value, ok := openClawUsageInt64(usage, "total_tokens"); ok {
-		metadata.TotalTokens = value
-	}
+	applyUsageToMessageMetadata(jsonutil.ToMap(uiMetadata["usage"]), metadata)
 	return metadata
 }
 
@@ -871,6 +859,24 @@ func openClawUsageNumber(raw map[string]any, keys ...string) (float64, bool) {
 func openClawUsageInt64(raw map[string]any, key string) (int64, bool) {
 	value, ok := openClawUsageNumber(raw, key)
 	return int64(value), ok
+}
+
+func applyUsageToMessageMetadata(usage map[string]any, metadata *MessageMetadata) {
+	if len(usage) == 0 || metadata == nil {
+		return
+	}
+	if value, ok := openClawUsageInt64(usage, "prompt_tokens"); ok {
+		metadata.PromptTokens = value
+	}
+	if value, ok := openClawUsageInt64(usage, "completion_tokens"); ok {
+		metadata.CompletionTokens = value
+	}
+	if value, ok := openClawUsageInt64(usage, "reasoning_tokens"); ok {
+		metadata.ReasoningTokens = value
+	}
+	if value, ok := openClawUsageInt64(usage, "total_tokens"); ok {
+		metadata.TotalTokens = value
+	}
 }
 
 func maybeUpdatePreviewSnippet(meta *PortalMetadata, text string, eventTS time.Time) bool {

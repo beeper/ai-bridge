@@ -136,8 +136,7 @@ func (c *ConnectorBase) FillPortalBridgeInfo(portal *bridgev2.Portal, content *e
 		c.spec.FillBridgeInfo(portal, content)
 		return
 	}
-	if portal == nil || content == nil || c.spec.ProtocolID == "" {
-		return
+	if portal != nil && content != nil && c.spec.ProtocolID != "" {
+		ApplyAIBridgeInfo(content, c.spec.ProtocolID, portal.RoomType, c.spec.AIRoomKind)
 	}
-	ApplyAIBridgeInfo(content, c.spec.ProtocolID, portal.RoomType, c.spec.AIRoomKind)
 }

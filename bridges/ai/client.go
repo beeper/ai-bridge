@@ -436,61 +436,14 @@ func newAIClient(login *bridgev2.UserLogin, connector *OpenAIConnector, apiKey s
 		log.Warn().Err(err).Int("entries", len(entries)).Msg("Debounce flush failed")
 	}, log)
 
-	// Initialize provider based on login metadata
-	// All providers use the OpenAI SDK with different base URLs
-	switch meta.Provider {
-	case ProviderBeeper:
-		beeperBaseURL := connector.resolveBeeperBaseURL(meta)
-		if beeperBaseURL == "" {
-			return nil, errors.New("beeper base_url is required for Beeper provider")
-		}
-		pdfEngine := connector.Config.Providers.Beeper.DefaultPDFEngine
-		provider, err := initOpenRouterProvider(key, beeperBaseURL+"/openrouter/v1", login.User.MXID.String(), pdfEngine, ProviderBeeper, log)
-		if err != nil {
-			return nil, err
-		}
-		oc.provider = provider
-		oc.api = provider.Client()
-
-	case ProviderOpenRouter:
-		openrouterURL := connector.resolveOpenRouterBaseURL()
-		pdfEngine := connector.Config.Providers.OpenRouter.DefaultPDFEngine
-		provider, err := initOpenRouterProvider(key, openrouterURL, "", pdfEngine, ProviderOpenRouter, log)
-		if err != nil {
-			return nil, err
-		}
-		oc.provider = provider
-		oc.api = provider.Client()
-
-	case ProviderMagicProxy:
-		baseURL := normalizeMagicProxyBaseURL(meta.BaseURL)
-		if baseURL == "" {
-			return nil, errors.New("magic proxy base_url is required")
-		}
-		pdfEngine := connector.Config.Providers.OpenRouter.DefaultPDFEngine
-		provider, err := initOpenRouterProvider(key, joinProxyPath(baseURL, "/openrouter/v1"), "", pdfEngine, ProviderMagicProxy, log)
-		if err != nil {
-			return nil, err
-		}
-		oc.provider = provider
-		oc.api = provider.Client()
-
-	case ProviderOpenAI:
-		// OpenAI provider
-		openaiURL := connector.resolveOpenAIBaseURL()
-		log.Info().
-			Str("provider", meta.Provider).
-			Str("openai_url", openaiURL).
-			Msg("Initializing AI provider endpoint")
-		provider, err := NewOpenAIProviderWithBaseURL(key, openaiURL, log)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create OpenAI provider: %w", err)
-		}
-		oc.provider = provider
-		oc.api = provider.Client()
-	default:
-		return nil, fmt.Errorf("unsupported provider: %s", meta.Provider)
+	// Initialize provider based on login metadata.
+	// All providers use the OpenAI SDK with different base URLs.
+	provider, err := initProviderForLogin(key, meta, connector, login, log)
+	if err != nil {
+		return nil, err
 	}
+	oc.provider = provider
+	oc.api = provider.Client()
 
 	oc.scheduler = newSchedulerRuntime(oc)
 	oc.initIntegrations()
@@ -512,6 +465,42 @@ func openRouterHeaders() map[string]string {
 	return map[string]string{
 		"HTTP-Referer": openRouterAppReferer,
 		"X-Title":      openRouterAppTitle,
+	}
+}
+
+// initProviderForLogin creates the appropriate provider based on login metadata.
+func initProviderForLogin(key string, meta *UserLoginMetadata, connector *OpenAIConnector, login *bridgev2.UserLogin, log zerolog.Logger) (*OpenAIProvider, error) {
+	switch meta.Provider {
+	case ProviderBeeper:
+		beeperBaseURL := connector.resolveBeeperBaseURL(meta)
+		if beeperBaseURL == "" {
+			return nil, errors.New("beeper base_url is required for Beeper provider")
+		}
+		pdfEngine := connector.Config.Providers.Beeper.DefaultPDFEngine
+		return initOpenRouterProvider(key, beeperBaseURL+"/openrouter/v1", login.User.MXID.String(), pdfEngine, ProviderBeeper, log)
+
+	case ProviderOpenRouter:
+		pdfEngine := connector.Config.Providers.OpenRouter.DefaultPDFEngine
+		return initOpenRouterProvider(key, connector.resolveOpenRouterBaseURL(), "", pdfEngine, ProviderOpenRouter, log)
+
+	case ProviderMagicProxy:
+		baseURL := normalizeMagicProxyBaseURL(meta.BaseURL)
+		if baseURL == "" {
+			return nil, errors.New("magic proxy base_url is required")
+		}
+		pdfEngine := connector.Config.Providers.OpenRouter.DefaultPDFEngine
+		return initOpenRouterProvider(key, joinProxyPath(baseURL, "/openrouter/v1"), "", pdfEngine, ProviderMagicProxy, log)
+
+	case ProviderOpenAI:
+		openaiURL := connector.resolveOpenAIBaseURL()
+		log.Info().
+			Str("provider", meta.Provider).
+			Str("openai_url", openaiURL).
+			Msg("Initializing AI provider endpoint")
+		return NewOpenAIProviderWithBaseURL(key, openaiURL, log)
+
+	default:
+		return nil, fmt.Errorf("unsupported provider: %s", meta.Provider)
 	}
 }
 
@@ -2358,10 +2347,7 @@ func getModelCapabilities(modelID string, info *ModelInfo) ModelCapabilities {
 		caps.SupportsToolCalling = info.SupportsToolCalling
 		caps.SupportsAudio = info.SupportsAudio
 		caps.SupportsVideo = info.SupportsVideo
-		if info.SupportsReasoning {
-			caps.SupportsReasoning = true
-		}
-		caps.SupportsToolCalling = info.SupportsToolCalling
+		caps.SupportsReasoning = info.SupportsReasoning
 	}
 
 	return caps

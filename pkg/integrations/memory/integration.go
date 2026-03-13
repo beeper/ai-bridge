@@ -31,7 +31,7 @@ type Manager interface {
 	Status() ProviderStatus
 	Search(ctx context.Context, query string, opts SearchOptions) ([]SearchResult, error)
 	ReadFile(ctx context.Context, relPath string, from, lines *int) (map[string]any, error)
-	MemorySearchStatus(ctx context.Context) (*MemorySearchStatus, error)
+	StatusDetails(ctx context.Context) (*MemorySearchStatus, error)
 	SyncWithProgress(ctx context.Context, onProgress func(completed, total int, label string)) error
 }
 

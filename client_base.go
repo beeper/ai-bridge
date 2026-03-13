@@ -44,8 +44,7 @@ func (c *ClientBase) BackgroundContext(ctx context.Context) context.Context {
 	if ctx != nil {
 		return ctx
 	}
-	login := c.GetUserLogin()
-	if login != nil && login.Bridge != nil && login.Bridge.BackgroundCtx != nil {
+	if login := c.GetUserLogin(); login != nil && login.Bridge != nil && login.Bridge.BackgroundCtx != nil {
 		return login.Bridge.BackgroundCtx
 	}
 	return context.Background()

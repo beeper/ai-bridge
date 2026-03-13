@@ -42,10 +42,9 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 		Stores:  store.NewScopeForLogin(cfg.Login, agentID),
 	}
 	rt.Turns = NewTurnManager(rt)
+	login := cfg.Login
 	rt.Approvals = NewApprovalFlow(ApprovalFlowConfig[map[string]any]{
-		Login: func() *bridgev2.UserLogin {
-			return cfg.Login
-		},
+		Login: func() *bridgev2.UserLogin { return login },
 	})
 	return rt
 }
