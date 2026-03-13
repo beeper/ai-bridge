@@ -7,6 +7,7 @@ import (
 
 	"github.com/beeper/agentremote/pkg/shared/exa"
 	"github.com/beeper/agentremote/pkg/shared/providerchain"
+	"github.com/beeper/agentremote/pkg/shared/registry"
 	"github.com/beeper/agentremote/pkg/shared/stringutil"
 )
 
@@ -18,13 +19,15 @@ func Search(ctx context.Context, req Request, cfg *Config) (*Response, error) {
 	cfg = cfg.WithDefaults()
 	req = normalizeRequest(req)
 
-	registry := NewRegistry()
-	registerProviders(registry, cfg)
-	order := buildOrder(cfg)
+	reg := registry.New[Provider]()
+	if exa.Enabled(cfg.Exa.Enabled, cfg.Exa.APIKey) {
+		reg.Register(&exaProvider{cfg: cfg.Exa})
+	}
+	order := stringutil.BuildProviderOrder(cfg.Provider, cfg.Fallbacks, DefaultFallbackOrder)
 
 	return providerchain.RunFirst(
 		order,
-		registry.Get,
+		reg.Get,
 		func(provider Provider) (*Response, error) {
 			return provider.Search(ctx, req)
 		},
@@ -51,18 +54,4 @@ func normalizeRequest(req Request) Request {
 		req.Count = MaxSearchCount
 	}
 	return req
-}
-
-func buildOrder(cfg *Config) []string {
-	return stringutil.BuildProviderOrder(cfg.Provider, cfg.Fallbacks, DefaultFallbackOrder)
-}
-
-func registerProviders(registry *Registry, cfg *Config) {
-	if registry == nil || cfg == nil {
-		return
-	}
-	if exa.Enabled(cfg.Exa.Enabled, cfg.Exa.APIKey) {
-		p := &exaProvider{cfg: cfg.Exa}
-		registry.Register(p)
-	}
 }

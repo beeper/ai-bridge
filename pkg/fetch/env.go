@@ -10,7 +10,7 @@ import (
 
 // ConfigFromEnv builds a fetch config using environment variables.
 func ConfigFromEnv() *Config {
-	cfg := (&Config{}).WithDefaults()
+	cfg := &Config{}
 
 	if provider := strings.TrimSpace(os.Getenv("FETCH_PROVIDER")); provider != "" {
 		cfg.Provider = provider
@@ -20,7 +20,7 @@ func ConfigFromEnv() *Config {
 	}
 	exa.ApplyEnv(&cfg.Exa.APIKey, &cfg.Exa.BaseURL)
 
-	return cfg
+	return cfg.WithDefaults()
 }
 
 // ApplyEnvDefaults fills empty config fields from environment variables.

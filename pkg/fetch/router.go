@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/beeper/agentremote/pkg/shared/providerchain"
+	"github.com/beeper/agentremote/pkg/shared/registry"
 	"github.com/beeper/agentremote/pkg/shared/stringutil"
 )
 
@@ -17,13 +18,13 @@ func Fetch(ctx context.Context, req Request, cfg *Config) (*Response, error) {
 	cfg = cfg.WithDefaults()
 	req = normalizeRequest(req)
 
-	registry := NewRegistry()
-	registerProviders(registry, cfg)
-	order := buildOrder(cfg)
+	reg := registry.New[Provider]()
+	registerProviders(reg, cfg)
+	order := stringutil.BuildProviderOrder(cfg.Provider, cfg.Fallbacks, DefaultFallbackOrder)
 
 	return providerchain.RunFirst(
 		order,
-		registry.Get,
+		reg.Get,
 		func(provider Provider) (*Response, error) {
 			return provider.Fetch(ctx, req)
 		},
@@ -47,18 +48,14 @@ func normalizeRequest(req Request) Request {
 	return req
 }
 
-func buildOrder(cfg *Config) []string {
-	return stringutil.BuildProviderOrder(cfg.Provider, cfg.Fallbacks, DefaultFallbackOrder)
-}
-
-func registerProviders(registry *Registry, cfg *Config) {
-	if registry == nil || cfg == nil {
+func registerProviders(reg *registry.Registry[Provider], cfg *Config) {
+	if reg == nil || cfg == nil {
 		return
 	}
 	if p := newExaProvider(cfg); p != nil {
-		registry.Register(p)
+		reg.Register(p)
 	}
 	if p := newDirectProvider(cfg); p != nil {
-		registry.Register(p)
+		reg.Register(p)
 	}
 }
