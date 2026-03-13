@@ -522,14 +522,7 @@ func (m *MemorySearchManager) searchKeywordScan(ctx context.Context, query strin
 		tokens[i] = strings.ToLower(strings.TrimSpace(t))
 	}
 
-	// Scan more rows than we return so we can rank matches in-process.
-	scanLimit := limit * 10
-	if scanLimit < 200 {
-		scanLimit = 200
-	}
-	if scanLimit > 1000 {
-		scanLimit = 1000
-	}
+	scanLimit := max(200, min(1000, limit*10))
 
 	scanArgs := m.baseArgs(m.status.Model)
 	sourceSQL, sourceArgs := sourceFilterSQL(5, sources)

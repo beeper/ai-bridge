@@ -12,7 +12,6 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	"github.com/beeper/agentremote/bridges/opencode/api"
-	"github.com/beeper/agentremote/pkg/shared/streamui"
 	"github.com/beeper/agentremote/turns"
 )
 

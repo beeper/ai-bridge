@@ -333,10 +333,7 @@ func (cl *CodexLogin) spawnAndStartLogin(ctx context.Context, log *zerolog.Logge
 			cl.mu.Lock()
 			cl.closeRPCLocked()
 			cl.mu.Unlock()
-			select {
-			case cl.startCh <- initErr:
-			default:
-			}
+			cl.signalStart(initErr)
 			return
 		}
 
@@ -389,10 +386,7 @@ func (cl *CodexLogin) spawnAndStartLogin(ctx context.Context, log *zerolog.Logge
 			if startErr != nil {
 				log.Warn().Err(startErr).Str("mode", mode).Msg("Codex login start failed")
 			}
-			select {
-			case cl.startCh <- startErr:
-			default:
-			}
+			cl.signalStart(startErr)
 			return
 		}
 
@@ -406,55 +400,36 @@ func (cl *CodexLogin) spawnAndStartLogin(ctx context.Context, log *zerolog.Logge
 		cancel()
 		if startErr != nil {
 			log.Warn().Err(startErr).Msg("Codex chatgpt login start failed")
-			select {
-			case cl.startCh <- startErr:
-			default:
-			}
+			cl.signalStart(startErr)
 			return
 		}
 		loginID := strings.TrimSpace(loginResp.LoginID)
 		authURL := strings.TrimSpace(loginResp.AuthURL)
 		cl.setLoginSession(loginID, authURL)
 		if authURL == "" || loginID == "" {
-			startErr = errors.New("codex returned empty authUrl/loginId")
-			select {
-			case cl.startCh <- startErr:
-			default:
-			}
+			cl.signalStart(errors.New("codex returned empty authUrl/loginId"))
 			return
 		}
 		log.Info().Str("instance_id", cl.instanceID).Str("login_id", loginID).Msg("Codex browser login started")
-		select {
-		case cl.startCh <- nil:
-		default:
-		}
+		cl.signalStart(nil)
 	}()
 
-	if mode == "apiKey" {
-		return &bridgev2.LoginStep{
-			Type:         bridgev2.LoginStepTypeDisplayAndWait,
-			StepID:       "io.ai-bridge.codex.validating",
-			Instructions: "Validating the API key with Codex. Keep this screen open.",
-			DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
-				Type: bridgev2.LoginDisplayTypeNothing,
-			},
-		}, nil
+	var stepID, instructions string
+	switch mode {
+	case "apiKey":
+		stepID = "io.ai-bridge.codex.validating"
+		instructions = "Validating the API key with Codex. Keep this screen open."
+	case "chatgptAuthTokens":
+		stepID = "io.ai-bridge.codex.validating_external_tokens"
+		instructions = "Validating ChatGPT external tokens with Codex. Keep this screen open."
+	default:
+		stepID = "io.ai-bridge.codex.starting"
+		instructions = "Starting Codex browser login…"
 	}
-	if mode == "chatgptAuthTokens" {
-		return &bridgev2.LoginStep{
-			Type:         bridgev2.LoginStepTypeDisplayAndWait,
-			StepID:       "io.ai-bridge.codex.validating_external_tokens",
-			Instructions: "Validating ChatGPT external tokens with Codex. Keep this screen open.",
-			DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
-				Type: bridgev2.LoginDisplayTypeNothing,
-			},
-		}, nil
-	}
-
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeDisplayAndWait,
-		StepID:       "io.ai-bridge.codex.starting",
-		Instructions: "Starting Codex browser login…",
+		StepID:       stepID,
+		Instructions: instructions,
 		DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
 			Type: bridgev2.LoginDisplayTypeNothing,
 		},

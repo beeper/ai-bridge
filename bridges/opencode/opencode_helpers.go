@@ -2,11 +2,32 @@ package opencode
 
 import (
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/beeper/agentremote/bridges/opencode/api"
 )
+
+// expandTilde expands a leading "~" or "~/" in a path to the user's home directory.
+// Returns the path unchanged if it does not start with "~".
+func expandTilde(path string) (string, error) {
+	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, rest), nil
+	}
+	if path == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return home, nil
+	}
+	return path, nil
+}
 
 const (
 	OpenCodeModeRemote          = "remote"

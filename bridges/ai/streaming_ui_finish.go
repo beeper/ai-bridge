@@ -6,6 +6,7 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 
+	"github.com/beeper/agentremote/bridges/ai/msgconv"
 	"github.com/beeper/agentremote/turns"
 )
 
@@ -14,9 +15,9 @@ func (oc *AIClient) emitUIFinish(ctx context.Context, portal *bridgev2.Portal, s
 		return
 	}
 	ui := oc.uiEmitter(state)
-	ui.EmitUIFinish(ctx, portal, mapFinishReason(state.finishReason), oc.buildUIMessageMetadata(state, meta, true))
+	ui.EmitUIFinish(ctx, portal, msgconv.MapFinishReason(state.finishReason), oc.buildUIMessageMetadata(state, meta, true))
 	if state.session != nil {
-		state.session.End(ctx, turns.EndReason(mapFinishReason(state.finishReason)))
+		state.session.End(ctx, turns.EndReason(msgconv.MapFinishReason(state.finishReason)))
 		state.session = nil
 	}
 

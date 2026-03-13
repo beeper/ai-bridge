@@ -412,17 +412,17 @@ func (c *Conversation) Intent(ctx context.Context) (bridgev2.MatrixAPI, error) {
 }
 
 func normalizeConversationSpec(spec ConversationSpec) ConversationSpec {
-	if spec.Kind == ConversationKindDelegated && spec.Visibility == "" {
-		spec.Visibility = ConversationVisibilityHidden
-	}
 	if spec.Kind == "" {
 		spec.Kind = ConversationKindNormal
 	}
+	if spec.Kind == ConversationKindDelegated {
+		if spec.Visibility == "" {
+			spec.Visibility = ConversationVisibilityHidden
+		}
+		spec.ArchiveOnCompletion = true
+	}
 	if spec.Visibility == "" {
 		spec.Visibility = ConversationVisibilityNormal
-	}
-	if spec.Kind == ConversationKindDelegated && !spec.ArchiveOnCompletion {
-		spec.ArchiveOnCompletion = true
 	}
 	if strings.TrimSpace(spec.PortalID) == "" {
 		spec.PortalID = "sdk:" + uuid.NewString()

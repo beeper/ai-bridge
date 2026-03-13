@@ -104,9 +104,6 @@ func buildCompactFinalUIMessage(uiMessage map[string]any) map[string]any {
 	return out
 }
 
-func mapFinishReason(reason string) string {
-	return msgconv.MapFinishReason(reason)
-}
 
 func shouldContinueChatToolLoop(finishReason string, toolCallCount int) bool {
 	if toolCallCount <= 0 {

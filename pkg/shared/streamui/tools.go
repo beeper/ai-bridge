@@ -37,8 +37,8 @@ func (e *Emitter) EnsureUIToolInputStart(
 		"toolCallId":       toolCallID,
 		"toolName":         toolName,
 		"providerExecuted": providerExecuted,
+		"dynamic":          true,
 	}
-	part["dynamic"] = true
 	if strings.TrimSpace(title) != "" {
 		part["title"] = title
 	}
