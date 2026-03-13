@@ -62,8 +62,6 @@ func modelRedirectTarget(requested, resolved string) networkid.UserID {
 	return modelUserID(resolved)
 }
 
-// validateDMModelSwitch enforces the DM invariant that counterpart ghosts are immutable.
-// Agent rooms are exempt because the stable counterpart ghost is the agent ghost.
 // buildAvailableTools returns a list of ToolInfo for all tools based on tool policy.
 func (oc *AIClient) buildAvailableTools(meta *PortalMetadata) []ToolInfo {
 	names := oc.toolNamesForPortal(meta)

@@ -213,6 +213,9 @@ func (c *sdkClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 	conv := c.conv(runCtx, msg.Portal)
 	session := c.getSession()
 	roomID := string(msg.Portal.ID)
+	if c.turnManager != nil {
+		roomID = c.turnManager.ResolveKey(roomID)
+	}
 	run := func(turnCtx context.Context) error {
 		var source *SourceRef
 		if msg.Event != nil {
