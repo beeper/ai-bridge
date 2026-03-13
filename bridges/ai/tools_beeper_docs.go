@@ -59,7 +59,7 @@ func executeBeeperDocs(ctx context.Context, args map[string]any) (string, error)
 		} `json:"results"`
 	}
 	if err := exa.PostAndDecodeJSON(ctx, baseURL, "/search", apiKey, payload, 30, &resp); err != nil {
-		return "", fmt.Errorf("beeper_docs: failed to parse response: %w", err)
+		return "", fmt.Errorf("beeper_docs search failed: %w", err)
 	}
 
 	type docResult struct {

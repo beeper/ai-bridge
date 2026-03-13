@@ -3,7 +3,6 @@ package sdk
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 
 	"go.mau.fi/util/configupgrade"
@@ -115,24 +114,9 @@ func NewConnectorBase(cfg *Config) *agentremote.ConnectorBase {
 			}
 			agentremote.ApplyAIBridgeInfo(content, protocolID, portal.RoomType, agentremote.AIRoomKindAgent)
 		},
-		LoadLogin: func(_ context.Context, login *bridgev2.UserLogin) error {
-			if cfg.AcceptLogin != nil {
-				ok, reason := cfg.AcceptLogin(login)
-				if !ok {
-					if strings.TrimSpace(reason) == "" {
-						reason = "This login is not supported."
-					}
-					makeBroken := cfg.MakeBrokenLogin
-					if makeBroken == nil {
-						makeBroken = func(l *bridgev2.UserLogin, msg string) *agentremote.BrokenLoginClient {
-							return agentremote.NewBrokenLoginClient(l, msg)
-						}
-					}
-					login.Client = makeBroken(login, reason)
-					return nil
-				}
-			}
-			return agentremote.LoadUserLogin(login, agentremote.LoadUserLoginConfig[bridgev2.NetworkAPI]{
+		LoadLogin: agentremote.TypedClientLoader(agentremote.TypedClientLoaderSpec[bridgev2.NetworkAPI]{
+			Accept: cfg.AcceptLogin,
+			LoadUserLoginConfig: agentremote.LoadUserLoginConfig[bridgev2.NetworkAPI]{
 				Mu:         mu,
 				Clients:    *clientsRef,
 				BridgeName: cfg.Name,
@@ -157,8 +141,8 @@ func NewConnectorBase(cfg *Config) *agentremote.ConnectorBase {
 						cfg.AfterLoadClient(client)
 					}
 				},
-			})
-		},
+			},
+		}),
 		LoginFlows: func() []bridgev2.LoginFlow {
 			if len(cfg.LoginFlows) > 0 {
 				return cfg.LoginFlows
