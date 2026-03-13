@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/beeper/agentremote/pkg/shared/exa"
 	"github.com/beeper/agentremote/pkg/shared/providerchain"
 	"github.com/beeper/agentremote/pkg/shared/stringutil"
 )
@@ -60,21 +61,8 @@ func registerProviders(registry *Registry, cfg *Config) {
 	if registry == nil || cfg == nil {
 		return
 	}
-
-	if p := newProviderIfEnabled(cfg.Exa.Enabled, cfg.Exa.APIKey, func() Provider { return &exaProvider{cfg: cfg.Exa} }); p != nil {
+	if exa.Enabled(cfg.Exa.Enabled, cfg.Exa.APIKey) {
+		p := &exaProvider{cfg: cfg.Exa}
 		registry.Register(p)
 	}
-}
-
-// newProviderIfEnabled returns a Provider when the feature flag is on and the
-// API key is non-empty. It returns nil otherwise, centralising the common
-// validation that every provider constructor previously duplicated.
-func newProviderIfEnabled(enabled *bool, apiKey string, create func() Provider) Provider {
-	if !stringutil.BoolPtrOr(enabled, true) {
-		return nil
-	}
-	if strings.TrimSpace(apiKey) == "" {
-		return nil
-	}
-	return create()
 }
