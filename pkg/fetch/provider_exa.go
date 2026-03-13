@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/beeper/agentremote/pkg/shared/exa"
-	"github.com/beeper/agentremote/pkg/shared/httputil"
-	"github.com/beeper/agentremote/pkg/shared/stringutil"
 )
 
 type exaProvider struct {
@@ -21,11 +19,7 @@ func newExaProvider(cfg *Config) Provider {
 	if cfg == nil {
 		return nil
 	}
-	if !stringutil.BoolPtrOr(cfg.Exa.Enabled, true) {
-		return nil
-	}
-	apiKey := strings.TrimSpace(cfg.Exa.APIKey)
-	if apiKey == "" {
+	if !exa.Enabled(cfg.Exa.Enabled, cfg.Exa.APIKey) {
 		return nil
 	}
 	return &exaProvider{cfg: cfg.Exa}
@@ -36,11 +30,6 @@ func (p *exaProvider) Name() string {
 }
 
 func (p *exaProvider) Fetch(ctx context.Context, req Request) (*Response, error) {
-	base := stringutil.NormalizeBaseURL(p.cfg.BaseURL)
-	if base == "" {
-		return nil, errors.New("exa base_url is empty")
-	}
-	endpoint := base + "/contents"
 	maxChars := req.MaxChars
 	if maxChars <= 0 {
 		maxChars = p.cfg.TextMaxCharacters
@@ -63,7 +52,7 @@ func (p *exaProvider) Fetch(ctx context.Context, req Request) (*Response, error)
 	}
 
 	start := time.Now()
-	data, _, err := httputil.PostJSON(ctx, endpoint, exa.AuthHeaders(p.cfg.BaseURL, p.cfg.APIKey), payload, DefaultTimeoutSecs)
+	data, err := exa.PostJSON(ctx, p.cfg.BaseURL, "/contents", p.cfg.APIKey, payload, DefaultTimeoutSecs)
 	if err != nil {
 		return nil, err
 	}

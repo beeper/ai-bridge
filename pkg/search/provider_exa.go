@@ -3,14 +3,11 @@ package search
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/beeper/agentremote/pkg/shared/exa"
-	"github.com/beeper/agentremote/pkg/shared/httputil"
-	"github.com/beeper/agentremote/pkg/shared/stringutil"
 )
 
 type exaProvider struct {
@@ -22,10 +19,6 @@ func (p *exaProvider) Name() string {
 }
 
 func (p *exaProvider) Search(ctx context.Context, req Request) (*Response, error) {
-	endpoint := resolveEndpoint(p.cfg.BaseURL, "/search")
-	if endpoint == "" {
-		return nil, errors.New("exa base_url is empty")
-	}
 	numResults := p.cfg.NumResults
 	if req.Count > 0 {
 		numResults = req.Count
@@ -65,7 +58,7 @@ func (p *exaProvider) Search(ctx context.Context, req Request) (*Response, error
 	}
 
 	start := time.Now()
-	data, _, err := httputil.PostJSON(ctx, endpoint, exa.AuthHeaders(p.cfg.BaseURL, p.cfg.APIKey), payload, DefaultTimeoutSecs)
+	data, err := exa.PostJSON(ctx, p.cfg.BaseURL, "/search", p.cfg.APIKey, payload, DefaultTimeoutSecs)
 	if err != nil {
 		return nil, err
 	}
@@ -126,14 +119,6 @@ func descriptionFromEntry(highlights []string, text string) string {
 		return trimmed[:240] + "..."
 	}
 	return trimmed
-}
-
-func resolveEndpoint(baseURL, path string) string {
-	base := stringutil.NormalizeBaseURL(baseURL)
-	if base == "" {
-		return ""
-	}
-	return base + path
 }
 
 func resolveSiteName(raw string) string {
