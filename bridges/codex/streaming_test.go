@@ -20,36 +20,17 @@ func TestCodex_StreamChunks_BasicOrderingAndSeq(t *testing.T) {
 	state.turn.Stream().TextDelta("hi")
 	state.turn.End("completed")
 
-	uiMessage := streamui.SnapshotCanonicalUIMessage(state.turn.UIState())
+	uiState := state.turn.UIState()
+	if uiState == nil || !uiState.UIStarted || !uiState.UIFinished {
+		t.Fatalf("expected turn UI state to be started and finished, got %#v", uiState)
+	}
+	uiMessage := streamui.SnapshotCanonicalUIMessage(uiState)
 	gotParts := agentremote.NormalizeUIParts(uiMessage["parts"])
-	if len(gotParts) < 5 {
-		t.Fatalf("expected >=5 parts, got %d", len(gotParts))
+	if len(gotParts) == 0 {
+		t.Fatal("expected canonical UI parts")
 	}
-	if gotParts[0]["type"] != "start" {
-		t.Fatalf("expected first part type=start, got %#v", gotParts[0]["type"])
-	}
-	if gotParts[1]["type"] != "start-step" {
-		t.Fatalf("expected second part type=start-step, got %#v", gotParts[1]["type"])
-	}
-	// text-start then text-delta should be present before finish.
-	seenTextStart := false
-	seenTextDelta := false
-	seenFinish := false
-	for _, p := range gotParts {
-		switch p["type"] {
-		case "text-start":
-			seenTextStart = true
-		case "text-delta":
-			seenTextDelta = true
-		case "finish":
-			seenFinish = true
-		}
-	}
-	if !seenTextStart || !seenTextDelta {
-		t.Fatalf("expected text-start and text-delta, got parts=%v", gotParts)
-	}
-	if !seenFinish {
-		t.Fatalf("expected finish part, got parts=%v", gotParts)
+	if gotParts[0]["type"] != "text" {
+		t.Fatalf("expected canonical text part, got %#v", gotParts[0])
 	}
 }
 

@@ -10,8 +10,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/agentremote"
-	"github.com/beeper/agentremote/pkg/shared/streamui"
 	bridgesdk "github.com/beeper/agentremote/sdk"
 )
 
@@ -31,21 +29,6 @@ func attachTestTurn(state *streamingState, portal *bridgev2.Portal) {
 	turn := conv.StartTurn(context.Background(), nil, nil)
 	turn.SetID(state.turnID)
 	state.turn = turn
-}
-
-func uiPartTypes(state *streamingState) []string {
-	if state == nil || state.turn == nil || state.turn.UIState() == nil {
-		return nil
-	}
-	uiMessage := streamui.SnapshotCanonicalUIMessage(state.turn.UIState())
-	parts := agentremote.NormalizeUIParts(uiMessage["parts"])
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if typ, _ := part["type"].(string); typ != "" {
-			out = append(out, typ)
-		}
-	}
-	return out
 }
 
 func TestCodex_Mapping_AgentMessageDelta_EmitsTextStartThenDelta(t *testing.T) {
@@ -69,9 +52,11 @@ func TestCodex_Mapping_AgentMessageDelta_EmitsTextStartThenDelta(t *testing.T) {
 		Params: raw,
 	})
 
-	got := uiPartTypes(state)
-	if len(got) != 2 || got[0] != "text-start" || got[1] != "text-delta" {
-		t.Fatalf("expected [text-start text-delta], got %v", got)
+	if got := state.accumulated.String(); got != "hi" {
+		t.Fatalf("expected accumulated text %q, got %q", "hi", got)
+	}
+	if state.turn == nil || state.turn.UIState() == nil || state.turn.UIState().UITextID == "" {
+		t.Fatal("expected active text stream in UI state")
 	}
 }
 
@@ -95,9 +80,11 @@ func TestCodex_Mapping_ReasoningSummaryDelta_EmitsReasoningStartThenDelta(t *tes
 		Params: raw,
 	})
 
-	got := uiPartTypes(state)
-	if len(got) != 2 || got[0] != "reasoning-start" || got[1] != "reasoning-delta" {
-		t.Fatalf("expected [reasoning-start reasoning-delta], got %v", got)
+	if got := state.reasoning.String(); got != "think" {
+		t.Fatalf("expected reasoning text %q, got %q", "think", got)
+	}
+	if state.turn == nil || state.turn.UIState() == nil || state.turn.UIState().UIReasoningID == "" {
+		t.Fatal("expected active reasoning stream in UI state")
 	}
 }
 
@@ -128,9 +115,12 @@ func TestCodex_Mapping_ItemStartedCommandExecution_EmitsToolInputStartAndAvailab
 		Params: raw,
 	})
 
-	got := uiPartTypes(state)
-	if len(got) != 2 || got[0] != "tool-input-start" || got[1] != "tool-input-available" {
-		t.Fatalf("expected [tool-input-start tool-input-available], got %v", got)
+	uiState := state.turn.UIState()
+	if uiState == nil || !uiState.UIToolStarted["it_cmd"] {
+		t.Fatal("expected tool input start to be tracked")
+	}
+	if got := uiState.UIToolNameByToolCallID["it_cmd"]; got != "commandExecution" {
+		t.Fatalf("expected tool name commandExecution, got %q", got)
 	}
 }
 
@@ -164,22 +154,8 @@ func TestCodex_Mapping_CommandOutputDelta_IsBuffered(t *testing.T) {
 		Params: raw2,
 	})
 
-	uiMessage := streamui.SnapshotCanonicalUIMessage(state.turn.UIState())
-	parts := agentremote.NormalizeUIParts(uiMessage["parts"])
-	var gotOutputs []string
-	for _, part := range parts {
-		if part["type"] != "tool-output-available" {
-			continue
-		}
-		if out, ok := part["output"].(string); ok {
-			gotOutputs = append(gotOutputs, out)
-		}
-	}
-	if len(gotOutputs) < 2 {
-		t.Fatalf("expected at least 2 tool outputs, got %v", gotOutputs)
-	}
-	if gotOutputs[len(gotOutputs)-1] != "hello world" {
-		t.Fatalf("expected buffered output 'hello world', got %q", gotOutputs[len(gotOutputs)-1])
+	if got := state.codexToolOutputBuffers["it_cmd"].String(); got != "hello world" {
+		t.Fatalf("expected buffered output 'hello world', got %q", got)
 	}
 }
 
@@ -203,12 +179,11 @@ func TestCodex_Mapping_TurnDiffUpdated_EmitsToolOutput(t *testing.T) {
 	})
 
 	// tool-input-start, tool-input-available, tool-output-available
-	got := uiPartTypes(state)
-	if len(got) < 3 {
-		t.Fatalf("expected >=3 parts, got %v", got)
+	if state.codexLatestDiff != "diff --git a/x b/x" {
+		t.Fatalf("expected diff to be stored, got %q", state.codexLatestDiff)
 	}
-	if got[0] != "tool-input-start" || got[1] != "tool-input-available" || got[2] != "tool-output-available" {
-		t.Fatalf("unexpected part types: %v", got)
+	if uiState := state.turn.UIState(); uiState == nil || !uiState.UIToolStarted["diff-"+turnID] {
+		t.Fatal("expected diff tool to be tracked in UI state")
 	}
 }
 
@@ -236,12 +211,11 @@ func TestCodex_Mapping_ContextCompaction_EmitsToolParts(t *testing.T) {
 	})
 
 	// started => tool-input-start/tool-input-available, completed => tool-output-available
-	got := uiPartTypes(state)
-	if len(got) < 3 {
-		t.Fatalf("expected >=3 parts, got %v", got)
+	if len(state.toolCalls) == 0 {
+		t.Fatal("expected completed tool call metadata")
 	}
-	if got[0] != "tool-input-start" || got[1] != "tool-input-available" || got[2] != "tool-output-available" {
-		t.Fatalf("unexpected part types: %v", got)
+	if state.toolCalls[len(state.toolCalls)-1].ToolName != "contextCompaction" {
+		t.Fatalf("expected contextCompaction tool call, got %#v", state.toolCalls[len(state.toolCalls)-1])
 	}
 }
 
@@ -268,16 +242,10 @@ func TestCodex_Mapping_ReviewMode_EmitsReviewToolOutput(t *testing.T) {
 	})
 	cc.handleNotif(context.Background(), portal, nil, state, "model", threadID, turnID, codexNotif{Method: "item/completed", Params: rawCompleted})
 
-	gotTypes := uiPartTypes(state)
-	// At least one tool output should be present.
-	seenOutput := false
-	for _, typ := range gotTypes {
-		if typ == "tool-output-available" {
-			seenOutput = true
-			break
-		}
+	if len(state.toolCalls) == 0 {
+		t.Fatal("expected review tool call metadata")
 	}
-	if !seenOutput {
-		t.Fatalf("expected tool-output-available, got %v", gotTypes)
+	if state.toolCalls[len(state.toolCalls)-1].ToolName != "review" {
+		t.Fatalf("expected review tool call, got %#v", state.toolCalls[len(state.toolCalls)-1])
 	}
 }

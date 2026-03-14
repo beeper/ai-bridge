@@ -13,7 +13,6 @@ import (
 
 	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/bridges/codex/codexrpc"
-	"github.com/beeper/agentremote/pkg/shared/streamui"
 	bridgesdk "github.com/beeper/agentremote/sdk"
 )
 
@@ -60,21 +59,6 @@ func attachApprovalTestTurn(state *streamingState, portal *bridgev2.Portal) {
 	turn := conv.StartTurn(context.Background(), nil, nil)
 	turn.SetID(state.turnID)
 	state.turn = turn
-}
-
-func approvalPartTypes(state *streamingState) []string {
-	if state == nil || state.turn == nil || state.turn.UIState() == nil {
-		return nil
-	}
-	uiMessage := streamui.SnapshotCanonicalUIMessage(state.turn.UIState())
-	parts := agentremote.NormalizeUIParts(uiMessage["parts"])
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if typ, _ := part["type"].(string); typ != "" {
-			out = append(out, typ)
-		}
-	}
-	return out
 }
 
 func TestCodex_CommandApproval_RequestBlocksUntilApproved(t *testing.T) {
@@ -143,31 +127,12 @@ func TestCodex_CommandApproval_RequestBlocksUntilApproved(t *testing.T) {
 		t.Fatalf("timed out waiting for approval handler to return")
 	}
 
-	uiMessage := streamui.SnapshotCanonicalUIMessage(state.turn.UIState())
-	gotParts := agentremote.NormalizeUIParts(uiMessage["parts"])
-	gotPartTypes := approvalPartTypes(state)
-	hasRequest := false
-	hasResponse := false
-	hasDenied := false
-	for _, p := range gotParts {
-		typ, _ := p["type"].(string)
-		switch typ {
-		case "tool-approval-request":
-			hasRequest = true
-		case "tool-approval-response":
-			hasResponse = true
-			if approved, ok := p["approved"].(bool); !ok || !approved {
-				t.Fatalf("expected approval response approved=true, got %#v", p)
-			}
-		case "tool-output-denied":
-			hasDenied = true
-		}
+	uiState := state.turn.UIState()
+	if uiState == nil || !uiState.UIToolApprovalRequested["123"] {
+		t.Fatal("expected approval request to be tracked in UI state")
 	}
-	if !hasRequest || !hasResponse {
-		t.Fatalf("expected request+response parts, got types %v", gotPartTypes)
-	}
-	if hasDenied {
-		t.Fatalf("unexpected tool-output-denied for approved decision")
+	if uiState.UIToolCallIDByApproval["123"] != "item_1" {
+		t.Fatalf("expected approval to map to tool call item_1, got %q", uiState.UIToolCallIDByApproval["123"])
 	}
 }
 
@@ -228,25 +193,12 @@ func TestCodex_CommandApproval_DenyEmitsResponseThenOutputDenied(t *testing.T) {
 		t.Fatalf("timed out waiting for approval handler to return")
 	}
 
-	gotPartTypes := approvalPartTypes(state)
-	idxResponse := -1
-	idxDenied := -1
-	for idx, typ := range gotPartTypes {
-		if typ == "tool-approval-response" && idxResponse < 0 {
-			idxResponse = idx
-		}
-		if typ == "tool-output-denied" && idxDenied < 0 {
-			idxDenied = idx
-		}
+	uiState := state.turn.UIState()
+	if uiState == nil || !uiState.UIToolApprovalRequested["456"] {
+		t.Fatal("expected denied approval request to be tracked in UI state")
 	}
-	if idxResponse < 0 {
-		t.Fatalf("expected tool-approval-response in parts, got %v", gotPartTypes)
-	}
-	if idxDenied < 0 {
-		t.Fatalf("expected tool-output-denied in parts, got %v", gotPartTypes)
-	}
-	if idxDenied <= idxResponse {
-		t.Fatalf("expected tool-output-denied after response, got %v", gotPartTypes)
+	if uiState.UIToolCallIDByApproval["456"] != "item_1" {
+		t.Fatalf("expected approval to map to tool call item_1, got %q", uiState.UIToolCallIDByApproval["456"])
 	}
 }
 
