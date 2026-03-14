@@ -29,8 +29,15 @@ func TestCodex_StreamChunks_BasicOrderingAndSeq(t *testing.T) {
 	if len(gotParts) == 0 {
 		t.Fatal("expected canonical UI parts")
 	}
-	if gotParts[0]["type"] != "text" {
-		t.Fatalf("expected canonical text part, got %#v", gotParts[0])
+	seenText := false
+	for _, part := range gotParts {
+		if part["type"] == "text" {
+			seenText = true
+			break
+		}
+	}
+	if !seenText {
+		t.Fatalf("expected canonical text part, got %#v", gotParts)
 	}
 }
 

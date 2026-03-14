@@ -170,13 +170,10 @@ func (oc *OpenClawClient) EmitStreamPart(ctx context.Context, portal *bridgev2.P
 	case "tool-input-delta":
 		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
 		inputTextDelta := stringValue(part["inputTextDelta"])
-		providerExecuted, _ := part["providerExecuted"].(bool)
-		stream.ToolInputDelta(toolCallID, inputTextDelta, providerExecuted)
+		stream.ToolInputDelta(toolCallID, inputTextDelta)
 	case "tool-input-available":
 		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
-		toolName := strings.TrimSpace(stringValue(part["toolName"]))
-		providerExecuted, _ := part["providerExecuted"].(bool)
-		stream.ToolInput(toolCallID, toolName, part["input"], providerExecuted)
+		stream.ToolInput(toolCallID, part["input"])
 	case "tool-output-available":
 		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
 		providerExecuted, _ := part["providerExecuted"].(bool)

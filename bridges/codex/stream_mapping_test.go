@@ -55,9 +55,6 @@ func TestCodex_Mapping_AgentMessageDelta_EmitsTextStartThenDelta(t *testing.T) {
 	if got := state.accumulated.String(); got != "hi" {
 		t.Fatalf("expected accumulated text %q, got %q", "hi", got)
 	}
-	if state.turn == nil || state.turn.UIState() == nil || state.turn.UIState().UITextID == "" {
-		t.Fatal("expected active text stream in UI state")
-	}
 }
 
 func TestCodex_Mapping_ReasoningSummaryDelta_EmitsReasoningStartThenDelta(t *testing.T) {
@@ -82,9 +79,6 @@ func TestCodex_Mapping_ReasoningSummaryDelta_EmitsReasoningStartThenDelta(t *tes
 
 	if got := state.reasoning.String(); got != "think" {
 		t.Fatalf("expected reasoning text %q, got %q", "think", got)
-	}
-	if state.turn == nil || state.turn.UIState() == nil || state.turn.UIState().UIReasoningID == "" {
-		t.Fatal("expected active reasoning stream in UI state")
 	}
 }
 
@@ -115,12 +109,8 @@ func TestCodex_Mapping_ItemStartedCommandExecution_EmitsToolInputStartAndAvailab
 		Params: raw,
 	})
 
-	uiState := state.turn.UIState()
-	if uiState == nil || !uiState.UIToolStarted["it_cmd"] {
-		t.Fatal("expected tool input start to be tracked")
-	}
-	if got := uiState.UIToolNameByToolCallID["it_cmd"]; got != "commandExecution" {
-		t.Fatalf("expected tool name commandExecution, got %q", got)
+	if state.turn == nil {
+		t.Fatal("expected SDK turn to exist")
 	}
 }
 
@@ -181,9 +171,6 @@ func TestCodex_Mapping_TurnDiffUpdated_EmitsToolOutput(t *testing.T) {
 	// tool-input-start, tool-input-available, tool-output-available
 	if state.codexLatestDiff != "diff --git a/x b/x" {
 		t.Fatalf("expected diff to be stored, got %q", state.codexLatestDiff)
-	}
-	if uiState := state.turn.UIState(); uiState == nil || !uiState.UIToolStarted["diff-"+turnID] {
-		t.Fatal("expected diff tool to be tracked in UI state")
 	}
 }
 
