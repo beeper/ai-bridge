@@ -13,6 +13,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 
 	airuntime "github.com/beeper/agentremote/pkg/runtime"
+	bridgesdk "github.com/beeper/agentremote/sdk"
 )
 
 func stableMCPApprovalID(toolCallID string, desc responseToolDescriptor) string {
@@ -218,11 +219,25 @@ func (oc *AIClient) gateMcpToolApproval(
 	if needsApproval {
 		if !state.ui.UIToolApprovalRequested[approvalID] {
 			state.ui.UIToolApprovalRequested[approvalID] = true
-			if err := oc.startToolApproval(ctx, portal, state, params, ""); err != nil {
+			handle := state.turn.Approvals().Request(bridgesdk.ApprovalRequest{
+				ApprovalID:   approvalID,
+				ToolCallID:   tool.callID,
+				ToolName:     tool.toolName,
+				TTL:          ttl,
+				Presentation: &presentation,
+				Metadata: map[string]any{
+					approvalMetadataKeyToolKind:     string(ToolApprovalKindMCP),
+					approvalMetadataKeyRuleToolName: mcpToolName,
+					approvalMetadataKeyServerLabel:  serverLabel,
+				},
+			})
+			if handle == nil {
 				delete(state.pendingMcpApprovalsSeen, approvalID)
 				oc.toolLifecycle(portal, state).fail(ctx, tool, true, ResultStatusError, "failed to deliver MCP approval prompt", nil)
-				oc.loggerForContext(ctx).Warn().Err(err).Str("approval_id", approvalID).Msg("Failed to start MCP approval prompt")
+				oc.loggerForContext(ctx).Warn().Str("approval_id", approvalID).Msg("Failed to create MCP approval handle")
+				return
 			}
+			state.pendingMcpApprovals[len(state.pendingMcpApprovals)-1].handle = handle
 		}
 	} else {
 		if _, created := oc.registerToolApproval(params); !created {

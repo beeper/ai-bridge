@@ -66,7 +66,16 @@ func (a *responsesTurnAdapter) startContinuationRound(ctx context.Context) (*sse
 
 	approvalInputs := make([]responses.ResponseInputItemUnionParam, 0, len(pendingApprovals))
 	for _, approval := range pendingApprovals {
-		decision := a.oc.waitForToolApprovalDecision(ctx, a.portal, state, approval.approvalID, approval.toolCallID)
+		handle := approval.handle
+		if handle == nil {
+			handle = &aiTurnApprovalHandle{
+				client:     a.oc,
+				turn:       state.turn,
+				approvalID: approval.approvalID,
+				toolCallID: approval.toolCallID,
+			}
+		}
+		decision := a.oc.waitForToolApprovalDecision(ctx, state, handle)
 		approved := approvalAllowed(decision)
 		item := responses.ResponseInputItemParamOfMcpApprovalResponse(approval.approvalID, approved)
 		if decision.Reason != "" && item.OfMcpApprovalResponse != nil {

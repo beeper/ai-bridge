@@ -6,6 +6,8 @@ import (
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
+
+	"github.com/beeper/agentremote/bridges/ai/msgconv"
 )
 
 func (oc *AIClient) completeStreamingSuccess(
@@ -20,8 +22,10 @@ func (oc *AIClient) completeStreamingSuccess(
 		state.finishReason = "stop"
 	}
 	oc.finalizeStreamingReplyAccumulator(state)
-	oc.emitUIFinish(ctx, portal, state, meta)
 	oc.persistTerminalAssistantTurn(ctx, log, portal, state, meta)
+	state.writer().MessageMetadata(ctx, oc.buildUIMessageMetadata(state, meta, true))
+	state.turn.End(msgconv.MapFinishReason(state.finishReason))
+	oc.noteStreamingPersistenceSideEffects(ctx, portal, state, meta)
 	oc.maybeGenerateTitle(ctx, portal, state.accumulated.String())
 	oc.recordProviderSuccess(ctx)
 }

@@ -583,15 +583,12 @@ func finalRenderedBodyFallback(state *streamingState) string {
 	return "..."
 }
 
-func (oc *AIClient) persistTerminalAssistantTurn(ctx context.Context, log zerolog.Logger, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata) {
+func (oc *AIClient) persistTerminalAssistantTurn(ctx context.Context, _ zerolog.Logger, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata) {
 	if state == nil {
 		return
 	}
 	if state.hasInitialMessageTarget() || state.heartbeat != nil {
 		oc.sendFinalAssistantTurn(ctx, portal, state, meta)
-	}
-	if state.hasInitialMessageTarget() && !state.suppressSave {
-		oc.saveAssistantMessage(ctx, log, portal, state, meta)
 	}
 }
 

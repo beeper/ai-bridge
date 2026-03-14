@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
@@ -17,6 +17,32 @@ import (
 
 type chatCompletionsTurnAdapter struct {
 	streamingAdapterBase
+}
+
+func chatToolRegistryKey(index int64) string {
+	return "chat-index:" + strconv.FormatInt(index, 10)
+}
+
+func (oc *AIClient) upsertChatStreamingTool(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	meta *PortalMetadata,
+	activeTools map[string]*activeToolCall,
+	toolDelta openai.ChatCompletionChunkChoiceDeltaToolCall,
+) *activeToolCall {
+	key := chatToolRegistryKey(toolDelta.Index)
+	tool := oc.ensureActiveToolCall(ctx, portal, state, meta, activeTools, key, "", ToolTypeFunction, "")
+	if tool == nil {
+		return nil
+	}
+	if strings.TrimSpace(toolDelta.ID) != "" {
+		tool.callID = strings.TrimSpace(toolDelta.ID)
+	}
+	if tool.input.Len() == 0 {
+		oc.toolLifecycle(portal, state).ensureInputStart(ctx, tool, false, nil)
+	}
+	return tool
 }
 
 func (a *chatCompletionsTurnAdapter) TrackRoomRunStreaming() bool {
@@ -62,7 +88,7 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 		return false, nil, oc.finishStreamingWithFailure(ctx, log, portal, state, meta, "error", initErr)
 	}
 
-	activeTools := make(map[int]*activeToolCall)
+	activeTools := make(map[string]*activeToolCall)
 	var roundContent strings.Builder
 	state.finishReason = ""
 
@@ -125,26 +151,14 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 					if typingSignals != nil {
 						typingSignals.SignalToolStart()
 					}
-					toolIdx := int(toolDelta.Index)
-					tool, exists := activeTools[toolIdx]
-					if !exists {
-						callID := toolDelta.ID
-						if strings.TrimSpace(callID) == "" {
-							callID = NewCallID()
-						}
-						tool = &activeToolCall{
-							callID:      callID,
-							toolType:    ToolTypeFunction,
-							startedAtMs: time.Now().UnixMilli(),
-						}
-						activeTools[toolIdx] = tool
+					tool := oc.upsertChatStreamingTool(ctx, portal, state, meta, activeTools, toolDelta)
+					if tool == nil {
+						continue
 					}
-
 					if toolDelta.Function.Name != "" {
 						tool.toolName = toolDelta.Function.Name
 					}
 					if toolDelta.Function.Arguments != "" {
-						tool.input.WriteString(toolDelta.Function.Arguments)
 						lifecycle.appendInputDelta(ctx, tool, tool.toolName, toolDelta.Function.Arguments, false)
 					}
 				}
@@ -168,19 +182,14 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 		return false, cle, err
 	}
 
-	type chatToolResult struct {
-		callID string
-		output string
-	}
 	toolCallParams := make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(activeTools))
-	toolResults := make([]chatToolResult, 0, len(activeTools))
 
 	if len(activeTools) > 0 {
-		keys := make([]int, 0, len(activeTools))
+		keys := make([]string, 0, len(activeTools))
 		for key := range activeTools {
 			keys = append(keys, key)
 		}
-		sort.Ints(keys)
+		sort.Strings(keys)
 		for _, key := range keys {
 			tool := activeTools[key]
 			if tool == nil {
@@ -211,27 +220,19 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 			if typingSignals != nil {
 				typingSignals.SignalToolStart()
 			}
-			toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
-				Client:        oc,
-				Portal:        portal,
-				Meta:          meta,
-				SourceEventID: state.sourceEventID,
-				SenderID:      state.senderID,
-			})
-
-			execution := oc.executeStreamingBuiltinTool(
-				toolCtx,
+			oc.handleFunctionCallArgumentsDone(
+				ctx,
 				log,
 				portal,
 				state,
 				meta,
-				tool,
+				activeTools,
+				key,
 				toolName,
 				argsJSON,
 				false,
 				" (Chat Completions)",
 			)
-			toolResults = append(toolResults, chatToolResult{callID: tool.callID, output: execution.result})
 		}
 	}
 
@@ -244,12 +245,13 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 			assistantMsg.Content.OfString = param.NewOpt(content)
 		}
 		currentMessages = append(currentMessages, openai.ChatCompletionMessageParamUnion{OfAssistant: &assistantMsg})
-		for _, result := range toolResults {
-			currentMessages = append(currentMessages, openai.ToolMessage(result.output, result.callID))
+		for _, output := range state.pendingFunctionOutputs {
+			currentMessages = append(currentMessages, openai.ToolMessage(output.output, output.callID))
 		}
 		if round >= maxStreamingToolRounds {
 			log.Warn().Int("rounds", round+1).Msg("Max tool call rounds reached; stopping chat completions continuation")
 			currentMessages = append(currentMessages, openai.AssistantMessage("Continuation stopped after reaching the maximum number of streaming tool rounds."))
+			state.pendingFunctionOutputs = nil
 			a.messages = currentMessages
 			return false, nil, nil
 		}
@@ -273,6 +275,7 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 				currentMessages = append(currentMessages, openai.UserMessage(prompt))
 			}
 		}
+		state.pendingFunctionOutputs = nil
 		a.messages = currentMessages
 		return true, nil, nil
 	}

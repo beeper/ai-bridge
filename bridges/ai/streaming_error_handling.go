@@ -7,6 +7,8 @@ import (
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
+
+	"github.com/beeper/agentremote/bridges/ai/msgconv"
 )
 
 // NonFallbackError marks an error as ineligible for fallback retries once output has been sent.
@@ -40,14 +42,15 @@ func (oc *AIClient) finishStreamingWithFailure(
 ) error {
 	state.finishReason = reason
 	state.completedAtMs = time.Now().UnixMilli()
-	ss := state.writer()
-	if reason == "cancelled" {
-		ss.Abort(ctx, "cancelled")
-	} else {
-		ss.Error(ctx, err.Error())
-	}
-	oc.emitUIFinish(ctx, portal, state, meta)
 	oc.persistTerminalAssistantTurn(ctx, log, portal, state, meta)
+	state.writer().MessageMetadata(ctx, oc.buildUIMessageMetadata(state, meta, true))
+	if reason == "cancelled" {
+		state.writer().Abort(ctx, "cancelled")
+		state.turn.End(msgconv.MapFinishReason(reason))
+	} else {
+		state.turn.EndWithError(err.Error())
+	}
+	oc.noteStreamingPersistenceSideEffects(ctx, portal, state, meta)
 	return streamFailureError(state, err)
 }
 

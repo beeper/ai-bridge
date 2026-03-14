@@ -8,6 +8,7 @@ import (
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
@@ -44,8 +45,8 @@ type streamingState struct {
 	pendingFunctionOutputs []functionCallOutput // Function outputs to send back to API for continuation
 	sourceCitations        []citations.SourceCitation
 	sourceDocuments        []citations.SourceDocument
-	generatedFiles []citations.GeneratedFilePart
-	finishReason   string
+	generatedFiles         []citations.GeneratedFilePart
+	finishReason           string
 	responseID             string
 	statusSent             bool
 	statusSentIDs          map[id.EventID]bool
@@ -99,13 +100,26 @@ func (s *streamingState) writer() *sdk.Writer {
 	return s.turn.Writer()
 }
 
+func turnInitialEventID(s *streamingState) id.EventID {
+	if s == nil || s.turn == nil {
+		return ""
+	}
+	return s.turn.InitialEventID()
+}
+
+func turnNetworkMessageID(s *streamingState) networkid.MessageID {
+	if s == nil || s.turn == nil {
+		return ""
+	}
+	return s.turn.NetworkMessageID()
+}
+
 // trackFirstToken records the first-token timestamp once.
 func (s *streamingState) trackFirstToken() {
 	if s != nil && s.firstTokenAtMs == 0 {
 		s.firstTokenAtMs = time.Now().UnixMilli()
 	}
 }
-
 
 type mcpApprovalRequest struct {
 	approvalID  string

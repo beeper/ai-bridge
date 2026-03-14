@@ -12,22 +12,16 @@ import (
 	"github.com/beeper/agentremote/sdk"
 )
 
-// saveAssistantMessage saves the completed assistant message to the database.
-// When sendViaPortal was used (state.turn.NetworkMessageID() is set), the DB row already exists
-// from SendConvertedMessage — this function updates the metadata with full streaming results.
-// Otherwise, it falls back to inserting a new row.
-func (oc *AIClient) saveAssistantMessage(
-	ctx context.Context,
-	log zerolog.Logger,
-	portal *bridgev2.Portal,
-	state *streamingState,
-	meta *PortalMetadata,
-) {
-	modelID := oc.effectiveModel(meta)
-	uiMessage := oc.buildStreamUIMessage(state, meta, nil)
+func (oc *AIClient) buildStreamingMessageMetadata(state *streamingState, meta *PortalMetadata, uiMessage map[string]any) *MessageMetadata {
+	if state == nil {
+		return nil
+	}
+	if len(uiMessage) == 0 {
+		uiMessage = oc.buildStreamUIMessage(state, meta, nil)
+	}
 	turnData := turnDataFromStreamingState(state, uiMessage)
-
-	fullMeta := &MessageMetadata{
+	modelID := oc.effectiveModel(meta)
+	return &MessageMetadata{
 		BaseMessageMetadata: agentremote.BuildAssistantBaseMetadata(agentremote.AssistantMetadataParams{
 			Body:                    state.accumulated.String(),
 			FinishReason:            state.finishReason,
@@ -56,25 +50,45 @@ func (oc *AIClient) saveAssistantMessage(
 			ThinkingTokenCount: thinkingTokenCount(modelID, state.reasoning.String()),
 		},
 	}
+}
 
-	agentremote.UpsertAssistantMessage(ctx, agentremote.UpsertAssistantMessageParams{
-		Login:            oc.UserLogin,
-		Portal:           portal,
-		SenderID:         modelUserID(modelID),
-		NetworkMessageID: state.turn.NetworkMessageID(),
-		InitialEventID:   state.turn.InitialEventID(),
-		Metadata:         fullMeta,
-		Logger:           log,
-	})
-
+func (oc *AIClient) noteStreamingPersistenceSideEffects(ctx context.Context, portal *bridgev2.Portal, state *streamingState, meta *PortalMetadata) {
+	if state == nil {
+		return
+	}
 	if meta != nil && portal != nil && (state.promptTokens > 0 || state.completionTokens > 0) {
 		meta.SetModuleMeta("compaction_last_prompt_tokens", state.promptTokens)
 		meta.SetModuleMeta("compaction_last_completion_tokens", state.completionTokens)
 		meta.SetModuleMeta("compaction_last_usage_at", time.Now().UnixMilli())
 		oc.savePortalQuiet(ctx, portal, "compaction usage snapshot")
 	}
-
 	oc.notifySessionMutation(ctx, portal, meta, false)
+}
+
+// saveAssistantMessage saves the completed assistant message to the database.
+// When sendViaPortal was used (state.turn.NetworkMessageID() is set), the DB row already exists
+// from SendConvertedMessage — this function updates the metadata with full streaming results.
+// Otherwise, it falls back to inserting a new row.
+func (oc *AIClient) saveAssistantMessage(
+	ctx context.Context,
+	log zerolog.Logger,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	meta *PortalMetadata,
+) {
+	uiMessage := oc.buildStreamUIMessage(state, meta, nil)
+	fullMeta := oc.buildStreamingMessageMetadata(state, meta, uiMessage)
+
+	agentremote.UpsertAssistantMessage(ctx, agentremote.UpsertAssistantMessageParams{
+		Login:            oc.UserLogin,
+		Portal:           portal,
+		SenderID:         modelUserID(oc.effectiveModel(meta)),
+		NetworkMessageID: state.turn.NetworkMessageID(),
+		InitialEventID:   state.turn.InitialEventID(),
+		Metadata:         fullMeta,
+		Logger:           log,
+	})
+	oc.noteStreamingPersistenceSideEffects(ctx, portal, state, meta)
 }
 
 func thinkingTokenCount(model string, content string) int {

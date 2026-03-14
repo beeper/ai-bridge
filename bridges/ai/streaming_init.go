@@ -34,7 +34,16 @@ func (oc *AIClient) createStreamingTurn(
 	turn := conv.StartTurn(ctx, nil, &bridgesdk.SourceRef{EventID: string(sourceEventID)})
 	turn.SetID(state.turnID)
 	turn.SetSender(sender)
-
+	turn.SetFinalMetadataProvider(bridgesdk.FinalMetadataProviderFunc(func(sdkTurn *bridgesdk.Turn, _ string) any {
+		if sdkTurn != nil {
+			state.turn = sdkTurn
+			state.ui = sdkTurn.UIState()
+		}
+		return oc.buildStreamingMessageMetadata(state, meta, nil)
+	}))
+	turn.Approvals().SetHandler(func(callCtx context.Context, sdkTurn *bridgesdk.Turn, req bridgesdk.ApprovalRequest) bridgesdk.ApprovalHandle {
+		return oc.requestTurnApproval(callCtx, portal, state, sdkTurn, req)
+	})
 	// Use bridges/ai's own initial message sending.
 	turn.SetSendFunc(func(sendCtx context.Context) (id.EventID, networkid.MessageID, error) {
 		if !state.suppressSend {
