@@ -575,9 +575,10 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 	cwd := strings.TrimSpace(meta.CodexCwd)
 	conv := bridgesdk.NewConversation(ctx, cc.UserLogin, portal, cc.senderForPortal(), cc.connector.sdkConfig, cc)
 	source := bridgesdk.UserMessageSource(sourceEvent.ID.String())
-	turn := conv.StartTurn(ctx, codexSDKAgent(), source)
-	stream := turn.Stream()
-	approvals := turn.Approvals()
+	stream := conv.Stream(ctx)
+	stream.SetAgent(codexSDKAgent())
+	stream.SetSource(source)
+	approvals := stream.Approvals()
 	stream.SetTransport(func(turnID string, seq int, content map[string]any, txnID string) bool {
 		if cc.streamEventHook == nil {
 			return false
@@ -588,11 +589,12 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 	approvals.SetHandler(func(callCtx context.Context, sdkTurn *bridgesdk.Turn, req bridgesdk.ApprovalRequest) bridgesdk.ApprovalHandle {
 		return cc.requestSDKApproval(callCtx, portal, state, sdkTurn, req)
 	})
-	turn.SetFinalMetadataProvider(bridgesdk.FinalMetadataProviderFunc(func(sdkTurn *bridgesdk.Turn, finishReason string) any {
+	stream.SetFinalMetadataProvider(bridgesdk.FinalMetadataProviderFunc(func(sdkTurn *bridgesdk.Turn, finishReason string) any {
 		return cc.buildSDKFinalMetadata(sdkTurn, state, model, finishReason)
 	}))
-	state.turn = turn
-	state.turnID = turn.ID()
+	state.stream = stream
+	state.turn = stream.Turn()
+	state.turnID = stream.ID()
 	state.agentID = string(codexGhostID)
 	state.initialEventID = sourceEvent.ID
 	stream.Metadata(cc.buildUIMessageMetadata(state, model, false, ""))
@@ -622,7 +624,7 @@ func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, met
 		"sandboxPolicy":  cc.buildSandboxPolicy(cwd),
 	}, &turnStart)
 	if err != nil {
-		turn.EndWithError(err.Error())
+		stream.EndWithError(err.Error())
 		return
 	}
 	turnID := strings.TrimSpace(turnStart.Turn.ID)
@@ -695,11 +697,11 @@ done:
 	}
 	if completedErr != "" {
 		stream.Metadata(cc.buildUIMessageMetadata(state, model, true, finishStatus))
-		turn.EndWithError(completedErr)
+		state.turn.EndWithError(completedErr)
 		return
 	}
 	stream.Metadata(cc.buildUIMessageMetadata(state, model, true, finishStatus))
-	turn.End(finishStatus)
+	state.turn.End(finishStatus)
 }
 
 func (cc *CodexClient) appendCodexToolOutput(state *streamingState, toolCallID, delta string) string {
@@ -771,7 +773,6 @@ func (cc *CodexClient) handleNotif(ctx context.Context, portal *bridgev2.Portal,
 		}
 		state.recordFirstToken()
 		state.accumulated.WriteString(f.Delta)
-		state.visibleAccumulated.WriteString(f.Delta)
 		cc.emitUITextDelta(ctx, portal, state, f.Delta)
 
 	case "item/reasoning/summaryTextDelta":
@@ -1039,7 +1040,6 @@ func (cc *CodexClient) handleItemCompleted(ctx context.Context, portal *bridgev2
 			return
 		}
 		state.accumulated.WriteString(it.Text)
-		state.visibleAccumulated.WriteString(it.Text)
 		cc.emitUITextDelta(ctx, portal, state, it.Text)
 		return
 	case "reasoning":
@@ -1803,11 +1803,11 @@ func (cc *CodexClient) buildUIMessageMetadata(state *streamingState, model strin
 	})
 }
 
-func (cc *CodexClient) turnStream(state *streamingState) *bridgesdk.TurnStream {
-	if state == nil || state.turn == nil {
+func (cc *CodexClient) turnStream(state *streamingState) *bridgesdk.Stream {
+	if state == nil || state.stream == nil {
 		return nil
 	}
-	return state.turn.Stream()
+	return state.stream
 }
 
 func (cc *CodexClient) emitUITextDelta(ctx context.Context, portal *bridgev2.Portal, state *streamingState, text string) {
@@ -1838,7 +1838,7 @@ func (cc *CodexClient) emitUIToolOutputAvailable(
 	streaming bool,
 ) {
 	if stream := cc.turnStream(state); stream != nil {
-		stream.ToolOutput(toolCallID, output, bridgesdk.ToolOutputOptions{
+		stream.TurnStream().ToolOutput(toolCallID, output, bridgesdk.ToolOutputOptions{
 			ProviderExecuted: providerExecuted,
 			Streaming:        streaming,
 		})
@@ -1860,7 +1860,7 @@ func (cc *CodexClient) emitUIToolOutputError(
 	providerExecuted bool,
 ) {
 	if stream := cc.turnStream(state); stream != nil {
-		stream.ToolOutputError(toolCallID, errText, providerExecuted)
+		stream.ToolOutputError(toolCallID, errText)
 	}
 }
 
@@ -1892,8 +1892,8 @@ func (cc *CodexClient) ensureUIToolInputStart(ctx context.Context, portal *bridg
 	if toolCallID == "" {
 		return
 	}
-	if state != nil && state.turn != nil {
-		state.turn.Stream().EnsureToolInputStart(toolCallID, input, bridgesdk.ToolInputOptions{
+	if stream := cc.turnStream(state); stream != nil {
+		stream.TurnStream().EnsureToolInputStart(toolCallID, input, bridgesdk.ToolInputOptions{
 			ToolName:         toolName,
 			ProviderExecuted: providerExecuted,
 		})
@@ -1904,8 +1904,8 @@ func (cc *CodexClient) emitUIToolApprovalRequest(
 	ctx context.Context, portal *bridgev2.Portal, state *streamingState,
 	approvalID, toolCallID, toolName string, presentation agentremote.ApprovalPromptPresentation, ttlSeconds int,
 ) {
-	if state != nil && state.turn != nil {
-		state.turn.Approvals().EmitRequest(approvalID, toolCallID)
+	if stream := cc.turnStream(state); stream != nil {
+		stream.Approvals().EmitRequest(approvalID, toolCallID)
 	}
 	if state == nil {
 		return
@@ -2113,7 +2113,11 @@ func (h *codexSDKApprovalHandle) Wait(ctx context.Context) (bridgesdk.ToolApprov
 	if h.turn != nil {
 		h.turn.Approvals().Respond(h.approvalID, h.toolCallID, ok && decision.Approved, reason)
 		if !(ok && decision.Approved) {
-			h.turn.Stream().ToolDenied(h.toolCallID)
+			if h.state != nil && h.state.stream != nil {
+				h.state.stream.ToolDenied(h.toolCallID)
+			} else {
+				h.turn.ToolDenied(h.toolCallID)
+			}
 		}
 	}
 	return bridgesdk.ToolApprovalResponse{

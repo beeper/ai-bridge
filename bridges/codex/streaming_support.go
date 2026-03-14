@@ -1,20 +1,16 @@
 package codex
 
 import (
-	"context"
 	"strings"
 	"time"
 
-	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/pkg/shared/backfillutil"
 	"github.com/beeper/agentremote/pkg/shared/citations"
-	"github.com/beeper/agentremote/pkg/shared/streamui"
 	bridgesdk "github.com/beeper/agentremote/sdk"
-	"github.com/beeper/agentremote/turns"
 )
 
 type streamingState struct {
@@ -39,6 +35,7 @@ type streamingState struct {
 	firstToken           bool
 	suppressSend         bool
 
+	stream *bridgesdk.Stream
 	turn *bridgesdk.Turn
 
 	codexToolOutputBuffers    map[string]*strings.Builder
@@ -55,15 +52,8 @@ func (s *streamingState) recordFirstToken() {
 	s.firstTokenAtMs = time.Now().UnixMilli()
 }
 
-func (s *streamingState) streamTarget() turns.StreamTarget {
-	if s == nil {
-		return turns.StreamTarget{}
-	}
-	return turns.StreamTarget{NetworkMessageID: s.networkMessageID}
-}
-
 func (s *streamingState) hasEditTarget() bool {
-	return s != nil && s.streamTarget().HasEditTarget()
+	return s != nil && s.networkMessageID != ""
 }
 
 func newStreamingState(sourceEventID id.EventID) *streamingState {

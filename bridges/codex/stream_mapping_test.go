@@ -9,6 +9,10 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/id"
+
+	"github.com/beeper/agentremote"
+	"github.com/beeper/agentremote/pkg/shared/streamui"
+	bridgesdk "github.com/beeper/agentremote/sdk"
 )
 
 func newHookableStreamingState(turnID string) *streamingState {
@@ -19,20 +23,37 @@ func newHookableStreamingState(turnID string) *streamingState {
 	}
 }
 
+func attachTestTurn(state *streamingState, portal *bridgev2.Portal) {
+	if state == nil {
+		return
+	}
+	conv := bridgesdk.NewConversation(context.Background(), nil, portal, bridgev2.EventSender{}, &bridgesdk.Config{}, nil)
+	turn := conv.StartTurn(context.Background(), nil, nil)
+	turn.SetID(state.turnID)
+	state.turn = turn
+}
+
+func uiPartTypes(state *streamingState) []string {
+	if state == nil || state.turn == nil || state.turn.UIState() == nil {
+		return nil
+	}
+	uiMessage := streamui.SnapshotCanonicalUIMessage(state.turn.UIState())
+	parts := agentremote.NormalizeUIParts(uiMessage["parts"])
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if typ, _ := part["type"].(string); typ != "" {
+			out = append(out, typ)
+		}
+	}
+	return out
+}
+
 func TestCodex_Mapping_AgentMessageDelta_EmitsTextStartThenDelta(t *testing.T) {
 	cc := &CodexClient{}
-	var got []string
-	cc.streamEventHook = func(turnID string, seq int, content map[string]any, txnID string) {
-		_ = turnID
-		_ = seq
-		_ = txnID
-		part, _ := content["part"].(map[string]any)
-		typ, _ := part["type"].(string)
-		got = append(got, typ)
-	}
 
 	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: id.RoomID("!room:example.com")}}
 	state := newHookableStreamingState("turn_1")
+	attachTestTurn(state, portal)
 	threadID := "thr_1"
 	turnID := "turn_1_server"
 
@@ -48,6 +69,7 @@ func TestCodex_Mapping_AgentMessageDelta_EmitsTextStartThenDelta(t *testing.T) {
 		Params: raw,
 	})
 
+	got := uiPartTypes(state)
 	if len(got) != 2 || got[0] != "text-start" || got[1] != "text-delta" {
 		t.Fatalf("expected [text-start text-delta], got %v", got)
 	}
@@ -55,18 +77,10 @@ func TestCodex_Mapping_AgentMessageDelta_EmitsTextStartThenDelta(t *testing.T) {
 
 func TestCodex_Mapping_ReasoningSummaryDelta_EmitsReasoningStartThenDelta(t *testing.T) {
 	cc := &CodexClient{}
-	var got []string
-	cc.streamEventHook = func(turnID string, seq int, content map[string]any, txnID string) {
-		_ = turnID
-		_ = seq
-		_ = txnID
-		part, _ := content["part"].(map[string]any)
-		typ, _ := part["type"].(string)
-		got = append(got, typ)
-	}
 
 	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: id.RoomID("!room:example.com")}}
 	state := newHookableStreamingState("turn_1")
+	attachTestTurn(state, portal)
 	threadID := "thr_1"
 	turnID := "turn_1_server"
 
@@ -81,6 +95,7 @@ func TestCodex_Mapping_ReasoningSummaryDelta_EmitsReasoningStartThenDelta(t *tes
 		Params: raw,
 	})
 
+	got := uiPartTypes(state)
 	if len(got) != 2 || got[0] != "reasoning-start" || got[1] != "reasoning-delta" {
 		t.Fatalf("expected [reasoning-start reasoning-delta], got %v", got)
 	}
@@ -88,18 +103,10 @@ func TestCodex_Mapping_ReasoningSummaryDelta_EmitsReasoningStartThenDelta(t *tes
 
 func TestCodex_Mapping_ItemStartedCommandExecution_EmitsToolInputStartAndAvailable(t *testing.T) {
 	cc := &CodexClient{}
-	var got []string
-	cc.streamEventHook = func(turnID string, seq int, content map[string]any, txnID string) {
-		_ = turnID
-		_ = seq
-		_ = txnID
-		part, _ := content["part"].(map[string]any)
-		typ, _ := part["type"].(string)
-		got = append(got, typ)
-	}
 
 	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: id.RoomID("!room:example.com")}}
 	state := newHookableStreamingState("turn_1")
+	attachTestTurn(state, portal)
 	threadID := "thr_1"
 	turnID := "turn_1_server"
 
@@ -121,6 +128,7 @@ func TestCodex_Mapping_ItemStartedCommandExecution_EmitsToolInputStartAndAvailab
 		Params: raw,
 	})
 
+	got := uiPartTypes(state)
 	if len(got) != 2 || got[0] != "tool-input-start" || got[1] != "tool-input-available" {
 		t.Fatalf("expected [tool-input-start tool-input-available], got %v", got)
 	}
@@ -128,22 +136,10 @@ func TestCodex_Mapping_ItemStartedCommandExecution_EmitsToolInputStartAndAvailab
 
 func TestCodex_Mapping_CommandOutputDelta_IsBuffered(t *testing.T) {
 	cc := &CodexClient{}
-	var gotOutputs []string
-	cc.streamEventHook = func(turnID string, seq int, content map[string]any, txnID string) {
-		_ = turnID
-		_ = seq
-		_ = txnID
-		part, _ := content["part"].(map[string]any)
-		if part["type"] != "tool-output-available" {
-			return
-		}
-		if out, ok := part["output"].(string); ok {
-			gotOutputs = append(gotOutputs, out)
-		}
-	}
 
 	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: id.RoomID("!room:example.com")}}
 	state := newHookableStreamingState("turn_1")
+	attachTestTurn(state, portal)
 	threadID := "thr_1"
 	turnID := "turn_1_server"
 
@@ -168,6 +164,17 @@ func TestCodex_Mapping_CommandOutputDelta_IsBuffered(t *testing.T) {
 		Params: raw2,
 	})
 
+	uiMessage := streamui.SnapshotCanonicalUIMessage(state.turn.UIState())
+	parts := agentremote.NormalizeUIParts(uiMessage["parts"])
+	var gotOutputs []string
+	for _, part := range parts {
+		if part["type"] != "tool-output-available" {
+			continue
+		}
+		if out, ok := part["output"].(string); ok {
+			gotOutputs = append(gotOutputs, out)
+		}
+	}
 	if len(gotOutputs) < 2 {
 		t.Fatalf("expected at least 2 tool outputs, got %v", gotOutputs)
 	}
@@ -178,18 +185,10 @@ func TestCodex_Mapping_CommandOutputDelta_IsBuffered(t *testing.T) {
 
 func TestCodex_Mapping_TurnDiffUpdated_EmitsToolOutput(t *testing.T) {
 	cc := &CodexClient{}
-	var got []string
-	cc.streamEventHook = func(turnID string, seq int, content map[string]any, txnID string) {
-		_ = turnID
-		_ = seq
-		_ = txnID
-		part, _ := content["part"].(map[string]any)
-		typ, _ := part["type"].(string)
-		got = append(got, typ)
-	}
 
 	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: id.RoomID("!room:example.com")}}
 	state := newHookableStreamingState("turn_1")
+	attachTestTurn(state, portal)
 	threadID := "thr_1"
 	turnID := "turn_1_server"
 
@@ -204,6 +203,7 @@ func TestCodex_Mapping_TurnDiffUpdated_EmitsToolOutput(t *testing.T) {
 	})
 
 	// tool-input-start, tool-input-available, tool-output-available
+	got := uiPartTypes(state)
 	if len(got) < 3 {
 		t.Fatalf("expected >=3 parts, got %v", got)
 	}
@@ -214,18 +214,10 @@ func TestCodex_Mapping_TurnDiffUpdated_EmitsToolOutput(t *testing.T) {
 
 func TestCodex_Mapping_ContextCompaction_EmitsToolParts(t *testing.T) {
 	cc := &CodexClient{}
-	var got []string
-	cc.streamEventHook = func(turnID string, seq int, content map[string]any, txnID string) {
-		_ = turnID
-		_ = seq
-		_ = txnID
-		part, _ := content["part"].(map[string]any)
-		typ, _ := part["type"].(string)
-		got = append(got, typ)
-	}
 
 	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: id.RoomID("!room:example.com")}}
 	state := newHookableStreamingState("turn_1")
+	attachTestTurn(state, portal)
 	threadID := "thr_1"
 	turnID := "turn_1_server"
 
@@ -244,6 +236,7 @@ func TestCodex_Mapping_ContextCompaction_EmitsToolParts(t *testing.T) {
 	})
 
 	// started => tool-input-start/tool-input-available, completed => tool-output-available
+	got := uiPartTypes(state)
 	if len(got) < 3 {
 		t.Fatalf("expected >=3 parts, got %v", got)
 	}
@@ -254,18 +247,10 @@ func TestCodex_Mapping_ContextCompaction_EmitsToolParts(t *testing.T) {
 
 func TestCodex_Mapping_ReviewMode_EmitsReviewToolOutput(t *testing.T) {
 	cc := &CodexClient{}
-	var gotTypes []string
-	cc.streamEventHook = func(turnID string, seq int, content map[string]any, txnID string) {
-		_ = turnID
-		_ = seq
-		_ = txnID
-		part, _ := content["part"].(map[string]any)
-		typ, _ := part["type"].(string)
-		gotTypes = append(gotTypes, typ)
-	}
 
 	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: id.RoomID("!room:example.com")}}
 	state := newHookableStreamingState("turn_1")
+	attachTestTurn(state, portal)
 	threadID := "thr_1"
 	turnID := "turn_1_server"
 
@@ -283,6 +268,7 @@ func TestCodex_Mapping_ReviewMode_EmitsReviewToolOutput(t *testing.T) {
 	})
 	cc.handleNotif(context.Background(), portal, nil, state, "model", threadID, turnID, codexNotif{Method: "item/completed", Params: rawCompleted})
 
+	gotTypes := uiPartTypes(state)
 	// At least one tool output should be present.
 	seenOutput := false
 	for _, typ := range gotTypes {

@@ -3,7 +3,6 @@ package codex
 import (
 	"context"
 	"encoding/json"
-	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +13,8 @@ import (
 
 	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/bridges/codex/codexrpc"
+	"github.com/beeper/agentremote/pkg/shared/streamui"
+	bridgesdk "github.com/beeper/agentremote/sdk"
 )
 
 func newTestCodexClient(owner id.UserID) *CodexClient {
@@ -51,31 +52,41 @@ func waitForPendingApproval(t *testing.T, ctx context.Context, cc *CodexClient, 
 	}
 }
 
+func attachApprovalTestTurn(state *streamingState, portal *bridgev2.Portal) {
+	if state == nil {
+		return
+	}
+	conv := bridgesdk.NewConversation(context.Background(), nil, portal, bridgev2.EventSender{}, &bridgesdk.Config{}, nil)
+	turn := conv.StartTurn(context.Background(), nil, nil)
+	turn.SetID(state.turnID)
+	state.turn = turn
+}
+
+func approvalPartTypes(state *streamingState) []string {
+	if state == nil || state.turn == nil || state.turn.UIState() == nil {
+		return nil
+	}
+	uiMessage := streamui.SnapshotCanonicalUIMessage(state.turn.UIState())
+	parts := agentremote.NormalizeUIParts(uiMessage["parts"])
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if typ, _ := part["type"].(string); typ != "" {
+			out = append(out, typ)
+		}
+	}
+	return out
+}
+
 func TestCodex_CommandApproval_RequestBlocksUntilApproved(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	t.Cleanup(cancel)
 
-	var mu sync.Mutex
-	var gotPartTypes []string
-	var gotParts []map[string]any
 	cc := newTestCodexClient(id.UserID("@owner:example.com"))
-	cc.streamEventHook = func(turnID string, seq int, content map[string]any, txnID string) {
-		_ = turnID
-		_ = seq
-		_ = txnID
-		if p, ok := content["part"].(map[string]any); ok {
-			mu.Lock()
-			gotParts = append(gotParts, p)
-			if typ, ok := p["type"].(string); ok {
-				gotPartTypes = append(gotPartTypes, typ)
-			}
-			mu.Unlock()
-		}
-	}
 
 	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: id.RoomID("!room:example.com")}}
 	meta := &PortalMetadata{}
 	state := &streamingState{turnID: "turn_local", initialEventID: id.EventID("$event"), networkMessageID: networkid.MessageID("codex:test")}
+	attachApprovalTestTurn(state, portal)
 	cc.activeTurns = map[string]*codexActiveTurn{
 		codexTurnKey("thr_1", "turn_1"): {
 			portal:   portal,
@@ -132,8 +143,9 @@ func TestCodex_CommandApproval_RequestBlocksUntilApproved(t *testing.T) {
 		t.Fatalf("timed out waiting for approval handler to return")
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	uiMessage := streamui.SnapshotCanonicalUIMessage(state.turn.UIState())
+	gotParts := agentremote.NormalizeUIParts(uiMessage["parts"])
+	gotPartTypes := approvalPartTypes(state)
 	hasRequest := false
 	hasResponse := false
 	hasDenied := false
@@ -163,25 +175,12 @@ func TestCodex_CommandApproval_DenyEmitsResponseThenOutputDenied(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	t.Cleanup(cancel)
 
-	var mu sync.Mutex
-	var gotPartTypes []string
 	cc := newTestCodexClient(id.UserID("@owner:example.com"))
-	cc.streamEventHook = func(turnID string, seq int, content map[string]any, txnID string) {
-		_ = turnID
-		_ = seq
-		_ = txnID
-		if p, ok := content["part"].(map[string]any); ok {
-			if typ, ok := p["type"].(string); ok {
-				mu.Lock()
-				gotPartTypes = append(gotPartTypes, typ)
-				mu.Unlock()
-			}
-		}
-	}
 
 	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: id.RoomID("!room:example.com")}}
 	meta := &PortalMetadata{}
 	state := &streamingState{turnID: "turn_local", initialEventID: id.EventID("$event"), networkMessageID: networkid.MessageID("codex:test")}
+	attachApprovalTestTurn(state, portal)
 	cc.activeTurns = map[string]*codexActiveTurn{
 		codexTurnKey("thr_1", "turn_1"): {
 			portal:   portal,
@@ -229,8 +228,7 @@ func TestCodex_CommandApproval_DenyEmitsResponseThenOutputDenied(t *testing.T) {
 		t.Fatalf("timed out waiting for approval handler to return")
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	gotPartTypes := approvalPartTypes(state)
 	idxResponse := -1
 	idxDenied := -1
 	for idx, typ := range gotPartTypes {

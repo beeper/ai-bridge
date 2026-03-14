@@ -92,6 +92,7 @@ type openClawStreamState struct {
 	portal                    *bridgev2.Portal
 	turnID                    string
 	agentID                   string
+	stream                    *bridgesdk.Stream
 	turn                      *bridgesdk.Turn
 	sessionKey                string
 	messageTS                 time.Time

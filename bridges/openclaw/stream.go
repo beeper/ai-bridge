@@ -126,21 +126,22 @@ func (oc *OpenClawClient) EmitStreamPart(ctx context.Context, portal *bridgev2.P
 		}
 	}
 	streamui.ApplyChunk(&state.ui, part)
-	turn := state.turn
-	if turn == nil {
-		turn = oc.newSDKStreamTurn(ctx, portal, state)
-		state.turn = turn
+	stream := state.stream
+	if stream == nil {
+		stream = oc.newSDKStream(ctx, portal, state)
+		state.stream = stream
+		if stream != nil {
+			state.turn = stream.Turn()
+		}
 	}
 	oc.StreamMu.Unlock()
 
 	if oc.IsStreamShuttingDown() {
 		return
 	}
-	if turn == nil {
+	if stream == nil {
 		return
 	}
-
-	stream := turn.Stream()
 	switch partType {
 	case "start", "message-metadata":
 		if metadata, _ := part["messageMetadata"].(map[string]any); len(metadata) > 0 {
@@ -162,7 +163,7 @@ func (oc *OpenClawClient) EmitStreamPart(ctx context.Context, portal *bridgev2.P
 		toolName := strings.TrimSpace(stringValue(part["toolName"]))
 		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
 		providerExecuted, _ := part["providerExecuted"].(bool)
-		stream.EnsureToolInputStart(toolCallID, nil, bridgesdk.ToolInputOptions{
+		stream.TurnStream().EnsureToolInputStart(toolCallID, nil, bridgesdk.ToolInputOptions{
 			ToolName:         toolName,
 			ProviderExecuted: providerExecuted,
 		})
@@ -179,25 +180,25 @@ func (oc *OpenClawClient) EmitStreamPart(ctx context.Context, portal *bridgev2.P
 	case "tool-output-available":
 		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
 		providerExecuted, _ := part["providerExecuted"].(bool)
-		stream.ToolOutput(toolCallID, part["output"], bridgesdk.ToolOutputOptions{ProviderExecuted: providerExecuted})
+		stream.TurnStream().ToolOutput(toolCallID, part["output"], bridgesdk.ToolOutputOptions{ProviderExecuted: providerExecuted})
 	case "tool-output-error":
 		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
 		errorText := stringValue(part["errorText"])
 		providerExecuted, _ := part["providerExecuted"].(bool)
-		stream.ToolOutputError(toolCallID, errorText, providerExecuted)
+		stream.TurnStream().ToolOutputError(toolCallID, errorText, providerExecuted)
 	case "tool-output-denied":
 		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
 		stream.ToolDenied(toolCallID)
 	case "tool-approval-request":
 		approvalID := strings.TrimSpace(stringValue(part["approvalId"]))
 		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
-		turn.Approvals().EmitRequest(approvalID, toolCallID)
+		stream.Approvals().EmitRequest(approvalID, toolCallID)
 	case "tool-approval-response":
 		approvalID := strings.TrimSpace(stringValue(part["approvalId"]))
 		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
 		approved, _ := part["approved"].(bool)
 		reason := stringValue(part["reason"])
-		turn.Approvals().Respond(approvalID, toolCallID, approved, reason)
+		stream.Approvals().Respond(approvalID, toolCallID, approved, reason)
 	case "file":
 		stream.File(stringValue(part["url"]), stringValue(part["mediaType"]))
 	case "source-document":
@@ -213,7 +214,7 @@ func (oc *OpenClawClient) EmitStreamPart(ctx context.Context, portal *bridgev2.P
 		stream.Error(stringValue(part["errorText"]))
 	default:
 		if strings.HasPrefix(partType, "data-") {
-			stream.Emitter().Emit(turn.Context(), portal, part)
+			stream.Emitter().Emit(stream.Context(), portal, part)
 		}
 	}
 }
@@ -226,9 +227,9 @@ func (oc *OpenClawClient) FinishStream(turnID, finishReason string) {
 
 	oc.StreamMu.Lock()
 	state := oc.streamStates[turnID]
-	var turn *bridgesdk.Turn
+	var stream *bridgesdk.Stream
 	if state != nil {
-		turn = state.turn
+		stream = state.stream
 		if state.finishReason == "" {
 			state.finishReason = strings.TrimSpace(finishReason)
 		}
@@ -242,21 +243,21 @@ func (oc *OpenClawClient) FinishStream(turnID, finishReason string) {
 	delete(oc.streamStates, turnID)
 	oc.StreamMu.Unlock()
 
-	if turn == nil {
+	if stream == nil {
 		return
 	}
 	switch strings.TrimSpace(state.finishReason) {
 	case "abort", "aborted":
-		turn.Abort(openclawconv.StringsTrimDefault(state.finishReason, "aborted"))
+		stream.Abort(openclawconv.StringsTrimDefault(state.finishReason, "aborted"))
 	case "error":
-		turn.EndWithError(openclawconv.StringsTrimDefault(state.errorText, "OpenClaw stream failed"))
+		stream.EndWithError(openclawconv.StringsTrimDefault(state.errorText, "OpenClaw stream failed"))
 	default:
 		reason := openclawconv.StringsTrimDefault(state.finishReason, strings.TrimSpace(finishReason))
-		turn.End(openclawconv.StringsTrimDefault(reason, "stop"))
+		stream.End(openclawconv.StringsTrimDefault(reason, "stop"))
 	}
 }
 
-func (oc *OpenClawClient) newSDKStreamTurn(ctx context.Context, portal *bridgev2.Portal, state *openClawStreamState) *bridgesdk.Turn {
+func (oc *OpenClawClient) newSDKStream(ctx context.Context, portal *bridgev2.Portal, state *openClawStreamState) *bridgesdk.Stream {
 	if oc == nil || portal == nil || state == nil || oc.connector == nil || oc.connector.sdkConfig == nil {
 		return nil
 	}
@@ -267,10 +268,11 @@ func (oc *OpenClawClient) newSDKStreamTurn(ctx context.Context, portal *bridgev2
 	sender := oc.senderForAgent(state.agentID, false)
 	conv := bridgesdk.NewConversation(ctx, oc.UserLogin, portal, sender, oc.connector.sdkConfig, oc)
 	_ = conv.EnsureRoomAgent(ctx, agent)
-	turn := conv.StartTurn(ctx, agent, nil)
-	turn.SetID(state.turnID)
-	turn.SetSender(sender)
-	turn.SetFinalMetadataProvider(bridgesdk.FinalMetadataProviderFunc(func(_ *bridgesdk.Turn, finishReason string) any {
+	stream := conv.Stream(ctx)
+	stream.SetAgent(agent)
+	stream.SetID(state.turnID)
+	stream.SetSender(sender)
+	stream.SetFinalMetadataProvider(bridgesdk.FinalMetadataProviderFunc(func(_ *bridgesdk.Turn, finishReason string) any {
 		if strings.TrimSpace(finishReason) != "" {
 			state.finishReason = strings.TrimSpace(finishReason)
 		}
@@ -279,7 +281,7 @@ func (oc *OpenClawClient) newSDKStreamTurn(ctx context.Context, portal *bridgev2
 		}
 		return oc.buildStreamDBMetadata(state)
 	}))
-	return turn
+	return stream
 }
 
 func (oc *OpenClawClient) computeVisibleDelta(turnID, text string) string {

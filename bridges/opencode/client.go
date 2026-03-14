@@ -39,6 +39,7 @@ type openCodeStreamState struct {
 	portal               *bridgev2.Portal
 	turnID               string
 	agentID              string
+	stream               *bridgesdk.Stream
 	turn                 *bridgesdk.Turn
 	initialEventID       id.EventID
 	networkMessageID     networkid.MessageID

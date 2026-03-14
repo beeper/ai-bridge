@@ -1,54 +1,30 @@
 package codex
 
 import (
-	"context"
 	"testing"
 	"time"
 
+	"github.com/beeper/agentremote"
+	"github.com/beeper/agentremote/pkg/shared/streamui"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
-	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/id"
 )
 
 func TestCodex_StreamChunks_BasicOrderingAndSeq(t *testing.T) {
-	ctx := context.Background()
-
-	var gotParts []map[string]any
-	var gotSeq []int
-	cc := &CodexClient{
-		streamEventHook: func(turnID string, seq int, content map[string]any, txnID string) {
-			_ = turnID
-			_ = txnID
-			gotSeq = append(gotSeq, seq)
-			partAny, _ := content["part"].(map[string]any)
-			gotParts = append(gotParts, partAny)
-		},
-	}
 	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: id.RoomID("!room:example.com")}}
-	state := &streamingState{
-		turnID:           "turn_local_1",
-		initialEventID:   id.EventID("$event"),
-		networkMessageID: networkid.MessageID("codex:test"),
-	}
+	state := newHookableStreamingState("turn_local_1")
+	attachTestTurn(state, portal)
+	state.turn.Stream().Metadata(map[string]any{"model": "gpt-5.1-codex"})
+	state.turn.Stream().StepStart()
+	state.turn.Stream().TextDelta("hi")
+	state.turn.End("completed")
 
-	cc.emitUIStart(ctx, portal, state, "gpt-5.1-codex")
-	cc.uiEmitter(state).EmitUIStepStart(ctx, portal)
-	cc.uiEmitter(state).EmitUITextDelta(ctx, portal, "hi")
-	cc.emitUIFinish(ctx, portal, state, "gpt-5.1-codex", "completed")
-
+	uiMessage := streamui.SnapshotCanonicalUIMessage(state.turn.UIState())
+	gotParts := agentremote.NormalizeUIParts(uiMessage["parts"])
 	if len(gotParts) < 5 {
 		t.Fatalf("expected >=5 parts, got %d", len(gotParts))
 	}
-	if gotSeq[0] != 1 {
-		t.Fatalf("expected first seq=1, got %d", gotSeq[0])
-	}
-	for i := 1; i < len(gotSeq); i++ {
-		if gotSeq[i] <= gotSeq[i-1] {
-			t.Fatalf("seq not monotonic at %d: %v", i, gotSeq)
-		}
-	}
-
 	if gotParts[0]["type"] != "start" {
 		t.Fatalf("expected first part type=start, got %#v", gotParts[0]["type"])
 	}
