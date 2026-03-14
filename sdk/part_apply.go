@@ -124,10 +124,6 @@ func partString(part map[string]any, key string) string {
 }
 
 func partBool(part map[string]any, key string) bool {
-	raw, ok := part[key]
-	if !ok {
-		return false
-	}
-	value, _ := raw.(bool)
+	value, _ := part[key].(bool)
 	return value
 }

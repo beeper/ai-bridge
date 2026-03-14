@@ -18,6 +18,11 @@ type Scope struct {
 	AgentID  string
 }
 
+// ready reports whether this scope has a usable database connection.
+func (s *Scope) ready() bool {
+	return s != nil && s.DB != nil
+}
+
 func NewScope(db *dbutil.Database, bridgeID, loginID, agentID string) *Scope {
 	if db == nil {
 		return nil

@@ -211,11 +211,11 @@ func (c *sdkClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Matri
 		return c.config().OnMessage(session, conv, sdkMsg, turn)
 	}
 	go func() {
-		if c.turnManager != nil {
+		if c.turnManager == nil {
+			_ = run(runCtx)
+		} else {
 			_ = c.turnManager.Run(runCtx, roomID, run)
-			return
 		}
-		_ = run(runCtx)
 	}()
 	return &bridgev2.MatrixMessageResponse{Pending: true}, nil
 }
@@ -241,8 +241,6 @@ func convertMatrixMessage(msg *bridgev2.MatrixMessage) *Message {
 	}
 
 	switch content.MsgType {
-	case event.MsgText, event.MsgNotice, event.MsgEmote:
-		m.MsgType = MessageText
 	case event.MsgImage:
 		m.MsgType = MessageImage
 	case event.MsgAudio:

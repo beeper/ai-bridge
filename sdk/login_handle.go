@@ -61,18 +61,13 @@ func (l *LoginHandle) EnsureConversation(ctx context.Context, spec ConversationS
 	}
 
 	state := conversationStateFromSpec(spec)
-
 	if portal.Metadata == nil {
 		portal.Metadata = &SDKPortalMetadata{}
 	}
-	var store *conversationStateStore
-	if l.runtime != nil {
-		store = l.runtime.conversationStore()
-	}
-	if err := saveConversationState(ctx, portal, store, state); err != nil {
+	conv := newConversation(ctx, portal, l.login, bridgev2.EventSender{}, l.runtime)
+	if err := conv.saveState(ctx, state); err != nil {
 		return nil, err
 	}
-	conv := newConversation(ctx, portal, l.login, bridgev2.EventSender{}, l.runtime)
 	if portal.MXID == "" {
 		info := &bridgev2.ChatInfo{Name: ptr.NonZero(portal.Name)}
 		if err := portal.CreateMatrixRoom(ctx, l.login, info); err != nil {

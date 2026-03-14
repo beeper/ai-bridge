@@ -28,7 +28,7 @@ type ApprovalStore struct {
 }
 
 func (s *ApprovalStore) Upsert(ctx context.Context, record ApprovalRecord) error {
-	if s == nil || s.scope == nil || s.scope.DB == nil {
+	if s == nil || !s.scope.ready() {
 		return nil
 	}
 	record.ApprovalID = strings.TrimSpace(record.ApprovalID)
@@ -67,7 +67,7 @@ func (s *ApprovalStore) Upsert(ctx context.Context, record ApprovalRecord) error
 }
 
 func (s *ApprovalStore) Get(ctx context.Context, approvalID string) (ApprovalRecord, bool, error) {
-	if s == nil || s.scope == nil || s.scope.DB == nil {
+	if s == nil || !s.scope.ready() {
 		return ApprovalRecord{}, false, nil
 	}
 	record := ApprovalRecord{}

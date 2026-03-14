@@ -21,7 +21,7 @@ type SystemEventStore struct {
 }
 
 func (s *SystemEventStore) Replace(ctx context.Context, queues []SystemEventQueue) error {
-	if s == nil || s.scope == nil || s.scope.DB == nil {
+	if s == nil || !s.scope.ready() {
 		return nil
 	}
 	return s.scope.DB.DoTxn(ctx, nil, func(ctx context.Context) error {
@@ -52,7 +52,7 @@ func (s *SystemEventStore) Replace(ctx context.Context, queues []SystemEventQueu
 }
 
 func (s *SystemEventStore) Load(ctx context.Context) ([]SystemEventQueue, error) {
-	if s == nil || s.scope == nil || s.scope.DB == nil {
+	if s == nil || !s.scope.ready() {
 		return nil, nil
 	}
 	rows, err := s.scope.DB.Query(ctx, `
@@ -79,7 +79,6 @@ func (s *SystemEventStore) Load(ctx context.Context) ([]SystemEventQueue, error)
 		if err := rows.Scan(&sessionKey, &eventIndex, &text, &ts, &lastText); err != nil {
 			return nil, err
 		}
-		_ = eventIndex
 		if current == nil || current.SessionKey != sessionKey {
 			queues = append(queues, SystemEventQueue{SessionKey: sessionKey})
 			current = &queues[len(queues)-1]

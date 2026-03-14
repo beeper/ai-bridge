@@ -28,7 +28,7 @@ type SessionStore struct {
 }
 
 func (s *SessionStore) Get(ctx context.Context, sessionKey string) (SessionRecord, bool, error) {
-	if s == nil || s.scope == nil || s.scope.DB == nil {
+	if s == nil || !s.scope.ready() {
 		return SessionRecord{}, false, nil
 	}
 	key := strings.TrimSpace(sessionKey)
@@ -74,7 +74,7 @@ func (s *SessionStore) Get(ctx context.Context, sessionKey string) (SessionRecor
 }
 
 func (s *SessionStore) Upsert(ctx context.Context, record SessionRecord) error {
-	if s == nil || s.scope == nil || s.scope.DB == nil {
+	if s == nil || !s.scope.ready() {
 		return nil
 	}
 	key := strings.TrimSpace(record.SessionKey)

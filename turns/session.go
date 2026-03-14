@@ -201,7 +201,7 @@ func (s *StreamSession) EmitPart(ctx context.Context, part map[string]any) {
 	// Build the envelope once and share it between hook and ephemeral paths.
 	seq := s.params.NextSeq()
 	content, err := matrixevents.BuildStreamEventEnvelope(turnID, seq, part, matrixevents.StreamEventOpts{
-		RelatesToEventID: targetEventID,
+		RelatesToEventID: string(targetEventID),
 		AgentID:          strings.TrimSpace(s.params.AgentID),
 	})
 	if err != nil {
@@ -230,15 +230,14 @@ func (s *StreamSession) EmitPart(ctx context.Context, part map[string]any) {
 	_ = s.sendEphemeralWithRetry(ephemeralSender, eventContent, txnID, partType)
 }
 
-func (s *StreamSession) resolveTargetEventID(ctx context.Context, target StreamTarget) (string, error) {
+func (s *StreamSession) resolveTargetEventID(ctx context.Context, target StreamTarget) (id.EventID, error) {
 	if s == nil {
 		return "", nil
 	}
 	s.targetMu.Lock()
 	if resolved, ok := s.resolvedTargetIDs[target]; ok {
-		resolvedStr := resolved.String()
 		s.targetMu.Unlock()
-		return resolvedStr, nil
+		return resolved, nil
 	}
 	s.targetMu.Unlock()
 
@@ -247,13 +246,13 @@ func (s *StreamSession) resolveTargetEventID(ctx context.Context, target StreamT
 	}
 	resolved, err := s.params.ResolveTargetEventID(ctx, target)
 	if err != nil || resolved == "" {
-		return resolved.String(), err
+		return resolved, err
 	}
 
 	s.targetMu.Lock()
 	s.resolvedTargetIDs[target] = resolved
 	s.targetMu.Unlock()
-	return resolved.String(), nil
+	return resolved, nil
 }
 
 func (s *StreamSession) sendEphemeralWithRetry(ephemeralSender bridgev2.EphemeralSendingMatrixAPI, eventContent *event.Content, txnID string, partType string) bool {
@@ -264,7 +263,7 @@ func (s *StreamSession) sendEphemeralWithRetry(ephemeralSender bridgev2.Ephemera
 		if s.IsClosed() {
 			return context.Canceled
 		}
-		roomID := id.RoomID("")
+		var roomID id.RoomID
 		if s.params.GetRoomID != nil {
 			roomID = s.params.GetRoomID()
 		}
@@ -306,14 +305,14 @@ func (s *StreamSession) useDebouncedMode() bool {
 		(s.params.RuntimeFallbackFlag != nil && s.params.RuntimeFallbackFlag.Load())
 }
 
-func (s *StreamSession) fallbackToDebounced(ctx context.Context, reason string, err error, partType string) {
-	s.switchToDebounced(ctx, reason, err)
+func (s *StreamSession) fallbackToDebounced(_ context.Context, reason string, err error, partType string) {
+	s.switchToDebounced(reason, err)
 	if eligible, force := debouncedPartMode(partType); eligible {
 		s.enqueueDebounced(force)
 	}
 }
 
-func (s *StreamSession) switchToDebounced(_ context.Context, reason string, err error) {
+func (s *StreamSession) switchToDebounced(reason string, err error) {
 	if s == nil {
 		return
 	}
@@ -415,9 +414,8 @@ func debouncedPartMode(partType string) (eligible bool, force bool) {
 		return true, false
 	case "tool-input-start", "tool-input-available", "tool-input-error",
 		"tool-output-available", "tool-output-error", "tool-output-denied",
-		"tool-approval-request", "tool-approval-response":
-		return true, true
-	case "finish", "abort", "error":
+		"tool-approval-request", "tool-approval-response",
+		"finish", "abort", "error":
 		return true, true
 	default:
 		return false, false

@@ -3,7 +3,6 @@ package sdk
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -737,8 +736,5 @@ func (t *Turn) Session() *turns.StreamSession { return t.session }
 
 // Err returns any startup error encountered by the turn transport.
 func (t *Turn) Err() error {
-	if t.startErr == nil {
-		return nil
-	}
-	return fmt.Errorf("turn startup failed: %w", t.startErr)
+	return t.startErr
 }

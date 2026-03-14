@@ -4,7 +4,7 @@ import "maunium.net/go/mautrix/event"
 
 func defaultSDKFeatureConfig() *RoomFeatures {
 	return &RoomFeatures{
-		MaxTextLength:        100000,
+		MaxTextLength:        DefaultAgentMaxTextLength,
 		SupportsReply:        true,
 		SupportsReactions:    true,
 		SupportsTyping:       true,
@@ -67,7 +67,7 @@ func convertRoomFeatures(f *RoomFeatures) *event.RoomFeatures {
 	}
 	maxText := f.MaxTextLength
 	if maxText == 0 {
-		maxText = 100000
+		maxText = DefaultAgentMaxTextLength
 	}
 	capID := f.CustomCapabilityID
 	if capID == "" {

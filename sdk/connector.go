@@ -16,16 +16,14 @@ import (
 
 // NewConnectorBase builds an SDK-backed connector base that can be embedded by custom bridges.
 func NewConnectorBase(cfg *Config) *agentremote.ConnectorBase {
-	var localMu sync.Mutex
-	var localClients map[networkid.UserLoginID]bridgev2.NetworkAPI
 	var br *bridgev2.Bridge
-	mu := &localMu
-	clientsRef := &localClients
-	if cfg.ClientCacheMu != nil {
-		mu = cfg.ClientCacheMu
+	mu, clientsRef := cfg.ClientCacheMu, cfg.ClientCache
+	if mu == nil {
+		mu = &sync.Mutex{}
 	}
-	if cfg.ClientCache != nil {
-		clientsRef = cfg.ClientCache
+	if clientsRef == nil {
+		clients := make(map[networkid.UserLoginID]bridgev2.NetworkAPI)
+		clientsRef = &clients
 	}
 
 	protocolID := cfg.ProtocolID
@@ -71,11 +69,10 @@ func NewConnectorBase(cfg *Config) *agentremote.ConnectorBase {
 			}
 		},
 		Config: func() (string, any, configupgrade.Upgrader) {
-			example := cfg.ExampleConfig
-			if example == "" {
-				example = "{}"
+			if cfg.ExampleConfig != "" {
+				return cfg.ExampleConfig, cfg.ConfigData, cfg.ConfigUpgrader
 			}
-			return example, cfg.ConfigData, cfg.ConfigUpgrader
+			return "{}", cfg.ConfigData, cfg.ConfigUpgrader
 		},
 		DBMeta: func() database.MetaTypes {
 			if cfg.DBMeta != nil {

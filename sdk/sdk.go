@@ -16,16 +16,15 @@ type Bridge struct {
 // New creates a new SDK bridge instance.
 func New(cfg Config) *Bridge {
 	conn := NewConnectorBase(&cfg)
-	desc := cfg.Description
-	if desc == "" {
-		desc = "A Matrix↔" + cfg.Name + " bridge for Beeper built on agentremote SDK."
+	if cfg.Description == "" {
+		cfg.Description = "A Matrix↔" + cfg.Name + " bridge for Beeper built on agentremote SDK."
 	}
 	return &Bridge{
 		config:    &cfg,
 		connector: conn,
 		main: &mxmain.BridgeMain{
 			Name:        cfg.Name,
-			Description: desc,
+			Description: cfg.Description,
 			URL:         "https://github.com/beeper/agentremote",
 			Version:     "0.1.0",
 			Connector:   conn,
@@ -39,10 +38,8 @@ func (b *Bridge) Run() {
 	b.main.Run()
 }
 
-// Stop stops the bridge.
-func (b *Bridge) Stop() {
-	// Bridge stop is handled by mxmain's signal handling
-}
+// Stop is a no-op; shutdown is handled by mxmain's signal handling.
+func (b *Bridge) Stop() {}
 
 // Connector returns the underlying ConnectorBase.
 func (b *Bridge) Connector() *agentremote.ConnectorBase { return b.connector }

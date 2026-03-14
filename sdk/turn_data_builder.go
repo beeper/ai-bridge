@@ -142,8 +142,10 @@ func TurnDataHasURLPart(td TurnData, partType, url string) bool {
 }
 
 func TurnDataHasFilePart(td TurnData, partType, filename, title string) bool {
+	filename = strings.TrimSpace(filename)
+	title = strings.TrimSpace(title)
 	for _, part := range td.Parts {
-		if part.Type == partType && strings.TrimSpace(part.Filename) == strings.TrimSpace(filename) && strings.TrimSpace(part.Title) == strings.TrimSpace(title) {
+		if part.Type == partType && strings.TrimSpace(part.Filename) == filename && strings.TrimSpace(part.Title) == title {
 			return true
 		}
 	}

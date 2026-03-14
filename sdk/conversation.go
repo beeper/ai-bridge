@@ -62,34 +62,32 @@ func (c *Conversation) configOrNil() *Config {
 	return c.runtime.config()
 }
 
+func (c *Conversation) stateStore() *conversationStateStore {
+	if c == nil || c.runtime == nil {
+		return nil
+	}
+	return c.runtime.conversationStore()
+}
+
 func (c *Conversation) state() *sdkConversationState {
 	if c == nil {
 		return &sdkConversationState{}
 	}
-	var store *conversationStateStore
-	if c.runtime != nil {
-		store = c.runtime.conversationStore()
-	}
-	return loadConversationState(c.portal, store)
+	return loadConversationState(c.portal, c.stateStore())
 }
 
 func (c *Conversation) saveState(ctx context.Context, state *sdkConversationState) error {
 	if c == nil {
 		return nil
 	}
-	var store *conversationStateStore
-	if c.runtime != nil {
-		store = c.runtime.conversationStore()
-	}
-	return saveConversationState(ctx, c.portal, store, state)
+	return saveConversationState(ctx, c.portal, c.stateStore(), state)
 }
 
 func (c *Conversation) resolveDefaultAgent(ctx context.Context) (*Agent, error) {
 	if c == nil {
 		return nil, nil
 	}
-	state := c.state()
-	for _, agentID := range state.RoomAgents.AgentIDs {
+	for _, agentID := range c.state().RoomAgents.AgentIDs {
 		if agent, err := c.resolveAgentByIdentifier(ctx, agentID); err == nil && agent != nil {
 			return agent, nil
 		}
@@ -158,12 +156,11 @@ func (c *Conversation) currentRoomFeatures(ctx context.Context) *RoomFeatures {
 }
 
 func (c *Conversation) aiRoomKind() string {
-	if c == nil {
-		return agentremote.AIRoomKindAgent
-	}
-	state := c.state()
-	if state.Kind == ConversationKindDelegated || strings.TrimSpace(state.ParentConversationID) != "" {
-		return "subagent"
+	if c != nil {
+		state := c.state()
+		if state.Kind == ConversationKindDelegated || strings.TrimSpace(state.ParentConversationID) != "" {
+			return "subagent"
+		}
 	}
 	return agentremote.AIRoomKindAgent
 }
