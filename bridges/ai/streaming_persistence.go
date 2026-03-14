@@ -13,7 +13,7 @@ import (
 )
 
 // saveAssistantMessage saves the completed assistant message to the database.
-// When sendViaPortal was used (state.networkMessageID is set), the DB row already exists
+// When sendViaPortal was used (state.turn.NetworkMessageID() is set), the DB row already exists
 // from SendConvertedMessage — this function updates the metadata with full streaming results.
 // Otherwise, it falls back to inserting a new row.
 func (oc *AIClient) saveAssistantMessage(
@@ -61,8 +61,8 @@ func (oc *AIClient) saveAssistantMessage(
 		Login:            oc.UserLogin,
 		Portal:           portal,
 		SenderID:         modelUserID(modelID),
-		NetworkMessageID: state.networkMessageID,
-		InitialEventID:   state.initialEventID,
+		NetworkMessageID: state.turn.NetworkMessageID(),
+		InitialEventID:   state.turn.InitialEventID(),
 		Metadata:         fullMeta,
 		Logger:           log,
 	})

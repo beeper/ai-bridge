@@ -23,7 +23,7 @@ func (e *NonFallbackError) Unwrap() error {
 }
 
 func streamFailureError(state *streamingState, err error) error {
-	if state != nil && (state.hasEditTarget() || state.initialEventID != "" || state.networkMessageID != "") {
+	if state != nil && (state.hasEditTarget() || state.turn.InitialEventID() != "" || state.turn.NetworkMessageID() != "") {
 		return &NonFallbackError{Err: err}
 	}
 	return &PreDeltaError{Err: err}

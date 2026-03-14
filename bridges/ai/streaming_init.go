@@ -40,8 +40,8 @@ func (oc *AIClient) createStreamingTurn(
 		if !state.suppressSend {
 			oc.ensureGhostDisplayName(sendCtx, oc.effectiveModel(meta))
 		}
-		evtID := oc.sendInitialStreamMessage(sendCtx, portal, state, "...", state.turnID, state.replyTarget)
-		return evtID, state.networkMessageID, nil
+		evtID, msgID := oc.sendInitialStreamMessage(sendCtx, portal, "...", state.turnID, state.replyTarget)
+		return evtID, msgID, nil
 	})
 
 	// Use model-specific intent for ephemeral streaming delivery.

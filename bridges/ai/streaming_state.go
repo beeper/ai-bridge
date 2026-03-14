@@ -8,7 +8,6 @@ import (
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
@@ -45,10 +44,8 @@ type streamingState struct {
 	pendingFunctionOutputs []functionCallOutput // Function outputs to send back to API for continuation
 	sourceCitations        []citations.SourceCitation
 	sourceDocuments        []citations.SourceDocument
-	generatedFiles         []citations.GeneratedFilePart
-	initialEventID         id.EventID
-	networkMessageID       networkid.MessageID // Network message ID for bridgev2 DB lookup
-	finishReason           string
+	generatedFiles []citations.GeneratedFilePart
+	finishReason   string
 	responseID             string
 	statusSent             bool
 	statusSentIDs          map[id.EventID]bool
@@ -81,10 +78,10 @@ func (s *streamingState) hasInitialMessageTarget() bool {
 }
 
 func (s *streamingState) streamTarget() turns.StreamTarget {
-	if s == nil {
+	if s == nil || s.turn == nil {
 		return turns.StreamTarget{}
 	}
-	return turns.StreamTarget{NetworkMessageID: s.networkMessageID}
+	return turns.StreamTarget{NetworkMessageID: s.turn.NetworkMessageID()}
 }
 
 func (s *streamingState) hasEditTarget() bool {
@@ -92,7 +89,7 @@ func (s *streamingState) hasEditTarget() bool {
 }
 
 func (s *streamingState) hasEphemeralTarget() bool {
-	return s != nil && s.initialEventID != ""
+	return s != nil && s.turn != nil && s.turn.InitialEventID() != ""
 }
 
 func (s *streamingState) writer() *sdk.Writer {
@@ -109,25 +106,13 @@ func (s *streamingState) trackFirstToken() {
 	}
 }
 
-// syncTurnIDs copies the Turn's initial message IDs back to streamingState
-// so that response_finalization.go can access them for final edits.
-func (s *streamingState) syncTurnIDs() {
-	if s == nil || s.turn == nil {
-		return
-	}
-	if s.initialEventID == "" {
-		s.initialEventID = s.turn.InitialEventID()
-	}
-	if s.networkMessageID == "" {
-		s.networkMessageID = s.turn.NetworkMessageID()
-	}
-}
 
 type mcpApprovalRequest struct {
 	approvalID  string
 	toolCallID  string
 	toolName    string
 	serverLabel string
+	handle      sdk.ApprovalHandle
 }
 
 func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID id.EventID, senderID string, roomID id.RoomID) *streamingState {

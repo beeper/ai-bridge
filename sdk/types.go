@@ -104,6 +104,7 @@ type ApprovalRequest struct {
 	ToolName     string
 	TTL          time.Duration
 	Presentation *agentremote.ApprovalPromptPresentation
+	Metadata     map[string]any
 }
 
 // ApprovalHandle tracks an individual approval request.

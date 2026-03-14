@@ -57,7 +57,6 @@ func (oc *AIClient) emitVisibleTextDelta(
 		return err
 	}
 	// Sync IDs from Turn after initial message is sent.
-	state.syncTurnIDs()
 	return nil
 }
 
@@ -128,7 +127,6 @@ func (oc *AIClient) handleResponseReasoningTextDelta(
 		state.writer().Error(ctx, errText)
 		return err
 	}
-	state.syncTurnIDs()
 	return nil
 }
 

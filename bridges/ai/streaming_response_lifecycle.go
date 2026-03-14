@@ -34,7 +34,12 @@ func (oc *AIClient) handleResponseLifecycleEvent(
 		return
 	}
 
-	oc.emitUIRuntimeMetadata(ctx, portal, state, meta, responseMetadataDeltaFromResponse(response))
+	extra := responseMetadataDeltaFromResponse(response)
+	base := oc.buildUIMessageMetadata(state, meta, false)
+	if len(extra) > 0 {
+		base = mergeMaps(base, extra)
+	}
+	state.writer().MessageMetadata(ctx, base)
 
 	if eventType == "response.failed" {
 		if msg := strings.TrimSpace(response.Error.Message); msg != "" {

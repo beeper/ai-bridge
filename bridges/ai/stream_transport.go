@@ -16,7 +16,7 @@ func (oc *AIClient) sendDebouncedStreamEdit(ctx context.Context, portal *bridgev
 		Login:            oc.UserLogin,
 		Portal:           portal,
 		Sender:           oc.senderForPortal(ctx, portal),
-		NetworkMessageID: state.networkMessageID,
+		NetworkMessageID: state.turn.NetworkMessageID(),
 		SuppressSend:     state.suppressSend,
 		VisibleBody:      state.visibleAccumulated.String(),
 		FallbackBody:     state.accumulated.String(),

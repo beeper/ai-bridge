@@ -59,8 +59,8 @@ func (oc *AIClient) sendContinuationMessage(ctx context.Context, portal *bridgev
 }
 
 // sendInitialStreamMessage sends the first message in a streaming session via bridgev2's pipeline.
-// Returns the event ID and stores the network message ID in state for later edits.
-func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, state *streamingState, content string, turnID string, replyTarget ReplyTarget) id.EventID {
+// Returns the event ID and network message ID.
+func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridgev2.Portal, content string, turnID string, replyTarget ReplyTarget) (id.EventID, networkid.MessageID) {
 	relatesTo := buildReplyRelatesTo(replyTarget)
 
 	uiMessage := map[string]any{
@@ -96,13 +96,10 @@ func (oc *AIClient) sendInitialStreamMessage(ctx context.Context, portal *bridge
 	eventID, _, err := oc.sendViaPortal(ctx, portal, converted, msgID)
 	if err != nil {
 		oc.loggerForContext(ctx).Error().Err(err).Msg("Failed to send initial streaming message")
-		return ""
-	}
-	if state != nil {
-		state.networkMessageID = msgID
+		return "", ""
 	}
 	oc.loggerForContext(ctx).Info().Stringer("event_id", eventID).Str("turn_id", turnID).Msg("Initial streaming message sent")
-	return eventID
+	return eventID, msgID
 }
 
 // flushPartialStreamingMessage saves the partially accumulated assistant message on context cancellation.
@@ -115,7 +112,7 @@ func (oc *AIClient) flushPartialStreamingMessage(ctx context.Context, portal *br
 	if !state.suppressSave {
 		log := *oc.loggerForContext(ctx)
 		log.Info().
-			Str("event_id", state.initialEventID.String()).
+			Str("event_id", state.turn.InitialEventID().String()).
 			Int("accumulated_len", state.accumulated.Len()).
 			Msg("Flushing partial streaming message on cancellation")
 		oc.saveAssistantMessage(ctx, log, portal, state, meta)
@@ -159,7 +156,7 @@ func (oc *AIClient) sendFinalAssistantTurn(ctx context.Context, portal *bridgev2
 	if directives.IsSilent {
 		oc.loggerForContext(ctx).Debug().
 			Str("turn_id", state.turnID).
-			Str("initial_event_id", state.initialEventID.String()).
+			Str("initial_event_id", state.turn.InitialEventID().String()).
 			Msg("Silent reply detected, redacting streaming message")
 		oc.redactInitialStreamingMessage(ctx, portal, state)
 		return
@@ -429,17 +426,17 @@ func (oc *AIClient) redactInitialStreamingMessage(ctx context.Context, portal *b
 	if portal == nil || state == nil {
 		return
 	}
-	if state.networkMessageID != "" {
-		if err := oc.redactViaPortal(ctx, portal, state.networkMessageID); err != nil {
-			oc.loggerForContext(ctx).Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact streaming message via network ID")
+	if state.turn.NetworkMessageID() != "" {
+		if err := oc.redactViaPortal(ctx, portal, state.turn.NetworkMessageID()); err != nil {
+			oc.loggerForContext(ctx).Warn().Err(err).Stringer("event_id", state.turn.InitialEventID()).Msg("Failed to redact streaming message via network ID")
 		}
 		return
 	}
-	if state.initialEventID == "" {
+	if state.turn.InitialEventID() == "" {
 		return
 	}
-	if err := oc.redactEventViaPortal(ctx, portal, state.initialEventID); err != nil {
-		oc.loggerForContext(ctx).Warn().Err(err).Stringer("event_id", state.initialEventID).Msg("Failed to redact streaming message via event ID")
+	if err := oc.redactEventViaPortal(ctx, portal, state.turn.InitialEventID()); err != nil {
+		oc.loggerForContext(ctx).Warn().Err(err).Stringer("event_id", state.turn.InitialEventID()).Msg("Failed to redact streaming message via event ID")
 	}
 }
 
@@ -612,11 +609,11 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 	if replyToEventID != nil {
 		replyTo = *replyToEventID
 	}
-	relatesTo := msgconv.RelatesToReplace(state.initialEventID, replyTo)
-	if relatesTo == nil && state.networkMessageID != "" {
+	relatesTo := msgconv.RelatesToReplace(state.turn.InitialEventID(), replyTo)
+	if relatesTo == nil && state.turn.NetworkMessageID() != "" {
 		oc.loggerForContext(ctx).Debug().
 			Str("turn_id", state.turnID).
-			Str("target_message_id", string(state.networkMessageID)).
+			Str("target_message_id", string(state.turn.NetworkMessageID())).
 			Msg("Final assistant edit using network target without initial event ID")
 	}
 
@@ -642,9 +639,9 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 			TopLevelExtra: topLevelExtra,
 		}},
 	}
-	editTarget := state.networkMessageID
+	editTarget := state.turn.NetworkMessageID()
 	if editTarget == "" {
-		editTarget = agentremote.MatrixMessageID(state.initialEventID)
+		editTarget = agentremote.MatrixMessageID(state.turn.InitialEventID())
 	}
 	if editTarget == "" {
 		oc.loggerForContext(ctx).Warn().
@@ -661,7 +658,7 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 	}
 	oc.recordAgentActivity(ctx, portal, meta)
 	oc.loggerForContext(ctx).Debug().
-		Str("initial_event_id", state.initialEventID.String()).
+		Str("initial_event_id", state.turn.InitialEventID().String()).
 		Str("turn_id", state.turnID).
 		Str("mode", strings.TrimSpace(mode)).
 		Int("link_previews", len(linkPreviews)).
