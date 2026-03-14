@@ -2,9 +2,7 @@ package memory
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -12,6 +10,8 @@ import (
 	"unicode"
 
 	"maunium.net/go/mautrix/bridgev2/networkid"
+
+	memorycore "github.com/beeper/agentremote/pkg/memory"
 )
 
 type sessionState struct {
@@ -130,7 +130,7 @@ func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sess
 				_ = m.deleteSessionFile(ctx, key)
 			} else {
 				path := sessionPathForKey(key)
-				hash := hashSessionContent(content)
+				hash := memorycore.HashText(content)
 				existingHash, _ := m.getSessionFileHash(ctx, key)
 				if needsFullReindex || indexAll || existingHash == "" || existingHash != hash {
 					if err := m.upsertSessionFile(ctx, key, path, content, hash); err != nil {
@@ -442,7 +442,3 @@ func sessionPathForKey(sessionKey string) string {
 	return "sessions/" + cleaned + ".jsonl"
 }
 
-func hashSessionContent(content string) string {
-	sum := sha256.Sum256([]byte(content))
-	return hex.EncodeToString(sum[:])
-}

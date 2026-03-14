@@ -52,7 +52,7 @@ func ChunkMarkdown(content string, tokens, overlap int) []Chunk {
 			StartLine: start,
 			EndLine:   end,
 			Text:      text,
-			Hash:      hashText(text),
+			Hash:      HashText(text),
 		})
 	}
 
@@ -107,7 +107,7 @@ func splitLineSegments(line string, maxChars int) []string {
 	return segments
 }
 
-func hashText(text string) string {
+func HashText(text string) string {
 	sum := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(sum[:])
 }

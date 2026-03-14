@@ -3,14 +3,11 @@ package memory
 import (
 	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -25,11 +22,8 @@ import (
 
 const memorySnippetMaxChars = 700
 
-var keywordTokenRE = regexp.MustCompile(`[A-Za-z0-9_]+`)
-
-// extractKeywordTokens extracts and lowercases keyword tokens from a query string.
 func extractKeywordTokens(query string) []string {
-	tokens := keywordTokenRE.FindAllString(query, -1)
+	tokens := memorycore.TokenRE.FindAllString(query, -1)
 	for i, t := range tokens {
 		tokens[i] = strings.ToLower(strings.TrimSpace(t))
 	}
@@ -827,8 +821,7 @@ func memoryManagerCacheKey(bridgeID, loginID, agentID string, cfg *memorycore.Re
 		"experimental": cfg.Experimental,
 	}
 	raw, _ := json.Marshal(payload)
-	sum := sha256.Sum256(raw)
-	return fmt.Sprintf("%s:%s:%s:%s", bridgeID, loginID, agentID, hex.EncodeToString(sum[:]))
+	return fmt.Sprintf("%s:%s:%s:%s", bridgeID, loginID, agentID, memorycore.HashText(string(raw)))
 }
 
 func clampOverfetch(limit, multiplier int) int {

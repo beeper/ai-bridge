@@ -4,7 +4,6 @@ import (
 	memorycore "github.com/beeper/agentremote/pkg/memory"
 )
 
-type RemoteConfig = memorycore.RemoteConfig
 type StoreConfig = memorycore.StoreConfig
 type ChunkingConfig = memorycore.ChunkingConfig
 type SyncConfig = memorycore.SyncConfig

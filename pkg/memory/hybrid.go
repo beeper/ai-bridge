@@ -6,11 +6,11 @@ import (
 	"strings"
 )
 
-var tokenRE = regexp.MustCompile(`[A-Za-z0-9_]+`)
+var TokenRE = regexp.MustCompile(`[A-Za-z0-9_]+`)
 
 // BuildFtsQuery builds a simple AND query for FTS5 from raw input.
 func BuildFtsQuery(raw string) string {
-	tokens := tokenRE.FindAllString(raw, -1)
+	tokens := TokenRE.FindAllString(raw, -1)
 	if len(tokens) == 0 {
 		return ""
 	}

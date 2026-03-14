@@ -73,7 +73,7 @@ func executeSearchTool(ctx context.Context, scope iruntime.ToolScope, args map[s
 
 	manager, errMsg := deps.GetManager(scope)
 	if manager == nil {
-		return marshalSearch(searchOutput{
+		return marshalJSON(searchOutput{
 			Results:  []SearchResult{},
 			Disabled: true,
 			Error:    errMsgOrDefault(errMsg),
@@ -102,7 +102,7 @@ func executeSearchTool(ctx context.Context, scope iruntime.ToolScope, args map[s
 	defer cancel()
 	results, searchErr := manager.Search(searchCtx, query, opts)
 	if searchErr != nil {
-		return marshalSearch(searchOutput{
+		return marshalJSON(searchOutput{
 			Results:  []SearchResult{},
 			Disabled: true,
 			Error:    searchErr.Error(),
@@ -120,7 +120,7 @@ func executeSearchTool(ctx context.Context, scope iruntime.ToolScope, args map[s
 	decorated := decorateSearchResults(results, includeCitations)
 	status := manager.Status()
 
-	return marshalSearch(searchOutput{
+	return marshalJSON(searchOutput{
 		Results:   decorated,
 		Provider:  status.Provider,
 		Model:     status.Model,
@@ -139,7 +139,7 @@ func executeGetTool(ctx context.Context, scope iruntime.ToolScope, args map[stri
 	}
 	manager, errMsg := deps.GetManager(scope)
 	if manager == nil {
-		return marshalGet(getOutput{
+		return marshalJSON(getOutput{
 			Path:     path,
 			Text:     "",
 			Disabled: true,
@@ -156,7 +156,7 @@ func executeGetTool(ctx context.Context, scope iruntime.ToolScope, args map[stri
 	}
 	result, readErr := manager.ReadFile(ctx, path, from, lines)
 	if readErr != nil {
-		return marshalGet(getOutput{
+		return marshalJSON(getOutput{
 			Path:     path,
 			Text:     "",
 			Disabled: true,
@@ -168,7 +168,7 @@ func executeGetTool(ctx context.Context, scope iruntime.ToolScope, args map[stri
 	if strings.TrimSpace(resolvedPath) == "" {
 		resolvedPath = path
 	}
-	return marshalGet(getOutput{
+	return marshalJSON(getOutput{
 		Path: resolvedPath,
 		Text: text,
 	}), nil
@@ -423,12 +423,7 @@ func readStringList(args map[string]any, key string) []string {
 	return out
 }
 
-func marshalSearch(payload searchOutput) string {
-	blob, _ := json.MarshalIndent(payload, "", "  ")
-	return string(blob)
-}
-
-func marshalGet(payload getOutput) string {
+func marshalJSON(payload any) string {
 	blob, _ := json.MarshalIndent(payload, "", "  ")
 	return string(blob)
 }
