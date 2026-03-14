@@ -94,10 +94,10 @@ func AppendArtifactPart(td *TurnData, raw map[string]any) {
 			return
 		}
 		td.Parts = append(td.Parts, TurnPart{
-			Type:             partType,
-			URL:              url,
-			Title:            strings.TrimSpace(stringValue(raw["title"])),
-			ProviderMetadata: jsonutil.DeepCloneMap(jsonutil.ToMap(raw["providerMetadata"])),
+			Type:  partType,
+			URL:   url,
+			Title: strings.TrimSpace(stringValue(raw["title"])),
+			Extra: extraFields(raw, "type", "url", "title"),
 		})
 	case "source-document":
 		filename := strings.TrimSpace(stringValue(raw["filename"]))
@@ -110,6 +110,7 @@ func AppendArtifactPart(td *TurnData, raw map[string]any) {
 			Title:     title,
 			Filename:  filename,
 			MediaType: strings.TrimSpace(stringValue(raw["mediaType"])),
+			Extra:     extraFields(raw, "type", "title", "filename", "mediaType"),
 		})
 	}
 }

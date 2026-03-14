@@ -10,7 +10,6 @@ import (
 
 	"github.com/beeper/agentremote"
 	airuntime "github.com/beeper/agentremote/pkg/runtime"
-	"github.com/beeper/agentremote/pkg/shared/streamui"
 )
 
 type ToolApprovalKind string
@@ -208,9 +207,8 @@ func (oc *AIClient) isBuiltinToolDenied(
 			ApprovalID: approvalID,
 			Reason:     agentremote.ApprovalReasonDeliveryError,
 		})
-		oc.uiEmitter(state).EmitUIToolApprovalResponse(ctx, portal, approvalID, tool.callID, false, decision.Reason)
-		streamui.RecordApprovalResponse(&state.ui, approvalID, tool.callID, false, decision.Reason)
-		oc.uiEmitter(state).EmitUIToolOutputDenied(ctx, portal, tool.callID)
+		oc.writer(state, portal).Approvals().Respond(ctx, approvalID, tool.callID, false, decision.Reason)
+		oc.writer(state, portal).Tools().Denied(ctx, tool.callID)
 		return true
 	}
 	resolution, _, ok := oc.waitToolApproval(ctx, approvalID)
@@ -220,10 +218,9 @@ func (oc *AIClient) isBuiltinToolDenied(
 			decision = airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalTimedOut, Reason: agentremote.ApprovalReasonTimeout}
 		}
 	}
-	oc.uiEmitter(state).EmitUIToolApprovalResponse(ctx, portal, approvalID, tool.callID, approvalAllowed(decision), decision.Reason)
-	streamui.RecordApprovalResponse(&state.ui, approvalID, tool.callID, approvalAllowed(decision), decision.Reason)
+	oc.writer(state, portal).Approvals().Respond(ctx, approvalID, tool.callID, approvalAllowed(decision), decision.Reason)
 	if !approvalAllowed(decision) {
-		oc.uiEmitter(state).EmitUIToolOutputDenied(ctx, portal, tool.callID)
+		oc.writer(state, portal).Tools().Denied(ctx, tool.callID)
 		return true
 	}
 	return false

@@ -17,5 +17,5 @@ func (oc *AIClient) emitUIRuntimeMetadata(
 	if len(extra) > 0 {
 		base = mergeMaps(base, extra)
 	}
-	oc.uiEmitter(state).EmitUIMessageMetadata(ctx, portal, base)
+	oc.writer(state, portal).MessageMetadata(ctx, base)
 }

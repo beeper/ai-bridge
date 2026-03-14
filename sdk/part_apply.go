@@ -24,6 +24,7 @@ func ApplyStreamPart(turn *Turn, part map[string]any, opts PartApplyOptions) boo
 	if partType == "" {
 		return false
 	}
+	writer := turn.Writer()
 	tools := turn.Tools()
 	switch partType {
 	case "start", "message-metadata":
@@ -58,26 +59,26 @@ func ApplyStreamPart(turn *Turn, part map[string]any, opts PartApplyOptions) boo
 	case "reasoning-end":
 		turn.FinishReasoning()
 	case "tool-input-start":
-		tools.EnsureInputStart(partString(part, "toolCallId"), nil, ToolInputOptions{
+		tools.EnsureInputStart(turn.Context(), partString(part, "toolCallId"), nil, ToolInputOptions{
 			ToolName:         partString(part, "toolName"),
 			ProviderExecuted: partBool(part, "providerExecuted"),
 		})
 	case "tool-input-delta":
-		tools.InputDelta(partString(part, "toolCallId"), partString(part, "inputTextDelta"), partBool(part, "providerExecuted"))
+		tools.InputDelta(turn.Context(), partString(part, "toolCallId"), "", partString(part, "inputTextDelta"), partBool(part, "providerExecuted"))
 	case "tool-input-available":
-		tools.Input(partString(part, "toolCallId"), partString(part, "toolName"), part["input"], partBool(part, "providerExecuted"))
+		tools.Input(turn.Context(), partString(part, "toolCallId"), partString(part, "toolName"), part["input"], partBool(part, "providerExecuted"))
 	case "tool-output-available":
-		tools.Output(partString(part, "toolCallId"), part["output"], ToolOutputOptions{
+		tools.Output(turn.Context(), partString(part, "toolCallId"), part["output"], ToolOutputOptions{
 			ProviderExecuted: partBool(part, "providerExecuted"),
 		})
 	case "tool-output-error":
-		tools.OutputError(partString(part, "toolCallId"), partString(part, "errorText"), partBool(part, "providerExecuted"))
+		tools.OutputError(turn.Context(), partString(part, "toolCallId"), partString(part, "errorText"), partBool(part, "providerExecuted"))
 	case "tool-output-denied":
-		tools.Denied(partString(part, "toolCallId"))
+		tools.Denied(turn.Context(), partString(part, "toolCallId"))
 	case "tool-approval-request":
-		turn.Approvals().EmitRequest(partString(part, "approvalId"), partString(part, "toolCallId"))
+		turn.Approvals().EmitRequest(turn.Context(), partString(part, "approvalId"), partString(part, "toolCallId"))
 	case "tool-approval-response":
-		turn.Approvals().Respond(partString(part, "approvalId"), partString(part, "toolCallId"), partBool(part, "approved"), partString(part, "reason"))
+		turn.Approvals().Respond(turn.Context(), partString(part, "approvalId"), partString(part, "toolCallId"), partBool(part, "approved"), partString(part, "reason"))
 	case "file":
 		turn.AddFile(partString(part, "url"), partString(part, "mediaType"))
 	case "source-document":
@@ -111,7 +112,7 @@ func ApplyStreamPart(turn *Turn, part map[string]any, opts PartApplyOptions) boo
 			if opts.ResetMetadataOnDataParts {
 				turn.SetMetadata(nil)
 			}
-			turn.Emitter().Emit(turn.Context(), turn.conv.portal, part)
+			writer.RawPart(turn.Context(), part)
 			return true
 		}
 		return false

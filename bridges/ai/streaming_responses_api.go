@@ -76,14 +76,14 @@ func (a *responsesTurnAdapter) startContinuationRound(ctx context.Context) (*sse
 			decision = airuntime.ToolApprovalDecision{State: airuntime.ToolApprovalTimedOut, Reason: agentremote.ApprovalReasonTimeout}
 		}
 		approved := approvalAllowed(decision)
-		a.oc.semanticStream(state, a.portal).Approvals().Respond(ctx, approval.approvalID, approval.toolCallID, approved, decision.Reason)
+		a.oc.writer(state, a.portal).Approvals().Respond(ctx, approval.approvalID, approval.toolCallID, approved, decision.Reason)
 		item := responses.ResponseInputItemParamOfMcpApprovalResponse(approval.approvalID, approved)
 		if decision.Reason != "" && item.OfMcpApprovalResponse != nil {
 			item.OfMcpApprovalResponse.Reason = param.NewOpt(decision.Reason)
 		}
 		approvalInputs = append(approvalInputs, item)
 		if !approved {
-			a.oc.semanticStream(state, a.portal).Tools().Denied(ctx, approval.toolCallID)
+			a.oc.writer(state, a.portal).Tools().Denied(ctx, approval.toolCallID)
 		}
 	}
 
@@ -360,11 +360,11 @@ func (oc *AIClient) processResponseStreamEvent(
 		if typingSignals != nil {
 			typingSignals.SignalToolStart()
 		}
-		oc.emitStreamEvent(ctx, portal, state, map[string]any{
-			"type":      "data-image_generation_partial",
-			"data":      map[string]any{"item_id": streamEvent.ItemID, "index": streamEvent.PartialImageIndex, "image_b64": streamEvent.PartialImageB64},
-			"transient": true,
-		})
+		oc.writer(state, portal).Data(ctx, "image_generation_partial", map[string]any{
+			"item_id":   streamEvent.ItemID,
+			"index":     streamEvent.PartialImageIndex,
+			"image_b64": streamEvent.PartialImageB64,
+		}, true)
 
 	case "response.output_text.annotation.added":
 		oc.handleResponseOutputAnnotationAdded(ctx, portal, state, streamEvent.Annotation, streamEvent.AnnotationIndex)
@@ -385,7 +385,7 @@ func (oc *AIClient) processResponseStreamEvent(
 		if streamEvent.Response.ID != "" {
 			state.responseID = streamEvent.Response.ID
 		}
-		oc.semanticStream(state, portal).MessageMetadata(ctx, oc.buildUIMessageMetadata(state, meta, true))
+		oc.writer(state, portal).MessageMetadata(ctx, oc.buildUIMessageMetadata(state, meta, true))
 
 		if !isContinuation {
 			// Extract any generated images from response output
@@ -437,7 +437,7 @@ func (oc *AIClient) handleProviderToolInProgress(
 	toolType ToolType,
 ) {
 	tool := oc.ensureActiveToolCall(ctx, portal, state, meta, activeTools, itemID, toolName, toolType, "")
-	oc.semanticStream(state, portal).Tools().InputDelta(ctx, tool.callID, tool.toolName, "", true)
+	oc.writer(state, portal).Tools().InputDelta(ctx, tool.callID, tool.toolName, "", true)
 }
 
 // handleProviderToolCompleted finalizes a provider/MCP tool with a success or failure result.
@@ -462,13 +462,13 @@ func (oc *AIClient) handleProviderToolCompleted(
 	}
 
 	if failureText != "" {
-		oc.semanticStream(state, portal).Tools().OutputError(ctx, tool.callID, failureText, true)
+		oc.writer(state, portal).Tools().OutputError(ctx, tool.callID, failureText, true)
 		recordToolCallResult(state, tool, ToolStatusFailed, ResultStatusError, failureText, map[string]any{"error": failureText}, nil)
 		return
 	}
 
 	output := map[string]any{"status": "completed"}
-	oc.semanticStream(state, portal).Tools().Output(ctx, tool.callID, output, bridgesdk.ToolOutputOptions{
+	oc.writer(state, portal).Tools().Output(ctx, tool.callID, output, bridgesdk.ToolOutputOptions{
 		ProviderExecuted: true,
 	})
 	recordToolCallResult(state, tool, ToolStatusCompleted, ResultStatusSuccess, "", output, nil)

@@ -24,7 +24,7 @@ func (oc *AIClient) ensureInitialStreamMessage(
 	errText string,
 	logMessage string,
 ) error {
-	stream := oc.semanticStream(state, portal)
+	stream := oc.writer(state, portal)
 	if !state.firstToken {
 		return nil
 	}
@@ -76,7 +76,7 @@ func (oc *AIClient) emitVisibleTextDelta(
 	errText string,
 	logMessage string,
 ) error {
-	stream := oc.semanticStream(state, portal)
+	stream := oc.writer(state, portal)
 	if typingSignals != nil {
 		typingSignals.SignalTextDelta(delta)
 	}
@@ -161,7 +161,7 @@ func (oc *AIClient) handleResponseReasoningTextDelta(
 	errText string,
 	logMessage string,
 ) error {
-	stream := oc.semanticStream(state, portal)
+	stream := oc.writer(state, portal)
 	state.reasoning.WriteString(delta)
 	if state.firstToken && state.reasoning.Len() > 0 {
 		if err := oc.ensureInitialStreamMessage(
@@ -190,7 +190,7 @@ func (oc *AIClient) appendReasoningText(
 	state *streamingState,
 	text string,
 ) {
-	stream := oc.semanticStream(state, portal)
+	stream := oc.writer(state, portal)
 	if text == "" {
 		return
 	}
@@ -205,7 +205,7 @@ func (oc *AIClient) handleResponseRefusalDelta(
 	typingSignals *TypingSignaler,
 	delta string,
 ) {
-	stream := oc.semanticStream(state, portal)
+	stream := oc.writer(state, portal)
 	if typingSignals != nil {
 		typingSignals.SignalTextDelta(delta)
 	}
@@ -218,7 +218,7 @@ func (oc *AIClient) handleResponseRefusalDone(
 	state *streamingState,
 	refusal string,
 ) {
-	stream := oc.semanticStream(state, portal)
+	stream := oc.writer(state, portal)
 	if refusal == "" {
 		return
 	}
@@ -232,7 +232,7 @@ func (oc *AIClient) handleResponseOutputAnnotationAdded(
 	annotation any,
 	annotationIndex any,
 ) {
-	stream := oc.semanticStream(state, portal)
+	stream := oc.writer(state, portal)
 	if citation, ok := extractURLCitation(annotation); ok {
 		state.sourceCitations = citations.AppendUniqueCitation(state.sourceCitations, citation)
 		stream.SourceURL(ctx, citation)
@@ -241,9 +241,5 @@ func (oc *AIClient) handleResponseOutputAnnotationAdded(
 		state.sourceDocuments = append(state.sourceDocuments, document)
 		stream.SourceDocument(ctx, document)
 	}
-	oc.emitStreamEvent(ctx, portal, state, map[string]any{
-		"type":      "data-annotation",
-		"data":      map[string]any{"annotation": annotation, "index": annotationIndex},
-		"transient": true,
-	})
+	stream.Data(ctx, "annotation", map[string]any{"annotation": annotation, "index": annotationIndex}, true)
 }

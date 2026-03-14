@@ -40,7 +40,7 @@ func (oc *AIClient) finishStreamingWithFailure(
 ) error {
 	state.finishReason = reason
 	state.completedAtMs = time.Now().UnixMilli()
-	ss := oc.semanticStream(state, portal)
+	ss := oc.writer(state, portal)
 	if reason == "cancelled" {
 		ss.Abort(ctx, "cancelled")
 	} else {

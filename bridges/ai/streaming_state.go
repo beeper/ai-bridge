@@ -173,10 +173,18 @@ func (oc *AIClient) uiEmitter(state *streamingState) *streamui.Emitter {
 	}
 }
 
-func (oc *AIClient) semanticStream(state *streamingState, portal *bridgev2.Portal) *sdk.SemanticStream {
-	return &sdk.SemanticStream{
+func (oc *AIClient) writer(state *streamingState, portal *bridgev2.Portal) *sdk.Writer {
+	emitter := oc.uiEmitter(state)
+	if state == nil {
+		return &sdk.Writer{
+			State:   emitter.State,
+			Emitter: emitter,
+			Portal:  portal,
+		}
+	}
+	return &sdk.Writer{
 		State:   &state.ui,
-		Emitter: oc.uiEmitter(state),
+		Emitter: emitter,
 		Portal:  portal,
 	}
 }

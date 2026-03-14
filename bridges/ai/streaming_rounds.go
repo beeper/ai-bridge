@@ -25,8 +25,9 @@ func runStreamingStep[T any](
 	handleEvent func(T) (done bool, cle *ContextLengthError, err error),
 	handleErr func(error) (cle *ContextLengthError, err error),
 ) (bool, *ContextLengthError, error) {
-	oc.uiEmitter(state).EmitUIStepStart(ctx, portal)
-	defer oc.uiEmitter(state).EmitUIStepFinish(ctx, portal)
+	writer := oc.writer(state, portal)
+	writer.StepStart(ctx)
+	defer writer.StepFinish(ctx)
 	for stream.Next() {
 		current := stream.Current()
 		if shouldMarkSuccess == nil || shouldMarkSuccess(current) {

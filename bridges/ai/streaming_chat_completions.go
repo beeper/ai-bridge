@@ -51,7 +51,7 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 	if temp := oc.effectiveTemperature(meta); temp > 0 {
 		params.Temperature = openai.Float(temp)
 	}
-	streamUI := oc.semanticStream(state, portal)
+	streamUI := oc.writer(state, portal)
 	params.Tools = oc.selectedChatStreamingTools(ctx, meta)
 
 	stream := oc.api.Chat.Completions.NewStreaming(ctx, params)

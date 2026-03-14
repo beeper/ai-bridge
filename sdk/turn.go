@@ -68,14 +68,14 @@ func (h *sdkApprovalHandle) Wait(ctx context.Context) (ToolApprovalResponse, err
 		if ctx != nil && ctx.Err() != nil {
 			reason = agentremote.ApprovalReasonCancelled
 		}
-		h.turn.emitter.EmitUIToolApprovalResponse(h.turn.turnCtx, h.turn.conv.portal, h.approvalID, h.toolCallID, false, reason)
+		h.turn.Writer().Approvals().Respond(h.turn.turnCtx, h.approvalID, h.toolCallID, false, reason)
 		approvalFlow.FinishResolved(h.approvalID, agentremote.ApprovalDecisionPayload{
 			ApprovalID: h.approvalID,
 			Reason:     reason,
 		})
 		return ToolApprovalResponse{Reason: reason}, nil
 	}
-	h.turn.emitter.EmitUIToolApprovalResponse(h.turn.turnCtx, h.turn.conv.portal, h.approvalID, h.toolCallID, decision.Approved, decision.Reason)
+	h.turn.Writer().Approvals().Respond(h.turn.turnCtx, h.approvalID, h.toolCallID, decision.Approved, decision.Reason)
 	approvalFlow.FinishResolved(h.approvalID, decision)
 	return ToolApprovalResponse{
 		Approved: decision.Approved,
@@ -355,53 +355,6 @@ func (t *Turn) ensureStarted() {
 	t.emitter.EmitUIStart(t.turnCtx, t.conv.portal, baseMeta)
 }
 
-// WriteText sends a text chunk.
-func (t *Turn) WriteText(text string) {
-	t.ensureStarted()
-	t.visibleText.WriteString(text)
-	t.emitter.EmitUITextDelta(t.turnCtx, t.conv.portal, text)
-}
-
-// WriteReasoning sends a reasoning/thinking chunk.
-func (t *Turn) WriteReasoning(text string) {
-	t.ensureStarted()
-	t.emitter.EmitUIReasoningDelta(t.turnCtx, t.conv.portal, text)
-}
-
-// Error emits a UI error event for the turn.
-func (t *Turn) Error(text string) {
-	t.ensureStarted()
-	t.emitter.EmitUIError(t.turnCtx, t.conv.portal, text)
-}
-
-// FinishText closes the current text stream part, if one is open.
-func (t *Turn) FinishText() {
-	t.ensureStarted()
-	if t.state == nil || t.state.UITextID == "" {
-		return
-	}
-	partID := t.state.UITextID
-	t.emitter.Emit(t.turnCtx, t.conv.portal, map[string]any{
-		"type": "text-end",
-		"id":   partID,
-	})
-	t.state.UITextID = ""
-}
-
-// FinishReasoning closes the current reasoning stream part, if one is open.
-func (t *Turn) FinishReasoning() {
-	t.ensureStarted()
-	if t.state == nil || t.state.UIReasoningID == "" {
-		return
-	}
-	partID := t.state.UIReasoningID
-	t.emitter.Emit(t.turnCtx, t.conv.portal, map[string]any{
-		"type": "reasoning-end",
-		"id":   partID,
-	})
-	t.state.UIReasoningID = ""
-}
-
 // requestApproval creates a new approval request and returns its handle.
 func (t *Turn) requestApproval(req ApprovalRequest) ApprovalHandle {
 	t.ensureStarted()
@@ -426,7 +379,7 @@ func (t *Turn) requestApproval(req ApprovalRequest) ApprovalHandle {
 		ToolCallID: req.ToolCallID,
 		ToolName:   req.ToolName,
 	})
-	t.Approvals().EmitRequest(approvalID, req.ToolCallID)
+	t.Approvals().EmitRequest(t.turnCtx, approvalID, req.ToolCallID)
 	presentation := agentremote.ApprovalPromptPresentation{
 		Title:       req.ToolName,
 		AllowAlways: true,
@@ -447,53 +400,6 @@ func (t *Turn) requestApproval(req ApprovalRequest) ApprovalHandle {
 		OwnerMXID: t.conv.login.UserMXID,
 	})
 	return &sdkApprovalHandle{approvalID: approvalID, toolCallID: req.ToolCallID, turn: t}
-}
-
-// AddSourceURL adds a source citation URL.
-func (t *Turn) AddSourceURL(url, title string) {
-	t.ensureStarted()
-	t.emitter.EmitUISourceURL(t.turnCtx, t.conv.portal, citations.SourceCitation{
-		URL:   url,
-		Title: title,
-	})
-}
-
-// AddSourceDocument adds a source document citation.
-func (t *Turn) AddSourceDocument(docID, title, mediaType, filename string) {
-	t.ensureStarted()
-	t.emitter.EmitUISourceDocument(t.turnCtx, t.conv.portal, citations.SourceDocument{
-		ID:        docID,
-		Title:     title,
-		MediaType: mediaType,
-		Filename:  filename,
-	})
-}
-
-// AddFile adds a generated file reference.
-func (t *Turn) AddFile(url, mediaType string) {
-	t.ensureStarted()
-	t.emitter.EmitUIFile(t.turnCtx, t.conv.portal, url, mediaType)
-}
-
-// StepStart begins a visual step grouping.
-func (t *Turn) StepStart() {
-	t.ensureStarted()
-	t.emitter.EmitUIStepStart(t.turnCtx, t.conv.portal)
-}
-
-// StepFinish ends a visual step grouping.
-func (t *Turn) StepFinish() {
-	t.ensureStarted()
-	t.emitter.EmitUIStepFinish(t.turnCtx, t.conv.portal)
-}
-
-// SetMetadata merges message metadata for this turn.
-func (t *Turn) SetMetadata(metadata map[string]any) {
-	t.ensureStarted()
-	for k, v := range metadata {
-		t.metadata[k] = v
-	}
-	t.emitter.EmitUIMessageMetadata(t.turnCtx, t.conv.portal, metadata)
 }
 
 // SetReplyTo sets the m.in_reply_to relation for this turn's message.
@@ -614,7 +520,7 @@ func (t *Turn) End(finishReason string) {
 		return
 	}
 	t.ended = true
-	t.emitter.EmitUIFinish(t.turnCtx, t.conv.portal, finishReason, t.metadata)
+	t.Writer().Finish(t.turnCtx, finishReason, t.metadata)
 	if t.session != nil {
 		t.session.End(t.turnCtx, turns.EndReasonFinish)
 	}
@@ -634,8 +540,8 @@ func (t *Turn) EndWithError(errText string) {
 		t.SendStatus(event.MessageStatusFail, errText)
 		return
 	}
-	t.emitter.EmitUIError(t.turnCtx, t.conv.portal, errText)
-	t.emitter.EmitUIFinish(t.turnCtx, t.conv.portal, "error", t.metadata)
+	t.Writer().Error(t.turnCtx, errText)
+	t.Writer().Finish(t.turnCtx, "error", t.metadata)
 	if t.session != nil {
 		t.session.End(t.turnCtx, turns.EndReasonError)
 	}
@@ -654,7 +560,7 @@ func (t *Turn) Abort(reason string) {
 		t.SendStatus(event.MessageStatusRetriable, reason)
 		return
 	}
-	t.emitter.EmitUIAbort(t.turnCtx, t.conv.portal, reason)
+	t.Writer().Abort(t.turnCtx, reason)
 	if t.session != nil {
 		t.session.End(t.turnCtx, turns.EndReasonDisconnect)
 	}

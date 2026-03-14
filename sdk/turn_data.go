@@ -14,6 +14,7 @@ type TurnData struct {
 	ID       string         `json:"id,omitempty"`
 	Role     string         `json:"role,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
+	Extra    map[string]any `json:"extra,omitempty"`
 	Parts    []TurnPart     `json:"parts,omitempty"`
 }
 
@@ -36,7 +37,7 @@ type TurnPart struct {
 	Filename         string         `json:"filename,omitempty"`
 	MediaType        string         `json:"mediaType,omitempty"`
 	ProviderExecuted bool           `json:"providerExecuted,omitempty"`
-	ProviderMetadata map[string]any `json:"providerMetadata,omitempty"`
+	Extra            map[string]any `json:"extra,omitempty"`
 }
 
 func (td TurnData) Clone() TurnData {
@@ -46,6 +47,7 @@ func (td TurnData) Clone() TurnData {
 			ID:       td.ID,
 			Role:     td.Role,
 			Metadata: jsonutil.DeepCloneMap(td.Metadata),
+			Extra:    jsonutil.DeepCloneMap(td.Extra),
 			Parts:    append([]TurnPart(nil), td.Parts...),
 		}
 	}
@@ -55,6 +57,7 @@ func (td TurnData) Clone() TurnData {
 			ID:       td.ID,
 			Role:     td.Role,
 			Metadata: jsonutil.DeepCloneMap(td.Metadata),
+			Extra:    jsonutil.DeepCloneMap(td.Extra),
 			Parts:    append([]TurnPart(nil), td.Parts...),
 		}
 	}
@@ -99,6 +102,7 @@ func TurnDataFromUIMessage(uiMessage map[string]any) (TurnData, bool) {
 		ID:       stringValue(uiMessage["id"]),
 		Role:     stringValue(uiMessage["role"]),
 		Metadata: jsonutil.DeepCloneMap(jsonutil.ToMap(uiMessage["metadata"])),
+		Extra:    extraFields(uiMessage, "id", "role", "metadata", "parts"),
 	}
 	partsRaw, ok := uiMessage["parts"].([]any)
 	if !ok {
@@ -111,22 +115,22 @@ func TurnDataFromUIMessage(uiMessage map[string]any) (TurnData, bool) {
 			continue
 		}
 		part := TurnPart{
-			Type:             stringValue(partMap["type"]),
-			State:            stringValue(partMap["state"]),
-			Text:             stringValue(partMap["text"]),
-			Reasoning:        stringValue(partMap["reasoning"]),
-			ToolCallID:       stringValue(partMap["toolCallId"]),
-			ToolName:         stringValue(partMap["toolName"]),
-			ToolType:         stringValue(partMap["toolType"]),
-			Input:            jsonutil.DeepCloneAny(partMap["input"]),
-			Output:           jsonutil.DeepCloneAny(partMap["output"]),
-			ErrorText:        stringValue(partMap["errorText"]),
-			Approval:         jsonutil.DeepCloneMap(jsonutil.ToMap(partMap["approval"])),
-			URL:              stringValue(partMap["url"]),
-			Title:            stringValue(partMap["title"]),
-			Filename:         stringValue(partMap["filename"]),
-			MediaType:        stringValue(partMap["mediaType"]),
-			ProviderMetadata: jsonutil.DeepCloneMap(jsonutil.ToMap(partMap["providerMetadata"])),
+			Type:       stringValue(partMap["type"]),
+			State:      stringValue(partMap["state"]),
+			Text:       stringValue(partMap["text"]),
+			Reasoning:  stringValue(partMap["reasoning"]),
+			ToolCallID: stringValue(partMap["toolCallId"]),
+			ToolName:   stringValue(partMap["toolName"]),
+			ToolType:   stringValue(partMap["toolType"]),
+			Input:      jsonutil.DeepCloneAny(partMap["input"]),
+			Output:     jsonutil.DeepCloneAny(partMap["output"]),
+			ErrorText:  stringValue(partMap["errorText"]),
+			Approval:   jsonutil.DeepCloneMap(jsonutil.ToMap(partMap["approval"])),
+			URL:        stringValue(partMap["url"]),
+			Title:      stringValue(partMap["title"]),
+			Filename:   stringValue(partMap["filename"]),
+			MediaType:  stringValue(partMap["mediaType"]),
+			Extra:      extraFields(partMap, "type", "state", "text", "reasoning", "toolCallId", "toolName", "toolType", "input", "output", "errorText", "approval", "url", "title", "filename", "mediaType", "providerExecuted"),
 		}
 		if value, ok := partMap["providerExecuted"].(bool); ok {
 			part.ProviderExecuted = value
@@ -145,6 +149,9 @@ func UIMessageFromTurnData(td TurnData) map[string]any {
 	}
 	if len(td.Metadata) > 0 {
 		ui["metadata"] = jsonutil.DeepCloneMap(td.Metadata)
+	}
+	for key, value := range jsonutil.DeepCloneMap(td.Extra) {
+		ui[key] = value
 	}
 	parts := make([]any, 0, len(td.Parts))
 	for _, part := range td.Parts {
@@ -196,13 +203,34 @@ func UIMessageFromTurnData(td TurnData) map[string]any {
 		if part.ProviderExecuted {
 			partMap["providerExecuted"] = true
 		}
-		if len(part.ProviderMetadata) > 0 {
-			partMap["providerMetadata"] = jsonutil.DeepCloneMap(part.ProviderMetadata)
+		for key, value := range jsonutil.DeepCloneMap(part.Extra) {
+			partMap[key] = value
 		}
 		parts = append(parts, partMap)
 	}
 	ui["parts"] = parts
 	return ui
+}
+
+func extraFields(raw map[string]any, knownKeys ...string) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	known := make(map[string]struct{}, len(knownKeys))
+	for _, key := range knownKeys {
+		known[key] = struct{}{}
+	}
+	extra := map[string]any{}
+	for key, value := range raw {
+		if _, ok := known[key]; ok {
+			continue
+		}
+		extra[key] = jsonutil.DeepCloneAny(value)
+	}
+	if len(extra) == 0 {
+		return nil
+	}
+	return extra
 }
 
 func stringValue(v any) string {

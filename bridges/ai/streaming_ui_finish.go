@@ -14,9 +14,8 @@ func (oc *AIClient) emitUIFinish(ctx context.Context, portal *bridgev2.Portal, s
 	if state == nil {
 		return
 	}
-	ui := oc.uiEmitter(state)
 	finishReason := msgconv.MapFinishReason(state.finishReason)
-	ui.EmitUIFinish(ctx, portal, finishReason, oc.buildUIMessageMetadata(state, meta, true))
+	oc.writer(state, portal).Finish(ctx, finishReason, oc.buildUIMessageMetadata(state, meta, true))
 	if state.session != nil {
 		state.session.End(ctx, mapTurnEndReason(finishReason))
 		state.session = nil
