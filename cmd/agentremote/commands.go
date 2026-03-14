@@ -108,6 +108,24 @@ func initCommands() {
 			Run: cmdStart,
 		},
 		{
+			Name: "up", Group: "Bridges",
+			Description: "Start a bridge in the background",
+			Usage:       "agentremote up <bridge> [flags]",
+			PosArgs:     "bridge",
+			Flags: []flagDef{
+				{Name: "profile", Help: "Profile name", Default: "default"},
+				{Name: "name", Help: "Instance name (for multiple instances of the same bridge)"},
+				{Name: "env", Help: "Override beeper env for this bridge", Values: envNames()},
+				{Name: "wait", Help: "Block until bridge is connected", IsBool: true},
+				{Name: "wait-timeout", Help: "Timeout for --wait", Default: "60s"},
+			},
+			Examples: []string{
+				"agentremote up ai",
+				"agentremote up codex --name test",
+			},
+			Run: cmdUp,
+		},
+		{
 			Name: "run", Group: "Bridges",
 			Description: "Run a bridge in the foreground",
 			Usage:       "agentremote run <bridge> [flags]",
@@ -124,6 +142,22 @@ func initCommands() {
 			Run: cmdRun,
 		},
 		{
+			Name: "init", Group: "Bridges",
+			Description: "Initialize local config and metadata for a bridge",
+			Usage:       "agentremote init <bridge> [flags]",
+			PosArgs:     "bridge",
+			Flags: []flagDef{
+				{Name: "profile", Help: "Profile name", Default: "default"},
+				{Name: "name", Help: "Instance name (for multiple instances of the same bridge)"},
+				{Name: "env", Help: "Override beeper env for this bridge", Values: envNames()},
+			},
+			Examples: []string{
+				"agentremote init ai",
+				"agentremote init openclaw --name dev",
+			},
+			Run: cmdInit,
+		},
+		{
 			Name: "stop", Group: "Bridges",
 			Description: "Stop a running bridge",
 			Usage:       "agentremote stop <instance> [flags]",
@@ -136,6 +170,20 @@ func initCommands() {
 				"agentremote stop codex-test",
 			},
 			Run: cmdStop,
+		},
+		{
+			Name: "down", Group: "Bridges",
+			Description: "Stop a running bridge",
+			Usage:       "agentremote down <instance> [flags]",
+			PosArgs:     "instance",
+			Flags: []flagDef{
+				{Name: "profile", Help: "Profile name", Default: "default"},
+			},
+			Examples: []string{
+				"agentremote down ai",
+				"agentremote down codex-test",
+			},
+			Run: cmdDown,
 		},
 		{
 			Name: "stop-all", Group: "Bridges",
@@ -178,6 +226,24 @@ func initCommands() {
 			Run: cmdStatus,
 		},
 		{
+			Name: "register", Group: "Bridges",
+			Description: "Ensure bridge registration without starting the process",
+			Usage:       "agentremote register <bridge> [flags]",
+			PosArgs:     "bridge",
+			Flags: []flagDef{
+				{Name: "profile", Help: "Profile name", Default: "default"},
+				{Name: "name", Help: "Instance name (for multiple instances of the same bridge)"},
+				{Name: "env", Help: "Override beeper env for this bridge", Values: envNames()},
+				{Name: "output", Help: "Write registration YAML to a separate path", Default: "-"},
+				{Name: "json", Help: "Print registration metadata as JSON", IsBool: true},
+			},
+			Examples: []string{
+				"agentremote register ai",
+				"agentremote register codex --name dev --json",
+			},
+			Run: cmdRegister,
+		},
+		{
 			Name: "logs", Group: "Bridges",
 			Description: "View bridge logs",
 			Usage:       "agentremote logs <instance> [flags]",
@@ -199,6 +265,16 @@ func initCommands() {
 			Run:         func(args []string) error { return cmdList() },
 		},
 		{
+			Name: "instances", Group: "Bridges",
+			Description: "List local bridge instances for a profile",
+			Usage:       "agentremote instances [flags]",
+			Flags: []flagDef{
+				{Name: "profile", Help: "Profile name", Default: "default"},
+				{Name: "output", Help: "Output format", Default: "text", Values: []string{"text", "json"}},
+			},
+			Run: cmdInstances,
+		},
+		{
 			Name: "delete", Group: "Bridges",
 			Description: "Delete a bridge instance",
 			Usage:       "agentremote delete <instance> [flags]",
@@ -218,6 +294,28 @@ func initCommands() {
 			Description: "Show version info",
 			Usage:       "agentremote version",
 			Run:         func(args []string) error { return cmdVersion() },
+		},
+		{
+			Name: "doctor", Group: "Other",
+			Description: "Check agentremote auth and local instance state",
+			Usage:       "agentremote doctor [flags]",
+			Flags: []flagDef{
+				{Name: "profile", Help: "Profile name", Default: "default"},
+				{Name: "output", Help: "Output format", Default: "text", Values: []string{"text", "json"}},
+			},
+			Run: cmdDoctor,
+		},
+		{
+			Name: "auth", Group: "Other",
+			Description: "Manage stored auth tokens",
+			Usage:       "agentremote auth <set-token|show|whoami> [flags]",
+			PosArgs:     "command",
+			Examples: []string{
+				"agentremote auth set-token --token syt_...",
+				"agentremote auth show --profile work",
+				"agentremote auth whoami",
+			},
+			Run: cmdAuth,
 		},
 		{
 			Name: "completion", Group: "Other",
