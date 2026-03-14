@@ -22,7 +22,6 @@ func (oc *AIClient) createStreamingTurn(
 	meta *PortalMetadata,
 	state *streamingState,
 	sourceEventID id.EventID,
-	turnID string,
 ) *bridgesdk.Turn {
 	var sdkConfig *bridgesdk.Config
 	if oc.connector != nil {
@@ -34,12 +33,10 @@ func (oc *AIClient) createStreamingTurn(
 	}
 	conv := bridgesdk.NewConversation(ctx, oc.UserLogin, portal, sender, sdkConfig, oc)
 	turn := conv.StartTurn(ctx, nil, &bridgesdk.SourceRef{EventID: string(sourceEventID)})
-	turn.SetID(turnID)
 	turn.SetSender(sender)
 	turn.SetFinalMetadataProvider(bridgesdk.FinalMetadataProviderFunc(func(sdkTurn *bridgesdk.Turn, _ string) any {
 		if sdkTurn != nil {
 			state.turn = sdkTurn
-			state.ui = sdkTurn.UIState()
 		}
 		return oc.buildStreamingMessageMetadata(state, meta, nil)
 	}))
@@ -126,12 +123,11 @@ func (oc *AIClient) prepareStreamingRun(
 	if portal != nil {
 		roomID = portal.MXID
 	}
-	state, turnID := newStreamingState(ctx, meta, sourceEventID, senderID, roomID)
+	state := newStreamingState(ctx, meta, sourceEventID, senderID, roomID)
 
 	// Create SDK Turn for writer/emitter/session management.
-	turn := oc.createStreamingTurn(ctx, portal, meta, state, sourceEventID, turnID)
+	turn := oc.createStreamingTurn(ctx, portal, meta, state, sourceEventID)
 	state.turn = turn
-	state.ui = turn.UIState()
 
 	state.replyTarget = oc.resolveInitialReplyTarget(evt)
 	if isSimpleMode(meta) {

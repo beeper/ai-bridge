@@ -14,13 +14,10 @@ import (
 )
 
 func currentStreamingUIState(state *streamingState) *streamui.UIState {
-	if state == nil {
+	if state == nil || state.turn == nil {
 		return nil
 	}
-	if state.turn != nil && state.turn.UIState() != nil {
-		return state.turn.UIState()
-	}
-	return state.ui
+	return state.turn.UIState()
 }
 
 func visibleStreamingText(state *streamingState) string {

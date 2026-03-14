@@ -70,23 +70,21 @@ func TestShouldContinueChatToolLoop(t *testing.T) {
 
 func TestBuildStreamUIMessage_IncludesSourceAndFileParts(t *testing.T) {
 	oc := &AIClient{}
-	state := &streamingState{
-		turnID: "turn-1",
-		sourceCitations: []citations.SourceCitation{{
-			URL:   "https://example.com",
-			Title: "Example",
-		}},
-		sourceDocuments: []citations.SourceDocument{{
-			ID:        "doc-1",
-			Title:     "Doc",
-			Filename:  "doc.txt",
-			MediaType: "text/plain",
-		}},
-		generatedFiles: []citations.GeneratedFilePart{{
-			URL:       "mxc://example/file",
-			MediaType: "image/png",
-		}},
-	}
+	state := testStreamingState("turn-1")
+	state.sourceCitations = []citations.SourceCitation{{
+		URL:   "https://example.com",
+		Title: "Example",
+	}}
+	state.sourceDocuments = []citations.SourceDocument{{
+		ID:        "doc-1",
+		Title:     "Doc",
+		Filename:  "doc.txt",
+		MediaType: "text/plain",
+	}}
+	state.generatedFiles = []citations.GeneratedFilePart{{
+		URL:       "mxc://example/file",
+		MediaType: "image/png",
+	}}
 
 	ui := oc.buildStreamUIMessage(state, simpleModeTestMeta("openai/gpt-4.1"), nil)
 	if ui == nil {

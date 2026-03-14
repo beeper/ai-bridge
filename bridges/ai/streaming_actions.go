@@ -2,153 +2,236 @@ package ai
 
 import (
 	"context"
+	"strconv"
+	"strings"
 
+	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
+	"github.com/rs/zerolog"
+	"maunium.net/go/mautrix/bridgev2"
 )
 
 type streamTurnActions struct {
-	base  *streamingAdapterBase
-	tools *streamToolRegistry
+	oc                           *AIClient
+	ctx                          context.Context
+	log                          zerolog.Logger
+	portal                       *bridgev2.Portal
+	state                        *streamingState
+	meta                         *PortalMetadata
+	activeTools                  *streamToolRegistry
+	typingSignals                *TypingSignaler
+	touchTyping                  func()
+	isHeartbeat                  bool
+	continuationSuffix           string
+	approvalFallbackForNonObject bool
 }
 
-func newStreamTurnActions(base *streamingAdapterBase, tools *streamToolRegistry) streamTurnActions {
+func newStreamTurnActions(
+	ctx context.Context,
+	oc *AIClient,
+	log zerolog.Logger,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	meta *PortalMetadata,
+	activeTools *streamToolRegistry,
+	typingSignals *TypingSignaler,
+	touchTyping func(),
+	isHeartbeat bool,
+	isContinuation bool,
+	approvalFallbackForNonObject bool,
+) streamTurnActions {
+	suffix := ""
+	if isContinuation {
+		suffix = " (continuation)"
+	}
 	return streamTurnActions{
-		base:  base,
-		tools: tools,
+		oc:                           oc,
+		ctx:                          ctx,
+		log:                          log,
+		portal:                       portal,
+		state:                        state,
+		meta:                         meta,
+		activeTools:                  activeTools,
+		typingSignals:                typingSignals,
+		touchTyping:                  touchTyping,
+		isHeartbeat:                  isHeartbeat,
+		continuationSuffix:           suffix,
+		approvalFallbackForNonObject: approvalFallbackForNonObject,
 	}
 }
 
-func (a streamTurnActions) touchTyping() {
-	if a.base != nil && a.base.touchTyping != nil {
-		a.base.touchTyping()
+func (a streamTurnActions) touch() {
+	if a.touchTyping != nil {
+		a.touchTyping()
 	}
 }
 
-func (a streamTurnActions) signalToolStart() {
-	a.touchTyping()
-	if a.base != nil && a.base.typingSignals != nil {
-		a.base.typingSignals.SignalToolStart()
+func (a streamTurnActions) touchTool() {
+	a.touch()
+	if a.typingSignals != nil {
+		a.typingSignals.SignalToolStart()
 	}
 }
 
-func (a streamTurnActions) textDelta(ctx context.Context, delta string, errText string, logMessage string) error {
-	if a.base == nil {
-		return nil
+func (a streamTurnActions) textErrorText() string {
+	return "failed to send initial streaming message" + a.continuationSuffix
+}
+
+func (a streamTurnActions) textLogMessage() string {
+	return "Failed to send initial streaming message" + a.continuationSuffix
+}
+
+func (a streamTurnActions) updateUsage(promptTokens, completionTokens, reasoningTokens, totalTokens int64) {
+	if a.state == nil {
+		return
 	}
-	a.touchTyping()
-	return a.base.oc.handleResponseOutputTextDelta(
-		ctx,
-		a.base.log,
-		a.base.portal,
-		a.base.state,
-		a.base.meta,
-		a.base.typingSignals,
-		a.base.isHeartbeat,
+	a.state.promptTokens = promptTokens
+	a.state.completionTokens = completionTokens
+	a.state.reasoningTokens = reasoningTokens
+	a.state.totalTokens = totalTokens
+	a.state.writer().MessageMetadata(a.ctx, a.oc.buildUIMessageMetadata(a.state, a.meta, true))
+}
+
+func (a streamTurnActions) textDelta(delta string) (string, error) {
+	a.touch()
+	return a.oc.processStreamingTextDelta(
+		a.ctx,
+		a.log,
+		a.portal,
+		a.state,
+		a.meta,
+		a.typingSignals,
+		a.isHeartbeat,
 		delta,
-		errText,
-		logMessage,
+		a.textErrorText(),
+		a.textLogMessage(),
 	)
 }
 
-func (a streamTurnActions) reasoningDelta(ctx context.Context, delta string, errText string, logMessage string) error {
-	if a.base == nil {
-		return nil
+func (a streamTurnActions) reasoningDelta(delta string) error {
+	a.touch()
+	if a.typingSignals != nil {
+		a.typingSignals.SignalReasoningDelta()
 	}
-	a.touchTyping()
-	if a.base.typingSignals != nil {
-		a.base.typingSignals.SignalReasoningDelta()
-	}
-	return a.base.oc.handleResponseReasoningTextDelta(
-		ctx,
-		a.base.log,
-		a.base.portal,
-		a.base.state,
-		a.base.meta,
-		a.base.isHeartbeat,
+	return a.oc.handleResponseReasoningTextDelta(
+		a.ctx,
+		a.log,
+		a.portal,
+		a.state,
+		a.meta,
+		a.isHeartbeat,
 		delta,
-		errText,
-		logMessage,
+		a.textErrorText(),
+		a.textLogMessage(),
 	)
 }
 
-func (a streamTurnActions) refusalDelta(ctx context.Context, delta string) {
-	if a.base == nil {
-		return
-	}
-	a.touchTyping()
-	a.base.oc.handleResponseRefusalDelta(ctx, a.base.portal, a.base.state, a.base.typingSignals, delta)
+func (a streamTurnActions) reasoningText(text string) {
+	a.oc.appendReasoningText(a.ctx, a.portal, a.state, strings.TrimSpace(text))
 }
 
-func (a streamTurnActions) refusalDone(ctx context.Context, refusal string) {
-	if a.base == nil {
-		return
-	}
-	a.base.oc.handleResponseRefusalDone(ctx, a.base.portal, a.base.state, refusal)
+func (a streamTurnActions) refusalDelta(delta string) {
+	a.touch()
+	a.oc.handleResponseRefusalDelta(a.ctx, a.portal, a.state, a.typingSignals, delta)
 }
 
-func (a streamTurnActions) responseOutputItemAdded(ctx context.Context, item responses.ResponseOutputItemUnion) {
-	if a.base == nil {
-		return
-	}
-	a.base.oc.handleResponseOutputItemAdded(ctx, a.base.portal, a.base.state, a.tools, item)
+func (a streamTurnActions) refusalDone(refusal string) {
+	a.oc.handleResponseRefusalDone(a.ctx, a.portal, a.state, strings.TrimSpace(refusal))
 }
 
-func (a streamTurnActions) responseOutputItemDone(ctx context.Context, item responses.ResponseOutputItemUnion) {
-	if a.base == nil {
-		return
-	}
-	a.base.oc.handleResponseOutputItemDone(ctx, a.base.portal, a.base.state, a.tools, item)
+func (a streamTurnActions) functionToolInputDelta(itemID, name, delta string) {
+	a.touchTool()
+	a.oc.handleFunctionCallArgumentsDelta(a.ctx, a.portal, a.state, a.meta, a.activeTools, itemID, name, delta)
 }
 
-func (a streamTurnActions) customToolInputDelta(ctx context.Context, itemID string, item responses.ResponseOutputItemUnion, delta string) {
-	if a.base == nil {
-		return
-	}
-	a.base.oc.handleCustomToolInputDeltaFromOutputItem(ctx, a.base.portal, a.base.state, a.tools, itemID, item, delta)
+func (a streamTurnActions) functionToolInputDone(itemID, name, arguments string) {
+	a.touchTool()
+	a.oc.handleFunctionCallArgumentsDone(
+		a.ctx,
+		a.log,
+		a.portal,
+		a.state,
+		a.meta,
+		a.activeTools,
+		itemID,
+		name,
+		arguments,
+		a.approvalFallbackForNonObject,
+		a.continuationSuffix,
+	)
 }
 
-func (a streamTurnActions) customToolInputDone(ctx context.Context, itemID string, item responses.ResponseOutputItemUnion, inputText string) {
-	if a.base == nil {
-		return
-	}
-	a.base.oc.handleCustomToolInputDoneFromOutputItem(ctx, a.base.portal, a.base.state, a.tools, itemID, item, inputText)
+func (a streamTurnActions) providerToolInProgress(itemID, toolName string, toolType ToolType) {
+	a.touchTool()
+	a.oc.handleProviderToolInProgress(a.ctx, a.portal, a.state, a.meta, a.activeTools, itemID, toolName, toolType)
 }
 
-func (a streamTurnActions) mcpCallFailed(ctx context.Context, itemID string, item responses.ResponseOutputItemUnion) {
-	if a.base == nil {
-		return
-	}
-	a.base.oc.handleMCPCallFailedFromOutputItem(ctx, a.base.portal, a.base.state, a.tools, itemID, item)
+func (a streamTurnActions) providerToolCompleted(itemID, toolName string, toolType ToolType, failureText string) {
+	a.touch()
+	a.oc.handleProviderToolCompleted(a.ctx, a.portal, a.state, a.activeTools, itemID, toolName, toolType, failureText)
 }
 
-func (a streamTurnActions) functionArgsDelta(ctx context.Context, itemID string, name string, delta string) {
-	if a.base == nil {
-		return
-	}
-	a.signalToolStart()
-	a.base.oc.handleFunctionCallArgumentsDelta(ctx, a.base.portal, a.base.state, a.base.meta, a.tools, itemID, name, delta)
+func (a streamTurnActions) outputItemAdded(item responses.ResponseOutputItemUnion) {
+	a.oc.handleResponseOutputItemAdded(a.ctx, a.portal, a.state, a.activeTools, item)
 }
 
-func (a streamTurnActions) functionArgsDone(ctx context.Context, itemID string, name string, arguments string, approvalFallbackForNonObject bool, logSuffix string) {
-	if a.base == nil {
-		return
-	}
-	a.signalToolStart()
-	a.base.oc.handleFunctionCallArgumentsDone(ctx, a.base.log, a.base.portal, a.base.state, a.base.meta, a.tools, itemID, name, arguments, approvalFallbackForNonObject, logSuffix)
+func (a streamTurnActions) outputItemDone(item responses.ResponseOutputItemUnion) {
+	a.oc.handleResponseOutputItemDone(a.ctx, a.portal, a.state, a.activeTools, item)
 }
 
-func (a streamTurnActions) providerToolInProgress(ctx context.Context, itemID string, toolName string, toolType ToolType) {
-	if a.base == nil {
-		return
-	}
-	a.signalToolStart()
-	a.base.oc.handleProviderToolInProgress(ctx, a.base.portal, a.base.state, a.base.meta, a.tools, itemID, toolName, toolType)
+func (a streamTurnActions) customToolInputDelta(itemID string, item responses.ResponseOutputItemUnion, delta string) {
+	a.oc.handleCustomToolInputDeltaFromOutputItem(a.ctx, a.portal, a.state, a.activeTools, itemID, item, delta)
 }
 
-func (a streamTurnActions) providerToolCompleted(ctx context.Context, itemID string, toolName string, toolType ToolType, failureText string) {
-	if a.base == nil {
-		return
+func (a streamTurnActions) customToolInputDone(itemID string, item responses.ResponseOutputItemUnion, inputText string) {
+	a.oc.handleCustomToolInputDoneFromOutputItem(a.ctx, a.portal, a.state, a.activeTools, itemID, item, inputText)
+}
+
+func (a streamTurnActions) mcpCallFailed(itemID string, item responses.ResponseOutputItemUnion) {
+	a.oc.handleMCPCallFailedFromOutputItem(a.ctx, a.portal, a.state, a.activeTools, itemID, item)
+}
+
+func (a streamTurnActions) annotationAdded(annotation any, annotationIndex any) {
+	a.oc.handleResponseOutputAnnotationAdded(a.ctx, a.portal, a.state, annotation, annotationIndex)
+}
+
+func chatToolRegistryKey(index int64) string {
+	return "chat-index:" + strconv.FormatInt(index, 10)
+}
+
+func chatToolDescriptor(toolDelta openai.ChatCompletionChunkChoiceDeltaToolCall) responseToolDescriptor {
+	desc := responseToolDescriptor{
+		registryKey: streamToolItemKey(chatToolRegistryKey(toolDelta.Index)),
+		itemID:      chatToolRegistryKey(toolDelta.Index),
+		callID:      strings.TrimSpace(toolDelta.ID),
+		toolName:    strings.TrimSpace(toolDelta.Function.Name),
+		toolType:    ToolTypeFunction,
+		ok:          true,
 	}
-	a.touchTyping()
-	a.base.oc.handleProviderToolCompleted(ctx, a.base.portal, a.base.state, a.tools, itemID, toolName, toolType, failureText)
+	if desc.callID == "" {
+		desc.callID = desc.itemID
+	}
+	if desc.registryKey == "" {
+		desc.registryKey = streamToolCallKey(desc.callID)
+	}
+	return desc
+}
+
+func (a streamTurnActions) chatToolInputDelta(toolDelta openai.ChatCompletionChunkChoiceDeltaToolCall) *activeToolCall {
+	a.touchTool()
+	desc := chatToolDescriptor(toolDelta)
+	tool, _ := a.oc.upsertActiveToolFromDescriptor(a.ctx, a.portal, a.state, a.activeTools, desc)
+	if tool == nil {
+		return nil
+	}
+	if tool.input.Len() == 0 {
+		a.oc.toolLifecycle(a.portal, a.state).ensureInputStart(a.ctx, tool, false, nil)
+	}
+	if desc.toolName != "" {
+		tool.toolName = desc.toolName
+	}
+	if toolDelta.Function.Arguments != "" {
+		a.oc.toolLifecycle(a.portal, a.state).appendInputDelta(a.ctx, tool, tool.toolName, toolDelta.Function.Arguments, false)
+	}
+	return tool
 }

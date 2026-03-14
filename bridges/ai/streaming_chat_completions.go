@@ -3,8 +3,6 @@ package ai
 import (
 	"context"
 	"errors"
-	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
@@ -17,32 +15,6 @@ import (
 
 type chatCompletionsTurnAdapter struct {
 	streamingAdapterBase
-}
-
-func chatToolRegistryKey(index int64) string {
-	return "chat-index:" + strconv.FormatInt(index, 10)
-}
-
-func (oc *AIClient) upsertChatStreamingTool(
-	ctx context.Context,
-	portal *bridgev2.Portal,
-	state *streamingState,
-	meta *PortalMetadata,
-	activeTools map[string]*activeToolCall,
-	toolDelta openai.ChatCompletionChunkChoiceDeltaToolCall,
-) *activeToolCall {
-	key := chatToolRegistryKey(toolDelta.Index)
-	tool := oc.ensureActiveToolCall(ctx, portal, state, meta, activeTools, key, "", ToolTypeFunction, "")
-	if tool == nil {
-		return nil
-	}
-	if strings.TrimSpace(toolDelta.ID) != "" {
-		tool.callID = strings.TrimSpace(toolDelta.ID)
-	}
-	if tool.input.Len() == 0 {
-		oc.toolLifecycle(portal, state).ensureInputStart(ctx, tool, false, nil)
-	}
-	return tool
 }
 
 func (a *chatCompletionsTurnAdapter) TrackRoomRunStreaming() bool {
@@ -77,8 +49,6 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 	if temp := oc.effectiveTemperature(meta); temp > 0 {
 		params.Temperature = openai.Float(temp)
 	}
-	streamUI := state.writer()
-	lifecycle := oc.toolLifecycle(portal, state)
 	params.Tools = oc.selectedChatStreamingTools(ctx, meta)
 
 	stream := oc.api.Chat.Completions.NewStreaming(ctx, params)
@@ -88,7 +58,21 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 		return false, nil, oc.finishStreamingWithFailure(ctx, log, portal, state, meta, "error", initErr)
 	}
 
-	activeTools := make(map[string]*activeToolCall)
+	activeTools := newStreamToolRegistry()
+	actions := newStreamTurnActions(
+		ctx,
+		oc,
+		log,
+		portal,
+		state,
+		meta,
+		activeTools,
+		typingSignals,
+		touchTyping,
+		isHeartbeat,
+		round > 0,
+		false,
+	)
 	var roundContent strings.Builder
 	state.finishReason = ""
 
@@ -96,28 +80,17 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 		func(openai.ChatCompletionChunk) bool { return true },
 		func(chunk openai.ChatCompletionChunk) (bool, *ContextLengthError, error) {
 			if chunk.Usage.TotalTokens > 0 || chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 {
-				state.promptTokens = chunk.Usage.PromptTokens
-				state.completionTokens = chunk.Usage.CompletionTokens
-				state.reasoningTokens = chunk.Usage.CompletionTokensDetails.ReasoningTokens
-				state.totalTokens = chunk.Usage.TotalTokens
-				streamUI.MessageMetadata(ctx, oc.buildUIMessageMetadata(state, meta, true))
+				actions.updateUsage(
+					chunk.Usage.PromptTokens,
+					chunk.Usage.CompletionTokens,
+					chunk.Usage.CompletionTokensDetails.ReasoningTokens,
+					chunk.Usage.TotalTokens,
+				)
 			}
 
 			for _, choice := range chunk.Choices {
 				if choice.Delta.Content != "" {
-					touchTyping()
-					roundDelta, err := oc.processStreamingTextDelta(
-						ctx,
-						log,
-						portal,
-						state,
-						meta,
-						typingSignals,
-						isHeartbeat,
-						choice.Delta.Content,
-						"failed to send initial streaming message",
-						"Failed to send initial streaming message",
-					)
+					roundDelta, err := actions.textDelta(choice.Delta.Content)
 					if err != nil {
 						return false, nil, &PreDeltaError{Err: err}
 					}
@@ -127,40 +100,16 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 				}
 
 				if choice.Delta.Refusal != "" {
-					touchTyping()
 					state.accumulated.WriteString(choice.Delta.Refusal)
 					roundContent.WriteString(choice.Delta.Refusal)
-					if err := oc.emitVisibleTextDelta(
-						ctx,
-						log,
-						portal,
-						state,
-						meta,
-						typingSignals,
-						isHeartbeat,
-						choice.Delta.Refusal,
-						"failed to send initial streaming message",
-						"Failed to send initial streaming message",
-					); err != nil {
+					actions.refusalDelta(choice.Delta.Refusal)
+					if err := state.turn.Err(); err != nil {
 						return false, nil, &PreDeltaError{Err: err}
 					}
 				}
 
 				for _, toolDelta := range choice.Delta.ToolCalls {
-					touchTyping()
-					if typingSignals != nil {
-						typingSignals.SignalToolStart()
-					}
-					tool := oc.upsertChatStreamingTool(ctx, portal, state, meta, activeTools, toolDelta)
-					if tool == nil {
-						continue
-					}
-					if toolDelta.Function.Name != "" {
-						tool.toolName = toolDelta.Function.Name
-					}
-					if toolDelta.Function.Arguments != "" {
-						lifecycle.appendInputDelta(ctx, tool, tool.toolName, toolDelta.Function.Arguments, false)
-					}
+					actions.chatToolInputDelta(toolDelta)
 				}
 
 				if choice.FinishReason != "" {
@@ -182,16 +131,12 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 		return false, cle, err
 	}
 
-	toolCallParams := make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(activeTools))
+	keys := activeTools.SortedKeys()
+	toolCallParams := make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(keys))
 
-	if len(activeTools) > 0 {
-		keys := make([]string, 0, len(activeTools))
-		for key := range activeTools {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
+	if len(keys) > 0 {
 		for _, key := range keys {
-			tool := activeTools[key]
+			tool := activeTools.Lookup(key)
 			if tool == nil {
 				continue
 			}
@@ -216,23 +161,7 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 				},
 			})
 
-			touchTyping()
-			if typingSignals != nil {
-				typingSignals.SignalToolStart()
-			}
-			oc.handleFunctionCallArgumentsDone(
-				ctx,
-				log,
-				portal,
-				state,
-				meta,
-				activeTools,
-				key,
-				toolName,
-				argsJSON,
-				false,
-				" (Chat Completions)",
-			)
+			actions.functionToolInputDone(tool.itemID, toolName, argsJSON)
 		}
 	}
 

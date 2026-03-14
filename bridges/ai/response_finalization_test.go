@@ -1,37 +1,48 @@
 package ai
 
 import (
+	"context"
 	"testing"
+
+	"maunium.net/go/mautrix/bridgev2"
 
 	"github.com/beeper/agentremote/pkg/shared/citations"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
+	bridgesdk "github.com/beeper/agentremote/sdk"
 )
+
+func testStreamingState(turnID string) *streamingState {
+	conv := bridgesdk.NewConversation(context.Background(), nil, nil, bridgev2.EventSender{}, nil, nil)
+	turn := conv.StartTurn(context.Background(), nil, nil)
+	turn.SetID(turnID)
+	return &streamingState{
+		turn: turn,
+	}
+}
 
 func TestBuildFinalEditUIMessage_IncludesSourceAndFileParts(t *testing.T) {
 	oc := &AIClient{}
-	state := &streamingState{
-		turnID: "turn-1",
-		sourceCitations: []citations.SourceCitation{{
-			URL:      "https://example.com",
-			Title:    "Example",
-			SiteName: "Example Site",
-		}},
-		sourceDocuments: []citations.SourceDocument{{
-			ID:        "doc-1",
-			Title:     "Doc",
-			Filename:  "doc.txt",
-			MediaType: "text/plain",
-		}},
-		generatedFiles: []citations.GeneratedFilePart{{
-			URL:       "mxc://example/file",
-			MediaType: "image/png",
-		}},
-	}
+	state := testStreamingState("turn-1")
+	state.sourceCitations = []citations.SourceCitation{{
+		URL:      "https://example.com",
+		Title:    "Example",
+		SiteName: "Example Site",
+	}}
+	state.sourceDocuments = []citations.SourceDocument{{
+		ID:        "doc-1",
+		Title:     "Doc",
+		Filename:  "doc.txt",
+		MediaType: "text/plain",
+	}}
+	state.generatedFiles = []citations.GeneratedFilePart{{
+		URL:       "mxc://example/file",
+		MediaType: "image/png",
+	}}
 	state.accumulated.WriteString("hello")
-	streamui.ApplyChunk(state.ui, map[string]any{"type": "start", "messageId": "turn-1"})
-	streamui.ApplyChunk(state.ui, map[string]any{"type": "text-start", "id": "text-1"})
-	streamui.ApplyChunk(state.ui, map[string]any{"type": "text-delta", "id": "text-1", "delta": "hello"})
-	streamui.ApplyChunk(state.ui, map[string]any{"type": "text-end", "id": "text-1"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "start", "messageId": "turn-1"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "text-start", "id": "text-1"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "text-delta", "id": "text-1", "delta": "hello"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "text-end", "id": "text-1"})
 
 	ui := buildCompactFinalUIMessage(oc.buildStreamUIMessage(state, simpleModeTestMeta("openai/gpt-4.1"), nil))
 	if ui == nil {
@@ -85,16 +96,16 @@ func TestBuildFinalEditUIMessage_IncludesSourceAndFileParts(t *testing.T) {
 
 func TestBuildFinalEditUIMessage_OmitsTextAndReasoningParts(t *testing.T) {
 	oc := &AIClient{}
-	state := &streamingState{turnID: "turn-2"}
+	state := testStreamingState("turn-2")
 	state.accumulated.WriteString("hello")
 	state.reasoning.WriteString("thinking")
-	streamui.ApplyChunk(state.ui, map[string]any{"type": "start", "messageId": "turn-2"})
-	streamui.ApplyChunk(state.ui, map[string]any{"type": "text-start", "id": "text-2"})
-	streamui.ApplyChunk(state.ui, map[string]any{"type": "text-delta", "id": "text-2", "delta": "hello"})
-	streamui.ApplyChunk(state.ui, map[string]any{"type": "text-end", "id": "text-2"})
-	streamui.ApplyChunk(state.ui, map[string]any{"type": "reasoning-start", "id": "reasoning-2"})
-	streamui.ApplyChunk(state.ui, map[string]any{"type": "reasoning-delta", "id": "reasoning-2", "delta": "thinking"})
-	streamui.ApplyChunk(state.ui, map[string]any{"type": "reasoning-end", "id": "reasoning-2"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "start", "messageId": "turn-2"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "text-start", "id": "text-2"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "text-delta", "id": "text-2", "delta": "hello"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "text-end", "id": "text-2"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "reasoning-start", "id": "reasoning-2"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "reasoning-delta", "id": "reasoning-2", "delta": "thinking"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "reasoning-end", "id": "reasoning-2"})
 
 	ui := buildCompactFinalUIMessage(oc.buildStreamUIMessage(state, simpleModeTestMeta("openai/gpt-4.1"), nil))
 	parts, _ := ui["parts"].([]any)
@@ -104,6 +115,19 @@ func TestBuildFinalEditUIMessage_OmitsTextAndReasoningParts(t *testing.T) {
 		case "text", "reasoning":
 			t.Fatalf("expected final UIMessage to omit textual parts, got %#v", part)
 		}
+	}
+}
+
+func TestFinalRenderedBodyFallback_UsesVisibleTurnText(t *testing.T) {
+	state := testStreamingState("turn-visible")
+	state.accumulated.WriteString("[[reply_to_current]] hidden")
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "start", "messageId": "turn-visible"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "text-start", "id": "text-visible"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "text-delta", "id": "text-visible", "delta": "Visible refusal"})
+	streamui.ApplyChunk(state.turn.UIState(), map[string]any{"type": "text-end", "id": "text-visible"})
+
+	if got := finalRenderedBodyFallback(state); got != "Visible refusal" {
+		t.Fatalf("expected visible body fallback, got %q", got)
 	}
 }
 

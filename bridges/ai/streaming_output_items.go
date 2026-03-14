@@ -121,8 +121,10 @@ func deriveToolDescriptorForOutputItem(item responses.ResponseOutputItemUnion, s
 			desc.registryKey = streamToolApprovalKey(desc.approvalID)
 		}
 		if approvalID := strings.TrimSpace(item.ApprovalRequestID); approvalID != "" && state != nil {
-			if mapped := strings.TrimSpace(state.ui.UIToolCallIDByApproval[approvalID]); mapped != "" {
-				desc.callID = mapped
+			if uiState := currentStreamingUIState(state); uiState != nil {
+				if mapped := strings.TrimSpace(uiState.UIToolCallIDByApproval[approvalID]); mapped != "" {
+					desc.callID = mapped
+				}
 			}
 		}
 		desc.input = parseJSONOrRaw(item.Arguments)

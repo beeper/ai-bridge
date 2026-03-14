@@ -2,8 +2,10 @@ package ai
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
+	"github.com/openai/openai-go/v3/responses"
 	"maunium.net/go/mautrix/bridgev2"
 
 	"github.com/beeper/agentremote/pkg/shared/jsonutil"
@@ -121,6 +123,35 @@ func (l toolLifecycle) completeResult(
 		return
 	}
 	l.fail(ctx, tool, providerExecuted, resultStatus, errorText, input)
+}
+
+func (l toolLifecycle) completeFromResponseItem(ctx context.Context, tool *activeToolCall, item responses.ResponseOutputItemUnion) {
+	if tool == nil {
+		return
+	}
+	result := responseOutputItemResultPayload(item)
+	resultStatus := ResultStatusSuccess
+	errorText := strings.TrimSpace(item.Error)
+	statusText := strings.ToLower(strings.TrimSpace(item.Status))
+	switch {
+	case outputItemLooksDenied(item):
+		resultStatus = ResultStatusDenied
+	case statusText == "failed" || statusText == "incomplete" || errorText != "":
+		if errorText == "" {
+			errorText = fmt.Sprintf("%s failed", tool.toolName)
+		}
+		resultStatus = ResultStatusError
+	}
+	l.completeResult(
+		ctx,
+		tool,
+		true,
+		resultStatus,
+		errorText,
+		result,
+		nil,
+		parseToolInputPayload(tool.input.String()),
+	)
 }
 
 func outputMapFromResult(result any, errorText string, resultStatus ResultStatus) map[string]any {

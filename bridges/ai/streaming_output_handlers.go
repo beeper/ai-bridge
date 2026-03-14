@@ -22,6 +22,50 @@ func stableMCPApprovalID(toolCallID string, desc responseToolDescriptor) string 
 	return "mcp_approval_" + hex.EncodeToString(sum[:8])
 }
 
+func (oc *AIClient) startStreamingMCPApproval(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	params ToolApprovalParams,
+	needsPrompt bool,
+) (bridgesdk.ApprovalHandle, error) {
+	uiState := currentStreamingUIState(state)
+	req := bridgesdk.ApprovalRequest{
+		ApprovalID:   params.ApprovalID,
+		ToolCallID:   params.ToolCallID,
+		ToolName:     params.ToolName,
+		TTL:          params.TTL,
+		Presentation: &params.Presentation,
+		Metadata: map[string]any{
+			approvalMetadataKeyToolKind:     string(params.ToolKind),
+			approvalMetadataKeyRuleToolName: params.RuleToolName,
+			approvalMetadataKeyServerLabel:  params.ServerLabel,
+		},
+	}
+	if needsPrompt {
+		if uiState != nil && !uiState.UIToolApprovalRequested[params.ApprovalID] {
+			uiState.UIToolApprovalRequested[params.ApprovalID] = true
+		}
+		handle := state.turn.Approvals().Request(req)
+		if handle == nil {
+			return nil, fmt.Errorf("failed to deliver MCP approval prompt")
+		}
+		return handle, nil
+	}
+	if _, created := oc.registerToolApproval(params); !created {
+		return nil, fmt.Errorf("failed to register MCP approval request")
+	}
+	if err := oc.resolveToolApproval(params.ApprovalID, true, "auto_approved"); err != nil {
+		return nil, fmt.Errorf("failed to auto-approve MCP tool call: %w", err)
+	}
+	return &aiTurnApprovalHandle{
+		client:     oc,
+		turn:       state.turn,
+		approvalID: params.ApprovalID,
+		toolCallID: params.ToolCallID,
+	}, nil
+}
+
 func (oc *AIClient) upsertActiveToolFromDescriptor(
 	ctx context.Context,
 	portal *bridgev2.Portal,
@@ -68,8 +112,10 @@ func (oc *AIClient) upsertActiveToolFromDescriptor(
 	if desc.toolType != "" {
 		tool.toolType = desc.toolType
 	}
-	state.ui.UIToolNameByToolCallID[tool.callID] = tool.toolName
-	state.ui.UIToolTypeByToolCallID[tool.callID] = tool.toolType
+	if uiState := currentStreamingUIState(state); uiState != nil {
+		uiState.UIToolNameByToolCallID[tool.callID] = tool.toolName
+		uiState.UIToolTypeByToolCallID[tool.callID] = tool.toolType
+	}
 
 	if created {
 		lifecycle.ensureInputStart(ctx, tool, desc.providerExecuted, nil)
@@ -149,7 +195,7 @@ func (oc *AIClient) handleMCPCallFailedFromOutputItem(
 	if tool == nil {
 		return
 	}
-	if state != nil && state.ui.UIToolOutputFinalized[tool.callID] {
+	if uiState := currentStreamingUIState(state); uiState != nil && uiState.UIToolOutputFinalized[tool.callID] {
 		return
 	}
 	errorText := strings.TrimSpace(item.Error)
@@ -187,7 +233,10 @@ func (oc *AIClient) gateMcpToolApproval(
 	if tool.input.Len() == 0 {
 		tool.input.WriteString(stringifyJSONValue(desc.input))
 	}
-	state.ui.UIToolCallIDByApproval[approvalID] = tool.callID
+	tool.approvalID = approvalID
+	if uiState := currentStreamingUIState(state); uiState != nil {
+		uiState.UIToolCallIDByApproval[approvalID] = tool.callID
+	}
 	oc.toolLifecycle(portal, state).emitInput(ctx, tool, tool.toolName, desc.input, true)
 	state.pendingMcpApprovalsSeen[approvalID] = true
 	parsed := item.AsMcpApprovalRequest()
@@ -214,8 +263,6 @@ func (oc *AIClient) gateMcpToolApproval(
 		TTL:          ttl,
 	}
 
-	// If approvals are disabled, not required, or already always-allowed, auto-approve
-	// without prompting. Otherwise emit an approval request to the UI.
 	runtimeDecision := airuntime.DecideToolApproval(airuntime.ToolPolicyInput{
 		ToolName:      mcpToolName,
 		ToolKind:      "mcp",
@@ -226,41 +273,13 @@ func (oc *AIClient) gateMcpToolApproval(
 	if needsApproval && state.heartbeat != nil {
 		needsApproval = false
 	}
-	if needsApproval {
-		if !state.ui.UIToolApprovalRequested[approvalID] {
-			state.ui.UIToolApprovalRequested[approvalID] = true
-			handle := state.turn.Approvals().Request(bridgesdk.ApprovalRequest{
-				ApprovalID:   approvalID,
-				ToolCallID:   tool.callID,
-				ToolName:     tool.toolName,
-				TTL:          ttl,
-				Presentation: &presentation,
-				Metadata: map[string]any{
-					approvalMetadataKeyToolKind:     string(ToolApprovalKindMCP),
-					approvalMetadataKeyRuleToolName: mcpToolName,
-					approvalMetadataKeyServerLabel:  serverLabel,
-				},
-			})
-			if handle == nil {
-				delete(state.pendingMcpApprovalsSeen, approvalID)
-				oc.toolLifecycle(portal, state).fail(ctx, tool, true, ResultStatusError, "failed to deliver MCP approval prompt", nil)
-				oc.loggerForContext(ctx).Warn().Str("approval_id", approvalID).Msg("Failed to create MCP approval handle")
-				return
-			}
-			state.pendingMcpApprovals[len(state.pendingMcpApprovals)-1].handle = handle
-		}
-	} else {
-		if _, created := oc.registerToolApproval(params); !created {
-			delete(state.pendingMcpApprovalsSeen, approvalID)
-			oc.toolLifecycle(portal, state).fail(ctx, tool, true, ResultStatusError, "failed to register MCP approval request", nil)
-			return
-		}
-		if err := oc.resolveToolApproval(approvalID, true, "auto_approved"); err != nil {
-			delete(state.pendingMcpApprovalsSeen, approvalID)
-			oc.toolLifecycle(portal, state).fail(ctx, tool, true, ResultStatusError, "failed to auto-approve MCP tool call", nil)
-			oc.loggerForContext(ctx).Warn().Err(err).Str("approval_id", approvalID).Msg("Failed to auto-approve MCP tool call")
-		}
+	handle, err := oc.startStreamingMCPApproval(ctx, portal, state, params, needsApproval)
+	if err != nil {
+		delete(state.pendingMcpApprovalsSeen, approvalID)
+		oc.toolLifecycle(portal, state).fail(ctx, tool, true, ResultStatusError, err.Error(), nil)
+		return
 	}
+	state.pendingMcpApprovals[len(state.pendingMcpApprovals)-1].handle = handle
 }
 
 // resolveOutputItemTool performs the common setup shared by handleResponseOutputItemAdded
@@ -271,7 +290,7 @@ func (oc *AIClient) resolveOutputItemTool(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	state *streamingState,
-	activeTools map[string]*activeToolCall,
+	activeTools *streamToolRegistry,
 	item responses.ResponseOutputItemUnion,
 ) (*activeToolCall, responseToolDescriptor, bool, bool) {
 	desc := deriveToolDescriptorForOutputItem(item, state)
@@ -282,7 +301,7 @@ func (oc *AIClient) resolveOutputItemTool(
 	if tool == nil {
 		return nil, desc, false, false
 	}
-	if state.ui.UIToolOutputFinalized[tool.callID] {
+	if uiState := currentStreamingUIState(state); uiState != nil && uiState.UIToolOutputFinalized[tool.callID] {
 		return nil, desc, false, false
 	}
 	if item.Type == "mcp_approval_request" {
@@ -308,7 +327,7 @@ func (oc *AIClient) handleResponseOutputItemAdded(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	state *streamingState,
-	activeTools map[string]*activeToolCall,
+	activeTools *streamToolRegistry,
 	item responses.ResponseOutputItemUnion,
 ) {
 	tool, desc, created, ok := oc.resolveOutputItemTool(ctx, portal, state, activeTools, item)
@@ -324,7 +343,7 @@ func (oc *AIClient) handleResponseOutputItemDone(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	state *streamingState,
-	activeTools map[string]*activeToolCall,
+	activeTools *streamToolRegistry,
 	item responses.ResponseOutputItemUnion,
 ) {
 	tool, desc, created, ok := oc.resolveOutputItemTool(ctx, portal, state, activeTools, item)
@@ -341,28 +360,7 @@ func (oc *AIClient) handleResponseOutputItemDone(
 			state.writer().File(ctx, file.URL, file.MediaType)
 		}
 	}
-
-	result := responseOutputItemResultPayload(item)
-	resultStatus := ResultStatusSuccess
-	toolStatus := ToolStatusCompleted
-	statusText := strings.ToLower(strings.TrimSpace(item.Status))
-	errorText := strings.TrimSpace(item.Error)
-	switch {
-	case outputItemLooksDenied(item):
-		resultStatus = ResultStatusDenied
-		toolStatus = ToolStatusFailed
-	case statusText == "failed" || statusText == "incomplete" || errorText != "":
-		if errorText == "" {
-			errorText = fmt.Sprintf("%s failed", tool.toolName)
-		}
-		resultStatus = ResultStatusError
-		toolStatus = ToolStatusFailed
-	}
-	if toolStatus == ToolStatusCompleted {
-		oc.toolLifecycle(portal, state).succeed(ctx, tool, true, result, nil, parseToolInputPayload(tool.input.String()))
-		return
-	}
-	oc.toolLifecycle(portal, state).fail(ctx, tool, true, resultStatus, errorText, parseToolInputPayload(tool.input.String()))
+	oc.toolLifecycle(portal, state).completeFromResponseItem(ctx, tool, item)
 }
 
 // Response stream output helpers.

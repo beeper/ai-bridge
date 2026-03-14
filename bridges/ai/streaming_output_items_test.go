@@ -59,18 +59,19 @@ func TestDeriveToolDescriptorForOutputItem_FunctionCallParsesArgumentsJSON(t *te
 
 func TestUpsertActiveToolFromDescriptor_RecreatesNilMapEntry(t *testing.T) {
 	oc := &AIClient{}
-	state, turnID := newStreamingState(context.Background(), nil, "", "", "")
+	state := newStreamingState(context.Background(), nil, "", "", "")
 	conv := bridgesdk.NewConversation(context.Background(), nil, nil, bridgev2.EventSender{}, nil, nil)
 	state.turn = conv.StartTurn(context.Background(), nil, nil)
-	state.turn.SetID(turnID)
-	activeTools := map[string]*activeToolCall{"item_123": nil}
+	activeTools := newStreamToolRegistry()
+	activeTools.byKey[streamToolItemKey("item_123")] = nil
 
 	tool, created := oc.upsertActiveToolFromDescriptor(context.Background(), nil, state, activeTools, responseToolDescriptor{
-		ok:       true,
-		itemID:   "item_123",
-		callID:   "call_123",
-		toolName: "web_search",
-		toolType: ToolTypeFunction,
+		ok:          true,
+		registryKey: streamToolItemKey("item_123"),
+		itemID:      "item_123",
+		callID:      "call_123",
+		toolName:    "web_search",
+		toolType:    ToolTypeFunction,
 	})
 	if !created {
 		t.Fatalf("expected nil map entry to be recreated")
@@ -78,7 +79,7 @@ func TestUpsertActiveToolFromDescriptor_RecreatesNilMapEntry(t *testing.T) {
 	if tool == nil {
 		t.Fatal("expected tool to be recreated")
 	}
-	if activeTools["item_123"] == nil {
+	if activeTools.Lookup(streamToolItemKey("item_123")) == nil {
 		t.Fatal("expected recreated tool to be stored back into the map")
 	}
 	if tool.callID == "" || tool.toolName != "web_search" {

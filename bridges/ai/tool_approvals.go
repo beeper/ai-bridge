@@ -193,8 +193,8 @@ func (oc *AIClient) requestTurnApproval(
 		turnID = state.turn.ID()
 	}
 	replyTo := id.EventID("")
-	if state != nil {
-		replyTo = turnInitialEventID(state)
+	if state != nil && state.turn != nil {
+		replyTo = state.turn.InitialEventID()
 	}
 	oc.approvalFlow.SendPrompt(ctx, portal, agentremote.SendPromptParams{
 		ApprovalPromptMessageParams: agentremote.ApprovalPromptMessageParams{

@@ -8,16 +8,12 @@ import (
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
-	"github.com/beeper/agentremote"
 	runtimeparse "github.com/beeper/agentremote/pkg/runtime"
 	"github.com/beeper/agentremote/pkg/shared/citations"
-	"github.com/beeper/agentremote/pkg/shared/streamui"
 	"github.com/beeper/agentremote/sdk"
-	"github.com/beeper/agentremote/turns"
 )
 
 // streamingState tracks the state of a streaming response
@@ -64,9 +60,6 @@ type streamingState struct {
 	suppressSave      bool
 	suppressSend      bool
 
-	// AI SDK UIMessage stream tracking — accessed via turn.UIState().
-	ui *streamui.UIState
-
 	// Pending MCP approvals to resolve before the turn can continue.
 	pendingMcpApprovals     []mcpApprovalRequest
 	pendingMcpApprovalsSeen map[string]bool
@@ -76,15 +69,8 @@ func (s *streamingState) hasInitialMessageTarget() bool {
 	return s != nil && (s.hasEditTarget() || s.hasEphemeralTarget())
 }
 
-func (s *streamingState) streamTarget() turns.StreamTarget {
-	if s == nil || s.turn == nil {
-		return turns.StreamTarget{}
-	}
-	return turns.StreamTarget{NetworkMessageID: s.turn.NetworkMessageID()}
-}
-
 func (s *streamingState) hasEditTarget() bool {
-	return s != nil && s.streamTarget().HasEditTarget()
+	return s != nil && s.turn != nil && s.turn.NetworkMessageID() != ""
 }
 
 func (s *streamingState) hasEphemeralTarget() bool {
@@ -96,20 +82,6 @@ func (s *streamingState) writer() *sdk.Writer {
 		return nil
 	}
 	return s.turn.Writer()
-}
-
-func turnInitialEventID(s *streamingState) id.EventID {
-	if s == nil || s.turn == nil {
-		return ""
-	}
-	return s.turn.InitialEventID()
-}
-
-func turnNetworkMessageID(s *streamingState) networkid.MessageID {
-	if s == nil || s.turn == nil {
-		return ""
-	}
-	return s.turn.NetworkMessageID()
 }
 
 // trackFirstToken records the first-token timestamp once.
@@ -127,14 +99,11 @@ type mcpApprovalRequest struct {
 	handle      sdk.ApprovalHandle
 }
 
-func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID id.EventID, senderID string, roomID id.RoomID) (*streamingState, string) {
+func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID id.EventID, senderID string, roomID id.RoomID) *streamingState {
 	agentID := ""
 	if meta != nil {
 		agentID = resolveAgentID(meta)
 	}
-	turnID := agentremote.NewTurnID()
-	ui := &streamui.UIState{TurnID: turnID}
-	ui.InitMaps()
 	state := &streamingState{
 		agentID:                 agentID,
 		startedAtMs:             time.Now().UnixMilli(),
@@ -143,7 +112,6 @@ func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID 
 		roomID:                  roomID,
 		statusSentIDs:           make(map[id.EventID]bool),
 		replyAccumulator:        runtimeparse.NewStreamingDirectiveAccumulator(),
-		ui:                      ui,
 		pendingMcpApprovalsSeen: make(map[string]bool),
 	}
 	if hb := heartbeatRunFromContext(ctx); hb != nil {
@@ -154,7 +122,7 @@ func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID 
 			state.suppressSend = hb.Config.SuppressSend
 		}
 	}
-	return state, turnID
+	return state
 }
 
 func (oc *AIClient) applyStreamingReplyTarget(state *streamingState, parsed *runtimeparse.StreamingDirectiveResult) {
