@@ -271,22 +271,21 @@ func appendPart(state *UIState, part map[string]any) int {
 	return idx
 }
 
-func ensureTextPart(state *UIState, partID string, providerMetadata map[string]any) map[string]any {
-	if idx, ok := state.UITextPartIndexByID[partID]; ok {
+func ensureStreamingPart(state *UIState, indexMap map[string]int, partID, partType string, providerMetadata map[string]any) map[string]any {
+	if idx, ok := indexMap[partID]; ok {
 		return getPartAt(state, idx)
 	}
-	part := newStreamingTextPart("text", providerMetadata)
-	state.UITextPartIndexByID[partID] = appendPart(state, part)
+	part := newStreamingTextPart(partType, providerMetadata)
+	indexMap[partID] = appendPart(state, part)
 	return part
 }
 
+func ensureTextPart(state *UIState, partID string, providerMetadata map[string]any) map[string]any {
+	return ensureStreamingPart(state, state.UITextPartIndexByID, partID, "text", providerMetadata)
+}
+
 func ensureReasoningPart(state *UIState, partID string, providerMetadata map[string]any) map[string]any {
-	if idx, ok := state.UIReasoningPartIndexByID[partID]; ok {
-		return getPartAt(state, idx)
-	}
-	part := newStreamingTextPart("reasoning", providerMetadata)
-	state.UIReasoningPartIndexByID[partID] = appendPart(state, part)
-	return part
+	return ensureStreamingPart(state, state.UIReasoningPartIndexByID, partID, "reasoning", providerMetadata)
 }
 
 func newStreamingTextPart(partType string, providerMetadata map[string]any) map[string]any {

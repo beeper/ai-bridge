@@ -158,17 +158,27 @@ func (e *Emitter) EmitUIToolApprovalResponse(
 	e.Emit(ctx, portal, part)
 }
 
+// markToolOutputFinalized returns true if the tool call has already been
+// finalized (and should be skipped). Otherwise it marks it as finalized.
+func (e *Emitter) markToolOutputFinalized(toolCallID string) bool {
+	if e.State == nil {
+		return false
+	}
+	if e.State.UIToolOutputFinalized[toolCallID] {
+		return true
+	}
+	e.State.UIToolOutputFinalized[toolCallID] = true
+	return false
+}
+
 // EmitUIToolOutputAvailable sends a "tool-output-available" event.
 func (e *Emitter) EmitUIToolOutputAvailable(ctx context.Context, portal *bridgev2.Portal, toolCallID string, output any, providerExecuted, preliminary bool) {
 	toolCallID = strings.TrimSpace(toolCallID)
 	if toolCallID == "" {
 		return
 	}
-	if e.State != nil && !preliminary {
-		if e.State.UIToolOutputFinalized[toolCallID] {
-			return
-		}
-		e.State.UIToolOutputFinalized[toolCallID] = true
+	if !preliminary && e.markToolOutputFinalized(toolCallID) {
+		return
 	}
 	part := map[string]any{
 		"type":             "tool-output-available",
@@ -184,14 +194,12 @@ func (e *Emitter) EmitUIToolOutputAvailable(ctx context.Context, portal *bridgev
 
 // EmitUIToolOutputDenied sends a "tool-output-denied" event.
 func (e *Emitter) EmitUIToolOutputDenied(ctx context.Context, portal *bridgev2.Portal, toolCallID string) {
-	if strings.TrimSpace(toolCallID) == "" {
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" {
 		return
 	}
-	if e.State != nil {
-		if e.State.UIToolOutputFinalized[toolCallID] {
-			return
-		}
-		e.State.UIToolOutputFinalized[toolCallID] = true
+	if e.markToolOutputFinalized(toolCallID) {
+		return
 	}
 	e.Emit(ctx, portal, map[string]any{
 		"type":       "tool-output-denied",
@@ -205,11 +213,8 @@ func (e *Emitter) EmitUIToolOutputError(ctx context.Context, portal *bridgev2.Po
 	if toolCallID == "" {
 		return
 	}
-	if e.State != nil {
-		if e.State.UIToolOutputFinalized[toolCallID] {
-			return
-		}
-		e.State.UIToolOutputFinalized[toolCallID] = true
+	if e.markToolOutputFinalized(toolCallID) {
+		return
 	}
 	e.Emit(ctx, portal, map[string]any{
 		"type":             "tool-output-error",
