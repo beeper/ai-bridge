@@ -1021,6 +1021,10 @@ func (oc *AIClient) Disconnect() {
 	clear(oc.pendingQueues)
 	oc.pendingQueuesMu.Unlock()
 
+	if oc.approvalFlow != nil {
+		oc.approvalFlow.Close()
+	}
+
 	oc.activeRoomRunsMu.Lock()
 	clear(oc.activeRoomRuns)
 	oc.activeRoomRunsMu.Unlock()

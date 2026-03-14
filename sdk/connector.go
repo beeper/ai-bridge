@@ -112,6 +112,7 @@ func NewConnectorBase(cfg *Config) *agentremote.ConnectorBase {
 			LoadUserLoginConfig: agentremote.LoadUserLoginConfig[bridgev2.NetworkAPI]{
 				Mu:         mu,
 				Clients:    *clientsRef,
+				ClientsRef: clientsRef,
 				BridgeName: cfg.Name,
 				MakeBroken: cfg.MakeBrokenLogin,
 				Update: func(client bridgev2.NetworkAPI, login *bridgev2.UserLogin) {

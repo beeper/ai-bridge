@@ -61,21 +61,18 @@ func AppendDetailsFromMap(details []ApprovalDetail, labelPrefix string, values m
 			keys = append(keys, key)
 		}
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		return strings.TrimSpace(keys[i]) < strings.TrimSpace(keys[j])
-	})
-	count := 0
+	sort.Strings(keys)
+	added := 0
 	for _, key := range keys {
-		if count >= max {
+		if added >= max {
 			break
 		}
-		trimmed := strings.TrimSpace(key)
 		if value := ValueSummary(values[key]); value != "" {
 			details = append(details, ApprovalDetail{
-				Label: fmt.Sprintf("%s %s", labelPrefix, trimmed),
+				Label: fmt.Sprintf("%s %s", labelPrefix, strings.TrimSpace(key)),
 				Value: value,
 			})
-			count++
+			added++
 		}
 	}
 	if len(keys) > max {

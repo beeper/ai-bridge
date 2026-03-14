@@ -46,8 +46,8 @@ func TestUpgradeV1Fresh(t *testing.T) {
 	if err := bridgeDB.QueryRow(ctx, "SELECT version FROM "+VersionTable).Scan(&version); err != nil {
 		t.Fatalf("read %s failed: %v", VersionTable, err)
 	}
-	if version != 2 {
-		t.Fatalf("expected %s=2, got %d", VersionTable, version)
+	if version != 3 {
+		t.Fatalf("expected %s=3, got %d", VersionTable, version)
 	}
 
 	for _, table := range []string{
@@ -93,7 +93,7 @@ func TestNewChildUpgrade(t *testing.T) {
 	if err := bridgeDB.QueryRow(ctx, "SELECT version FROM "+VersionTable).Scan(&version); err != nil {
 		t.Fatalf("read %s failed: %v", VersionTable, err)
 	}
-	if version != 2 {
-		t.Fatalf("expected %s=2, got %d", VersionTable, version)
+	if version != 3 {
+		t.Fatalf("expected %s=3, got %d", VersionTable, version)
 	}
 }

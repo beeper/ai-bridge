@@ -121,15 +121,14 @@ func formatExaStatusError(targetURL string, statuses []exaContentStatus) string 
 	if len(statuses) == 0 {
 		return ""
 	}
-
 	targetURL = strings.TrimSpace(targetURL)
 
 	var matched *exaContentStatus
 	var firstError *exaContentStatus
 	for i := range statuses {
 		s := &statuses[i]
-		isError := strings.EqualFold(strings.TrimSpace(s.Status), "error")
-		if strings.EqualFold(strings.TrimSpace(s.ID), targetURL) {
+		isError := strings.EqualFold(s.Status, "error")
+		if strings.EqualFold(s.ID, targetURL) {
 			if !isError {
 				return ""
 			}
@@ -146,17 +145,23 @@ func formatExaStatusError(targetURL string, statuses []exaContentStatus) string 
 	if matched == nil {
 		return ""
 	}
-	tag := "unknown_error"
-	if matched.Error != nil {
-		if t := strings.TrimSpace(matched.Error.Tag); t != "" {
-			tag = t
-		}
-		if matched.Error.HTTPStatusCode != nil {
-			tag = fmt.Sprintf("%s (http %d)", tag, *matched.Error.HTTPStatusCode)
-		}
-	}
+	tag := formatExaErrorTag(matched.Error)
 	if matched.ID == "" {
 		return tag
 	}
 	return fmt.Sprintf("%s: %s", matched.ID, tag)
+}
+
+func formatExaErrorTag(info *exaStatusInfo) string {
+	if info == nil {
+		return "unknown_error"
+	}
+	tag := strings.TrimSpace(info.Tag)
+	if tag == "" {
+		tag = "unknown_error"
+	}
+	if info.HTTPStatusCode != nil {
+		return fmt.Sprintf("%s (http %d)", tag, *info.HTTPStatusCode)
+	}
+	return tag
 }

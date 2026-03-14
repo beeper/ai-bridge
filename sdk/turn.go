@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -189,13 +188,11 @@ func (t *Turn) resolveSender(ctx context.Context) bridgev2.EventSender {
 }
 
 func (t *Turn) buildPlaceholderMessage() *bridgev2.ConvertedMessage {
-	raw := map[string]any{
-		"msgtype":    event.MsgText,
-		"body":       "...",
+	extra := map[string]any{
 		"m.mentions": map[string]any{},
 	}
 	if relatesTo := t.buildRelatesTo(); relatesTo != nil {
-		raw["m.relates_to"] = relatesTo
+		extra["m.relates_to"] = relatesTo
 	}
 	return &bridgev2.ConvertedMessage{
 		Parts: []*bridgev2.ConvertedMessagePart{{
@@ -205,7 +202,7 @@ func (t *Turn) buildPlaceholderMessage() *bridgev2.ConvertedMessage {
 				MsgType: event.MsgText,
 				Body:    "...",
 			},
-			Extra: raw,
+			Extra: extra,
 		}},
 	}
 }
@@ -261,7 +258,11 @@ func (t *Turn) ensureSession() {
 				if t.conv == nil || t.conv.login == nil || t.conv.login.Bridge == nil {
 					return "", nil
 				}
-				return turns.ResolveTargetEventIDFromDB(callCtx, t.conv.login.Bridge, t.conv.portal.Receiver, target)
+				receiver := t.conv.portal.Receiver
+				if receiver == "" {
+					receiver = t.conv.login.ID
+				}
+				return turns.ResolveTargetEventIDFromDB(callCtx, t.conv.login.Bridge, receiver, target)
 			},
 			GetRoomID: func() id.RoomID {
 				if t.conv == nil || t.conv.portal == nil {
@@ -278,7 +279,7 @@ func (t *Turn) ensureSession() {
 				state.UIStepCount++
 				return state.UIStepCount
 			},
-			RuntimeFallbackFlag: &atomic.Bool{},
+			RuntimeFallbackFlag: &t.conv.runtimeFallback,
 			GetEphemeralSender: func(callCtx context.Context) (bridgev2.EphemeralSendingMatrixAPI, bool) {
 				if t.conv == nil || t.conv.login == nil || t.conv.login.Bridge == nil || t.conv.login.Bridge.Bot == nil {
 					return nil, false

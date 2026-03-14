@@ -560,9 +560,9 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 	if cl.User == nil {
 		return nil, errors.New("missing user")
 	}
-	bgCtx := cl.backgroundProcessContext()
-	log := cl.logger(bgCtx)
+	log := cl.logger(ctx)
 
+	bgCtx := cl.backgroundProcessContext()
 	loginID := agentremote.NextUserLoginID(cl.User, "codex")
 	remoteName := "Codex"
 	dupCount := 0
@@ -608,7 +608,7 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 
 	login, step, err := agentremote.CreateAndCompleteLogin(
 		bgCtx,
-		cl.backgroundProcessContext(),
+		bgCtx,
 		cl.User,
 		"codex",
 		remoteName,

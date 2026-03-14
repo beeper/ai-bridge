@@ -189,7 +189,7 @@ func (c *sdkClient) conv(ctx context.Context, portal *bridgev2.Portal) *Conversa
 }
 
 // HandleMatrixMessage dispatches incoming messages to the OnMessage callback.
-func (c *sdkClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (resp *bridgev2.MatrixMessageResponse, err error) {
+func (c *sdkClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (*bridgev2.MatrixMessageResponse, error) {
 	if c.config().OnMessage == nil {
 		return nil, nil
 	}

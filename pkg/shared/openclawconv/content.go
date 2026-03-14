@@ -1,11 +1,11 @@
 package openclawconv
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/beeper/agentremote/pkg/shared/jsonutil"
+	"github.com/beeper/agentremote/pkg/shared/stringutil"
 )
 
 var (
@@ -13,12 +13,11 @@ var (
 	invalidAgentIDRe = regexp.MustCompile(`[^a-z0-9_-]+`)
 )
 
-func AgentIDFromSessionKey(sessionKey string) string {
-	parts := strings.Split(strings.TrimSpace(sessionKey), ":")
-	if len(parts) < 3 || !strings.EqualFold(parts[0], "agent") {
-		return ""
-	}
-	agentID := strings.TrimSpace(parts[1])
+// CanonicalAgentID normalizes an agent ID to lowercase, replacing invalid
+// characters with hyphens and trimming to 64 characters. Returns "" for
+// empty input.
+func CanonicalAgentID(agentID string) string {
+	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return ""
 	}
@@ -32,6 +31,14 @@ func AgentIDFromSessionKey(sessionKey string) string {
 		normalized = normalized[:64]
 	}
 	return normalized
+}
+
+func AgentIDFromSessionKey(sessionKey string) string {
+	parts := strings.Split(strings.TrimSpace(sessionKey), ":")
+	if len(parts) < 3 || !strings.EqualFold(parts[0], "agent") {
+		return ""
+	}
+	return CanonicalAgentID(parts[1])
 }
 
 func ContentBlocks(message map[string]any) []map[string]any {
@@ -62,14 +69,14 @@ func ExtractMessageText(message map[string]any) string {
 	if message == nil {
 		return ""
 	}
-	if text := trimString(message["text"]); text != "" {
+	if text := stringutil.TrimString(message["text"]); text != "" {
 		return text
 	}
 	var parts []string
 	for _, block := range ContentBlocks(message) {
-		switch strings.ToLower(trimString(block["type"])) {
+		switch strings.ToLower(stringutil.TrimString(block["type"])) {
 		case "text", "input_text", "output_text":
-			if text := strings.TrimSpace(StringsTrimDefault(stringValue(block["text"]), stringValue(block["content"]))); text != "" {
+			if text := strings.TrimSpace(StringsTrimDefault(stringutil.StringValue(block["text"]), stringutil.StringValue(block["content"]))); text != "" {
 				parts = append(parts, text)
 			}
 		}
@@ -88,7 +95,7 @@ func ExtractAttachmentBlocks(message map[string]any) []map[string]any {
 }
 
 func IsAttachmentBlock(block map[string]any) bool {
-	str := func(key string) string { return trimString(block[key]) }
+	str := func(key string) string { return stringutil.TrimString(block[key]) }
 
 	blockType := strings.ToLower(str("type"))
 	switch blockType {
@@ -119,25 +126,12 @@ func IsAttachmentBlock(block map[string]any) bool {
 	return false
 }
 
-func stringValue(v any) string {
-	switch typed := v.(type) {
-	case string:
-		return typed
-	case fmt.Stringer:
-		return typed.String()
-	default:
-		return ""
-	}
+// StringValue delegates to stringutil.StringValue for backward compatibility.
+func StringValue(v any) string {
+	return stringutil.StringValue(v)
 }
 
-func trimString(v any) string {
-	return strings.TrimSpace(stringValue(v))
-}
-
+// StringsTrimDefault delegates to stringutil.TrimDefault for backward compatibility.
 func StringsTrimDefault(value, fallback string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-	return value
+	return stringutil.TrimDefault(value, fallback)
 }

@@ -185,6 +185,39 @@ func (s *AgentStoreAdapter) ListAvailableTools(_ context.Context) ([]tools.ToolI
 	return result, nil
 }
 
+func (s *AgentStoreAdapter) LoadBossAgents(ctx context.Context) (map[string]tools.AgentData, error) {
+	agentsMap, err := s.LoadAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]tools.AgentData, len(agentsMap))
+	for id, agent := range agentsMap {
+		result[id] = agentToToolsData(agent)
+	}
+	return result, nil
+}
+
+func (s *AgentStoreAdapter) SaveBossAgent(ctx context.Context, agent tools.AgentData) error {
+	return s.SaveAgent(ctx, toolsDataToAgent(agent))
+}
+
+func (s *AgentStoreAdapter) ListBossModels(ctx context.Context) ([]tools.ModelData, error) {
+	models, err := s.ListModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]tools.ModelData, 0, len(models))
+	for _, m := range models {
+		result = append(result, tools.ModelData{
+			ID:          m.ID,
+			Name:        m.Name,
+			Provider:    m.Provider,
+			Description: m.Description,
+		})
+	}
+	return result, nil
+}
+
 // Verify interface compliance
 var _ agents.AgentStore = (*AgentStoreAdapter)(nil)
 
@@ -281,62 +314,38 @@ func FromAgentDefinitionContent(content *AgentDefinitionContent) *agents.AgentDe
 // BossStoreAdapter implements tools.AgentStoreInterface for boss tool execution.
 // This adapter converts between our agent types and the tools package types.
 type BossStoreAdapter struct {
-	store *AgentStoreAdapter
+	*AgentStoreAdapter
 }
 
 func NewBossStoreAdapter(client *AIClient) *BossStoreAdapter {
 	return &BossStoreAdapter{
-		store: NewAgentStoreAdapter(client),
+		AgentStoreAdapter: NewAgentStoreAdapter(client),
 	}
 }
 
 // LoadAgents implements tools.AgentStoreInterface.
 func (b *BossStoreAdapter) LoadAgents(ctx context.Context) (map[string]tools.AgentData, error) {
-	agentsMap, err := b.store.LoadAgents(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	result := make(map[string]tools.AgentData, len(agentsMap))
-	for id, agent := range agentsMap {
-		result[id] = agentToToolsData(agent)
-	}
-	return result, nil
+	return b.LoadBossAgents(ctx)
 }
 
 // SaveAgent implements tools.AgentStoreInterface.
 func (b *BossStoreAdapter) SaveAgent(ctx context.Context, agent tools.AgentData) error {
-	def := toolsDataToAgent(agent)
-	return b.store.SaveAgent(ctx, def)
+	return b.SaveBossAgent(ctx, agent)
 }
 
 // DeleteAgent implements tools.AgentStoreInterface.
 func (b *BossStoreAdapter) DeleteAgent(ctx context.Context, agentID string) error {
-	return b.store.DeleteAgent(ctx, agentID)
+	return b.AgentStoreAdapter.DeleteAgent(ctx, agentID)
 }
 
 // ListModels implements tools.AgentStoreInterface.
 func (b *BossStoreAdapter) ListModels(ctx context.Context) ([]tools.ModelData, error) {
-	models, err := b.store.ListModels(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]tools.ModelData, 0, len(models))
-	for _, m := range models {
-		result = append(result, tools.ModelData{
-			ID:          m.ID,
-			Name:        m.Name,
-			Provider:    m.Provider,
-			Description: m.Description,
-		})
-	}
-	return result, nil
+	return b.ListBossModels(ctx)
 }
 
 // ListAvailableTools implements tools.AgentStoreInterface.
 func (b *BossStoreAdapter) ListAvailableTools(ctx context.Context) ([]tools.ToolInfo, error) {
-	return b.store.ListAvailableTools(ctx)
+	return b.AgentStoreAdapter.ListAvailableTools(ctx)
 }
 
 // RunInternalCommand implements tools.AgentStoreInterface.
@@ -349,7 +358,7 @@ func (b *BossStoreAdapter) RunInternalCommand(ctx context.Context, roomID string
 		return "", errors.New("room_id is required")
 	}
 
-	prefix := b.store.client.connector.br.Config.CommandPrefix
+	prefix := b.client.connector.br.Config.CommandPrefix
 	if strings.HasPrefix(command, prefix) {
 		command = strings.TrimSpace(strings.TrimPrefix(command, prefix))
 	}
@@ -378,19 +387,19 @@ func (b *BossStoreAdapter) RunInternalCommand(ctx context.Context, roomID string
 		return "", fmt.Errorf("room '%s' has no Matrix ID", roomID)
 	}
 
-	runCtx := b.store.client.backgroundContext(ctx)
-	logCopy := b.store.client.log.With().Str("mx_command", cmdName).Logger()
-	captureBot := newCaptureMatrixAPI(b.store.client.UserLogin.Bridge.Bot)
+	runCtx := b.client.backgroundContext(ctx)
+	logCopy := b.client.log.With().Str("mx_command", cmdName).Logger()
+	captureBot := newCaptureMatrixAPI(b.client.UserLogin.Bridge.Bot)
 	eventID := agentremote.NewEventID("internal")
 	ce := &commands.Event{
 		Bot:        captureBot,
-		Bridge:     b.store.client.UserLogin.Bridge,
+		Bridge:     b.client.UserLogin.Bridge,
 		Portal:     portal,
 		Processor:  nil,
 		RoomID:     portal.MXID,
 		OrigRoomID: portal.MXID,
 		EventID:    eventID,
-		User:       b.store.client.UserLogin.User,
+		User:       b.client.UserLogin.User,
 		Command:    cmdName,
 		Args:       args[1:],
 		RawArgs:    rawArgs,
@@ -504,19 +513,19 @@ func (c *captureMatrixAPI) WaitForMessages(ctx context.Context, firstTimeout, se
 // CreateRoom implements tools.AgentStoreInterface.
 func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) (string, error) {
 	// Get the agent to verify it exists
-	agent, err := b.store.GetAgentByID(ctx, room.AgentID)
+	agent, err := b.GetAgentByID(ctx, room.AgentID)
 	if err != nil {
 		return "", fmt.Errorf("agent '%s' not found: %w", room.AgentID, err)
 	}
 
 	// Create the portal via createAgentChatWithModel
-	resp, err := b.store.client.createAgentChatWithModel(ctx, agent, "", false)
+	resp, err := b.client.createAgentChatWithModel(ctx, agent, "", false)
 	if err != nil {
 		return "", fmt.Errorf("failed to create room: %w", err)
 	}
 
 	// Get the portal to apply any overrides
-	portal, err := b.store.client.UserLogin.Bridge.GetPortalByKey(ctx, resp.PortalKey)
+	portal, err := b.client.UserLogin.Bridge.GetPortalByKey(ctx, resp.PortalKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to get created portal: %w", err)
 	}
@@ -537,7 +546,7 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 		}
 	}
 	// Create the Matrix room
-	if err := b.store.client.materializePortalRoom(ctx, portal, resp.PortalInfo, portalRoomMaterializeOptions{
+	if err := b.client.materializePortalRoom(ctx, portal, resp.PortalInfo, portalRoomMaterializeOptions{
 		CleanupOnCreateError: "failed to create Matrix room",
 		SendWelcome:          true,
 	}); err != nil {
@@ -545,8 +554,8 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 	}
 
 	if room.Name != "" {
-		if err := b.store.client.setRoomNameNoSave(ctx, portal, room.Name); err != nil {
-			b.store.client.log.Warn().Err(err).Msg("Failed to set Matrix room name")
+		if err := b.client.setRoomNameNoSave(ctx, portal, room.Name); err != nil {
+			b.client.log.Warn().Err(err).Msg("Failed to set Matrix room name")
 			portal.Name = originalName
 			portal.NameSet = originalNameSet
 			pm.Title = originalTitle
@@ -577,20 +586,20 @@ func (b *BossStoreAdapter) ModifyRoom(ctx context.Context, roomID string, update
 	}
 	if updates.AgentID != "" {
 		// Verify agent exists
-		agent, err := b.store.GetAgentByID(ctx, updates.AgentID)
+		agent, err := b.GetAgentByID(ctx, updates.AgentID)
 		if err != nil {
 			return fmt.Errorf("agent '%s' not found: %w", updates.AgentID, err)
 		}
-		portal.OtherUserID = b.store.client.agentUserID(agent.ID)
+		portal.OtherUserID = b.client.agentUserID(agent.ID)
 		pm.ResolvedTarget = resolveTargetFromGhostID(portal.OtherUserID)
-		modelID := b.store.client.effectiveModel(pm)
-		agentName := b.store.client.resolveAgentDisplayName(ctx, agent)
-		b.store.client.ensureAgentGhostDisplayName(ctx, agent.ID, modelID, agentName)
+		modelID := b.client.effectiveModel(pm)
+		agentName := b.client.resolveAgentDisplayName(ctx, agent)
+		b.client.ensureAgentGhostDisplayName(ctx, agent.ID, modelID, agentName)
 	}
 
 	if updates.Name != "" && portal.MXID != "" {
-		if err := b.store.client.setRoomName(ctx, portal, updates.Name); err != nil {
-			b.store.client.log.Warn().Err(err).Msg("Failed to set Matrix room name")
+		if err := b.client.setRoomName(ctx, portal, updates.Name); err != nil {
+			b.client.log.Warn().Err(err).Msg("Failed to set Matrix room name")
 		}
 	}
 
@@ -599,7 +608,7 @@ func (b *BossStoreAdapter) ModifyRoom(ctx context.Context, roomID string, update
 
 // ListRooms implements tools.AgentStoreInterface.
 func (b *BossStoreAdapter) ListRooms(ctx context.Context) ([]tools.RoomData, error) {
-	portals, err := b.store.client.listAllChatPortals(ctx)
+	portals, err := b.client.listAllChatPortals(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list rooms: %w", err)
 	}

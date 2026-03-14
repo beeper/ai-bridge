@@ -24,8 +24,9 @@ func (s *SystemEventStore) Replace(ctx context.Context, queues []SystemEventQueu
 	if s == nil || !s.scope.ready() {
 		return nil
 	}
+	agentID := normalizeAgentID(s.scope.AgentID)
 	return s.scope.DB.DoTxn(ctx, nil, func(ctx context.Context) error {
-		if _, err := s.scope.DB.Exec(ctx, `DELETE FROM ai_system_events WHERE bridge_id=$1 AND login_id=$2`, s.scope.BridgeID, s.scope.LoginID); err != nil {
+		if _, err := s.scope.DB.Exec(ctx, `DELETE FROM ai_system_events WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`, s.scope.BridgeID, s.scope.LoginID, agentID); err != nil {
 			return err
 		}
 		for _, queue := range queues {
@@ -40,9 +41,9 @@ func (s *SystemEventStore) Replace(ctx context.Context, queues []SystemEventQueu
 				}
 				if _, err := s.scope.DB.Exec(ctx, `
 					INSERT INTO ai_system_events (
-						bridge_id, login_id, session_key, event_index, text, ts, last_text
-					) VALUES ($1, $2, $3, $4, $5, $6, $7)
-				`, s.scope.BridgeID, s.scope.LoginID, sessionKey, idx, evt.Text, evt.TS, lastText); err != nil {
+						bridge_id, login_id, agent_id, session_key, event_index, text, ts, last_text
+					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+				`, s.scope.BridgeID, s.scope.LoginID, agentID, sessionKey, idx, evt.Text, evt.TS, lastText); err != nil {
 					return err
 				}
 			}
@@ -55,12 +56,13 @@ func (s *SystemEventStore) Load(ctx context.Context) ([]SystemEventQueue, error)
 	if s == nil || !s.scope.ready() {
 		return nil, nil
 	}
+	agentID := normalizeAgentID(s.scope.AgentID)
 	rows, err := s.scope.DB.Query(ctx, `
 		SELECT session_key, event_index, text, ts, last_text
 		FROM ai_system_events
-		WHERE bridge_id=$1 AND login_id=$2
+		WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3
 		ORDER BY session_key, event_index
-	`, s.scope.BridgeID, s.scope.LoginID)
+	`, s.scope.BridgeID, s.scope.LoginID, agentID)
 	if err != nil {
 		return nil, err
 	}

@@ -12,21 +12,19 @@ import (
 // expandTilde expands a leading "~" or "~/" in a path to the user's home directory.
 // Returns the path unchanged if it does not start with "~".
 func expandTilde(path string) (string, error) {
-	if rest, ok := strings.CutPrefix(path, "~/"); ok {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(home, rest), nil
+	rest, isTilde := strings.CutPrefix(path, "~")
+	if !isTilde {
+		return path, nil
 	}
-	if path == "~" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		return home, nil
+	// Only expand bare "~" or "~/..." -- not "~user" style paths.
+	if rest != "" && rest[0] != '/' {
+		return path, nil
 	}
-	return path, nil
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, rest), nil
 }
 
 const (

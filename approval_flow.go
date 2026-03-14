@@ -62,6 +62,15 @@ type Pending[D any] struct {
 	done      chan struct{} // closed when the approval is finalized
 }
 
+// closeDone marks the pending approval as finalized. Safe to call multiple times.
+func (p *Pending[D]) closeDone() {
+	select {
+	case <-p.done:
+	default:
+		close(p.done)
+	}
+}
+
 // ApprovalFlow owns the full lifecycle of approval prompts and pending approvals.
 // D is the bridge-specific pending data type.
 type ApprovalFlow[D any] struct {
@@ -128,10 +137,31 @@ func (f *ApprovalFlow[D]) Close() {
 	if f == nil {
 		return
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closeReaperLocked()
+}
+
+func (f *ApprovalFlow[D]) closeReaperLocked() {
 	select {
 	case <-f.reaperStop:
 	default:
 		close(f.reaperStop)
+	}
+}
+
+func (f *ApprovalFlow[D]) ensureReaperRunning() {
+	if f == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	select {
+	case <-f.reaperStop:
+		f.reaperStop = make(chan struct{})
+		f.reaperNotify = make(chan struct{}, 1)
+		go f.runReaper()
+	default:
 	}
 }
 
@@ -233,6 +263,7 @@ func (f *ApprovalFlow[D]) reapExpired() {
 // Returns the Pending and true if newly created, or the existing one and false
 // if a non-expired approval with the same ID already exists.
 func (f *ApprovalFlow[D]) Register(approvalID string, ttl time.Duration, data D) (*Pending[D], bool) {
+	f.ensureReaperRunning()
 	approvalID = strings.TrimSpace(approvalID)
 	if approvalID == "" {
 		return nil, false
@@ -559,6 +590,7 @@ func (f *ApprovalFlow[D]) SendPrompt(ctx context.Context, portal *bridgev2.Porta
 	if f == nil || portal == nil || portal.MXID == "" {
 		return
 	}
+	f.ensureReaperRunning()
 	login := f.login()
 	if login == nil {
 		return
@@ -670,6 +702,13 @@ func (f *ApprovalFlow[D]) HandleReaction(ctx context.Context, msg *bridgev2.Matr
 			return true
 		}
 	}
+	if p == nil {
+		if f.sendNotice != nil {
+			f.sendNotice(ctx, msg.Portal, ApprovalErrorToastText(ErrApprovalUnknown))
+		}
+		f.redactSingleReaction(msg)
+		return true
+	}
 
 	resolved := false
 	if f.deliverDecision != nil {
@@ -684,14 +723,12 @@ func (f *ApprovalFlow[D]) HandleReaction(ctx context.Context, msg *bridgev2.Matr
 		}
 	} else {
 		// Channel-based flow (Codex).
-		if p != nil {
-			select {
-			case p.ch <- match.Decision:
-				resolved = true
-			default:
-				if f.sendNotice != nil {
-					f.sendNotice(ctx, msg.Portal, ApprovalErrorToastText(ErrApprovalAlreadyHandled))
-				}
+		select {
+		case p.ch <- match.Decision:
+			resolved = true
+		default:
+			if f.sendNotice != nil {
+				f.sendNotice(ctx, msg.Portal, ApprovalErrorToastText(ErrApprovalAlreadyHandled))
 			}
 		}
 	}
@@ -788,6 +825,7 @@ func (f *ApprovalFlow[D]) sendPrefillReactions(_ context.Context, portal *bridge
 }
 
 func (f *ApprovalFlow[D]) schedulePromptTimeout(approvalID string, expiresAt time.Time) {
+	f.ensureReaperRunning()
 	approvalID = strings.TrimSpace(approvalID)
 	if approvalID == "" || expiresAt.IsZero() {
 		return
@@ -818,11 +856,7 @@ func (f *ApprovalFlow[D]) cancelPendingTimeout(approvalID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if p := f.pending[approvalID]; p != nil {
-		select {
-		case <-p.done:
-		default:
-			close(p.done)
-		}
+		p.closeDone()
 	}
 }
 
@@ -914,11 +948,7 @@ func (f *ApprovalFlow[D]) finalizeWithPromptVersion(approvalID string, decision 
 		}
 	}
 	if p := f.pending[approvalID]; p != nil {
-		select {
-		case <-p.done:
-		default:
-			close(p.done)
-		}
+		p.closeDone()
 	}
 	delete(f.pending, approvalID)
 	if entry := f.promptsByApproval[approvalID]; entry != nil {

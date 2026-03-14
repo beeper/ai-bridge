@@ -547,19 +547,16 @@ func (e *BossToolExecutor) ExecuteEditAgent(ctx context.Context, input map[strin
 		return ErrorResult("edit_agent", "cannot modify preset agents - fork it first"), nil
 	}
 
-	// Apply updates
-	if name, _ := ReadString(input, "name", false); name != "" {
-		agent.Name = name
+	applyStringUpdate := func(key string, dest *string) {
+		if v, _ := ReadString(input, key, false); v != "" {
+			*dest = v
+		}
 	}
-	if desc, _ := ReadString(input, "description", false); desc != "" {
-		agent.Description = desc
-	}
-	if model, _ := ReadString(input, "model", false); model != "" {
-		agent.Model = model
-	}
-	if prompt, _ := ReadString(input, "system_prompt", false); prompt != "" {
-		agent.SystemPrompt = prompt
-	}
+	applyStringUpdate("name", &agent.Name)
+	applyStringUpdate("description", &agent.Description)
+	applyStringUpdate("model", &agent.Model)
+	applyStringUpdate("system_prompt", &agent.SystemPrompt)
+
 	toolsConfig, err := readToolPolicyConfig(input)
 	if err != nil {
 		return ErrorResult("edit_agent", fmt.Sprintf("invalid tools config: %v", err)), nil
@@ -695,17 +692,15 @@ func (e *BossToolExecutor) ExecuteModifyRoom(ctx context.Context, input map[stri
 		return ErrorResult("modify_room", err.Error()), nil
 	}
 
-	updates := RoomData{}
-
-	if name, _ := ReadString(input, "name", false); name != "" {
-		updates.Name = name
+	var updates RoomData
+	applyStringUpdate := func(key string, dest *string) {
+		if v, _ := ReadString(input, key, false); v != "" {
+			*dest = v
+		}
 	}
-	if agentID, _ := ReadString(input, "agent_id", false); agentID != "" {
-		updates.AgentID = agentID
-	}
-	if prompt, _ := ReadString(input, "system_prompt", false); prompt != "" {
-		updates.SystemPrompt = prompt
-	}
+	applyStringUpdate("name", &updates.Name)
+	applyStringUpdate("agent_id", &updates.AgentID)
+	applyStringUpdate("system_prompt", &updates.SystemPrompt)
 
 	if err := e.store.ModifyRoom(ctx, roomID, updates); err != nil {
 		return ErrorResult("modify_room", fmt.Sprintf("failed to modify room: %v", err)), nil

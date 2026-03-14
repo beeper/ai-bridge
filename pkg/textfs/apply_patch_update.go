@@ -84,6 +84,14 @@ func applyReplacements(lines []string, replacements []replacement) []string {
 	return result
 }
 
+// normalizers defines increasingly lenient matching strategies for seekSequence.
+var normalizers = []func(string) string{
+	func(v string) string { return v },
+	func(v string) string { return strings.TrimRightFunc(v, unicode.IsSpace) },
+	strings.TrimSpace,
+	func(v string) string { return normalizePunctuation(strings.TrimSpace(v)) },
+}
+
 func seekSequence(lines []string, pattern []string, start int, eof bool) *int {
 	if len(pattern) == 0 {
 		idx := start
@@ -100,20 +108,12 @@ func seekSequence(lines []string, pattern []string, start int, eof bool) *int {
 	if searchStart > maxStart {
 		return nil
 	}
-	if idx := seekSequenceWithNormalize(lines, pattern, searchStart, maxStart, func(v string) string { return v }); idx != nil {
-		return idx
+	for _, normalize := range normalizers {
+		if idx := seekSequenceWithNormalize(lines, pattern, searchStart, maxStart, normalize); idx != nil {
+			return idx
+		}
 	}
-	if idx := seekSequenceWithNormalize(lines, pattern, searchStart, maxStart, func(v string) string {
-		return strings.TrimRightFunc(v, unicode.IsSpace)
-	}); idx != nil {
-		return idx
-	}
-	if idx := seekSequenceWithNormalize(lines, pattern, searchStart, maxStart, strings.TrimSpace); idx != nil {
-		return idx
-	}
-	return seekSequenceWithNormalize(lines, pattern, searchStart, maxStart, func(v string) string {
-		return normalizePunctuation(strings.TrimSpace(v))
-	})
+	return nil
 }
 
 func seekSequenceWithNormalize(lines []string, pattern []string, start int, maxStart int, normalize func(string) string) *int {

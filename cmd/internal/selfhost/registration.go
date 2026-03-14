@@ -20,6 +20,7 @@ type RegistrationParams struct {
 	RegistrationPath string
 	BeeperBridgeName string
 	BridgeType       string
+	DBName           string
 }
 
 func EnsureRegistration(ctx context.Context, params RegistrationParams) error {
@@ -28,7 +29,7 @@ func EnsureRegistration(ctx context.Context, params RegistrationParams) error {
 	if err != nil {
 		return fmt.Errorf("whoami failed: %w", err)
 	}
-	if auth.Username == "" || auth.Username != who.UserInfo.Username {
+	if auth.Username != who.UserInfo.Username {
 		auth.Username = who.UserInfo.Username
 		if params.SaveAuth != nil {
 			if err := params.SaveAuth(auth); err != nil {
@@ -61,6 +62,7 @@ func EnsureRegistration(ctx context.Context, params RegistrationParams) error {
 		hc.HomeserverURL.String(),
 		params.BeeperBridgeName,
 		params.BridgeType,
+		params.DBName,
 		auth.Domain,
 		reg.AppToken,
 		userID,

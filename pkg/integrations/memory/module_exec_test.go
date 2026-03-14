@@ -123,7 +123,7 @@ func TestExecuteCommand_StatusDeepAliasUsesLexicalStatusOutput(t *testing.T) {
 	}
 
 	handled, err := ExecuteCommand(context.Background(), call, CommandExecDeps{
-		GetManager: func(iruntime.ToolScope) (Manager, string) {
+		GetManager: func(iruntime.ToolScope) (execManager, string) {
 			return manager, ""
 		},
 	})

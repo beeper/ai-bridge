@@ -352,7 +352,7 @@ func envNames() []string {
 }
 
 func bridgeNames() []string {
-	return sortedMapKeys(bridgeRegistry)
+	return slices.Sorted(maps.Keys(bridgeRegistry))
 }
 
 func visibleCommands() []cmdDef {
@@ -371,10 +371,6 @@ func commandNames() []string {
 		out = append(out, c.Name)
 	}
 	return out
-}
-
-func sortedMapKeys[T any](m map[string]T) []string {
-	return slices.Sorted(maps.Keys(m))
 }
 
 func visibleCommandsByGroup(group string) []cmdDef {

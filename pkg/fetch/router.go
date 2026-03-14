@@ -40,7 +40,6 @@ func normalizeRequest(req Request) Request {
 	if req.ExtractMode == "" {
 		req.ExtractMode = "markdown"
 	}
-	// Let providers apply their own defaults when max chars is not specified.
 	if req.MaxChars < 0 {
 		req.MaxChars = 0
 	}

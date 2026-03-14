@@ -38,9 +38,7 @@ func (oc *AIClient) buildContinuationParams(
 		// All Responses continuations are stateless: include the accumulated local history.
 		input = append(input, state.baseInput...)
 	}
-	for _, approval := range approvalInputs {
-		input = append(input, approval)
-	}
+	input = append(input, approvalInputs...)
 	for _, output := range pendingOutputs {
 		if output.name != "" {
 			args := output.arguments

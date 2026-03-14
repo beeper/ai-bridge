@@ -203,6 +203,9 @@ func (cc *CodexClient) Connect(ctx context.Context) {
 
 func (cc *CodexClient) Disconnect() {
 	cc.SetLoggedIn(false)
+	if cc.approvalFlow != nil {
+		cc.approvalFlow.Close()
+	}
 
 	// Signal dispatchNotifications goroutine to stop.
 	if cc.notifDone != nil {
@@ -353,17 +356,16 @@ func (cc *CodexClient) purgeCodexCwdsBestEffort(ctx context.Context) {
 	}
 }
 
-func (cc *CodexClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+func (cc *CodexClient) GetChatInfo(_ context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 	meta := portalMeta(portal)
 	if meta == nil || !meta.IsCodexRoom {
-		metaTitle := ""
+		var metaTitle string
 		if meta != nil {
 			metaTitle = meta.Title
 		}
 		return agentremote.BuildChatInfoWithFallback(metaTitle, portal.Name, "Codex", portal.Topic), nil
 	}
-	title := codexPortalTitle(portal)
-	return cc.composeCodexChatInfo(title, strings.TrimSpace(meta.CodexThreadID) != ""), nil
+	return cc.composeCodexChatInfo(codexPortalTitle(portal), strings.TrimSpace(meta.CodexThreadID) != ""), nil
 }
 
 func (cc *CodexClient) GetUserInfo(_ context.Context, _ *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
@@ -562,7 +564,6 @@ func (cc *CodexClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Ma
 func (cc *CodexClient) runTurn(ctx context.Context, portal *bridgev2.Portal, meta *PortalMetadata, sourceEvent *event.Event, body string) {
 	log := cc.loggerForContext(ctx)
 	state := newStreamingState(sourceEvent.ID)
-	state.startedAtMs = time.Now().UnixMilli()
 
 	model := cc.connector.Config.Codex.DefaultModel
 	threadID := strings.TrimSpace(meta.CodexThreadID)
@@ -698,9 +699,6 @@ done:
 func (cc *CodexClient) appendCodexToolOutput(state *streamingState, toolCallID, delta string) string {
 	if state == nil || toolCallID == "" {
 		return delta
-	}
-	if state.codexToolOutputBuffers == nil {
-		state.codexToolOutputBuffers = make(map[string]*strings.Builder)
 	}
 	b := state.codexToolOutputBuffers[toolCallID]
 	if b == nil {
@@ -1059,18 +1057,12 @@ func (cc *CodexClient) handleItemCompleted(ctx context.Context, portal *bridgev2
 	case "commandExecution", "fileChange", "mcpToolCall":
 		var it map[string]any
 		_ = json.Unmarshal(raw, &it)
-		statusVal, _ := it["status"].(string)
-		statusVal = strings.TrimSpace(statusVal)
+		statusVal := strings.TrimSpace(itemStringField(it, "status"))
+		errText := extractItemErrorMessage(it)
 		switch statusVal {
 		case "declined":
 			cc.emitUIToolOutputDenied(ctx, portal, state, itemID)
 		case "failed":
-			errText := "tool failed"
-			if errObj, ok := it["error"].(map[string]any); ok {
-				if msg, ok := errObj["message"].(string); ok && strings.TrimSpace(msg) != "" {
-					errText = strings.TrimSpace(msg)
-				}
-			}
 			cc.emitUIToolOutputError(ctx, portal, state, itemID, errText, true)
 		default:
 			cc.emitUIToolOutputAvailable(ctx, portal, state, itemID, it, true, false)
@@ -1085,11 +1077,7 @@ func (cc *CodexClient) handleItemCompleted(ctx context.Context, portal *bridgev2
 			tc.ErrorMessage = "Denied by user"
 		case "failed":
 			tc.ResultStatus = string(matrixevents.ResultStatusError)
-			if errObj, ok := it["error"].(map[string]any); ok {
-				if msg, ok := errObj["message"].(string); ok && strings.TrimSpace(msg) != "" {
-					tc.ErrorMessage = strings.TrimSpace(msg)
-				}
-			}
+			tc.ErrorMessage = errText
 		default:
 			tc.ResultStatus = string(matrixevents.ResultStatusSuccess)
 		}
@@ -1132,6 +1120,20 @@ type providerJSONToolOutputOptions struct {
 	collectArtifacts        bool
 	collectCitations        bool
 	appendBeforeSideEffects bool
+}
+
+func itemStringField(it map[string]any, key string) string {
+	v, _ := it[key].(string)
+	return v
+}
+
+func extractItemErrorMessage(it map[string]any) string {
+	if errObj, ok := it["error"].(map[string]any); ok {
+		if msg, ok := errObj["message"].(string); ok && strings.TrimSpace(msg) != "" {
+			return strings.TrimSpace(msg)
+		}
+	}
+	return "tool failed"
 }
 
 func (cc *CodexClient) emitProviderJSONToolOutput(
@@ -1729,13 +1731,13 @@ func (cc *CodexClient) popPendingCodex(roomID id.RoomID) *codexPendingMessage {
 	defer cc.roomMu.Unlock()
 	queue := cc.pendingMessages[roomID]
 	if len(queue) == 0 {
-		delete(cc.pendingMessages, roomID)
 		return nil
 	}
 	pm := queue[0]
-	cc.pendingMessages[roomID] = queue[1:]
 	if len(queue) == 1 {
 		delete(cc.pendingMessages, roomID)
+	} else {
+		cc.pendingMessages[roomID] = queue[1:]
 	}
 	return pm
 }

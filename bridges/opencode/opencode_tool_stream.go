@@ -147,15 +147,11 @@ func (m *OpenCodeManager) emitArtifactStream(ctx context.Context, inst *openCode
 	}
 
 	if title != "" {
-		filename := strings.TrimSpace(part.Filename)
-		if filename == "" {
-			filename = title
-		}
 		m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, agentID, map[string]any{
 			"type":      "source-document",
 			"sourceId":  "opencode-doc-" + part.ID,
 			"title":     title,
-			"filename":  filename,
+			"filename":  title,
 			"mediaType": mediaType,
 		})
 	}

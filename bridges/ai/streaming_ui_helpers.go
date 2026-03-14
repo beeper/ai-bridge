@@ -8,6 +8,7 @@ import (
 
 	"maunium.net/go/mautrix/event"
 
+	"github.com/beeper/agentremote/pkg/shared/stringutil"
 	"github.com/beeper/agentremote/sdk"
 )
 
@@ -69,7 +70,7 @@ func buildCompactFinalUIMessage(uiMessage map[string]any) map[string]any {
 		if !ok {
 			continue
 		}
-		partType := strings.TrimSpace(stringValue(part["type"]))
+		partType := strings.TrimSpace(stringutil.StringValue(part["type"]))
 		switch partType {
 		case "text", "reasoning", "step-start":
 			continue

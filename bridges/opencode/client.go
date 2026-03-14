@@ -101,6 +101,10 @@ func (oc *OpenCodeClient) Disconnect() {
 	oc.BeginStreamShutdown()
 	oc.SetLoggedIn(false)
 	oc.CloseAllSessions()
+	oc.abortActiveTurns()
+	if oc.bridge != nil && oc.bridge.manager != nil && oc.bridge.manager.approvalFlow != nil {
+		oc.bridge.manager.approvalFlow.Close()
+	}
 	oc.StreamMu.Lock()
 	oc.streamStates = make(map[string]*openCodeStreamState)
 	oc.StreamMu.Unlock()
@@ -109,6 +113,20 @@ func (oc *OpenCodeClient) Disconnect() {
 	}
 	if oc.UserLogin != nil {
 		oc.UserLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateTransientDisconnect, Message: "Disconnected"})
+	}
+}
+
+func (oc *OpenCodeClient) abortActiveTurns() {
+	oc.StreamMu.Lock()
+	turns := make([]*bridgesdk.Turn, 0, len(oc.streamStates))
+	for _, state := range oc.streamStates {
+		if state != nil && state.turn != nil {
+			turns = append(turns, state.turn)
+		}
+	}
+	oc.StreamMu.Unlock()
+	for _, turn := range turns {
+		turn.Abort("disconnect")
 	}
 }
 

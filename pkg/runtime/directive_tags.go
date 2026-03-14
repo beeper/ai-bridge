@@ -75,10 +75,11 @@ func ParseInlineDirectives(text string, options InlineDirectiveParseOptions) Inl
 		return InlineDirectiveParseResult{}
 	}
 
-	hasExplicitOptions := options.StripAudioTag || options.StripReplyTags || options.NormalizeWhitespace ||
-		options.SilentToken != "" || options.CurrentMessageID != ""
-	stripAudio := !hasExplicitOptions || options.StripAudioTag
-	stripReply := !hasExplicitOptions || options.StripReplyTags
+	// When no explicit options are set, default to stripping both audio and reply tags.
+	defaultStrip := !options.StripAudioTag && !options.StripReplyTags && !options.NormalizeWhitespace &&
+		options.SilentToken == "" && options.CurrentMessageID == ""
+	stripAudio := defaultStrip || options.StripAudioTag
+	stripReply := defaultStrip || options.StripReplyTags
 
 	cleaned := text
 	result := InlineDirectiveParseResult{}

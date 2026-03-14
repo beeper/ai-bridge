@@ -13,17 +13,13 @@ type exaProvider struct {
 	cfg ExaConfig
 }
 
-func newExaProvider(cfg *Config) Provider {
+func newExaProvider(cfg *Config) *exaProvider {
 	if cfg == nil {
 		return nil
 	}
-	return exa.NewProvider(cfg.Exa.Enabled, cfg.Exa.APIKey, func() Provider {
+	return exa.NewProvider(cfg.Exa.Enabled, cfg.Exa.APIKey, func() *exaProvider {
 		return &exaProvider{cfg: cfg.Exa}
 	})
-}
-
-func (p *exaProvider) Name() string {
-	return ProviderExa
 }
 
 func (p *exaProvider) Search(ctx context.Context, req Request) (*Response, error) {

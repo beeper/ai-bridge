@@ -16,7 +16,9 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/dbutil"
 
+	iruntime "github.com/beeper/agentremote/pkg/integrations/runtime"
 	memorycore "github.com/beeper/agentremote/pkg/memory"
+	pkgruntime "github.com/beeper/agentremote/pkg/runtime"
 	"github.com/beeper/agentremote/pkg/textfs"
 )
 
@@ -37,7 +39,7 @@ const (
 )
 
 type MemorySearchManager struct {
-	runtime      Runtime
+	host         iruntime.Host
 	db           *dbutil.Database
 	bridgeID     string
 	loginID      string
@@ -109,15 +111,19 @@ var memoryManagerCache = struct {
 	managers: make(map[string]*MemorySearchManager),
 }
 
-func GetMemorySearchManager(runtime Runtime, agentID string) (*MemorySearchManager, string) {
-	if runtime == nil {
+func GetMemorySearchManager(host iruntime.Host, agentID string) (*MemorySearchManager, string) {
+	if host == nil {
 		return nil, "memory search unavailable"
 	}
-	db := runtime.BridgeDB()
+	rawDB := host.BridgeDB()
+	if rawDB == nil {
+		return nil, "memory search unavailable"
+	}
+	db, _ := rawDB.(*dbutil.Database)
 	if db == nil {
 		return nil, "memory search unavailable"
 	}
-	cfg, err := runtime.ResolveConfig(agentID)
+	cfg, err := resolveMemorySearchConfigFromMaps(host.ModuleConfig(moduleName), host.AgentModuleConfig(agentID, moduleName))
 	if err != nil {
 		return nil, err.Error()
 	}
@@ -125,8 +131,8 @@ func GetMemorySearchManager(runtime Runtime, agentID string) (*MemorySearchManag
 		return nil, "memory search disabled"
 	}
 
-	bridgeID := runtime.BridgeID()
-	loginID := runtime.LoginID()
+	bridgeID := host.BridgeID()
+	loginID := host.LoginID()
 	if agentID == "" {
 		agentID = "default"
 	}
@@ -140,7 +146,7 @@ func GetMemorySearchManager(runtime Runtime, agentID string) (*MemorySearchManag
 	}
 
 	manager := &MemorySearchManager{
-		runtime:  runtime,
+		host:     host,
 		db:       db,
 		bridgeID: bridgeID,
 		loginID:  loginID,
@@ -150,7 +156,7 @@ func GetMemorySearchManager(runtime Runtime, agentID string) (*MemorySearchManag
 			Provider: "builtin",
 			Model:    "lexical",
 		},
-		log: runtime.Logger().With().Str("component", "memory").Logger(),
+		log: iruntime.ZerologFromHost(host).With().Str("component", "memory").Logger(),
 	}
 	manager.startIntervalSync = sync.OnceFunc(func() {
 		interval := time.Duration(manager.cfg.Sync.IntervalMinutes) * time.Minute
@@ -228,8 +234,8 @@ func (m *MemorySearchManager) StatusDetails(ctx context.Context) (*MemorySearchS
 	m.mu.Unlock()
 
 	workspaceDir := ""
-	if m.runtime != nil {
-		workspaceDir = m.runtime.ResolvePromptWorkspaceDir()
+	if m.host != nil {
+		workspaceDir = m.host.ResolveWorkspaceDir()
 	}
 	status := &MemorySearchStatus{
 		Dirty:        dirty,
@@ -823,12 +829,7 @@ func clampOverfetch(limit, multiplier int) int {
 }
 
 func normalizeNewlines(text string) string {
-	if text == "" {
-		return ""
-	}
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
-	return text
+	return pkgruntime.NormalizeInboundTextNewlines(text)
 }
 
 // truncateSnippet truncates text to memorySnippetMaxChars, counting supplementary

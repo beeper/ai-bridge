@@ -74,6 +74,19 @@ func ConvertImportedTurns(turns []*ImportedTurn, idPrefix string) []*bridgev2.Ba
 	return messages
 }
 
+// parseJSONOrWrap attempts to parse s as a JSON object map; if it fails,
+// it wraps the raw string as {"raw": s}. Returns nil for empty input.
+func parseJSONOrWrap(s string) map[string]any {
+	if s == "" {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(s), &m); err == nil {
+		return m
+	}
+	return map[string]any{"raw": s}
+}
+
 func convertImportedTurn(turn *ImportedTurn, idPrefix string) *bridgev2.BackfillMessage {
 	msgID := turn.ID
 	if msgID == "" {
@@ -112,28 +125,13 @@ func convertImportedTurn(turn *ImportedTurn, idPrefix string) *bridgev2.Backfill
 	if len(turn.ToolCalls) > 0 {
 		meta.ToolCalls = make([]agentremote.ToolCallMetadata, len(turn.ToolCalls))
 		for i, tc := range turn.ToolCalls {
-			tcMeta := agentremote.ToolCallMetadata{
+			meta.ToolCalls[i] = agentremote.ToolCallMetadata{
 				CallID:   tc.ID,
 				ToolName: tc.Name,
 				Status:   "completed",
+				Input:    parseJSONOrWrap(tc.Input),
+				Output:   parseJSONOrWrap(tc.Output),
 			}
-			if tc.Input != "" {
-				var inputMap map[string]any
-				if err := json.Unmarshal([]byte(tc.Input), &inputMap); err == nil {
-					tcMeta.Input = inputMap
-				} else {
-					tcMeta.Input = map[string]any{"raw": tc.Input}
-				}
-			}
-			if tc.Output != "" {
-				var outputMap map[string]any
-				if err := json.Unmarshal([]byte(tc.Output), &outputMap); err == nil {
-					tcMeta.Output = outputMap
-				} else {
-					tcMeta.Output = map[string]any{"raw": tc.Output}
-				}
-			}
-			meta.ToolCalls[i] = tcMeta
 		}
 	}
 

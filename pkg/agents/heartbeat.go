@@ -60,48 +60,36 @@ const (
 
 func stripTokenAtEdges(raw string, token string) (string, bool) {
 	text := strings.TrimSpace(raw)
-	if text == "" {
-		return "", false
-	}
-	if !strings.Contains(text, token) {
+	if text == "" || !strings.Contains(text, token) {
 		return text, false
 	}
 	didStrip := false
 	for {
-		trimmed := strings.TrimSpace(text)
-		if after, ok := strings.CutPrefix(trimmed, token); ok {
-			text = strings.TrimLeft(after, " \t\r\n")
+		if after, ok := strings.CutPrefix(text, token); ok {
+			text = strings.TrimSpace(after)
 			didStrip = true
 			continue
 		}
-		if strings.HasSuffix(trimmed, token) {
-			text = strings.TrimRight(trimmed[:len(trimmed)-len(token)], " \t\r\n")
+		if before, ok := strings.CutSuffix(text, token); ok {
+			text = strings.TrimSpace(before)
 			didStrip = true
 			continue
 		}
 		break
 	}
-	collapsed := strings.Join(strings.Fields(text), " ")
-	return collapsed, didStrip
+	return strings.Join(strings.Fields(text), " "), didStrip
 }
 
 // StripHeartbeatTokenWithMode strips HEARTBEAT_OK from edges, honoring heartbeat-specific behavior.
 // Returns (shouldSkip, strippedText, didStrip).
 func StripHeartbeatTokenWithMode(text string, mode StripHeartbeatMode, maxAckChars int) (bool, string, bool) {
-	if text == "" {
-		return true, "", false
-	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return true, "", false
 	}
-	if maxAckChars < 0 {
-		maxAckChars = 0
-	}
 
 	normalized := stringutil.StripMarkup(trimmed)
-	hasToken := strings.Contains(trimmed, HeartbeatToken) || strings.Contains(normalized, HeartbeatToken)
-	if !hasToken {
+	if !strings.Contains(trimmed, HeartbeatToken) && !strings.Contains(normalized, HeartbeatToken) {
 		return false, trimmed, false
 	}
 
@@ -121,7 +109,7 @@ func StripHeartbeatTokenWithMode(text string, mode StripHeartbeatMode, maxAckCha
 	if pickedText == "" {
 		return true, "", true
 	}
-	if mode == StripHeartbeatModeHeartbeat && len(pickedText) <= maxAckChars {
+	if mode == StripHeartbeatModeHeartbeat && maxAckChars >= 0 && len(pickedText) <= maxAckChars {
 		return true, "", true
 	}
 	return false, pickedText, true

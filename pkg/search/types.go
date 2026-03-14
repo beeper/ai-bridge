@@ -1,13 +1,5 @@
 package search
 
-import "context"
-
-// Provider performs web searches for a given backend.
-type Provider interface {
-	Name() string
-	Search(ctx context.Context, req Request) (*Response, error)
-}
-
 // Request represents a normalized web search request.
 type Request struct {
 	Query      string

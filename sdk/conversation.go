@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,8 @@ type Conversation struct {
 	login   *bridgev2.UserLogin
 	sender  bridgev2.EventSender
 	runtime conversationRuntime
+
+	runtimeFallback atomic.Bool
 }
 
 func newConversation(ctx context.Context, portal *bridgev2.Portal, login *bridgev2.UserLogin, sender bridgev2.EventSender, runtime conversationRuntime) *Conversation {
@@ -156,11 +159,12 @@ func (c *Conversation) currentRoomFeatures(ctx context.Context) *RoomFeatures {
 }
 
 func (c *Conversation) aiRoomKind() string {
-	if c != nil {
-		state := c.state()
-		if state.Kind == ConversationKindDelegated || strings.TrimSpace(state.ParentConversationID) != "" {
-			return "subagent"
-		}
+	if c == nil {
+		return agentremote.AIRoomKindAgent
+	}
+	state := c.state()
+	if state.Kind == ConversationKindDelegated || strings.TrimSpace(state.ParentConversationID) != "" {
+		return "subagent"
 	}
 	return agentremote.AIRoomKindAgent
 }

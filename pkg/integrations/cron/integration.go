@@ -11,6 +11,8 @@ import (
 
 const moduleName = "cron"
 
+// cronSchedulerHost stays local to avoid importing cron job types into the
+// generic runtime package, which would create a package cycle.
 type cronSchedulerHost interface {
 	CronStatus(ctx context.Context) (enabled bool, backend string, jobCount int, nextRun *int64, err error)
 	CronList(ctx context.Context, includeDisabled bool) ([]Job, error)
@@ -52,11 +54,16 @@ func (i *Integration) ExecuteTool(ctx context.Context, call iruntime.ToolCall) (
 	return true, result, err
 }
 
+func (i *Integration) scheduler() cronSchedulerHost {
+	scheduler, _ := i.host.(cronSchedulerHost)
+	return scheduler
+}
+
 func (i *Integration) ToolAvailability(_ context.Context, _ iruntime.ToolScope, toolName string) (bool, bool, iruntime.SettingSource, string) {
 	if !iruntime.MatchesName(toolName, toolspec.CronName) {
 		return false, false, iruntime.SourceGlobalDefault, ""
 	}
-	if _, ok := i.host.(cronSchedulerHost); !ok {
+	if i.scheduler() == nil {
 		return true, false, iruntime.SourceProviderLimit, "Scheduler not available"
 	}
 	return true, true, iruntime.SourceGlobalDefault, ""
@@ -84,8 +91,8 @@ func (i *Integration) executeCronCommand(ctx context.Context, call iruntime.Comm
 	if reply == nil {
 		reply = func(string, ...any) {}
 	}
-	scheduler, ok := i.host.(cronSchedulerHost)
-	if !ok {
+	scheduler := i.scheduler()
+	if scheduler == nil {
 		reply("Scheduler not available.")
 		return nil
 	}
@@ -215,7 +222,7 @@ func (i *Integration) executeCronCommand(ctx context.Context, call iruntime.Comm
 }
 
 func (i *Integration) buildToolExecDeps(ctx context.Context, scope iruntime.ToolScope) ToolExecDeps {
-	scheduler, _ := i.host.(cronSchedulerHost)
+	scheduler := i.scheduler()
 	deps := ToolExecDeps{
 		NowMs: func() int64 { return i.host.Now().UnixMilli() },
 		ResolveCreateContext: func() ToolCreateContext {

@@ -821,7 +821,7 @@ func executeMessageSearch(ctx context.Context, args map[string]any, btc *BridgeT
 				results = append(results, map[string]any{
 					"message_id": msg.MXID.String(),
 					"role":       msgMeta.Role,
-					"content":    truncateString(body, 200),
+					"content":    stringutil.Truncate(body, 200),
 					"timestamp":  msg.Timestamp.Unix(),
 				})
 			}
@@ -831,13 +831,6 @@ func executeMessageSearch(ctx context.Context, args map[string]any, btc *BridgeT
 	// Build JSON response
 	resultsJSON, _ := json.Marshal(results)
 	return fmt.Sprintf(`{"action":"search","query":%q,"results":%s,"count":%d}`, query, string(resultsJSON), len(results)), nil
-}
-
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }
 
 func executeImageGeneration(ctx context.Context, args map[string]any) (string, error) {
@@ -1655,8 +1648,7 @@ func executeReadFile(ctx context.Context, args map[string]any) (string, error) {
 		return "", fmt.Errorf("file not found: %s", path)
 	}
 
-	content := strings.ReplaceAll(entry.Content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\r", "\n")
+	content := runtimeparse.NormalizeInboundTextNewlines(entry.Content)
 	lines := strings.Split(content, "\n")
 	totalLines := len(lines)
 	startLine := 1
@@ -1757,12 +1749,9 @@ func executeEditFile(ctx context.Context, args map[string]any) (string, error) {
 	}
 
 	original := entry.Content
-	normalized := strings.ReplaceAll(original, "\r\n", "\n")
-	normalized = strings.ReplaceAll(normalized, "\r", "\n")
-	oldNormalized := strings.ReplaceAll(oldText, "\r\n", "\n")
-	oldNormalized = strings.ReplaceAll(oldNormalized, "\r", "\n")
-	newNormalized := strings.ReplaceAll(newText, "\r\n", "\n")
-	newNormalized = strings.ReplaceAll(newNormalized, "\r", "\n")
+	normalized := runtimeparse.NormalizeInboundTextNewlines(original)
+	oldNormalized := runtimeparse.NormalizeInboundTextNewlines(oldText)
+	newNormalized := runtimeparse.NormalizeInboundTextNewlines(newText)
 
 	if oldNormalized == "" {
 		return "", errors.New("oldText must not be empty")

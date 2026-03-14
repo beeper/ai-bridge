@@ -172,6 +172,9 @@ func (oc *OpenClawClient) Disconnect() {
 	}
 	if oc.manager != nil {
 		oc.manager.Stop()
+		if oc.manager.approvalFlow != nil {
+			oc.manager.approvalFlow.Close()
+		}
 	}
 	oc.SetLoggedIn(false)
 	oc.abortActiveTurns()

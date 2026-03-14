@@ -168,9 +168,9 @@ func isAllowedURL(rawURL string) bool {
 }
 
 func extractTextFromHTML(html string) string {
-	html = removeHTMLElement(html, "script")
-	html = removeHTMLElement(html, "style")
-	html = removeHTMLElement(html, "noscript")
+	for _, tag := range []string{"script", "style", "noscript"} {
+		html = removeHTMLElement(html, tag)
+	}
 
 	var result strings.Builder
 	inTag := false

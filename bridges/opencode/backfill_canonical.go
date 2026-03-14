@@ -204,15 +204,11 @@ func appendCanonicalArtifactParts(state *streamui.UIState, part api.Part) {
 		})
 	}
 	if title != "" {
-		filename := strings.TrimSpace(part.Filename)
-		if filename == "" {
-			filename = title
-		}
 		streamui.ApplyChunk(state, map[string]any{
 			"type":      "source-document",
 			"sourceId":  "opencode-doc-" + part.ID,
 			"title":     title,
-			"filename":  filename,
+			"filename":  title,
 			"mediaType": mediaType,
 		})
 	}

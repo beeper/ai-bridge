@@ -12,6 +12,7 @@ import (
 type LoadUserLoginConfig[C bridgev2.NetworkAPI] struct {
 	Mu      *sync.Mutex
 	Clients map[networkid.UserLoginID]bridgev2.NetworkAPI
+	ClientsRef *map[networkid.UserLoginID]bridgev2.NetworkAPI
 
 	// BridgeName is used in error messages (e.g. "OpenCode").
 	BridgeName string
@@ -44,9 +45,13 @@ func resolveMakeBroken(makeBroken func(*bridgev2.UserLogin, string) *BrokenLogin
 // convention used by all bridge connectors.
 func LoadUserLogin[C bridgev2.NetworkAPI](login *bridgev2.UserLogin, cfg LoadUserLoginConfig[C]) error {
 	makeBroken := resolveMakeBroken(cfg.MakeBroken)
+	clients := cfg.Clients
+	if cfg.ClientsRef != nil {
+		clients = *cfg.ClientsRef
+	}
 
 	client, err := LoadOrCreateTypedClient(
-		cfg.Mu, cfg.Clients, login, cfg.Update,
+		cfg.Mu, clients, login, cfg.Update,
 		func() (C, error) { return cfg.Create(login) },
 	)
 	if err != nil {

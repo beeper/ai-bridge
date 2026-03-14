@@ -8,9 +8,7 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3"
-	"github.com/rs/zerolog"
 	"go.mau.fi/util/dbutil"
-	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"github.com/beeper/agentremote/pkg/agents"
 	iruntime "github.com/beeper/agentremote/pkg/integrations/runtime"
@@ -26,14 +24,6 @@ type SearchResult = memorycore.SearchResult
 type FallbackStatus = memorycore.FallbackStatus
 type ProviderStatus = memorycore.ProviderStatus
 type ResolvedConfig = memorycore.ResolvedConfig
-
-type Manager interface {
-	Status() ProviderStatus
-	Search(ctx context.Context, query string, opts SearchOptions) ([]SearchResult, error)
-	ReadFile(ctx context.Context, relPath string, from, lines *int) (map[string]any, error)
-	StatusDetails(ctx context.Context) (*MemorySearchStatus, error)
-	SyncWithProgress(ctx context.Context, onProgress func(completed, total int, label string)) error
-}
 
 // Integration is the self-owned memory integration module.
 // It implements ToolIntegration, PromptIntegration, CommandIntegration,
@@ -126,9 +116,7 @@ func (i *Integration) OnSessionMutation(ctx context.Context, evt iruntime.Sessio
 	if manager == nil {
 		return
 	}
-	if msm, ok := manager.(*MemorySearchManager); ok {
-		msm.NotifySessionChanged(ctx, evt.SessionKey, evt.Force)
-	}
+	manager.NotifySessionChanged(ctx, evt.SessionKey, evt.Force)
 }
 
 func (i *Integration) OnFileChanged(_ context.Context, evt iruntime.FileChangedEvent) {
@@ -137,9 +125,7 @@ func (i *Integration) OnFileChanged(_ context.Context, evt iruntime.FileChangedE
 	if manager == nil {
 		return
 	}
-	if msm, ok := manager.(*MemorySearchManager); ok {
-		msm.NotifyFileChanged(evt.Path)
-	}
+	manager.NotifyFileChanged(evt.Path)
 }
 
 func (i *Integration) OnContextOverflow(ctx context.Context, call iruntime.ContextOverflowCall) {
@@ -188,7 +174,7 @@ func (i *Integration) PurgeForLogin(ctx context.Context, scope iruntime.LoginSco
 	return nil
 }
 
-func (i *Integration) managerForScope(scope iruntime.ToolScope) (Manager, string) {
+func (i *Integration) managerForScope(scope iruntime.ToolScope) (execManager, string) {
 	agentID := i.agentIDFromEventMeta(scope.Meta)
 	return i.getManager(agentID)
 }
@@ -362,18 +348,15 @@ func (i *Integration) readMemoryPromptSection(ctx context.Context, scope iruntim
 	if trunc.Truncated {
 		text += "\n\n[truncated]"
 	}
-	if strings.TrimSpace(filePath) != "" {
-		return fmt.Sprintf("## %s\n%s", filePath, text)
+	heading := filePath
+	if strings.TrimSpace(heading) == "" {
+		heading = path
 	}
-	return fmt.Sprintf("## %s\n%s", path, text)
+	return fmt.Sprintf("## %s\n%s", heading, text)
 }
 
-func (i *Integration) getManager(agentID string) (Manager, string) {
-	rt := i.buildRuntime()
-	if rt == nil {
-		return nil, "memory search unavailable"
-	}
-	manager, errMsg := GetMemorySearchManager(rt, agentID)
+func (i *Integration) getManager(agentID string) (*MemorySearchManager, string) {
+	manager, errMsg := GetMemorySearchManager(i.host, agentID)
 	if manager == nil {
 		if errMsg == "" {
 			errMsg = "memory search unavailable"
@@ -381,10 +364,6 @@ func (i *Integration) getManager(agentID string) (Manager, string) {
 		return nil, errMsg
 	}
 	return manager, ""
-}
-
-func (i *Integration) buildRuntime() Runtime {
-	return &hostRuntimeAdapter{host: i.host}
 }
 
 func (i *Integration) runFlushToolLoop(
@@ -546,57 +525,6 @@ func splitQuotedArgs(input string) ([]string, error) {
 		args = append(args, current.String())
 	}
 	return args, nil
-}
-
-type hostRuntimeAdapter struct {
-	host iruntime.Host
-}
-
-func (a *hostRuntimeAdapter) ResolveConfig(agentID string) (*ResolvedConfig, error) {
-	cfg := a.host.ModuleConfig("memory_search")
-	agentCfg := a.host.AgentModuleConfig(agentID, "memory_search")
-	return resolveMemorySearchConfigFromMaps(cfg, agentCfg)
-}
-
-func (a *hostRuntimeAdapter) ResolvePromptWorkspaceDir() string {
-	return a.host.ResolveWorkspaceDir()
-}
-
-func (a *hostRuntimeAdapter) ListSessionPortals(ctx context.Context, loginID, agentID string) ([]SessionPortal, error) {
-	infos, err := a.host.SessionPortals(ctx, loginID, agentID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]SessionPortal, 0, len(infos))
-	for _, info := range infos {
-		portalKey, ok := info.PortalKey.(networkid.PortalKey)
-		if !ok {
-			continue
-		}
-		out = append(out, SessionPortal{Key: info.Key, PortalKey: portalKey})
-	}
-	return out, nil
-}
-
-func (a *hostRuntimeAdapter) BridgeDB() *dbutil.Database {
-	raw := a.host.BridgeDB()
-	if raw == nil {
-		return nil
-	}
-	db, _ := raw.(*dbutil.Database)
-	return db
-}
-
-func (a *hostRuntimeAdapter) BridgeID() string {
-	return a.host.BridgeID()
-}
-
-func (a *hostRuntimeAdapter) LoginID() string {
-	return a.host.LoginID()
-}
-
-func (a *hostRuntimeAdapter) Logger() zerolog.Logger {
-	return iruntime.ZerologFromHost(a.host)
 }
 
 func resolveMemorySearchConfigFromMaps(defaults map[string]any, agentOverrides map[string]any) (*ResolvedConfig, error) {

@@ -84,7 +84,6 @@ func stripInboundMetadata(text string) string {
 		}
 		if !inMetaBlock && hasInboundMetaSentinel(line) {
 			inMetaBlock = true
-			inFence = false
 			continue
 		}
 		if inMetaBlock {

@@ -5,17 +5,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
-	"regexp"
 	"strings"
 
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"github.com/beeper/agentremote/pkg/shared/openclawconv"
-)
-
-var (
-	openClawValidAgentIDRe   = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
-	openClawInvalidAgentIDRe = regexp.MustCompile(`[^a-z0-9_-]+`)
 )
 
 func openClawGatewayID(gatewayURL, label string) string {
@@ -77,18 +71,5 @@ func isOpenClawSyntheticDMSessionKey(sessionKey string) bool {
 }
 
 func canonicalOpenClawAgentID(agentID string) string {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return ""
-	}
-	if openClawValidAgentIDRe.MatchString(agentID) {
-		return strings.ToLower(agentID)
-	}
-	normalized := strings.ToLower(agentID)
-	normalized = openClawInvalidAgentIDRe.ReplaceAllString(normalized, "-")
-	normalized = strings.Trim(normalized, "-")
-	if len(normalized) > 64 {
-		normalized = normalized[:64]
-	}
-	return normalized
+	return openclawconv.CanonicalAgentID(agentID)
 }

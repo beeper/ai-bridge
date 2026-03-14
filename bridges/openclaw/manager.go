@@ -912,7 +912,7 @@ func applyNormalizedUsageToParams(usage map[string]any, params *msgconv.UIMessag
 }
 
 func openClawErrorText(payload gatewayChatEvent) string {
-	return openclawconv.StringsTrimDefault(payload.ErrorMessage, openclawconv.StringsTrimDefault(payload.StopReason, ""))
+	return openclawconv.StringsTrimDefault(payload.ErrorMessage, strings.TrimSpace(payload.StopReason))
 }
 
 func extractOpenClawEventTimestamp(eventTS int64, message map[string]any) time.Time {
@@ -972,7 +972,7 @@ func normalizeOpenClawLiveMessage(eventTS int64, message map[string]any) map[str
 	return normalized
 }
 
-func isOpenClawDirectChatEvent(_ string, message map[string]any) bool {
+func isOpenClawDirectChatEvent(message map[string]any) bool {
 	if len(message) == 0 {
 		return false
 	}
@@ -1176,7 +1176,7 @@ func (m *openClawManager) handleChatEvent(ctx context.Context, payload gatewayCh
 	meta := portalMeta(portal)
 	payload.Message = normalizeOpenClawLiveMessage(payload.TS, payload.Message)
 	eventTS := extractOpenClawEventTimestamp(payload.TS, payload.Message)
-	if isOpenClawDirectChatEvent(payload.State, payload.Message) {
+	if isOpenClawDirectChatEvent(payload.Message) {
 		m.handleDirectChatEvent(ctx, portal, meta, payload, eventTS)
 		return
 	}
@@ -1869,14 +1869,7 @@ func (m *openClawManager) clearPendingPortalResync(sessionKey string) {
 }
 
 func stringValue(v any) string {
-	switch typed := v.(type) {
-	case string:
-		return typed
-	case fmt.Stringer:
-		return typed.String()
-	default:
-		return ""
-	}
+	return openclawconv.StringValue(v)
 }
 
 func openClawAttachmentFallbackText(block map[string]any, err error) string {

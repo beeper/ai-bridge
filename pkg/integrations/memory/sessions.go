@@ -26,26 +26,30 @@ type sessionPortal struct {
 }
 
 func (m *MemorySearchManager) activeSessionPortals(ctx context.Context) (map[string]sessionPortal, error) {
-	if m == nil || m.runtime == nil {
+	if m == nil || m.host == nil {
 		return nil, errors.New("memory search unavailable")
 	}
-	items, err := m.runtime.ListSessionPortals(ctx, m.loginID, m.agentID)
+	infos, err := m.host.SessionPortals(ctx, m.loginID, m.agentID)
 	if err != nil {
 		return nil, err
 	}
-	active := make(map[string]sessionPortal, len(items))
-	for _, item := range items {
-		key := strings.TrimSpace(item.Key)
+	active := make(map[string]sessionPortal, len(infos))
+	for _, info := range infos {
+		key := strings.TrimSpace(info.Key)
 		if key == "" {
 			continue
 		}
-		active[key] = sessionPortal{key: key, portalKey: item.PortalKey}
+		portalKey, ok := info.PortalKey.(networkid.PortalKey)
+		if !ok {
+			continue
+		}
+		active[key] = sessionPortal{key: key, portalKey: portalKey}
 	}
 	return active, nil
 }
 
 func (m *MemorySearchManager) syncSessions(ctx context.Context, force bool, sessionKey, generation string) error {
-	if m == nil || m.runtime == nil {
+	if m == nil || m.host == nil {
 		return errors.New("memory search unavailable")
 	}
 	active, err := m.activeSessionPortals(ctx)
@@ -433,4 +437,3 @@ func sessionPathForKey(sessionKey string) string {
 	cleaned = strings.ReplaceAll(cleaned, "\\", "_")
 	return "sessions/" + cleaned + ".jsonl"
 }
-

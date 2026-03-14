@@ -249,11 +249,7 @@ func sanitizeOpenCodeTitle(title string) string {
 	if trimmed == "" {
 		return ""
 	}
-	trimmed = strings.Join(strings.Fields(trimmed), " ")
-	if len(trimmed) > 80 {
-		trimmed = trimmed[:80] + "..."
-	}
-	return trimmed
+	return stringutil.Truncate(strings.Join(strings.Fields(trimmed), " "), 80)
 }
 
 func (b *Bridge) emitOpenCodePartRemove(ctx context.Context, portal *bridgev2.Portal, instanceID, partID, partType string, fromMe bool) {

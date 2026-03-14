@@ -12,6 +12,7 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	"github.com/beeper/agentremote/bridges/opencode/api"
+	"github.com/beeper/agentremote/pkg/shared/stringutil"
 	"github.com/beeper/agentremote/turns"
 )
 
@@ -127,13 +128,13 @@ func (b *Bridge) buildOpenCodePartContent(ctx context.Context, portal *bridgev2.
 		if body == "" {
 			body = "Snapshot saved"
 		} else {
-			body = "Snapshot:\n" + truncateOpenCodeText(body, 4000)
+			body = "Snapshot:\n" + stringutil.Truncate(body, 4000)
 		}
 		return &event.MessageEventContent{MsgType: event.MsgNotice, Body: body}, nil, nil
 	case "step-start":
 		body := "Step started"
 		if strings.TrimSpace(part.Snapshot) != "" {
-			body += ": " + truncateOpenCodeText(strings.TrimSpace(part.Snapshot), 200)
+			body += ": " + stringutil.Truncate(strings.TrimSpace(part.Snapshot), 200)
 		}
 		return &event.MessageEventContent{MsgType: event.MsgNotice, Body: body}, nil, nil
 	case "step-finish":
@@ -159,7 +160,7 @@ func (b *Bridge) buildOpenCodePartContent(ctx context.Context, portal *bridgev2.
 		if desc != "" {
 			body += ": " + desc
 		} else if prompt != "" {
-			body += ": " + truncateOpenCodeText(prompt, 300)
+			body += ": " + stringutil.Truncate(prompt, 300)
 		}
 		if part.Agent != "" {
 			body += " (agent: " + part.Agent + ")"
@@ -168,7 +169,7 @@ func (b *Bridge) buildOpenCodePartContent(ctx context.Context, portal *bridgev2.
 	case "retry":
 		body := fmt.Sprintf("Retry attempt %d", part.Attempt)
 		if len(part.Error) > 0 {
-			body += ": " + truncateOpenCodeText(string(part.Error), 300)
+			body += ": " + stringutil.Truncate(string(part.Error), 300)
 		}
 		return &event.MessageEventContent{MsgType: event.MsgNotice, Body: body}, nil, nil
 	case "compaction":
@@ -177,11 +178,4 @@ func (b *Bridge) buildOpenCodePartContent(ctx context.Context, portal *bridgev2.
 	default:
 		return &event.MessageEventContent{MsgType: event.MsgNotice, Body: "OpenCode part: " + part.Type}, nil, nil
 	}
-}
-
-func truncateOpenCodeText(text string, max int) string {
-	if max <= 0 || len(text) <= max {
-		return text
-	}
-	return text[:max] + "..."
 }

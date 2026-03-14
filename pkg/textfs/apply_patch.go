@@ -188,22 +188,24 @@ func parsePatchText(input string) (*parsedPatch, error) {
 }
 
 func checkPatchBoundariesLenient(lines []string) ([]string, error) {
-	outerErr := checkPatchBoundariesStrict(lines)
-	if outerErr == nil {
+	if err := checkPatchBoundariesStrict(lines); err == nil {
 		return lines, nil
 	}
-	if len(lines) >= 4 {
-		first := strings.TrimSpace(lines[0])
-		last := strings.TrimSpace(lines[len(lines)-1])
-		if (first == "<<EOF" || first == "<<'EOF'" || first == "<<\"EOF\"") && strings.HasSuffix(last, "EOF") {
-			inner := lines[1 : len(lines)-1]
-			if err := checkPatchBoundariesStrict(inner); err != nil {
-				return nil, err
-			}
-			return inner, nil
-		}
+	// Try stripping heredoc wrappers (<<EOF ... EOF).
+	if len(lines) < 4 {
+		return nil, checkPatchBoundariesStrict(lines)
 	}
-	return nil, outerErr
+	first := strings.TrimSpace(lines[0])
+	last := strings.TrimSpace(lines[len(lines)-1])
+	isHeredoc := (first == "<<EOF" || first == "<<'EOF'" || first == "<<\"EOF\"") && strings.HasSuffix(last, "EOF")
+	if !isHeredoc {
+		return nil, checkPatchBoundariesStrict(lines)
+	}
+	inner := lines[1 : len(lines)-1]
+	if err := checkPatchBoundariesStrict(inner); err != nil {
+		return nil, err
+	}
+	return inner, nil
 }
 
 func checkPatchBoundariesStrict(lines []string) error {
@@ -340,14 +342,15 @@ func parseUpdateFileChunk(lines []string, lineNumber int, allowMissingContext bo
 func formatPatchSummary(summary ApplyPatchSummary) string {
 	var b strings.Builder
 	b.WriteString("Updated files:")
-	for _, file := range summary.Added {
-		b.WriteString("\nA " + file)
+	writePaths := func(prefix string, paths []string) {
+		for _, path := range paths {
+			b.WriteString("\n")
+			b.WriteString(prefix)
+			b.WriteString(path)
+		}
 	}
-	for _, file := range summary.Modified {
-		b.WriteString("\nM " + file)
-	}
-	for _, file := range summary.Deleted {
-		b.WriteString("\nD " + file)
-	}
+	writePaths("A ", summary.Added)
+	writePaths("M ", summary.Modified)
+	writePaths("D ", summary.Deleted)
 	return b.String()
 }

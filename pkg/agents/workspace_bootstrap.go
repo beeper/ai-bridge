@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -57,6 +58,7 @@ func EnsureBootstrapFiles(ctx context.Context, store *textfs.Store) (bool, error
 	if store == nil {
 		return false, errors.New("textfs store is required")
 	}
+
 	brandNew := true
 	for _, name := range coreBootstrapFiles {
 		_, found, err := store.Read(ctx, name)
@@ -68,23 +70,17 @@ func EnsureBootstrapFiles(ctx context.Context, store *textfs.Store) (bool, error
 		}
 	}
 
-	for _, name := range coreBootstrapFiles {
+	filesToWrite := coreBootstrapFiles
+	if brandNew {
+		filesToWrite = append(slices.Clone(coreBootstrapFiles), DefaultBootstrapFilename)
+	}
+	for _, name := range filesToWrite {
 		content, err := loadWorkspaceTemplate(name)
 		if err != nil {
 			return brandNew, fmt.Errorf("loading template %s: %w", name, err)
 		}
 		if _, err := store.WriteIfMissing(ctx, name, content); err != nil {
 			return brandNew, fmt.Errorf("writing bootstrap file %s: %w", name, err)
-		}
-	}
-
-	if brandNew {
-		content, err := loadWorkspaceTemplate(DefaultBootstrapFilename)
-		if err != nil {
-			return brandNew, fmt.Errorf("loading template %s: %w", DefaultBootstrapFilename, err)
-		}
-		if _, err := store.WriteIfMissing(ctx, DefaultBootstrapFilename, content); err != nil {
-			return brandNew, fmt.Errorf("writing bootstrap file %s: %w", DefaultBootstrapFilename, err)
 		}
 	}
 

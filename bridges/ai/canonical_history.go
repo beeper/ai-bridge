@@ -67,10 +67,3 @@ func (oc *AIClient) downloadHistoryImageBlock(ctx context.Context, mediaURL, mim
 		MimeType: actualMimeType,
 	}
 }
-
-func stringValue(raw any) string {
-	if value, ok := raw.(string); ok {
-		return value
-	}
-	return ""
-}

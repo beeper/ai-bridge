@@ -16,15 +16,23 @@ import (
 
 const commandMaxBytes = 256 * 1024
 
+type execManager interface {
+	Status() ProviderStatus
+	Search(ctx context.Context, query string, opts SearchOptions) ([]SearchResult, error)
+	ReadFile(ctx context.Context, relPath string, from, lines *int) (map[string]any, error)
+	StatusDetails(ctx context.Context) (*MemorySearchStatus, error)
+	SyncWithProgress(ctx context.Context, onProgress func(completed, total int, label string)) error
+}
+
 type ToolExecDeps struct {
-	GetManager             func(scope iruntime.ToolScope) (Manager, string)
+	GetManager             func(scope iruntime.ToolScope) (execManager, string)
 	ResolveSessionKey      func(scope iruntime.ToolScope) string
 	ResolveCitationsMode   func(scope iruntime.ToolScope) string
 	ShouldIncludeCitations func(ctx context.Context, scope iruntime.ToolScope, mode string) bool
 }
 
 type CommandExecDeps struct {
-	GetManager        func(scope iruntime.ToolScope) (Manager, string)
+	GetManager        func(scope iruntime.ToolScope) (execManager, string)
 	ResolveSessionKey func(scope iruntime.ToolScope) string
 	SplitQuotedArgs   func(raw string) ([]string, error)
 	WriteFile         func(ctx context.Context, scope iruntime.CommandScope, mode string, path string, content string, maxBytes int) (updatedPath string, err error)

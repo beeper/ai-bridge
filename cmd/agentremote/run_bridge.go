@@ -22,7 +22,7 @@ func cmdInternalBridge(args []string) error {
 	// e.g. agentremote __bridge ai -c config.yaml → ai -c config.yaml
 	os.Args = append([]string{def.Name}, args[1:]...)
 
-	m := newBridgeMain(def)
+	m := def.Definition.NewMain(def.NewFunc())
 	m.InitVersion(Tag, Commit, BuildTime)
 	m.Run()
 	return nil

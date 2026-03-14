@@ -2,7 +2,6 @@ package main
 
 import (
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/matrix/mxmain"
 
 	aibridge "github.com/beeper/agentremote/bridges/ai"
 	"github.com/beeper/agentremote/bridges/codex"
@@ -33,10 +32,6 @@ var bridgeRegistry = map[string]bridgeDef{
 		Definition: bridgeentry.OpenClaw,
 		NewFunc:    func() bridgev2.NetworkConnector { return openclaw.NewConnector() },
 	},
-}
-
-func newBridgeMain(def bridgeDef) *mxmain.BridgeMain {
-	return def.Definition.NewMain(def.NewFunc())
 }
 
 func beeperBridgeName(bridgeType, name string) string {

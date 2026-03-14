@@ -256,12 +256,9 @@ func detectCapabilities(modelID string, apiModel OpenRouterModel, hasAPIData boo
 
 	caps := ModelCapabilities{}
 
-	// Vision: "image" in architecture.input_modalities
-	caps.Vision = slices.Contains(apiModel.Architecture.InputModalities, "image")
-	// Legacy fallback: check modality field
-	if !caps.Vision && strings.Contains(apiModel.Architecture.Modality, "image") {
-		caps.Vision = true
-	}
+	// Vision: "image" in architecture.input_modalities (or legacy modality field)
+	caps.Vision = slices.Contains(apiModel.Architecture.InputModalities, "image") ||
+		strings.Contains(apiModel.Architecture.Modality, "image")
 
 	// Image Generation: "image" in architecture.output_modalities
 	caps.ImageGen = slices.Contains(apiModel.Architecture.OutputModalities, "image")

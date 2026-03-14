@@ -52,20 +52,11 @@ func (inst *openCodeInstance) cacheSnapshot(sessionID string) (bool, time.Time, 
 
 func (inst *openCodeInstance) listMessagesForBackfill(ctx context.Context, sessionID string, forward bool, count int) ([]api.MessageWithParts, error) {
 	complete, lastRefresh, size := inst.cacheSnapshot(sessionID)
-	requireFull := !forward && !complete
-	refreshLimit := 0
-	if forward {
-		refreshLimit = openCodeBackfillRefreshLimit
-		if count > refreshLimit {
-			refreshLimit = count
-		}
-	}
-	if requireFull || (refreshLimit > 0 && time.Since(lastRefresh) > openCodeBackfillRefreshInterval) || size == 0 {
-		limit := 0
-		if !requireFull {
-			limit = refreshLimit
-		}
-		_, err := inst.refreshMessages(ctx, sessionID, limit, requireFull)
+	_ = forward
+	_ = count
+	requireFull := !complete || size == 0 || time.Since(lastRefresh) > openCodeBackfillRefreshInterval
+	if requireFull {
+		_, err := inst.refreshMessages(ctx, sessionID, 0, true)
 		if err != nil {
 			return nil, err
 		}
@@ -166,14 +157,9 @@ func (inst *openCodeInstance) removeCachedPart(sessionID, messageID, partID stri
 		cache.mu.Unlock()
 		return
 	}
-	parts := entry.msg.Parts[:0]
-	for _, part := range entry.msg.Parts {
-		if part.ID == partID {
-			continue
-		}
-		parts = append(parts, part)
-	}
-	entry.msg.Parts = parts
+	entry.msg.Parts = slices.DeleteFunc(entry.msg.Parts, func(p api.Part) bool {
+		return p.ID == partID
+	})
 	cache.messages[messageID] = entry
 	cache.mu.Unlock()
 }

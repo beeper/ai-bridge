@@ -14,7 +14,7 @@ import (
 // configuration to the YAML config file at configPath. It merges homeserver,
 // appservice, bridge, database, matrix, provisioning, encryption and other
 // sections required for websocket-mode operation against hungryserv.
-func PatchConfigWithRegistration(configPath string, reg any, homeserverURL, bridgeName, bridgeType, beeperDomain, asToken, userID, matrixToken, provisioningSecret string) error {
+func PatchConfigWithRegistration(configPath string, reg any, homeserverURL, bridgeName, bridgeType, dbName, beeperDomain, asToken, userID, matrixToken, provisioningSecret string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
@@ -62,7 +62,11 @@ func PatchConfigWithRegistration(configPath string, reg any, homeserverURL, brid
 
 	// Database — sqlite for self-hosted
 	SetPath(doc, []string{"database", "type"}, "sqlite3-fk-wal")
-	SetPath(doc, []string{"database", "uri"}, "file:ai.db?_txlock=immediate")
+	dbName = strings.TrimSpace(dbName)
+	if dbName == "" {
+		dbName = "ai.db"
+	}
+	SetPath(doc, []string{"database", "uri"}, fmt.Sprintf("file:%s?_txlock=immediate", dbName))
 
 	// Matrix connector
 	SetPath(doc, []string{"matrix", "message_status_events"}, true)

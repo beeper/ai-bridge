@@ -17,13 +17,13 @@ func (b *BossStoreAdapter) resolvePortalByRoomID(ctx context.Context, roomID str
 	}
 
 	if strings.HasPrefix(trimmed, "!") {
-		portal, err := b.store.client.UserLogin.Bridge.GetPortalByMXID(ctx, id.RoomID(trimmed))
+		portal, err := b.client.UserLogin.Bridge.GetPortalByMXID(ctx, id.RoomID(trimmed))
 		if err == nil && portal != nil {
 			return portal, nil
 		}
 	}
 
-	portals, err := b.store.client.listAllChatPortals(ctx)
+	portals, err := b.client.listAllChatPortals(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list portals: %w", err)
 	}

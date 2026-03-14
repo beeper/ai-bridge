@@ -13,6 +13,7 @@ import (
 type UserLoginMetadata struct {
 	Provider          string `json:"provider,omitempty"`
 	CodexHome         string `json:"codex_home,omitempty"`
+	CodexHomeManaged  bool   `json:"codex_home_managed,omitempty"`
 	CodexAuthSource   string `json:"codex_auth_source,omitempty"`
 	CodexCommand      string `json:"codex_command,omitempty"`
 	CodexAuthMode     string `json:"codex_auth_mode,omitempty"`
@@ -73,9 +74,23 @@ func normalizedCodexAuthSource(meta *UserLoginMetadata) string {
 }
 
 func isHostAuthLogin(meta *UserLoginMetadata) bool {
-	return normalizedCodexAuthSource(meta) == CodexAuthSourceHost
+	switch normalizedCodexAuthSource(meta) {
+	case CodexAuthSourceHost:
+		return true
+	case CodexAuthSourceManaged:
+		return false
+	default:
+		return !isManagedAuthLogin(meta)
+	}
 }
 
 func isManagedAuthLogin(meta *UserLoginMetadata) bool {
-	return normalizedCodexAuthSource(meta) == CodexAuthSourceManaged
+	switch normalizedCodexAuthSource(meta) {
+	case CodexAuthSourceManaged:
+		return true
+	case CodexAuthSourceHost:
+		return false
+	default:
+		return meta != nil && (meta.CodexHomeManaged || strings.TrimSpace(meta.CodexHome) != "")
+	}
 }

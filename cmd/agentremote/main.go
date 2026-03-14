@@ -232,7 +232,7 @@ func cmdWhoami(args []string) error {
 	if err != nil {
 		return err
 	}
-	if cfg.Username == "" || cfg.Username != resp.UserInfo.Username {
+	if cfg.Username != resp.UserInfo.Username {
 		cfg.Username = resp.UserInfo.Username
 		if err := saveAuthConfig(*profile, cfg); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to save auth config: %v\n", err)
@@ -324,7 +324,7 @@ func resolveBridgeArgs(fs *flag.FlagSet) (bridgeType string, err error) {
 
 func cmdStart(args []string) error {
 	fs := newFlagSet("start")
-	profile, name, _ := parseBridgeFlags(fs)
+	profile, name, env := parseBridgeFlags(fs)
 	wait := fs.Bool("wait", false, "block until bridge is connected (timeout 60s)")
 	waitTimeout := fs.Duration("wait-timeout", 60*time.Second, "timeout for --wait")
 	if err := fs.Parse(args); err != nil {
@@ -345,14 +345,14 @@ func cmdStart(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err = ensureRegistration(*profile, meta, bridgeType); err != nil {
+	if err = ensureRegistration(*profile, *env, meta, bridgeType); err != nil {
 		return err
 	}
 	running, pid := bridgeutil.ProcessAliveFromPIDFile(meta.PIDPath)
 	if running {
 		fmt.Printf("%s already running (pid %d)\n", instName, pid)
 		if *wait {
-			return waitForBridge(*profile, beeperName, *waitTimeout)
+			return waitForBridge(*profile, *env, beeperName, *waitTimeout)
 		}
 		return nil
 	}
@@ -362,7 +362,7 @@ func cmdStart(args []string) error {
 	fmt.Printf("started %s\n", instName)
 	cliutil.PrintRuntimePaths(meta)
 	if *wait {
-		return waitForBridge(*profile, beeperName, *waitTimeout)
+		return waitForBridge(*profile, *env, beeperName, *waitTimeout)
 	}
 	return nil
 }
@@ -371,8 +371,8 @@ func cmdUp(args []string) error {
 	return cmdStart(args)
 }
 
-func waitForBridge(profile, beeperName string, timeout time.Duration) error {
-	cfg, err := getAuthOrEnv(profile)
+func waitForBridge(profile, envOverride, beeperName string, timeout time.Duration) error {
+	cfg, err := getAuthWithOverride(profile, envOverride)
 	if err != nil {
 		return err
 	}
@@ -396,7 +396,7 @@ func waitForBridge(profile, beeperName string, timeout time.Duration) error {
 
 func cmdRun(args []string) error {
 	fs := newFlagSet("run")
-	profile, name, _ := parseBridgeFlags(fs)
+	profile, name, env := parseBridgeFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -415,7 +415,7 @@ func cmdRun(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err = ensureRegistration(*profile, meta, bridgeType); err != nil {
+	if err = ensureRegistration(*profile, *env, meta, bridgeType); err != nil {
 		return err
 	}
 	exe, err := os.Executable()
@@ -526,10 +526,25 @@ func cmdStopAll(args []string) error {
 }
 
 func cmdRestart(args []string) error {
-	if err := cmdStop(args); err != nil {
+	fs := newFlagSet("restart")
+	profile, name, _ := parseBridgeFlags(fs)
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return cmdStart(args)
+	bridgeType, err := resolveBridgeArgs(fs)
+	if err != nil {
+		return err
+	}
+	instName := instanceDirName(bridgeType, *name)
+	if err := cmdStop([]string{"--profile", *profile, instName}); err != nil {
+		return err
+	}
+	startArgs := []string{"--profile", *profile}
+	if *name != "" {
+		startArgs = append(startArgs, "--name", *name)
+	}
+	startArgs = append(startArgs, bridgeType)
+	return cmdStart(startArgs)
 }
 
 type bridgeStatus struct {
@@ -731,7 +746,7 @@ func cmdLogs(args []string) error {
 
 func cmdRegister(args []string) error {
 	fs := newFlagSet("register")
-	profile, name, _ := parseBridgeFlags(fs)
+	profile, name, env := parseBridgeFlags(fs)
 	output := fs.String("output", "-", "output path for registration YAML")
 	jsonOut := fs.Bool("json", false, "print registration metadata as JSON")
 	if err := fs.Parse(args); err != nil {
@@ -752,7 +767,7 @@ func cmdRegister(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err = ensureRegistration(*profile, meta, bridgeType); err != nil {
+	if err = ensureRegistration(*profile, *env, meta, bridgeType); err != nil {
 		return err
 	}
 	if *jsonOut {
@@ -1099,22 +1114,35 @@ func generateExampleConfig(meta *metadata) error {
 	return cmd.Run()
 }
 
-func saveAuthFunc(profile string) func(beeperauth.Config) error {
-	return func(cfg beeperauth.Config) error { return saveAuthConfig(profile, cfg) }
+func saveAuthFunc(profile string, preserve *authConfig) func(beeperauth.Config) error {
+	return func(cfg beeperauth.Config) error {
+		if preserve != nil {
+			cfg.Env = preserve.Env
+			cfg.Domain = preserve.Domain
+		}
+		return saveAuthConfig(profile, cfg)
+	}
 }
 
-func ensureRegistration(profile string, meta *metadata, bridgeType string) error {
-	auth, err := getAuthOrEnv(profile)
+func ensureRegistration(profile, envOverride string, meta *metadata, bridgeType string) error {
+	auth, err := getAuthWithOverride(profile, envOverride)
 	if err != nil {
 		return err
 	}
+	var preserve *authConfig
+	if strings.TrimSpace(envOverride) != "" {
+		if cfg, loadErr := loadAuthConfig(profile); loadErr == nil {
+			preserve = &cfg
+		}
+	}
 	return selfhost.EnsureRegistration(context.Background(), selfhost.RegistrationParams{
 		Auth:             auth,
-		SaveAuth:         saveAuthFunc(profile),
+		SaveAuth:         saveAuthFunc(profile, preserve),
 		ConfigPath:       meta.ConfigPath,
 		RegistrationPath: meta.RegistrationPath,
 		BeeperBridgeName: meta.BeeperBridgeName,
 		BridgeType:       bridgeType,
+		DBName:           bridgeRegistry[bridgeType].DBName,
 	})
 }
 

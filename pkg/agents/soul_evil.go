@@ -42,13 +42,7 @@ func clampChance(value float64) float64 {
 	if math.IsNaN(value) || math.IsInf(value, 0) {
 		return 0
 	}
-	if value < 0 {
-		return 0
-	}
-	if value > 1 {
-		return 1
-	}
-	return value
+	return max(0, min(1, value))
 }
 
 func resolveTimezone(raw string) *time.Location {
@@ -128,12 +122,16 @@ func isWithinDailyPurgeWindow(at string, duration string, now time.Time, loc *ti
 
 // DecideSoulEvil decides whether to swap SOUL content for this run.
 func DecideSoulEvil(params SoulEvilCheckParams) SoulEvilDecision {
-	fileName := DefaultSoulEvilFilename
-	if params.Config != nil && strings.TrimSpace(params.Config.File) != "" {
-		fileName = strings.TrimSpace(params.Config.File)
-	}
-	if params.Config == nil {
+	noEvil := func(fileName string) SoulEvilDecision {
 		return SoulEvilDecision{UseEvil: false, FileName: fileName}
+	}
+
+	fileName := DefaultSoulEvilFilename
+	if params.Config == nil {
+		return noEvil(fileName)
+	}
+	if trimmed := strings.TrimSpace(params.Config.File); trimmed != "" {
+		fileName = trimmed
 	}
 
 	loc := resolveTimezone(params.UserTimezone)
@@ -159,5 +157,5 @@ func DecideSoulEvil(params SoulEvilCheckParams) SoulEvilDecision {
 		}
 	}
 
-	return SoulEvilDecision{UseEvil: false, FileName: fileName}
+	return noEvil(fileName)
 }

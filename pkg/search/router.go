@@ -5,8 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/beeper/agentremote/pkg/shared/providerresource"
-	"github.com/beeper/agentremote/pkg/shared/registry"
+	"github.com/beeper/agentremote/pkg/shared/stringutil"
 )
 
 // Search executes a search using the configured provider chain.
@@ -17,29 +16,24 @@ func Search(ctx context.Context, req Request, cfg *Config) (*Response, error) {
 	cfg = cfg.WithDefaults()
 	req = normalizeRequest(req)
 
-	return providerresource.Run(
-		cfg.Provider,
-		cfg.Fallbacks,
-		DefaultFallbackOrder,
-		func(reg *registry.Registry[Provider]) {
-			registerProviders(reg, cfg)
-		},
-		func(provider Provider) (*Response, error) {
-			return provider.Search(ctx, req)
-		},
-		func(name string, resp *Response) {
-			if resp.Provider == "" {
-				resp.Provider = name
-			}
-			if resp.Query == "" {
-				resp.Query = req.Query
-			}
-			if resp.Count == 0 {
-				resp.Count = len(resp.Results)
-			}
-		},
-		errors.New("no search providers available"),
-	)
+	provider, name := resolveProvider(cfg)
+	if provider == nil {
+		return nil, errors.New("no search providers available")
+	}
+	resp, err := provider.Search(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Provider == "" {
+		resp.Provider = name
+	}
+	if resp.Query == "" {
+		resp.Query = req.Query
+	}
+	if resp.Count == 0 {
+		resp.Count = len(resp.Results)
+	}
+	return resp, nil
 }
 
 func normalizeRequest(req Request) Request {
@@ -52,8 +46,14 @@ func normalizeRequest(req Request) Request {
 	return req
 }
 
-func registerProviders(reg *registry.Registry[Provider], cfg *Config) {
-	if p := newExaProvider(cfg); p != nil {
-		reg.Register(p)
+func resolveProvider(cfg *Config) (*exaProvider, string) {
+	order := stringutil.BuildProviderOrder(cfg.Provider, cfg.Fallbacks, DefaultFallbackOrder)
+	for _, name := range order {
+		if strings.EqualFold(name, ProviderExa) {
+			if provider := newExaProvider(cfg); provider != nil {
+				return provider, ProviderExa
+			}
+		}
 	}
+	return nil, ""
 }

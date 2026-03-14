@@ -16,7 +16,6 @@ import (
 
 	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/bridges/codex/codexrpc"
-	"github.com/beeper/agentremote/pkg/aidb"
 	bridgesdk "github.com/beeper/agentremote/sdk"
 )
 
@@ -55,17 +54,7 @@ type hostAuthProbe struct {
 }
 
 func (cc *CodexConnector) bridgeDB() *dbutil.Database {
-	if cc.db != nil {
-		return cc.db
-	}
-	if cc.br != nil && cc.br.DB != nil {
-		cc.db = aidb.NewChild(
-			cc.br.DB.Database,
-			dbutil.ZeroLogger(cc.br.Log.With().Str("db_section", "codex_bridge").Logger()),
-		)
-		return cc.db
-	}
-	return nil
+	return cc.db
 }
 
 // reconcileHostAuthLogins ensures a deterministic host-auth Codex login exists

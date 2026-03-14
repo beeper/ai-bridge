@@ -18,6 +18,7 @@ type systemEventsDBScope struct {
 	db       *dbutil.Database
 	bridgeID string
 	loginID  string
+	agentID  string
 }
 
 func systemEventsScope(client *AIClient) *systemEventsDBScope {
@@ -29,6 +30,7 @@ func systemEventsScope(client *AIClient) *systemEventsDBScope {
 		db:       db,
 		bridgeID: bridgeID,
 		loginID:  loginID,
+		agentID:  "beep",
 	}
 }
 
@@ -111,7 +113,7 @@ func saveSystemEventsSnapshot(ctx context.Context, scope *systemEventsDBScope, q
 		return nil
 	}
 	return scope.db.DoTxn(ctx, nil, func(ctx context.Context) error {
-		if _, err := scope.db.Exec(ctx, `DELETE FROM ai_system_events WHERE bridge_id=$1 AND login_id=$2`, scope.bridgeID, scope.loginID); err != nil {
+		if _, err := scope.db.Exec(ctx, `DELETE FROM ai_system_events WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`, scope.bridgeID, scope.loginID, scope.agentID); err != nil {
 			return err
 		}
 		for _, queue := range queues {
@@ -125,9 +127,9 @@ func saveSystemEventsSnapshot(ctx context.Context, scope *systemEventsDBScope, q
 				}
 				if _, err := scope.db.Exec(ctx, `
 					INSERT INTO ai_system_events (
-						bridge_id, login_id, session_key, event_index, text, ts, last_text
-					) VALUES ($1, $2, $3, $4, $5, $6, $7)
-				`, scope.bridgeID, scope.loginID, queue.SessionKey, idx, evt.Text, evt.TS, lastText); err != nil {
+						bridge_id, login_id, agent_id, session_key, event_index, text, ts, last_text
+					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+				`, scope.bridgeID, scope.loginID, scope.agentID, queue.SessionKey, idx, evt.Text, evt.TS, lastText); err != nil {
 					return err
 				}
 			}
@@ -143,9 +145,9 @@ func loadSystemEventsSnapshot(ctx context.Context, scope *systemEventsDBScope) (
 	rows, err := scope.db.Query(ctx, `
 		SELECT session_key, event_index, text, ts, last_text
 		FROM ai_system_events
-		WHERE bridge_id=$1 AND login_id=$2
+		WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3
 		ORDER BY session_key, event_index
-	`, scope.bridgeID, scope.loginID)
+	`, scope.bridgeID, scope.loginID, scope.agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -156,19 +158,17 @@ func loadSystemEventsSnapshot(ctx context.Context, scope *systemEventsDBScope) (
 	for rows.Next() {
 		var (
 			sessionKey string
-			index      int
 			text       string
 			ts         int64
 			lastText   string
 		)
-		if err := rows.Scan(&sessionKey, &index, &text, &ts, &lastText); err != nil {
+		if err := rows.Scan(&sessionKey, new(int), &text, &ts, &lastText); err != nil {
 			return nil, err
 		}
 		if current == nil || current.SessionKey != sessionKey {
 			queues = append(queues, persistedSystemEventQueue{SessionKey: sessionKey})
 			current = &queues[len(queues)-1]
 		}
-		_ = index
 		current.Events = append(current.Events, SystemEvent{Text: text, TS: ts})
 		if strings.TrimSpace(lastText) != "" {
 			current.LastText = lastText
