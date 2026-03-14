@@ -82,7 +82,7 @@ func NewConnector() *CodexConnector {
 		ConfigData:     &cc.Config,
 		ConfigUpgrader: configupgrade.SimpleUpgrader(upgradeConfig),
 		DBMeta: func() database.MetaTypes {
-			return agentremote.BuildMetaTypes(
+			return bridgesdk.BuildStandardMetaTypes(
 				func() any { return &PortalMetadata{} },
 				func() any { return &MessageMetadata{} },
 				func() any { return &UserLoginMetadata{} },

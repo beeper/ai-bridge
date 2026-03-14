@@ -15,6 +15,7 @@ import (
 
 	"github.com/beeper/agentremote"
 	airuntime "github.com/beeper/agentremote/pkg/runtime"
+	bridgesdk "github.com/beeper/agentremote/sdk"
 )
 
 const (
@@ -53,9 +54,7 @@ func (oc *OpenAIConnector) applyRuntimeDefaults() {
 	if oc.Config.ModelCacheDuration == 0 {
 		oc.Config.ModelCacheDuration = 6 * time.Hour
 	}
-	if oc.Config.Bridge.CommandPrefix == "" {
-		oc.Config.Bridge.CommandPrefix = "!ai"
-	}
+	bridgesdk.ApplyDefaultCommandPrefix(&oc.Config.Bridge.CommandPrefix, "!ai")
 	if oc.Config.Pruning == nil {
 		oc.Config.Pruning = airuntime.DefaultPruningConfig()
 	} else {

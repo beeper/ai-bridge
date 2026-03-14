@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"go.mau.fi/util/configupgrade"
-	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -43,12 +42,8 @@ func NewConnector() *OpenClawConnector {
 			oc.br = bridge
 		},
 		StartConnector: func(_ context.Context, _ *bridgev2.Bridge) error {
-			if oc.Config.Bridge.CommandPrefix == "" {
-				oc.Config.Bridge.CommandPrefix = "!openclaw"
-			}
-			if oc.Config.OpenClaw.Enabled == nil {
-				oc.Config.OpenClaw.Enabled = ptr.Ptr(true)
-			}
+			bridgesdk.ApplyDefaultCommandPrefix(&oc.Config.Bridge.CommandPrefix, "!openclaw")
+			bridgesdk.ApplyBoolDefault(&oc.Config.OpenClaw.Enabled, true)
 			return nil
 		},
 		BridgeName: func() bridgev2.BridgeName {
@@ -65,12 +60,12 @@ func NewConnector() *OpenClawConnector {
 		ConfigData:     &oc.Config,
 		ConfigUpgrader: configupgrade.SimpleUpgrader(upgradeConfig),
 		DBMeta: func() database.MetaTypes {
-			return database.MetaTypes{
-				Portal:    func() any { return &PortalMetadata{} },
-				Message:   func() any { return &MessageMetadata{} },
-				UserLogin: func() any { return &UserLoginMetadata{} },
-				Ghost:     func() any { return &GhostMetadata{} },
-			}
+			return bridgesdk.BuildStandardMetaTypes(
+				func() any { return &PortalMetadata{} },
+				func() any { return &MessageMetadata{} },
+				func() any { return &UserLoginMetadata{} },
+				func() any { return &GhostMetadata{} },
+			)
 		},
 		NetworkCapabilities: func() *bridgev2.NetworkGeneralCapabilities {
 			caps := agentremote.DefaultNetworkCapabilities()

@@ -28,7 +28,6 @@ type streamingState struct {
 	reasoningTokens      int64
 	totalTokens          int64
 	accumulated          strings.Builder
-	visibleAccumulated   strings.Builder
 	reasoning            strings.Builder
 	toolCalls            []ToolCallMetadata
 	sourceCitations      []citations.SourceCitation
@@ -36,20 +35,16 @@ type streamingState struct {
 	generatedFiles       []citations.GeneratedFilePart
 	initialEventID       id.EventID
 	networkMessageID     networkid.MessageID
-	sequenceNum          int
 	lastRemoteEventOrder int64
 	firstToken           bool
 	suppressSend         bool
 
-	ui      streamui.UIState
-	session *turns.StreamSession
-	turn    *bridgesdk.Turn
+	turn *bridgesdk.Turn
 
 	codexToolOutputBuffers    map[string]*strings.Builder
 	codexLatestDiff           string
 	codexReasoningSummarySeen bool
 	codexTimelineNotices      map[string]bool
-	loggedStreamStart         bool
 }
 
 func (s *streamingState) recordFirstToken() {
@@ -71,31 +66,13 @@ func (s *streamingState) hasEditTarget() bool {
 	return s != nil && s.streamTarget().HasEditTarget()
 }
 
-func (cc *CodexClient) uiEmitter(state *streamingState) *streamui.Emitter {
-	if state != nil && state.turn != nil {
-		return state.turn.Emitter()
-	}
-	state.ui.TurnID = state.turnID
-	state.ui.InitMaps()
-	return &streamui.Emitter{
-		State: &state.ui,
-		Emit: func(ctx context.Context, portal *bridgev2.Portal, part map[string]any) {
-			streamui.ApplyChunk(&state.ui, part)
-			cc.emitStreamEvent(ctx, portal, state, part)
-		},
-	}
-}
-
 func newStreamingState(sourceEventID id.EventID) *streamingState {
 	turnID := agentremote.NewTurnID()
-	ui := streamui.UIState{TurnID: turnID}
-	ui.InitMaps()
 	return &streamingState{
 		turnID:                 turnID,
 		startedAtMs:            time.Now().UnixMilli(),
 		firstToken:             true,
 		initialEventID:         sourceEventID,
-		ui:                     ui,
 		codexTimelineNotices:   make(map[string]bool),
 		codexToolOutputBuffers: make(map[string]*strings.Builder),
 	}

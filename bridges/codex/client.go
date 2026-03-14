@@ -1803,10 +1803,6 @@ func (cc *CodexClient) buildUIMessageMetadata(state *streamingState, model strin
 	})
 }
 
-func (cc *CodexClient) emitUIStart(ctx context.Context, portal *bridgev2.Portal, state *streamingState, model string) {
-	cc.uiEmitter(state).EmitUIStart(ctx, portal, cc.buildUIMessageMetadata(state, model, false, ""))
-}
-
 func (cc *CodexClient) turnStream(state *streamingState) *bridgesdk.TurnStream {
 	if state == nil || state.turn == nil {
 		return nil
@@ -1817,25 +1813,19 @@ func (cc *CodexClient) turnStream(state *streamingState) *bridgesdk.TurnStream {
 func (cc *CodexClient) emitUITextDelta(ctx context.Context, portal *bridgev2.Portal, state *streamingState, text string) {
 	if stream := cc.turnStream(state); stream != nil {
 		stream.TextDelta(text)
-		return
 	}
-	cc.uiEmitter(state).EmitUITextDelta(ctx, portal, text)
 }
 
 func (cc *CodexClient) emitUIReasoningDelta(ctx context.Context, portal *bridgev2.Portal, state *streamingState, text string) {
 	if stream := cc.turnStream(state); stream != nil {
 		stream.ReasoningDelta(text)
-		return
 	}
-	cc.uiEmitter(state).EmitUIReasoningDelta(ctx, portal, text)
 }
 
 func (cc *CodexClient) emitUIError(ctx context.Context, portal *bridgev2.Portal, state *streamingState, text string) {
 	if stream := cc.turnStream(state); stream != nil {
 		stream.Error(text)
-		return
 	}
-	cc.uiEmitter(state).EmitUIError(ctx, portal, text)
 }
 
 func (cc *CodexClient) emitUIToolOutputAvailable(
@@ -1852,17 +1842,13 @@ func (cc *CodexClient) emitUIToolOutputAvailable(
 			ProviderExecuted: providerExecuted,
 			Streaming:        streaming,
 		})
-		return
 	}
-	cc.uiEmitter(state).EmitUIToolOutputAvailable(ctx, portal, toolCallID, output, providerExecuted, streaming)
 }
 
 func (cc *CodexClient) emitUIToolOutputDenied(ctx context.Context, portal *bridgev2.Portal, state *streamingState, toolCallID string) {
 	if stream := cc.turnStream(state); stream != nil {
 		stream.ToolDenied(toolCallID)
-		return
 	}
-	cc.uiEmitter(state).EmitUIToolOutputDenied(ctx, portal, toolCallID)
 }
 
 func (cc *CodexClient) emitUIToolOutputError(
@@ -1875,41 +1861,31 @@ func (cc *CodexClient) emitUIToolOutputError(
 ) {
 	if stream := cc.turnStream(state); stream != nil {
 		stream.ToolOutputError(toolCallID, errText, providerExecuted)
-		return
 	}
-	cc.uiEmitter(state).EmitUIToolOutputError(ctx, portal, toolCallID, errText, providerExecuted)
 }
 
 func (cc *CodexClient) emitUIMessageMetadata(ctx context.Context, portal *bridgev2.Portal, state *streamingState, metadata map[string]any) {
 	if stream := cc.turnStream(state); stream != nil {
 		stream.Metadata(metadata)
-		return
 	}
-	cc.uiEmitter(state).EmitUIMessageMetadata(ctx, portal, metadata)
 }
 
 func (cc *CodexClient) emitUISourceURL(ctx context.Context, portal *bridgev2.Portal, state *streamingState, citation citations.SourceCitation) {
 	if stream := cc.turnStream(state); stream != nil {
 		stream.SourceCitation(citation)
-		return
 	}
-	cc.uiEmitter(state).EmitUISourceURL(ctx, portal, citation)
 }
 
 func (cc *CodexClient) emitUISourceDocument(ctx context.Context, portal *bridgev2.Portal, state *streamingState, document citations.SourceDocument) {
 	if stream := cc.turnStream(state); stream != nil {
 		stream.SourceDocument(document)
-		return
 	}
-	cc.uiEmitter(state).EmitUISourceDocument(ctx, portal, document)
 }
 
 func (cc *CodexClient) emitUIFile(ctx context.Context, portal *bridgev2.Portal, state *streamingState, file citations.GeneratedFilePart) {
 	if stream := cc.turnStream(state); stream != nil {
 		stream.GeneratedFile(file)
-		return
 	}
-	cc.uiEmitter(state).EmitUIFile(ctx, portal, file.URL, file.MediaType)
 }
 
 func (cc *CodexClient) ensureUIToolInputStart(ctx context.Context, portal *bridgev2.Portal, state *streamingState, toolCallID, toolName string, providerExecuted bool, input any) {
@@ -1921,11 +1897,7 @@ func (cc *CodexClient) ensureUIToolInputStart(ctx context.Context, portal *bridg
 			ToolName:         toolName,
 			ProviderExecuted: providerExecuted,
 		})
-		return
 	}
-	ui := cc.uiEmitter(state)
-	ui.EnsureUIToolInputStart(ctx, portal, toolCallID, toolName, providerExecuted, streamui.ToolDisplayTitle(toolName), nil)
-	ui.EmitUIToolInputAvailable(ctx, portal, toolCallID, toolName, input, providerExecuted)
 }
 
 func (cc *CodexClient) emitUIToolApprovalRequest(
@@ -1934,8 +1906,6 @@ func (cc *CodexClient) emitUIToolApprovalRequest(
 ) {
 	if state != nil && state.turn != nil {
 		state.turn.Approvals().EmitRequest(approvalID, toolCallID)
-	} else {
-		cc.uiEmitter(state).EmitUIToolApprovalRequest(ctx, portal, approvalID, toolCallID)
 	}
 	if state == nil {
 		return
@@ -1955,23 +1925,17 @@ func (cc *CodexClient) emitUIToolApprovalRequest(
 	})
 }
 
-func (cc *CodexClient) emitUIFinish(ctx context.Context, portal *bridgev2.Portal, state *streamingState, model string, finishReason string) {
-	cc.uiEmitter(state).EmitUIFinish(ctx, portal, finishReason, cc.buildUIMessageMetadata(state, model, true, finishReason))
-	if state != nil && state.session != nil {
-		state.session.End(ctx, turns.EndReason(finishReason))
-		state.session = nil
-	}
-}
-
 func (cc *CodexClient) buildCanonicalUIMessage(state *streamingState, model string, finishReason string) map[string]any {
-	if uiMessage := streamui.SnapshotCanonicalUIMessage(&state.ui); len(uiMessage) > 0 {
-		metadata, _ := uiMessage["metadata"].(map[string]any)
-		uiMessage["metadata"] = msgconv.MergeUIMessageMetadata(metadata, cc.buildUIMessageMetadata(state, model, true, finishReason))
-		return msgconv.AppendUIMessageArtifacts(
-			uiMessage,
-			citations.BuildSourceParts(state.sourceCitations, state.sourceDocuments),
-			citations.GeneratedFilesToParts(state.generatedFiles),
-		)
+	if state != nil && state.turn != nil {
+		if uiMessage := streamui.SnapshotCanonicalUIMessage(state.turn.UIState()); len(uiMessage) > 0 {
+			metadata, _ := uiMessage["metadata"].(map[string]any)
+			uiMessage["metadata"] = msgconv.MergeUIMessageMetadata(metadata, cc.buildUIMessageMetadata(state, model, true, finishReason))
+			return msgconv.AppendUIMessageArtifacts(
+				uiMessage,
+				citations.BuildSourceParts(state.sourceCitations, state.sourceDocuments),
+				citations.GeneratedFilesToParts(state.generatedFiles),
+			)
+		}
 	}
 	return msgconv.BuildUIMessage(msgconv.UIMessageParams{
 		TurnID:     state.turnID,
@@ -2150,11 +2114,6 @@ func (h *codexSDKApprovalHandle) Wait(ctx context.Context) (bridgesdk.ToolApprov
 		h.turn.Approvals().Respond(h.approvalID, h.toolCallID, ok && decision.Approved, reason)
 		if !(ok && decision.Approved) {
 			h.turn.Stream().ToolDenied(h.toolCallID)
-		}
-	} else if h.portal != nil {
-		h.client.uiEmitter(h.state).EmitUIToolApprovalResponse(ctx, h.portal, h.approvalID, h.toolCallID, ok && decision.Approved, reason)
-		if !(ok && decision.Approved) {
-			h.client.uiEmitter(h.state).EmitUIToolOutputDenied(ctx, h.portal, h.toolCallID)
 		}
 	}
 	return bridgesdk.ToolApprovalResponse{
@@ -2370,9 +2329,13 @@ func (cc *CodexClient) setApprovalStateTracking(state *streamingState, approvalI
 	if state == nil {
 		return
 	}
-	state.ui.InitMaps()
-	state.ui.UIToolCallIDByApproval[approvalID] = toolCallID
-	state.ui.UIToolApprovalRequested[approvalID] = true
-	state.ui.UIToolNameByToolCallID[toolCallID] = toolName
-	state.ui.UIToolTypeByToolCallID[toolCallID] = matrixevents.ToolTypeProvider
+	if state.turn == nil || state.turn.UIState() == nil {
+		return
+	}
+	uiState := state.turn.UIState()
+	uiState.InitMaps()
+	uiState.UIToolCallIDByApproval[approvalID] = toolCallID
+	uiState.UIToolApprovalRequested[approvalID] = true
+	uiState.UIToolNameByToolCallID[toolCallID] = toolName
+	uiState.UIToolTypeByToolCallID[toolCallID] = matrixevents.ToolTypeProvider
 }

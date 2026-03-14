@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"go.mau.fi/util/configupgrade"
-	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -60,12 +59,8 @@ func NewConnector() *OpenCodeConnector {
 			oc.br = bridge
 		},
 		StartConnector: func(_ context.Context, _ *bridgev2.Bridge) error {
-			if oc.Config.Bridge.CommandPrefix == "" {
-				oc.Config.Bridge.CommandPrefix = "!opencode"
-			}
-			if oc.Config.OpenCode.Enabled == nil {
-				oc.Config.OpenCode.Enabled = ptr.Ptr(true)
-			}
+			bridgesdk.ApplyDefaultCommandPrefix(&oc.Config.Bridge.CommandPrefix, "!opencode")
+			bridgesdk.ApplyBoolDefault(&oc.Config.OpenCode.Enabled, true)
 			return nil
 		},
 		BridgeName: func() bridgev2.BridgeName {
@@ -82,7 +77,7 @@ func NewConnector() *OpenCodeConnector {
 		ConfigData:     &oc.Config,
 		ConfigUpgrader: configupgrade.SimpleUpgrader(upgradeConfig),
 		DBMeta: func() database.MetaTypes {
-			return agentremote.BuildMetaTypes(
+			return bridgesdk.BuildStandardMetaTypes(
 				func() any { return &PortalMetadata{} },
 				func() any { return &MessageMetadata{} },
 				func() any { return &UserLoginMetadata{} },

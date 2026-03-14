@@ -12,6 +12,7 @@ import (
 
 	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/pkg/aidb"
+	bridgesdk "github.com/beeper/agentremote/sdk"
 )
 
 func NewAIConnector() *OpenAIConnector {
@@ -67,7 +68,7 @@ func NewAIConnector() *OpenAIConnector {
 			return exampleNetworkConfig, &oc.Config, configupgrade.SimpleUpgrader(upgradeConfig)
 		},
 		DBMeta: func() database.MetaTypes {
-			return agentremote.BuildMetaTypes(
+			return bridgesdk.BuildStandardMetaTypes(
 				func() any { return &PortalMetadata{} },
 				func() any { return &MessageMetadata{} },
 				func() any { return &UserLoginMetadata{} },
