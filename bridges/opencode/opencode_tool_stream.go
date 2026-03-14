@@ -7,7 +7,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 
 	"github.com/beeper/agentremote/bridges/opencode/api"
-	"github.com/beeper/agentremote/pkg/shared/streamui"
+	"github.com/beeper/agentremote/pkg/shared/citations"
+	bridgesdk "github.com/beeper/agentremote/sdk"
 )
 
 func opencodeToolCallID(part api.Part) string {
@@ -42,12 +43,25 @@ func (m *OpenCodeManager) emitToolStreamDelta(ctx context.Context, inst *openCod
 	agentID := m.bridge.portalAgentID(portal)
 	m.ensureStepStarted(ctx, inst, portal, part.SessionID, part.MessageID)
 	sf := inst.partStreamFlags(part.SessionID, part.ID)
+	if client, ok := m.bridge.host.(*OpenCodeClient); ok {
+		if _, writer := client.ensureStreamWriter(ctx, portal, turnID, agentID); writer != nil {
+			tools := writer.Tools()
+			if !sf.inputStarted {
+				tools.EnsureInputStart(ctx, toolCallID, nil, bridgesdk.ToolInputOptions{
+					ToolName:         toolName,
+					ProviderExecuted: false,
+				})
+				inst.withPartState(part.SessionID, part.ID, func(ps *openCodePartState) { ps.streamInputStarted = true })
+			}
+			tools.InputDelta(ctx, toolCallID, toolName, delta, false)
+			return
+		}
+	}
 	if !sf.inputStarted {
 		m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, agentID, map[string]any{
 			"type":             "tool-input-start",
 			"toolCallId":       toolCallID,
 			"toolName":         toolName,
-			"title":            streamui.ToolDisplayTitle(toolName),
 			"providerExecuted": false,
 		})
 		inst.withPartState(part.SessionID, part.ID, func(ps *openCodePartState) { ps.streamInputStarted = true })
@@ -72,6 +86,31 @@ func (m *OpenCodeManager) emitToolStreamState(ctx context.Context, inst *openCod
 	agentID := m.bridge.portalAgentID(portal)
 	m.ensureStepStarted(ctx, inst, portal, part.SessionID, part.MessageID)
 	sf := inst.partStreamFlags(part.SessionID, part.ID)
+	if client, ok := m.bridge.host.(*OpenCodeClient); ok {
+		if _, writer := client.ensureStreamWriter(ctx, portal, turnID, agentID); writer != nil {
+			tools := writer.Tools()
+			if len(part.State.Input) > 0 && !sf.inputAvailable {
+				if !sf.inputStarted {
+					tools.EnsureInputStart(ctx, toolCallID, nil, bridgesdk.ToolInputOptions{
+						ToolName:         toolName,
+						ProviderExecuted: false,
+					})
+					inst.withPartState(part.SessionID, part.ID, func(ps *openCodePartState) { ps.streamInputStarted = true })
+				}
+				tools.Input(ctx, toolCallID, toolName, part.State.Input, false)
+				inst.withPartState(part.SessionID, part.ID, func(ps *openCodePartState) { ps.streamInputAvailable = true })
+			}
+			if part.State.Output != "" && !sf.outputAvailable {
+				tools.Output(ctx, toolCallID, part.State.Output, bridgesdk.ToolOutputOptions{ProviderExecuted: false})
+				inst.withPartState(part.SessionID, part.ID, func(ps *openCodePartState) { ps.streamOutputAvailable = true })
+			}
+			if part.State.Error != "" && !sf.outputError {
+				tools.OutputError(ctx, toolCallID, part.State.Error, false)
+				inst.withPartState(part.SessionID, part.ID, func(ps *openCodePartState) { ps.streamOutputError = true })
+			}
+			return
+		}
+	}
 
 	if len(part.State.Input) > 0 && !sf.inputAvailable {
 		if !sf.inputStarted {
@@ -79,7 +118,6 @@ func (m *OpenCodeManager) emitToolStreamState(ctx context.Context, inst *openCod
 				"type":             "tool-input-start",
 				"toolCallId":       toolCallID,
 				"toolName":         toolName,
-				"title":            streamui.ToolDisplayTitle(toolName),
 				"providerExecuted": false,
 			})
 			inst.withPartState(part.SessionID, part.ID, func(ps *openCodePartState) { ps.streamInputStarted = true })
@@ -136,6 +174,29 @@ func (m *OpenCodeManager) emitArtifactStream(ctx context.Context, inst *openCode
 	mediaType := strings.TrimSpace(part.Mime)
 	if mediaType == "" {
 		mediaType = "application/octet-stream"
+	}
+	if client, ok := m.bridge.host.(*OpenCodeClient); ok {
+		if _, writer := client.ensureStreamWriter(ctx, portal, turnID, agentID); writer != nil {
+			if sourceURL != "" {
+				writer.File(ctx, sourceURL, mediaType)
+			}
+			if title != "" {
+				writer.SourceDocument(ctx, citations.SourceDocument{
+					ID:        "opencode-doc-" + part.ID,
+					Title:     title,
+					Filename:  title,
+					MediaType: mediaType,
+				})
+			}
+			if sourceURL != "" {
+				writer.SourceURL(ctx, citations.SourceCitation{
+					URL:   sourceURL,
+					Title: title,
+				})
+			}
+			inst.markPartArtifactStreamSent(part.SessionID, part.ID)
+			return
+		}
 	}
 
 	if sourceURL != "" {

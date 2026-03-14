@@ -22,6 +22,19 @@ func (m *OpenCodeManager) ensureTurnStarted(ctx context.Context, inst *openCodeI
 		return
 	}
 	agentID := m.bridge.portalAgentID(portal)
+	if client, ok := m.bridge.host.(*OpenCodeClient); ok {
+		if streamState, writer := client.ensureStreamWriter(ctx, portal, turnID, agentID); writer != nil {
+			if len(metadata) > 0 {
+				client.applyStreamMessageMetadata(streamState, metadata)
+				writer.MessageMetadata(ctx, metadata)
+			} else {
+				// Start the turn without fabricating raw stream parts.
+				writer.MessageMetadata(ctx, nil)
+			}
+			state.started = true
+			return
+		}
+	}
 	if state.started {
 		if len(metadata) > 0 {
 			m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, agentID, map[string]any{
@@ -56,6 +69,13 @@ func (m *OpenCodeManager) ensureStepStarted(ctx context.Context, inst *openCodeI
 		return
 	}
 	agentID := m.bridge.portalAgentID(portal)
+	if client, ok := m.bridge.host.(*OpenCodeClient); ok {
+		if _, writer := client.ensureStreamWriter(ctx, portal, turnID, agentID); writer != nil {
+			writer.StepStart(ctx)
+			state.stepOpen = true
+			return
+		}
+	}
 	m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, agentID, map[string]any{
 		"type": "start-step",
 	})
@@ -78,6 +98,13 @@ func (m *OpenCodeManager) closeStepIfOpen(ctx context.Context, inst *openCodeIns
 		return
 	}
 	agentID := m.bridge.portalAgentID(portal)
+	if client, ok := m.bridge.host.(*OpenCodeClient); ok {
+		if _, writer := client.ensureStreamWriter(ctx, portal, turnID, agentID); writer != nil {
+			writer.StepFinish(ctx)
+			state.stepOpen = false
+			return
+		}
+	}
 	m.bridge.emitOpenCodeStreamEvent(ctx, portal, turnID, agentID, map[string]any{
 		"type": "finish-step",
 	})
@@ -104,6 +131,19 @@ func (m *OpenCodeManager) emitTurnFinish(ctx context.Context, inst *openCodeInst
 		finishReason = "stop"
 	}
 	agentID := m.bridge.portalAgentID(portal)
+	if client, ok := m.bridge.host.(*OpenCodeClient); ok {
+		if streamState, writer := client.ensureStreamWriter(ctx, portal, turnID, agentID); writer != nil {
+			if len(metadata) > 0 {
+				client.applyStreamMessageMetadata(streamState, metadata)
+				writer.MessageMetadata(ctx, metadata)
+			}
+			streamState.finishReason = finishReason
+			m.bridge.finishOpenCodeStream(turnID)
+			state.finished = true
+			inst.removeTurnState(sessionID, messageID)
+			return
+		}
+	}
 	part := map[string]any{
 		"type":         "finish",
 		"finishReason": finishReason,

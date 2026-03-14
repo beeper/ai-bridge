@@ -23,17 +23,13 @@ func buildCanonicalAssistantBackfill(msg api.MessageWithParts, agentID string) c
 		turnID = "opencode-msg-" + strings.TrimSpace(msg.Info.ID)
 	}
 	state := streamui.UIState{TurnID: turnID}
+	replay := streamui.NewReplayBuilder(&state)
 	startMeta := buildTurnStartMetadata(&msg, agentID)
-	streamui.ApplyChunk(&state, map[string]any{
-		"type":            "start",
-		"messageId":       turnID,
-		"messageMetadata": startMeta,
-	})
+	replay.Start(startMeta)
 
-	var visible strings.Builder
 	for _, part := range msg.Parts {
 		fillPartIDs(&part, msg.Info.ID, msg.Info.SessionID)
-		appendCanonicalAssistantPart(&state, &visible, part)
+		appendCanonicalAssistantPart(replay, part)
 	}
 
 	finishReason := strings.TrimSpace(msg.Info.Finish)
@@ -41,14 +37,10 @@ func buildCanonicalAssistantBackfill(msg api.MessageWithParts, agentID string) c
 		finishReason = "stop"
 	}
 	finishMeta := buildTurnFinishMetadata(&msg, agentID, finishReason)
-	streamui.ApplyChunk(&state, map[string]any{
-		"type":            "finish",
-		"finishReason":    finishReason,
-		"messageMetadata": finishMeta,
-	})
+	replay.Finish(finishReason, finishMeta)
 
 	uiMessage := streamui.SnapshotCanonicalUIMessage(&state)
-	body := strings.TrimSpace(visible.String())
+	body := strings.TrimSpace(replay.VisibleText())
 	if body == "" {
 		body = "..."
 	}
@@ -81,50 +73,43 @@ func buildCanonicalAssistantBackfill(msg api.MessageWithParts, agentID string) c
 	}
 }
 
-func appendCanonicalAssistantPart(state *streamui.UIState, visible *strings.Builder, part api.Part) {
+func appendCanonicalAssistantPart(replay *streamui.ReplayBuilder, part api.Part) {
 	switch part.Type {
 	case "text":
 		if part.ID == "" || part.Text == "" {
 			return
 		}
-		partID := opencodePartStreamID(part, "text")
-		streamui.ApplyChunk(state, map[string]any{"type": "text-start", "id": partID})
-		streamui.ApplyChunk(state, map[string]any{"type": "text-delta", "id": partID, "delta": part.Text})
-		streamui.ApplyChunk(state, map[string]any{"type": "text-end", "id": partID})
-		visible.WriteString(part.Text)
+		replay.Text(opencodePartStreamID(part, "text"), part.Text)
 	case "reasoning":
 		if part.ID == "" || part.Text == "" {
 			return
 		}
-		partID := opencodePartStreamID(part, "reasoning")
-		streamui.ApplyChunk(state, map[string]any{"type": "reasoning-start", "id": partID})
-		streamui.ApplyChunk(state, map[string]any{"type": "reasoning-delta", "id": partID, "delta": part.Text})
-		streamui.ApplyChunk(state, map[string]any{"type": "reasoning-end", "id": partID})
+		replay.Reasoning(opencodePartStreamID(part, "reasoning"), part.Text)
 	case "tool":
-		appendCanonicalToolPart(state, part)
+		appendCanonicalToolPart(replay, part)
 		if part.State != nil {
 			for _, attachment := range part.State.Attachments {
 				fillPartIDs(&attachment, part.MessageID, part.SessionID)
-				appendCanonicalAssistantPart(state, visible, attachment)
+				appendCanonicalAssistantPart(replay, attachment)
 			}
 		}
 	case "file":
-		appendCanonicalArtifactParts(state, part)
+		appendCanonicalArtifactParts(replay, part)
 	case "step-start":
-		streamui.ApplyChunk(state, map[string]any{"type": "start-step"})
+		replay.StepStart()
 	case "step-finish":
-		streamui.ApplyChunk(state, map[string]any{"type": "finish-step"})
+		replay.StepFinish()
 		if data := canonicalDataPart(part); data != nil {
-			streamui.ApplyChunk(state, data)
+			replay.Data(data)
 		}
 	case "patch", "snapshot", "agent", "subtask", "retry", "compaction":
 		if data := canonicalDataPart(part); data != nil {
-			streamui.ApplyChunk(state, data)
+			replay.Data(data)
 		}
 	}
 }
 
-func appendCanonicalToolPart(state *streamui.UIState, part api.Part) {
+func appendCanonicalToolPart(replay *streamui.ReplayBuilder, part api.Part) {
 	toolCallID := opencodeToolCallID(part)
 	if toolCallID == "" {
 		return
@@ -132,54 +117,24 @@ func appendCanonicalToolPart(state *streamui.UIState, part api.Part) {
 	toolName := opencodeToolName(part)
 	if part.State != nil {
 		if len(part.State.Input) > 0 {
-			streamui.ApplyChunk(state, map[string]any{
-				"type":             "tool-input-available",
-				"toolCallId":       toolCallID,
-				"toolName":         toolName,
-				"input":            part.State.Input,
-				"providerExecuted": false,
-			})
+			replay.ToolInput(toolCallID, toolName, part.State.Input, false)
 		} else if strings.TrimSpace(part.State.Raw) != "" {
-			streamui.ApplyChunk(state, map[string]any{
-				"type":             "tool-input-start",
-				"toolCallId":       toolCallID,
-				"toolName":         toolName,
-				"title":            streamui.ToolDisplayTitle(toolName),
-				"providerExecuted": false,
-			})
-			streamui.ApplyChunk(state, map[string]any{
-				"type":           "tool-input-delta",
-				"toolCallId":     toolCallID,
-				"inputTextDelta": part.State.Raw,
-			})
+			replay.ToolInputText(toolCallID, toolName, part.State.Raw, false)
 		}
 		switch strings.TrimSpace(part.State.Status) {
 		case "completed":
 			if part.State.Output != "" {
-				streamui.ApplyChunk(state, map[string]any{
-					"type":             "tool-output-available",
-					"toolCallId":       toolCallID,
-					"output":           part.State.Output,
-					"providerExecuted": false,
-				})
+				replay.ToolOutput(toolCallID, part.State.Output, false)
 			}
 		case "error":
-			streamui.ApplyChunk(state, map[string]any{
-				"type":             "tool-output-error",
-				"toolCallId":       toolCallID,
-				"errorText":        part.State.Error,
-				"providerExecuted": false,
-			})
+			replay.ToolOutputError(toolCallID, part.State.Error, false)
 		case "denied", "rejected":
-			streamui.ApplyChunk(state, map[string]any{
-				"type":       "tool-output-denied",
-				"toolCallId": toolCallID,
-			})
+			replay.ToolDenied(toolCallID)
 		}
 	}
 }
 
-func appendCanonicalArtifactParts(state *streamui.UIState, part api.Part) {
+func appendCanonicalArtifactParts(replay *streamui.ReplayBuilder, part api.Part) {
 	sourceURL := strings.TrimSpace(part.URL)
 	title := strings.TrimSpace(part.Filename)
 	if title == "" {
@@ -190,27 +145,11 @@ func appendCanonicalArtifactParts(state *streamui.UIState, part api.Part) {
 		mediaType = "application/octet-stream"
 	}
 	if sourceURL != "" {
-		streamui.ApplyChunk(state, map[string]any{
-			"type":      "file",
-			"url":       sourceURL,
-			"mediaType": mediaType,
-			"filename":  strings.TrimSpace(part.Filename),
-		})
-		streamui.ApplyChunk(state, map[string]any{
-			"type":     "source-url",
-			"sourceId": "opencode-source-" + part.ID,
-			"url":      sourceURL,
-			"title":    title,
-		})
+		replay.File(sourceURL, mediaType, strings.TrimSpace(part.Filename))
+		replay.SourceURL("opencode-source-"+part.ID, sourceURL, title)
 	}
 	if title != "" {
-		streamui.ApplyChunk(state, map[string]any{
-			"type":      "source-document",
-			"sourceId":  "opencode-doc-" + part.ID,
-			"title":     title,
-			"filename":  title,
-			"mediaType": mediaType,
-		})
+		replay.SourceDocument("opencode-doc-"+part.ID, title, title, mediaType)
 	}
 }
 

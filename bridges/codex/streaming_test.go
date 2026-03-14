@@ -16,9 +16,9 @@ func TestCodex_StreamChunks_BasicOrderingAndSeq(t *testing.T) {
 	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: id.RoomID("!room:example.com")}}
 	state := newHookableStreamingState("turn_local_1")
 	attachTestTurn(state, portal)
-	state.turn.SetMetadata(map[string]any{"model": "gpt-5.1-codex"})
-	state.turn.StepStart()
-	state.turn.WriteText("hi")
+	state.turn.Writer().MessageMetadata(state.turn.Context(), map[string]any{"model": "gpt-5.1-codex"})
+	state.turn.Writer().StepStart(state.turn.Context())
+	state.turn.Writer().TextDelta(state.turn.Context(), "hi")
 	state.turn.End("completed")
 
 	uiState := state.turn.UIState()

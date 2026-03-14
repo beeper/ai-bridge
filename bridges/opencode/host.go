@@ -62,23 +62,11 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 	agentID = strings.TrimSpace(agentID)
 	ctx = oc.BackgroundContext(ctx)
 
+	state, turn := oc.ensureStreamTurn(ctx, portal, turnID, agentID)
+	if state == nil || turn == nil {
+		return
+	}
 	oc.StreamMu.Lock()
-	state := oc.streamStates[turnID]
-	if state == nil {
-		state = &openCodeStreamState{
-			portal:  portal,
-			turnID:  turnID,
-			agentID: strings.TrimSpace(agentID),
-		}
-		state.ui.TurnID = turnID
-		oc.streamStates[turnID] = state
-	}
-	if state.portal == nil {
-		state.portal = portal
-	}
-	if state.agentID == "" {
-		state.agentID = agentID
-	}
 	if metadata, _ := part["messageMetadata"].(map[string]any); len(metadata) > 0 {
 		oc.applyStreamMessageMetadata(state, metadata)
 	}
@@ -104,11 +92,6 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 	case "abort":
 		state.finishReason = "abort"
 	}
-	turn := state.turn
-	if turn == nil {
-		turn = oc.newSDKStreamTurn(ctx, portal, state)
-		state.turn = turn
-	}
 	oc.StreamMu.Unlock()
 
 	if oc.IsStreamShuttingDown() || turn == nil {
@@ -123,6 +106,50 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 		HandleTerminalEvents:            true,
 		DefaultFinishReason:             "stop",
 	})
+}
+
+func (oc *OpenCodeClient) ensureStreamTurn(ctx context.Context, portal *bridgev2.Portal, turnID, agentID string) (*openCodeStreamState, *bridgesdk.Turn) {
+	if oc == nil || portal == nil || portal.MXID == "" {
+		return nil, nil
+	}
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" || oc.IsStreamShuttingDown() {
+		return nil, nil
+	}
+	ctx = oc.BackgroundContext(ctx)
+	agentID = strings.TrimSpace(agentID)
+
+	oc.StreamMu.Lock()
+	defer oc.StreamMu.Unlock()
+
+	state := oc.streamStates[turnID]
+	if state == nil {
+		state = &openCodeStreamState{
+			portal:  portal,
+			turnID:  turnID,
+			agentID: agentID,
+		}
+		state.ui.TurnID = turnID
+		oc.streamStates[turnID] = state
+	}
+	if state.portal == nil {
+		state.portal = portal
+	}
+	if state.agentID == "" {
+		state.agentID = agentID
+	}
+	if state.turn == nil {
+		state.turn = oc.newSDKStreamTurn(ctx, portal, state)
+	}
+	return state, state.turn
+}
+
+func (oc *OpenCodeClient) ensureStreamWriter(ctx context.Context, portal *bridgev2.Portal, turnID, agentID string) (*openCodeStreamState, *bridgesdk.Writer) {
+	state, turn := oc.ensureStreamTurn(ctx, portal, turnID, agentID)
+	if state == nil || turn == nil {
+		return state, nil
+	}
+	return state, turn.Writer()
 }
 
 func (oc *OpenCodeClient) FinishOpenCodeStream(turnID string) {
