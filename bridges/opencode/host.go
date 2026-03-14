@@ -119,109 +119,15 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 	if oc.IsStreamShuttingDown() || turn == nil {
 		return
 	}
-	tools := turn.Tools()
-	switch strings.TrimSpace(partType) {
-	case "start", "message-metadata":
-		if metadata, _ := part["messageMetadata"].(map[string]any); len(metadata) > 0 {
-			turn.SetMetadata(metadata)
-		} else {
-			turn.SetMetadata(nil)
-		}
-	case "start-step":
-		turn.StepStart()
-	case "finish-step":
-		turn.StepFinish()
-	case "text-start", "reasoning-start":
-		turn.SetMetadata(nil)
-	case "text-delta":
-		if delta, _ := part["delta"].(string); delta != "" {
-			turn.WriteText(delta)
-		} else {
-			turn.SetMetadata(nil)
-		}
-	case "text-end":
-		turn.FinishText()
-	case "reasoning-delta":
-		if delta, _ := part["delta"].(string); delta != "" {
-			turn.WriteReasoning(delta)
-		} else {
-			turn.SetMetadata(nil)
-		}
-	case "reasoning-end":
-		turn.FinishReasoning()
-	case "tool-input-start":
-		toolName, _ := part["toolName"].(string)
-		toolCallID, _ := part["toolCallId"].(string)
-		providerExecuted, _ := part["providerExecuted"].(bool)
-		tools.EnsureInputStart(toolCallID, nil, bridgesdk.ToolInputOptions{
-			ToolName:         toolName,
-			ProviderExecuted: providerExecuted,
-		})
-	case "tool-input-delta":
-		toolCallID, _ := part["toolCallId"].(string)
-		inputTextDelta, _ := part["inputTextDelta"].(string)
-		providerExecuted, _ := part["providerExecuted"].(bool)
-		tools.InputDelta(toolCallID, inputTextDelta, providerExecuted)
-	case "tool-input-available":
-		toolCallID, _ := part["toolCallId"].(string)
-		toolName, _ := part["toolName"].(string)
-		providerExecuted, _ := part["providerExecuted"].(bool)
-		tools.Input(toolCallID, toolName, part["input"], providerExecuted)
-	case "tool-output-available":
-		toolCallID, _ := part["toolCallId"].(string)
-		providerExecuted, _ := part["providerExecuted"].(bool)
-		tools.Output(toolCallID, part["output"], bridgesdk.ToolOutputOptions{ProviderExecuted: providerExecuted})
-	case "tool-output-error":
-		toolCallID, _ := part["toolCallId"].(string)
-		errorText, _ := part["errorText"].(string)
-		providerExecuted, _ := part["providerExecuted"].(bool)
-		tools.OutputError(toolCallID, errorText, providerExecuted)
-	case "tool-output-denied":
-		toolCallID, _ := part["toolCallId"].(string)
-		tools.Denied(toolCallID)
-	case "tool-approval-request":
-		approvalID, _ := part["approvalId"].(string)
-		toolCallID, _ := part["toolCallId"].(string)
-		turn.Approvals().EmitRequest(approvalID, toolCallID)
-	case "tool-approval-response":
-		approvalID, _ := part["approvalId"].(string)
-		toolCallID, _ := part["toolCallId"].(string)
-		approved, _ := part["approved"].(bool)
-		reason, _ := part["reason"].(string)
-		turn.Approvals().Respond(approvalID, toolCallID, approved, reason)
-	case "file":
-		url, _ := part["url"].(string)
-		mediaType, _ := part["mediaType"].(string)
-		turn.AddFile(url, mediaType)
-	case "source-document":
-		sourceID, _ := part["sourceId"].(string)
-		title, _ := part["title"].(string)
-		mediaType, _ := part["mediaType"].(string)
-		filename, _ := part["filename"].(string)
-		turn.AddSourceDocument(sourceID, title, mediaType, filename)
-	case "source-url":
-		url, _ := part["url"].(string)
-		title, _ := part["title"].(string)
-		turn.AddSourceURL(url, title)
-	case "error":
-		errText, _ := part["errorText"].(string)
-		turn.Error(errText)
-	case "finish":
-		finishReason, _ := part["finishReason"].(string)
-		if strings.TrimSpace(finishReason) == "" {
-			finishReason = "stop"
-		}
-		turn.End(finishReason)
-	case "abort":
-		reason, _ := part["reason"].(string)
-		turn.SetMetadata(nil)
-		turn.Abort(reason)
-	default:
-		if strings.HasPrefix(strings.TrimSpace(partType), "data-") {
-			turn.SetMetadata(nil)
-			turn.Emitter().Emit(turn.Context(), portal, part)
-		}
-	}
+	bridgesdk.ApplyStreamPart(turn, part, bridgesdk.PartApplyOptions{
+		ResetMetadataOnStartMarkers:     true,
+		ResetMetadataOnEmptyMessageMeta: true,
+		ResetMetadataOnEmptyTextDelta:   true,
+		ResetMetadataOnAbort:            true,
+		ResetMetadataOnDataParts:        true,
+		HandleTerminalEvents:            true,
+		DefaultFinishReason:             "stop",
+	})
 }
 
 func (oc *OpenCodeClient) FinishOpenCodeStream(turnID string) {

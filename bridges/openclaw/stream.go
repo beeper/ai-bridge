@@ -138,77 +138,7 @@ func (oc *OpenClawClient) EmitStreamPart(ctx context.Context, portal *bridgev2.P
 	if turn == nil {
 		return
 	}
-	tools := turn.Tools()
-	switch partType {
-	case "start", "message-metadata":
-		if metadata, _ := part["messageMetadata"].(map[string]any); len(metadata) > 0 {
-			turn.SetMetadata(metadata)
-		}
-	case "start-step":
-		turn.StepStart()
-	case "finish-step":
-		turn.StepFinish()
-	case "text-delta":
-		if delta := stringValue(part["delta"]); delta != "" {
-			turn.WriteText(delta)
-		}
-	case "reasoning-delta":
-		if delta := stringValue(part["delta"]); delta != "" {
-			turn.WriteReasoning(delta)
-		}
-	case "tool-input-start":
-		toolName := strings.TrimSpace(stringValue(part["toolName"]))
-		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
-		providerExecuted, _ := part["providerExecuted"].(bool)
-		tools.EnsureInputStart(toolCallID, nil, bridgesdk.ToolInputOptions{
-			ToolName:         toolName,
-			ProviderExecuted: providerExecuted,
-		})
-	case "tool-input-delta":
-		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
-		inputTextDelta := stringValue(part["inputTextDelta"])
-		providerExecuted, _ := part["providerExecuted"].(bool)
-		tools.InputDelta(toolCallID, inputTextDelta, providerExecuted)
-	case "tool-input-available":
-		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
-		toolName := strings.TrimSpace(stringValue(part["toolName"]))
-		providerExecuted, _ := part["providerExecuted"].(bool)
-		tools.Input(toolCallID, toolName, part["input"], providerExecuted)
-	case "tool-output-available":
-		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
-		providerExecuted, _ := part["providerExecuted"].(bool)
-		tools.Output(toolCallID, part["output"], bridgesdk.ToolOutputOptions{ProviderExecuted: providerExecuted})
-	case "tool-output-error":
-		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
-		errorText := stringValue(part["errorText"])
-		providerExecuted, _ := part["providerExecuted"].(bool)
-		tools.OutputError(toolCallID, errorText, providerExecuted)
-	case "tool-output-denied":
-		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
-		tools.Denied(toolCallID)
-	case "tool-approval-request":
-		approvalID := strings.TrimSpace(stringValue(part["approvalId"]))
-		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
-		turn.Approvals().EmitRequest(approvalID, toolCallID)
-	case "tool-approval-response":
-		approvalID := strings.TrimSpace(stringValue(part["approvalId"]))
-		toolCallID := strings.TrimSpace(stringValue(part["toolCallId"]))
-		approved, _ := part["approved"].(bool)
-		reason := stringValue(part["reason"])
-		turn.Approvals().Respond(approvalID, toolCallID, approved, reason)
-	case "file":
-		turn.AddFile(stringValue(part["url"]), stringValue(part["mediaType"]))
-	case "source-document":
-		turn.AddSourceDocument(stringValue(part["sourceId"]), stringValue(part["title"]), stringValue(part["mediaType"]), stringValue(part["filename"]))
-	case "source-url":
-		turn.AddSourceURL(stringValue(part["url"]), stringValue(part["title"]))
-	case "error":
-		turn.Error(stringValue(part["errorText"]))
-	default:
-		if strings.HasPrefix(partType, "data-") {
-			turn.Emitter().Emit(turn.Context(), portal, part)
-		}
-	}
+	bridgesdk.ApplyStreamPart(turn, part, bridgesdk.PartApplyOptions{})
 }
 
 func (oc *OpenClawClient) FinishStream(turnID, finishReason string) {
