@@ -1496,18 +1496,7 @@ func (cc *CodexClient) composeCodexChatInfo(title string, canBackfill bool) *bri
 }
 
 func resolveCodexWorkingDirectory(raw string) (string, error) {
-	path := strings.TrimSpace(raw)
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
-	}
-	if !filepath.IsAbs(path) {
-		return "", fmt.Errorf("path must be absolute")
-	}
-	return filepath.Clean(path), nil
+	return agentremote.NormalizeAbsolutePath(raw)
 }
 
 func (cc *CodexClient) buildSandboxPolicy(cwd string) map[string]any {

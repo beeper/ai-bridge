@@ -14,6 +14,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
 
+	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/bridges/opencode/api"
 	"github.com/beeper/agentremote/pkg/shared/media"
 	"github.com/beeper/agentremote/pkg/shared/stringutil"
@@ -128,14 +129,11 @@ func resolveManagedWorkingDirectory(raw, defaultDir string) (string, error) {
 	if path == "" {
 		return "", errors.New("send an absolute path or `~/...`, or configure a default path in the managed OpenCode login")
 	}
-	path, err := expandTilde(path)
+	path, err := agentremote.NormalizeAbsolutePath(path)
 	if err != nil {
-		return "", err
-	}
-	if !filepath.IsAbs(path) {
 		return "", errors.New("send an absolute path or `~/...` for managed OpenCode")
 	}
-	return filepath.Clean(path), nil
+	return path, nil
 }
 
 func openCodeSessionUsesDirectory(requested string, session *api.Session) bool {

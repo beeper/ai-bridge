@@ -277,7 +277,7 @@ func resolveManagedOpenCodeDirectory(input string) (string, error) {
 	if value == "" {
 		return "", errors.New("default_path is required")
 	}
-	value, err := expandTilde(value)
+	value, err := agentremote.ExpandUserHome(value)
 	if err != nil {
 		return "", fmt.Errorf("invalid default path: %w", err)
 	}

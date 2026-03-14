@@ -648,10 +648,8 @@ func (cl *CodexLogin) resolveCodexHomeBaseDir() string {
 			base = filepath.Join(os.TempDir(), "ai-bridge-codex")
 		}
 	}
-	if rest, ok := strings.CutPrefix(base, "~"+string(os.PathSeparator)); ok {
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			base = filepath.Join(home, rest)
-		}
+	if expanded, err := agentremote.ExpandUserHome(base); err == nil && expanded != "" {
+		base = expanded
 	}
 	if abs, err := filepath.Abs(base); err == nil {
 		return abs
