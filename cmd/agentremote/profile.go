@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/beeper/agentremote/cmd/internal/beeperauth"
@@ -58,19 +57,7 @@ func getInstancePaths(profile, instanceName string) (*instancePaths, error) {
 	if err != nil {
 		return nil, err
 	}
-	paths := cliutil.BuildStatePaths(root, instanceName)
-	if profile != defaultProfile || pathExists(paths.Root) {
-		return paths, nil
-	}
-	legacyRoot, legacyErr := legacyInstanceRoot()
-	if legacyErr != nil {
-		return paths, nil
-	}
-	legacyPaths := cliutil.BuildStatePaths(legacyRoot, instanceName)
-	if pathExists(legacyPaths.Root) {
-		return legacyPaths, nil
-	}
-	return paths, nil
+	return cliutil.BuildStatePaths(root, instanceName), nil
 }
 
 func ensureInstanceLayout(profile, instanceName string) (*instancePaths, error) {
@@ -92,33 +79,12 @@ func authStore(profile string) (beeperauth.Store, error) {
 	return beeperauth.Store{Path: path, MissingError: missingAuthError(profile)}, nil
 }
 
-func legacyAuthStore() (beeperauth.Store, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return beeperauth.Store{}, err
-	}
-	path := filepath.Join(home, ".config", "ai-bridge-manager", "config.json")
-	return beeperauth.Store{Path: path, MissingError: missingAuthError(defaultProfile)}, nil
-}
-
 func loadAuthConfig(profile string) (authConfig, error) {
 	store, err := authStore(profile)
 	if err != nil {
 		return authConfig{}, err
 	}
-	cfg, err := beeperauth.Load(store)
-	if err == nil || profile != defaultProfile {
-		return cfg, err
-	}
-	legacyStore, legacyErr := legacyAuthStore()
-	if legacyErr != nil {
-		return authConfig{}, err
-	}
-	legacyCfg, legacyLoadErr := beeperauth.Load(legacyStore)
-	if legacyLoadErr == nil {
-		return legacyCfg, nil
-	}
-	return authConfig{}, err
+	return beeperauth.Load(store)
 }
 
 func saveAuthConfig(profile string, cfg authConfig) error {
@@ -134,19 +100,7 @@ func getAuthOrEnv(profile string) (authConfig, error) {
 	if err != nil {
 		return authConfig{}, err
 	}
-	cfg, err := beeperauth.ResolveFromEnvOrStore(store)
-	if err == nil || profile != defaultProfile {
-		return cfg, err
-	}
-	legacyStore, legacyErr := legacyAuthStore()
-	if legacyErr != nil {
-		return authConfig{}, err
-	}
-	legacyCfg, legacyLoadErr := beeperauth.ResolveFromEnvOrStore(legacyStore)
-	if legacyLoadErr == nil {
-		return legacyCfg, nil
-	}
-	return authConfig{}, err
+	return beeperauth.ResolveFromEnvOrStore(store)
 }
 
 func getAuthWithOverride(profile, envOverride string) (authConfig, error) {
@@ -167,19 +121,6 @@ func getAuthWithOverride(profile, envOverride string) (authConfig, error) {
 	return cfg, nil
 }
 
-func legacyInstanceRoot() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".local", "share", "ai-bridge-manager", "instances"), nil
-}
-
-func pathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
 func listProfiles() ([]string, error) {
 	root, err := configRoot()
 	if err != nil {
@@ -193,21 +134,7 @@ func listInstancesForProfile(profile string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	instances, err := cliutil.ListDirectories(root)
-	if err != nil || profile != defaultProfile {
-		return instances, err
-	}
-	legacyRoot, legacyErr := legacyInstanceRoot()
-	if legacyErr != nil {
-		return instances, nil
-	}
-	legacyInstances, legacyListErr := cliutil.ListDirectories(legacyRoot)
-	if legacyListErr != nil {
-		return instances, nil
-	}
-	instances = append(instances, legacyInstances...)
-	slices.Sort(instances)
-	return slices.Compact(instances), nil
+	return cliutil.ListDirectories(root)
 }
 
 func missingAuthError(profile string) func() error {

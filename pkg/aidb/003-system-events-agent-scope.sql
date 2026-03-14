@@ -1,3 +1,4 @@
+-- v2 -> v3: scope system event storage by agent
 CREATE TABLE IF NOT EXISTS ai_system_events_v3 (
   bridge_id TEXT NOT NULL,
   login_id TEXT NOT NULL,

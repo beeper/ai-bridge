@@ -27,23 +27,3 @@ func TestIsHostAuthLogin_DistinguishesManagedFromHost(t *testing.T) {
 		t.Fatal("expected managed login to not be host-auth")
 	}
 }
-
-func TestLegacyManagedMetadataFallsBackToManagedAuth(t *testing.T) {
-	meta := &UserLoginMetadata{CodexHomeManaged: true}
-	if !isManagedAuthLogin(meta) {
-		t.Fatal("expected legacy managed metadata to be treated as managed")
-	}
-	if isHostAuthLogin(meta) {
-		t.Fatal("expected legacy managed metadata to not be treated as host-auth")
-	}
-}
-
-func TestLegacyHostMetadataFallsBackToHostAuth(t *testing.T) {
-	meta := &UserLoginMetadata{}
-	if !isHostAuthLogin(meta) {
-		t.Fatal("expected legacy unmarked metadata to default to host-auth")
-	}
-	if isManagedAuthLogin(meta) {
-		t.Fatal("expected legacy unmarked metadata to not be treated as managed")
-	}
-}

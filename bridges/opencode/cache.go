@@ -12,7 +12,6 @@ import (
 
 const (
 	openCodeBackfillRefreshInterval = 10 * time.Second
-	openCodeBackfillRefreshLimit    = 200
 )
 
 type messageCacheEntry struct {

@@ -1,8 +1,6 @@
 package ai
 
-import (
-	"strings"
-)
+import "strings"
 
 // ModelBackend identifies which backend to use for a model
 // All backends use the OpenAI SDK with different base URLs

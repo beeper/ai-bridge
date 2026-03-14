@@ -1154,7 +1154,7 @@ func deleteRemoteBridge(profile, beeperName string) error {
 	return selfhost.DeleteRemoteBridge(
 		context.Background(),
 		auth,
-		saveAuthFunc(profile),
+		saveAuthFunc(profile, nil),
 		beeperName,
 	)
 }

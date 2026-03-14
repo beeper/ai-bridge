@@ -1,8 +1,6 @@
 package ai
 
-import (
-	"context"
-)
+import "context"
 
 // AIProvider defines a common interface for OpenAI-compatible AI providers
 type AIProvider interface {

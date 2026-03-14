@@ -117,6 +117,31 @@ func TestTypedClientLoaderAssignsBrokenLoginOnRejectedLogin(t *testing.T) {
 	}
 }
 
+func TestTypedClientLoaderUsesClientMapReferenceWhenInitialCacheIsNil(t *testing.T) {
+	var mu sync.Mutex
+	var clients map[networkid.UserLoginID]bridgev2.NetworkAPI
+	EnsureClientMap(&mu, &clients)
+
+	loader := TypedClientLoader(TypedClientLoaderSpec[*fakeClient]{
+		Accept: func(*bridgev2.UserLogin) (bool, string) { return true, "" },
+		LoadUserLoginConfig: LoadUserLoginConfig[*fakeClient]{
+			Mu:         &mu,
+			ClientsRef: &clients,
+			BridgeName: "fake",
+			Create: func(*bridgev2.UserLogin) (*fakeClient, error) {
+				return &fakeClient{}, nil
+			},
+		},
+	})
+	login := &bridgev2.UserLogin{UserLogin: &database.UserLogin{ID: "login-ref"}}
+	if err := loader(context.Background(), login); err != nil {
+		t.Fatalf("loader returned error: %v", err)
+	}
+	if clients[login.ID] == nil {
+		t.Fatalf("expected client to be cached through ClientsRef")
+	}
+}
+
 func TestConnectorStopCanDisconnectCachedClients(t *testing.T) {
 	var mu sync.Mutex
 	clients := map[networkid.UserLoginID]bridgev2.NetworkAPI{

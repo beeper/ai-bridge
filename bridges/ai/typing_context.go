@@ -1,8 +1,6 @@
 package ai
 
-import (
-	"context"
-)
+import "context"
 
 type TypingContext struct {
 	IsGroup      bool

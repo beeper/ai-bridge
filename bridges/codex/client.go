@@ -700,6 +700,9 @@ func (cc *CodexClient) appendCodexToolOutput(state *streamingState, toolCallID, 
 	if state == nil || toolCallID == "" {
 		return delta
 	}
+	if state.codexToolOutputBuffers == nil {
+		state.codexToolOutputBuffers = make(map[string]*strings.Builder)
+	}
 	b := state.codexToolOutputBuffers[toolCallID]
 	if b == nil {
 		b = &strings.Builder{}

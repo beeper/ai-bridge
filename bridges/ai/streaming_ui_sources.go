@@ -1,8 +1,6 @@
 package ai
 
-import (
-	"github.com/beeper/agentremote/pkg/shared/citations"
-)
+import "github.com/beeper/agentremote/pkg/shared/citations"
 
 func collectToolOutputCitations(state *streamingState, toolName, output string) {
 	if state == nil {

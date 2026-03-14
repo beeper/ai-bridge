@@ -40,15 +40,11 @@ func (oc *AIClient) cancelRoomRun(roomID id.RoomID) bool {
 	oc.activeRoomRunsMu.Lock()
 	run := oc.activeRoomRuns[roomID]
 	oc.activeRoomRunsMu.Unlock()
-	cancel := (context.CancelFunc)(nil)
-	if run != nil {
-		cancel = run.cancel
+	if run == nil || run.cancel == nil {
+		return false
 	}
-	if cancel != nil {
-		cancel()
-		return true
-	}
-	return false
+	run.cancel()
+	return true
 }
 
 func (oc *AIClient) clearRoomRun(roomID id.RoomID) {

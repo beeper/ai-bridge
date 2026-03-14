@@ -10,8 +10,8 @@ import (
 
 // LoadUserLoginConfig configures the generic LoadUserLogin helper.
 type LoadUserLoginConfig[C bridgev2.NetworkAPI] struct {
-	Mu      *sync.Mutex
-	Clients map[networkid.UserLoginID]bridgev2.NetworkAPI
+	Mu         *sync.Mutex
+	Clients    map[networkid.UserLoginID]bridgev2.NetworkAPI
 	ClientsRef *map[networkid.UserLoginID]bridgev2.NetworkAPI
 
 	// BridgeName is used in error messages (e.g. "OpenCode").

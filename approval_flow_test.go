@@ -165,6 +165,61 @@ func TestApprovalFlow_HandleReaction_DeliveryErrorKeepsPending(t *testing.T) {
 	}
 }
 
+func TestApprovalFlow_HandleReaction_UnknownPendingShowsUnknown(t *testing.T) {
+	owner := id.UserID("@owner:example.com")
+	roomID := id.RoomID("!room:example.com")
+	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: roomID}}
+	login := &bridgev2.UserLogin{
+		UserLogin: &database.UserLogin{
+			ID:       networkid.UserLoginID("login"),
+			UserMXID: owner,
+		},
+		Bridge: &bridgev2.Bridge{},
+	}
+
+	var redacted bool
+	var notice string
+	flow := NewApprovalFlow(ApprovalFlowConfig[*testApprovalFlowData]{
+		Login: func() *bridgev2.UserLogin { return login },
+		SendNotice: func(_ context.Context, _ *bridgev2.Portal, msg string) {
+			notice = msg
+		},
+		DeliverDecision: func(_ context.Context, _ *bridgev2.Portal, _ *Pending[*testApprovalFlowData], _ ApprovalDecisionPayload) error {
+			t.Fatal("did not expect DeliverDecision to be called")
+			return nil
+		},
+	})
+	flow.testRedactSingleReaction = func(_ *bridgev2.MatrixReaction) {
+		redacted = true
+	}
+	flow.mu.Lock()
+	flow.registerPromptLocked(ApprovalPromptRegistration{
+		ApprovalID:    "approval-1",
+		RoomID:        roomID,
+		OwnerMXID:     owner,
+		ToolCallID:    "tool-1",
+		PromptEventID: id.EventID("$prompt"),
+		Options:       DefaultApprovalOptions(),
+	})
+	flow.mu.Unlock()
+
+	msg := &bridgev2.MatrixReaction{
+		MatrixEventBase: bridgev2.MatrixEventBase[*event.ReactionEventContent]{
+			Event:  &event.Event{ID: id.EventID("$reaction"), Sender: owner},
+			Portal: portal,
+		},
+	}
+	if !flow.HandleReaction(context.Background(), msg, id.EventID("$prompt"), ApprovalReactionKeyAllowOnce) {
+		t.Fatalf("expected approval reaction to be handled")
+	}
+	if !redacted {
+		t.Fatalf("expected unknown approval reaction to be redacted")
+	}
+	if notice == "" {
+		t.Fatalf("expected unknown approval notice")
+	}
+}
+
 func TestApprovalFlow_ResolveExternalMirrorsRemoteDecision(t *testing.T) {
 	owner := id.UserID("@owner:example.com")
 	roomID := id.RoomID("!room:example.com")

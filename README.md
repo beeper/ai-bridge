@@ -181,7 +181,7 @@ For a local Beeper environment:
 ./tools/bridges run codex
 ```
 
-Configured instances in `bridges.manifest.yml`:
+Configured instances live under `~/.config/agentremote/profiles/<profile>/instances/`:
 
 - `ai`
 - `codex`

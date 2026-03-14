@@ -6,6 +6,10 @@ import (
 	"testing"
 
 	"go.mau.fi/util/dbutil"
+
+	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/beeper/agentremote/pkg/aidb"
 )
 
 func TestNewScopeTrimsIdentifiers(t *testing.T) {
@@ -77,5 +81,49 @@ func TestSessionHelpers(t *testing.T) {
 	}
 	if got := nullableInt64Value(value); got != int64(42) {
 		t.Fatalf("expected int64 conversion, got %#v", got)
+	}
+}
+
+func TestSystemEventStoreIsAgentScoped(t *testing.T) {
+	ctx := context.Background()
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer raw.Close()
+	db, err := dbutil.NewWithDB(raw, "sqlite3")
+	if err != nil {
+		t.Fatalf("wrap db: %v", err)
+	}
+	child := aidb.NewChild(db, dbutil.NoopLogger)
+	if err := aidb.Upgrade(ctx, child, "ai_bridge", "database not initialized"); err != nil {
+		t.Fatalf("upgrade child db: %v", err)
+	}
+
+	scopeA := NewScope(child, "bridge", "login", "agent-a")
+	scopeB := NewScope(child, "bridge", "login", "agent-b")
+	queueA := []SystemEventQueue{{SessionKey: "s", Events: []SystemEvent{{Text: "a", TS: 1}}, LastText: "last-a"}}
+	queueB := []SystemEventQueue{{SessionKey: "s", Events: []SystemEvent{{Text: "b", TS: 2}}, LastText: "last-b"}}
+
+	if err := scopeA.SystemEvents().Replace(ctx, queueA); err != nil {
+		t.Fatalf("replace agent-a queues: %v", err)
+	}
+	if err := scopeB.SystemEvents().Replace(ctx, queueB); err != nil {
+		t.Fatalf("replace agent-b queues: %v", err)
+	}
+
+	gotA, err := scopeA.SystemEvents().Load(ctx)
+	if err != nil {
+		t.Fatalf("load agent-a queues: %v", err)
+	}
+	gotB, err := scopeB.SystemEvents().Load(ctx)
+	if err != nil {
+		t.Fatalf("load agent-b queues: %v", err)
+	}
+	if len(gotA) != 1 || len(gotA[0].Events) != 1 || gotA[0].Events[0].Text != "a" {
+		t.Fatalf("unexpected agent-a queues: %#v", gotA)
+	}
+	if len(gotB) != 1 || len(gotB[0].Events) != 1 || gotB[0].Events[0].Text != "b" {
+		t.Fatalf("unexpected agent-b queues: %#v", gotB)
 	}
 }
