@@ -5,6 +5,7 @@ import (
 
 	"github.com/beeper/agentremote/bridges/ai/msgconv"
 	"github.com/beeper/agentremote/pkg/shared/citations"
+	"github.com/beeper/agentremote/turns"
 )
 
 func TestMapFinishReason(t *testing.T) {
@@ -28,6 +29,32 @@ func TestMapFinishReason(t *testing.T) {
 			got := msgconv.MapFinishReason(tc.input)
 			if got != tc.expect {
 				t.Fatalf("msgconv.MapFinishReason(%q) = %q, want %q", tc.input, got, tc.expect)
+			}
+		})
+	}
+}
+
+func TestMapTurnEndReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect turns.EndReason
+	}{
+		{name: "error", input: "error", expect: turns.EndReasonError},
+		{name: "disconnect", input: "disconnect", expect: turns.EndReasonDisconnect},
+		{name: "stop", input: "stop", expect: turns.EndReasonFinish},
+		{name: "length", input: "length", expect: turns.EndReasonFinish},
+		{name: "content_filter", input: "content-filter", expect: turns.EndReasonFinish},
+		{name: "tool_calls", input: "tool-calls", expect: turns.EndReasonFinish},
+		{name: "other", input: "other", expect: turns.EndReasonFinish},
+		{name: "unknown_defaults_to_finish", input: "unexpected", expect: turns.EndReasonFinish},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mapTurnEndReason(tc.input)
+			if got != tc.expect {
+				t.Fatalf("mapTurnEndReason(%q) = %q, want %q", tc.input, got, tc.expect)
 			}
 		})
 	}

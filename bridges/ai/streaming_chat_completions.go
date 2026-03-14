@@ -79,7 +79,7 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 	if stream == nil {
 		initErr := errors.New("chat completions streaming not available")
 		logChatCompletionsFailure(log, initErr, params, meta, currentMessages, "stream_init")
-		return false, nil, &PreDeltaError{Err: initErr}
+		return false, nil, oc.finishStreamingWithFailure(ctx, log, portal, state, meta, "error", initErr)
 	}
 
 	activeTools := make(map[int]*activeToolCall)
@@ -102,7 +102,6 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 					touchTyping()
 					delta := maybePrependTextSeparator(state, choice.Delta.Content)
 					state.accumulated.WriteString(delta)
-					roundContent.WriteString(delta)
 
 					parsed := (*runtimeparse.StreamingDirectiveResult)(nil)
 					if state.replyAccumulator != nil {
@@ -111,6 +110,9 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 					if parsed != nil {
 						oc.applyStreamingReplyTarget(state, parsed)
 						cleaned := parsed.Text
+						if cleaned != "" {
+							roundContent.WriteString(cleaned)
+						}
 						if typingSignals != nil {
 							typingSignals.SignalTextDelta(cleaned)
 						}
@@ -141,6 +143,25 @@ func (a *chatCompletionsTurnAdapter) RunRound(
 					touchTyping()
 					if typingSignals != nil {
 						typingSignals.SignalTextDelta(choice.Delta.Refusal)
+					}
+					state.accumulated.WriteString(choice.Delta.Refusal)
+					state.visibleAccumulated.WriteString(choice.Delta.Refusal)
+					roundContent.WriteString(choice.Delta.Refusal)
+					if state.firstToken && state.visibleAccumulated.Len() > 0 {
+						state.firstToken = false
+						state.firstTokenAtMs = time.Now().UnixMilli()
+						if !state.suppressSend && !isHeartbeat {
+							oc.ensureGhostDisplayName(ctx, oc.effectiveModel(meta))
+							state.initialEventID = oc.sendInitialStreamMessage(ctx, portal, state, state.visibleAccumulated.String(), state.turnID, state.replyTarget)
+							if !state.hasInitialMessageTarget() {
+								errText := "failed to send initial streaming message"
+								log.Error().Msg("Failed to send initial streaming message")
+								state.finishReason = "error"
+								streamUI.Error(ctx, errText)
+								oc.emitUIFinish(ctx, portal, state, meta)
+								return false, nil, &PreDeltaError{Err: errors.New(errText)}
+							}
+						}
 					}
 					streamUI.TextDelta(ctx, choice.Delta.Refusal)
 				}

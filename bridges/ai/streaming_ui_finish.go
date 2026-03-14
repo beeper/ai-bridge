@@ -15,9 +15,10 @@ func (oc *AIClient) emitUIFinish(ctx context.Context, portal *bridgev2.Portal, s
 		return
 	}
 	ui := oc.uiEmitter(state)
-	ui.EmitUIFinish(ctx, portal, msgconv.MapFinishReason(state.finishReason), oc.buildUIMessageMetadata(state, meta, true))
+	finishReason := msgconv.MapFinishReason(state.finishReason)
+	ui.EmitUIFinish(ctx, portal, finishReason, oc.buildUIMessageMetadata(state, meta, true))
 	if state.session != nil {
-		state.session.End(ctx, turns.EndReason(msgconv.MapFinishReason(state.finishReason)))
+		state.session.End(ctx, mapTurnEndReason(finishReason))
 		state.session = nil
 	}
 
@@ -27,5 +28,18 @@ func (oc *AIClient) emitUIFinish(ctx context.Context, portal *bridgev2.Portal, s
 			Str("turn_id", strings.TrimSpace(state.turnID)).
 			Int("events_sent", state.sequenceNum).
 			Msg("Finished streaming events")
+	}
+}
+
+func mapTurnEndReason(reason string) turns.EndReason {
+	switch reason {
+	case "error":
+		return turns.EndReasonError
+	case "disconnect":
+		return turns.EndReasonDisconnect
+	case "stop", "length", "content-filter", "tool-calls", "other":
+		return turns.EndReasonFinish
+	default:
+		return turns.EndReasonFinish
 	}
 }

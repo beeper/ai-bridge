@@ -86,7 +86,11 @@ func mediaKindTitleAndLabel(kind MediaUnderstandingKind) (string, string) {
 	case MediaKindVideoDescription:
 		return "Video", "Description"
 	default:
-		return "", ""
+		kindText := strings.TrimSpace(string(kind))
+		if kindText == "" {
+			return "Unknown Output", "Output"
+		}
+		return "Unknown: " + kindText, "Output"
 	}
 }
 
