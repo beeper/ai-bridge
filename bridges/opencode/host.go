@@ -109,111 +109,108 @@ func (oc *OpenCodeClient) EmitOpenCodeStreamEvent(ctx context.Context, portal *b
 	case "abort":
 		state.finishReason = "abort"
 	}
-	stream := state.stream
-	if stream == nil {
-		stream = oc.newSDKStream(ctx, portal, state)
-		state.stream = stream
-		if stream != nil {
-			state.turn = stream.Turn()
-		}
+	turn := state.turn
+	if turn == nil {
+		turn = oc.newSDKStreamTurn(ctx, portal, state)
+		state.turn = turn
 	}
 	oc.StreamMu.Unlock()
 
-	if oc.IsStreamShuttingDown() || stream == nil {
+	if oc.IsStreamShuttingDown() || turn == nil {
 		return
 	}
 	switch strings.TrimSpace(partType) {
 	case "start", "message-metadata":
 		if metadata, _ := part["messageMetadata"].(map[string]any); len(metadata) > 0 {
-			stream.SetMetadata(metadata)
+			turn.SetMetadata(metadata)
 		} else {
-			stream.SetMetadata(nil)
+			turn.SetMetadata(nil)
 		}
 	case "start-step":
-		stream.StepStart()
+		turn.StepStart()
 	case "finish-step":
-		stream.StepFinish()
+		turn.StepFinish()
 	case "text-start", "reasoning-start":
-		stream.SetMetadata(nil)
+		turn.SetMetadata(nil)
 	case "text-delta":
 		if delta, _ := part["delta"].(string); delta != "" {
-			stream.WriteText(delta)
+			turn.WriteText(delta)
 		} else {
-			stream.SetMetadata(nil)
+			turn.SetMetadata(nil)
 		}
 	case "text-end":
-		stream.Turn().FinishText()
+		turn.FinishText()
 	case "reasoning-delta":
 		if delta, _ := part["delta"].(string); delta != "" {
-			stream.WriteReasoning(delta)
+			turn.WriteReasoning(delta)
 		} else {
-			stream.SetMetadata(nil)
+			turn.SetMetadata(nil)
 		}
 	case "reasoning-end":
-		stream.Turn().FinishReasoning()
+		turn.FinishReasoning()
 	case "tool-input-start":
 		toolName, _ := part["toolName"].(string)
 		toolCallID, _ := part["toolCallId"].(string)
 		providerExecuted, _ := part["providerExecuted"].(bool)
-		stream.ToolStart(toolName, toolCallID, providerExecuted)
+		turn.ToolStart(toolName, toolCallID, providerExecuted)
 	case "tool-input-delta":
 		toolCallID, _ := part["toolCallId"].(string)
 		inputTextDelta, _ := part["inputTextDelta"].(string)
-		stream.ToolInputDelta(toolCallID, inputTextDelta)
+		turn.ToolInputDelta(toolCallID, inputTextDelta)
 	case "tool-input-available":
 		toolCallID, _ := part["toolCallId"].(string)
-		stream.ToolInput(toolCallID, part["input"])
+		turn.ToolInput(toolCallID, part["input"])
 	case "tool-output-available":
 		toolCallID, _ := part["toolCallId"].(string)
-		stream.ToolOutput(toolCallID, part["output"])
+		turn.ToolOutput(toolCallID, part["output"])
 	case "tool-output-error":
 		toolCallID, _ := part["toolCallId"].(string)
 		errorText, _ := part["errorText"].(string)
-		stream.ToolOutputError(toolCallID, errorText)
+		turn.ToolOutputError(toolCallID, errorText)
 	case "tool-output-denied":
 		toolCallID, _ := part["toolCallId"].(string)
-		stream.ToolDenied(toolCallID)
+		turn.ToolDenied(toolCallID)
 	case "tool-approval-request":
 		approvalID, _ := part["approvalId"].(string)
 		toolCallID, _ := part["toolCallId"].(string)
-		stream.Approvals().EmitRequest(approvalID, toolCallID)
+		turn.Approvals().EmitRequest(approvalID, toolCallID)
 	case "tool-approval-response":
 		approvalID, _ := part["approvalId"].(string)
 		toolCallID, _ := part["toolCallId"].(string)
 		approved, _ := part["approved"].(bool)
 		reason, _ := part["reason"].(string)
-		stream.Approvals().Respond(approvalID, toolCallID, approved, reason)
+		turn.Approvals().Respond(approvalID, toolCallID, approved, reason)
 	case "file":
 		url, _ := part["url"].(string)
 		mediaType, _ := part["mediaType"].(string)
-		stream.AddFile(url, mediaType)
+		turn.AddFile(url, mediaType)
 	case "source-document":
 		sourceID, _ := part["sourceId"].(string)
 		title, _ := part["title"].(string)
 		mediaType, _ := part["mediaType"].(string)
 		filename, _ := part["filename"].(string)
-		stream.AddSourceDocument(sourceID, title, mediaType, filename)
+		turn.AddSourceDocument(sourceID, title, mediaType, filename)
 	case "source-url":
 		url, _ := part["url"].(string)
 		title, _ := part["title"].(string)
-		stream.AddSourceURL(url, title)
+		turn.AddSourceURL(url, title)
 	case "error":
 		errText, _ := part["errorText"].(string)
-		stream.Error(errText)
+		turn.Stream().Error(errText)
 	case "finish":
 		finishReason, _ := part["finishReason"].(string)
 		if strings.TrimSpace(finishReason) == "" {
 			finishReason = "stop"
 		}
-		stream.End(finishReason)
+		turn.End(finishReason)
 	case "abort":
 		reason, _ := part["reason"].(string)
-		stream.SetMetadata(nil)
-		stream.Abort(reason)
+		turn.SetMetadata(nil)
+		turn.Abort(reason)
 	default:
 		if strings.HasPrefix(strings.TrimSpace(partType), "data-") {
-			stream.SetMetadata(nil)
-			stream.Emitter().Emit(stream.Context(), portal, part)
+			turn.SetMetadata(nil)
+			turn.Stream().Emitter().Emit(turn.Context(), portal, part)
 		}
 	}
 }
@@ -227,16 +224,16 @@ func (oc *OpenCodeClient) FinishOpenCodeStream(turnID string) {
 	state := oc.streamStates[turnID]
 	delete(oc.streamStates, turnID)
 	oc.StreamMu.Unlock()
-	if state != nil && state.stream != nil {
+	if state != nil && state.turn != nil {
 		finishReason := strings.TrimSpace(state.finishReason)
 		if finishReason == "" {
 			finishReason = "stop"
 		}
-		state.stream.End(finishReason)
+		state.turn.End(finishReason)
 	}
 }
 
-func (oc *OpenCodeClient) newSDKStream(ctx context.Context, portal *bridgev2.Portal, state *openCodeStreamState) *bridgesdk.Stream {
+func (oc *OpenCodeClient) newSDKStreamTurn(ctx context.Context, portal *bridgev2.Portal, state *openCodeStreamState) *bridgesdk.Turn {
 	if oc == nil || portal == nil || state == nil || oc.connector == nil || oc.connector.sdkConfig == nil {
 		return nil
 	}
@@ -252,14 +249,13 @@ func (oc *OpenCodeClient) newSDKStream(ctx context.Context, portal *bridgev2.Por
 	sender := oc.SenderForOpenCode(instanceID, false)
 	conv := bridgesdk.NewConversation(ctx, oc.UserLogin, portal, sender, oc.connector.sdkConfig, oc)
 	_ = conv.EnsureRoomAgent(ctx, agent)
-	stream := conv.Stream(ctx)
-	stream.SetAgent(agent)
-	stream.SetID(state.turnID)
-	stream.SetSender(sender)
-	stream.SetFinalMetadataProvider(bridgesdk.FinalMetadataProviderFunc(func(_ *bridgesdk.Turn, finishReason string) any {
+	turn := conv.StartTurn(ctx, agent, nil)
+	turn.SetID(state.turnID)
+	turn.SetSender(sender)
+	turn.SetFinalMetadataProvider(bridgesdk.FinalMetadataProviderFunc(func(_ *bridgesdk.Turn, finishReason string) any {
 		return oc.buildSDKFinalMetadata(state, finishReason)
 	}))
-	return stream
+	return turn
 }
 
 func (oc *OpenCodeClient) DownloadAndEncodeMedia(ctx context.Context, mediaURL string, file *event.EncryptedFileInfo, maxMB int) (string, string, error) {

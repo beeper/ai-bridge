@@ -35,7 +35,6 @@ type streamingState struct {
 	firstToken           bool
 	suppressSend         bool
 
-	stream *bridgesdk.Stream
 	turn *bridgesdk.Turn
 
 	codexToolOutputBuffers    map[string]*strings.Builder

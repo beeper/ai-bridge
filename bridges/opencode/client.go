@@ -39,7 +39,6 @@ type openCodeStreamState struct {
 	portal               *bridgev2.Portal
 	turnID               string
 	agentID              string
-	stream               *bridgesdk.Stream
 	turn                 *bridgesdk.Turn
 	initialEventID       id.EventID
 	networkMessageID     networkid.MessageID
@@ -228,7 +227,6 @@ func (oc *OpenCodeClient) LogoutRemote(_ context.Context) {
 		agentremote.RemoveClientFromCache(&oc.connector.clientsMu, oc.connector.clients, oc.UserLogin.ID)
 	}
 }
-
 
 func (oc *OpenCodeClient) GetChatInfo(_ context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 	if portal == nil {
