@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"go.mau.fi/util/configupgrade"
 	"go.mau.fi/util/dbutil"
@@ -100,7 +101,7 @@ func NewConnector() *CodexConnector {
 			if !cc.codexEnabled() {
 				return nil, fmt.Errorf("login flow %s is not available", flowID)
 			}
-			if !containsLoginFlow(loginFlows, flowID) {
+			if !slices.ContainsFunc(loginFlows, func(f bridgev2.LoginFlow) bool { return f.ID == flowID }) {
 				return nil, fmt.Errorf("login flow %s is not available", flowID)
 			}
 			if err := cc.ensureHostAuthLoginForUser(ctx, user); err != nil && cc.br != nil {
@@ -114,11 +115,3 @@ func NewConnector() *CodexConnector {
 	return cc
 }
 
-func containsLoginFlow(flows []bridgev2.LoginFlow, flowID string) bool {
-	for _, flow := range flows {
-		if flow.ID == flowID {
-			return true
-		}
-	}
-	return false
-}

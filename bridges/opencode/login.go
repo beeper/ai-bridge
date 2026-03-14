@@ -162,7 +162,7 @@ func (ol *OpenCodeLogin) SubmitUserInput(ctx context.Context, input map[string]s
 		return step, nil
 	}
 
-	login, step, err := agentremote.CreateAndCompleteLogin(
+	_, step, err := agentremote.CreateAndCompleteLogin(
 		ctx,
 		ol.BackgroundProcessContext(),
 		ol.User,
@@ -178,7 +178,6 @@ func (ol *OpenCodeLogin) SubmitUserInput(ctx context.Context, input map[string]s
 	if err != nil {
 		return nil, fmt.Errorf("failed to create login: %w", err)
 	}
-	_ = login
 	return step, nil
 }
 

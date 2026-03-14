@@ -159,9 +159,6 @@ func (oc *OpenClawClient) FinishStream(turnID, finishReason string) {
 			state.completedAtMs = openClawStreamMessageTimestamp(state).UnixMilli()
 		}
 	}
-	oc.StreamMu.Unlock()
-
-	oc.StreamMu.Lock()
 	delete(oc.streamStates, turnID)
 	oc.StreamMu.Unlock()
 
