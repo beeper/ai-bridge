@@ -2073,10 +2073,12 @@ func buildMessageMetadata(state *streamingState, turnID string, model string, fi
 			CompletionTokens:   state.completionTokens,
 			ReasoningTokens:    state.reasoningTokens,
 		}),
-		Model:              model,
-		FirstTokenAtMs:     state.firstTokenAtMs,
-		HasToolCalls:       len(state.toolCalls) > 0,
-		ThinkingTokenCount: len(strings.Fields(state.reasoning.String())),
+		AssistantMessageMetadata: agentremote.AssistantMessageMetadata{
+			Model:              model,
+			FirstTokenAtMs:     state.firstTokenAtMs,
+			HasToolCalls:       len(state.toolCalls) > 0,
+			ThinkingTokenCount: len(strings.Fields(state.reasoning.String())),
+		},
 	}
 }
 

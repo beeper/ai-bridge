@@ -21,8 +21,44 @@ type BaseMessageMetadata struct {
 	CompletedAtMs           int64              `json:"completed_at_ms,omitempty"`
 	ThinkingContent         string             `json:"thinking_content,omitempty"`
 	ToolCalls               []ToolCallMetadata `json:"tool_calls,omitempty"`
-	GeneratedFiles          []GeneratedFileRef `json:"generated_files,omitempty"`
-	ExcludeFromHistory      bool               `json:"exclude_from_history,omitempty"`
+	GeneratedFiles     []GeneratedFileRef `json:"generated_files,omitempty"`
+	ExcludeFromHistory bool               `json:"exclude_from_history,omitempty"`
+}
+
+// AssistantMessageMetadata contains fields common to assistant messages across
+// bridges. Embed this in each bridge's MessageMetadata alongside BaseMessageMetadata.
+type AssistantMessageMetadata struct {
+	CompletionID       string `json:"completion_id,omitempty"`
+	Model              string `json:"model,omitempty"`
+	HasToolCalls       bool   `json:"has_tool_calls,omitempty"`
+	Transcript         string `json:"transcript,omitempty"`
+	FirstTokenAtMs     int64  `json:"first_token_at_ms,omitempty"`
+	ThinkingTokenCount int    `json:"thinking_token_count,omitempty"`
+}
+
+// CopyFromAssistant copies non-zero assistant fields from src into the receiver.
+func (a *AssistantMessageMetadata) CopyFromAssistant(src *AssistantMessageMetadata) {
+	if src == nil {
+		return
+	}
+	if src.CompletionID != "" {
+		a.CompletionID = src.CompletionID
+	}
+	if src.Model != "" {
+		a.Model = src.Model
+	}
+	if src.HasToolCalls {
+		a.HasToolCalls = true
+	}
+	if src.Transcript != "" {
+		a.Transcript = src.Transcript
+	}
+	if src.FirstTokenAtMs != 0 {
+		a.FirstTokenAtMs = src.FirstTokenAtMs
+	}
+	if src.ThinkingTokenCount != 0 {
+		a.ThinkingTokenCount = src.ThinkingTokenCount
+	}
 }
 
 // CopyFromBase copies non-zero common fields from src into the receiver.

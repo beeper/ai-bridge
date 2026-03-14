@@ -9,6 +9,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/id"
 
+	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/pkg/shared/backfillutil"
 	"github.com/beeper/agentremote/pkg/shared/citations"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
@@ -86,7 +87,7 @@ func (cc *CodexClient) uiEmitter(state *streamingState) *streamui.Emitter {
 }
 
 func newStreamingState(sourceEventID id.EventID) *streamingState {
-	turnID := NewTurnID()
+	turnID := agentremote.NewTurnID()
 	ui := streamui.UIState{TurnID: turnID}
 	ui.InitMaps()
 	return &streamingState{

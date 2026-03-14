@@ -41,11 +41,13 @@ func (oc *AIClient) saveAssistantMessage(
 			CompletionTokens:        state.completionTokens,
 			ReasoningTokens:         state.reasoningTokens,
 		}),
-		CompletionID:       state.responseID,
-		Model:              modelID,
-		FirstTokenAtMs:     state.firstTokenAtMs,
-		HasToolCalls:       len(state.toolCalls) > 0,
-		ThinkingTokenCount: thinkingTokenCount(modelID, state.reasoning.String()),
+		AssistantMessageMetadata: agentremote.AssistantMessageMetadata{
+			CompletionID:       state.responseID,
+			Model:              modelID,
+			FirstTokenAtMs:     state.firstTokenAtMs,
+			HasToolCalls:       len(state.toolCalls) > 0,
+			ThinkingTokenCount: thinkingTokenCount(modelID, state.reasoning.String()),
+		},
 	}
 
 	agentremote.UpsertAssistantMessage(ctx, agentremote.UpsertAssistantMessageParams{

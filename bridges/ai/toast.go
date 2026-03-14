@@ -102,8 +102,8 @@ func buildApprovalSnapshotPart(body string, uiMessage map[string]any, toastText 
 				Role:               "assistant",
 				CanonicalSchema:    "ai-sdk-ui-message-v1",
 				CanonicalUIMessage: uiMessage,
+				ExcludeFromHistory: true,
 			},
-			ExcludeFromHistory: true,
 		},
 	}
 }

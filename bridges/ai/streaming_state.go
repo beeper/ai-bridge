@@ -12,6 +12,7 @@ import (
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
+	"github.com/beeper/agentremote"
 	runtimeparse "github.com/beeper/agentremote/pkg/runtime"
 	"github.com/beeper/agentremote/pkg/shared/citations"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
@@ -110,7 +111,7 @@ func newStreamingState(ctx context.Context, meta *PortalMetadata, sourceEventID 
 	if meta != nil {
 		agentID = resolveAgentID(meta)
 	}
-	turnID := NewTurnID()
+	turnID := agentremote.NewTurnID()
 	ui := streamui.UIState{TurnID: turnID}
 	ui.InitMaps()
 	state := &streamingState{

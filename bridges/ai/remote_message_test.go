@@ -9,6 +9,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+
+	"github.com/beeper/agentremote"
 )
 
 func TestOpenAIRemoteMessageAccessors(t *testing.T) {
@@ -18,7 +20,7 @@ func TestOpenAIRemoteMessageAccessors(t *testing.T) {
 		ID:        networkid.MessageID("msg-1"),
 		Sender:    bridgev2.EventSender{Sender: networkid.UserID("agent")},
 		Timestamp: ts,
-		Metadata:  &MessageMetadata{CompletionID: "completion-1"},
+		Metadata:  &MessageMetadata{AssistantMessageMetadata: agentremote.AssistantMessageMetadata{CompletionID: "completion-1"}},
 	}
 
 	if got := msg.GetType(); got != bridgev2.RemoteEventMessage {
@@ -68,8 +70,10 @@ func TestOpenAIRemoteMessageConvertMessage(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			meta := &MessageMetadata{
-				Model:        "gpt-test",
-				CompletionID: "completion-2",
+				AssistantMessageMetadata: agentremote.AssistantMessageMetadata{
+					Model:        "gpt-test",
+					CompletionID: "completion-2",
+				},
 			}
 			msg := &OpenAIRemoteMessage{
 				Content:          tc.content,

@@ -38,13 +38,7 @@ type PortalMetadata struct {
 
 type MessageMetadata struct {
 	agentremote.BaseMessageMetadata
-	ExcludeFromHistory bool   `json:"exclude_from_history,omitempty"`
-	CompletionID       string `json:"completion_id,omitempty"`
-	Model              string `json:"model,omitempty"`
-	HasToolCalls       bool   `json:"has_tool_calls,omitempty"`
-	Transcript         string `json:"transcript,omitempty"`
-	FirstTokenAtMs     int64  `json:"first_token_at_ms,omitempty"`
-	ThinkingTokenCount int    `json:"thinking_token_count,omitempty"`
+	agentremote.AssistantMessageMetadata
 }
 
 type ToolCallMetadata = agentremote.ToolCallMetadata
@@ -61,27 +55,7 @@ func (mm *MessageMetadata) CopyFrom(other any) {
 		return
 	}
 	mm.CopyFromBase(&src.BaseMessageMetadata)
-	if src.ExcludeFromHistory {
-		mm.ExcludeFromHistory = true
-	}
-	if src.CompletionID != "" {
-		mm.CompletionID = src.CompletionID
-	}
-	if src.Model != "" {
-		mm.Model = src.Model
-	}
-	if src.HasToolCalls {
-		mm.HasToolCalls = true
-	}
-	if src.Transcript != "" {
-		mm.Transcript = src.Transcript
-	}
-	if src.FirstTokenAtMs != 0 {
-		mm.FirstTokenAtMs = src.FirstTokenAtMs
-	}
-	if src.ThinkingTokenCount != 0 {
-		mm.ThinkingTokenCount = src.ThinkingTokenCount
-	}
+	mm.CopyFromAssistant(&src.AssistantMessageMetadata)
 }
 
 func loginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {

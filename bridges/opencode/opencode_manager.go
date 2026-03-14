@@ -122,16 +122,13 @@ func NewOpenCodeManager(bridge *Bridge) *OpenCodeManager {
 }
 
 func (m *OpenCodeManager) log() *zerolog.Logger {
-	if m == nil || m.bridge == nil || m.bridge.host == nil {
-		l := zerolog.Nop()
-		return &l
+	if m != nil && m.bridge != nil && m.bridge.host != nil {
+		if base := m.bridge.host.Log(); base != nil {
+			l := base.With().Str("component", "opencode").Logger()
+			return &l
+		}
 	}
-	base := m.bridge.host.Log()
-	if base == nil {
-		l := zerolog.Nop()
-		return &l
-	}
-	l := base.With().Str("component", "opencode").Logger()
+	l := zerolog.Nop()
 	return &l
 }
 

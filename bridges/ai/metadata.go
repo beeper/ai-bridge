@@ -322,14 +322,7 @@ func clonePortalMetadata(src *PortalMetadata) *PortalMetadata {
 // prompts using database history.
 type MessageMetadata struct {
 	agentremote.BaseMessageMetadata
-
-	CompletionID       string `json:"completion_id,omitempty"`
-	Model              string `json:"model,omitempty"`
-	HasToolCalls       bool   `json:"has_tool_calls,omitempty"`
-	Transcript         string `json:"transcript,omitempty"`
-	FirstTokenAtMs     int64  `json:"first_token_at_ms,omitempty"`
-	ThinkingTokenCount int    `json:"thinking_token_count,omitempty"`
-	ExcludeFromHistory bool   `json:"exclude_from_history,omitempty"`
+	agentremote.AssistantMessageMetadata
 
 	// Media understanding (OpenClaw-style)
 	MediaUnderstanding          []MediaUnderstandingOutput   `json:"media_understanding,omitempty"`
@@ -356,46 +349,14 @@ func (mm *MessageMetadata) CopyFrom(other any) {
 		return
 	}
 	mm.CopyFromBase(&src.BaseMessageMetadata)
-	if src.CompletionID != "" {
-		mm.CompletionID = src.CompletionID
-	}
-	if src.Model != "" {
-		mm.Model = src.Model
-	}
-	if src.HasToolCalls {
-		mm.HasToolCalls = true
-	}
-	if src.Transcript != "" {
-		mm.Transcript = src.Transcript
-	}
-	if src.FirstTokenAtMs != 0 {
-		mm.FirstTokenAtMs = src.FirstTokenAtMs
-	}
-	if src.ThinkingTokenCount != 0 {
-		mm.ThinkingTokenCount = src.ThinkingTokenCount
-	}
-	if src.ExcludeFromHistory {
-		mm.ExcludeFromHistory = true
-	}
+	mm.CopyFromAssistant(&src.AssistantMessageMetadata)
 }
 
 var _ database.MetaMerger = (*MessageMetadata)(nil)
 
-// NewTurnID generates a new unique turn ID
-func NewTurnID() string {
-	// Use a simple timestamp-based ID for now
-	// Could be enhanced with UUID or other unique ID generation
-	return "turn_" + generateShortID()
-}
-
 // NewCallID generates a new unique call ID for tool calls
 func NewCallID() string {
-	return "call_" + generateShortID()
-}
-
-// generateShortID generates a short unique ID (12 chars)
-func generateShortID() string {
-	return random.String(12)
+	return "call_" + random.String(12)
 }
 
 func isModuleInternalRoom(meta *PortalMetadata) bool {
