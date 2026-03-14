@@ -25,10 +25,9 @@ type Integration struct {
 }
 
 func New(host iruntime.Host) iruntime.ModuleHooks {
-	if host == nil {
-		return nil
-	}
-	return &Integration{host: host}
+	return iruntime.ModuleOrNil(host, func(host iruntime.Host) *Integration {
+		return &Integration{host: host}
+	})
 }
 
 func (i *Integration) Name() string { return moduleName }
@@ -46,7 +45,7 @@ func (i *Integration) ToolDefinitions(_ context.Context, _ iruntime.ToolScope) [
 }
 
 func (i *Integration) ExecuteTool(ctx context.Context, call iruntime.ToolCall) (bool, string, error) {
-	if !strings.EqualFold(strings.TrimSpace(call.Name), toolspec.CronName) {
+	if !iruntime.MatchesName(call.Name, toolspec.CronName) {
 		return false, "", nil
 	}
 	result, err := ExecuteTool(ctx, call.Args, i.buildToolExecDeps(ctx, call.Scope))
@@ -54,7 +53,7 @@ func (i *Integration) ExecuteTool(ctx context.Context, call iruntime.ToolCall) (
 }
 
 func (i *Integration) ToolAvailability(_ context.Context, _ iruntime.ToolScope, toolName string) (bool, bool, iruntime.SettingSource, string) {
-	if !strings.EqualFold(strings.TrimSpace(toolName), toolspec.CronName) {
+	if !iruntime.MatchesName(toolName, toolspec.CronName) {
 		return false, false, iruntime.SourceGlobalDefault, ""
 	}
 	if _, ok := i.host.(cronSchedulerHost); !ok {
@@ -74,7 +73,7 @@ func (i *Integration) CommandDefinitions(_ context.Context, _ iruntime.CommandSc
 }
 
 func (i *Integration) ExecuteCommand(ctx context.Context, call iruntime.CommandCall) (bool, error) {
-	if !strings.EqualFold(strings.TrimSpace(call.Name), moduleName) {
+	if !iruntime.MatchesName(call.Name, moduleName) {
 		return false, nil
 	}
 	return true, i.executeCronCommand(ctx, call)

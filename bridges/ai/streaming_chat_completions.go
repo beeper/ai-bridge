@@ -206,23 +206,13 @@ func (oc *AIClient) streamChatCompletions(
 
 		if err := stream.Err(); err != nil {
 			if errors.Is(err, context.Canceled) {
-				state.finishReason = "cancelled"
-				state.completedAtMs = time.Now().UnixMilli()
-				oc.uiEmitter(state).EmitUIAbort(ctx, portal, "cancelled")
-				oc.emitUIFinish(ctx, portal, state, meta)
-				oc.persistTerminalAssistantTurn(ctx, log, portal, state, meta)
-				return false, nil, streamFailureError(state, err)
+				return false, nil, oc.finishStreamingCancelled(ctx, log, portal, state, meta, err)
 			}
 			if cle := ParseContextLengthError(err); cle != nil {
 				return false, cle, nil
 			}
 			logChatCompletionsFailure(log, err, params, meta, currentMessages, "stream_err")
-			state.finishReason = "error"
-			state.completedAtMs = time.Now().UnixMilli()
-			oc.uiEmitter(state).EmitUIError(ctx, portal, err.Error())
-			oc.emitUIFinish(ctx, portal, state, meta)
-			oc.persistTerminalAssistantTurn(ctx, log, portal, state, meta)
-			return false, nil, streamFailureError(state, err)
+			return false, nil, oc.finishStreamingError(ctx, log, portal, state, meta, err)
 		}
 
 		// Execute any accumulated tool calls

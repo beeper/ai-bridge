@@ -20,8 +20,7 @@ const (
 
 // PromptBlockType identifies the type of content in a prompt message.
 //
-// Audio/video are retained as compatibility block types for the existing
-// media-understanding call sites while the wider connector migrates.
+// Audio/video remain explicit block types for media-understanding call sites.
 type PromptBlockType string
 
 const (

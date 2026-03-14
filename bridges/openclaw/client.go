@@ -636,14 +636,6 @@ func summarizeOpenClawOrigin(origin, channel string) string {
 	if origin == "" {
 		return ""
 	}
-	var legacy string
-	if err := json.Unmarshal([]byte(origin), &legacy); err == nil {
-		legacy = strings.TrimSpace(legacy)
-		if legacy == "" || strings.EqualFold(legacy, strings.TrimSpace(channel)) {
-			return ""
-		}
-		return compactOpenClawOrigin(legacy)
-	}
 	var structured map[string]any
 	if err := json.Unmarshal([]byte(origin), &structured); err != nil || len(structured) == 0 {
 		return compactOpenClawOrigin(origin)

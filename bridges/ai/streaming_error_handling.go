@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 )
 
@@ -28,6 +29,38 @@ func streamFailureError(state *streamingState, err error) error {
 	return &PreDeltaError{Err: err}
 }
 
+func (oc *AIClient) finishStreamingCancelled(
+	ctx context.Context,
+	log zerolog.Logger,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	meta *PortalMetadata,
+	err error,
+) error {
+	state.finishReason = "cancelled"
+	state.completedAtMs = time.Now().UnixMilli()
+	oc.uiEmitter(state).EmitUIAbort(ctx, portal, "cancelled")
+	oc.emitUIFinish(ctx, portal, state, meta)
+	oc.persistTerminalAssistantTurn(ctx, log, portal, state, meta)
+	return streamFailureError(state, err)
+}
+
+func (oc *AIClient) finishStreamingError(
+	ctx context.Context,
+	log zerolog.Logger,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	meta *PortalMetadata,
+	err error,
+) error {
+	state.finishReason = "error"
+	state.completedAtMs = time.Now().UnixMilli()
+	oc.uiEmitter(state).EmitUIError(ctx, portal, err.Error())
+	oc.emitUIFinish(ctx, portal, state, meta)
+	oc.persistTerminalAssistantTurn(ctx, log, portal, state, meta)
+	return streamFailureError(state, err)
+}
+
 func (oc *AIClient) handleResponsesStreamErr(
 	ctx context.Context,
 	portal *bridgev2.Portal,
@@ -37,12 +70,7 @@ func (oc *AIClient) handleResponsesStreamErr(
 	includeContextLength bool,
 ) (*ContextLengthError, error) {
 	if errors.Is(err, context.Canceled) {
-		state.finishReason = "cancelled"
-		state.completedAtMs = time.Now().UnixMilli()
-		oc.uiEmitter(state).EmitUIAbort(context.Background(), portal, "cancelled")
-		oc.emitUIFinish(context.Background(), portal, state, meta)
-		oc.persistTerminalAssistantTurn(context.Background(), *oc.loggerForContext(ctx), portal, state, meta)
-		return nil, streamFailureError(state, err)
+		return nil, oc.finishStreamingCancelled(context.Background(), *oc.loggerForContext(ctx), portal, state, meta, err)
 	}
 
 	if includeContextLength {
@@ -52,10 +80,5 @@ func (oc *AIClient) handleResponsesStreamErr(
 		}
 	}
 
-	state.finishReason = "error"
-	state.completedAtMs = time.Now().UnixMilli()
-	oc.uiEmitter(state).EmitUIError(ctx, portal, err.Error())
-	oc.emitUIFinish(ctx, portal, state, meta)
-	oc.persistTerminalAssistantTurn(ctx, *oc.loggerForContext(ctx), portal, state, meta)
-	return nil, streamFailureError(state, err)
+	return nil, oc.finishStreamingError(ctx, *oc.loggerForContext(ctx), portal, state, meta, err)
 }

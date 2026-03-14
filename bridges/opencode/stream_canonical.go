@@ -229,7 +229,7 @@ func (oc *OpenCodeClient) queueFinalStreamEdit(ctx context.Context, portal *brid
 	}
 	sender := oc.SenderForOpenCode(instanceID, false)
 	eventTS := openCodeStreamEventTimestamp(state, true)
-	oc.UserLogin.QueueRemoteEvent(&OpenCodeRemoteEdit{
+	oc.UserLogin.QueueRemoteEvent(&agentremote.RemoteEdit{
 		Portal:        portal.PortalKey,
 		Sender:        sender,
 		TargetMessage: state.networkMessageID,

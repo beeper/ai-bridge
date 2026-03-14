@@ -249,11 +249,7 @@ func (oc *AIClient) processResponseStreamEvent(
 
 	case "error":
 		apiErr := fmt.Errorf("API error: %s", streamEvent.Message)
-		state.finishReason = "error"
-		state.completedAtMs = time.Now().UnixMilli()
-		oc.uiEmitter(state).EmitUIError(ctx, portal, streamEvent.Message)
-		oc.emitUIFinish(ctx, portal, state, meta)
-		oc.persistTerminalAssistantTurn(ctx, log, portal, state, meta)
+		terminalErr := oc.finishStreamingError(ctx, log, portal, state, meta, apiErr)
 		// Check for context length error (only on initial stream, not continuation)
 		if !isContinuation {
 			if strings.Contains(streamEvent.Message, "context_length") || strings.Contains(streamEvent.Message, "token") {
@@ -262,7 +258,7 @@ func (oc *AIClient) processResponseStreamEvent(
 				}, nil
 			}
 		}
-		return true, nil, streamFailureError(state, apiErr)
+		return true, nil, terminalErr
 
 	default:
 		// Ignore unknown events
@@ -422,23 +418,17 @@ func (oc *AIClient) streamingResponse(
 	for len(state.pendingFunctionOutputs) > 0 || len(state.pendingMcpApprovals) > 0 {
 		// Check for context cancellation before starting a new continuation round
 		if ctx.Err() != nil {
-			state.finishReason = "cancelled"
 			if state.hasInitialMessageTarget() && state.accumulated.Len() > 0 {
 				oc.flushPartialStreamingMessage(context.Background(), portal, state, meta)
 			}
-			oc.uiEmitter(state).EmitUIAbort(ctx, portal, "cancelled")
-			oc.emitUIFinish(ctx, portal, state, meta)
-			return false, nil, streamFailureError(state, ctx.Err())
+			return false, nil, oc.finishStreamingCancelled(ctx, log, portal, state, meta, ctx.Err())
 		}
 
 		continuationRound++
 		if continuationRound > maxToolRounds {
 			err := fmt.Errorf("max responses tool call rounds reached (%d)", maxToolRounds)
 			log.Warn().Err(err).Int("pending_outputs", len(state.pendingFunctionOutputs)).Msg("Stopping responses continuation loop")
-			state.finishReason = "error"
-			oc.uiEmitter(state).EmitUIError(ctx, portal, err.Error())
-			oc.emitUIFinish(ctx, portal, state, meta)
-			return false, nil, streamFailureError(state, err)
+			return false, nil, oc.finishStreamingError(ctx, log, portal, state, meta, err)
 		}
 		log.Debug().
 			Int("pending_outputs", len(state.pendingFunctionOutputs)).
@@ -504,10 +494,7 @@ func (oc *AIClient) streamingResponse(
 		if stream == nil {
 			initErr := errors.New("continuation streaming not available")
 			logResponsesFailure(log, initErr, continuationParams, meta, messages, "continuation_init")
-			state.finishReason = "error"
-			oc.uiEmitter(state).EmitUIError(ctx, portal, initErr.Error())
-			oc.emitUIFinish(ctx, portal, state, meta)
-			return false, nil, streamFailureError(state, initErr)
+			return false, nil, oc.finishStreamingError(ctx, log, portal, state, meta, initErr)
 		}
 		// Clear pending inputs only once continuation stream has actually started.
 		state.pendingFunctionOutputs = nil

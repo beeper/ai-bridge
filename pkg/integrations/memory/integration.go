@@ -45,10 +45,9 @@ type Integration struct {
 }
 
 func New(host iruntime.Host) iruntime.ModuleHooks {
-	if host == nil {
-		return nil
-	}
-	return &Integration{host: host}
+	return iruntime.ModuleOrNil(host, func(host iruntime.Host) *Integration {
+		return &Integration{host: host}
+	})
 }
 
 func (i *Integration) Name() string { return moduleName }
@@ -69,16 +68,14 @@ func (i *Integration) ToolDefinitions(_ context.Context, _ iruntime.ToolScope) [
 }
 
 func (i *Integration) ExecuteTool(ctx context.Context, call iruntime.ToolCall) (bool, string, error) {
-	name := strings.ToLower(strings.TrimSpace(call.Name))
-	if name != "memory_search" && name != "memory_get" {
+	if !iruntime.MatchesAnyName(call.Name, "memory_search", "memory_get") {
 		return false, "", nil
 	}
 	return ExecuteTool(ctx, call, i.buildToolExecDeps())
 }
 
 func (i *Integration) ToolAvailability(_ context.Context, scope iruntime.ToolScope, toolName string) (bool, bool, iruntime.SettingSource, string) {
-	name := strings.ToLower(strings.TrimSpace(toolName))
-	if name != "memory_search" && name != "memory_get" {
+	if !iruntime.MatchesAnyName(toolName, "memory_search", "memory_get") {
 		return false, false, iruntime.SourceGlobalDefault, ""
 	}
 	// Check if memory search is explicitly disabled for this agent.
@@ -119,7 +116,7 @@ func (i *Integration) CommandDefinitions(_ context.Context, _ iruntime.CommandSc
 }
 
 func (i *Integration) ExecuteCommand(ctx context.Context, call iruntime.CommandCall) (bool, error) {
-	if strings.ToLower(strings.TrimSpace(call.Name)) != moduleName {
+	if !iruntime.MatchesName(call.Name, moduleName) {
 		return false, nil
 	}
 	return ExecuteCommand(ctx, call, i.buildCommandExecDeps())
