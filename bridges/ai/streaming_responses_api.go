@@ -15,9 +15,6 @@ import (
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
-
-	"github.com/beeper/agentremote"
-	airuntime "github.com/beeper/agentremote/pkg/runtime"
 )
 
 // responseStreamContext holds loop-invariant parameters for processing a Responses API

@@ -44,7 +44,7 @@ func (oc *AIClient) emitUIToolApprovalRequest(
 	}
 
 	// Emit stream event for real-time UI
-	oc.toolLifecycle(portal, state).requestApproval(ctx, approvalID, toolCallID)
+	oc.writer(state, portal).Approvals().EmitRequest(ctx, approvalID, toolCallID)
 
 	turnID := ""
 	if state != nil {

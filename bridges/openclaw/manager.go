@@ -1927,10 +1927,10 @@ func openClawApplyHistoryChunks(state *streamui.UIState, message map[string]any,
 	if state == nil {
 		return
 	}
-	replay := streamui.NewReplayBuilder(state)
+	state.InitMaps()
 	role = strings.ToLower(strings.TrimSpace(role))
 	if role == "toolresult" {
-		openClawApplyHistoryToolResult(replay, message)
+		openClawApplyHistoryToolResult(state, message)
 		return
 	}
 	blocks := openclawconv.ContentBlocks(message)
@@ -1942,13 +1942,19 @@ func openClawApplyHistoryChunks(state *streamui.UIState, message map[string]any,
 			if text == "" {
 				continue
 			}
-			replay.Text(fmt.Sprintf("text-%d", idx), text)
+			partID := fmt.Sprintf("text-%d", idx)
+			streamui.ApplyChunk(state, map[string]any{"type": "text-start", "id": partID})
+			streamui.ApplyChunk(state, map[string]any{"type": "text-delta", "id": partID, "delta": text})
+			streamui.ApplyChunk(state, map[string]any{"type": "text-end", "id": partID})
 		case "reasoning", "thinking":
 			text := strings.TrimSpace(openclawconv.StringsTrimDefault(stringValue(block["text"]), stringValue(block["content"])))
 			if text == "" {
 				continue
 			}
-			replay.Reasoning(fmt.Sprintf("reasoning-%d", idx), text)
+			partID := fmt.Sprintf("reasoning-%d", idx)
+			streamui.ApplyChunk(state, map[string]any{"type": "reasoning-start", "id": partID})
+			streamui.ApplyChunk(state, map[string]any{"type": "reasoning-delta", "id": partID, "delta": text})
+			streamui.ApplyChunk(state, map[string]any{"type": "reasoning-end", "id": partID})
 		case "toolcall", "tooluse", "functioncall":
 			toolCallID := strings.TrimSpace(openclawconv.StringsTrimDefault(stringValue(block["id"]), stringValue(block["call_id"])))
 			if toolCallID == "" {
@@ -1959,42 +1965,70 @@ func openClawApplyHistoryChunks(state *streamui.UIState, message map[string]any,
 			if len(input) == 0 {
 				input = jsonutil.ToMap(block["input"])
 			}
-			replay.ToolInput(toolCallID, openclawconv.StringsTrimDefault(toolName, "tool"), input, false)
+			streamui.ApplyChunk(state, map[string]any{
+				"type":       "tool-input-available",
+				"toolCallId": toolCallID,
+				"toolName":   openclawconv.StringsTrimDefault(toolName, "tool"),
+				"input":      input,
+			})
 			if approvalID := strings.TrimSpace(openclawconv.StringsTrimDefault(stringValue(block["approvalId"]), stringValue(jsonutil.ToMap(block["approval"])["id"]))); approvalID != "" {
-				replay.ApprovalRequest(approvalID, toolCallID)
+				streamui.ApplyChunk(state, map[string]any{
+					"type":       "tool-approval-request",
+					"approvalId": approvalID,
+					"toolCallId": toolCallID,
+				})
 			}
 		case "toolresult", "tool_result", "tool-output":
-			openClawApplyHistoryToolResult(replay, block)
+			openClawApplyHistoryToolResult(state, block)
 		}
 	}
 	if len(blocks) == 0 {
 		if text := strings.TrimSpace(openclawconv.ExtractMessageText(message)); text != "" {
-			replay.Text("text-history", text)
+			streamui.ApplyChunk(state, map[string]any{"type": "text-start", "id": "text-history"})
+			streamui.ApplyChunk(state, map[string]any{"type": "text-delta", "id": "text-history", "delta": text})
+			streamui.ApplyChunk(state, map[string]any{"type": "text-end", "id": "text-history"})
 		}
 	}
 }
 
-func openClawApplyHistoryToolResult(replay *streamui.ReplayBuilder, message map[string]any) {
+func openClawApplyHistoryToolResult(state *streamui.UIState, message map[string]any) {
 	toolCallID := strings.TrimSpace(openclawconv.StringsTrimDefault(stringValue(message["toolCallId"]), stringValue(message["toolUseId"])))
 	if toolCallID == "" {
 		toolCallID = "tool-result"
 	}
 	toolName := strings.TrimSpace(openclawconv.StringsTrimDefault(stringValue(message["toolName"]), stringValue(message["name"])))
 	if toolName != "" {
-		replay.ToolInput(toolCallID, toolName, jsonutil.DeepCloneAny(jsonutil.ToMap(message["input"])), false)
+		streamui.ApplyChunk(state, map[string]any{
+			"type":       "tool-input-available",
+			"toolCallId": toolCallID,
+			"toolName":   toolName,
+			"input":      jsonutil.DeepCloneAny(jsonutil.ToMap(message["input"])),
+		})
 	}
 	if approvalID := strings.TrimSpace(openclawconv.StringsTrimDefault(stringValue(message["approvalId"]), stringValue(jsonutil.ToMap(message["approval"])["id"]))); approvalID != "" {
-		replay.ApprovalRequest(approvalID, toolCallID)
+		streamui.ApplyChunk(state, map[string]any{
+			"type":       "tool-approval-request",
+			"approvalId": approvalID,
+			"toolCallId": toolCallID,
+		})
 	}
 	if isError, _ := message["isError"].(bool); isError {
-		replay.ToolOutputError(toolCallID, openclawconv.StringsTrimDefault(openclawconv.ExtractMessageText(message), stringValue(message["error"])), false)
+		streamui.ApplyChunk(state, map[string]any{
+			"type":       "tool-output-error",
+			"toolCallId": toolCallID,
+			"errorText":  openclawconv.StringsTrimDefault(openclawconv.ExtractMessageText(message), stringValue(message["error"])),
+		})
 		return
 	}
 	output := jsonutil.DeepCloneAny(message["details"])
 	if output == nil {
 		output = jsonutil.DeepCloneAny(openclawconv.StringsTrimDefault(openclawconv.ExtractMessageText(message), stringValue(message["result"])))
 	}
-	replay.ToolOutput(toolCallID, output, false)
+	streamui.ApplyChunk(state, map[string]any{
+		"type":       "tool-output-available",
+		"toolCallId": toolCallID,
+		"output":     output,
+	})
 }
 
 func openClawHistoryFallbackText(uiParts []map[string]any) string {
