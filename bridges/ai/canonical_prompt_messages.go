@@ -110,7 +110,7 @@ func assistantPromptMessagesFromState(state *streamingState) []PromptMessage {
 				Type:              PromptBlockToolCall,
 				ToolCallID:        callID,
 				ToolName:          toolName,
-				ToolCallArguments: canonicalToolArguments(toolCall.Input),
+				ToolCallArguments: sdk.CanonicalToolArguments(toolCall.Input),
 			})
 		}
 
@@ -145,7 +145,7 @@ func assistantPromptMessagesFromState(state *streamingState) []PromptMessage {
 func promptToolOutputText(toolCall ToolCallMetadata) string {
 	switch {
 	case len(toolCall.Output) > 0:
-		return formatCanonicalValue(toolCall.Output)
+		return sdk.FormatCanonicalValue(toolCall.Output)
 	case strings.TrimSpace(toolCall.ErrorMessage) != "":
 		return strings.TrimSpace(toolCall.ErrorMessage)
 	case strings.EqualFold(strings.TrimSpace(toolCall.ResultStatus), "denied"),

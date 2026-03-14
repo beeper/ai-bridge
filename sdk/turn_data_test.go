@@ -92,3 +92,25 @@ func TestBuildTurnDataFromUIMessageMergesRuntimeState(t *testing.T) {
 		t.Fatalf("expected source-url part, got %#v", td.Parts)
 	}
 }
+
+func TestPromptMessagesFromTurnData(t *testing.T) {
+	td := TurnData{
+		Role: "assistant",
+		Parts: []TurnPart{
+			{Type: "text", Text: "hello"},
+			{Type: "reasoning", Reasoning: "thinking"},
+			{Type: "tool", ToolCallID: "tool-1", ToolName: "search", Input: map[string]any{"q": "matrix"}, Output: map[string]any{"done": true}},
+		},
+	}
+
+	messages := PromptMessagesFromTurnData(td)
+	if len(messages) != 2 {
+		t.Fatalf("expected assistant + tool result, got %#v", messages)
+	}
+	if messages[0].Role != PromptRoleAssistant {
+		t.Fatalf("unexpected assistant role %#v", messages[0])
+	}
+	if messages[1].Role != PromptRoleToolResult || messages[1].ToolCallID != "tool-1" {
+		t.Fatalf("unexpected tool result %#v", messages[1])
+	}
+}

@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -25,13 +24,6 @@ func (oc *AIClient) historyMessageBundle(
 	}
 
 	return nil
-}
-
-func canonicalToolArguments(raw any) string {
-	if value := strings.TrimSpace(formatCanonicalValue(raw)); value != "" {
-		return value
-	}
-	return "{}"
 }
 
 func (oc *AIClient) generatedImagesHistoryMessage(ctx context.Context, files []GeneratedFileRef) PromptMessage {
@@ -73,21 +65,6 @@ func (oc *AIClient) downloadHistoryImageBlock(ctx context.Context, mediaURL, mim
 		Type:     PromptBlockImage,
 		ImageB64: b64Data,
 		MimeType: actualMimeType,
-	}
-}
-
-func formatCanonicalValue(raw any) string {
-	switch typed := raw.(type) {
-	case nil:
-		return ""
-	case string:
-		return typed
-	default:
-		data, err := json.Marshal(typed)
-		if err != nil {
-			return fmt.Sprint(typed)
-		}
-		return string(data)
 	}
 }
 
