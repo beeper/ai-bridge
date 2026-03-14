@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/rs/zerolog"
-	"maunium.net/go/mautrix/bridgev2"
 )
 
 func (oc *AIClient) Log() *zerolog.Logger {
@@ -13,13 +12,6 @@ func (oc *AIClient) Log() *zerolog.Logger {
 		return &logger
 	}
 	return &oc.log
-}
-
-func (oc *AIClient) Login() *bridgev2.UserLogin {
-	if oc == nil {
-		return nil
-	}
-	return oc.UserLogin
 }
 
 func (oc *AIClient) BackgroundContext(ctx context.Context) context.Context {

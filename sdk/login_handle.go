@@ -44,11 +44,6 @@ func (l *LoginHandle) Conversation(ctx context.Context, portalID string) (*Conve
 	return newConversation(ctx, portal, l.login, bridgev2.EventSender{}, l.runtime), nil
 }
 
-// ConversationByPortal returns a Conversation for the given bridgev2.Portal.
-func (l *LoginHandle) ConversationByPortal(ctx context.Context, portal *bridgev2.Portal) *Conversation {
-	return newConversation(ctx, portal, l.login, bridgev2.EventSender{}, l.runtime)
-}
-
 // EnsureConversation resolves or creates a conversation for the given spec.
 func (l *LoginHandle) EnsureConversation(ctx context.Context, spec ConversationSpec) (*Conversation, error) {
 	if l == nil || l.login == nil || l.login.Bridge == nil {

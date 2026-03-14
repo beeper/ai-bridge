@@ -169,11 +169,6 @@ func (c *Conversation) aiRoomKind() string {
 	return agentremote.AIRoomKindAgent
 }
 
-// Send sends a complete text message.
-func (c *Conversation) Send(ctx context.Context, text string) error {
-	return c.SendHTML(ctx, text, "")
-}
-
 // SendHTML sends a message with both plaintext and HTML body.
 func (c *Conversation) SendHTML(ctx context.Context, text, html string) error {
 	content := &event.MessageEventContent{
@@ -389,11 +384,6 @@ func (c *Conversation) QueueRemoteEvent(evt bridgev2.RemoteEvent) {
 	if c.login != nil {
 		c.login.Bridge.QueueRemoteEvent(c.login, evt)
 	}
-}
-
-// Intent returns the Matrix API intent for sending events.
-func (c *Conversation) Intent(ctx context.Context) (bridgev2.MatrixAPI, error) {
-	return c.getIntent(ctx)
 }
 
 func normalizeConversationSpec(spec ConversationSpec) ConversationSpec {

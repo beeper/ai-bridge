@@ -91,7 +91,7 @@ func executeMessageChannelEdit(ctx context.Context, args map[string]any, btc *Br
 
 	updates := make([]string, 0, 2)
 	if title != "" {
-		if err := btc.Client.setRoomName(ctx, btc.Portal, title); err != nil {
+		if err := btc.Client.setRoomName(ctx, btc.Portal, title, true); err != nil {
 			return "", fmt.Errorf("failed to set room title: %w", err)
 		}
 		updates = append(updates, fmt.Sprintf("title=%s", title))

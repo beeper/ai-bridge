@@ -324,7 +324,7 @@ func (oc *AIClient) executeSessionsSpawn(ctx context.Context, portal *bridgev2.P
 		}), nil
 	}
 	if roomName != "" {
-		if err := oc.setRoomNameNoSave(ctx, childPortal, roomName); err != nil {
+		if err := oc.setRoomName(ctx, childPortal, roomName, false); err != nil {
 			oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to set subagent room name")
 		}
 	}

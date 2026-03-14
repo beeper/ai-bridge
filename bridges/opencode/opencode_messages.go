@@ -275,7 +275,7 @@ func (b *Bridge) emitOpenCodeMessageRemoveWithSender(_ context.Context, portal *
 	if portal == nil || messageID == "" || b == nil || b.host == nil {
 		return
 	}
-	login := b.host.Login()
+	login := b.host.GetUserLogin()
 	if login == nil {
 		return
 	}

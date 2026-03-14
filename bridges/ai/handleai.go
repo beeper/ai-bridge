@@ -427,7 +427,7 @@ func (oc *AIClient) maybeGenerateTitle(ctx context.Context, portal *bridgev2.Por
 			return
 		}
 
-		if err := oc.setRoomName(bgCtx, portal, title); err != nil {
+		if err := oc.setRoomName(bgCtx, portal, title, true); err != nil {
 			oc.loggerForContext(ctx).Warn().Err(err).Msg("Failed to set room name")
 		}
 	}()
@@ -549,15 +549,7 @@ func extractTitleFromResponse(resp *responses.Response) string {
 	return ""
 }
 
-func (oc *AIClient) setRoomName(ctx context.Context, portal *bridgev2.Portal, name string) error {
-	return oc.setRoomNameInternal(ctx, portal, name, true)
-}
-
-func (oc *AIClient) setRoomNameNoSave(ctx context.Context, portal *bridgev2.Portal, name string) error {
-	return oc.setRoomNameInternal(ctx, portal, name, false)
-}
-
-func (oc *AIClient) setRoomNameInternal(ctx context.Context, portal *bridgev2.Portal, name string, save bool) error {
+func (oc *AIClient) setRoomName(ctx context.Context, portal *bridgev2.Portal, name string, save bool) error {
 	if portal.MXID == "" {
 		return errors.New("portal has no Matrix room ID")
 	}

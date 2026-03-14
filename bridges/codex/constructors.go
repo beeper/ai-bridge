@@ -93,7 +93,7 @@ func NewConnector() *CodexConnector {
 		UpdateClient: bridgesdk.TypedClientUpdater[*CodexClient](),
 		AfterLoadClient: func(client bridgev2.NetworkAPI) {
 			if c, ok := client.(*CodexClient); ok {
-				c.scheduleBootstrap()
+				c.scheduleBootstrapOnce()
 			}
 		},
 		LoginFlows: loginFlows,
@@ -114,4 +114,3 @@ func NewConnector() *CodexConnector {
 	cc.ConnectorBase = bridgesdk.NewConnectorBase(cc.sdkConfig)
 	return cc
 }
-

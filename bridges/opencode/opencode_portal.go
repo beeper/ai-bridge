@@ -22,7 +22,7 @@ func (b *Bridge) ensureOpenCodeSessionPortalWithRoom(ctx context.Context, inst *
 	if b == nil || b.host == nil || inst == nil {
 		return nil
 	}
-	login := b.host.Login()
+	login := b.host.GetUserLogin()
 	if login == nil || login.Bridge == nil {
 		return nil
 	}
@@ -98,7 +98,7 @@ func (b *Bridge) removeOpenCodeSessionPortal(ctx context.Context, instanceID, se
 	if b == nil || b.host == nil {
 		return
 	}
-	login := b.host.Login()
+	login := b.host.GetUserLogin()
 	if login == nil || login.Bridge == nil {
 		return
 	}
@@ -114,7 +114,7 @@ func (b *Bridge) findOpenCodePortal(ctx context.Context, instanceID, sessionID s
 	if b == nil || b.host == nil {
 		return nil
 	}
-	login := b.host.Login()
+	login := b.host.GetUserLogin()
 	if login == nil || login.Bridge == nil {
 		return nil
 	}
@@ -130,7 +130,7 @@ func (b *Bridge) composeOpenCodeChatInfo(title, instanceID string) *bridgev2.Cha
 	if b == nil || b.host == nil {
 		return nil
 	}
-	login := b.host.Login()
+	login := b.host.GetUserLogin()
 	if login == nil {
 		return nil
 	}
@@ -150,7 +150,7 @@ func (b *Bridge) CreateSessionChat(ctx context.Context, instanceID, title string
 	if b == nil || b.host == nil {
 		return nil, errors.New("login unavailable")
 	}
-	login := b.host.Login()
+	login := b.host.GetUserLogin()
 	if login == nil {
 		return nil, errors.New("login unavailable")
 	}
@@ -251,7 +251,7 @@ func (b *Bridge) ReIDPortalToSession(ctx context.Context, portal *bridgev2.Porta
 	if b == nil || b.host == nil || portal == nil {
 		return portal, nil
 	}
-	login := b.host.Login()
+	login := b.host.GetUserLogin()
 	if login == nil || login.Bridge == nil {
 		return portal, errors.New("login unavailable")
 	}

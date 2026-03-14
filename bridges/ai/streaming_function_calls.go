@@ -102,19 +102,6 @@ func (oc *AIClient) processToolMediaResult(
 	return result, resultStatus
 }
 
-func (oc *AIClient) ensureFunctionCallTool(
-	ctx context.Context,
-	portal *bridgev2.Portal,
-	state *streamingState,
-	meta *PortalMetadata,
-	activeTools map[string]*activeToolCall,
-	itemID string,
-	name string,
-	initialInput string,
-) *activeToolCall {
-	return oc.ensureActiveToolCall(ctx, portal, state, meta, activeTools, itemID, name, ToolTypeFunction, initialInput)
-}
-
 // ensureActiveToolCall returns the existing activeToolCall for itemID, or creates and
 // registers a new one with the given toolType. This is the shared constructor used by
 // both function-call and provider/MCP tool handlers.
@@ -164,7 +151,7 @@ func (oc *AIClient) handleFunctionCallArgumentsDelta(
 	name string,
 	delta string,
 ) {
-	tool := oc.ensureFunctionCallTool(ctx, portal, state, meta, activeTools, itemID, name, "")
+	tool := oc.ensureActiveToolCall(ctx, portal, state, meta, activeTools, itemID, name, ToolTypeFunction, "")
 	tool.itemID = itemID
 	tool.input.WriteString(delta)
 	oc.semanticStream(state, portal).ToolInputDelta(ctx, tool.callID, name, delta, tool.toolType == ToolTypeProvider)
@@ -183,7 +170,7 @@ func (oc *AIClient) handleFunctionCallArgumentsDone(
 	approvalFallbackForNonObject bool,
 	logSuffix string,
 ) {
-	tool := oc.ensureFunctionCallTool(ctx, portal, state, meta, activeTools, itemID, name, arguments)
+	tool := oc.ensureActiveToolCall(ctx, portal, state, meta, activeTools, itemID, name, ToolTypeFunction, arguments)
 	tool.itemID = itemID
 	execution := oc.executeStreamingBuiltinTool(ctx, log, portal, state, meta, tool, name, arguments, approvalFallbackForNonObject, logSuffix)
 

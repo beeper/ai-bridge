@@ -612,7 +612,7 @@ func (oc *AIClient) sendFinalAssistantTurnContent(ctx context.Context, portal *b
 		rendered = format.RenderMarkdown(firstBody, true, true)
 	}
 
-	replyTo := id.EventID("")
+	var replyTo id.EventID
 	if replyToEventID != nil {
 		replyTo = *replyToEventID
 	}

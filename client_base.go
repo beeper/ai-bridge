@@ -41,10 +41,6 @@ func (c *ClientBase) GetUserLogin() *bridgev2.UserLogin {
 	return c.login
 }
 
-func (c *ClientBase) Login() *bridgev2.UserLogin {
-	return c.GetUserLogin()
-}
-
 // IsLoggedIn returns the current logged-in state.
 func (c *ClientBase) IsLoggedIn() bool {
 	return c.loggedIn.Load()

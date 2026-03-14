@@ -27,10 +27,6 @@ func (oc *OpenCodeClient) Log() *zerolog.Logger {
 	return &l
 }
 
-func (oc *OpenCodeClient) Login() *bridgev2.UserLogin {
-	return oc.UserLogin
-}
-
 func (oc *OpenCodeClient) BackgroundContext(ctx context.Context) context.Context {
 	if ctx != nil {
 		return ctx

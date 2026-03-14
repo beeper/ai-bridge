@@ -108,10 +108,6 @@ func resolveDesktopInstanceName(instances map[string]DesktopAPIInstance, request
 	)
 }
 
-func (oc *AIClient) resolveDesktopInstanceName(requested string) (string, error) {
-	return resolveDesktopInstanceName(oc.desktopAPIInstances(), requested)
-}
-
 func normalizeDesktopSessionKeyWithInstance(instance, chatID string) string {
 	trimmedChat := strings.TrimSpace(chatID)
 	if trimmedChat == "" {

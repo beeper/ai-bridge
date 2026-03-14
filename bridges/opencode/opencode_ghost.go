@@ -8,7 +8,7 @@ func (b *Bridge) EnsureGhostDisplayName(ctx context.Context, instanceID string) 
 	if b == nil || b.host == nil {
 		return
 	}
-	login := b.host.Login()
+	login := b.host.GetUserLogin()
 	if login == nil || login.Bridge == nil {
 		return
 	}

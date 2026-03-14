@@ -14,7 +14,7 @@ import (
 // resolveDesktopInstance resolves the "instance" arg and returns the canonical instance name.
 func resolveDesktopInstance(args map[string]any, client *AIClient) (string, error) {
 	instance := firstNonEmptyString(args["instance"])
-	return client.resolveDesktopInstanceName(instance)
+	return resolveDesktopInstanceName(client.desktopAPIInstances(), instance)
 }
 
 // argsLimit extracts an integer limit from args, clamped to a default.
@@ -70,7 +70,7 @@ func resolveDesktopMessageTarget(ctx context.Context, client *AIClient, args map
 		if !ok {
 			return "", "", "", true, errors.New("sessionKey must be a desktop-api session")
 		}
-		resolvedInstance, resolveErr := client.resolveDesktopInstanceName(parsedInstance)
+		resolvedInstance, resolveErr := resolveDesktopInstanceName(client.desktopAPIInstances(), parsedInstance)
 		if resolveErr != nil {
 			return "", "", "", true, resolveErr
 		}
@@ -79,7 +79,7 @@ func resolveDesktopMessageTarget(ctx context.Context, client *AIClient, args map
 
 	if label != "" {
 		if instance != "" {
-			resolvedInstance, resolveErr := client.resolveDesktopInstanceName(instance)
+			resolvedInstance, resolveErr := resolveDesktopInstanceName(client.desktopAPIInstances(), instance)
 			if resolveErr != nil {
 				return "", "", "", true, resolveErr
 			}
@@ -97,7 +97,7 @@ func resolveDesktopMessageTarget(ctx context.Context, client *AIClient, args map
 	}
 
 	if chatID != "" {
-		resolvedInstance, resolveErr := client.resolveDesktopInstanceName(instance)
+		resolvedInstance, resolveErr := resolveDesktopInstanceName(client.desktopAPIInstances(), instance)
 		if resolveErr != nil {
 			return "", "", "", true, resolveErr
 		}
@@ -105,7 +105,7 @@ func resolveDesktopMessageTarget(ctx context.Context, client *AIClient, args map
 	}
 
 	if !requireChat {
-		resolvedInstance, resolveErr := client.resolveDesktopInstanceName(instance)
+		resolvedInstance, resolveErr := resolveDesktopInstanceName(client.desktopAPIInstances(), instance)
 		if resolveErr != nil {
 			return "", "", "", true, resolveErr
 		}

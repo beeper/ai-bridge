@@ -41,7 +41,7 @@ func (oc *AIClient) prepareStreamingRun(
 			senderID = evt.Sender.String()
 		}
 	}
-	roomID := id.RoomID("")
+	var roomID id.RoomID
 	if portal != nil {
 		roomID = portal.MXID
 	}

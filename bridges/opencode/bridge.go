@@ -19,7 +19,7 @@ import (
 // to integrate with the surrounding connector.
 type Host interface {
 	Log() *zerolog.Logger
-	Login() *bridgev2.UserLogin
+	GetUserLogin() *bridgev2.UserLogin
 	BackgroundContext(ctx context.Context) context.Context
 	SendSystemNotice(ctx context.Context, portal *bridgev2.Portal, msg string)
 	EmitOpenCodeStreamEvent(ctx context.Context, portal *bridgev2.Portal, turnID, agentID string, part map[string]any)
@@ -129,7 +129,7 @@ func (b *Bridge) queueRemoteEvent(ev bridgev2.RemoteEvent) {
 	if b == nil || b.host == nil || ev == nil {
 		return
 	}
-	login := b.host.Login()
+	login := b.host.GetUserLogin()
 	if login == nil {
 		return
 	}
@@ -193,7 +193,7 @@ func (b *Bridge) queueOpenCodeSessionResync(instanceID string, session api.Sessi
 	if b == nil || b.host == nil || strings.TrimSpace(session.ID) == "" {
 		return
 	}
-	login := b.host.Login()
+	login := b.host.GetUserLogin()
 	if login == nil {
 		return
 	}
@@ -204,7 +204,7 @@ func (b *Bridge) listAllChatPortals(ctx context.Context) ([]*bridgev2.Portal, er
 	if b == nil || b.host == nil {
 		return nil, nil
 	}
-	login := b.host.Login()
+	login := b.host.GetUserLogin()
 	if login == nil || login.Bridge == nil || login.Bridge.DB == nil {
 		return nil, nil
 	}

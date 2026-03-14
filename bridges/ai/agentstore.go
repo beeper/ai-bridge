@@ -554,7 +554,7 @@ func (b *BossStoreAdapter) CreateRoom(ctx context.Context, room tools.RoomData) 
 	}
 
 	if room.Name != "" {
-		if err := b.client.setRoomNameNoSave(ctx, portal, room.Name); err != nil {
+		if err := b.client.setRoomName(ctx, portal, room.Name, false); err != nil {
 			b.client.log.Warn().Err(err).Msg("Failed to set Matrix room name")
 			portal.Name = originalName
 			portal.NameSet = originalNameSet
@@ -598,7 +598,7 @@ func (b *BossStoreAdapter) ModifyRoom(ctx context.Context, roomID string, update
 	}
 
 	if updates.Name != "" && portal.MXID != "" {
-		if err := b.client.setRoomName(ctx, portal, updates.Name); err != nil {
+		if err := b.client.setRoomName(ctx, portal, updates.Name, true); err != nil {
 			b.client.log.Warn().Err(err).Msg("Failed to set Matrix room name")
 		}
 	}

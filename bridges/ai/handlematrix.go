@@ -490,7 +490,7 @@ func (oc *AIClient) regenerateFromEdit(
 		summaryLine: newBody,
 		enqueuedAt:  time.Now().UnixMilli(),
 	}
-	oc.dispatchOrQueueWithStatus(ctx, evt, portal, meta, queueItem, queueSettings, promptContext)
+	oc.dispatchOrQueueCore(ctx, evt, portal, meta, nil, queueItem, queueSettings, promptContext)
 
 	return nil
 }

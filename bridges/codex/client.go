@@ -1391,10 +1391,6 @@ func (cc *CodexClient) backgroundContext(ctx context.Context) context.Context {
 	return cc.loggerForContext(ctx).WithContext(base)
 }
 
-func (cc *CodexClient) scheduleBootstrap() {
-	cc.scheduleBootstrapOnce()
-}
-
 func (cc *CodexClient) bootstrap(ctx context.Context) {
 	cc.waitForLoginPersisted(ctx)
 	syncSucceeded := true
@@ -1669,10 +1665,7 @@ func (cc *CodexClient) sendSystemNotice(ctx context.Context, portal *bridgev2.Po
 	if portal == nil || portal.MXID == "" || cc.UserLogin == nil || cc.UserLogin.Bridge == nil {
 		return
 	}
-	bg := cc.backgroundContext(ctx)
-	sendCtx, cancel := context.WithTimeout(bg, 10*time.Second)
-	defer cancel()
-	cc.sendViaPortal(sendCtx, portal, agentremote.BuildSystemNotice(strings.TrimSpace(message)), "")
+	cc.sendViaPortal(portal, agentremote.BuildSystemNotice(strings.TrimSpace(message)), "", time.Time{}, 0)
 }
 
 func (cc *CodexClient) sendPendingStatus(ctx context.Context, portal *bridgev2.Portal, evt *event.Event, message string) {

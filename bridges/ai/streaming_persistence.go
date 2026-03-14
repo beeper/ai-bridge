@@ -67,14 +67,10 @@ func (oc *AIClient) saveAssistantMessage(
 		Logger:           log,
 	})
 
-	usageMetaUpdated := false
-	if meta != nil && (state.promptTokens > 0 || state.completionTokens > 0) {
+	if meta != nil && portal != nil && (state.promptTokens > 0 || state.completionTokens > 0) {
 		meta.SetModuleMeta("compaction_last_prompt_tokens", state.promptTokens)
 		meta.SetModuleMeta("compaction_last_completion_tokens", state.completionTokens)
 		meta.SetModuleMeta("compaction_last_usage_at", time.Now().UnixMilli())
-		usageMetaUpdated = true
-	}
-	if usageMetaUpdated && portal != nil {
 		oc.savePortalQuiet(ctx, portal, "compaction usage snapshot")
 	}
 

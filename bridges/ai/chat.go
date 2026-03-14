@@ -339,13 +339,13 @@ func (oc *AIClient) ResolveIdentifier(ctx context.Context, identifier string, cr
 		if err != nil || agent == nil {
 			return nil, bridgev2.WrapRespErr(fmt.Errorf("agent '%s' not found", agentID), mautrix.MNotFound)
 		}
-		return oc.resolveAgentIdentifier(ctx, agent, createChat)
+		return oc.resolveAgentIdentifier(ctx, agent, "", createChat)
 	}
 
 	// Try to find as agent first (bare agent ID like "beeper", "boss")
 	agent, err := store.GetAgentByID(ctx, id)
 	if err == nil && agent != nil {
-		return oc.resolveAgentIdentifier(ctx, agent, createChat)
+		return oc.resolveAgentIdentifier(ctx, agent, "", createChat)
 	}
 
 	// Allow explicit model aliases that resolve through configured catalog/aliases.
@@ -395,7 +395,7 @@ func (oc *AIClient) CreateChatWithGhost(ctx context.Context, ghost *bridgev2.Gho
 		if err != nil || agent == nil {
 			return nil, bridgev2.WrapRespErr(fmt.Errorf("agent '%s' not found", agentID), mautrix.MNotFound)
 		}
-		resp, err := oc.resolveAgentIdentifier(ctx, agent, true)
+		resp, err := oc.resolveAgentIdentifier(ctx, agent, "", true)
 		if err != nil {
 			return nil, err
 		}
@@ -404,12 +404,8 @@ func (oc *AIClient) CreateChatWithGhost(ctx context.Context, ghost *bridgev2.Gho
 	return nil, bridgev2.WrapRespErr(fmt.Errorf("unsupported ghost ID: %s", ghostID), mautrix.MInvalidParam)
 }
 
-// resolveAgentIdentifier resolves an agent to a ghost and optionally creates a chat
-func (oc *AIClient) resolveAgentIdentifier(ctx context.Context, agent *agents.AgentDefinition, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	return oc.resolveAgentIdentifierWithModel(ctx, agent, "", createChat)
-}
-
-func (oc *AIClient) resolveAgentIdentifierWithModel(ctx context.Context, agent *agents.AgentDefinition, modelID string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
+// resolveAgentIdentifier resolves an agent to a ghost and optionally creates a chat.
+func (oc *AIClient) resolveAgentIdentifier(ctx context.Context, agent *agents.AgentDefinition, modelID string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
 	explicitModel := modelID != ""
 	if modelID == "" {
 		modelID = oc.agentDefaultModel(agent)

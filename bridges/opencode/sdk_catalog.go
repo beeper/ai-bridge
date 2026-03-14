@@ -75,7 +75,7 @@ func sortedOpenCodeInstanceIDs(instances map[string]*OpenCodeInstance) []string 
 	return out
 }
 
-func (oc *OpenCodeClient) resolveOpenCodeIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
+func (oc *OpenCodeClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
 	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil {
 		return nil, errors.New("login unavailable")
 	}
@@ -122,7 +122,7 @@ func (oc *OpenCodeClient) resolveOpenCodeIdentifier(ctx context.Context, identif
 	}, nil
 }
 
-func (oc *OpenCodeClient) openCodeContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
+func (oc *OpenCodeClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
 	meta := loginMetadata(oc.UserLogin)
 	if meta == nil || len(meta.OpenCodeInstances) == 0 {
 		return nil, nil
@@ -130,7 +130,7 @@ func (oc *OpenCodeClient) openCodeContactList(ctx context.Context) ([]*bridgev2.
 	instanceIDs := sortedOpenCodeInstanceIDs(meta.OpenCodeInstances)
 	out := make([]*bridgev2.ResolveIdentifierResponse, 0, len(instanceIDs))
 	for _, instanceID := range instanceIDs {
-		resp, err := oc.resolveOpenCodeIdentifier(ctx, "opencode:"+instanceID, false)
+		resp, err := oc.ResolveIdentifier(ctx, "opencode:"+instanceID, false)
 		if err == nil && resp != nil {
 			out = append(out, resp)
 		}
@@ -138,9 +138,9 @@ func (oc *OpenCodeClient) openCodeContactList(ctx context.Context) ([]*bridgev2.
 	return out, nil
 }
 
-func (oc *OpenCodeClient) searchOpenCodeUsers(ctx context.Context, query string) ([]*bridgev2.ResolveIdentifierResponse, error) {
+func (oc *OpenCodeClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.ResolveIdentifierResponse, error) {
 	query = strings.TrimSpace(query)
-	contacts, err := oc.openCodeContactList(ctx)
+	contacts, err := oc.GetContactList(ctx)
 	if err != nil || query == "" {
 		return contacts, err
 	}
@@ -160,7 +160,7 @@ func (oc *OpenCodeClient) searchOpenCodeUsers(ctx context.Context, query string)
 			out = append(out, contact)
 		}
 	}
-	if resp, err := oc.resolveOpenCodeIdentifier(ctx, query, false); err == nil && resp != nil {
+	if resp, err := oc.ResolveIdentifier(ctx, query, false); err == nil && resp != nil {
 		alreadyIncluded := slices.ContainsFunc(out, func(existing *bridgev2.ResolveIdentifierResponse) bool {
 			return existing != nil && existing.UserID == resp.UserID
 		})

@@ -75,7 +75,7 @@ func (oc *AIClient) executeSessionsList(ctx context.Context, portal *bridgev2.Po
 		return toolsErrorResult(err)
 	}
 
-	currentRoomID := id.RoomID("")
+	var currentRoomID id.RoomID
 	if portal != nil {
 		currentRoomID = portal.MXID
 	}
@@ -237,7 +237,7 @@ func (oc *AIClient) executeSessionsHistory(ctx context.Context, portal *bridgev2
 	}
 
 	if instance, chatID, ok := parseDesktopSessionKey(sessionKey); ok {
-		resolvedInstance, resolveErr := oc.resolveDesktopInstanceName(instance)
+		resolvedInstance, resolveErr := resolveDesktopInstanceName(oc.desktopAPIInstances(), instance)
 		if resolveErr != nil {
 			return toolsErrorResult(resolveErr)
 		}
@@ -353,7 +353,7 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 	}
 
 	if instance, chatID, ok := parseDesktopSessionKey(sessionKey); ok {
-		resolvedInstance, resolveErr := oc.resolveDesktopInstanceName(instance)
+		resolvedInstance, resolveErr := resolveDesktopInstanceName(oc.desktopAPIInstances(), instance)
 		if resolveErr != nil {
 			return toolsErrorResult(resolveErr)
 		}
@@ -402,7 +402,7 @@ func (oc *AIClient) executeSessionsSend(ctx context.Context, portal *bridgev2.Po
 			var desktopKey string
 			var desktopErr error
 			if strings.TrimSpace(instance) != "" {
-				resolvedInstance, resolveErr := oc.resolveDesktopInstanceName(instance)
+				resolvedInstance, resolveErr := resolveDesktopInstanceName(oc.desktopAPIInstances(), instance)
 				if resolveErr != nil {
 					return toolsErrorResult(resolveErr)
 				}

@@ -218,18 +218,6 @@ func (oc *OpenCodeClient) GetUserInfo(_ context.Context, ghost *bridgev2.Ghost) 
 	return openCodeSDKAgent(instanceID, oc.instanceDisplayName(instanceID)).UserInfo(), nil
 }
 
-func (oc *OpenCodeClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	return oc.resolveOpenCodeIdentifier(ctx, identifier, createChat)
-}
-
-func (oc *OpenCodeClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
-	return oc.openCodeContactList(ctx)
-}
-
-func (oc *OpenCodeClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.ResolveIdentifierResponse, error) {
-	return oc.searchOpenCodeUsers(ctx, query)
-}
-
 func (oc *OpenCodeClient) LogoutRemote(_ context.Context) {
 	oc.Disconnect()
 	if oc.connector != nil && oc.UserLogin != nil {

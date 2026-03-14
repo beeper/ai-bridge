@@ -69,7 +69,7 @@ func NewOpenCodeManager(bridge *Bridge) *OpenCodeManager {
 	mgr.approvalFlow = agentremote.NewApprovalFlow(agentremote.ApprovalFlowConfig[*permissionApprovalRef]{
 		Login: func() *bridgev2.UserLogin {
 			if bridge != nil && bridge.host != nil {
-				return bridge.host.Login()
+				return bridge.host.GetUserLogin()
 			}
 			return nil
 		},
@@ -365,7 +365,7 @@ func (m *OpenCodeManager) EnsureManagedInstance(ctx context.Context, launcherID,
 	if launcher == nil || launcher.Mode != OpenCodeModeManagedLauncher {
 		return nil, errors.New("managed launcher not found")
 	}
-	login := m.bridge.host.Login()
+	login := m.bridge.host.GetUserLogin()
 	if login == nil {
 		return nil, errors.New("login unavailable")
 	}
@@ -574,7 +574,7 @@ func (m *OpenCodeManager) startEventLoop(inst *openCodeInstance) {
 	if inst == nil || m.bridge == nil || m.bridge.host == nil {
 		return
 	}
-	login := m.bridge.host.Login()
+	login := m.bridge.host.GetUserLogin()
 	if login == nil || login.Bridge == nil {
 		return
 	}
@@ -864,7 +864,7 @@ func (m *OpenCodeManager) handlePermissionAskedEvent(ctx context.Context, inst *
 	})
 	ownerMXID := id.UserID("")
 	if m.bridge != nil && m.bridge.host != nil {
-		if login := m.bridge.host.Login(); login != nil {
+		if login := m.bridge.host.GetUserLogin(); login != nil {
 			ownerMXID = login.UserMXID
 		}
 	}
@@ -1269,7 +1269,7 @@ func (m *OpenCodeManager) applyConnectedState(inst *openCodeInstance, connected 
 	if m.bridge == nil || m.bridge.host == nil {
 		return
 	}
-	login := m.bridge.host.Login()
+	login := m.bridge.host.GetUserLogin()
 	if login == nil || login.Bridge == nil {
 		return
 	}

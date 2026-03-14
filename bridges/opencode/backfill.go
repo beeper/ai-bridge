@@ -187,7 +187,7 @@ func (b *Bridge) convertOpenCodeBackfill(ctx context.Context, portal *bridgev2.P
 	if b == nil || portal == nil || b.host == nil {
 		return nil, nil
 	}
-	login := b.host.Login()
+	login := b.host.GetUserLogin()
 	if login == nil {
 		return nil, nil
 	}

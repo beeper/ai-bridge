@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"context"
 	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
@@ -13,15 +12,6 @@ import (
 
 // sendViaPortal sends a pre-built message through bridgev2's QueueRemoteEvent pipeline.
 func (cc *CodexClient) sendViaPortal(
-	_ context.Context,
-	portal *bridgev2.Portal,
-	converted *bridgev2.ConvertedMessage,
-	msgID networkid.MessageID,
-) (id.EventID, networkid.MessageID, error) {
-	return cc.sendViaPortalWithOrdering(portal, converted, msgID, time.Time{}, 0)
-}
-
-func (cc *CodexClient) sendViaPortalWithOrdering(
 	portal *bridgev2.Portal,
 	converted *bridgev2.ConvertedMessage,
 	msgID networkid.MessageID,

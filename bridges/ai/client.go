@@ -766,20 +766,6 @@ func (oc *AIClient) dispatchOrQueue(
 	return userMessage, isPending
 }
 
-// dispatchOrQueueWithStatus is like dispatchOrQueue but does not save a DB message.
-// Used for regenerate/edit operations.
-func (oc *AIClient) dispatchOrQueueWithStatus(
-	ctx context.Context,
-	evt *event.Event,
-	portal *bridgev2.Portal,
-	meta *PortalMetadata,
-	queueItem pendingQueueItem,
-	queueSettings airuntime.QueueSettings,
-	promptContext PromptContext,
-) {
-	oc.dispatchOrQueueCore(ctx, evt, portal, meta, nil, queueItem, queueSettings, promptContext)
-}
-
 // processPendingQueue processes queued messages for a room.
 func (oc *AIClient) processPendingQueue(ctx context.Context, roomID id.RoomID) {
 	if oc == nil || roomID == "" {
@@ -919,7 +905,7 @@ func (oc *AIClient) processPendingQueue(ctx context.Context, roomID id.RoomID) {
 			}
 
 			metaSnapshot := clonePortalMetadata(item.pending.Meta)
-			eventID := id.EventID("")
+			var eventID id.EventID
 			if item.pending.Event != nil {
 				eventID = item.pending.Event.ID
 			}
