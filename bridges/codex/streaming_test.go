@@ -2,7 +2,6 @@ package codex
 
 import (
 	"testing"
-	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -39,28 +38,5 @@ func TestCodex_StreamChunks_BasicOrderingAndSeq(t *testing.T) {
 	}
 	if !seenText {
 		t.Fatalf("expected canonical text part, got %#v", gotParts)
-	}
-}
-
-func TestCodexStreamEventTimestampPrefersStartedAndCompleted(t *testing.T) {
-	state := &streamingState{
-		startedAtMs:   time.Date(2026, time.March, 12, 10, 0, 0, 0, time.UTC).UnixMilli(),
-		completedAtMs: time.Date(2026, time.March, 12, 10, 0, 5, 0, time.UTC).UnixMilli(),
-	}
-	if got := codexStreamEventTimestamp(state, false); got.UnixMilli() != state.startedAtMs {
-		t.Fatalf("expected startedAtMs timestamp, got %d", got.UnixMilli())
-	}
-	if got := codexStreamEventTimestamp(state, true); got.UnixMilli() != state.completedAtMs {
-		t.Fatalf("expected completedAtMs timestamp, got %d", got.UnixMilli())
-	}
-}
-
-func TestCodexNextLiveStreamOrderMonotonic(t *testing.T) {
-	state := &streamingState{}
-	ts := time.UnixMilli(1_700_000_000_000)
-	first := codexNextLiveStreamOrder(state, ts)
-	second := codexNextLiveStreamOrder(state, ts)
-	if second <= first {
-		t.Fatalf("expected monotonic stream order, got %d then %d", first, second)
 	}
 }

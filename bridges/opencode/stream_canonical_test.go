@@ -1,9 +1,6 @@
 package opencode
 
-import (
-	"testing"
-	"time"
-)
+import "testing"
 
 func TestCurrentCanonicalUIMessageFallbackIncludesModelAndUsage(t *testing.T) {
 	oc := &OpenCodeClient{}
@@ -33,28 +30,5 @@ func TestCurrentCanonicalUIMessageFallbackIncludesModelAndUsage(t *testing.T) {
 	}
 	if usage["total_tokens"] != int64(21) {
 		t.Fatalf("expected total_tokens 21, got %#v", usage["total_tokens"])
-	}
-}
-
-func TestOpenCodeStreamEventTimestampPrefersStartedAndCompleted(t *testing.T) {
-	state := &openCodeStreamState{
-		startedAtMs:   time.Date(2026, time.March, 12, 11, 0, 0, 0, time.UTC).UnixMilli(),
-		completedAtMs: time.Date(2026, time.March, 12, 11, 0, 7, 0, time.UTC).UnixMilli(),
-	}
-	if got := openCodeStreamEventTimestamp(state, false); got.UnixMilli() != state.startedAtMs {
-		t.Fatalf("expected startedAtMs timestamp, got %d", got.UnixMilli())
-	}
-	if got := openCodeStreamEventTimestamp(state, true); got.UnixMilli() != state.completedAtMs {
-		t.Fatalf("expected completedAtMs timestamp, got %d", got.UnixMilli())
-	}
-}
-
-func TestOpenCodeNextStreamOrderMonotonic(t *testing.T) {
-	state := &openCodeStreamState{}
-	ts := time.UnixMilli(1_700_000_000_000)
-	first := openCodeNextStreamOrder(state, ts)
-	second := openCodeNextStreamOrder(state, ts)
-	if second <= first {
-		t.Fatalf("expected monotonic stream order, got %d then %d", first, second)
 	}
 }

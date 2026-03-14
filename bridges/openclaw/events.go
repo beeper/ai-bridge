@@ -224,53 +224,6 @@ func (m *OpenClawRemoteMessage) ConvertMessage(_ context.Context, _ *bridgev2.Po
 	return m.preBuilt, nil
 }
 
-type OpenClawRemoteEdit struct {
-	portal        networkid.PortalKey
-	sender        bridgev2.EventSender
-	targetMessage networkid.MessageID
-	timestamp     time.Time
-	streamOrder   int64
-	preBuilt      *bridgev2.ConvertedEdit
-}
-
-var (
-	_ bridgev2.RemoteEdit                 = (*OpenClawRemoteEdit)(nil)
-	_ bridgev2.RemoteEventWithTimestamp   = (*OpenClawRemoteEdit)(nil)
-	_ bridgev2.RemoteEventWithStreamOrder = (*OpenClawRemoteEdit)(nil)
-)
-
-func (e *OpenClawRemoteEdit) GetType() bridgev2.RemoteEventType { return bridgev2.RemoteEventEdit }
-func (e *OpenClawRemoteEdit) GetPortalKey() networkid.PortalKey { return e.portal }
-func (e *OpenClawRemoteEdit) GetSender() bridgev2.EventSender   { return e.sender }
-func (e *OpenClawRemoteEdit) GetTargetMessage() networkid.MessageID {
-	return e.targetMessage
-}
-func (e *OpenClawRemoteEdit) AddLogContext(c zerolog.Context) zerolog.Context {
-	return c.Str("openclaw_edit_target", string(e.targetMessage))
-}
-func (e *OpenClawRemoteEdit) GetTimestamp() time.Time {
-	if e.timestamp.IsZero() {
-		return time.Now()
-	}
-	return e.timestamp
-}
-func (e *OpenClawRemoteEdit) GetStreamOrder() int64 {
-	if e.streamOrder != 0 {
-		return e.streamOrder
-	}
-	return e.GetTimestamp().UnixMilli()
-}
-func (e *OpenClawRemoteEdit) ConvertEdit(_ context.Context, _ *bridgev2.Portal, _ bridgev2.MatrixAPI, existing []*database.Message) (*bridgev2.ConvertedEdit, error) {
-	if e.preBuilt != nil && len(existing) > 0 {
-		for i, part := range e.preBuilt.ModifiedParts {
-			if part.Part == nil && i < len(existing) {
-				part.Part = existing[i]
-			}
-		}
-	}
-	return e.preBuilt, nil
-}
-
 func newOpenClawMessageID() networkid.MessageID {
 	return networkid.MessageID("openclaw:" + uuid.NewString())
 }

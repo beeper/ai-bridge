@@ -97,8 +97,6 @@ func (c *sdkClient) config() *Config { return c.cfg }
 
 func (c *sdkClient) sessionValue() any { return c.getSession() }
 
-func (c *sdkClient) loginValue() *bridgev2.UserLogin { return c.userLogin }
-
 func (c *sdkClient) conversationStore() *conversationStateStore { return c.conversationState }
 
 func (c *sdkClient) approvalFlowValue() *agentremote.ApprovalFlow[*pendingSDKApprovalData] {

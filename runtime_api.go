@@ -1,8 +1,6 @@
 package agentremote
 
 import (
-	"strings"
-
 	"maunium.net/go/mautrix/bridgev2"
 
 	"github.com/beeper/agentremote/store"
@@ -25,26 +23,4 @@ type Runtime struct {
 	Turns     *TurnManager
 	Approvals *ApprovalFlow[map[string]any]
 	Stores    *store.Scope
-}
-
-// NewRuntime constructs the shared agentremote runtime facade for a single
-// bridge/login scope.
-func NewRuntime(cfg RuntimeConfig) *Runtime {
-	bridge := cfg.Bridge
-	if bridge == nil && cfg.Login != nil {
-		bridge = cfg.Login.Bridge
-	}
-	agentID := strings.TrimSpace(cfg.AgentID)
-	rt := &Runtime{
-		Bridge:  bridge,
-		Login:   cfg.Login,
-		AgentID: agentID,
-		Stores:  store.NewScopeForLogin(cfg.Login, agentID),
-	}
-	rt.Turns = NewTurnManager(rt)
-	login := cfg.Login
-	rt.Approvals = NewApprovalFlow(ApprovalFlowConfig[map[string]any]{
-		Login: func() *bridgev2.UserLogin { return login },
-	})
-	return rt
 }

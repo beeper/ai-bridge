@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/beeper/agentremote/bridges/ai/msgconv"
-	"github.com/beeper/agentremote/pkg/shared/backfillutil"
 	"github.com/beeper/agentremote/pkg/shared/maputil"
 	"github.com/beeper/agentremote/pkg/shared/streamui"
 	"github.com/beeper/agentremote/pkg/shared/stringutil"
@@ -104,30 +103,6 @@ func opencodeUIMessageMetadata(state *openCodeStreamState) map[string]any {
 		CompletedAtMs:    state.completedAtMs,
 		IncludeUsage:     true,
 	})
-}
-
-func openCodeStreamEventTimestamp(state *openCodeStreamState, preferCompleted bool) time.Time {
-	if state == nil {
-		return time.Now()
-	}
-	if preferCompleted && state.completedAtMs > 0 {
-		return time.UnixMilli(state.completedAtMs)
-	}
-	if state.startedAtMs > 0 {
-		return time.UnixMilli(state.startedAtMs)
-	}
-	if state.completedAtMs > 0 {
-		return time.UnixMilli(state.completedAtMs)
-	}
-	return time.Now()
-}
-
-func openCodeNextStreamOrder(state *openCodeStreamState, ts time.Time) int64 {
-	if state == nil {
-		return backfillutil.NextStreamOrder(0, ts)
-	}
-	state.lastRemoteEventOrder = backfillutil.NextStreamOrder(state.lastRemoteEventOrder, ts)
-	return state.lastRemoteEventOrder
 }
 
 func (oc *OpenCodeClient) buildStreamDBMetadata(state *openCodeStreamState) *MessageMetadata {

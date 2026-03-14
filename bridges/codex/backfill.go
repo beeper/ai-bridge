@@ -414,10 +414,6 @@ func codexBackfillConvertedMessage(role, text, turnID string) *bridgev2.Converte
 	}
 }
 
-func codexThreadBackfillEntries(thread codexThread, humanSender, codexSender bridgev2.EventSender) []codexBackfillEntry {
-	return codexThreadBackfillEntriesWithTimings(thread, nil, humanSender, codexSender)
-}
-
 func codexThreadBackfillEntriesWithTimings(thread codexThread, timings []codexTurnTiming, humanSender, codexSender bridgev2.EventSender) []codexBackfillEntry {
 	if len(thread.Turns) == 0 {
 		return nil

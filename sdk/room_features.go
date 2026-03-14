@@ -100,10 +100,6 @@ func convertRoomFeatures(f *RoomFeatures) *event.RoomFeatures {
 	return rf
 }
 
-func defaultSDKRoomFeatures() *event.RoomFeatures {
-	return convertRoomFeatures(defaultSDKFeatureConfig())
-}
-
 func capLevel(supported bool) event.CapabilitySupportLevel {
 	if supported {
 		return event.CapLevelFullySupported

@@ -8,7 +8,6 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/beeper/agentremote"
-	"github.com/beeper/agentremote/pkg/shared/backfillutil"
 	"github.com/beeper/agentremote/pkg/shared/citations"
 	bridgesdk "github.com/beeper/agentremote/sdk"
 )
@@ -60,27 +59,4 @@ func newStreamingState(sourceEventID id.EventID) *streamingState {
 		codexTimelineNotices:   make(map[string]bool),
 		codexToolOutputBuffers: make(map[string]*strings.Builder),
 	}
-}
-
-func codexStreamEventTimestamp(state *streamingState, preferCompleted bool) time.Time {
-	if state != nil {
-		if preferCompleted && state.completedAtMs > 0 {
-			return time.UnixMilli(state.completedAtMs)
-		}
-		if state.startedAtMs > 0 {
-			return time.UnixMilli(state.startedAtMs)
-		}
-		if state.completedAtMs > 0 {
-			return time.UnixMilli(state.completedAtMs)
-		}
-	}
-	return time.Now()
-}
-
-func codexNextLiveStreamOrder(state *streamingState, ts time.Time) int64 {
-	if state == nil {
-		return backfillutil.NextStreamOrder(0, ts)
-	}
-	state.lastRemoteEventOrder = backfillutil.NextStreamOrder(state.lastRemoteEventOrder, ts)
-	return state.lastRemoteEventOrder
 }

@@ -11,7 +11,6 @@ import (
 type conversationRuntime interface {
 	config() *Config
 	sessionValue() any
-	loginValue() *bridgev2.UserLogin
 	conversationStore() *conversationStateStore
 	approvalFlowValue() *agentremote.ApprovalFlow[*pendingSDKApprovalData]
 	providerIdentity() ProviderIdentity
@@ -28,8 +27,6 @@ type staticRuntime struct {
 func (r *staticRuntime) config() *Config { return r.cfg }
 
 func (r *staticRuntime) sessionValue() any { return r.session }
-
-func (r *staticRuntime) loginValue() *bridgev2.UserLogin { return r.login }
 
 func (r *staticRuntime) conversationStore() *conversationStateStore { return r.store }
 

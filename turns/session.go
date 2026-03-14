@@ -106,25 +106,6 @@ func NewStreamSession(params StreamSessionParams) *StreamSession {
 	return s
 }
 
-// EmitStreamEvent logs the stream start once and emits a part through a session.
-func EmitStreamEvent(ctx context.Context, portal *bridgev2.Portal, state StreamEventState, part map[string]any) {
-	if portal == nil || portal.MXID == "" || state.SuppressSend || state.EnsureSession == nil {
-		return
-	}
-	if state.LoggedStart != nil && !*state.LoggedStart {
-		*state.LoggedStart = true
-		if state.Logger != nil {
-			state.Logger.Info().
-				Stringer("room_id", portal.MXID).
-				Str("turn_id", strings.TrimSpace(state.TurnID)).
-				Msg("Streaming events")
-		}
-	}
-	if session := state.EnsureSession(); session != nil {
-		session.EmitPart(ctx, part)
-	}
-}
-
 func (s *StreamSession) IsClosed() bool {
 	return s == nil || s.closed.Load()
 }

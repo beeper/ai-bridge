@@ -561,10 +561,6 @@ type openClawBackfillEntry struct {
 	streamOrder int64
 }
 
-func buildOpenClawBackfillEntries(meta *PortalMetadata, history []map[string]any, params bridgev2.FetchMessagesParams) ([]openClawBackfillEntry, networkid.PaginationCursor, bool) {
-	return paginateOpenClawBackfillEntries(prepareOpenClawBackfillEntries(meta, history), params)
-}
-
 func paginateOpenClawBackfillEntries(entries []openClawBackfillEntry, params bridgev2.FetchMessagesParams) ([]openClawBackfillEntry, networkid.PaginationCursor, bool) {
 	if len(entries) == 0 {
 		return nil, "", false

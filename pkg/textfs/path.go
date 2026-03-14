@@ -26,15 +26,6 @@ func NormalizePath(raw string) (string, error) {
 	return cleaned, nil
 }
 
-// NormalizeDir normalizes a directory path; empty means root.
-func NormalizeDir(raw string) (string, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" || trimmed == "." || trimmed == "/" {
-		return "", nil
-	}
-	return NormalizePath(trimmed)
-}
-
 // IsMemoryPath returns true for MEMORY.md or memory/*.md.
 func IsMemoryPath(relPath string) bool {
 	normalized, err := NormalizePath(relPath)

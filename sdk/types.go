@@ -199,26 +199,6 @@ func UserMessageSource(eventID string) *SourceRef {
 	return &SourceRef{Kind: SourceKindUserMessage, EventID: eventID}
 }
 
-func ProactiveSource() *SourceRef {
-	return &SourceRef{Kind: SourceKindProactive}
-}
-
-func SystemSource(eventID string) *SourceRef {
-	return &SourceRef{Kind: SourceKindSystem, EventID: eventID}
-}
-
-func BackfillSource(eventID string) *SourceRef {
-	return &SourceRef{Kind: SourceKindBackfill, EventID: eventID}
-}
-
-func DelegatedSource(parentConversationID, eventID string) *SourceRef {
-	return &SourceRef{
-		Kind:                 SourceKindDelegated,
-		EventID:              eventID,
-		ParentConversationID: parentConversationID,
-	}
-}
-
 // ModelInfo describes an AI model.
 type ModelInfo struct {
 	ID           string
