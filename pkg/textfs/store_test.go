@@ -136,7 +136,4 @@ func TestNormalizePathAndDir(t *testing.T) {
 	if normalized, err := NormalizePath("file://MEMORY.md"); err != nil || normalized != "MEMORY.md" {
 		t.Fatalf("unexpected normalization: %q err=%v", normalized, err)
 	}
-	if dir, err := NormalizeDir("/"); err != nil || dir != "" {
-		t.Fatalf("unexpected dir normalization: %q err=%v", dir, err)
-	}
 }

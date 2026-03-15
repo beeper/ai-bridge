@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -286,8 +287,4 @@ func TestCompactPromptOnOverflow_InsertsSummaryAndRefresh(t *testing.T) {
 	}
 }
 
-type simpleErr string
-
-func (e simpleErr) Error() string { return string(e) }
-
-func assertErr(text string) error { return simpleErr(text) }
+func assertErr(text string) error { return errors.New(text) }

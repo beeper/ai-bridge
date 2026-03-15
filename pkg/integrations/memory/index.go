@@ -129,7 +129,7 @@ func (m *MemorySearchManager) needsFullReindex(ctx context.Context, force bool) 
 		`SELECT provider, model, provider_key, chunk_tokens, chunk_overlap, index_generation
          FROM ai_memory_meta
          WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3`,
-		m.bridgeID, m.loginID, m.agentID,
+		m.baseArgs()...,
 	)
 	switch err := row.Scan(&provider, &model, &providerKey, &chunkTokens, &chunkOverlap, &indexGen); err {
 	case nil:
@@ -164,10 +164,11 @@ func (m *MemorySearchManager) updateMeta(ctx context.Context, generation string)
          DO UPDATE SET provider=excluded.provider, model=excluded.model, provider_key=excluded.provider_key,
            chunk_tokens=excluded.chunk_tokens, chunk_overlap=excluded.chunk_overlap,
            vector_dims=NULL, index_generation=excluded.index_generation, updated_at=excluded.updated_at`,
-		m.bridgeID, m.loginID, m.agentID,
-		m.status.Provider, m.status.Model, lexicalProviderKey,
-		m.cfg.Chunking.Tokens, m.cfg.Chunking.Overlap,
-		generation, time.Now().UnixMilli(),
+		m.baseArgs(
+			m.status.Provider, m.status.Model, lexicalProviderKey,
+			m.cfg.Chunking.Tokens, m.cfg.Chunking.Overlap,
+			generation, time.Now().UnixMilli(),
+		)...,
 	)
 	return err
 }
@@ -181,7 +182,7 @@ func (m *MemorySearchManager) deriveIndexGeneration(ctx context.Context) string 
          WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3
          ORDER BY updated_at DESC
          LIMIT 1`,
-		m.bridgeID, m.loginID, m.agentID,
+		m.baseArgs()...,
 	)
 	var id string
 	if err := row.Scan(&id); err != nil {
@@ -315,7 +316,7 @@ func (m *MemorySearchManager) prepareMemoryFiles(ctx context.Context, force bool
 func (m *MemorySearchManager) needsFileIndex(ctx context.Context, entry textfs.FileEntry, source, generation string) (bool, error) {
 	var updatedAt sql.NullInt64
 	genSQL, genArgs := generationFilterSQL(7, generation)
-	args := []any{m.bridgeID, m.loginID, m.agentID, entry.Path, source, m.status.Model}
+	args := m.baseArgs(entry.Path, source, m.status.Model)
 	args = append(args, genArgs...)
 	row := m.db.QueryRow(ctx,
 		`SELECT MAX(updated_at) FROM ai_memory_chunks
@@ -418,7 +419,7 @@ func (m *MemorySearchManager) deletePathChunks(ctx context.Context, path, source
 		return nil
 	}
 	genFilter, genArgs := generationFilterSQL(7, generation)
-	args := []any{m.bridgeID, m.loginID, m.agentID, path, source, m.status.Model}
+	args := m.baseArgs(path, source, m.status.Model)
 	args = append(args, genArgs...)
 
 	placeholders := ""
@@ -467,7 +468,7 @@ func (m *MemorySearchManager) deletePathChunks(ctx context.Context, path, source
 		if _, err := m.db.Exec(ctx,
 			`DELETE FROM ai_memory_chunks_fts
              WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND id=$4`,
-			m.bridgeID, m.loginID, m.agentID, id,
+			m.baseArgs(id)...,
 		); err != nil {
 			m.log.Warn().Err(err).Str("chunk_id", id).Msg("FTS delete failed")
 		}
@@ -486,7 +487,7 @@ func (m *MemorySearchManager) removeStaleChunksForSource(ctx context.Context, ac
 		return nil
 	}
 	genSQL, genArgs := generationFilterSQL(5, generation)
-	args := []any{m.bridgeID, m.loginID, m.agentID, source}
+	args := m.baseArgs(source)
 	args = append(args, genArgs...)
 	rows, err := m.db.Query(ctx,
 		`SELECT DISTINCT path FROM ai_memory_chunks
@@ -514,7 +515,8 @@ func (m *MemorySearchManager) removeStaleChunksForSource(ctx context.Context, ac
 
 	for _, path := range stalePaths {
 		delGenSQL, delGenArgs := generationFilterSQL(6, generation)
-		delArgs := append([]any{m.bridgeID, m.loginID, m.agentID, path, source}, delGenArgs...)
+		delArgs := m.baseArgs(path, source)
+		delArgs = append(delArgs, delGenArgs...)
 		if _, err := m.db.Exec(ctx,
 			`DELETE FROM ai_memory_chunks
              WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND path=$4 AND source=$5`+delGenSQL,
@@ -544,7 +546,7 @@ func (m *MemorySearchManager) collectOldGenerationIDs(ctx context.Context, gener
 	rows, err := m.db.Query(ctx,
 		`SELECT id FROM ai_memory_chunks
          WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND id NOT LIKE $4`,
-		m.bridgeID, m.loginID, m.agentID, generation+":%",
+		m.baseArgs(generation+":%")...,
 	)
 	if err != nil {
 		return nil
@@ -574,7 +576,7 @@ func (m *MemorySearchManager) deleteOldGenerations(ctx context.Context, generati
 			if _, err := m.db.Exec(ctx,
 				`DELETE FROM ai_memory_chunks_fts
                  WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND id=$4`,
-				m.bridgeID, m.loginID, m.agentID, id,
+				m.baseArgs(id)...,
 			); err != nil {
 				m.log.Warn().Err(err).Str("chunk_id", id).Msg("old generation FTS delete failed")
 			}
@@ -583,7 +585,7 @@ func (m *MemorySearchManager) deleteOldGenerations(ctx context.Context, generati
 	if _, err := m.db.Exec(ctx,
 		`DELETE FROM ai_memory_chunks
          WHERE bridge_id=$1 AND login_id=$2 AND agent_id=$3 AND id NOT LIKE $4`,
-		m.bridgeID, m.loginID, m.agentID, generation+":%",
+		m.baseArgs(generation+":%")...,
 	); err != nil {
 		m.log.Warn().Err(err).Str("generation", generation).Msg("old generation chunk delete failed")
 	}
@@ -597,11 +599,11 @@ func (m *MemorySearchManager) searchKeyword(ctx context.Context, query string, l
 	if ftsQuery == "" {
 		return nil, nil
 	}
-	baseArgs := []any{ftsQuery, m.status.Model, m.bridgeID, m.loginID, m.agentID}
+	ftsArgs := []any{ftsQuery, m.status.Model, m.bridgeID, m.loginID, m.agentID}
 	filterSQL, filterArgs := sourceFilterSQL(6, sources)
 	genSQL, genArgs := generationFilterSQL(6+len(filterArgs), indexGen)
 	pathSQL, pathArgs := pathPrefixFilterSQL(6+len(filterArgs)+len(genArgs), pathPrefix)
-	args := append(baseArgs, filterArgs...)
+	args := append(ftsArgs, filterArgs...)
 	args = append(args, genArgs...)
 	args = append(args, pathArgs...)
 	rows, err := m.db.Query(ctx,

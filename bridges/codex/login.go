@@ -14,10 +14,9 @@ import (
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/database"
 
+	"github.com/beeper/agentremote"
 	"github.com/beeper/agentremote/bridges/codex/codexrpc"
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
 )
 
 var (
@@ -60,15 +59,13 @@ type codexAccountInfo struct {
 }
 
 func (cl *CodexLogin) logger(ctx context.Context) *zerolog.Logger {
-	var fallback *zerolog.Logger
+	var l zerolog.Logger
 	if cl != nil && cl.User != nil {
-		l := cl.User.Log.With().Str("component", "codex_login").Logger()
-		fallback = &l
+		l = cl.User.Log.With().Str("component", "codex_login").Logger()
 	} else {
-		l := zerolog.Nop()
-		fallback = &l
+		l = zerolog.Nop()
 	}
-	return bridgeadapter.LoggerFromContext(ctx, fallback)
+	return agentremote.LoggerFromContext(ctx, &l)
 }
 
 func (cl *CodexLogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
@@ -202,6 +199,14 @@ func (cl *CodexLogin) closeRPCLocked() {
 	}
 }
 
+// signalStart sends a non-blocking signal on startCh.
+func (cl *CodexLogin) signalStart(err error) {
+	select {
+	case cl.startCh <- err:
+	default:
+	}
+}
+
 func (cl *CodexLogin) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
 	cmd := cl.resolveCodexCommand()
 	if _, err := exec.LookPath(cmd); err != nil {
@@ -325,10 +330,7 @@ func (cl *CodexLogin) spawnAndStartLogin(ctx context.Context, log *zerolog.Logge
 			cl.mu.Lock()
 			cl.closeRPCLocked()
 			cl.mu.Unlock()
-			select {
-			case cl.startCh <- initErr:
-			default:
-			}
+			cl.signalStart(initErr)
 			return
 		}
 
@@ -370,47 +372,18 @@ func (cl *CodexLogin) spawnAndStartLogin(ctx context.Context, log *zerolog.Logge
 			}
 		})
 
-		if mode == "apiKey" {
+		if mode == "apiKey" || mode == "chatgptAuthTokens" {
+			loginParams := map[string]any{"type": mode}
+			for k, v := range credentials {
+				loginParams[k] = strings.TrimSpace(v)
+			}
 			startCtx, cancel := context.WithTimeout(bgCtx, 60*time.Second)
-			startErr := rpc.Call(startCtx, "account/login/start", map[string]any{
-				"type":   "apiKey",
-				"apiKey": strings.TrimSpace(credentials["apiKey"]),
-			}, &struct{}{})
+			startErr := rpc.Call(startCtx, "account/login/start", loginParams, &struct{}{})
 			cancel()
 			if startErr != nil {
-				log.Warn().Err(startErr).Msg("Codex apiKey login start failed")
-				select {
-				case cl.startCh <- startErr:
-				default:
-				}
-				return
+				log.Warn().Err(startErr).Str("mode", mode).Msg("Codex login start failed")
 			}
-			select {
-			case cl.startCh <- nil:
-			default:
-			}
-			return
-		}
-		if mode == "chatgptAuthTokens" {
-			startCtx, cancel := context.WithTimeout(bgCtx, 60*time.Second)
-			startErr := rpc.Call(startCtx, "account/login/start", map[string]any{
-				"type":        "chatgptAuthTokens",
-				"idToken":     strings.TrimSpace(credentials["idToken"]),
-				"accessToken": strings.TrimSpace(credentials["accessToken"]),
-			}, &struct{}{})
-			cancel()
-			if startErr != nil {
-				log.Warn().Err(startErr).Msg("Codex external token login start failed")
-				select {
-				case cl.startCh <- startErr:
-				default:
-				}
-				return
-			}
-			select {
-			case cl.startCh <- nil:
-			default:
-			}
+			cl.signalStart(startErr)
 			return
 		}
 
@@ -424,55 +397,36 @@ func (cl *CodexLogin) spawnAndStartLogin(ctx context.Context, log *zerolog.Logge
 		cancel()
 		if startErr != nil {
 			log.Warn().Err(startErr).Msg("Codex chatgpt login start failed")
-			select {
-			case cl.startCh <- startErr:
-			default:
-			}
+			cl.signalStart(startErr)
 			return
 		}
 		loginID := strings.TrimSpace(loginResp.LoginID)
 		authURL := strings.TrimSpace(loginResp.AuthURL)
 		cl.setLoginSession(loginID, authURL)
 		if authURL == "" || loginID == "" {
-			startErr = errors.New("codex returned empty authUrl/loginId")
-			select {
-			case cl.startCh <- startErr:
-			default:
-			}
+			cl.signalStart(errors.New("codex returned empty authUrl/loginId"))
 			return
 		}
 		log.Info().Str("instance_id", cl.instanceID).Str("login_id", loginID).Msg("Codex browser login started")
-		select {
-		case cl.startCh <- nil:
-		default:
-		}
+		cl.signalStart(nil)
 	}()
 
-	if mode == "apiKey" {
-		return &bridgev2.LoginStep{
-			Type:         bridgev2.LoginStepTypeDisplayAndWait,
-			StepID:       "io.ai-bridge.codex.validating",
-			Instructions: "Validating the API key with Codex. Keep this screen open.",
-			DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
-				Type: bridgev2.LoginDisplayTypeNothing,
-			},
-		}, nil
+	var stepID, instructions string
+	switch mode {
+	case "apiKey":
+		stepID = "io.ai-bridge.codex.validating"
+		instructions = "Validating the API key with Codex. Keep this screen open."
+	case "chatgptAuthTokens":
+		stepID = "io.ai-bridge.codex.validating_external_tokens"
+		instructions = "Validating ChatGPT external tokens with Codex. Keep this screen open."
+	default:
+		stepID = "io.ai-bridge.codex.starting"
+		instructions = "Starting Codex browser login…"
 	}
-	if mode == "chatgptAuthTokens" {
-		return &bridgev2.LoginStep{
-			Type:         bridgev2.LoginStepTypeDisplayAndWait,
-			StepID:       "io.ai-bridge.codex.validating_external_tokens",
-			Instructions: "Validating ChatGPT external tokens with Codex. Keep this screen open.",
-			DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
-				Type: bridgev2.LoginDisplayTypeNothing,
-			},
-		}, nil
-	}
-
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeDisplayAndWait,
-		StepID:       "io.ai-bridge.codex.starting",
-		Instructions: "Starting Codex browser login…",
+		StepID:       stepID,
+		Instructions: instructions,
 		DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
 			Type: bridgev2.LoginDisplayTypeNothing,
 		},
@@ -606,10 +560,10 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 	if cl.User == nil {
 		return nil, errors.New("missing user")
 	}
-	persistCtx := cl.backgroundProcessContext()
-	log := cl.logger(persistCtx)
+	log := cl.logger(ctx)
 
-	loginID := bridgeadapter.NextUserLoginID(cl.User, "codex")
+	bgCtx := cl.backgroundProcessContext()
+	loginID := agentremote.NextUserLoginID(cl.User, "codex")
 	remoteName := "Codex"
 	dupCount := 0
 	for _, existing := range cl.User.GetUserLogins() {
@@ -620,7 +574,9 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 		if !ok || meta == nil {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderCodex) && existing.ID != loginID {
+		if strings.EqualFold(strings.TrimSpace(meta.Provider), ProviderCodex) &&
+			isManagedAuthLogin(meta) &&
+			existing.ID != loginID {
 			dupCount++
 		}
 	}
@@ -631,7 +587,7 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 	// Best-effort read account email (chatgpt mode).
 	accountEmail := ""
 	if rpc := cl.getRPC(); rpc != nil {
-		readCtx, cancelRead := context.WithTimeout(persistCtx, 10*time.Second)
+		readCtx, cancelRead := context.WithTimeout(bgCtx, 10*time.Second)
 		defer cancelRead()
 		var acct struct {
 			Account *codexAccountInfo `json:"account"`
@@ -645,67 +601,57 @@ func (cl *CodexLogin) finishLogin(ctx context.Context) (*bridgev2.LoginStep, err
 	meta := &UserLoginMetadata{
 		Provider:          ProviderCodex,
 		CodexHome:         cl.codexHome,
-		CodexHomeManaged:  true,
+		CodexAuthSource:   CodexAuthSourceManaged,
 		CodexAuthMode:     cl.getAuthMode(),
 		CodexAccountEmail: accountEmail,
 	}
 
-	login, err := cl.User.NewLogin(persistCtx, &database.UserLogin{
-		ID:         loginID,
-		RemoteName: remoteName,
-		Metadata:   meta,
-	}, nil)
+	login, step, err := agentremote.CreateAndCompleteLogin(
+		bgCtx,
+		bgCtx,
+		cl.User,
+		"codex",
+		remoteName,
+		meta,
+		"io.ai-bridge.codex.complete",
+		cl.Connector.LoadUserLogin,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create login: %w", err)
 	}
 	log.Info().Str("user_login_id", string(login.ID)).Msg("Created new Codex login")
-	if err := cl.Connector.LoadUserLogin(persistCtx, login); err != nil {
-		return nil, fmt.Errorf("failed to load client: %w", err)
-	}
-	go login.Client.Connect(login.Log.WithContext(cl.backgroundProcessContext()))
 
 	cl.mu.Lock()
 	cl.closeRPCLocked()
 	cl.mu.Unlock()
 
-	return &bridgev2.LoginStep{
-		Type:   bridgev2.LoginStepTypeComplete,
-		StepID: "io.ai-bridge.codex.complete",
-		CompleteParams: &bridgev2.LoginCompleteParams{
-			UserLoginID: login.ID,
-			UserLogin:   login,
-		},
-	}, nil
+	return step, nil
 }
 
 func (cl *CodexLogin) resolveCodexCommand() string {
-	if cl.Connector != nil && cl.Connector.Config.Codex != nil {
-		if cmd := strings.TrimSpace(cl.Connector.Config.Codex.Command); cmd != "" {
-			return cmd
-		}
+	if cl.Connector == nil {
+		return "codex"
 	}
-	return "codex"
+	return resolveCodexCommandFromConfig(cl.Connector.Config.Codex)
 }
 
 func (cl *CodexLogin) resolveCodexHomeBaseDir() string {
-	base := ""
+	var base string
 	if cl.Connector != nil && cl.Connector.Config.Codex != nil {
 		base = strings.TrimSpace(cl.Connector.Config.Codex.HomeBaseDir)
 	}
 	if base == "" {
-		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		home, err := os.UserHomeDir()
+		if err == nil && home != "" {
 			base = filepath.Join(home, ".local", "share", "ai-bridge", "codex")
 		} else {
 			base = filepath.Join(os.TempDir(), "ai-bridge-codex")
 		}
 	}
-	if rest, ok := strings.CutPrefix(base, "~"+string(os.PathSeparator)); ok {
-		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-			base = filepath.Join(home, rest)
-		}
+	if expanded, err := agentremote.ExpandUserHome(base); err == nil && expanded != "" {
+		base = expanded
 	}
-	abs, err := filepath.Abs(base)
-	if err == nil {
+	if abs, err := filepath.Abs(base); err == nil {
 		return abs
 	}
 	return base

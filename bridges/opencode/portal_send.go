@@ -5,7 +5,7 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 
-	"github.com/beeper/agentremote/pkg/bridgeadapter"
+	"github.com/beeper/agentremote"
 )
 
 // sendViaPortal sends a pre-built message through bridgev2's QueueRemoteEvent pipeline.
@@ -15,14 +15,7 @@ func (oc *OpenCodeClient) sendViaPortal(
 	instanceID string,
 	converted *bridgev2.ConvertedMessage,
 ) error {
-	_, _, err := bridgeadapter.SendViaPortal(bridgeadapter.SendViaPortalParams{
-		Login:     oc.UserLogin,
-		Portal:    portal,
-		Sender:    oc.SenderForOpenCode(instanceID, false),
-		IDPrefix:  "opencode",
-		LogKey:    "opencode_msg_id",
-		Converted: converted,
-	})
+	_, _, err := oc.ClientBase.SendViaPortal(portal, oc.SenderForOpenCode(instanceID, false), converted)
 	return err
 }
 
@@ -33,7 +26,7 @@ func (oc *OpenCodeClient) sendSystemNoticeViaPortal(ctx context.Context, portal 
 	if pmeta != nil {
 		instanceID = pmeta.InstanceID
 	}
-	if err := oc.sendViaPortal(ctx, portal, instanceID, bridgeadapter.BuildSystemNotice(msg)); err != nil {
+	if err := oc.sendViaPortal(ctx, portal, instanceID, agentremote.BuildSystemNotice(msg)); err != nil {
 		oc.Log().Warn().Err(err).Msg("Failed to send system notice")
 	}
 }

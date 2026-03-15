@@ -11,15 +11,16 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 
-	"github.com/beeper/agentremote/pkg/connector/msgconv"
+	"github.com/beeper/agentremote/bridges/ai/msgconv"
 	"github.com/beeper/agentremote/pkg/shared/cachedvalue"
+	"github.com/beeper/agentremote/pkg/shared/openclawconv"
 )
 
 func TestOpenClawAgentIDFromSessionKey(t *testing.T) {
-	if got := openClawAgentIDFromSessionKey("agent:main:discord:channel:123"); got != "main" {
+	if got := openclawconv.AgentIDFromSessionKey("agent:main:discord:channel:123"); got != "main" {
 		t.Fatalf("expected main, got %q", got)
 	}
-	if got := openClawAgentIDFromSessionKey("main"); got != "" {
+	if got := openclawconv.AgentIDFromSessionKey("main"); got != "" {
 		t.Fatalf("expected empty agent id, got %q", got)
 	}
 }
@@ -31,7 +32,7 @@ func TestExtractMessageTextOpenResponsesParts(t *testing.T) {
 			map[string]any{"type": "output_text", "text": "world"},
 		},
 	}
-	if got := extractMessageText(msg); got != "hello\n\nworld" {
+	if got := openclawconv.ExtractMessageText(msg); got != "hello\n\nworld" {
 		t.Fatalf("unexpected extracted text: %q", got)
 	}
 }
@@ -56,13 +57,13 @@ func TestOpenClawAttachmentSourceFromBlock(t *testing.T) {
 }
 
 func TestIsOpenClawAttachmentBlock(t *testing.T) {
-	if isOpenClawAttachmentBlock(map[string]any{"type": "output_text", "text": "hello"}) {
+	if openclawconv.IsAttachmentBlock(map[string]any{"type": "output_text", "text": "hello"}) {
 		t.Fatal("output_text should not be treated as attachment")
 	}
-	if isOpenClawAttachmentBlock(map[string]any{"type": "toolCall", "id": "call-1"}) {
+	if openclawconv.IsAttachmentBlock(map[string]any{"type": "toolCall", "id": "call-1"}) {
 		t.Fatal("toolCall should not be treated as attachment")
 	}
-	if !isOpenClawAttachmentBlock(map[string]any{
+	if !openclawconv.IsAttachmentBlock(map[string]any{
 		"type":   "input_file",
 		"source": map[string]any{"type": "url", "url": "https://example.com/file.txt"},
 	}) {
@@ -258,6 +259,31 @@ func TestBuildOpenClawHistoryMessageMetadataIncludesGeneratedFiles(t *testing.T)
 	}
 }
 
+func TestPrepareOpenClawBackfillEntriesStableStreamOrder(t *testing.T) {
+	meta := &PortalMetadata{OpenClawSessionKey: "agent:main:test"}
+	history := []map[string]any{
+		{"role": "assistant", "timestamp": int64(1_700_000_001_000), "content": []any{map[string]any{"type": "output_text", "text": "a"}}},
+		{"role": "assistant", "timestamp": int64(1_700_000_001_000), "content": []any{map[string]any{"type": "output_text", "text": "b"}}},
+	}
+
+	entries := prepareOpenClawBackfillEntries(meta, history)
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].streamOrder >= entries[1].streamOrder {
+		t.Fatalf("expected strictly increasing stream order, got %d then %d", entries[0].streamOrder, entries[1].streamOrder)
+	}
+
+	batch, _, _ := paginateOpenClawBackfillEntries(entries, bridgev2.FetchMessagesParams{
+		Forward:       true,
+		Count:         10,
+		AnchorMessage: &database.Message{ID: entries[0].messageID, Timestamp: entries[0].timestamp},
+	})
+	if len(batch) != 1 || batch[0].messageID != entries[1].messageID {
+		t.Fatalf("expected forward pagination to skip anchor, got %#v", batch)
+	}
+}
+
 func TestNormalizeOpenClawUsage(t *testing.T) {
 	usage := normalizeOpenClawUsage(map[string]any{
 		"input":           float64(10),
@@ -318,10 +344,10 @@ func TestOpenClawAttachmentSourceFromNestedAssetSource(t *testing.T) {
 }
 
 func TestDownloadOpenClawAttachmentURLRejectsLocalFiles(t *testing.T) {
-	if _, _, err := downloadOpenClawAttachmentURL(context.Background(), "file:///tmp/test.txt", "", 1024, 1); err == nil {
+	if _, _, err := downloadOpenClawAttachmentURL(context.Background(), "file:///tmp/test.txt", "", 1024); err == nil {
 		t.Fatal("expected local file URL to be rejected")
 	}
-	if _, _, err := downloadOpenClawAttachmentURL(context.Background(), "/tmp/test.txt", "", 1024, 1); err == nil {
+	if _, _, err := downloadOpenClawAttachmentURL(context.Background(), "/tmp/test.txt", "", 1024); err == nil {
 		t.Fatal("expected absolute path to be rejected")
 	}
 }

@@ -2,8 +2,6 @@ package memory
 
 import (
 	"context"
-	"strings"
-	"time"
 
 	"go.mau.fi/util/dbutil"
 )
@@ -51,64 +49,6 @@ func PurgeTablesBestEffort(ctx context.Context, db *dbutil.Database, bridgeID, l
 	)
 }
 
-func PurgeVectorRowsBestEffort(ctx context.Context, db *dbutil.Database, bridgeID, loginID string, extensionPath string) {
-	if db == nil || db.Dialect != dbutil.SQLite {
-		return
-	}
-	extPath := strings.TrimSpace(extensionPath)
-	if extPath == "" {
-		return
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	conn, err := db.RawDB.Conn(ctx)
-	if err != nil {
-		return
-	}
-	defer func() { _ = conn.Close() }()
-	_ = conn.Raw(func(driverConn any) error {
-		if enabler, ok := driverConn.(purgeExtensionEnabler); ok {
-			return enabler.EnableLoadExtension(true)
-		}
-		return nil
-	})
-	if _, err := conn.ExecContext(ctx, "SELECT load_extension(?)", extPath); err != nil {
-		return
-	}
-	_ = conn.Raw(func(driverConn any) error {
-		if enabler, ok := driverConn.(purgeExtensionEnabler); ok {
-			return enabler.EnableLoadExtension(false)
-		}
-		return nil
-	})
-	_, _ = conn.ExecContext(ctx,
-		`DELETE FROM ai_memory_chunks_vec WHERE id IN (
-           SELECT id FROM ai_memory_chunks WHERE bridge_id=?1 AND login_id=?2
-         )`,
-		bridgeID, loginID,
-	)
-}
-
 func bestEffortExec(ctx context.Context, db *dbutil.Database, query string, args ...any) {
-	if db == nil {
-		return
-	}
-	_, err := db.Exec(ctx, query, args...)
-	if err == nil {
-		return
-	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "no such table") ||
-		strings.Contains(msg, "does not exist") ||
-		strings.Contains(msg, "undefined table") ||
-		strings.Contains(msg, "no such module") {
-		return
-	}
-}
-
-type purgeExtensionEnabler interface {
-	EnableLoadExtension(bool) error
+	_, _ = db.Exec(ctx, query, args...)
 }

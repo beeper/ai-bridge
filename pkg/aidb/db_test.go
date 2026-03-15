@@ -46,8 +46,8 @@ func TestUpgradeV1Fresh(t *testing.T) {
 	if err := bridgeDB.QueryRow(ctx, "SELECT version FROM "+VersionTable).Scan(&version); err != nil {
 		t.Fatalf("read %s failed: %v", VersionTable, err)
 	}
-	if version != 1 {
-		t.Fatalf("expected %s=1, got %d", VersionTable, version)
+	if version != 3 {
+		t.Fatalf("expected %s=3, got %d", VersionTable, version)
 	}
 
 	for _, table := range []string{
@@ -63,6 +63,7 @@ func TestUpgradeV1Fresh(t *testing.T) {
 		"ai_managed_heartbeat_run_keys",
 		"ai_system_events",
 		"ai_sessions",
+		"ai_approvals",
 	} {
 		exists, err := bridgeDB.TableExists(ctx, table)
 		if err != nil {
@@ -92,7 +93,7 @@ func TestNewChildUpgrade(t *testing.T) {
 	if err := bridgeDB.QueryRow(ctx, "SELECT version FROM "+VersionTable).Scan(&version); err != nil {
 		t.Fatalf("read %s failed: %v", VersionTable, err)
 	}
-	if version != 1 {
-		t.Fatalf("expected %s=1, got %d", VersionTable, version)
+	if version != 3 {
+		t.Fatalf("expected %s=3, got %d", VersionTable, version)
 	}
 }

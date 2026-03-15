@@ -555,12 +555,7 @@ func shouldRetryServerOverloaded(rpcErr *RPCError) bool {
 }
 
 func waitRetryBackoff(ctx context.Context, attempt int) error {
-	base := 100 * time.Millisecond
-	max := 3 * time.Second
-	backoff := base << attempt
-	if backoff > max {
-		backoff = max
-	}
+	backoff := min(100*time.Millisecond<<attempt, 3*time.Second)
 	jitter := time.Duration(rand.Int63n(int64(250 * time.Millisecond)))
 	timer := time.NewTimer(backoff + jitter)
 	defer timer.Stop()
@@ -599,12 +594,7 @@ func dialWebSocketWithRetry(ctx context.Context, wsURL string, maxWait time.Dura
 			return nil, fmt.Errorf("websocket dial failed: %w", firstErr(dialCtx.Err(), lastErr))
 		}
 		timer.Stop()
-		if backoff < 1*time.Second {
-			backoff *= 2
-			if backoff > 1*time.Second {
-				backoff = 1 * time.Second
-			}
-		}
+		backoff = min(backoff*2, 1*time.Second)
 	}
 }
 
