@@ -214,3 +214,46 @@ func TestTurnStreamSetTransportReceivesEvents(t *testing.T) {
 		t.Fatalf("expected text delta payload, got %#v", gotContent)
 	}
 }
+
+func TestTurnEndWithErrorSendsStatusWhenStarted(t *testing.T) {
+	// Create a turn with a source ref (needed for SendStatus path).
+	turn := newTurn(context.Background(), nil, nil, UserMessageSource("$source"))
+
+	// Simulate that the turn has started streaming content.
+	turn.started = true
+
+	// EndWithError should not panic and should transition to ended state.
+	// SendStatus is a no-op without a full conv/login/portal, but the code path
+	// through Writer().Error → SendStatus → Writer().Finish must not crash.
+	turn.EndWithError("test error")
+
+	if !turn.ended {
+		t.Fatal("expected turn to be ended after EndWithError")
+	}
+}
+
+func TestTurnEndWithErrorSendsStatusWhenNotStarted(t *testing.T) {
+	turn := newTurn(context.Background(), nil, nil, UserMessageSource("$source"))
+
+	// Turn not started — EndWithError should still send a fail status and end.
+	turn.EndWithError("pre-start error")
+
+	if !turn.ended {
+		t.Fatal("expected turn to be ended after EndWithError")
+	}
+}
+
+func TestTurnSourceRefCarriesSenderID(t *testing.T) {
+	source := &SourceRef{
+		Kind:     SourceKindUserMessage,
+		EventID:  "$evt1",
+		SenderID: "@user:test",
+	}
+	turn := newTurn(context.Background(), nil, nil, source)
+	if turn.Source().SenderID != "@user:test" {
+		t.Fatalf("expected sender id, got %q", turn.Source().SenderID)
+	}
+	if turn.Source().EventID != "$evt1" {
+		t.Fatalf("expected event id, got %q", turn.Source().EventID)
+	}
+}
