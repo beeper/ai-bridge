@@ -34,31 +34,30 @@ type OpenCodeClient struct {
 }
 
 type openCodeStreamState struct {
-	portal               *bridgev2.Portal
-	turnID               string
-	agentID              string
-	turn                 *bridgesdk.Turn
-	lastRemoteEventOrder int64
-	accumulated          strings.Builder
-	visible              strings.Builder
-	ui                   streamui.UIState
-	role                 string
-	sessionID            string
-	messageID            string
-	parentMessageID      string
-	agent                string
-	modelID              string
-	providerID           string
-	mode                 string
-	finishReason         string
-	errorText            string
-	startedAtMs          int64
-	completedAtMs        int64
-	promptTokens         int64
-	completionTokens     int64
-	reasoningTokens      int64
-	totalTokens          int64
-	cost                 float64
+	portal           *bridgev2.Portal
+	turnID           string
+	agentID          string
+	turn             *bridgesdk.Turn
+	accumulated      strings.Builder
+	visible          strings.Builder
+	ui               streamui.UIState
+	role             string
+	sessionID        string
+	messageID        string
+	parentMessageID  string
+	agent            string
+	modelID          string
+	providerID       string
+	mode             string
+	finishReason     string
+	errorText        string
+	startedAtMs      int64
+	completedAtMs    int64
+	promptTokens     int64
+	completionTokens int64
+	reasoningTokens  int64
+	totalTokens      int64
+	cost             float64
 }
 
 func newOpenCodeClient(login *bridgev2.UserLogin, connector *OpenCodeConnector) (*OpenCodeClient, error) {

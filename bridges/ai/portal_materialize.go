@@ -38,7 +38,12 @@ func (oc *AIClient) materializePortalRoom(
 		}
 		return err
 	}
-	agentremote.SendAIRoomInfo(ctx, portal, integrationPortalAIKind(portalMeta(portal)))
+	if !agentremote.SendAIRoomInfo(ctx, portal, integrationPortalAIKind(portalMeta(portal))) {
+		if opts.CleanupOnCreateError != "" {
+			cleanupPortal(ctx, oc, portal, opts.CleanupOnCreateError)
+		}
+		return fmt.Errorf("failed to send AI room info")
+	}
 	if opts.SendWelcome {
 		oc.sendWelcomeMessage(ctx, portal)
 	}

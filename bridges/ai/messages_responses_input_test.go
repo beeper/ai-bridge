@@ -52,6 +52,9 @@ func TestPromptContextToResponsesInput_MultimodalUser(t *testing.T) {
 			if part.OfInputFile.Filename.Value != "document.pdf" {
 				t.Fatalf("expected file part filename document.pdf, got %#v", part.OfInputFile.Filename.Value)
 			}
+			if part.OfInputFile.FileData.Value != "cGRm" {
+				t.Fatalf("expected file part data to preserve content, got %#v", part.OfInputFile.FileData.Value)
+			}
 		}
 	}
 

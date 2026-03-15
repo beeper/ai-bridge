@@ -114,6 +114,15 @@ func (h *aiTurnApprovalHandle) Wait(ctx context.Context) (bridgesdk.ToolApproval
 	}, nil
 }
 
+func newAITurnApprovalHandle(client *AIClient, turn *bridgesdk.Turn, approvalID, toolCallID string) *aiTurnApprovalHandle {
+	return &aiTurnApprovalHandle{
+		client:     client,
+		turn:       turn,
+		approvalID: strings.TrimSpace(approvalID),
+		toolCallID: strings.TrimSpace(toolCallID),
+	}
+}
+
 func (oc *AIClient) approvalParamsFromRequest(portal *bridgev2.Portal, state *streamingState, turn *bridgesdk.Turn, req bridgesdk.ApprovalRequest) ToolApprovalParams {
 	approvalID := strings.TrimSpace(req.ApprovalID)
 	if approvalID == "" {
@@ -167,29 +176,33 @@ func (oc *AIClient) approvalParamsFromRequest(portal *bridgev2.Portal, state *st
 	return params
 }
 
-func (oc *AIClient) requestTurnApproval(
+func (oc *AIClient) startTurnApproval(
 	ctx context.Context,
 	portal *bridgev2.Portal,
 	state *streamingState,
 	turn *bridgesdk.Turn,
-	req bridgesdk.ApprovalRequest,
-) bridgesdk.ApprovalHandle {
+	params ToolApprovalParams,
+	sendPrompt bool,
+) (bridgesdk.ApprovalHandle, bool) {
+	handle := newAITurnApprovalHandle(oc, turn, params.ApprovalID, params.ToolCallID)
 	if oc == nil {
-		return &aiTurnApprovalHandle{toolCallID: req.ToolCallID}
+		return handle, false
 	}
-	params := oc.approvalParamsFromRequest(portal, state, turn, req)
 	if _, created := oc.registerToolApproval(params); !created {
-		return &aiTurnApprovalHandle{client: oc, turn: turn, approvalID: params.ApprovalID, toolCallID: params.ToolCallID}
+		return handle, false
 	}
 	if turn != nil {
 		turn.Approvals().EmitRequest(turn.Context(), params.ApprovalID, params.ToolCallID)
 	}
+	if !sendPrompt {
+		return handle, true
+	}
 	if portal == nil || portal.MXID == "" || oc.UserLogin == nil || oc.UserLogin.UserMXID == "" || oc.approvalFlow == nil {
 		_ = oc.resolveToolApproval(params.ApprovalID, false, agentremote.ApprovalReasonDeliveryError)
-		return &aiTurnApprovalHandle{client: oc, turn: turn, approvalID: params.ApprovalID, toolCallID: params.ToolCallID}
+		return handle, true
 	}
 	turnID := params.TurnID
-	if state != nil && state.turn.ID() != "" {
+	if state != nil && state.turn != nil && state.turn.ID() != "" {
 		turnID = state.turn.ID()
 	}
 	replyTo := id.EventID("")
@@ -209,12 +222,22 @@ func (oc *AIClient) requestTurnApproval(
 		RoomID:    portal.MXID,
 		OwnerMXID: oc.UserLogin.UserMXID,
 	})
-	return &aiTurnApprovalHandle{
-		client:     oc,
-		turn:       turn,
-		approvalID: params.ApprovalID,
-		toolCallID: params.ToolCallID,
+	return handle, true
+}
+
+func (oc *AIClient) requestTurnApproval(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	state *streamingState,
+	turn *bridgesdk.Turn,
+	req bridgesdk.ApprovalRequest,
+) bridgesdk.ApprovalHandle {
+	if oc == nil {
+		return newAITurnApprovalHandle(nil, nil, req.ApprovalID, req.ToolCallID)
 	}
+	params := oc.approvalParamsFromRequest(portal, state, turn, req)
+	handle, _ := oc.startTurnApproval(ctx, portal, state, turn, params, true)
+	return handle
 }
 
 func (oc *AIClient) registerToolApproval(params ToolApprovalParams) (*agentremote.Pending[*pendingToolApprovalData], bool) {

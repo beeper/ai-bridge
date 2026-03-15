@@ -16,6 +16,4 @@ type SessionRecord struct {
 	QueueDrop             string
 }
 
-type SessionStore struct {
-	scope *Scope
-}
+type SessionStore struct{}

@@ -894,6 +894,9 @@ func (h *runtimeIntegrationHost) ExecuteBuiltinTool(ctx context.Context, scope i
 	}
 	portal, _ := scope.Portal.(*bridgev2.Portal)
 	meta, _ := scope.Meta.(*PortalMetadata)
+	if meta != nil && !h.client.isToolEnabled(meta, name) {
+		return "", fmt.Errorf("tool %s is disabled", name)
+	}
 	toolCtx := WithBridgeToolContext(ctx, &BridgeToolContext{
 		Client: h.client,
 		Portal: portal,

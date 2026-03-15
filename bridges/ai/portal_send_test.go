@@ -1,55 +1,56 @@
 package ai
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
-	"maunium.net/go/mautrix/event"
 )
 
-func TestEnsureConvertedMessageParts_InitializesNilContent(t *testing.T) {
-	converted := &bridgev2.ConvertedMessage{
-		Parts: []*bridgev2.ConvertedMessagePart{
-			{
-				ID:   networkid.PartID("0"),
-				Type: event.EventMessage,
-				Extra: map[string]any{
-					"body":    "Calling web_search...",
-					"msgtype": "m.notice",
-				},
-			},
-		},
+func TestSendViaPortalRejectsMissingBridgeState(t *testing.T) {
+	_, _, err := (&AIClient{}).sendViaPortal(context.Background(), &bridgev2.Portal{}, &bridgev2.ConvertedMessage{}, "")
+	if err == nil {
+		t.Fatal("expected bridge unavailable error")
 	}
-
-	ensureConvertedMessageParts(converted)
-
-	if len(converted.Parts) != 1 {
-		t.Fatalf("expected 1 part, got %d", len(converted.Parts))
-	}
-	if converted.Parts[0].Content == nil {
-		t.Fatalf("expected content to be initialized")
+	if !strings.Contains(err.Error(), "bridge unavailable") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestEnsureConvertedMessageParts_DropsNilPart(t *testing.T) {
-	converted := &bridgev2.ConvertedMessage{
-		Parts: []*bridgev2.ConvertedMessagePart{
-			nil,
-			{
-				ID:      networkid.PartID("1"),
-				Type:    event.EventMessage,
-				Content: &event.MessageEventContent{MsgType: event.MsgNotice, Body: "ok"},
-			},
-		},
-	}
+func TestSendViaPortalRejectsInvalidPortal(t *testing.T) {
+	oc := &AIClient{UserLogin: &bridgev2.UserLogin{Bridge: &bridgev2.Bridge{}}}
 
-	ensureConvertedMessageParts(converted)
-
-	if len(converted.Parts) != 1 {
-		t.Fatalf("expected 1 part after sanitization, got %d", len(converted.Parts))
+	_, _, err := oc.sendViaPortal(context.Background(), nil, &bridgev2.ConvertedMessage{}, "")
+	if err == nil {
+		t.Fatal("expected invalid portal error")
 	}
-	if converted.Parts[0] == nil {
-		t.Fatalf("expected non-nil part")
+	if !strings.Contains(err.Error(), "invalid portal") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSendEditViaPortalRejectsMissingBridgeState(t *testing.T) {
+	err := (&AIClient{}).sendEditViaPortal(context.Background(), &bridgev2.Portal{}, networkid.MessageID("msg-1"), &bridgev2.ConvertedEdit{})
+	if err == nil {
+		t.Fatal("expected bridge unavailable error")
+	}
+	if !strings.Contains(err.Error(), "bridge unavailable") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSendEditViaPortalRejectsInvalidTargetMessage(t *testing.T) {
+	oc := &AIClient{UserLogin: &bridgev2.UserLogin{Bridge: &bridgev2.Bridge{}}}
+	portal := &bridgev2.Portal{Portal: &database.Portal{MXID: "!room:example.com"}}
+
+	err := oc.sendEditViaPortal(context.Background(), portal, "", &bridgev2.ConvertedEdit{})
+	if err == nil {
+		t.Fatal("expected invalid target message error")
+	}
+	if !strings.Contains(err.Error(), "invalid target message") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

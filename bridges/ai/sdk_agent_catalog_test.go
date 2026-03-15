@@ -23,6 +23,7 @@ func newCatalogTestClient() *AIClient {
 							ID:          "custom-agent",
 							Name:        "Custom Agent",
 							Description: "Handles custom workflows",
+							AvatarURL:   "mxc://example.com/custom",
 							Model:       "openai/gpt-5",
 						},
 					},
@@ -88,5 +89,8 @@ func TestAIAgentCatalogListsAndResolvesCustomAgents(t *testing.T) {
 	}
 	if !slices.Contains(resolved.Identifiers, "custom-agent") {
 		t.Fatalf("expected raw agent id in identifiers, got %#v", resolved.Identifiers)
+	}
+	if resolved.AvatarURL != "mxc://example.com/custom" {
+		t.Fatalf("expected avatar URL to be preserved, got %q", resolved.AvatarURL)
 	}
 }

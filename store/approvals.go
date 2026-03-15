@@ -15,6 +15,4 @@ type ApprovalRecord struct {
 	UpdatedAtMs int64
 }
 
-type ApprovalStore struct {
-	scope *Scope
-}
+type ApprovalStore struct{}

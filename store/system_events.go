@@ -11,6 +11,4 @@ type SystemEventQueue struct {
 	LastText   string
 }
 
-type SystemEventStore struct {
-	scope *Scope
-}
+type SystemEventStore struct{}

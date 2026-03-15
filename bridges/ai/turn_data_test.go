@@ -51,3 +51,34 @@ func TestSetCanonicalPromptMessagesStoresTurnDataForUser(t *testing.T) {
 		t.Fatalf("unexpected turn data: %#v", td)
 	}
 }
+
+func TestCanonicalPromptMessagesFallsBackWhenTurnDataProjectionIsEmpty(t *testing.T) {
+	meta := &MessageMetadata{}
+	meta.CanonicalTurnSchema = sdk.CanonicalTurnDataSchemaV1
+	meta.CanonicalTurnData = sdk.TurnData{
+		ID:   "turn-1",
+		Role: "",
+		Parts: []sdk.TurnPart{
+			{Type: "text", Text: "dropped"},
+		},
+	}.ToMap()
+	meta.CanonicalPromptSchema = canonicalPromptSchemaV1
+	meta.CanonicalPromptMessages = encodePromptMessages([]PromptMessage{{
+		Role: PromptRoleUser,
+		Blocks: []PromptBlock{{
+			Type: PromptBlockText,
+			Text: "fallback",
+		}},
+	}})
+
+	messages := canonicalPromptMessages(meta)
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 fallback message, got %d", len(messages))
+	}
+	if messages[0].Role != PromptRoleUser {
+		t.Fatalf("expected fallback user role, got %q", messages[0].Role)
+	}
+	if got := messages[0].Text(); got != "fallback" {
+		t.Fatalf("expected fallback text, got %q", got)
+	}
+}

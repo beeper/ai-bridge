@@ -37,8 +37,15 @@ func (oc *AIClient) sendViaPortal(
 	converted *bridgev2.ConvertedMessage,
 	msgID networkid.MessageID,
 ) (id.EventID, networkid.MessageID, error) {
+	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil {
+		return "", "", fmt.Errorf("bridge unavailable")
+	}
+	if portal == nil || portal.MXID == "" {
+		return "", "", fmt.Errorf("invalid portal")
+	}
 	ensureConvertedMessageParts(converted)
-	return oc.ClientBase.SendViaPortalWithOptions(portal, oc.senderForPortal(ctx, portal), msgID, time.Time{}, 0, converted)
+	sender := oc.senderForPortal(ctx, portal)
+	return oc.ClientBase.SendViaPortalWithOptions(portal, sender, msgID, time.Time{}, 0, converted)
 }
 
 // The targetMsgID is the network message ID of the message to edit.
@@ -48,7 +55,17 @@ func (oc *AIClient) sendEditViaPortal(
 	targetMsgID networkid.MessageID,
 	converted *bridgev2.ConvertedEdit,
 ) error {
-	return agentremote.SendEditViaPortal(oc.UserLogin, portal, oc.senderForPortal(ctx, portal), targetMsgID, "ai_edit_target", converted)
+	if oc == nil || oc.UserLogin == nil || oc.UserLogin.Bridge == nil {
+		return fmt.Errorf("bridge unavailable")
+	}
+	if portal == nil || portal.MXID == "" {
+		return fmt.Errorf("invalid portal")
+	}
+	if targetMsgID == "" {
+		return fmt.Errorf("invalid target message")
+	}
+	sender := oc.senderForPortal(ctx, portal)
+	return agentremote.SendEditViaPortal(oc.UserLogin, portal, sender, targetMsgID, "ai_edit_target", converted)
 }
 
 func (oc *AIClient) redactViaPortal(

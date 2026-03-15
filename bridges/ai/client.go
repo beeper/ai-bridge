@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -337,8 +335,6 @@ type AIClient struct {
 
 	// Tool approvals (e.g. OpenAI MCP approval requests)
 	approvalFlow *agentremote.ApprovalFlow[*pendingToolApprovalData]
-
-	streamFallbackToDebounced atomic.Bool
 
 	// Per-login cancellation: cancelled when this login disconnects.
 	// All goroutines using backgroundContext() will be cancelled on disconnect.
@@ -1713,12 +1709,6 @@ func (oc *AIClient) updateAssistantGeneratedFiles(ctx context.Context, portal *b
 	}
 	oc.Log().Warn().Msg("No assistant message found to update with async GeneratedFiles")
 }
-
-// buildBasePrompt builds the system prompt and history portion of a prompt.
-// This is the common pattern used by buildPrompt and buildPromptWithImage.
-// thinkTagPattern matches <think>...</think> blocks (including multiline) in assistant messages.
-// These are thinking/reasoning traces that should be stripped from historical messages.
-var thinkTagPattern = regexp.MustCompile(`(?s)<think>.*?</think>\s*`)
 
 func (oc *AIClient) promptContextToDispatchMessages(
 	ctx context.Context,

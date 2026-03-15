@@ -29,41 +29,20 @@ func (oc *AIClient) startStreamingMCPApproval(
 	params ToolApprovalParams,
 	needsPrompt bool,
 ) (bridgesdk.ApprovalHandle, error) {
-	uiState := currentStreamingUIState(state)
-	req := bridgesdk.ApprovalRequest{
-		ApprovalID:   params.ApprovalID,
-		ToolCallID:   params.ToolCallID,
-		ToolName:     params.ToolName,
-		TTL:          params.TTL,
-		Presentation: &params.Presentation,
-		Metadata: map[string]any{
-			approvalMetadataKeyToolKind:     string(params.ToolKind),
-			approvalMetadataKeyRuleToolName: params.RuleToolName,
-			approvalMetadataKeyServerLabel:  params.ServerLabel,
-		},
+	handle, created := oc.startTurnApproval(ctx, portal, state, state.turn, params, needsPrompt)
+	if !created {
+		return nil, fmt.Errorf("failed to register MCP approval request")
 	}
 	if needsPrompt {
-		if uiState != nil && !uiState.UIToolApprovalRequested[params.ApprovalID] {
-			uiState.UIToolApprovalRequested[params.ApprovalID] = true
-		}
-		handle := state.turn.Approvals().Request(req)
 		if handle == nil {
 			return nil, fmt.Errorf("failed to deliver MCP approval prompt")
 		}
 		return handle, nil
 	}
-	if _, created := oc.registerToolApproval(params); !created {
-		return nil, fmt.Errorf("failed to register MCP approval request")
-	}
-	if err := oc.resolveToolApproval(params.ApprovalID, true, "auto_approved"); err != nil {
+	if err := oc.resolveToolApproval(params.ApprovalID, true, agentremote.ApprovalReasonAutoApproved); err != nil {
 		return nil, fmt.Errorf("failed to auto-approve MCP tool call: %w", err)
 	}
-	return &aiTurnApprovalHandle{
-		client:     oc,
-		turn:       state.turn,
-		approvalID: params.ApprovalID,
-		toolCallID: params.ToolCallID,
-	}, nil
+	return handle, nil
 }
 
 func (oc *AIClient) upsertActiveToolFromDescriptor(
@@ -243,12 +222,6 @@ func (oc *AIClient) gateMcpToolApproval(
 	serverLabel := strings.TrimSpace(parsed.ServerLabel)
 	mcpToolName := strings.TrimSpace(parsed.Name)
 	presentation := buildMCPApprovalPresentation(serverLabel, mcpToolName, desc.input)
-	state.pendingMcpApprovals = append(state.pendingMcpApprovals, mcpApprovalRequest{
-		approvalID:  approvalID,
-		toolCallID:  tool.callID,
-		toolName:    tool.toolName,
-		serverLabel: serverLabel,
-	})
 	ttl := time.Duration(oc.toolApprovalsTTLSeconds()) * time.Second
 	params := ToolApprovalParams{
 		ApprovalID:   approvalID,
@@ -276,10 +249,19 @@ func (oc *AIClient) gateMcpToolApproval(
 	handle, err := oc.startStreamingMCPApproval(ctx, portal, state, params, needsApproval)
 	if err != nil {
 		delete(state.pendingMcpApprovalsSeen, approvalID)
+		if uiState := currentStreamingUIState(state); uiState != nil {
+			delete(uiState.UIToolApprovalRequested, approvalID)
+		}
 		oc.toolLifecycle(portal, state).fail(ctx, tool, true, ResultStatusError, err.Error(), nil)
 		return
 	}
-	state.pendingMcpApprovals[len(state.pendingMcpApprovals)-1].handle = handle
+	state.pendingMcpApprovals = append(state.pendingMcpApprovals, mcpApprovalRequest{
+		approvalID:  approvalID,
+		toolCallID:  tool.callID,
+		toolName:    tool.toolName,
+		serverLabel: serverLabel,
+		handle:      handle,
+	})
 }
 
 // resolveOutputItemTool performs the common setup shared by handleResponseOutputItemAdded
@@ -334,7 +316,7 @@ func (oc *AIClient) handleResponseOutputItemAdded(
 	if !ok {
 		return
 	}
-	if created {
+	if created || desc.input != nil {
 		oc.emitToolInputIfAvailable(ctx, portal, state, tool, desc)
 	}
 }
@@ -350,7 +332,7 @@ func (oc *AIClient) handleResponseOutputItemDone(
 	if !ok {
 		return
 	}
-	if created {
+	if created || desc.input != nil {
 		oc.emitToolInputIfAvailable(ctx, portal, state, tool, desc)
 	}
 

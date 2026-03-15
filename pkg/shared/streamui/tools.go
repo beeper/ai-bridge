@@ -119,6 +119,7 @@ func (e *Emitter) EmitUIToolApprovalRequest(
 	if e.State == nil {
 		return
 	}
+	e.State.UIToolApprovalRequested[approvalID] = true
 	e.State.UIToolCallIDByApproval[approvalID] = toolCallID
 	e.Emit(ctx, portal, map[string]any{
 		"type":       "tool-approval-request",

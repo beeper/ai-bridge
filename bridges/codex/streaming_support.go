@@ -13,25 +13,24 @@ import (
 )
 
 type streamingState struct {
-	turnID               string
-	agentID              string
-	startedAtMs          int64
-	firstTokenAtMs       int64
-	completedAtMs        int64
-	promptTokens         int64
-	completionTokens     int64
-	reasoningTokens      int64
-	totalTokens          int64
-	accumulated          strings.Builder
-	reasoning            strings.Builder
-	toolCalls            []ToolCallMetadata
-	sourceCitations      []citations.SourceCitation
-	sourceDocuments      []citations.SourceDocument
-	generatedFiles       []citations.GeneratedFilePart
-	initialEventID       id.EventID
-	networkMessageID     networkid.MessageID
-	lastRemoteEventOrder int64
-	firstToken           bool
+	turnID           string
+	agentID          string
+	startedAtMs      int64
+	firstTokenAtMs   int64
+	completedAtMs    int64
+	promptTokens     int64
+	completionTokens int64
+	reasoningTokens  int64
+	totalTokens      int64
+	accumulated      strings.Builder
+	reasoning        strings.Builder
+	toolCalls        []ToolCallMetadata
+	sourceCitations  []citations.SourceCitation
+	sourceDocuments  []citations.SourceDocument
+	generatedFiles   []citations.GeneratedFilePart
+	initialEventID   id.EventID
+	networkMessageID networkid.MessageID
+	firstToken       bool
 
 	turn *bridgesdk.Turn
 

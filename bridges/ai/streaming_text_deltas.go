@@ -64,6 +64,20 @@ func (oc *AIClient) processStreamingTextDelta(
 		parsed = state.replyAccumulator.Consume(delta, false)
 	}
 	if parsed == nil {
+		if err := oc.emitVisibleTextDelta(
+			ctx,
+			log,
+			portal,
+			state,
+			meta,
+			typingSignals,
+			isHeartbeat,
+			roundDelta,
+			errText,
+			logMessage,
+		); err != nil {
+			return "", err
+		}
 		return roundDelta, nil
 	}
 

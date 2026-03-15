@@ -1,10 +1,6 @@
 package agentremote
 
-import (
-	"sync"
-
-	"github.com/beeper/agentremote/turns"
-)
+import "github.com/beeper/agentremote/turns"
 
 // AgentMessageRole is the canonical internal role for Pi-style turn messages.
 type AgentMessageRole string
@@ -85,11 +81,7 @@ type TurnSnapshot struct {
 }
 
 // TurnManager tracks active turns for a runtime.
-type TurnManager struct {
-	runtime *Runtime
-	mu      sync.Mutex
-	turns   map[string]*Turn
-}
+type TurnManager struct{}
 
 // TurnOptions configures a new managed turn.
 type TurnOptions struct {
@@ -100,9 +92,6 @@ type TurnOptions struct {
 // Turn is the public managed turn handle. It owns the Pi-style snapshot and can
 // optionally attach to a streaming transport session.
 type Turn struct {
-	runtime *Runtime
-	mu      sync.Mutex
-
 	ID      string
 	AgentID string
 

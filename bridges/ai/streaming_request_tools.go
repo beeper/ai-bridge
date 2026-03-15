@@ -25,6 +25,10 @@ func (oc *AIClient) selectedStreamingToolDescriptors(
 	meta *PortalMetadata,
 	allowResolvedBossAgent bool,
 ) []openAIToolDescriptor {
+	if meta != nil && !oc.getModelCapabilitiesForMeta(meta).SupportsToolCalling {
+		return nil
+	}
+
 	var descriptors []openAIToolDescriptor
 	builtinTools := oc.selectedBuiltinToolsForTurn(ctx, meta)
 	if len(builtinTools) > 0 {
@@ -42,7 +46,7 @@ func (oc *AIClient) selectedStreamingToolDescriptors(
 		return descriptors
 	}
 
-	if !oc.getModelCapabilitiesForMeta(meta).SupportsToolCalling || agentID == "" {
+	if agentID == "" {
 		return descriptors
 	}
 
