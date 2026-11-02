@@ -1,5 +1,8 @@
 # AI Bridge
 
+> [!WARNING]
+> This project is no longer supported. [Beeper](https://beeper.com) supports Grokbot, ChatGPT Dots, and Muse.
+
 > AI providers, models, and autonomous agents — exposed as a first-class Beeper chat network.
 
 `ai-bridge` is a [mautrix `bridgev2`](https://docs.mau.fi/bridges/go/) network connector that makes "talking to an AI" indistinguishable from talking to a person on Beeper. Each AI model is a contact. Each conversation is a room. Each response streams in live, carries its reasoning, tool calls, citations, and generated images, and is fully resumable across restarts.
